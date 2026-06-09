@@ -4,6 +4,7 @@ import { FileWithPath } from 'react-dropzone';
 import { FileCollectionRowSet, FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import type { ArcgisImportReference } from '@/lib/arcgis/types';
+import type { ColumnMapping } from '@/lib/column-mapping/types';
 
 // File upload constraints
 export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500MB per file
@@ -42,6 +43,9 @@ export interface UploadParseFilesProps {
   // state setters
   setDataViewActive: Dispatch<SetStateAction<number>>;
   setSelectedDelimiters: Dispatch<SetStateAction<Record<string, string>>>;
+  // column mapping (CSV flow): seeded from detected headers, confirmed via the mapping dialog
+  columnMapping?: ColumnMapping;
+  setColumnMapping?: (mapping: ColumnMapping) => void;
   // centralized functions
   handleInitialSubmit: () => Promise<void>;
   handleAddFile: (newFile: FileWithPath) => void;
@@ -92,6 +96,8 @@ export interface UploadFireProps {
   arcgisImportSession?: ArcgisImportReference | null;
   uploadCompleteMessage: string;
   selectedDelimiters: Record<string, string>;
+  // Confirmed column mapping from the parse step. When omitted, falls back to legacy header aliasing.
+  columnMapping?: ColumnMapping;
   // state setters
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;

@@ -23,6 +23,7 @@ import UploadArcgisPreflight from '@/components/uploadsystem/segments/uploadarcg
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import ailogger from '@/ailogger';
 import { useFileManagement } from '@/app/hooks/usefilemanagement';
+import { ColumnMapping } from '@/lib/column-mapping/types';
 import { useUploadState } from '@/app/hooks/useuploadstate';
 import { useErrorHandling } from '@/app/hooks/useerrorhandling';
 import { ErrorBoundary } from '@/components/errorboundary';
@@ -131,6 +132,7 @@ function UploadParentInner(props: UploadParentProps) {
   // doesn't reach the match review only to fail at Apply.
   const [revisionRolePreflightWarning, setRevisionRolePreflightWarning] = useState<string | null>(null);
   const [arcgisImportSession, setArcgisImportSession] = useState<ArcgisImportReference | null>(null);
+  const [columnMapping, setColumnMapping] = useState<ColumnMapping | undefined>(undefined);
 
   // Track if we've already initialized reingestion to prevent re-triggering
   const reingestionInitializedRef = useRef(false);
@@ -406,6 +408,8 @@ function UploadParentInner(props: UploadParentProps) {
             handleReplaceFile={handleReplaceFile}
             selectedDelimiters={selectedDelimiters}
             setSelectedDelimiters={setSelectedDelimiters}
+            columnMapping={columnMapping}
+            setColumnMapping={setColumnMapping}
           />
         );
       case ReviewStates.ARCGIS_PREFLIGHT:
@@ -455,6 +459,7 @@ function UploadParentInner(props: UploadParentProps) {
             setErrorComponent={errorHandling.setErrorComponent}
             setAllRowToCMID={setAllRowToCMID}
             selectedDelimiters={selectedDelimiters}
+            columnMapping={columnMapping}
           />
         );
       case ReviewStates.REVISION_MATCH:

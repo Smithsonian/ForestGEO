@@ -14,7 +14,7 @@ interface FileListEnhancedProps extends FileListProps {
   onDelimiterChange: (fileName: string, delimiter: string) => void;
   selectedDelimiters: Record<string, string>;
   onRemoveFile: (fileIndex: number) => void;
-  onValidationStatusChange?: (fileName: string, isValid: boolean, issues: string[]) => void;
+  onValidationStatusChange?: (fileName: string, isValid: boolean, issues: string[], detectedHeaders: string[]) => void;
   isArcgisWorkbook?: boolean;
 }
 
@@ -185,7 +185,11 @@ export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
                     onDelimiterChange={delimiter => onDelimiterChange(file.name, delimiter)}
                     initialDelimiter={selectedDelimiters[file.name]}
                     showPreview={expandedPreview[index]}
-                    onValidationStatusChange={onValidationStatusChange ? (isValid, issues) => onValidationStatusChange(file.name, isValid, issues) : undefined}
+                    onValidationStatusChange={
+                      onValidationStatusChange
+                        ? (isValid, issues, detectedHeaders) => onValidationStatusChange(file.name, isValid, issues, detectedHeaders)
+                        : undefined
+                    }
                     isArcgisWorkbook={isArcgisWorkbook}
                   />
                 </Stack>

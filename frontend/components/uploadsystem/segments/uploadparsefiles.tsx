@@ -19,18 +19,31 @@ import { UploadParseFilesProps } from '@/config/macros/uploadsystemmacros';
 // Using Box layout instead of Grid for better compatibility
 import { DropzoneCompact } from '@/components/uploadsystemhelpers/dropzonecompact';
 import { FileListEnhanced } from '@/components/uploadsystemhelpers/filelistenhanced';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
 import { RequiredTableHeadersByFormType, SourceFormat, TableHeadersByFormType } from '@/config/macros/formdetails';
 import InfoIcon from '@mui/icons-material/Info';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import TuneIcon from '@mui/icons-material/Tune';
 import { UploadMode } from '@/config/uploadmodes';
+import ColumnMappingDialog from './columnmappingdialog';
+import { seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
+import { CsvSourceMetadata } from '@/lib/column-mapping/types';
 
 export interface FileValidationStatus {
   fileName: string;
   isValid: boolean;
   issues: string[];
+  detectedHeaders: string[];
+}
+
+// Header-coverage failures are rescued by a valid column mapping (the whole point of mapping
+// is to satisfy required fields from differently-named columns); structural issues are not.
+const HEADER_COVERAGE_ISSUE_PATTERNS = [/^Missing required columns:/, /^Too few columns detected/];
+
+function isHeaderCoverageIssue(issue: string): boolean {
+  return HEADER_COVERAGE_ISSUE_PATTERNS.some(pattern => pattern.test(issue));
 }
 
 export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>) {
@@ -46,12 +59,15 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     handleReplaceFile,
     handleRemoveFile,
     selectedDelimiters,
-    setSelectedDelimiters
+    setSelectedDelimiters,
+    columnMapping,
+    setColumnMapping
   } = props;
 
   const [fileToReplace, setFileToReplace] = useState<FileWithPath | null>(null);
   const [showHeaderHelp, setShowHeaderHelp] = useState<boolean>(false);
   const [fileValidationStatuses, setFileValidationStatuses] = useState<Record<string, FileValidationStatus>>({});
+  const [mappingOpen, setMappingOpen] = useState<boolean>(false);
 
   const handleFileChange = async (newFiles: FileWithPath[]) => {
     for (const file of newFiles) {
@@ -74,12 +90,42 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     [setSelectedDelimiters]
   );
 
-  const handleValidationStatusChange = useCallback((fileName: string, isValid: boolean, issues: string[]) => {
+  const handleValidationStatusChange = useCallback((fileName: string, isValid: boolean, issues: string[], detectedHeaders: string[]) => {
     setFileValidationStatuses(prev => ({
       ...prev,
-      [fileName]: { fileName, isValid, issues }
+      [fileName]: { fileName, isValid, issues, detectedHeaders }
     }));
   }, []);
+
+  // Column mapping applies to the CSV measurements flow only; ArcGIS workbooks map at pre-flight
+  // and revision uploads validate against app-export headers instead.
+  const mappingEnabled = uploadForm === 'measurements' && uploadMode !== UploadMode.REVISIONS && sourceFormat !== SourceFormat.arcgis_xlsx;
+
+  const csvMetadata: CsvSourceMetadata | null = useMemo(() => {
+    if (!mappingEnabled) return null;
+    const firstWithHeaders = acceptedFiles.map(file => fileValidationStatuses[file.name]).find(status => status && status.detectedHeaders.length > 0);
+    return firstWithHeaders ? { format: SourceFormat.csv, headers: firstWithHeaders.detectedHeaders } : null;
+  }, [mappingEnabled, acceptedFiles, fileValidationStatuses]);
+
+  useEffect(() => {
+    if (csvMetadata && !columnMapping && setColumnMapping) setColumnMapping(seedMapping(csvMetadata));
+  }, [csvMetadata, columnMapping, setColumnMapping]);
+
+  // The mapping must resolve against every selected file's headers, not just the seeding file's.
+  const mappingValidForFile = useCallback(
+    (fileName: string): boolean => {
+      if (!mappingEnabled || !columnMapping) return false;
+      const status = fileValidationStatuses[fileName];
+      if (!status || status.detectedHeaders.length === 0) return false;
+      return validateMapping(columnMapping, { format: SourceFormat.csv, headers: status.detectedHeaders }).valid;
+    },
+    [mappingEnabled, columnMapping, fileValidationStatuses]
+  );
+
+  const mappingValid = useMemo(
+    () => acceptedFiles.length > 0 && acceptedFiles.every(file => mappingValidForFile(file.name)),
+    [acceptedFiles, mappingValidForFile]
+  );
 
   const arcgisValidationIssues = useMemo(() => {
     if (sourceFormat !== SourceFormat.arcgis_xlsx) return [];
@@ -98,29 +144,37 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     return issues;
   }, [acceptedFiles, sourceFormat]);
 
+  // A file passes when its own header validation succeeded, or when a confirmed column mapping
+  // covers its header-coverage gaps (structural issues like inconsistent column counts still block).
+  const fileEffectivelyValid = useCallback(
+    (fileName: string): boolean => {
+      const status = fileValidationStatuses[fileName];
+      if (!status) return false;
+      if (status.isValid) return true;
+      return mappingValidForFile(fileName) && status.issues.every(isHeaderCoverageIssue);
+    },
+    [fileValidationStatuses, mappingValidForFile]
+  );
+
   // Check if all files have been validated and are valid
   const allFilesValid = useMemo(() => {
     if (acceptedFiles.length === 0) return false;
     // ArcGIS .xlsx uploads bypass CSV header validation; the workbook contents are validated at pre-flight.
     if (sourceFormat === SourceFormat.arcgis_xlsx) return arcgisValidationIssues.length === 0;
-    // All files must have validation status and all must be valid
-    return acceptedFiles.every(file => {
-      const status = fileValidationStatuses[file.name];
-      return status && status.isValid;
-    });
-  }, [acceptedFiles, arcgisValidationIssues.length, fileValidationStatuses, sourceFormat]);
+    return acceptedFiles.every(file => fileEffectivelyValid(file.name));
+  }, [acceptedFiles, arcgisValidationIssues.length, fileEffectivelyValid, sourceFormat]);
 
   // Get all validation issues across all files
   const allValidationIssues = useMemo(() => {
     const issues: { fileName: string; issues: string[] }[] = [];
     acceptedFiles.forEach(file => {
       const status = fileValidationStatuses[file.name];
-      if (status && !status.isValid && status.issues.length > 0) {
+      if (status && !fileEffectivelyValid(file.name) && status.issues.length > 0) {
         issues.push({ fileName: file.name, issues: status.issues });
       }
     });
     return sourceFormat === SourceFormat.arcgis_xlsx ? [...arcgisValidationIssues, ...issues] : issues;
-  }, [acceptedFiles, arcgisValidationIssues, fileValidationStatuses, sourceFormat]);
+  }, [acceptedFiles, arcgisValidationIssues, fileEffectivelyValid, fileValidationStatuses, sourceFormat]);
 
   // Check if any file is still being analyzed (no validation status yet)
   const isAnalyzing = useMemo(() => {
@@ -232,7 +286,19 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                     </Alert>
                   )}
 
-                  <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                  <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    {mappingEnabled && (
+                      <JoyButton
+                        variant="outlined"
+                        color={mappingValid ? 'neutral' : 'primary'}
+                        size="lg"
+                        startDecorator={<TuneIcon />}
+                        disabled={!csvMetadata || !columnMapping}
+                        onClick={() => setMappingOpen(true)}
+                      >
+                        {allFilesValid || mappingValid ? 'Review column mapping' : 'Map columns (required)'}
+                      </JoyButton>
+                    )}
                     <JoyButton
                       variant="solid"
                       color={allFilesValid ? 'primary' : 'neutral'}
@@ -303,6 +369,22 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
           </Box>
         </Box>
       </Box>
+
+      {/* Column Mapping Dialog (CSV measurements flow) */}
+      {mappingEnabled && csvMetadata && columnMapping && (
+        <ColumnMappingDialog
+          open={mappingOpen}
+          format={SourceFormat.csv}
+          metadata={csvMetadata}
+          mapping={columnMapping}
+          onChange={m => setColumnMapping?.(m)}
+          onApply={m => {
+            setColumnMapping?.(m);
+            setMappingOpen(false);
+          }}
+          onClose={() => setMappingOpen(false)}
+        />
+      )}
 
       {/* File Replacement Modal */}
       <Modal open={Boolean(fileToReplace)} onClose={() => setFileToReplace(null)}>

@@ -34,6 +34,7 @@ import {
 import { abortChunkProcessingAfterPermanentUploadFailure, shouldTimeoutPausedParser } from '@/components/uploadsystemhelpers/uploadqueueguards';
 import { generateShortBatchID } from '@/config/utils';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
+import { buildPapaTransformHeader, collapseMultiSourceRow } from '@/lib/column-mapping/mapping';
 
 function createAbortError(message: string): Error {
   const error = new Error(message);
@@ -92,7 +93,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   setUploadError,
   setReviewState,
   selectedDelimiters,
-  arcgisImportSession
+  arcgisImportSession,
+  columnMapping
 }) => {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -802,7 +804,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         ailogger.error(`Error validating delimiter for file ${file.name}:`, error instanceof Error ? error : new Error(String(error)));
       }
 
-      const transformHeader = (header: string) => {
+      const legacyTransformHeader = (header: string) => {
         const normalizedHeader = header
           .trim()
           .toLowerCase()
@@ -856,6 +858,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // This ensures consistent key names for processPersonnel, processSpecies, etc.
         return normalizedHeader;
       };
+
+      const transformHeader = columnMapping ? buildPapaTransformHeader(columnMapping) : legacyTransformHeader;
       const validateRow = (row: FileRow): boolean => {
         const errors: string[] = [];
         let extraData = false;
@@ -1041,7 +1045,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 }
 
                 const validRows: FileRow[] = [];
-                results.data.forEach(row => {
+                results.data.forEach(rawRow => {
+                  const row = columnMapping ? collapseMultiSourceRow(rawRow, columnMapping) : rawRow;
                   if (validateRow(row)) {
                     validRows.push(row);
                   }
