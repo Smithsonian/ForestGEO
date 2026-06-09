@@ -65,7 +65,10 @@ const AUTHZ_SIGNAL_PATTERNS = [
   // (edit routes use assertSessionMayEdit which internally calls hasSchemaAccess)
   /assertSessionMayEdit/,
   // requireAdmin from lib/auth-helpers — admin implies cross-site privilege
-  /requireAdmin/
+  /requireAdmin/,
+  // assertCanEditMeasurementScope from config/editplan/scopeguard — DB-backed
+  // schema/plot/census scope check; throws ScopeAccessError on denial
+  /assertCanEditMeasurementScope/
 ] as const;
 
 /**
@@ -90,7 +93,9 @@ const AUTHZ_RETURN_PATTERNS = [
   /if\s*\(\s*authError\s*\)\s*return\s+authError/,
   /if\s*\(\s*sessionError\s*\)\s*return\s+sessionError/,
   /assertSessionMayEdit[\s\S]{0,300}?return/,
-  /try\s*\{[\s\S]{0,300}?validatedSchema[\s\S]{0,300}?\}\s*catch[\s\S]{0,200}?return/
+  /try\s*\{[\s\S]{0,300}?validatedSchema[\s\S]{0,300}?\}\s*catch[\s\S]{0,200}?return/,
+  // assertCanEditMeasurementScope throws ScopeAccessError; the catch returns 403
+  /error\s+instanceof\s+ScopeAccessError\s*\)[\s\S]{0,200}?return/
 ] as const;
 
 /**

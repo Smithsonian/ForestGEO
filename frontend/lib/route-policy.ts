@@ -75,6 +75,10 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   clearcensus: 'admin',
 
   // ── Site-scoped routes ────────────────────────────────────────────────────
+  // ArcGIS two-sheet xlsx import — both gate on assertCanEditMeasurementScope
+  // (schema/plot/census scope check) and return 403 on ScopeAccessError
+  'arcgis/preflight': 'site-scoped',
+  'arcgis/commit': 'site-scoped',
   // Bulk upload ingestion pipeline
   'batchedupload/[schema]/[[...slugs]]': 'site-scoped',
   bulkcrud: 'site-scoped',
