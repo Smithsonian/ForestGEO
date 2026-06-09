@@ -19,7 +19,7 @@ import { UploadParseFilesProps } from '@/config/macros/uploadsystemmacros';
 // Using Box layout instead of Grid for better compatibility
 import { DropzoneCompact } from '@/components/uploadsystemhelpers/dropzonecompact';
 import { FileListEnhanced } from '@/components/uploadsystemhelpers/filelistenhanced';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
 import { RequiredTableHeadersByFormType, SourceFormat, TableHeadersByFormType } from '@/config/macros/formdetails';
 import InfoIcon from '@mui/icons-material/Info';
@@ -28,8 +28,8 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import TuneIcon from '@mui/icons-material/Tune';
 import { UploadMode } from '@/config/uploadmodes';
 import ColumnMappingDialog from './columnmappingdialog';
-import { seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
-import { CsvSourceMetadata } from '@/lib/column-mapping/types';
+import { mappingApplies, seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
+import { ColumnMapping, CsvSourceMetadata } from '@/lib/column-mapping/types';
 
 export interface FileValidationStatus {
   fileName: string;
@@ -60,8 +60,8 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     handleRemoveFile,
     selectedDelimiters,
     setSelectedDelimiters,
-    columnMapping,
-    setColumnMapping
+    columnMappings,
+    setColumnMappingForFile
   } = props;
 
   const [fileToReplace, setFileToReplace] = useState<FileWithPath | null>(null);
@@ -101,25 +101,39 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   // and revision uploads validate against app-export headers instead.
   const mappingEnabled = uploadForm === 'measurements' && uploadMode !== UploadMode.REVISIONS && sourceFormat !== SourceFormat.arcgis_xlsx;
 
-  const csvMetadata: CsvSourceMetadata | null = useMemo(() => {
-    if (!mappingEnabled) return null;
-    const firstWithHeaders = acceptedFiles.map(file => fileValidationStatuses[file.name]).find(status => status && status.detectedHeaders.length > 0);
-    return firstWithHeaders ? { format: SourceFormat.csv, headers: firstWithHeaders.detectedHeaders } : null;
-  }, [mappingEnabled, acceptedFiles, fileValidationStatuses]);
+  const [mappingFile, setMappingFile] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (csvMetadata && !columnMapping && setColumnMapping) setColumnMapping(seedMapping(csvMetadata));
-  }, [csvMetadata, columnMapping, setColumnMapping]);
+  const metadataFor = useCallback(
+    (fileName: string): CsvSourceMetadata | null => {
+      if (!mappingEnabled) return null;
+      const status = fileValidationStatuses[fileName];
+      return status && status.detectedHeaders.length > 0 ? { format: SourceFormat.csv, headers: status.detectedHeaders } : null;
+    },
+    [mappingEnabled, fileValidationStatuses]
+  );
+
+  const effectiveMappingFor = useCallback(
+    (fileName: string): ColumnMapping | null => {
+      const meta = metadataFor(fileName);
+      if (!meta) return null;
+      const stored = columnMappings?.[fileName];
+      if (stored && mappingApplies(stored, meta.headers)) return stored;
+      return seedMapping(meta);
+    },
+    [metadataFor, columnMappings]
+  );
 
   // The mapping must resolve against every selected file's headers, not just the seeding file's.
   const mappingValidForFile = useCallback(
     (fileName: string): boolean => {
-      if (!mappingEnabled || !columnMapping) return false;
-      const status = fileValidationStatuses[fileName];
-      if (!status || status.detectedHeaders.length === 0) return false;
-      return validateMapping(columnMapping, { format: SourceFormat.csv, headers: status.detectedHeaders }).valid;
+      if (!mappingEnabled) return false;
+      const meta = metadataFor(fileName);
+      if (!meta) return false;
+      const effective = effectiveMappingFor(fileName);
+      if (!effective) return false;
+      return validateMapping(effective, meta).valid;
     },
-    [mappingEnabled, columnMapping, fileValidationStatuses]
+    [mappingEnabled, metadataFor, effectiveMappingFor]
   );
 
   const mappingValid = useMemo(
@@ -287,18 +301,31 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                   )}
 
                   <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
-                    {mappingEnabled && (
-                      <JoyButton
-                        variant="outlined"
-                        color={mappingValid ? 'neutral' : 'primary'}
-                        size="lg"
-                        startDecorator={<TuneIcon />}
-                        disabled={!csvMetadata || !columnMapping}
-                        onClick={() => setMappingOpen(true)}
-                      >
-                        {allFilesValid || mappingValid ? 'Review column mapping' : 'Map columns (required)'}
-                      </JoyButton>
-                    )}
+                    {mappingEnabled &&
+                      (() => {
+                        const firstFileNeedingMapping =
+                          acceptedFiles.find(f => {
+                            const status = fileValidationStatuses[f.name];
+                            return status && !status.isValid && !mappingValidForFile(f.name);
+                          })?.name ??
+                          acceptedFiles[0]?.name ??
+                          null;
+                        return (
+                          <JoyButton
+                            variant="outlined"
+                            color={mappingValid ? 'neutral' : 'primary'}
+                            size="lg"
+                            startDecorator={<TuneIcon />}
+                            disabled={!firstFileNeedingMapping || !metadataFor(firstFileNeedingMapping)}
+                            onClick={() => {
+                              setMappingFile(firstFileNeedingMapping);
+                              setMappingOpen(true);
+                            }}
+                          >
+                            {allFilesValid || mappingValid ? 'Review column mapping' : 'Map columns (required)'}
+                          </JoyButton>
+                        );
+                      })()}
                     <JoyButton
                       variant="solid"
                       color={allFilesValid ? 'primary' : 'neutral'}
@@ -371,15 +398,16 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
       </Box>
 
       {/* Column Mapping Dialog (CSV measurements flow) */}
-      {mappingEnabled && csvMetadata && columnMapping && (
+      {mappingEnabled && mappingFile && metadataFor(mappingFile) && effectiveMappingFor(mappingFile) && (
         <ColumnMappingDialog
           open={mappingOpen}
           format={SourceFormat.csv}
-          metadata={csvMetadata}
-          mapping={columnMapping}
-          onChange={m => setColumnMapping?.(m)}
+          fileName={mappingFile}
+          metadata={metadataFor(mappingFile)!}
+          mapping={effectiveMappingFor(mappingFile)!}
+          onChange={m => setColumnMappingForFile?.(mappingFile, m)}
           onApply={m => {
-            setColumnMapping?.(m);
+            setColumnMappingForFile?.(mappingFile, m);
             setMappingOpen(false);
           }}
           onClose={() => setMappingOpen(false)}

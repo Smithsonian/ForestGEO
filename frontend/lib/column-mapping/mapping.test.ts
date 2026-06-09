@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SourceFormat } from '@/config/macros/formdetails';
-import { isColumnMappingShape, joinMultiSourceValues, seedMapping, validateMapping } from './mapping';
+import { headerSignature, isColumnMappingShape, joinMultiSourceValues, mappingApplies, seedMapping, validateMapping } from './mapping';
 import { ArcgisSourceMetadata, CsvSourceMetadata } from './types';
 
 const csvMeta = (headers: string[]): CsvSourceMetadata => ({ format: SourceFormat.csv, headers });
@@ -183,5 +183,25 @@ describe('isColumnMappingShape', () => {
 describe('joinMultiSourceValues re-export', () => {
   it('is re-exported from resolution for existing consumers', () => {
     expect(joinMultiSourceValues(['LI', 'NA'])).toBe('LI');
+  });
+});
+
+describe('mapping identity', () => {
+  it('seedMapping stamps the header signature of its source metadata', () => {
+    const m = seedMapping(csvMeta(['Tag', 'X_Coord']));
+    expect(m.headerSignature).toBe(headerSignature(['Tag', 'X_Coord']));
+    expect(m.headerSignature).toBe(headerSignature(['x_coord', 'TAG'])); // order/case/separator-insensitive
+  });
+
+  it('mappingApplies rejects a mapping built from different headers', () => {
+    const m = seedMapping(csvMeta(['TreeNo', 'X_Coord']));
+    expect(mappingApplies(m, ['TreeNo', 'X_Coord'])).toBe(true);
+    expect(mappingApplies(m, ['tag', 'TreeNo', 'X_Coord'])).toBe(false);
+  });
+
+  it('isColumnMappingShape accepts an optional string headerSignature and rejects non-strings', () => {
+    const base = seedMapping(csvMeta(['tag']));
+    expect(isColumnMappingShape(JSON.parse(JSON.stringify(base)))).toBe(true);
+    expect(isColumnMappingShape({ ...base, headerSignature: 42 })).toBe(false);
   });
 });

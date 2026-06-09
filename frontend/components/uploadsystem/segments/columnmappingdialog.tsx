@@ -10,6 +10,8 @@ import { ColumnMapping, ColumnMappingField, SourceMetadata } from '@/lib/column-
 interface ColumnMappingDialogProps {
   open: boolean;
   format: SourceFormat;
+  /** Name of the file this mapping applies to; displayed under the title for multi-file batches. */
+  fileName?: string;
   metadata: SourceMetadata;
   mapping: ColumnMapping;
   /** Server-side rejection of the last applied mapping; rendered so the user knows what to fix. */
@@ -28,7 +30,7 @@ function setFieldSources(mapping: ColumnMapping, canonicalField: string, sources
   return { ...mapping, fields };
 }
 
-export default function ColumnMappingDialog({ open, format, metadata, mapping, serverError, onChange, onApply, onClose }: ColumnMappingDialogProps) {
+export default function ColumnMappingDialog({ open, format, fileName, metadata, mapping, serverError, onChange, onApply, onClose }: ColumnMappingDialogProps) {
   const defs = useMemo(() => canonicalFieldsFor(format), [format]);
   const sourceColumns = useMemo(() => sourceColumnsFromMetadata(metadata), [metadata]);
   const validation = useMemo(() => validateMapping(mapping, metadata), [mapping, metadata]);
@@ -39,6 +41,11 @@ export default function ColumnMappingDialog({ open, format, metadata, mapping, s
     <Modal open={open} onClose={onClose}>
       <ModalDialog sx={{ minWidth: 640, maxWidth: 820 }}>
         <DialogTitle>Map your columns</DialogTitle>
+        {fileName && (
+          <Typography level="body-sm" textColor="text.tertiary">
+            File: {fileName}
+          </Typography>
+        )}
         <DialogContent>
           <Typography level="body-sm" sx={{ mb: 1 }}>
             Match each column in your file to the field the app expects. Required fields must be mapped before you can continue.

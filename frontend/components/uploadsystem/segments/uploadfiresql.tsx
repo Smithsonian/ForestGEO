@@ -34,7 +34,7 @@ import {
 import { abortChunkProcessingAfterPermanentUploadFailure, shouldTimeoutPausedParser } from '@/components/uploadsystemhelpers/uploadqueueguards';
 import { generateShortBatchID } from '@/config/utils';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
-import { seedMapping } from '@/lib/column-mapping/mapping';
+import { mappingApplies, seedMapping } from '@/lib/column-mapping/mapping';
 import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
 import { aliasesFor } from '@/lib/column-mapping/fields';
 import { UploadMode } from '@/config/uploadmodes';
@@ -97,7 +97,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   setReviewState,
   selectedDelimiters,
   arcgisImportSession,
-  columnMapping
+  columnMappings
 }) => {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -865,14 +865,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         return normalizedHeader;
       };
 
-      const mappingFlowActive = uploadForm === 'measurements' && uploadMode !== UploadMode.REVISIONS && csvHeaders !== null && csvHeaders.length > 0;
+      const mappingFlowActive = uploadForm === FormType.measurements && uploadMode !== UploadMode.REVISIONS && csvHeaders !== null && csvHeaders.length > 0;
       const headerPlan = mappingFlowActive
-        ? resolveHeaders(
-            csvHeaders!,
-            columnMapping ?? seedMapping({ format: SourceFormat.csv, headers: csvHeaders! }),
-            aliasesFor(SourceFormat.csv),
-            CSV_RESOLVE_OPTIONS
-          )
+        ? (() => {
+            const storedMapping = columnMappings?.[file.name];
+            const effectiveMapping =
+              storedMapping && csvHeaders !== null && mappingApplies(storedMapping, csvHeaders)
+                ? storedMapping
+                : seedMapping({ format: SourceFormat.csv, headers: csvHeaders! });
+            return resolveHeaders(csvHeaders!, effectiveMapping, aliasesFor(SourceFormat.csv), CSV_RESOLVE_OPTIONS);
+          })()
         : null;
       const transformHeader = headerPlan ? transformHeaderFromPlan(headerPlan) : legacyTransformHeader;
       const validateRow = (row: FileRow): boolean => {
@@ -1028,6 +1030,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           chunk(results: ParseResult<FileRow>, parser) {
             actualChunkCount += 1;
             totalRows += results.data.length;
+            if (headerPlan && actualChunkCount === 1 && Array.isArray(results.meta.fields) && results.meta.fields.length !== headerPlan.outputKeys.length) {
+              ailogger.warn(
+                `Header plan misalignment for ${file.name}: preview tokenizer saw ${headerPlan.outputKeys.length} columns, papaparse saw ${results.meta.fields.length}. Falling back is not possible mid-parse; data may be mis-keyed.`
+              );
+            }
             const chunkTask = (async () => {
               try {
                 if (!isMountedRef.current) {
@@ -1233,7 +1240,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       pushErrorRowsToFailedMeasurements,
       waitForAllOperationsToComplete,
       markFatalUploadError,
-      submitArcgisImportSession
+      submitArcgisImportSession,
+      columnMappings,
+      uploadMode
     ]
   );
 

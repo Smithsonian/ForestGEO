@@ -43,9 +43,9 @@ export interface UploadParseFilesProps {
   // state setters
   setDataViewActive: Dispatch<SetStateAction<number>>;
   setSelectedDelimiters: Dispatch<SetStateAction<Record<string, string>>>;
-  // column mapping (CSV flow): seeded from detected headers, confirmed via the mapping dialog
-  columnMapping?: ColumnMapping;
-  setColumnMapping?: (mapping: ColumnMapping) => void;
+  // column mapping (CSV flow): per-file mappings keyed by file name, confirmed via the mapping dialog
+  columnMappings?: Record<string, ColumnMapping>;
+  setColumnMappingForFile?: (fileName: string, mapping: ColumnMapping) => void;
   // centralized functions
   handleInitialSubmit: () => Promise<void>;
   handleAddFile: (newFile: FileWithPath) => void;
@@ -96,8 +96,8 @@ export interface UploadFireProps {
   arcgisImportSession?: ArcgisImportReference | null;
   uploadCompleteMessage: string;
   selectedDelimiters: Record<string, string>;
-  // Confirmed column mapping from the parse step. When omitted, falls back to legacy header aliasing.
-  columnMapping?: ColumnMapping;
+  // Per-file confirmed column mappings from the parse step. When omitted, falls back to legacy header aliasing.
+  columnMappings?: Record<string, ColumnMapping>;
   // state setters
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;

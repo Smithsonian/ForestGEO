@@ -89,6 +89,39 @@ describe('ColumnMappingDialog validation messages', () => {
   });
 });
 
+describe('ColumnMappingDialog fileName prop', () => {
+  it('renders the file name under the title when the fileName prop is set', () => {
+    render(
+      <ColumnMappingDialog
+        open
+        format={SourceFormat.csv}
+        fileName="survey_data.csv"
+        metadata={meta}
+        mapping={seedMapping(meta)}
+        onChange={() => {}}
+        onApply={() => {}}
+        onClose={() => {}}
+      />
+    );
+    expect(screen.getByText(/File: survey_data\.csv/)).toBeInTheDocument();
+  });
+
+  it('does not render a file name line when the fileName prop is omitted', () => {
+    render(
+      <ColumnMappingDialog
+        open
+        format={SourceFormat.csv}
+        metadata={meta}
+        mapping={seedMapping(meta)}
+        onChange={() => {}}
+        onApply={() => {}}
+        onClose={() => {}}
+      />
+    );
+    expect(screen.queryByText(/^File:/)).not.toBeInTheDocument();
+  });
+});
+
 describe('ColumnMappingDialog (arcgis sheet roles)', () => {
   it('renders trees/stems sheet-role selects when no sheets were detected', () => {
     const arcgisMeta: ArcgisSourceMetadata = {

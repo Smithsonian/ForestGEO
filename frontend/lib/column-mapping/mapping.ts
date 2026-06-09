@@ -21,6 +21,18 @@ function allSourceColumns(metadata: SourceMetadata): string[] {
   return cols;
 }
 
+export function headerSignature(headers: string[]): string {
+  return headers
+    .map(normalizeHeader)
+    .filter(h => h.length > 0)
+    .sort()
+    .join('|');
+}
+
+export function mappingApplies(mapping: ColumnMapping, headers: string[]): boolean {
+  return mapping.headerSignature !== undefined && mapping.headerSignature === headerSignature(headers);
+}
+
 /**
  * Structural guard for mappings arriving from the wire (JSON.parse output). Anything that fails
  * here would otherwise throw a TypeError deep inside header resolution.
@@ -43,6 +55,7 @@ export function isColumnMappingShape(value: unknown): value is ColumnMapping {
     if (roles.treesSheetName !== undefined && typeof roles.treesSheetName !== 'string') return false;
     if (roles.stemsSheetName !== undefined && typeof roles.stemsSheetName !== 'string') return false;
   }
+  if (mapping.headerSignature !== undefined && typeof mapping.headerSignature !== 'string') return false;
   return true;
 }
 
@@ -72,6 +85,7 @@ export function seedMapping(metadata: SourceMetadata): ColumnMapping {
       stemsSheetName: metadata.detectedStemsSheet
     };
   }
+  mapping.headerSignature = headerSignature(sources);
   return mapping;
 }
 

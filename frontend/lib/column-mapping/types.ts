@@ -24,6 +24,8 @@ export interface ColumnMapping {
     treesSheetName?: string;
     stemsSheetName?: string;
   };
+  /** Signature of the headers this mapping was built from; a mapping never applies to other headers. */
+  headerSignature?: string;
 }
 
 export interface MappingValidation {

@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
@@ -132,7 +132,17 @@ function UploadParentInner(props: UploadParentProps) {
   // doesn't reach the match review only to fail at Apply.
   const [revisionRolePreflightWarning, setRevisionRolePreflightWarning] = useState<string | null>(null);
   const [arcgisImportSession, setArcgisImportSession] = useState<ArcgisImportReference | null>(null);
-  const [columnMapping, setColumnMapping] = useState<ColumnMapping | undefined>(undefined);
+  const [columnMappings, setColumnMappings] = useState<Record<string, ColumnMapping>>({});
+  const setColumnMappingForFile = useCallback((fileName: string, mapping: ColumnMapping) => {
+    setColumnMappings(prev => ({ ...prev, [fileName]: mapping }));
+  }, []);
+  const dropColumnMapping = useCallback((fileName: string) => {
+    setColumnMappings(prev => {
+      if (!(fileName in prev)) return prev;
+      const { [fileName]: _dropped, ...rest } = prev;
+      return rest;
+    });
+  }, []);
 
   // Track if we've already initialized reingestion to prevent re-triggering
   const reingestionInitializedRef = useRef(false);
@@ -179,6 +189,7 @@ function UploadParentInner(props: UploadParentProps) {
       // Reset to start state when in invalid state
       uploadState.resetToStart();
       fileManagement.clearFiles();
+      setColumnMappings({});
       setParsedData({});
       setIsReingestionMode(false);
       setRevisionMatchResult(null);
@@ -208,6 +219,7 @@ function UploadParentInner(props: UploadParentProps) {
   async function handleReturnToStart() {
     uploadState.resetToStart();
     fileManagement.clearFiles();
+    setColumnMappings({});
     setParsedData({});
     setIsReingestionMode(false);
     setRevisionMatchResult(null);
@@ -227,11 +239,15 @@ function UploadParentInner(props: UploadParentProps) {
 
   const handleRemoveFile = (fileIndex: number) => {
     setArcgisImportSession(null);
+    const removed = fileManagement.files[fileIndex];
+    if (removed) dropColumnMapping(removed.name);
     fileManagement.removeFile(fileIndex);
   };
 
   const handleReplaceFile = async (fileIndex: number, newFile: FileWithPath) => {
     setArcgisImportSession(null);
+    const replaced = fileManagement.files[fileIndex];
+    if (replaced) dropColumnMapping(replaced.name);
     fileManagement.replaceFile(fileIndex, newFile);
   };
 
@@ -408,8 +424,8 @@ function UploadParentInner(props: UploadParentProps) {
             handleReplaceFile={handleReplaceFile}
             selectedDelimiters={selectedDelimiters}
             setSelectedDelimiters={setSelectedDelimiters}
-            columnMapping={columnMapping}
-            setColumnMapping={setColumnMapping}
+            columnMappings={columnMappings}
+            setColumnMappingForFile={setColumnMappingForFile}
           />
         );
       case ReviewStates.ARCGIS_PREFLIGHT:
@@ -459,7 +475,7 @@ function UploadParentInner(props: UploadParentProps) {
             setErrorComponent={errorHandling.setErrorComponent}
             setAllRowToCMID={setAllRowToCMID}
             selectedDelimiters={selectedDelimiters}
-            columnMapping={columnMapping}
+            columnMappings={columnMappings}
           />
         );
       case ReviewStates.REVISION_MATCH:
