@@ -3,8 +3,8 @@ import { excelSerialToISODate } from './excel-date';
 import { UnparseableDateError } from './errors';
 
 describe('excelSerialToISODate', () => {
-  it('maps the Excel epoch boundary (serial 2 -> 1900-01-01)', () => {
-    expect(excelSerialToISODate(2)).toBe('1900-01-01');
+  it('rejects the Excel epoch boundary as implausible census data', () => {
+    expect(() => excelSerialToISODate(2)).toThrow(UnparseableDateError);
   });
 
   it('converts a modern census serial to its calendar date', () => {
@@ -33,6 +33,14 @@ describe('excelSerialToISODate', () => {
 
   it('rejects bare-year numeric text instead of reading it as a 1900s serial', () => {
     expect(() => excelSerialToISODate('2026')).toThrow(UnparseableDateError);
+  });
+
+  it('rejects bare-year numeric cells instead of reading them as 1900s serials', () => {
+    expect(() => excelSerialToISODate(2026)).toThrow(UnparseableDateError);
+  });
+
+  it('rejects date-formatted bare-year cells that ExcelJS exposes as 1900s Date objects', () => {
+    expect(() => excelSerialToISODate(new Date(Date.UTC(1905, 6, 18)))).toThrow(UnparseableDateError);
   });
 
   it('rejects a small bare-number string below the plausible serial floor', () => {

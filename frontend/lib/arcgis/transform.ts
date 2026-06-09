@@ -24,22 +24,34 @@ function expandExponential(text: string): string {
   return `${sign}${result}`;
 }
 
-// IEEE 754 double-precision carries ~15.9 significant digits; rounding to 15 collapses
-// representation noise the double could never faithfully store, without touching real data.
+// Render numeric cells without exponential notation. Generic identifiers/tags use this path so exact
+// integers are not rounded while moving through the ArcGIS transform.
+function numberToPlainString(value: number): string {
+  if (!Number.isFinite(value)) return String(value);
+  return expandExponential(String(value));
+}
+
+// IEEE 754 double-precision carries ~15.9 significant digits; rounding decimal measurement values to
+// 15 collapses representation noise the double could never faithfully store.
 const DOUBLE_SIGNIFICANT_DIGITS = 15;
 
-// Render a numeric cell as a faithful plain-decimal string. toPrecision collapses
-// double-representation noise (0.1+0.2 -> 0.30000000000000004) that lives beyond what a
-// double can actually carry, without altering any value a real measurement could hold; the
-// expansion step then removes exponential notation. Non-finite values fall back to String().
-function numberToCanonicalString(value: number): string {
+// Render numeric measurement cells as plain decimals. Integer values are preserved exactly as JS
+// represents them; fractional values get float-noise cleanup before exponent expansion.
+function numberToCanonicalDecimalString(value: number): string {
   if (!Number.isFinite(value)) return String(value);
+  if (Number.isInteger(value)) return numberToPlainString(value);
   return expandExponential(String(Number(value.toPrecision(DOUBLE_SIGNIFICANT_DIGITS))));
 }
 
 function cellToString(value: ArcgisCell): string | null {
   if (value === null || value === undefined) return null;
-  const text = value instanceof Date ? excelSerialToISODate(value) : typeof value === 'number' ? numberToCanonicalString(value) : value.trim();
+  const text = value instanceof Date ? excelSerialToISODate(value) : typeof value === 'number' ? numberToPlainString(value) : value.trim();
+  return text === '' ? null : text;
+}
+
+function decimalCellToString(value: ArcgisCell): string | null {
+  if (value === null || value === undefined) return null;
+  const text = value instanceof Date ? excelSerialToISODate(value) : typeof value === 'number' ? numberToCanonicalDecimalString(value) : value.trim();
   return text === '' ? null : text;
 }
 
@@ -191,10 +203,10 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       stemtag: cellToString(field(tree, 'StemTag')),
       spcode,
       quadrat,
-      lx: cellToString(field(tree, 'lx')),
-      ly: cellToString(field(tree, 'ly')),
-      dbh: cellToString(field(tree, 'DBH_CURRENT')),
-      hom: cellToString(field(tree, 'HOM')),
+      lx: decimalCellToString(field(tree, 'lx')),
+      ly: decimalCellToString(field(tree, 'ly')),
+      dbh: decimalCellToString(field(tree, 'DBH_CURRENT')),
+      hom: decimalCellToString(field(tree, 'HOM')),
       date: dateToIso(field(tree, 'Date_measured')),
       codes: joinCodes(tree),
       comments: cellToString(field(tree, 'notes'))
@@ -242,8 +254,8 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
         quadrat: orphanQuadrat,
         lx: null,
         ly: null,
-        dbh: cellToString(field(stem, 'DBH_CURRENT')),
-        hom: cellToString(field(stem, 'HOM')),
+        dbh: decimalCellToString(field(stem, 'DBH_CURRENT')),
+        hom: decimalCellToString(field(stem, 'HOM')),
         date: dateToIso(field(stem, 'Date_measured')),
         codes: joinCodes(stem),
         comments: cellToString(field(stem, 'notes'))
@@ -288,10 +300,10 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       stemtag: cellToString(field(stem, 'StemTag')),
       spcode,
       quadrat,
-      lx: cellToString(field(parent, 'lx')),
-      ly: cellToString(field(parent, 'ly')),
-      dbh: cellToString(field(stem, 'DBH_CURRENT')),
-      hom: cellToString(field(stem, 'HOM')),
+      lx: decimalCellToString(field(parent, 'lx')),
+      ly: decimalCellToString(field(parent, 'ly')),
+      dbh: decimalCellToString(field(stem, 'DBH_CURRENT')),
+      hom: decimalCellToString(field(stem, 'HOM')),
       date: dateToIso(field(stem, 'Date_measured')),
       codes: joinCodes(stem),
       comments: cellToString(field(stem, 'notes'))

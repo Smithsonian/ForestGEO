@@ -223,4 +223,13 @@ describe('cellToString numeric formatting (via transformArcgisWorkbook)', () => 
     const { rows } = transformArcgisWorkbook({ trees: [tree({ lx: -0.0000015 as unknown as string })], stems: [] });
     expect(rows[0].lx).toBe('-0.0000015');
   });
+
+  it('preserves exact integer identifiers without significant-digit rounding', () => {
+    const { rows } = transformArcgisWorkbook({
+      trees: [tree({ tag: 1234567890123456, StemTag: Number.MAX_SAFE_INTEGER })],
+      stems: []
+    });
+    expect(rows[0].tag).toBe('1234567890123456');
+    expect(rows[0].stemtag).toBe('9007199254740991');
+  });
 });
