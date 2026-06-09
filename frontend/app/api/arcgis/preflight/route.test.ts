@@ -112,6 +112,18 @@ describe('POST /api/arcgis/preflight mapping', () => {
     expect(mocks.readArcgisWorkbook).not.toHaveBeenCalled();
   });
 
+  it('rejects well-formed JSON with the wrong mapping shape without reading the workbook', async () => {
+    const wrongShapes = ['{"fields":{}}', '[1,2]', '"just a string"', '{"version":1,"format":"arcgis_xlsx","fields":[{"canonicalField":"lx"}]}'];
+    for (const mapping of wrongShapes) {
+      const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1', mapping }) as any);
+      const body = await res.json();
+      expect(res.status, `shape ${mapping} must 400`).toBe(400);
+      expect(body.error).toMatch(/mapping/i);
+    }
+    expect(mocks.readArcgisWorkbook).not.toHaveBeenCalled();
+    expect(mocks.loggerError).not.toHaveBeenCalled();
+  });
+
   it('keeps returning a plain error for date parse failures (not a mapping problem)', async () => {
     mocks.readArcgisWorkbook.mockRejectedValue(new UnparseableDateError('bad date'));
 

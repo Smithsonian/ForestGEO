@@ -11,7 +11,7 @@ import { describeArcgisWorkbook, readArcgisWorkbook } from '@/lib/arcgis/workboo
 import { transformArcgisWorkbook } from '@/lib/arcgis/transform';
 import { createArcgisImportSession } from '@/lib/arcgis/import-session';
 import { SourceFormat } from '@/config/macros/formdetails';
-import { seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
+import { isColumnMappingShape, seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
 import type { ArcgisSourceMetadata, ColumnMapping } from '@/lib/column-mapping/types';
 
 export const runtime = 'nodejs';
@@ -83,11 +83,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const mappingRaw = formData.get('mapping');
   let mapping: ColumnMapping | undefined;
   if (typeof mappingRaw === 'string' && mappingRaw.length > 0) {
+    let parsed: unknown;
     try {
-      mapping = JSON.parse(mappingRaw);
+      parsed = JSON.parse(mappingRaw);
     } catch {
       return NextResponse.json({ error: 'Invalid mapping payload.' }, { status: HTTPResponses.INVALID_REQUEST });
     }
+    if (!isColumnMappingShape(parsed)) {
+      return NextResponse.json({ error: 'Invalid mapping payload.' }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+    mapping = parsed;
   }
 
   try {
