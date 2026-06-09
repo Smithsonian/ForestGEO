@@ -83,7 +83,7 @@ export function assertUploadableArcgisSession(session: ArcgisSessionRow | null, 
   if (session.file_id !== scope.fileName) {
     throw new ArcgisImportSessionError('ArcGIS import session file does not match the requested file.', HTTPResponses.CONFLICT);
   }
-  if (!['preflight', 'committing'].includes(session.state)) {
+  if (session.state !== 'preflight') {
     throw new ArcgisImportSessionError(`ArcGIS import session is not uploadable from state "${session.state}".`, HTTPResponses.CONFLICT);
   }
 }
@@ -159,7 +159,7 @@ export async function createArcgisImportSession(input: CreateArcgisImportSession
        WHERE plot_id = ?
          AND census_id = ?
          AND user_id = ?
-         AND state IN ('preflight', 'committed', 'abandoned')`,
+         AND state IN ('preflight', 'committed')`,
       [input.schema]
     );
     await connectionManager.executeQuery(deletePreviousSQL, [input.plotID, input.censusID, input.userId], transactionID);
@@ -322,10 +322,15 @@ export async function claimArcgisImportSessionForCommit(
     throw new ArcgisImportSessionError(`ArcGIS import session is not uploadable from state "${session.state}".`, HTTPResponses.CONFLICT);
   }
 
+  // Reserve this preflight session for the in-flight commit: the row is already held under
+  // SELECT ... FOR UPDATE, so this CAS on state = 'preflight' just claims it (affectedRows must be 1)
+  // and records the batch/upload-session it is being committed to. State stays 'preflight' until
+  // markArcgisImportSessionCommitted flips it to 'committed' at the end of the same transaction;
+  // committed_row_count/committed_at are finalized there. If the transaction rolls back, these
+  // committed_* writes revert with it, so no other request ever observes a half-committed preflight row.
   const claimSQL = format(
     `UPDATE ??.arcgis_import_sessions
-     SET state = 'committing',
-         committed_file_id = file_id,
+     SET committed_file_id = file_id,
          committed_batch_id = ?,
          committed_upload_session_id = ?,
          committed_row_count = NULL,
@@ -356,7 +361,7 @@ export async function markArcgisImportSessionCommitted(
      SET state = 'committed',
          committed_row_count = ?,
          committed_at = NOW()
-     WHERE import_session_id = ? AND state = 'committing'`,
+     WHERE import_session_id = ? AND state = 'preflight'`,
     [input.schema]
   );
   const result = await connectionManager.executeQuery(updateSQL, [input.insertedRowCount, input.importSessionId], transactionID);
@@ -370,7 +375,7 @@ export async function cleanupStaleArcgisImportSessions(schema: string, maxAgeSec
   const connectionManager = ConnectionManager.getInstance();
   const deleteSQL = format(
     `DELETE FROM ??.arcgis_import_sessions
-     WHERE state IN ('preflight', 'committed', 'abandoned')
+     WHERE state IN ('preflight', 'committed')
        AND updated_at < DATE_SUB(NOW(), INTERVAL ? SECOND)`,
     [schema]
   );

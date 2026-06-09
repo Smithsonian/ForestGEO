@@ -10,8 +10,15 @@ describe('assertUploadableArcgisSession', () => {
     expect(() => assertUploadableArcgisSession(baseSession, scope)).not.toThrow();
   });
 
-  it('passes for a matching committing session', () => {
-    expect(() => assertUploadableArcgisSession({ ...baseSession, state: 'committing' }, scope)).not.toThrow();
+  it('rejects a committing session now that the state machine is collapsed', () => {
+    try {
+      assertUploadableArcgisSession({ ...baseSession, state: 'committing' }, scope);
+      throw new Error('expected throw');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ArcgisImportSessionError);
+      expect((e as ArcgisImportSessionError).status).toBe(HTTPResponses.CONFLICT);
+      expect((e as ArcgisImportSessionError).message).toContain('uploadable');
+    }
   });
 
   it('rejects a missing session with 404 NOT_FOUND', () => {
