@@ -166,6 +166,174 @@ describe('UploadArcgisPreflight', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('does not re-run preflight when the parent re-renders with new callback identities', async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response(JSON.stringify({ importSessionId: 's1', fileName: 'arcgis-export.xlsx', rowCount: 11181, summary, warnings: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const files = [new File(['workbook'], 'arcgis-export.xlsx')];
+
+    const { rerender } = render(
+      <UploadArcgisPreflight
+        acceptedFiles={files}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        onProceed={() => {}}
+        onBack={() => {}}
+        onError={() => {}}
+      />
+    );
+    expect(await screen.findByText(/11181/)).toBeInTheDocument();
+
+    // Parent re-render with fresh inline arrows (uploadparent passes them inline every render).
+    rerender(
+      <UploadArcgisPreflight
+        acceptedFiles={files}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        onProceed={() => {}}
+        onBack={() => {}}
+        onError={() => {}}
+      />
+    );
+
+    expect(screen.getByText(/11181/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears stale mapping UI when the file selection changes', async () => {
+    const mappingRequiredBody = {
+      error: 'Trees sheet missing lx, ly.',
+      mappingRequired: true,
+      format: 'arcgis_xlsx',
+      sheets: [{ name: 'TreesCustom', columns: ['GlobalID'] }],
+      missingRequired: ['lx'],
+      missingSheetRoles: ['trees', 'stems']
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(mappingRequiredBody), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+      .mockReturnValueOnce(new Promise(() => {})); // second preflight stays in flight
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { rerender } = render(
+      <UploadArcgisPreflight
+        acceptedFiles={[new File(['a'], 'a.xlsx')]}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        onProceed={() => {}}
+        onBack={() => {}}
+        onError={() => {}}
+      />
+    );
+    expect(await screen.findByText(/do not match the expected ArcGIS schema/i)).toBeInTheDocument();
+
+    rerender(
+      <UploadArcgisPreflight
+        acceptedFiles={[new File(['b'], 'b.xlsx')]}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        onProceed={() => {}}
+        onBack={() => {}}
+        onError={() => {}}
+      />
+    );
+
+    // File A's mapping UI must not survive into file B's in-flight preflight.
+    expect(screen.queryByText(/do not match the expected ArcGIS schema/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /map your columns/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/preparing the arcgis workbook pre-flight/i)).toBeInTheDocument();
+  });
+
+  it('surfaces the server rejection message in the mapping flow instead of discarding it', async () => {
+    const mappingRequiredBody = {
+      error: 'Trees sheet "TreesCustom" is missing required column(s): lx.',
+      mappingRequired: true,
+      format: 'arcgis_xlsx',
+      sheets: [{ name: 'TreesCustom', columns: ['GlobalID'] }],
+      missingRequired: ['lx'],
+      missingSheetRoles: ['trees', 'stems']
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(mappingRequiredBody), { status: 400, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <UploadArcgisPreflight
+        acceptedFiles={[new File(['a'], 'a.xlsx')]}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        onProceed={() => {}}
+        onBack={() => {}}
+        onError={() => {}}
+      />
+    );
+
+    expect(await screen.findAllByText(/Trees sheet "TreesCustom" is missing required column\(s\): lx\./)).not.toHaveLength(0);
+  });
+
+  it('ignores a superseded preflight response that resolves after the file changed', async () => {
+    let resolveFirst: (response: Response) => void = () => {};
+    const firstResponse = new Promise<Response>(resolve => {
+      resolveFirst = resolve;
+    });
+    const secondSummary = { ...summary, totalRows: 222 };
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(firstResponse)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ importSessionId: 'session-b', fileName: 'b.xlsx', rowCount: 222, summary: secondSummary, warnings: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { rerender } = render(
+      <UploadArcgisPreflight
+        acceptedFiles={[new File(['a'], 'a.xlsx')]}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        onProceed={() => {}}
+        onBack={() => {}}
+        onError={() => {}}
+      />
+    );
+
+    rerender(
+      <UploadArcgisPreflight
+        acceptedFiles={[new File(['b'], 'b.xlsx')]}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        onProceed={() => {}}
+        onBack={() => {}}
+        onError={() => {}}
+      />
+    );
+    expect(await screen.findByText(/222/)).toBeInTheDocument();
+
+    // File A's stale response lands last; it must not clobber file B's staged session.
+    resolveFirst(
+      new Response(JSON.stringify({ importSessionId: 'session-a', fileName: 'a.xlsx', rowCount: 111, summary: { ...summary, totalRows: 111 }, warnings: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    );
+    await waitFor(() => expect(screen.queryByText(/111/)).not.toBeInTheDocument());
+    expect(screen.getByText(/222/)).toBeInTheDocument();
+  });
+
   it('shows a recoverable file-selection error for multiple workbooks', async () => {
     const onBack = vi.fn();
     const onError = vi.fn();

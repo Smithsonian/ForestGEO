@@ -140,17 +140,20 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
   const [arcgisMeta, setArcgisMeta] = useState<ArcgisSourceMetadata | null>(null);
   const [mapping, setMapping] = useState<ColumnMapping | null>(null);
   const [mappingOpen, setMappingOpen] = useState(false);
-  const isMountedRef = useRef(true);
-
+  const [mappingServerError, setMappingServerError] = useState<string | null>(null);
+  // onError is read through a ref so runPreflight's identity (and therefore the preflight effect)
+  // is insulated from parents that pass a fresh inline callback on every render.
+  const onErrorRef = useRef(onError);
   useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+    onErrorRef.current = onError;
+  }, [onError]);
+  const abortRef = useRef<AbortController | null>(null);
 
   const runPreflight = useCallback(
     async (mappingArg?: ColumnMapping) => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
       const file = acceptedFiles[0];
       try {
         const formData = new FormData();
@@ -162,20 +165,22 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
 
         const response = await fetch('/api/arcgis/preflight', {
           method: 'POST',
-          body: formData
+          body: formData,
+          signal: controller.signal
         });
         const payload = (await response.json().catch(() => ({}))) as Partial<ArcgisPreflightResponse> & {
           error?: string;
           mappingRequired?: boolean;
           sheets?: { name: string; columns: string[] }[];
         };
-        if (!isMountedRef.current) return;
+        if (controller.signal.aborted) return;
 
         if (!response.ok) {
           if (payload.mappingRequired && Array.isArray(payload.sheets)) {
             const meta: ArcgisSourceMetadata = { format: SourceFormat.arcgis_xlsx, sheets: payload.sheets };
             setArcgisMeta(meta);
             setMapping(mappingArg ?? seedMapping(meta));
+            setMappingServerError(typeof payload.error === 'string' ? payload.error : null);
             setMappingOpen(true);
             return;
           }
@@ -191,20 +196,25 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
           throw new Error('ArcGIS pre-flight returned an incomplete import session response.');
         }
 
+        setMappingServerError(null);
         setResult(payload as ArcgisPreflightResponse);
       } catch (error: unknown) {
-        if (!isMountedRef.current) return;
+        if (controller.signal.aborted) return;
         const wrapped = error instanceof Error ? error : new Error(String(error));
         ailogger.error('ArcGIS pre-flight failed:', wrapped);
-        onError(wrapped);
+        onErrorRef.current(wrapped);
       }
     },
-    [acceptedFiles, schema, plotID, censusID, onError]
+    [acceptedFiles, schema, plotID, censusID]
   );
 
   useEffect(() => {
     setResult(null);
     setErrorMessage(null);
+    setArcgisMeta(null);
+    setMapping(null);
+    setMappingOpen(false);
+    setMappingServerError(null);
     const file = acceptedFiles[0];
     if (!file) {
       setErrorMessage('No file provided for the ArcGIS import.');
@@ -223,6 +233,7 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
       return;
     }
     void runPreflight();
+    return () => abortRef.current?.abort();
   }, [acceptedFiles, schema, plotID, censusID, runPreflight]);
 
   if (errorMessage) {
@@ -247,6 +258,11 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
             <Typography level="body-sm">
               The workbook columns do not match the expected ArcGIS schema. Map your columns (and pick the trees/stems sheets) to continue.
             </Typography>
+            {mappingServerError && (
+              <Typography level="body-sm" color="danger">
+                {mappingServerError}
+              </Typography>
+            )}
             <Stack direction="row" spacing={1}>
               <Button size="sm" onClick={() => setMappingOpen(true)}>
                 Map columns
@@ -262,6 +278,7 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
           format={SourceFormat.arcgis_xlsx}
           metadata={arcgisMeta}
           mapping={mapping}
+          serverError={mappingServerError ?? undefined}
           onChange={setMapping}
           onApply={m => {
             setMapping(m);
