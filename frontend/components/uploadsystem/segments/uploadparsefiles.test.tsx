@@ -5,11 +5,12 @@ import { mappingApplies, seedMapping, validateMapping } from '@/lib/column-mappi
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import { UploadMode } from '@/config/uploadmodes';
 import { FileWithStream } from '@/config/macros/uploadsystemmacros';
+import { DelimiterIssueCode, type DelimiterIssue } from '@/components/uploadsystemhelpers/delimiterdetection';
 import UploadParseFiles from './uploadparsefiles';
 
 // Per-test validation events: map from file name to the status the mock should report.
 // Tests populate this before rendering; the mock fires one useEffect call per entry.
-const fileValidationEvents: Map<string, { isValid: boolean; issues: string[]; headers: string[] }> = new Map();
+const fileValidationEvents: Map<string, { isValid: boolean; issues: DelimiterIssue[]; headers: string[] }> = new Map();
 
 // FileListEnhanced reads actual File blobs and does CSV parsing; in unit tests we just need it to
 // fire onValidationStatusChange so the component's per-file state is populated.
@@ -21,7 +22,7 @@ vi.mock('@/components/uploadsystemhelpers/filelistenhanced', async () => {
     FileListEnhanced: ({
       onValidationStatusChange
     }: {
-      onValidationStatusChange: (name: string, isValid: boolean, issues: string[], headers: string[]) => void;
+      onValidationStatusChange: (name: string, isValid: boolean, issues: DelimiterIssue[], headers: string[]) => void;
     }) => {
       useEffect(() => {
         fileValidationEvents.forEach(({ isValid, issues, headers }, name) => {
@@ -127,7 +128,7 @@ describe('setColumnMappingForFile wiring (render integration)', () => {
     fileValidationEvents.clear();
     fileValidationEvents.set(SURVEY_FILE_NAME, {
       isValid: false,
-      issues: ['Missing required columns: tag'],
+      issues: [{ code: DelimiterIssueCode.MISSING_REQUIRED_COLUMNS, message: 'Missing required columns: tag' }],
       headers: CANONICAL_HEADERS
     });
 
@@ -184,7 +185,7 @@ describe('setColumnMappingForFile wiring (render integration)', () => {
     });
     fileValidationEvents.set(BRAVO, {
       isValid: false,
-      issues: ['Missing required columns: tag'],
+      issues: [{ code: DelimiterIssueCode.MISSING_REQUIRED_COLUMNS, message: 'Missing required columns: tag' }],
       headers: BRAVO_HEADERS
     });
 
@@ -205,6 +206,30 @@ describe('setColumnMappingForFile wiring (render integration)', () => {
     // ColumnMappingDialog renders "File: {fileName}" when the fileName prop is provided.
     expect(screen.getByText(`File: ${BRAVO}`)).toBeDefined();
     expect(screen.queryByText(`File: ${ALPHA}`)).toBeNull();
+  });
+});
+
+// Rescue-eligibility must be determined by issue.code, never by matching against message text.
+// A wording change in delimiterdetection must not silently break the mapping-rescue path.
+describe('mapping rescue is wording-independent (code-based eligibility)', () => {
+  it('Continue button is enabled when the only issue is MISSING_REQUIRED_COLUMNS regardless of message text', () => {
+    fileValidationEvents.clear();
+    fileValidationEvents.set(SURVEY_FILE_NAME, {
+      isValid: false,
+      issues: [{ code: DelimiterIssueCode.MISSING_REQUIRED_COLUMNS, message: 'totally reworded text that must not matter' }],
+      headers: CANONICAL_HEADERS
+    });
+
+    const setColumnMappingForFile = vi.fn();
+
+    act(() => {
+      renderUploadParseFiles([buildFile(SURVEY_FILE_NAME)], setColumnMappingForFile);
+    });
+
+    // fileEffectivelyValid resolves true: canonical headers seed a valid mapping and the only issue
+    // is a header-coverage code — Continue must be enabled regardless of the message wording.
+    const continueButton = screen.getByRole('button', { name: /continue upload/i });
+    expect(continueButton).not.toBeDisabled();
   });
 });
 

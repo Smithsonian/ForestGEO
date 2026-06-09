@@ -1,25 +1,22 @@
-import { SourceFormat } from '@/config/macros/formdetails';
+import { FormType, SourceFormat, TableHeadersByFormType } from '@/config/macros/formdetails';
 import { ARCGIS_SCHEMA, CODE_COLUMN_PREFIX, normalizeHeader } from '@/lib/arcgis/schema';
 import { CanonicalFieldDef, MappingScope } from './types';
 
 export { normalizeHeader };
 
-// CSV measurement import fields. Deliberately a curated subset of
-// TableHeadersByFormType[measurements] — excludes export-only fields
-// (measurementID, errors). Requiredness mirrors RequiredTableHeadersByFormType.
-const CSV_FIELDS: CanonicalFieldDef[] = [
-  { canonicalField: 'tag', required: true, scope: 'file', multiSource: false, explanation: 'Tree tag, unique within plot' },
-  { canonicalField: 'spcode', required: true, scope: 'file', multiSource: false, explanation: 'Species code' },
-  { canonicalField: 'quadrat', required: true, scope: 'file', multiSource: false, explanation: 'Quadrat name' },
-  { canonicalField: 'lx', required: true, scope: 'file', multiSource: false, explanation: 'X-coordinate of stem' },
-  { canonicalField: 'ly', required: true, scope: 'file', multiSource: false, explanation: 'Y-coordinate of stem' },
-  { canonicalField: 'date', required: true, scope: 'file', multiSource: false, explanation: 'Measurement date' },
-  { canonicalField: 'stemtag', required: false, scope: 'file', multiSource: false, explanation: 'Stem tag for multi-stemmed trees' },
-  { canonicalField: 'dbh', required: false, scope: 'file', multiSource: false, explanation: 'Diameter at breast height' },
-  { canonicalField: 'hom', required: false, scope: 'file', multiSource: false, explanation: 'Height of measurement' },
-  { canonicalField: 'codes', required: false, scope: 'file', multiSource: true, explanation: 'Attribute codes; multiple columns joined with ";"' },
-  { canonicalField: 'comments', required: false, scope: 'file', multiSource: false, explanation: 'Free-text comments' }
-];
+const MEASUREMENTS_EXPORT_ONLY_FIELDS = new Set(['measurementID', 'errors']);
+const MULTI_SOURCE_CSV_FIELDS = new Set(['codes']);
+
+// Derived from the canonical measurements registry so requiredness/explanations cannot drift.
+const CSV_FIELDS: CanonicalFieldDef[] = TableHeadersByFormType[FormType.measurements]
+  .filter(header => !MEASUREMENTS_EXPORT_ONLY_FIELDS.has(header.label))
+  .map(header => ({
+    canonicalField: header.label,
+    required: header.category === 'required',
+    scope: 'file' as MappingScope,
+    multiSource: MULTI_SOURCE_CSV_FIELDS.has(header.label),
+    explanation: header.explanation
+  }));
 
 // CSV alias dictionary, ported verbatim from uploadfiresql.tsx:transformHeader (normalized keys).
 const CSV_ALIASES: Record<string, string[]> = {

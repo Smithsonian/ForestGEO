@@ -7,6 +7,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
+import { DelimiterIssue } from './delimiterdetection';
 
 interface FileListEnhancedProps extends FileListProps {
   expectedHeaders?: string[];
@@ -14,7 +15,7 @@ interface FileListEnhancedProps extends FileListProps {
   onDelimiterChange: (fileName: string, delimiter: string) => void;
   selectedDelimiters: Record<string, string>;
   onRemoveFile: (fileIndex: number) => void;
-  onValidationStatusChange?: (fileName: string, isValid: boolean, issues: string[], detectedHeaders: string[]) => void;
+  onValidationStatusChange?: (fileName: string, isValid: boolean, issues: DelimiterIssue[], detectedHeaders: string[]) => void;
   isArcgisWorkbook?: boolean;
 }
 

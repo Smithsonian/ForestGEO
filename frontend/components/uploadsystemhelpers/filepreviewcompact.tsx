@@ -2,6 +2,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Alert, Box, Chip, Divider, Option, Select, Sheet, Stack, Typography } from '@mui/joy';
 import { useFilePreviewAnalysis, DELIMITER_OPTIONS } from './useFilePreviewAnalysis';
+import { DelimiterIssue } from './delimiterdetection';
 
 interface FilePreviewCompactProps {
   file: File;
@@ -10,7 +11,7 @@ interface FilePreviewCompactProps {
   onDelimiterChange: (delimiter: string) => void;
   initialDelimiter?: string;
   showPreview?: boolean;
-  onValidationStatusChange?: (isValid: boolean, issues: string[], detectedHeaders: string[]) => void;
+  onValidationStatusChange?: (isValid: boolean, issues: DelimiterIssue[], detectedHeaders: string[]) => void;
   isArcgisWorkbook?: boolean;
 }
 
@@ -40,7 +41,7 @@ export default function FilePreviewCompact({
 
   // Extract stable primitive values from validation result for dependency tracking
   const validationIsValid = validationResult?.isValid ?? null;
-  const validationIssuesKey = validationResult?.issues?.join('|') ?? '';
+  const validationIssuesKey = validationResult?.issues?.map(i => i.code + i.message).join('|') ?? '';
   const detectedHeadersKey = (validationResult?.preview?.[0] ?? []).join('|');
 
   // Report validation status changes to parent (only when values actually change)
@@ -149,7 +150,11 @@ export default function FilePreviewCompact({
         {validationResult && validationResult.issues.length > 0 && (
           <Alert size="sm" color="warning">
             <Typography level="body-xs">
-              <strong>Issues:</strong> {validationResult.issues.slice(0, 2).join(', ')}
+              <strong>Issues:</strong>{' '}
+              {validationResult.issues
+                .slice(0, 2)
+                .map(i => i.message)
+                .join(', ')}
               {validationResult.issues.length > 2 && ` (+${validationResult.issues.length - 2} more)`}
             </Typography>
           </Alert>

@@ -14,10 +14,23 @@ export interface DelimiterDetectionResult {
   avgColumnsPerRow: number;
 }
 
+export enum DelimiterIssueCode {
+  EMPTY_FIRST_ROW = 'EMPTY_FIRST_ROW',
+  MISSING_REQUIRED_COLUMNS = 'MISSING_REQUIRED_COLUMNS',
+  TOO_FEW_COLUMNS = 'TOO_FEW_COLUMNS',
+  ROW_COLUMN_COUNT_MISMATCH = 'ROW_COLUMN_COUNT_MISMATCH',
+  INCONSISTENT_COLUMNS = 'INCONSISTENT_COLUMNS'
+}
+
+export interface DelimiterIssue {
+  code: DelimiterIssueCode;
+  message: string;
+}
+
 export interface DelimiterValidationResult {
   isValid: boolean;
   delimiter: string;
-  issues: string[];
+  issues: DelimiterIssue[];
   preview: string[][];
 }
 
@@ -298,14 +311,14 @@ export async function validateDelimiter(file: File, delimiter: string, expectedH
  */
 function validateDelimiterContent(content: string, delimiter: string, expectedHeaders?: string[]): DelimiterValidationResult {
   const lines = content.split('\n').slice(0, 5); // Check first 5 lines
-  const issues: string[] = [];
+  const issues: DelimiterIssue[] = [];
   const preview: string[][] = [];
 
   if (lines.length === 0) {
     return {
       isValid: false,
       delimiter,
-      issues: ['File appears to be empty'],
+      issues: [{ code: DelimiterIssueCode.EMPTY_FIRST_ROW, message: 'File appears to be empty' }],
       preview: []
     };
   }
@@ -313,7 +326,7 @@ function validateDelimiterContent(content: string, delimiter: string, expectedHe
   // Parse header row
   const headerLine = lines[0].trim();
   if (!headerLine) {
-    issues.push('First row is empty or contains only whitespace');
+    issues.push({ code: DelimiterIssueCode.EMPTY_FIRST_ROW, message: 'First row is empty or contains only whitespace' });
   }
 
   const headers = parseLineWithDelimiter(headerLine, delimiter);
@@ -347,13 +360,16 @@ function validateDelimiterContent(content: string, delimiter: string, expectedHe
     if (missingHeaders.length > 0) {
       // Capitalize first letter of each missing header for display
       const formattedMissing = missingHeaders.map(h => h.charAt(0).toUpperCase() + h.slice(1));
-      issues.push(`Missing required columns: ${formattedMissing.join(', ')}`);
+      issues.push({ code: DelimiterIssueCode.MISSING_REQUIRED_COLUMNS, message: `Missing required columns: ${formattedMissing.join(', ')}` });
     }
 
     // Count only non-empty headers for the column count check
     const nonEmptyHeaderCount = headers.filter(h => h.trim().length > 0).length;
     if (nonEmptyHeaderCount < expectedHeaders.length * 0.7) {
-      issues.push(`Too few columns detected (${nonEmptyHeaderCount}) compared to expected (${expectedHeaders.length})`);
+      issues.push({
+        code: DelimiterIssueCode.TOO_FEW_COLUMNS,
+        message: `Too few columns detected (${nonEmptyHeaderCount}) compared to expected (${expectedHeaders.length})`
+      });
     }
   }
 
@@ -367,7 +383,7 @@ function validateDelimiterContent(content: string, delimiter: string, expectedHe
       columnCounts.push(columns.length);
 
       if (columns.length !== headers.length) {
-        issues.push(`Row ${i + 1} has ${columns.length} columns, expected ${headers.length}`);
+        issues.push({ code: DelimiterIssueCode.ROW_COLUMN_COUNT_MISMATCH, message: `Row ${i + 1} has ${columns.length} columns, expected ${headers.length}` });
       }
     }
   }
@@ -376,7 +392,7 @@ function validateDelimiterContent(content: string, delimiter: string, expectedHe
   if (columnCounts.length > 0) {
     const variance = calculateVariance(columnCounts);
     if (variance > 1) {
-      issues.push('Inconsistent number of columns across rows');
+      issues.push({ code: DelimiterIssueCode.INCONSISTENT_COLUMNS, message: 'Inconsistent number of columns across rows' });
     }
   }
 

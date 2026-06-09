@@ -767,7 +767,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           expectedHeaders.map(h => h.label)
         );
         if (!validation.isValid) {
-          ailogger.warn(`Delimiter validation issues for file ${file.name}:`, validation.issues);
+          ailogger.warn(
+            `Delimiter validation issues for file ${file.name}:`,
+            validation.issues.map(i => i.message)
+          );
           // Log issues but continue parsing - user may have non-standard format that still works
         }
 

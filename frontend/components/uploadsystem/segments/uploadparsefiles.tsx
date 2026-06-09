@@ -30,20 +30,21 @@ import { UploadMode } from '@/config/uploadmodes';
 import ColumnMappingDialog from './columnmappingdialog';
 import { mappingApplies, seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
 import { ColumnMapping, CsvSourceMetadata } from '@/lib/column-mapping/types';
+import { DelimiterIssue, DelimiterIssueCode } from '@/components/uploadsystemhelpers/delimiterdetection';
 
 export interface FileValidationStatus {
   fileName: string;
   isValid: boolean;
-  issues: string[];
+  issues: DelimiterIssue[];
   detectedHeaders: string[];
 }
 
 // Header-coverage failures are rescued by a valid column mapping (the whole point of mapping
 // is to satisfy required fields from differently-named columns); structural issues are not.
-const HEADER_COVERAGE_ISSUE_PATTERNS = [/^Missing required columns:/, /^Too few columns detected/];
+const HEADER_COVERAGE_ISSUE_CODES = new Set([DelimiterIssueCode.MISSING_REQUIRED_COLUMNS, DelimiterIssueCode.TOO_FEW_COLUMNS]);
 
-function isHeaderCoverageIssue(issue: string): boolean {
-  return HEADER_COVERAGE_ISSUE_PATTERNS.some(pattern => pattern.test(issue));
+function isHeaderCoverageIssue(issue: DelimiterIssue): boolean {
+  return HEADER_COVERAGE_ISSUE_CODES.has(issue.code);
 }
 
 export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>) {
@@ -90,7 +91,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     [setSelectedDelimiters]
   );
 
-  const handleValidationStatusChange = useCallback((fileName: string, isValid: boolean, issues: string[], detectedHeaders: string[]) => {
+  const handleValidationStatusChange = useCallback((fileName: string, isValid: boolean, issues: DelimiterIssue[], detectedHeaders: string[]) => {
     setFileValidationStatuses(prev => ({
       ...prev,
       [fileName]: { fileName, isValid, issues, detectedHeaders }
@@ -184,7 +185,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     acceptedFiles.forEach(file => {
       const status = fileValidationStatuses[file.name];
       if (status && !fileEffectivelyValid(file.name) && status.issues.length > 0) {
-        issues.push({ fileName: file.name, issues: status.issues });
+        issues.push({ fileName: file.name, issues: status.issues.map(i => i.message) });
       }
     });
     return sourceFormat === SourceFormat.arcgis_xlsx ? [...arcgisValidationIssues, ...issues] : issues;
