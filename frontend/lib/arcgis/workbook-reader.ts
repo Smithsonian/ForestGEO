@@ -1,7 +1,8 @@
 import ExcelJS from 'exceljs';
 import { AmbiguousSheetError, MissingColumnError, MissingSheetError } from './errors';
-import { STEM_SIGNATURE_COLUMN, canonicalFieldFor, requiredColumnsForSheet } from './schema';
+import { STEM_SIGNATURE_COLUMN, canonicalFieldFor, normalizeHeader, requiredColumnsForSheet } from './schema';
 import type { ArcgisCell, ArcgisRow, ArcgisWorkbook } from './types';
+import type { ColumnMapping } from '@/lib/column-mapping/types';
 
 interface ParsedSheet {
   name: string;
@@ -28,16 +29,21 @@ function normalizeCellValue(value: ExcelJS.CellValue): ArcgisCell {
 
 /**
  * Maps each raw header to its CANONICAL schema field (when one matches a normalized alias) or to its
- * own trimmed text otherwise, so `COD_*`/OBJECTID/etc. survive. If two headers resolve to the same
- * canonical field, the FIRST wins and later ones are ignored (no overwrite).
+ * own trimmed text otherwise, so `COD_*`/OBJECTID/etc. survive. A user-confirmed mapping's source
+ * columns take precedence over alias detection. If two headers resolve to the same canonical field,
+ * the FIRST wins and later ones are ignored (no overwrite).
  */
-function buildHeaderMap(rawHeaders: string[]): { keys: string[]; keyByRawHeader: Map<string, string> } {
+function buildHeaderMap(rawHeaders: string[], mapping?: ColumnMapping): { keys: string[]; keyByRawHeader: Map<string, string> } {
+  const overrideByNorm = new Map<string, string>();
+  for (const field of mapping?.fields ?? []) {
+    for (const src of field.sourceColumns) overrideByNorm.set(normalizeHeader(src), field.canonicalField);
+  }
   const keys: string[] = [];
   const keyByRawHeader = new Map<string, string>();
   const claimed = new Set<string>();
   for (const raw of rawHeaders) {
     const trimmed = raw.trim();
-    const key = canonicalFieldFor(trimmed) ?? trimmed;
+    const key = overrideByNorm.get(normalizeHeader(trimmed)) ?? canonicalFieldFor(trimmed) ?? trimmed;
     if (claimed.has(key)) continue;
     claimed.add(key);
     keys.push(key);
@@ -46,7 +52,7 @@ function buildHeaderMap(rawHeaders: string[]): { keys: string[]; keyByRawHeader:
   return { keys, keyByRawHeader };
 }
 
-function parseSheet(worksheet: ExcelJS.Worksheet): ParsedSheet {
+function parseSheet(worksheet: ExcelJS.Worksheet, mapping?: ColumnMapping): ParsedSheet {
   const columnCount = worksheet.columnCount;
   const headerRow = worksheet.getRow(1);
   const rawHeaders: string[] = [];
@@ -55,7 +61,7 @@ function parseSheet(worksheet: ExcelJS.Worksheet): ParsedSheet {
     rawHeaders.push(value === null ? '' : String(value));
   }
 
-  const { keys, keyByRawHeader } = buildHeaderMap(rawHeaders);
+  const { keys, keyByRawHeader } = buildHeaderMap(rawHeaders, mapping);
 
   const rows: ArcgisRow[] = [];
   for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
@@ -85,24 +91,34 @@ function parseSheet(worksheet: ExcelJS.Worksheet): ParsedSheet {
   return { name: worksheet.name, columns: keys, rows };
 }
 
-export async function readArcgisWorkbook(buffer: ArrayBuffer): Promise<ArcgisWorkbook> {
+export async function readArcgisWorkbook(buffer: ArrayBuffer, mapping?: ColumnMapping): Promise<ArcgisWorkbook> {
   const workbook = new ExcelJS.Workbook();
   // exceljs ships an ambient `declare interface Buffer extends ArrayBuffer {}` that merges with and
   // diverges from @types/node's Buffer, so neither a node Buffer nor an ArrayBuffer is assignable to
   // its load() parameter at the type level. load() accepts the raw ArrayBuffer at runtime.
   await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
-  const sheets = workbook.worksheets.map(worksheet => parseSheet(worksheet));
+  const sheets = workbook.worksheets.map(worksheet => parseSheet(worksheet, mapping));
+  const sheetRoles = mapping?.sheetRoles;
 
-  const stemsCandidates = sheets.filter(s => s.columns.includes(STEM_SIGNATURE_COLUMN));
-  if (stemsCandidates.length === 0) {
-    throw new MissingSheetError(
-      `No stems sheet found: expected a sheet containing the "${STEM_SIGNATURE_COLUMN}" column. Sheets seen: ${sheets.map(s => s.name).join(', ')}`
-    );
+  let stemsSheet: ParsedSheet;
+  if (sheetRoles?.stemsSheetName) {
+    const named = sheets.find(s => s.name === sheetRoles.stemsSheetName);
+    if (!named) {
+      throw new MissingSheetError(`Stems sheet "${sheetRoles.stemsSheetName}" not found in workbook. Sheets seen: ${sheets.map(s => s.name).join(', ')}`);
+    }
+    stemsSheet = named;
+  } else {
+    const stemsCandidates = sheets.filter(s => s.columns.includes(STEM_SIGNATURE_COLUMN));
+    if (stemsCandidates.length === 0) {
+      throw new MissingSheetError(
+        `No stems sheet found: expected a sheet containing the "${STEM_SIGNATURE_COLUMN}" column. Sheets seen: ${sheets.map(s => s.name).join(', ')}`
+      );
+    }
+    if (stemsCandidates.length > 1) {
+      throw new AmbiguousSheetError(`Multiple stems sheet candidates found: ${stemsCandidates.map(s => `"${s.name}"`).join(', ')}.`);
+    }
+    stemsSheet = stemsCandidates[0];
   }
-  if (stemsCandidates.length > 1) {
-    throw new AmbiguousSheetError(`Multiple stems sheet candidates found: ${stemsCandidates.map(s => `"${s.name}"`).join(', ')}.`);
-  }
-  const stemsSheet = stemsCandidates[0];
 
   const requiredStems = requiredColumnsForSheet('stems');
   const missingStems = requiredStems.filter(field => !stemsSheet.columns.includes(field));
@@ -116,25 +132,54 @@ export async function readArcgisWorkbook(buffer: ArrayBuffer): Promise<ArcgisWor
     throw new MissingSheetError('No trees sheet found: the workbook must contain a separate trees sheet alongside the stems sheet.');
   }
 
-  // Trees sheet is detected by SIGNATURE — the sheet (in any position, ignoring extra/junk sheets)
-  // whose canonical columns include every required tree field.
-  const treeCandidates = candidates.filter(s => required.every(field => s.columns.includes(field)));
-  if (treeCandidates.length === 0) {
-    const best = candidates.reduce((a, b) => {
-      const aMissing = required.filter(f => !a.columns.includes(f)).length;
-      const bMissing = required.filter(f => !b.columns.includes(f)).length;
-      return bMissing < aMissing ? b : a;
-    });
-    const missing = required.filter(field => !best.columns.includes(field));
-    throw new MissingColumnError(
-      `No trees sheet found: the closest candidate "${best.name}" is missing required column(s): ${missing.join(', ')}. ` +
-        `Add researcher-supplied "lx"/"ly" columns before upload.`
-    );
-  }
-  if (treeCandidates.length > 1) {
-    throw new AmbiguousSheetError(`Multiple trees sheet candidates found: ${treeCandidates.map(s => `"${s.name}"`).join(', ')}.`);
+  let treesSheet: ParsedSheet;
+  if (sheetRoles?.treesSheetName) {
+    const named = candidates.find(s => s.name === sheetRoles.treesSheetName);
+    if (!named) {
+      throw new MissingSheetError(`Trees sheet "${sheetRoles.treesSheetName}" not found in workbook. Sheets seen: ${sheets.map(s => s.name).join(', ')}`);
+    }
+    const missing = required.filter(field => !named.columns.includes(field));
+    if (missing.length > 0) {
+      throw new MissingColumnError(`Trees sheet "${named.name}" is missing required column(s): ${missing.join(', ')}.`);
+    }
+    treesSheet = named;
+  } else {
+    // Trees sheet is detected by SIGNATURE — the sheet (in any position, ignoring extra/junk sheets)
+    // whose canonical columns include every required tree field.
+    const treeCandidates = candidates.filter(s => required.every(field => s.columns.includes(field)));
+    if (treeCandidates.length === 0) {
+      const best = candidates.reduce((a, b) => {
+        const aMissing = required.filter(f => !a.columns.includes(f)).length;
+        const bMissing = required.filter(f => !b.columns.includes(f)).length;
+        return bMissing < aMissing ? b : a;
+      });
+      const missing = required.filter(field => !best.columns.includes(field));
+      throw new MissingColumnError(
+        `No trees sheet found: the closest candidate "${best.name}" is missing required column(s): ${missing.join(', ')}. ` +
+          `Add researcher-supplied "lx"/"ly" columns before upload.`
+      );
+    }
+    if (treeCandidates.length > 1) {
+      throw new AmbiguousSheetError(`Multiple trees sheet candidates found: ${treeCandidates.map(s => `"${s.name}"`).join(', ')}.`);
+    }
+    treesSheet = treeCandidates[0];
   }
 
-  const treesSheet = treeCandidates[0];
   return { trees: treesSheet.rows, stems: stemsSheet.rows };
+}
+
+/** Enumerate worksheet names and their raw (trimmed) first-row headers without canonicalizing or validating. */
+export async function describeArcgisWorkbook(buffer: ArrayBuffer): Promise<{ sheets: { name: string; columns: string[] }[] }> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  const sheets = workbook.worksheets.map(worksheet => {
+    const headerRow = worksheet.getRow(1);
+    const columns: string[] = [];
+    headerRow.eachCell({ includeEmpty: false }, cell => {
+      const text = String(normalizeCellValue(cell.value) ?? '').trim();
+      if (text.length > 0) columns.push(text);
+    });
+    return { name: worksheet.name, columns };
+  });
+  return { sheets };
 }

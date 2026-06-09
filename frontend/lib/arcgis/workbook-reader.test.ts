@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import ExcelJS from 'exceljs';
-import { readArcgisWorkbook } from './workbook-reader';
+import { describeArcgisWorkbook, readArcgisWorkbook } from './workbook-reader';
 import { transformArcgisWorkbook } from './transform';
 import { AmbiguousSheetError, MissingSheetError, MissingColumnError } from './errors';
+import { SourceFormat } from '@/config/macros/formdetails';
+import type { ColumnMapping } from '@/lib/column-mapping/types';
 
 async function buildWorkbook(sheets: Record<string, unknown[][]>): Promise<ArrayBuffer> {
   const wb = new ExcelJS.Workbook();
@@ -266,5 +268,78 @@ describe('readArcgisWorkbook', () => {
     const workbook = await readArcgisWorkbook((await wb.xlsx.writeBuffer()) as ArrayBuffer);
     const result = transformArcgisWorkbook(workbook);
     expect(result.rows[0].date).toBe('2026-01-15');
+  });
+});
+
+const CUSTOM_TREE_HEADER = ['GlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'MyX', 'MyY', 'When'];
+const CUSTOM_STEM_HEADER = ['GlobalID', 'ParentGlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'When'];
+
+describe('describeArcgisWorkbook', () => {
+  it('lists every sheet with raw headers and does not throw on missing required columns', async () => {
+    const buffer = await buildWorkbook({
+      TreesCustom: [['GlobalID', 'TreeTag', 'Sp', 'Q', 'MyX', 'MyY', 'When']],
+      StemsCustom: [['GlobalID', 'ParentGlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'When']]
+    });
+    const described = await describeArcgisWorkbook(buffer);
+    expect(described.sheets.map(s => s.name)).toEqual(['TreesCustom', 'StemsCustom']);
+    expect(described.sheets[0].columns).toContain('MyX');
+    expect(described.sheets[1].columns).toContain('ParentGlobalID');
+  });
+});
+
+describe('readArcgisWorkbook with mapping', () => {
+  const mapping: ColumnMapping = {
+    version: 1,
+    format: SourceFormat.arcgis_xlsx,
+    fields: [
+      { canonicalField: 'tag', sourceColumns: ['TreeTag'], scope: 'both' },
+      { canonicalField: 'spcode', sourceColumns: ['Sp'], scope: 'both' },
+      { canonicalField: 'quadrat', sourceColumns: ['Q'], scope: 'both' },
+      { canonicalField: 'lx', sourceColumns: ['MyX'], scope: 'trees' },
+      { canonicalField: 'ly', sourceColumns: ['MyY'], scope: 'trees' },
+      { canonicalField: 'Date_measured', sourceColumns: ['When'], scope: 'both' }
+    ],
+    sheetRoles: { treesSheetName: 'TreesCustom', stemsSheetName: 'StemsCustom' }
+  };
+
+  it('canonicalizes custom headers and uses sheetRoles', async () => {
+    const buffer = await buildWorkbook({
+      TreesCustom: [CUSTOM_TREE_HEADER, ['G1', '100', '100', 'QURU', 'A25', '5.1', '6.2', 46036]],
+      StemsCustom: [CUSTOM_STEM_HEADER, ['S1', 'G1', '100', '100-1', 'QURU', 'A25', 46036]]
+    });
+    const wb = await readArcgisWorkbook(buffer, mapping);
+    expect(wb.trees).toHaveLength(1);
+    expect(Object.keys(wb.trees[0])).toEqual(expect.arrayContaining(['lx', 'ly', 'tag', 'spcode', 'quadrat', 'Date_measured']));
+    expect(wb.trees[0].lx).toBe('5.1');
+    expect(wb.stems).toHaveLength(1);
+    expect(wb.stems[0].ParentGlobalID).toBe('G1');
+  });
+
+  it('throws MissingSheetError when a sheetRole names a sheet that does not exist', async () => {
+    const buffer = await buildWorkbook({
+      TreesCustom: [CUSTOM_TREE_HEADER, ['G1', '100', '100', 'QURU', 'A25', '5.1', '6.2', 46036]],
+      StemsCustom: [CUSTOM_STEM_HEADER, ['S1', 'G1', '100', '100-1', 'QURU', 'A25', 46036]]
+    });
+    const badRoles: ColumnMapping = { ...mapping, sheetRoles: { treesSheetName: 'Nope', stemsSheetName: 'StemsCustom' } };
+    await expect(readArcgisWorkbook(buffer, badRoles)).rejects.toThrow(MissingSheetError);
+  });
+
+  it('throws MissingColumnError when a role-selected sheet still lacks a required mapped column', async () => {
+    const headerNoCoords = ['GlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'When'];
+    const buffer = await buildWorkbook({
+      TreesCustom: [headerNoCoords, ['G1', '100', '100', 'QURU', 'A25', 46036]],
+      StemsCustom: [CUSTOM_STEM_HEADER, ['S1', 'G1', '100', '100-1', 'QURU', 'A25', 46036]]
+    });
+    await expect(readArcgisWorkbook(buffer, mapping)).rejects.toThrow(MissingColumnError);
+  });
+
+  it('behaves identically to the no-mapping path when mapping is undefined', async () => {
+    const buffer = await buildWorkbook({
+      trees: [TREE_HEADER, ['G1', 'A25', '100', '100', 'QURU', '12.3', '1.3', 'ok', 46036, '5.1', '6.2', 'M', 'NA']],
+      stems: [STEM_HEADER, ['G1', 'S1', 'A25', '100', 'QURU', '4.4', '1.3', '', 46036, 'A', 'NA']]
+    });
+    const { trees, stems } = await readArcgisWorkbook(buffer, undefined);
+    expect(trees).toHaveLength(1);
+    expect(stems).toHaveLength(1);
   });
 });
