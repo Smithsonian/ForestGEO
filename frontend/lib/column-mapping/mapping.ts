@@ -1,7 +1,9 @@
-import { FileRow, SourceFormat } from '@/config/macros/formdetails';
-import { CODE_JOIN_SEPARATOR, NULL_CODE_TOKEN } from '@/lib/arcgis/schema';
+import { SourceFormat } from '@/config/macros/formdetails';
 import { aliasesFor, canonicalFieldsFor, normalizeHeader } from './fields';
+import { ARCGIS_RESOLVE_OPTIONS, CSV_RESOLVE_OPTIONS, resolveHeaders } from './resolution';
 import { ColumnMapping, ColumnMappingField, MappingValidation, SourceMetadata } from './types';
+
+export { joinMultiSourceValues } from './resolution';
 
 function allSourceColumns(metadata: SourceMetadata): string[] {
   if (metadata.format === SourceFormat.csv) return metadata.headers;
@@ -73,20 +75,6 @@ export function seedMapping(metadata: SourceMetadata): ColumnMapping {
   return mapping;
 }
 
-/** Mirrors readArcgisWorkbook's per-header resolution: an explicit mapping wins, else alias detection. */
-function fieldResolvedOnSheet(
-  canonicalField: string,
-  sheetColumns: string[],
-  overrideByNorm: Map<string, string>,
-  fieldByAliasNorm: Map<string, string>
-): boolean {
-  return sheetColumns.some(c => {
-    const norm = normalizeHeader(c);
-    const resolved = overrideByNorm.get(norm) ?? fieldByAliasNorm.get(norm);
-    return resolved === canonicalField;
-  });
-}
-
 export function validateMapping(mapping: ColumnMapping, metadata: SourceMetadata): MappingValidation {
   const defs = canonicalFieldsFor(mapping.format);
   const available = new Set(allSourceColumns(metadata).map(normalizeHeader));
@@ -131,35 +119,30 @@ export function validateMapping(mapping: ColumnMapping, metadata: SourceMetadata
   // Required fields are checked per sheet when both roles resolve (matching the reader's per-sheet
   // enforcement); otherwise against the union of all columns.
   const perSheet = treesSheetColumns !== undefined && stemsSheetColumns !== undefined;
-  const overrideByNorm = new Map<string, string>();
-  const fieldByAliasNorm = new Map<string, string>();
-  if (perSheet) {
-    for (const field of mapping.fields) {
-      for (const src of field.sourceColumns) overrideByNorm.set(normalizeHeader(src), field.canonicalField);
-    }
-    const aliases = aliasesFor(mapping.format);
-    for (const [canonicalField, aliasList] of Object.entries(aliases)) {
-      for (const alias of aliasList) fieldByAliasNorm.set(normalizeHeader(alias), canonicalField);
-    }
-  }
+
+  const csvPlan = metadata.format === SourceFormat.csv ? resolveHeaders(metadata.headers, mapping, aliasesFor(mapping.format), CSV_RESOLVE_OPTIONS) : null;
+  const treesPlan = perSheet ? resolveHeaders(treesSheetColumns!, mapping, aliasesFor(mapping.format), ARCGIS_RESOLVE_OPTIONS) : null;
+  const stemsPlan = perSheet ? resolveHeaders(stemsSheetColumns!, mapping, aliasesFor(mapping.format), ARCGIS_RESOLVE_OPTIONS) : null;
 
   for (const def of defs) {
     if (!def.required) continue;
     if (perSheet) {
-      const sheetsToCheck: { role: string; columns: string[] }[] =
+      const sheetsToCheck =
         def.scope === 'trees'
-          ? [{ role: 'trees', columns: treesSheetColumns! }]
+          ? [{ role: 'trees', plan: treesPlan! }]
           : def.scope === 'stems'
-            ? [{ role: 'stems', columns: stemsSheetColumns! }]
+            ? [{ role: 'stems', plan: stemsPlan! }]
             : [
-                { role: 'trees', columns: treesSheetColumns! },
-                { role: 'stems', columns: stemsSheetColumns! }
+                { role: 'trees', plan: treesPlan! },
+                { role: 'stems', plan: stemsPlan! }
               ];
       for (const sheet of sheetsToCheck) {
-        if (!fieldResolvedOnSheet(def.canonicalField, sheet.columns, overrideByNorm, fieldByAliasNorm)) {
+        if (!sheet.plan.resolvedFields.has(def.canonicalField)) {
           missingRequired.push(`${def.canonicalField} (${sheet.role} sheet)`);
         }
       }
+    } else if (csvPlan) {
+      if (!csvPlan.resolvedFields.has(def.canonicalField)) missingRequired.push(def.canonicalField);
     } else {
       const sourceColumns = fieldByKey.get(def.canonicalField)?.sourceColumns ?? [];
       const present = sourceColumns.filter(c => available.has(normalizeHeader(c)));
@@ -177,67 +160,4 @@ export function validateMapping(mapping: ColumnMapping, metadata: SourceMetadata
     !sheetRoleConflict;
 
   return { valid, missingRequired, missingSourceColumns, duplicateSourceColumns, ignoredSourceColumns, missingSheetRoles, sheetRoleConflict };
-}
-
-export function joinMultiSourceValues(values: (string | null | undefined)[]): string | null {
-  const kept = values.map(v => (v ?? '').trim()).filter(v => v.length > 0 && v.toUpperCase() !== NULL_CODE_TOKEN && v.toUpperCase() !== 'NULL');
-  return kept.length > 0 ? kept.join(CODE_JOIN_SEPARATOR) : null;
-}
-
-const MULTI_SOURCE_SEP = '#';
-
-/** Appended to an unmapped column's key when it would otherwise collide with a key the mapping owns. */
-export const IGNORED_COLUMN_KEY_SUFFIX = '__ignored';
-
-/**
- * Build the Papa Parse `transformHeader` callback for a confirmed CSV mapping. The mapping is the
- * sole authority for its canonical fields: an unmapped column whose normalized name matches a field
- * key (or a multi-source temp key) is diverted to an inert `…__ignored` key so it can never
- * overwrite mapped data via papaparse's last-column-wins object building.
- */
-export function buildPapaTransformHeader(mapping: ColumnMapping): (header: string) => string {
-  // normalizedSourceHeader -> emitted key
-  const emit = new Map<string, string>();
-  const reservedKeys = new Set<string>(mapping.fields.map(f => f.canonicalField));
-  for (const field of mapping.fields) {
-    if (field.sourceColumns.length === 0) continue;
-    if (field.sourceColumns.length === 1) {
-      emit.set(normalizeHeader(field.sourceColumns[0]), field.canonicalField);
-    } else {
-      field.sourceColumns.forEach((col, i) => {
-        const tempKey = `${field.canonicalField}${MULTI_SOURCE_SEP}${i}`;
-        emit.set(normalizeHeader(col), tempKey);
-        reservedKeys.add(tempKey);
-      });
-    }
-  }
-  return (header: string) => {
-    const norm = normalizeHeader(header);
-    const mapped = emit.get(norm);
-    if (mapped !== undefined) return mapped;
-    return reservedKeys.has(norm) ? `${norm}${IGNORED_COLUMN_KEY_SUFFIX}` : norm;
-  };
-}
-
-/**
- * Collapse multi-source temp keys (`codes#0`, `codes#1`, …) into the canonical joined field.
- * Rows that produced none of a field's temp keys (e.g. a file whose column was already canonical)
- * are left untouched so an inapplicable mapping can never erase real data.
- */
-export function collapseMultiSourceRow(row: FileRow, mapping: ColumnMapping): FileRow {
-  const multi = mapping.fields.filter(f => f.sourceColumns.length > 1);
-  if (multi.length === 0) return row;
-
-  const out: FileRow = { ...row };
-  for (const field of multi) {
-    const tempKeys = field.sourceColumns.map((_col, i) => `${field.canonicalField}${MULTI_SOURCE_SEP}${i}`);
-    if (!tempKeys.some(key => Object.hasOwn(row, key))) continue;
-    const parts: (string | null)[] = [];
-    for (const key of tempKeys) {
-      parts.push(out[key] ?? null);
-      delete out[key];
-    }
-    out[field.canonicalField] = joinMultiSourceValues(parts);
-  }
-  return out;
 }

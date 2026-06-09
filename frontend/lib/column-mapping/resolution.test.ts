@@ -117,3 +117,11 @@ describe('joinMultiSourceValues', () => {
     expect(joinMultiSourceValues([null, 'NA', ''])).toBeNull();
   });
 });
+
+describe('resolveHeaders (degenerate / null mapping)', () => {
+  it('degenerates to pure alias/passthrough resolution when mapping is null', () => {
+    const plan = resolveHeaders(['lx', 'DeviceID'], null, csvAliases, { ...CSV_RESOLVE_OPTIONS, allowAliasFill: true });
+    expect(plan.outputKeys).toEqual(['lx', 'deviceid']);
+    expect(plan.resolutions[0].kind).toBe('alias');
+  });
+});

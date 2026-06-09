@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SourceFormat } from '@/config/macros/formdetails';
-import { buildPapaTransformHeader, collapseMultiSourceRow, isColumnMappingShape, joinMultiSourceValues, seedMapping, validateMapping } from './mapping';
+import { isColumnMappingShape, joinMultiSourceValues, seedMapping, validateMapping } from './mapping';
 import { ArcgisSourceMetadata, CsvSourceMetadata } from './types';
 
 const csvMeta = (headers: string[]): CsvSourceMetadata => ({ format: SourceFormat.csv, headers });
@@ -161,96 +161,6 @@ describe('validateMapping (arcgis per-sheet scope)', () => {
   });
 });
 
-describe('buildPapaTransformHeader', () => {
-  it('renames single-source headers to canonical and gives multi-source temp keys', () => {
-    const m = seedMapping(csvMeta(['X_Coord', 'Y_Coord', 'tag', 'spcode', 'quadrat', 'date']));
-    const t = buildPapaTransformHeader(m);
-    expect(t('X_Coord')).toBe('lx');
-    expect(t('Y_Coord')).toBe('ly');
-    expect(t('DeviceID')).toBe('deviceid'); // unmapped -> normalized fallback
-  });
-
-  it('never lets an unmapped column emit a canonical key claimed by the mapping', () => {
-    // User explicitly mapped MeasDate -> date; the file also has a raw 'Date' column the
-    // dialog reports as ignored. Its fallback key must NOT collide with 'date', or papaparse
-    // last-column-wins silently replaces the mapped value.
-    const m: ReturnType<typeof seedMapping> = {
-      version: 1,
-      format: SourceFormat.csv,
-      fields: [{ canonicalField: 'date', sourceColumns: ['MeasDate'], scope: 'file' }]
-    };
-    const t = buildPapaTransformHeader(m);
-    expect(t('MeasDate')).toBe('date');
-    expect(t('Date')).not.toBe('date');
-  });
-
-  it('never lets an unmapped column emit a canonical key the user deliberately left unmapped', () => {
-    // The mapping is the authority: if the user unmapped 'date', a stray 'Date' column must
-    // not silently feed it.
-    const m: ReturnType<typeof seedMapping> = {
-      version: 1,
-      format: SourceFormat.csv,
-      fields: [
-        { canonicalField: 'date', sourceColumns: [], scope: 'file' },
-        { canonicalField: 'tag', sourceColumns: ['tag'], scope: 'file' }
-      ]
-    };
-    const t = buildPapaTransformHeader(m);
-    expect(t('Date')).not.toBe('date');
-  });
-
-  it('emits distinct temp keys for multi-source codes', () => {
-    const m: ReturnType<typeof seedMapping> = {
-      version: 1,
-      format: SourceFormat.csv,
-      fields: [{ canonicalField: 'codes', sourceColumns: ['Code1', 'Code2'], scope: 'file' }]
-    };
-    const t = buildPapaTransformHeader(m);
-    expect(t('Code1')).toBe('codes#0');
-    expect(t('Code2')).toBe('codes#1');
-  });
-});
-
-describe('collapseMultiSourceRow', () => {
-  it('joins temp keys into the canonical codes field and removes temps', () => {
-    const m = {
-      version: 1 as const,
-      format: SourceFormat.csv,
-      fields: [{ canonicalField: 'codes', sourceColumns: ['Code1', 'Code2'], scope: 'file' as const }]
-    };
-    const row = { 'codes#0': 'LI', 'codes#1': 'DS', tag: '100001' };
-    expect(collapseMultiSourceRow(row, m)).toEqual({ codes: 'LI;DS', tag: '100001' });
-  });
-
-  it('leaves a row untouched when none of the multi-source temp keys are present', () => {
-    // A file whose 'codes' column is already canonical never produced codes#0/codes#1 temp
-    // keys; collapsing must not overwrite its real value with null.
-    const m = {
-      version: 1 as const,
-      format: SourceFormat.csv,
-      fields: [{ canonicalField: 'codes', sourceColumns: ['Code1', 'Code2'], scope: 'file' as const }]
-    };
-    const row = { codes: 'LI;DS', tag: '100001' };
-    expect(collapseMultiSourceRow(row, m)).toEqual({ codes: 'LI;DS', tag: '100001' });
-  });
-
-  it('collapses to null when temp keys are present but empty', () => {
-    const m = {
-      version: 1 as const,
-      format: SourceFormat.csv,
-      fields: [{ canonicalField: 'codes', sourceColumns: ['Code1', 'Code2'], scope: 'file' as const }]
-    };
-    const row = { 'codes#0': null, 'codes#1': '', tag: '100001' };
-    expect(collapseMultiSourceRow(row, m)).toEqual({ codes: null, tag: '100001' });
-  });
-
-  it('is a no-op when there are no multi-source fields', () => {
-    const m = { version: 1 as const, format: SourceFormat.csv, fields: [{ canonicalField: 'lx', sourceColumns: ['X'], scope: 'file' as const }] };
-    const row = { lx: '202', ly: '104.5' };
-    expect(collapseMultiSourceRow(row, m)).toEqual({ lx: '202', ly: '104.5' });
-  });
-});
-
 describe('isColumnMappingShape', () => {
   it('accepts a structurally valid mapping', () => {
     const m = seedMapping(csvMeta(['tag', 'spcode', 'quadrat', 'lx', 'ly', 'date']));
@@ -270,9 +180,8 @@ describe('isColumnMappingShape', () => {
   });
 });
 
-describe('joinMultiSourceValues', () => {
-  it('joins non-empty, non-NA values with ";"', () => {
-    expect(joinMultiSourceValues(['LI', null, 'NA', 'DS'])).toBe('LI;DS');
-    expect(joinMultiSourceValues([null, 'NA', ''])).toBeNull();
+describe('joinMultiSourceValues re-export', () => {
+  it('is re-exported from resolution for existing consumers', () => {
+    expect(joinMultiSourceValues(['LI', 'NA'])).toBe('LI');
   });
 });

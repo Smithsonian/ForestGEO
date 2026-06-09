@@ -34,7 +34,10 @@ import {
 import { abortChunkProcessingAfterPermanentUploadFailure, shouldTimeoutPausedParser } from '@/components/uploadsystemhelpers/uploadqueueguards';
 import { generateShortBatchID } from '@/config/utils';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
-import { buildPapaTransformHeader, collapseMultiSourceRow } from '@/lib/column-mapping/mapping';
+import { seedMapping } from '@/lib/column-mapping/mapping';
+import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
+import { aliasesFor } from '@/lib/column-mapping/fields';
+import { UploadMode } from '@/config/uploadmodes';
 
 function createAbortError(message: string): Error {
   const error = new Error(message);
@@ -746,6 +749,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         invalidDateCount: 0,
         invalidDateSamples: new Set<string>()
       };
+      let csvHeaders: string[] | null = null;
 
       if (!expectedHeaders || !requiredHeaders) {
         ailogger.error(`No headers defined for form type: ${uploadForm}`);
@@ -769,7 +773,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         // Enhanced header validation with mapping feedback
         if (validation.preview && validation.preview.length > 0) {
-          const csvHeaders = validation.preview[0];
+          csvHeaders = validation.preview[0];
           const requiredHeaderLabels = requiredHeaders.map(h => h.label);
           const mappingResults: string[] = [];
           const missingRequired: string[] = [];
@@ -804,6 +808,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         ailogger.error(`Error validating delimiter for file ${file.name}:`, error instanceof Error ? error : new Error(String(error)));
       }
 
+      // Non-measurements forms and revision uploads only. The measurements flow resolves headers
+      // through lib/column-mapping/resolution (seeded mapping when the user confirmed none).
       const legacyTransformHeader = (header: string) => {
         const normalizedHeader = header
           .trim()
@@ -859,7 +865,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         return normalizedHeader;
       };
 
-      const transformHeader = columnMapping ? buildPapaTransformHeader(columnMapping) : legacyTransformHeader;
+      const mappingFlowActive = uploadForm === 'measurements' && uploadMode !== UploadMode.REVISIONS && csvHeaders !== null && csvHeaders.length > 0;
+      const headerPlan = mappingFlowActive
+        ? resolveHeaders(
+            csvHeaders!,
+            columnMapping ?? seedMapping({ format: SourceFormat.csv, headers: csvHeaders! }),
+            aliasesFor(SourceFormat.csv),
+            CSV_RESOLVE_OPTIONS
+          )
+        : null;
+      const transformHeader = headerPlan ? transformHeaderFromPlan(headerPlan) : legacyTransformHeader;
       const validateRow = (row: FileRow): boolean => {
         const errors: string[] = [];
         let extraData = false;
@@ -1046,7 +1061,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
                 const validRows: FileRow[] = [];
                 results.data.forEach(rawRow => {
-                  const row = columnMapping ? collapseMultiSourceRow(rawRow, columnMapping) : rawRow;
+                  const row = headerPlan ? collapseRowWithPlan(rawRow, headerPlan) : rawRow;
                   if (validateRow(row)) {
                     validRows.push(row);
                   }
