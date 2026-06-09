@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SourceFormat } from '@/config/macros/formdetails';
-import { joinMultiSourceValues, seedMapping, validateMapping } from './mapping';
+import { buildPapaTransformHeader, collapseMultiSourceRow, joinMultiSourceValues, seedMapping, validateMapping } from './mapping';
 import { ArcgisSourceMetadata, CsvSourceMetadata } from './types';
 
 const csvMeta = (headers: string[]): CsvSourceMetadata => ({ format: SourceFormat.csv, headers });
@@ -73,6 +73,45 @@ describe('validateMapping (arcgis sheet roles)', () => {
     const v = validateMapping(m, { ...meta, detectedTreesSheet: 'Sheet1', detectedStemsSheet: 'Sheet2' });
     expect(v.missingSheetRoles ?? []).toEqual([]);
     expect(v.valid).toBe(true);
+  });
+});
+
+describe('buildPapaTransformHeader', () => {
+  it('renames single-source headers to canonical and gives multi-source temp keys', () => {
+    const m = seedMapping(csvMeta(['X_Coord', 'Y_Coord', 'tag', 'spcode', 'quadrat', 'date']));
+    const t = buildPapaTransformHeader(m);
+    expect(t('X_Coord')).toBe('lx');
+    expect(t('Y_Coord')).toBe('ly');
+    expect(t('DeviceID')).toBe('deviceid'); // unmapped -> normalized fallback
+  });
+
+  it('emits distinct temp keys for multi-source codes', () => {
+    const m: ReturnType<typeof seedMapping> = {
+      version: 1,
+      format: SourceFormat.csv,
+      fields: [{ canonicalField: 'codes', sourceColumns: ['Code1', 'Code2'], scope: 'file' }]
+    };
+    const t = buildPapaTransformHeader(m);
+    expect(t('Code1')).toBe('codes#0');
+    expect(t('Code2')).toBe('codes#1');
+  });
+});
+
+describe('collapseMultiSourceRow', () => {
+  it('joins temp keys into the canonical codes field and removes temps', () => {
+    const m = {
+      version: 1 as const,
+      format: SourceFormat.csv,
+      fields: [{ canonicalField: 'codes', sourceColumns: ['Code1', 'Code2'], scope: 'file' as const }]
+    };
+    const row = { 'codes#0': 'LI', 'codes#1': 'DS', tag: '100001' };
+    expect(collapseMultiSourceRow(row, m)).toEqual({ codes: 'LI;DS', tag: '100001' });
+  });
+
+  it('is a no-op when there are no multi-source fields', () => {
+    const m = { version: 1 as const, format: SourceFormat.csv, fields: [{ canonicalField: 'lx', sourceColumns: ['X'], scope: 'file' as const }] };
+    const row = { lx: '202', ly: '104.5' };
+    expect(collapseMultiSourceRow(row, m)).toEqual({ lx: '202', ly: '104.5' });
   });
 });
 

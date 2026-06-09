@@ -1,4 +1,4 @@
-import { SourceFormat } from '@/config/macros/formdetails';
+import { FileRow, SourceFormat } from '@/config/macros/formdetails';
 import { CODE_JOIN_SEPARATOR, NULL_CODE_TOKEN } from '@/lib/arcgis/schema';
 import { aliasesFor, canonicalFieldsFor, normalizeHeader } from './fields';
 import { ColumnMapping, ColumnMappingField, MappingValidation, SourceMetadata } from './types';
@@ -84,4 +84,39 @@ export function validateMapping(mapping: ColumnMapping, metadata: SourceMetadata
 export function joinMultiSourceValues(values: (string | null | undefined)[]): string | null {
   const kept = values.map(v => (v ?? '').trim()).filter(v => v.length > 0 && v.toUpperCase() !== NULL_CODE_TOKEN && v.toUpperCase() !== 'NULL');
   return kept.length > 0 ? kept.join(CODE_JOIN_SEPARATOR) : null;
+}
+
+const MULTI_SOURCE_SEP = '#';
+
+/** Build the Papa Parse `transformHeader` callback for a confirmed CSV mapping. */
+export function buildPapaTransformHeader(mapping: ColumnMapping): (header: string) => string {
+  // normalizedSourceHeader -> emitted key
+  const emit = new Map<string, string>();
+  for (const field of mapping.fields) {
+    if (field.sourceColumns.length === 0) continue;
+    if (field.sourceColumns.length === 1) {
+      emit.set(normalizeHeader(field.sourceColumns[0]), field.canonicalField);
+    } else {
+      field.sourceColumns.forEach((col, i) => emit.set(normalizeHeader(col), `${field.canonicalField}${MULTI_SOURCE_SEP}${i}`));
+    }
+  }
+  return (header: string) => emit.get(normalizeHeader(header)) ?? normalizeHeader(header);
+}
+
+/** Collapse multi-source temp keys (`codes#0`, `codes#1`, …) into the canonical joined field. */
+export function collapseMultiSourceRow(row: FileRow, mapping: ColumnMapping): FileRow {
+  const multi = mapping.fields.filter(f => f.sourceColumns.length > 1);
+  if (multi.length === 0) return row;
+
+  const out: FileRow = { ...row };
+  for (const field of multi) {
+    const parts: (string | null)[] = [];
+    field.sourceColumns.forEach((_col, i) => {
+      const key = `${field.canonicalField}${MULTI_SOURCE_SEP}${i}`;
+      parts.push(out[key] ?? null);
+      delete out[key];
+    });
+    out[field.canonicalField] = joinMultiSourceValues(parts);
+  }
+  return out;
 }
