@@ -1,0 +1,147 @@
+'use client';
+
+import React, { useMemo } from 'react';
+import { Alert, Box, Button, Chip, DialogContent, DialogTitle, Modal, ModalDialog, Option, Select, Stack, Typography } from '@mui/joy';
+import { SourceFormat } from '@/config/macros/formdetails';
+import { canonicalFieldsFor } from '@/lib/column-mapping/fields';
+import { validateMapping } from '@/lib/column-mapping/mapping';
+import { ColumnMapping, ColumnMappingField, SourceMetadata } from '@/lib/column-mapping/types';
+
+interface ColumnMappingDialogProps {
+  open: boolean;
+  format: SourceFormat;
+  metadata: SourceMetadata;
+  mapping: ColumnMapping;
+  onChange: (next: ColumnMapping) => void;
+  onApply: (mapping: ColumnMapping) => void;
+  onClose: () => void;
+}
+
+function sourceColumnsFromMetadata(metadata: SourceMetadata): string[] {
+  return metadata.format === SourceFormat.csv ? metadata.headers : Array.from(new Set(metadata.sheets.flatMap(s => s.columns)));
+}
+
+function setFieldSources(mapping: ColumnMapping, canonicalField: string, sources: string[]): ColumnMapping {
+  const fields: ColumnMappingField[] = mapping.fields.map(f => (f.canonicalField === canonicalField ? { ...f, sourceColumns: sources } : f));
+  return { ...mapping, fields };
+}
+
+export default function ColumnMappingDialog({ open, format, metadata, mapping, onChange, onApply, onClose }: ColumnMappingDialogProps) {
+  const defs = useMemo(() => canonicalFieldsFor(format), [format]);
+  const sourceColumns = useMemo(() => sourceColumnsFromMetadata(metadata), [metadata]);
+  const validation = useMemo(() => validateMapping(mapping, metadata), [mapping, metadata]);
+
+  const sheetNames = metadata.format === SourceFormat.arcgis_xlsx ? metadata.sheets.map(s => s.name) : [];
+
+  return (
+    <Modal open={open} onClose={onClose}>
+      <ModalDialog sx={{ minWidth: 640, maxWidth: 820 }}>
+        <DialogTitle>Map your columns</DialogTitle>
+        <DialogContent>
+          <Typography level="body-sm" sx={{ mb: 1 }}>
+            Match each column in your file to the field the app expects. Required fields must be mapped before you can continue.
+          </Typography>
+
+          {metadata.format === SourceFormat.arcgis_xlsx && (validation.missingSheetRoles?.length ?? 0) > 0 && (
+            <Box sx={{ mb: 2 }}>
+              <Typography level="title-sm">Sheet roles</Typography>
+              {(['trees', 'stems'] as const).map(role => (
+                <Stack key={role} direction="row" alignItems="center" spacing={1} sx={{ my: 0.5 }}>
+                  <Typography sx={{ width: 80 }}>{role}</Typography>
+                  <Select
+                    placeholder={`Select ${role} sheet`}
+                    value={(role === 'trees' ? mapping.sheetRoles?.treesSheetName : mapping.sheetRoles?.stemsSheetName) ?? null}
+                    onChange={(_e, v) =>
+                      onChange({
+                        ...mapping,
+                        sheetRoles: {
+                          ...mapping.sheetRoles,
+                          ...(role === 'trees' ? { treesSheetName: v ?? undefined } : { stemsSheetName: v ?? undefined })
+                        }
+                      })
+                    }
+                  >
+                    {sheetNames.map(n => (
+                      <Option key={n} value={n}>
+                        {n}
+                      </Option>
+                    ))}
+                  </Select>
+                </Stack>
+              ))}
+            </Box>
+          )}
+
+          <Stack spacing={0.5}>
+            {defs.map(def => {
+              const field = mapping.fields.find(f => f.canonicalField === def.canonicalField);
+              const selected = field?.sourceColumns ?? [];
+              const unmappedRequired = def.required && selected.length === 0;
+              return (
+                <Stack
+                  key={def.canonicalField}
+                  direction="row"
+                  alignItems="center"
+                  spacing={1}
+                  data-testid={`mapping-row-${def.canonicalField}`}
+                  sx={{ py: 0.75, borderTop: '1px solid', borderColor: 'divider', bgcolor: unmappedRequired ? 'danger.softBg' : 'transparent' }}
+                >
+                  <Box sx={{ flex: 1 }}>
+                    <Select
+                      multiple={def.multiSource}
+                      placeholder={unmappedRequired ? 'Choose a column' : 'Unmapped'}
+                      value={def.multiSource ? selected : (selected[0] ?? null)}
+                      onChange={(_e, v) => onChange(setFieldSources(mapping, def.canonicalField, def.multiSource ? (v as string[]) : v ? [v as string] : []))}
+                    >
+                      {sourceColumns.map(c => (
+                        <Option key={c} value={c}>
+                          {c}
+                        </Option>
+                      ))}
+                    </Select>
+                  </Box>
+                  <Typography sx={{ width: 24, textAlign: 'center' }}>→</Typography>
+                  <Box sx={{ flex: 1.2 }}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Typography level="title-sm">{def.canonicalField}</Typography>
+                      <Chip size="sm" color={def.required ? 'danger' : 'neutral'}>
+                        {def.required ? 'required' : 'optional'}
+                      </Chip>
+                    </Stack>
+                    {def.explanation && (
+                      <Typography level="body-xs" textColor="text.tertiary">
+                        {def.explanation}
+                      </Typography>
+                    )}
+                  </Box>
+                </Stack>
+              );
+            })}
+          </Stack>
+
+          {!validation.valid && (
+            <Alert color="danger" sx={{ mt: 2 }}>
+              {validation.missingRequired.length > 0 && <span>Unmapped required: {validation.missingRequired.join(', ')}. </span>}
+              {validation.missingSourceColumns.length > 0 && <span>Missing columns: {validation.missingSourceColumns.join(', ')}. </span>}
+              {(validation.missingSheetRoles?.length ?? 0) > 0 && <span>Select sheet roles: {validation.missingSheetRoles!.join(', ')}.</span>}
+            </Alert>
+          )}
+          {validation.ignoredSourceColumns.length > 0 && (
+            <Typography level="body-xs" textColor="text.tertiary" sx={{ mt: 1 }}>
+              Ignored (unused) columns: {validation.ignoredSourceColumns.join(', ')}
+            </Typography>
+          )}
+
+          <Stack direction="row" justifyContent="flex-end" spacing={1} sx={{ mt: 2 }}>
+            <Button variant="plain" color="neutral" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button disabled={!validation.valid} onClick={() => onApply(mapping)}>
+              Apply mapping
+            </Button>
+          </Stack>
+        </DialogContent>
+      </ModalDialog>
+    </Modal>
+  );
+}
