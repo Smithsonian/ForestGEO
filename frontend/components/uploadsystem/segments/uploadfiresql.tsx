@@ -869,10 +869,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       const headerPlan = mappingFlowActive
         ? (() => {
             const storedMapping = columnMappings?.[file.name];
-            const effectiveMapping =
-              storedMapping && csvHeaders !== null && mappingApplies(storedMapping, csvHeaders)
-                ? storedMapping
-                : seedMapping({ format: SourceFormat.csv, headers: csvHeaders! });
+            const storedMappingApplies = storedMapping !== undefined && mappingApplies(storedMapping, csvHeaders!);
+            if (storedMapping && !storedMappingApplies) {
+              ailogger.warn(
+                `Confirmed column mapping for ${file.name} was built from different headers (signature mismatch); falling back to a seeded mapping.`
+              );
+            }
+            const effectiveMapping = storedMappingApplies ? storedMapping : seedMapping({ format: SourceFormat.csv, headers: csvHeaders! });
             return resolveHeaders(csvHeaders!, effectiveMapping, aliasesFor(SourceFormat.csv), CSV_RESOLVE_OPTIONS);
           })()
         : null;
