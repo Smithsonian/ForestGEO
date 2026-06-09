@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SourceFormat } from '@/config/macros/formdetails';
-import { buildPapaTransformHeader, collapseMultiSourceRow, joinMultiSourceValues, seedMapping, validateMapping } from './mapping';
+import { buildPapaTransformHeader, collapseMultiSourceRow, isColumnMappingShape, joinMultiSourceValues, seedMapping, validateMapping } from './mapping';
 import { ArcgisSourceMetadata, CsvSourceMetadata } from './types';
 
 const csvMeta = (headers: string[]): CsvSourceMetadata => ({ format: SourceFormat.csv, headers });
@@ -27,6 +27,32 @@ describe('seedMapping (csv)', () => {
     const m = seedMapping(csvMeta(['Code1', 'Code2', 'codes']));
     // only exact-normalized alias members match; 'code1'/'code2' are NOT aliases, 'codes' is
     expect(m.fields.find(x => x.canonicalField === 'codes')?.sourceColumns).toEqual(['codes']);
+  });
+});
+
+describe('validateMapping duplicate source columns', () => {
+  it('flags the same source column mapped to two different fields', () => {
+    const headers = ['X_Coord', 'tag', 'spcode', 'quadrat', 'date'];
+    const m = seedMapping(csvMeta(headers));
+    const withDuplicate = {
+      ...m,
+      fields: m.fields.map(f => (f.canonicalField === 'lx' || f.canonicalField === 'ly' ? { ...f, sourceColumns: ['X_Coord'] } : f))
+    };
+    const v = validateMapping(withDuplicate, csvMeta(headers));
+    expect(v.duplicateSourceColumns).toContain('X_Coord');
+    expect(v.valid).toBe(false);
+  });
+
+  it('flags the same column listed twice within one multi-source field', () => {
+    const headers = ['Code1', 'tag', 'spcode', 'quadrat', 'lx', 'ly', 'date'];
+    const m = seedMapping(csvMeta(headers));
+    const withDuplicate = {
+      ...m,
+      fields: m.fields.map(f => (f.canonicalField === 'codes' ? { ...f, sourceColumns: ['Code1', 'Code1'] } : f))
+    };
+    const v = validateMapping(withDuplicate, csvMeta(headers));
+    expect(v.duplicateSourceColumns).toContain('Code1');
+    expect(v.valid).toBe(false);
   });
 });
 
@@ -74,6 +100,65 @@ describe('validateMapping (arcgis sheet roles)', () => {
     expect(v.missingSheetRoles ?? []).toEqual([]);
     expect(v.valid).toBe(true);
   });
+
+  it('rejects the same sheet assigned to both roles', () => {
+    const detected = { ...meta, detectedTreesSheet: 'Sheet1', detectedStemsSheet: 'Sheet1' };
+    const m = seedMapping(detected);
+    const v = validateMapping(m, detected);
+    expect(v.sheetRoleConflict).toBe(true);
+    expect(v.valid).toBe(false);
+  });
+});
+
+describe('validateMapping (arcgis per-sheet scope)', () => {
+  // lx/ly are trees-scoped required fields in ARCGIS_SCHEMA; tag is required on both sheets.
+  const sheets = [
+    { name: 'TreesSheet', columns: ['GlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'Date_measured'] },
+    { name: 'StemsSheet', columns: ['GlobalID', 'ParentGlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'Date_measured', 'PosX', 'PosY'] }
+  ];
+  const meta: ArcgisSourceMetadata = {
+    format: SourceFormat.arcgis_xlsx,
+    sheets,
+    detectedTreesSheet: 'TreesSheet',
+    detectedStemsSheet: 'StemsSheet'
+  };
+
+  it('rejects a trees-scoped required field mapped to a column that exists only on the stems sheet', () => {
+    const m = seedMapping(meta);
+    const withCrossSheet = {
+      ...m,
+      fields: m.fields.map(f =>
+        f.canonicalField === 'lx' ? { ...f, sourceColumns: ['PosX'] } : f.canonicalField === 'ly' ? { ...f, sourceColumns: ['PosY'] } : f
+      )
+    };
+    const v = validateMapping(withCrossSheet, meta);
+    expect(v.missingRequired.some(entry => entry.includes('lx'))).toBe(true);
+    expect(v.valid).toBe(false);
+  });
+
+  it('accepts a trees-scoped required field mapped to a column on the trees sheet', () => {
+    const treesWithCoords = [{ name: 'TreesSheet', columns: [...sheets[0].columns, 'PosX', 'PosY'] }, sheets[1]];
+    const metaWithCoords: ArcgisSourceMetadata = { ...meta, sheets: treesWithCoords };
+    const m = seedMapping(metaWithCoords);
+    const mapped = {
+      ...m,
+      fields: m.fields.map(f =>
+        f.canonicalField === 'lx' ? { ...f, sourceColumns: ['PosX'] } : f.canonicalField === 'ly' ? { ...f, sourceColumns: ['PosY'] } : f
+      )
+    };
+    const v = validateMapping(mapped, metaWithCoords);
+    expect(v.missingRequired).toEqual([]);
+    expect(v.valid).toBe(true);
+  });
+
+  it('treats both-scoped fields present on each sheet as satisfied, flagging only the truly missing trees fields', () => {
+    // tag/spcode/quadrat/etc. exist on both sheets; only lx/ly (trees scope) are genuinely
+    // unmappable here, so they must be the only complaints.
+    const m = seedMapping(meta);
+    const v = validateMapping(m, meta);
+    expect(v.missingRequired.length).toBeGreaterThan(0);
+    expect(v.missingRequired.every(entry => entry.startsWith('lx') || entry.startsWith('ly'))).toBe(true);
+  });
 });
 
 describe('buildPapaTransformHeader', () => {
@@ -83,6 +168,35 @@ describe('buildPapaTransformHeader', () => {
     expect(t('X_Coord')).toBe('lx');
     expect(t('Y_Coord')).toBe('ly');
     expect(t('DeviceID')).toBe('deviceid'); // unmapped -> normalized fallback
+  });
+
+  it('never lets an unmapped column emit a canonical key claimed by the mapping', () => {
+    // User explicitly mapped MeasDate -> date; the file also has a raw 'Date' column the
+    // dialog reports as ignored. Its fallback key must NOT collide with 'date', or papaparse
+    // last-column-wins silently replaces the mapped value.
+    const m: ReturnType<typeof seedMapping> = {
+      version: 1,
+      format: SourceFormat.csv,
+      fields: [{ canonicalField: 'date', sourceColumns: ['MeasDate'], scope: 'file' }]
+    };
+    const t = buildPapaTransformHeader(m);
+    expect(t('MeasDate')).toBe('date');
+    expect(t('Date')).not.toBe('date');
+  });
+
+  it('never lets an unmapped column emit a canonical key the user deliberately left unmapped', () => {
+    // The mapping is the authority: if the user unmapped 'date', a stray 'Date' column must
+    // not silently feed it.
+    const m: ReturnType<typeof seedMapping> = {
+      version: 1,
+      format: SourceFormat.csv,
+      fields: [
+        { canonicalField: 'date', sourceColumns: [], scope: 'file' },
+        { canonicalField: 'tag', sourceColumns: ['tag'], scope: 'file' }
+      ]
+    };
+    const t = buildPapaTransformHeader(m);
+    expect(t('Date')).not.toBe('date');
   });
 
   it('emits distinct temp keys for multi-source codes', () => {
@@ -108,10 +222,51 @@ describe('collapseMultiSourceRow', () => {
     expect(collapseMultiSourceRow(row, m)).toEqual({ codes: 'LI;DS', tag: '100001' });
   });
 
+  it('leaves a row untouched when none of the multi-source temp keys are present', () => {
+    // A file whose 'codes' column is already canonical never produced codes#0/codes#1 temp
+    // keys; collapsing must not overwrite its real value with null.
+    const m = {
+      version: 1 as const,
+      format: SourceFormat.csv,
+      fields: [{ canonicalField: 'codes', sourceColumns: ['Code1', 'Code2'], scope: 'file' as const }]
+    };
+    const row = { codes: 'LI;DS', tag: '100001' };
+    expect(collapseMultiSourceRow(row, m)).toEqual({ codes: 'LI;DS', tag: '100001' });
+  });
+
+  it('collapses to null when temp keys are present but empty', () => {
+    const m = {
+      version: 1 as const,
+      format: SourceFormat.csv,
+      fields: [{ canonicalField: 'codes', sourceColumns: ['Code1', 'Code2'], scope: 'file' as const }]
+    };
+    const row = { 'codes#0': null, 'codes#1': '', tag: '100001' };
+    expect(collapseMultiSourceRow(row, m)).toEqual({ codes: null, tag: '100001' });
+  });
+
   it('is a no-op when there are no multi-source fields', () => {
     const m = { version: 1 as const, format: SourceFormat.csv, fields: [{ canonicalField: 'lx', sourceColumns: ['X'], scope: 'file' as const }] };
     const row = { lx: '202', ly: '104.5' };
     expect(collapseMultiSourceRow(row, m)).toEqual({ lx: '202', ly: '104.5' });
+  });
+});
+
+describe('isColumnMappingShape', () => {
+  it('accepts a structurally valid mapping', () => {
+    const m = seedMapping(csvMeta(['tag', 'spcode', 'quadrat', 'lx', 'ly', 'date']));
+    expect(isColumnMappingShape(m)).toBe(true);
+    expect(isColumnMappingShape(JSON.parse(JSON.stringify(m)))).toBe(true);
+  });
+
+  it('rejects non-objects, wrong field containers, and fields missing sourceColumns', () => {
+    expect(isColumnMappingShape(null)).toBe(false);
+    expect(isColumnMappingShape('csv')).toBe(false);
+    expect(isColumnMappingShape([1, 2])).toBe(false);
+    expect(isColumnMappingShape({ version: 1, format: SourceFormat.csv, fields: {} })).toBe(false);
+    expect(isColumnMappingShape({ version: 1, format: SourceFormat.csv, fields: [{ canonicalField: 'lx' }] })).toBe(false);
+    expect(isColumnMappingShape({ version: 1, format: SourceFormat.csv, fields: [{ canonicalField: 'lx', sourceColumns: [42] }] })).toBe(false);
+    expect(isColumnMappingShape({ version: 1, format: 'parquet', fields: [] })).toBe(false);
+    expect(isColumnMappingShape({ version: 1, format: SourceFormat.arcgis_xlsx, fields: [], sheetRoles: 'Sheet1' })).toBe(false);
   });
 });
 

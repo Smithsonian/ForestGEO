@@ -30,8 +30,12 @@ export interface MappingValidation {
   valid: boolean;
   missingRequired: string[];
   missingSourceColumns: string[];
+  /** Source columns assigned to more than one field (or twice to one field). */
+  duplicateSourceColumns: string[];
   ignoredSourceColumns: string[];
   missingSheetRoles?: string[];
+  /** True when the trees and stems roles name the same sheet. */
+  sheetRoleConflict?: boolean;
 }
 
 export interface CsvSourceMetadata {

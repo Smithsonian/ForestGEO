@@ -49,6 +49,46 @@ describe('ColumnMappingDialog (csv)', () => {
   });
 });
 
+describe('ColumnMappingDialog validation messages', () => {
+  it('flags a column mapped to two fields and disables Apply', () => {
+    const resolvedMeta: CsvSourceMetadata = { format: SourceFormat.csv, headers: ['tag', 'spcode', 'quadrat', 'X_Coord', 'Y_Coord', 'date'] };
+    const seeded = seedMapping(resolvedMeta);
+    const duplicated = {
+      ...seeded,
+      fields: seeded.fields.map(f => (f.canonicalField === 'ly' ? { ...f, sourceColumns: ['X_Coord'] } : f))
+    };
+    render(
+      <ColumnMappingDialog
+        open
+        format={SourceFormat.csv}
+        metadata={resolvedMeta}
+        mapping={duplicated}
+        onChange={() => {}}
+        onApply={() => {}}
+        onClose={() => {}}
+      />
+    );
+    expect(screen.getByText(/mapped to more than one field/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /apply mapping/i })).toBeDisabled();
+  });
+
+  it('renders a server-side rejection so a failed re-preflight is explained', () => {
+    render(
+      <ColumnMappingDialog
+        open
+        format={SourceFormat.csv}
+        metadata={meta}
+        mapping={seedMapping(meta)}
+        onChange={() => {}}
+        onApply={() => {}}
+        onClose={() => {}}
+        serverError={'Trees sheet "Sheet1" is missing required column(s): lx.'}
+      />
+    );
+    expect(screen.getByText(/Trees sheet "Sheet1" is missing required column\(s\): lx\./)).toBeInTheDocument();
+  });
+});
+
 describe('ColumnMappingDialog (arcgis sheet roles)', () => {
   it('renders trees/stems sheet-role selects when no sheets were detected', () => {
     const arcgisMeta: ArcgisSourceMetadata = {
@@ -72,5 +112,54 @@ describe('ColumnMappingDialog (arcgis sheet roles)', () => {
     expect(screen.getByText('Sheet roles')).toBeInTheDocument();
     expect(screen.getByText(/select trees sheet/i)).toBeInTheDocument();
     expect(screen.getByText(/select stems sheet/i)).toBeInTheDocument();
+  });
+
+  it('keeps the sheet-role selects visible after both roles are set so the user can change them', () => {
+    const arcgisMeta: ArcgisSourceMetadata = {
+      format: SourceFormat.arcgis_xlsx,
+      sheets: [
+        { name: 'TreesCustom', columns: ['GlobalID', 'TreeTag', 'MyX', 'MyY'] },
+        { name: 'StemsCustom', columns: ['GlobalID', 'ParentGlobalID'] }
+      ],
+      detectedTreesSheet: 'TreesCustom',
+      detectedStemsSheet: 'StemsCustom'
+    };
+    render(
+      <ColumnMappingDialog
+        open
+        format={SourceFormat.arcgis_xlsx}
+        metadata={arcgisMeta}
+        mapping={seedMapping(arcgisMeta)}
+        onChange={() => {}}
+        onApply={() => {}}
+        onClose={() => {}}
+      />
+    );
+    expect(screen.getByText('Sheet roles')).toBeInTheDocument();
+  });
+
+  it('explains when both roles point at the same sheet and disables Apply', () => {
+    const arcgisMeta: ArcgisSourceMetadata = {
+      format: SourceFormat.arcgis_xlsx,
+      sheets: [
+        { name: 'Sheet1', columns: ['GlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'lx', 'ly', 'Date_measured', 'ParentGlobalID'] },
+        { name: 'Sheet2', columns: ['GlobalID', 'ParentGlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'Date_measured'] }
+      ],
+      detectedTreesSheet: 'Sheet1',
+      detectedStemsSheet: 'Sheet1'
+    };
+    render(
+      <ColumnMappingDialog
+        open
+        format={SourceFormat.arcgis_xlsx}
+        metadata={arcgisMeta}
+        mapping={seedMapping(arcgisMeta)}
+        onChange={() => {}}
+        onApply={() => {}}
+        onClose={() => {}}
+      />
+    );
+    expect(screen.getByText(/different sheets/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /apply mapping/i })).toBeDisabled();
   });
 });

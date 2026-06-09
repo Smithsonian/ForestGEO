@@ -19,6 +19,31 @@ function allSourceColumns(metadata: SourceMetadata): string[] {
   return cols;
 }
 
+/**
+ * Structural guard for mappings arriving from the wire (JSON.parse output). Anything that fails
+ * here would otherwise throw a TypeError deep inside header resolution.
+ */
+export function isColumnMappingShape(value: unknown): value is ColumnMapping {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const mapping = value as Record<string, unknown>;
+  if (mapping.version !== 1) return false;
+  if (mapping.format !== SourceFormat.csv && mapping.format !== SourceFormat.arcgis_xlsx) return false;
+  if (!Array.isArray(mapping.fields)) return false;
+  for (const field of mapping.fields) {
+    if (typeof field !== 'object' || field === null) return false;
+    const f = field as Record<string, unknown>;
+    if (typeof f.canonicalField !== 'string') return false;
+    if (!Array.isArray(f.sourceColumns) || !f.sourceColumns.every(c => typeof c === 'string')) return false;
+  }
+  if (mapping.sheetRoles !== undefined) {
+    if (typeof mapping.sheetRoles !== 'object' || mapping.sheetRoles === null || Array.isArray(mapping.sheetRoles)) return false;
+    const roles = mapping.sheetRoles as Record<string, unknown>;
+    if (roles.treesSheetName !== undefined && typeof roles.treesSheetName !== 'string') return false;
+    if (roles.stemsSheetName !== undefined && typeof roles.stemsSheetName !== 'string') return false;
+  }
+  return true;
+}
+
 export function seedMapping(metadata: SourceMetadata): ColumnMapping {
   const format = metadata.format;
   const defs = canonicalFieldsFor(format);
@@ -48,37 +73,110 @@ export function seedMapping(metadata: SourceMetadata): ColumnMapping {
   return mapping;
 }
 
+/** Mirrors readArcgisWorkbook's per-header resolution: an explicit mapping wins, else alias detection. */
+function fieldResolvedOnSheet(
+  canonicalField: string,
+  sheetColumns: string[],
+  overrideByNorm: Map<string, string>,
+  fieldByAliasNorm: Map<string, string>
+): boolean {
+  return sheetColumns.some(c => {
+    const norm = normalizeHeader(c);
+    const resolved = overrideByNorm.get(norm) ?? fieldByAliasNorm.get(norm);
+    return resolved === canonicalField;
+  });
+}
+
 export function validateMapping(mapping: ColumnMapping, metadata: SourceMetadata): MappingValidation {
   const defs = canonicalFieldsFor(mapping.format);
-  const requiredByField = new Map(defs.map(d => [d.canonicalField, d.required]));
   const available = new Set(allSourceColumns(metadata).map(normalizeHeader));
+  const fieldByKey = new Map(mapping.fields.map(f => [f.canonicalField, f]));
 
   const missingRequired: string[] = [];
   const missingSourceColumns: string[] = [];
+  const duplicateSourceColumns: string[] = [];
   const usedNormalized = new Set<string>();
+  const firstRawByNorm = new Map<string, string>();
 
   for (const field of mapping.fields) {
-    const required = requiredByField.get(field.canonicalField) ?? false;
-    const present = field.sourceColumns.filter(c => available.has(normalizeHeader(c)));
-    field.sourceColumns.forEach(c => usedNormalized.add(normalizeHeader(c)));
-    if (required && present.length === 0) missingRequired.push(field.canonicalField);
     for (const c of field.sourceColumns) {
-      if (!available.has(normalizeHeader(c))) missingSourceColumns.push(c);
+      const norm = normalizeHeader(c);
+      if (usedNormalized.has(norm)) {
+        if (!duplicateSourceColumns.includes(firstRawByNorm.get(norm) ?? c)) duplicateSourceColumns.push(firstRawByNorm.get(norm) ?? c);
+      } else {
+        usedNormalized.add(norm);
+        firstRawByNorm.set(norm, c);
+      }
+      if (!available.has(norm)) missingSourceColumns.push(c);
+    }
+  }
+
+  let missingSheetRoles: string[] | undefined;
+  let sheetRoleConflict: boolean | undefined;
+  let treesSheetColumns: string[] | undefined;
+  let stemsSheetColumns: string[] | undefined;
+  if (mapping.format === SourceFormat.arcgis_xlsx) {
+    missingSheetRoles = [];
+    const treesSheetName = mapping.sheetRoles?.treesSheetName;
+    const stemsSheetName = mapping.sheetRoles?.stemsSheetName;
+    if (!treesSheetName) missingSheetRoles.push('trees');
+    if (!stemsSheetName) missingSheetRoles.push('stems');
+    sheetRoleConflict = Boolean(treesSheetName && stemsSheetName && treesSheetName === stemsSheetName);
+    if (metadata.format === SourceFormat.arcgis_xlsx && !sheetRoleConflict) {
+      treesSheetColumns = metadata.sheets.find(s => s.name === treesSheetName)?.columns;
+      stemsSheetColumns = metadata.sheets.find(s => s.name === stemsSheetName)?.columns;
+    }
+  }
+
+  // Required fields are checked per sheet when both roles resolve (matching the reader's per-sheet
+  // enforcement); otherwise against the union of all columns.
+  const perSheet = treesSheetColumns !== undefined && stemsSheetColumns !== undefined;
+  const overrideByNorm = new Map<string, string>();
+  const fieldByAliasNorm = new Map<string, string>();
+  if (perSheet) {
+    for (const field of mapping.fields) {
+      for (const src of field.sourceColumns) overrideByNorm.set(normalizeHeader(src), field.canonicalField);
+    }
+    const aliases = aliasesFor(mapping.format);
+    for (const [canonicalField, aliasList] of Object.entries(aliases)) {
+      for (const alias of aliasList) fieldByAliasNorm.set(normalizeHeader(alias), canonicalField);
+    }
+  }
+
+  for (const def of defs) {
+    if (!def.required) continue;
+    if (perSheet) {
+      const sheetsToCheck: { role: string; columns: string[] }[] =
+        def.scope === 'trees'
+          ? [{ role: 'trees', columns: treesSheetColumns! }]
+          : def.scope === 'stems'
+            ? [{ role: 'stems', columns: stemsSheetColumns! }]
+            : [
+                { role: 'trees', columns: treesSheetColumns! },
+                { role: 'stems', columns: stemsSheetColumns! }
+              ];
+      for (const sheet of sheetsToCheck) {
+        if (!fieldResolvedOnSheet(def.canonicalField, sheet.columns, overrideByNorm, fieldByAliasNorm)) {
+          missingRequired.push(`${def.canonicalField} (${sheet.role} sheet)`);
+        }
+      }
+    } else {
+      const sourceColumns = fieldByKey.get(def.canonicalField)?.sourceColumns ?? [];
+      const present = sourceColumns.filter(c => available.has(normalizeHeader(c)));
+      if (present.length === 0) missingRequired.push(def.canonicalField);
     }
   }
 
   const ignoredSourceColumns = allSourceColumns(metadata).filter(c => !usedNormalized.has(normalizeHeader(c)));
 
-  let missingSheetRoles: string[] | undefined;
-  if (mapping.format === SourceFormat.arcgis_xlsx) {
-    missingSheetRoles = [];
-    if (!mapping.sheetRoles?.treesSheetName) missingSheetRoles.push('trees');
-    if (!mapping.sheetRoles?.stemsSheetName) missingSheetRoles.push('stems');
-  }
+  const valid =
+    missingRequired.length === 0 &&
+    missingSourceColumns.length === 0 &&
+    duplicateSourceColumns.length === 0 &&
+    (missingSheetRoles?.length ?? 0) === 0 &&
+    !sheetRoleConflict;
 
-  const valid = missingRequired.length === 0 && missingSourceColumns.length === 0 && (missingSheetRoles?.length ?? 0) === 0;
-
-  return { valid, missingRequired, missingSourceColumns, ignoredSourceColumns, missingSheetRoles };
+  return { valid, missingRequired, missingSourceColumns, duplicateSourceColumns, ignoredSourceColumns, missingSheetRoles, sheetRoleConflict };
 }
 
 export function joinMultiSourceValues(values: (string | null | undefined)[]): string | null {
@@ -88,34 +186,57 @@ export function joinMultiSourceValues(values: (string | null | undefined)[]): st
 
 const MULTI_SOURCE_SEP = '#';
 
-/** Build the Papa Parse `transformHeader` callback for a confirmed CSV mapping. */
+/** Appended to an unmapped column's key when it would otherwise collide with a key the mapping owns. */
+export const IGNORED_COLUMN_KEY_SUFFIX = '__ignored';
+
+/**
+ * Build the Papa Parse `transformHeader` callback for a confirmed CSV mapping. The mapping is the
+ * sole authority for its canonical fields: an unmapped column whose normalized name matches a field
+ * key (or a multi-source temp key) is diverted to an inert `…__ignored` key so it can never
+ * overwrite mapped data via papaparse's last-column-wins object building.
+ */
 export function buildPapaTransformHeader(mapping: ColumnMapping): (header: string) => string {
   // normalizedSourceHeader -> emitted key
   const emit = new Map<string, string>();
+  const reservedKeys = new Set<string>(mapping.fields.map(f => f.canonicalField));
   for (const field of mapping.fields) {
     if (field.sourceColumns.length === 0) continue;
     if (field.sourceColumns.length === 1) {
       emit.set(normalizeHeader(field.sourceColumns[0]), field.canonicalField);
     } else {
-      field.sourceColumns.forEach((col, i) => emit.set(normalizeHeader(col), `${field.canonicalField}${MULTI_SOURCE_SEP}${i}`));
+      field.sourceColumns.forEach((col, i) => {
+        const tempKey = `${field.canonicalField}${MULTI_SOURCE_SEP}${i}`;
+        emit.set(normalizeHeader(col), tempKey);
+        reservedKeys.add(tempKey);
+      });
     }
   }
-  return (header: string) => emit.get(normalizeHeader(header)) ?? normalizeHeader(header);
+  return (header: string) => {
+    const norm = normalizeHeader(header);
+    const mapped = emit.get(norm);
+    if (mapped !== undefined) return mapped;
+    return reservedKeys.has(norm) ? `${norm}${IGNORED_COLUMN_KEY_SUFFIX}` : norm;
+  };
 }
 
-/** Collapse multi-source temp keys (`codes#0`, `codes#1`, …) into the canonical joined field. */
+/**
+ * Collapse multi-source temp keys (`codes#0`, `codes#1`, …) into the canonical joined field.
+ * Rows that produced none of a field's temp keys (e.g. a file whose column was already canonical)
+ * are left untouched so an inapplicable mapping can never erase real data.
+ */
 export function collapseMultiSourceRow(row: FileRow, mapping: ColumnMapping): FileRow {
   const multi = mapping.fields.filter(f => f.sourceColumns.length > 1);
   if (multi.length === 0) return row;
 
   const out: FileRow = { ...row };
   for (const field of multi) {
+    const tempKeys = field.sourceColumns.map((_col, i) => `${field.canonicalField}${MULTI_SOURCE_SEP}${i}`);
+    if (!tempKeys.some(key => Object.hasOwn(row, key))) continue;
     const parts: (string | null)[] = [];
-    field.sourceColumns.forEach((_col, i) => {
-      const key = `${field.canonicalField}${MULTI_SOURCE_SEP}${i}`;
+    for (const key of tempKeys) {
       parts.push(out[key] ?? null);
       delete out[key];
-    });
+    }
     out[field.canonicalField] = joinMultiSourceValues(parts);
   }
   return out;

@@ -12,6 +12,8 @@ interface ColumnMappingDialogProps {
   format: SourceFormat;
   metadata: SourceMetadata;
   mapping: ColumnMapping;
+  /** Server-side rejection of the last applied mapping; rendered so the user knows what to fix. */
+  serverError?: string;
   onChange: (next: ColumnMapping) => void;
   onApply: (mapping: ColumnMapping) => void;
   onClose: () => void;
@@ -26,7 +28,7 @@ function setFieldSources(mapping: ColumnMapping, canonicalField: string, sources
   return { ...mapping, fields };
 }
 
-export default function ColumnMappingDialog({ open, format, metadata, mapping, onChange, onApply, onClose }: ColumnMappingDialogProps) {
+export default function ColumnMappingDialog({ open, format, metadata, mapping, serverError, onChange, onApply, onClose }: ColumnMappingDialogProps) {
   const defs = useMemo(() => canonicalFieldsFor(format), [format]);
   const sourceColumns = useMemo(() => sourceColumnsFromMetadata(metadata), [metadata]);
   const validation = useMemo(() => validateMapping(mapping, metadata), [mapping, metadata]);
@@ -42,7 +44,13 @@ export default function ColumnMappingDialog({ open, format, metadata, mapping, o
             Match each column in your file to the field the app expects. Required fields must be mapped before you can continue.
           </Typography>
 
-          {metadata.format === SourceFormat.arcgis_xlsx && (validation.missingSheetRoles?.length ?? 0) > 0 && (
+          {serverError && (
+            <Alert color="danger" sx={{ mb: 2 }}>
+              {serverError}
+            </Alert>
+          )}
+
+          {metadata.format === SourceFormat.arcgis_xlsx && (
             <Box sx={{ mb: 2 }}>
               <Typography level="title-sm">Sheet roles</Typography>
               {(['trees', 'stems'] as const).map(role => (
@@ -123,7 +131,11 @@ export default function ColumnMappingDialog({ open, format, metadata, mapping, o
             <Alert color="danger" sx={{ mt: 2 }}>
               {validation.missingRequired.length > 0 && <span>Unmapped required: {validation.missingRequired.join(', ')}. </span>}
               {validation.missingSourceColumns.length > 0 && <span>Missing columns: {validation.missingSourceColumns.join(', ')}. </span>}
-              {(validation.missingSheetRoles?.length ?? 0) > 0 && <span>Select sheet roles: {validation.missingSheetRoles!.join(', ')}.</span>}
+              {validation.duplicateSourceColumns.length > 0 && (
+                <span>Mapped to more than one field: {validation.duplicateSourceColumns.join(', ')}. Each column can feed only one field. </span>
+              )}
+              {(validation.missingSheetRoles?.length ?? 0) > 0 && <span>Select sheet roles: {validation.missingSheetRoles!.join(', ')}. </span>}
+              {validation.sheetRoleConflict && <span>Trees and stems must be different sheets.</span>}
             </Alert>
           )}
           {validation.ignoredSourceColumns.length > 0 && (
