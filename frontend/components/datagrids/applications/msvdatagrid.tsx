@@ -9,7 +9,7 @@ import { Snackbar, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
-import { FormType } from '@/config/macros/formdetails';
+import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
@@ -66,6 +66,7 @@ export default function MeasurementsSummaryViewDataGrid({
   const { setLoading } = useLoading();
   const router = useRouter();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isArcgisUploadOpen, setIsArcgisUploadOpen] = useState(false);
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -197,6 +198,22 @@ export default function MeasurementsSummaryViewDataGrid({
         skipToProcessing={isReingesting}
         onUploadComplete={() => setUploadCompleted(true)}
       />
+      <UploadParentModal
+        isUploadModalOpen={isArcgisUploadOpen}
+        handleCloseUploadModal={() => {
+          const wasCompleted = uploadCompleted;
+          setIsArcgisUploadOpen(false);
+          setUploadCompleted(false);
+          if (wasCompleted) {
+            reloadMSV().then(() => {
+              setOpenAlert(true);
+            });
+          }
+        }}
+        formType={FormType.measurements}
+        sourceFormat={SourceFormat.arcgis_xlsx}
+        onUploadComplete={() => setUploadCompleted(true)}
+      />
       <MultilineModal
         isManualEntryFormOpen={isManualEntryFormOpen}
         handleCloseManualEntryForm={() => {
@@ -249,6 +266,12 @@ export default function MeasurementsSummaryViewDataGrid({
             icon: <AssignmentOutlined />
           },
           { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> },
+          {
+            label: 'Import ArcGIS',
+            onClick: () => setIsArcgisUploadOpen(true),
+            tooltip: 'Import an ArcGIS Field Maps .xlsx workbook',
+            icon: <UploadFileOutlined />
+          },
           { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view', icon: <CachedOutlined /> }
         ]}
         enablePageJump

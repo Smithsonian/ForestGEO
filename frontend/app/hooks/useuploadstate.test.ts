@@ -8,7 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useUploadState } from './useuploadstate';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { FormType } from '@/config/macros/formdetails';
+import { FormType, SourceFormat } from '@/config/macros/formdetails';
 
 // Mock the AttributeStatusOptions export from core
 vi.mock('@/config/sqlrdsdefinitions/core', () => ({
@@ -22,12 +22,19 @@ describe('useUploadState', () => {
 
       expect(result.current.state).toEqual({
         uploadForm: undefined,
+        sourceFormat: SourceFormat.csv,
         reviewState: ReviewStates.START,
         personnelRecording: '',
         isDataUnsaved: false,
         uploadCompleteMessage: '',
         dataViewActive: 1
       });
+    });
+
+    it('should default sourceFormat to csv', () => {
+      const { result } = renderHook(() => useUploadState());
+
+      expect(result.current.state.sourceFormat).toBe(SourceFormat.csv);
     });
 
     it('should initialize with overridden upload form', () => {
@@ -81,6 +88,46 @@ describe('useUploadState', () => {
       });
 
       expect(result.current.state.uploadForm).toBe(FormType.species);
+    });
+  });
+
+  describe('Source Format Management', () => {
+    it('should set source format to arcgis_xlsx', () => {
+      const { result } = renderHook(() => useUploadState());
+
+      expect(result.current.state.sourceFormat).toBe(SourceFormat.csv);
+
+      act(() => {
+        result.current.setSourceFormat(SourceFormat.arcgis_xlsx);
+      });
+
+      expect(result.current.state.sourceFormat).toBe(SourceFormat.arcgis_xlsx);
+    });
+
+    it('should reset source format back to csv', () => {
+      const { result } = renderHook(() => useUploadState());
+
+      act(() => {
+        result.current.setSourceFormat(SourceFormat.arcgis_xlsx);
+      });
+
+      expect(result.current.state.sourceFormat).toBe(SourceFormat.arcgis_xlsx);
+
+      act(() => {
+        result.current.setSourceFormat(SourceFormat.csv);
+      });
+
+      expect(result.current.state.sourceFormat).toBe(SourceFormat.csv);
+    });
+
+    it('should support functional updater form', () => {
+      const { result } = renderHook(() => useUploadState());
+
+      act(() => {
+        result.current.setSourceFormat(prev => (prev === SourceFormat.csv ? SourceFormat.arcgis_xlsx : SourceFormat.csv));
+      });
+
+      expect(result.current.state.sourceFormat).toBe(SourceFormat.arcgis_xlsx);
     });
   });
 
@@ -250,6 +297,7 @@ describe('useUploadState', () => {
       // Set various state values
       act(() => {
         result.current.setUploadForm(FormType.measurements);
+        result.current.setSourceFormat(SourceFormat.arcgis_xlsx);
         result.current.setPersonnelRecording('John Doe');
         result.current.setReviewState(ReviewStates.UPLOAD_SQL);
         result.current.setIsDataUnsaved(true);
@@ -259,6 +307,7 @@ describe('useUploadState', () => {
 
       // Verify state is set
       expect(result.current.state.uploadForm).toBe(FormType.measurements);
+      expect(result.current.state.sourceFormat).toBe(SourceFormat.arcgis_xlsx);
       expect(result.current.state.personnelRecording).toBe('John Doe');
       expect(result.current.state.reviewState).toBe(ReviewStates.UPLOAD_SQL);
 
@@ -270,6 +319,7 @@ describe('useUploadState', () => {
       // Verify all state is reset
       expect(result.current.state).toEqual({
         uploadForm: undefined,
+        sourceFormat: SourceFormat.csv,
         reviewState: ReviewStates.START,
         personnelRecording: '',
         isDataUnsaved: false,

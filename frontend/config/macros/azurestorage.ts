@@ -87,7 +87,8 @@ export async function uploadValidFileAsBuffer(
   user: string,
   formType: string,
   fileRowErrors: FileRowErrors[] = [],
-  blobFileName: string = file.name
+  blobFileName: string = file.name,
+  sourceFormat: string = 'csv'
 ): Promise<BlobUploadCommonResponse> {
   let buffer: Buffer;
   try {
@@ -139,6 +140,7 @@ export async function uploadValidFileAsBuffer(
   const metadata = {
     user: user,
     FormType: formType,
+    sourceformat: sourceFormat,
     FileErrorState: JSON.stringify(fileRowErrors.length > 0 ? fileRowErrors : [])
   };
 

@@ -1,25 +1,27 @@
 import { Dispatch, SetStateAction } from 'react';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 
-const arcgisHeaderString =
-  'OBJECTID Q20 P5 Lx Ly Px Py SPP TAG STEMTAG DBH Viejo HOM Viejo Códigos Viejos Tallo Principal DBH HOM Tipo Arbol Estado Censo STEMTAG GlobalID Códigos D - Dead N - Tag and tree missing L - Leaning CYL - Trunk cylindrical for B trees R - Resprout B - Buttressed tree Q - Broken above 1.3 m M - Multiple-stemmed P - Problem A - Needs checking Ss - Dead stem still standing Cs - Dead stem fallen Ns - Stemtag and stem missing Ts - Stemtag found, stem missing Ascender DBH a 1.30 DOS - Dos placas EM - Error de medida ID - Problema identificación MED - Problema medida NC - No califica NUM - Número Equivocado PP - Placa Perdida Placa Repuesta POSIBLE - Placa/Planta dudosa VIVO - Posiblemente muerto MAP - Problema mapeo Problemas Comentarios Censado Por UTM X (m) UTM Y (m) Fecha Captura Mensaje DBH Equipo x y';
-const arcgisHeaderArr: string[] = arcgisHeaderString.split(/\s+/);
-
-interface HeaderObject {
-  label: string;
-}
-
-const arcgisHeaders: HeaderObject[] = arcgisHeaderArr.map(header => ({
-  label: header
-}));
-
 export enum FormType {
   attributes = 'attributes',
   personnel = 'personnel',
   species = 'species',
   quadrats = 'quadrats',
-  measurements = 'measurements',
+  measurements = 'measurements'
+}
+
+export enum SourceFormat {
+  csv = 'csv',
   arcgis_xlsx = 'arcgis_xlsx'
+}
+
+export function normalizeSourceFormat(value: unknown): SourceFormat | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return Object.values(SourceFormat).includes(trimmed as SourceFormat) ? (trimmed as SourceFormat) : null;
+}
+
+export function isSourceFormat(value: unknown): value is SourceFormat {
+  return normalizeSourceFormat(value) !== null;
 }
 
 // this does not include app users -- that is a different configuration. used solely to define users being submitted as part of census.
@@ -109,8 +111,7 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     { label: 'codes', explanation: 'The attribute codes associated with the measurement and stem', category: 'optional' },
     { label: 'comments', explanation: 'Comments about the measurement', category: 'optional' }, // optional - users should be able to submit comments if needed
     { label: 'errors', explanation: 'Validation errors detected for this measurement', category: 'optional' }
-  ],
-  [FormType.arcgis_xlsx]: arcgisHeaders
+  ]
 };
 
 export enum DatagridType {
@@ -290,8 +291,8 @@ export function getFormHeaderForGridHeader(
   return TableHeadersByFormType[formType].find(h => h.label === formField);
 }
 
-export function getFormForDataGrid(grid: DatagridType): FormType {
-  return DatagridToFormTypeMap[grid] ?? FormType.arcgis_xlsx;
+export function getFormForDataGrid(grid: DatagridType): FormType | undefined {
+  return DatagridToFormTypeMap[grid];
 }
 
 export function getDataGridForForm(form: FormType): DatagridType | undefined {
@@ -469,15 +470,13 @@ export const RequiredTableHeadersByFormType: Record<FormType, { label: string }[
   [FormType.personnel]: TableHeadersByFormType[FormType.personnel].filter(header => header.category === 'required'),
   [FormType.species]: TableHeadersByFormType[FormType.species].filter(header => header.category === 'required'),
   [FormType.quadrats]: TableHeadersByFormType[FormType.quadrats].filter(header => header.category === 'required'),
-  [FormType.measurements]: TableHeadersByFormType[FormType.measurements].filter(header => header.category === 'required'),
-  [FormType.arcgis_xlsx]: []
+  [FormType.measurements]: TableHeadersByFormType[FormType.measurements].filter(header => header.category === 'required')
 };
 
 export const DBInputForms: FormType[] = [FormType.attributes, FormType.personnel, FormType.species, FormType.quadrats, FormType.measurements];
 
 export const FormGroups: Record<string, string[]> = {
-  'Database Forms': DBInputForms,
-  'ArcGIS Forms': [FormType.arcgis_xlsx]
+  'Database Forms': DBInputForms
 };
 
 /**

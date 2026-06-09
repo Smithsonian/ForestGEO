@@ -12,6 +12,7 @@
 import ailogger from '@/ailogger';
 import { runSessionCleanup, purgeOldSessions, ensureUploadSessionsTable } from './uploadsessiontracker';
 import ConnectionManager from './connectionmanager';
+import { cleanupStaleArcgisImportSessions } from '@/lib/arcgis/import-session';
 
 let cleanupIntervalHandle: NodeJS.Timeout | null = null;
 let isCleanupRunning = false;
@@ -31,6 +32,7 @@ async function cleanupSchema(schema: string): Promise<{
   staleMarked: number;
   cleanedUp: number;
   tempDeleted: number;
+  arcgisImportSessionsDeleted: number;
   errors: string[];
 }> {
   const result = {
@@ -38,6 +40,7 @@ async function cleanupSchema(schema: string): Promise<{
     staleMarked: 0,
     cleanedUp: 0,
     tempDeleted: 0,
+    arcgisImportSessionsDeleted: 0,
     errors: [] as string[]
   };
 
@@ -50,6 +53,8 @@ async function cleanupSchema(schema: string): Promise<{
     result.staleMarked = cleanupResult.staleMarked;
     result.cleanedUp = cleanupResult.cleanedUp;
     result.tempDeleted = cleanupResult.totalTempDeleted;
+
+    result.arcgisImportSessionsDeleted = await cleanupStaleArcgisImportSessions(schema);
 
     // Purge old sessions (older than 30 days)
     await purgeOldSessions(schema, 30);
@@ -69,6 +74,7 @@ export async function runGlobalCleanup(): Promise<{
   totalStaleMarked: number;
   totalCleanedUp: number;
   totalTempDeleted: number;
+  totalArcgisImportSessionsDeleted: number;
   errors: string[];
 }> {
   if (isCleanupRunning) {
@@ -78,6 +84,7 @@ export async function runGlobalCleanup(): Promise<{
       totalStaleMarked: 0,
       totalCleanedUp: 0,
       totalTempDeleted: 0,
+      totalArcgisImportSessionsDeleted: 0,
       errors: ['Cleanup already in progress']
     };
   }
@@ -90,6 +97,7 @@ export async function runGlobalCleanup(): Promise<{
     totalStaleMarked: 0,
     totalCleanedUp: 0,
     totalTempDeleted: 0,
+    totalArcgisImportSessionsDeleted: 0,
     errors: [] as string[]
   };
 
@@ -109,6 +117,7 @@ export async function runGlobalCleanup(): Promise<{
         result.totalStaleMarked += schemaResult.staleMarked;
         result.totalCleanedUp += schemaResult.cleanedUp;
         result.totalTempDeleted += schemaResult.tempDeleted;
+        result.totalArcgisImportSessionsDeleted += schemaResult.arcgisImportSessionsDeleted;
         result.errors.push(...schemaResult.errors);
       } catch (error: any) {
         result.errors.push(`${schema}: ${error.message}`);
@@ -121,6 +130,7 @@ export async function runGlobalCleanup(): Promise<{
       staleMarked: result.totalStaleMarked,
       cleanedUp: result.totalCleanedUp,
       tempDeleted: result.totalTempDeleted,
+      arcgisImportSessionsDeleted: result.totalArcgisImportSessionsDeleted,
       errors: result.errors.length
     });
   } finally {
@@ -173,6 +183,7 @@ export async function cleanupSpecificSchema(schema: string): Promise<{
   staleMarked: number;
   cleanedUp: number;
   tempDeleted: number;
+  arcgisImportSessionsDeleted: number;
   errors: string[];
 }> {
   return cleanupSchema(schema);

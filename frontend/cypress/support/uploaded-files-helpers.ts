@@ -38,7 +38,7 @@ export function buildUploadedFile(overrides: Partial<UploadedFileRecord> = {}): 
     name,
     user: overrides.user ?? 'Field Crew',
     date: overrides.date ?? '2024-06-15T09:30:00.000Z',
-    formType: overrides.formType ?? (name.toLowerCase().endsWith('.xlsx') ? 'arcgis_xlsx' : 'measurements'),
+    formType: overrides.formType ?? 'measurements',
     fileErrors: overrides.fileErrors ?? 0
   };
 }

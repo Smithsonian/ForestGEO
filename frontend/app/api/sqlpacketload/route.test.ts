@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
 import ConnectionManager from '@/config/connectionmanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
+import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests, TEMP_MEASUREMENT_INSERT_BATCH_SIZE } from '@/lib/ingestion/temporary-measurements';
 
 const { getCookieMock, authMock, handleUpsertMock } = vi.hoisted(() => ({
   getCookieMock: vi.fn(),
@@ -94,11 +95,8 @@ vi.mock('mysql2/promise', () => ({
   })
 }));
 
-/** Must match TEMP_MEASUREMENT_INSERT_BATCH_SIZE in route.ts */
-const TEMP_MEASUREMENT_INSERT_BATCH_SIZE = 1000;
-
 /** Number of columns in the temporarymeasurements INSERT (FileID through Comments) */
-const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 16;
+const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 17;
 
 const TEST_SESSION_ID = 'session-1';
 const TEST_PLOT_ID = 22;
@@ -186,9 +184,32 @@ describe('sqlpacketload measurement scope validation', () => {
     authMock.mockResolvedValue({ user: { id: 'user-1' } });
     getCookieMock.mockResolvedValue(undefined);
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
+    resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
+  });
+
+  it('rejects invalid sourceFormat before touching measurement scope data', async () => {
+    const res = (await POST(makeMeasurementRequest({ sourceFormat: 'spoofed_arcgis' })))!;
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'sourceFormat must be csv'
+    });
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    expect(requireUploadSessionOwnershipMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects arcgis_xlsx sourceFormat for measurement uploads (route is csv-only)', async () => {
+    const res = (await POST(makeMeasurementRequest({ sourceFormat: 'arcgis_xlsx' })))!;
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'sourceFormat must be csv'
+    });
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    expect(requireUploadSessionOwnershipMock).not.toHaveBeenCalled();
   });
 
   it('prefers request body over mismatched cookies', async () => {
@@ -201,6 +222,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
@@ -218,7 +240,7 @@ describe('sqlpacketload measurement scope validation', () => {
     const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
       String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
     );
-    expect(insertCall[1].slice(0, 5)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, TEST_PLOT_ID, TEST_CENSUS_ID]);
+    expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
   });
 
   it('rejects when census does not belong to the provided plot', async () => {
@@ -249,6 +271,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
@@ -267,7 +290,7 @@ describe('sqlpacketload measurement scope validation', () => {
       String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
     );
     expect(insertCall).toBeDefined();
-    expect(insertCall[1].slice(0, 5)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, TEST_PLOT_ID, TEST_CENSUS_ID]);
+    expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
   });
 
   it('rejects measurement uploads when the upload session does not own the scope', async () => {
@@ -310,6 +333,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
@@ -337,6 +361,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 10605 })
@@ -362,6 +387,8 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       // batch scope check
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      // SourceFormat column exists
+      .mockResolvedValueOnce([{ count: 1 }])
       // pre-insert count
       .mockResolvedValueOnce([{ count: 0 }])
       // cleanupPreviousFileUploads: find old batches
@@ -426,6 +453,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce({ affectedRows: 0 })
       .mockResolvedValueOnce(undefined)
@@ -463,6 +491,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([{ batchID: 'completed-batch-1' }])
       .mockRejectedValueOnce(missingError)
@@ -524,6 +553,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
@@ -573,10 +603,29 @@ describe('sqlpacketload fixed-data upload modes', () => {
     vi.clearAllMocks();
     mockConnectionManager = ConnectionManager.getInstance();
     authMock.mockResolvedValue({ user: { id: 'user-1' } });
+    resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-fixed');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
     handleUpsertMock.mockResolvedValue({ id: 1, operation: 'inserted' });
+  });
+
+  it('rejects arcgis_xlsx sourceFormat for fixed-data uploads (route is csv-only)', async () => {
+    const res = await POST(
+      makeFixedDataRequest(
+        'attributes',
+        {
+          'row-1': { code: 'alive', description: 'Alive', status: 'alive' }
+        },
+        { sourceFormat: 'arcgis_xlsx' }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    await expect(res?.json()).resolves.toMatchObject({
+      error: 'sourceFormat must be csv'
+    });
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
   });
 
   it('updates existing attributes and inserts new codes in revisions mode', async () => {

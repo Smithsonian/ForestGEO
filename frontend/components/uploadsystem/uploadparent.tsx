@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
@@ -19,6 +19,7 @@ import UploadComplete from '@/components/uploadsystem/segments/uploadcomplete';
 import UploadReingestion from '@/components/uploadsystem/segments/uploadreingestion';
 import UploadRevisionMatch from '@/components/uploadsystem/segments/uploadrevisionmatch';
 import UploadRevisionApply from '@/components/uploadsystem/segments/uploadrevisionapply';
+import UploadArcgisPreflight from '@/components/uploadsystem/segments/uploadarcgispreflight';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import ailogger from '@/ailogger';
 import { useFileManagement } from '@/app/hooks/usefilemanagement';
@@ -29,6 +30,7 @@ import { UploadMode } from '@/config/uploadmodes';
 import { canonicalizeRevisionRow, normalizeRevisionHeader } from '@/components/uploadsystemhelpers/revisionfileparse';
 import { EMPTY_REVISION_MATCH_COUNTS, RevisionInvalidRow, RevisionMatchedRow, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { BulkEditPlan } from '@/config/editplan/types';
+import type { ArcgisImportReference } from '@/lib/arcgis/types';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -102,16 +104,17 @@ interface UploadParentProps {
   onReset: () => void;
   overrideUploadForm?: FormType;
   overrideUploadMode?: UploadMode;
+  overrideSourceFormat?: SourceFormat;
   skipToProcessing?: boolean;
   onUploadComplete?: () => void;
 }
 
 function UploadParentInner(props: UploadParentProps) {
-  const { onReset, overrideUploadForm, overrideUploadMode, skipToProcessing, onUploadComplete } = props;
+  const { onReset, overrideUploadForm, overrideUploadMode, overrideSourceFormat, skipToProcessing, onUploadComplete } = props;
 
   // Custom hooks for state management
   const fileManagement = useFileManagement();
-  const uploadState = useUploadState(overrideUploadForm, skipToProcessing, overrideUploadMode);
+  const uploadState = useUploadState(overrideUploadForm, skipToProcessing, overrideUploadMode, overrideSourceFormat);
   const errorHandling = useErrorHandling();
 
   // Remaining local state (not managed by custom hooks)
@@ -127,6 +130,7 @@ function UploadParentInner(props: UploadParentProps) {
   // revisionRolePolicy and block. Surface this at the parse step so the user
   // doesn't reach the match review only to fail at Apply.
   const [revisionRolePreflightWarning, setRevisionRolePreflightWarning] = useState<string | null>(null);
+  const [arcgisImportSession, setArcgisImportSession] = useState<ArcgisImportReference | null>(null);
 
   // Track if we've already initialized reingestion to prevent re-triggering
   const reingestionInitializedRef = useRef(false);
@@ -177,6 +181,7 @@ function UploadParentInner(props: UploadParentProps) {
       setIsReingestionMode(false);
       setRevisionMatchResult(null);
       setRevisionConfirmNewRows(false);
+      setArcgisImportSession(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadState.state.uploadForm, uploadState.state.reviewState]);
@@ -205,6 +210,7 @@ function UploadParentInner(props: UploadParentProps) {
     setIsReingestionMode(false);
     setRevisionMatchResult(null);
     setRevisionConfirmNewRows(false);
+    setArcgisImportSession(null);
   }
 
   async function resetError() {
@@ -213,14 +219,17 @@ function UploadParentInner(props: UploadParentProps) {
 
   // Function to handle file addition
   const handleAddFile = (newFile: FileWithPath) => {
+    setArcgisImportSession(null);
     fileManagement.addFile(newFile);
   };
 
   const handleRemoveFile = (fileIndex: number) => {
+    setArcgisImportSession(null);
     fileManagement.removeFile(fileIndex);
   };
 
   const handleReplaceFile = async (fileIndex: number, newFile: FileWithPath) => {
+    setArcgisImportSession(null);
     fileManagement.replaceFile(fileIndex, newFile);
   };
 
@@ -255,7 +264,10 @@ function UploadParentInner(props: UploadParentProps) {
   }
 
   async function handleInitialSubmit() {
-    if (uploadState.state.uploadMode === UploadMode.REVISIONS && uploadState.state.uploadForm === FormType.measurements) {
+    if (uploadState.state.sourceFormat === SourceFormat.arcgis_xlsx) {
+      setArcgisImportSession(null);
+      uploadState.setReviewState(ReviewStates.ARCGIS_PREFLIGHT);
+    } else if (uploadState.state.uploadMode === UploadMode.REVISIONS && uploadState.state.uploadForm === FormType.measurements) {
       try {
         const stagedParsedData = await parseRevisionFiles();
         setParsedData(stagedParsedData);
@@ -384,6 +396,7 @@ function UploadParentInner(props: UploadParentProps) {
           <UploadParseFiles
             uploadForm={uploadState.state.uploadForm}
             uploadMode={uploadState.state.uploadMode}
+            sourceFormat={uploadState.state.sourceFormat}
             acceptedFiles={fileManagement.files}
             dataViewActive={uploadState.state.dataViewActive}
             setDataViewActive={uploadState.setDataViewActive}
@@ -393,6 +406,24 @@ function UploadParentInner(props: UploadParentProps) {
             handleReplaceFile={handleReplaceFile}
             selectedDelimiters={selectedDelimiters}
             setSelectedDelimiters={setSelectedDelimiters}
+          />
+        );
+      case ReviewStates.ARCGIS_PREFLIGHT:
+        return (
+          <UploadArcgisPreflight
+            acceptedFiles={fileManagement.files}
+            schema={currentSite?.schemaName || ''}
+            plotID={currentPlotID ?? 0}
+            censusID={currentCensusID ?? 0}
+            onProceed={importSession => {
+              setArcgisImportSession(importSession);
+              uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+            }}
+            onBack={() => uploadState.setReviewState(ReviewStates.UPLOAD_FILES)}
+            onError={error => {
+              errorHandling.setError(error);
+              uploadState.setReviewState(ReviewStates.ERRORS);
+            }}
           />
         );
       case ReviewStates.UPLOAD_SQL:
@@ -412,7 +443,9 @@ function UploadParentInner(props: UploadParentProps) {
             acceptedFiles={fileManagement.files}
             uploadForm={uploadState.state.uploadForm}
             uploadMode={uploadState.state.uploadMode}
+            sourceFormat={uploadState.state.sourceFormat}
             parsedData={parsedData}
+            arcgisImportSession={arcgisImportSession}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
             schema={currentSite?.schemaName || ''}
@@ -476,6 +509,7 @@ function UploadParentInner(props: UploadParentProps) {
           <UploadFireAzure
             acceptedFiles={fileManagement.files}
             uploadForm={uploadState.state.uploadForm}
+            sourceFormat={uploadState.state.sourceFormat}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
             setUploadError={(error: any) => errorHandling.setError(error)}

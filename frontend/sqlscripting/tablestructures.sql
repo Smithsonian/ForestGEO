@@ -623,6 +623,7 @@ create table if not exists temporarymeasurements
     FileID          varchar(36)                         null,
     BatchID         varchar(36)                         not null,
     SessionID       varchar(64)                         null,
+    SourceFormat    varchar(32) default 'csv'           not null,
     PlotID          int                                 null,
     CensusID        int                                 null,
     TreeTag         varchar(20)                         null,
@@ -662,6 +663,48 @@ create index temporarymeasurements_TreeTag_SpeciesCode_index
 
 create index idx_tmpm_session
     on temporarymeasurements (SessionID);
+
+create table if not exists arcgis_import_sessions
+(
+    import_session_id           varchar(64)                         not null
+        primary key,
+    plot_id                     int                                 not null,
+    census_id                   int                                 not null,
+    user_id                     varchar(255)                        not null,
+    file_id                     varchar(255)                        not null,
+    row_count                   int                                 not null,
+    warning_count               int                                 not null,
+    summary_json                json                                not null,
+    warnings_json               json                                not null,
+    state                       varchar(32) default 'preflight'     not null,
+    committed_file_id           varchar(255)                        null,
+    committed_batch_id          varchar(64)                         null,
+    committed_upload_session_id varchar(64)                         null,
+    committed_row_count         int                                 null,
+    committed_at                timestamp                           null,
+    created_at                  timestamp default CURRENT_TIMESTAMP not null,
+    updated_at                  timestamp default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP
+);
+
+create index idx_arcgis_import_scope
+    on arcgis_import_sessions (plot_id, census_id, user_id, state);
+
+create index idx_arcgis_import_committed_batch
+    on arcgis_import_sessions (committed_batch_id);
+
+create index idx_arcgis_import_created
+    on arcgis_import_sessions (created_at);
+
+create table if not exists arcgis_import_rows
+(
+    import_session_id varchar(64) not null,
+    row_index         int         not null,
+    row_json          json        not null,
+    primary key (import_session_id, row_index),
+    constraint fk_arcgis_import_rows_session
+        foreign key (import_session_id) references arcgis_import_sessions (import_session_id)
+            on delete cascade
+);
 
 create table if not exists trees
 (
@@ -834,6 +877,8 @@ values ('ingestion', 'MISSING_FIELD_TREETAG', 'Missing required field: TreeTag')
        ('ingestion', 'MISSING_FIELD_SPECIESCODE', 'Missing required field: SpeciesCode'),
        ('ingestion', 'MISSING_FIELD_QUADRATNAME', 'Missing required field: QuadratName'),
        ('ingestion', 'MISSING_FIELD_DATE', 'Missing required field: MeasurementDate'),
+       ('ingestion', 'MISSING_FIELD_LOCALX', 'Missing required field: LocalX'),
+       ('ingestion', 'MISSING_FIELD_LOCALY', 'Missing required field: LocalY'),
        ('ingestion', 'INVALID_QUADRAT', 'Invalid quadrat reference'),
        ('ingestion', 'INVALID_SPECIES', 'Invalid species reference'),
        ('ingestion', 'AMBIGUOUS_QUADRAT', 'Quadrat name resolves to multiple active quadrats in the same plot'),

@@ -9,6 +9,7 @@ import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import path from 'path';
 import type { Session } from 'next-auth';
+import { FormType, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -57,6 +58,7 @@ interface FileOperationParams {
   census?: string;
   user?: string;
   formType?: string;
+  sourceFormat?: string;
 }
 
 interface AuthorizedFileScope {
@@ -170,7 +172,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
     return new NextResponse(JSON.stringify({ error: 'File is required' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const { fileName, formType } = params;
+  const { fileName, formType, sourceFormat } = params;
   const file = formData.get(fileName ?? 'file') as File | null;
   const fileRowErrors = formData.get('fileRowErrors') ? JSON.parse(formData.get('fileRowErrors') as string) : [];
 
@@ -179,6 +181,19 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
     return new NextResponse(JSON.stringify({ error: 'Missing required parameters: fileName, formType, and file' }), {
       status: HTTPResponses.INVALID_REQUEST
     });
+  }
+
+  const normalizedSourceFormat = normalizeSourceFormat(sourceFormat ?? SourceFormat.csv);
+  if (!normalizedSourceFormat) {
+    return new NextResponse(JSON.stringify({ error: 'Invalid sourceFormat' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+  if (normalizedSourceFormat === SourceFormat.arcgis_xlsx && formType !== FormType.measurements) {
+    return new NextResponse(JSON.stringify({ error: 'ArcGIS .xlsx sourceFormat is only valid for measurements uploads' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
+  if (normalizedSourceFormat === SourceFormat.arcgis_xlsx && !fileName.toLowerCase().endsWith('.xlsx')) {
+    return new NextResponse(JSON.stringify({ error: 'ArcGIS uploads must use a .xlsx workbook' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
   // Security validations
@@ -221,7 +236,15 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
     const containerClient = await getContainerClient(scope.primaryContainer);
 
     // uploadValidFileAsBuffer now always returns a response or throws
-    const uploadResponse = await uploadValidFileAsBuffer(containerClient, file, scope.userId, formType, fileRowErrors, sanitizedFileName);
+    const uploadResponse = await uploadValidFileAsBuffer(
+      containerClient,
+      file,
+      scope.userId,
+      formType,
+      fileRowErrors,
+      sanitizedFileName,
+      normalizedSourceFormat
+    );
 
     // Verify the response status
     if (uploadResponse._response.status < 200 || uploadResponse._response.status >= 300) {
@@ -306,7 +329,8 @@ function extractParams(request: NextRequest): FileOperationParams & { fileName?:
     plot: searchParams.get('plot')?.trim() || undefined,
     census: searchParams.get('census')?.trim() || undefined,
     user: searchParams.get('user')?.trim() || undefined,
-    formType: searchParams.get('formType')?.trim() || undefined
+    formType: searchParams.get('formType')?.trim() || undefined,
+    sourceFormat: searchParams.get('sourceFormat')?.trim() || undefined
   };
 }
 

@@ -1,8 +1,9 @@
 import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
 import React, { Dispatch, SetStateAction } from 'react';
 import { FileWithPath } from 'react-dropzone';
-import { FileCollectionRowSet, FormType } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
+import type { ArcgisImportReference } from '@/lib/arcgis/types';
 
 // File upload constraints
 export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500MB per file
@@ -34,6 +35,7 @@ export interface UploadParseFilesProps {
   // state vars
   uploadForm: FormType | undefined;
   uploadMode: UploadMode | undefined;
+  sourceFormat?: SourceFormat;
   acceptedFiles: FileWithStream[];
   dataViewActive: number;
   selectedDelimiters: Record<string, string>;
@@ -83,9 +85,11 @@ export interface UploadFireProps {
   // state vars
   uploadForm: FormType | undefined;
   uploadMode: UploadMode | undefined;
+  sourceFormat?: SourceFormat;
   personnelRecording: string;
   acceptedFiles: FileWithStream[];
   parsedData: FileCollectionRowSet;
+  arcgisImportSession?: ArcgisImportReference | null;
   uploadCompleteMessage: string;
   selectedDelimiters: Record<string, string>;
   // state setters
@@ -102,6 +106,7 @@ export interface UploadFireAzureProps {
   user: string;
   // state vars
   uploadForm: FormType | undefined;
+  sourceFormat?: SourceFormat;
   acceptedFiles: FileWithStream[];
   allRowToCMID: DetailedCMIDRow[];
   // state setters
@@ -166,6 +171,7 @@ export interface UploadErrorProps {
 export enum ReviewStates {
   START = 'start',
   UPLOAD_FILES = 'upload_files',
+  ARCGIS_PREFLIGHT = 'arcgis_preflight',
   REVIEW = 'review',
   UPLOAD_SQL = 'upload_sql',
   REVISION_MATCH = 'revision_match',
@@ -190,7 +196,8 @@ export enum ReviewProgress {
   VALIDATE_ERRORS_FOUND = 8,
   UPDATE = 9,
   UPLOAD_AZURE = 10,
-  COMPLETE = 11
+  COMPLETE = 11,
+  ARCGIS_PREFLIGHT = 12
 }
 
 // for validation error display ONLY

@@ -15,6 +15,7 @@ interface FileListEnhancedProps extends FileListProps {
   selectedDelimiters: Record<string, string>;
   onRemoveFile: (fileIndex: number) => void;
   onValidationStatusChange?: (fileName: string, isValid: boolean, issues: string[]) => void;
+  isArcgisWorkbook?: boolean;
 }
 
 export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
@@ -27,7 +28,8 @@ export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
     onDelimiterChange,
     selectedDelimiters,
     onRemoveFile,
-    onValidationStatusChange
+    onValidationStatusChange,
+    isArcgisWorkbook
   } = props;
 
   const [expandedPreview, setExpandedPreview] = useState<Record<number, boolean>>({});
@@ -184,6 +186,7 @@ export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
                     initialDelimiter={selectedDelimiters[file.name]}
                     showPreview={expandedPreview[index]}
                     onValidationStatusChange={onValidationStatusChange ? (isValid, issues) => onValidationStatusChange(file.name, isValid, issues) : undefined}
+                    isArcgisWorkbook={isArcgisWorkbook}
                   />
                 </Stack>
               </Stack>

@@ -62,6 +62,7 @@ vi.mock('next/headers', () => {
  */
 
 const emptyModule = {};
+const coreModule = { AttributeStatusOptions: ['alive', 'dead', 'stem dead', 'broken below', 'omitted', 'missing'] };
 
 vi.mock('@/config/sqlrdsdefinitions/taxonomies', () => emptyModule);
 vi.mock('@/config/sqlrdsdefinitions/zones', () => emptyModule);
@@ -69,7 +70,7 @@ vi.mock('@/config/sqlrdsdefinitions/views', () => emptyModule);
 vi.mock('@/config/sqlrdsdefinitions/validations', () => emptyModule);
 vi.mock('@/config/sqlrdsdefinitions/timekeeping', () => emptyModule);
 vi.mock('@/config/sqlrdsdefinitions/personnel', () => emptyModule);
-vi.mock('@/config/sqlrdsdefinitions/core', () => emptyModule);
+vi.mock('@/config/sqlrdsdefinitions/core', () => coreModule);
 vi.mock('@/config/sqlrdsdefinitions/admin', () => emptyModule);
 // datamapper also imports a relative admin re-export:
 vi.mock('./sqlrdsdefinitions/admin', () => emptyModule);
