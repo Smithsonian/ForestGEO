@@ -333,6 +333,33 @@ describe('readArcgisWorkbook with mapping', () => {
     await expect(readArcgisWorkbook(buffer, mapping)).rejects.toThrow(MissingColumnError);
   });
 
+  it('lets an explicitly mapped column claim its key even when an alias-named column appears earlier', async () => {
+    // Leftover empty 'lx' column sits BEFORE the user-mapped 'MyX'. The explicit mapping must win:
+    // lx data comes from MyX, not from the stale alias-named column.
+    const headerWithLeftover = ['GlobalID', 'lx', 'TreeTag', 'StemTag', 'Sp', 'Q', 'MyX', 'MyY', 'When'];
+    const buffer = await buildWorkbook({
+      TreesCustom: [headerWithLeftover, ['G1', '', '100', '100', 'QURU', 'A25', '5.1', '6.2', 46036]],
+      StemsCustom: [CUSTOM_STEM_HEADER, ['S1', 'G1', '100', '100-1', 'QURU', 'A25', 46036]]
+    });
+    const wb = await readArcgisWorkbook(buffer, mapping);
+    expect(wb.trees).toHaveLength(1);
+    expect(wb.trees[0].lx).toBe('5.1');
+    expect(wb.trees[0].ly).toBe('6.2');
+  });
+
+  it('still alias-resolves a field on a sheet where its mapped source column is absent', async () => {
+    // The mapping sends tag <- TreeTag, but this stems sheet names the column 'tag' (an alias) and
+    // has no TreeTag; alias detection must still fill the unclaimed key on that sheet.
+    const stemHeaderAliasTag = ['GlobalID', 'ParentGlobalID', 'tag', 'StemTag', 'Sp', 'Q', 'When'];
+    const buffer = await buildWorkbook({
+      TreesCustom: [CUSTOM_TREE_HEADER, ['G1', '100', '100', 'QURU', 'A25', '5.1', '6.2', 46036]],
+      StemsCustom: [stemHeaderAliasTag, ['S1', 'G1', '100', '100-1', 'QURU', 'A25', 46036]]
+    });
+    const wb = await readArcgisWorkbook(buffer, mapping);
+    expect(wb.stems).toHaveLength(1);
+    expect(wb.stems[0].tag).toBe('100');
+  });
+
   it('behaves identically to the no-mapping path when mapping is undefined', async () => {
     const buffer = await buildWorkbook({
       trees: [TREE_HEADER, ['G1', 'A25', '100', '100', 'QURU', '12.3', '1.3', 'ok', 46036, '5.1', '6.2', 'M', 'NA']],

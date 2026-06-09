@@ -29,8 +29,10 @@ function normalizeCellValue(value: ExcelJS.CellValue): ArcgisCell {
 
 /**
  * Maps each raw header to its CANONICAL schema field (when one matches a normalized alias) or to its
- * own trimmed text otherwise, so `COD_*`/OBJECTID/etc. survive. A user-confirmed mapping's source
- * columns take precedence over alias detection. If two headers resolve to the same canonical field,
+ * own trimmed text otherwise, so `COD_*`/OBJECTID/etc. survive. Resolution is two-pass so a
+ * user-confirmed mapping's source columns ALWAYS claim their canonical keys, regardless of column
+ * order; alias detection then only fills keys the mapping left unclaimed (a column the user mapped
+ * to another field can never alias-claim). If two headers resolve to the same key within a pass,
  * the FIRST wins and later ones are ignored (no overwrite).
  */
 function buildHeaderMap(rawHeaders: string[], mapping?: ColumnMapping): { keys: string[]; keyByRawHeader: Map<string, string> } {
@@ -38,16 +40,34 @@ function buildHeaderMap(rawHeaders: string[], mapping?: ColumnMapping): { keys: 
   for (const field of mapping?.fields ?? []) {
     for (const src of field.sourceColumns) overrideByNorm.set(normalizeHeader(src), field.canonicalField);
   }
-  const keys: string[] = [];
   const keyByRawHeader = new Map<string, string>();
   const claimed = new Set<string>();
+
   for (const raw of rawHeaders) {
+    const key = overrideByNorm.get(normalizeHeader(raw.trim()));
+    if (key === undefined || claimed.has(key)) continue;
+    claimed.add(key);
+    keyByRawHeader.set(raw, key);
+  }
+
+  for (const raw of rawHeaders) {
+    if (keyByRawHeader.has(raw)) continue;
     const trimmed = raw.trim();
-    const key = overrideByNorm.get(normalizeHeader(trimmed)) ?? canonicalFieldFor(trimmed) ?? trimmed;
+    // A header the mapping assigns elsewhere never falls back to alias/verbatim resolution.
+    if (overrideByNorm.has(normalizeHeader(trimmed))) continue;
+    const key = canonicalFieldFor(trimmed) ?? trimmed;
     if (claimed.has(key)) continue;
     claimed.add(key);
-    keys.push(key);
     keyByRawHeader.set(raw, key);
+  }
+
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawHeaders) {
+    const key = keyByRawHeader.get(raw);
+    if (key === undefined || seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
   }
   return { keys, keyByRawHeader };
 }
