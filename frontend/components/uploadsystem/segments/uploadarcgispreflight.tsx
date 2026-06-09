@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Accordion,
   AccordionDetails,
@@ -22,6 +22,10 @@ import type { ArcgisImportReference, ArcgisPreflightResponse, TransformSummary, 
 import { warningsToCsv } from '@/lib/arcgis/diagnostics-csv';
 import { arcgisHelpHeaders } from '@/lib/arcgis/schema';
 import ailogger from '@/ailogger';
+import ColumnMappingDialog from './columnmappingdialog';
+import { seedMapping } from '@/lib/column-mapping/mapping';
+import { SourceFormat } from '@/config/macros/formdetails';
+import type { ArcgisSourceMetadata, ColumnMapping } from '@/lib/column-mapping/types';
 
 const EXPECTED_COLUMNS = arcgisHelpHeaders();
 
@@ -133,45 +137,48 @@ export function ArcgisPreflightSummary({ summary, warnings, onProceed }: { summa
 export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, censusID, onProceed, onBack, onError }: Readonly<UploadArcgisPreflightProps>) {
   const [result, setResult] = useState<ArcgisPreflightResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [arcgisMeta, setArcgisMeta] = useState<ArcgisSourceMetadata | null>(null);
+  const [mapping, setMapping] = useState<ColumnMapping | null>(null);
+  const [mappingOpen, setMappingOpen] = useState(false);
+  const isMountedRef = useRef(true);
 
   useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      setResult(null);
-      setErrorMessage(null);
-      const file = acceptedFiles[0];
-      if (!file) {
-        setErrorMessage('No file provided for the ArcGIS import.');
-        return;
-      }
-      if (acceptedFiles.length > 1) {
-        setErrorMessage(`ArcGIS import accepts exactly one workbook, but ${acceptedFiles.length} files were provided. Remove the extra file(s) and try again.`);
-        return;
-      }
-      if (!file.name.toLowerCase().endsWith('.xlsx')) {
-        setErrorMessage('ArcGIS import requires a single .xlsx workbook.');
-        return;
-      }
-      if (!schema || !plotID || !censusID) {
-        setErrorMessage('ArcGIS import requires an active site, plot, and census selection.');
-        return;
-      }
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
+  const runPreflight = useCallback(
+    async (mappingArg?: ColumnMapping) => {
+      const file = acceptedFiles[0];
       try {
         const formData = new FormData();
         formData.append('file', file as File);
         formData.append('schema', schema);
         formData.append('plotID', String(plotID));
         formData.append('censusID', String(censusID));
+        if (mappingArg) formData.append('mapping', JSON.stringify(mappingArg));
 
         const response = await fetch('/api/arcgis/preflight', {
           method: 'POST',
           body: formData
         });
-        const payload = (await response.json().catch(() => ({}))) as Partial<ArcgisPreflightResponse> & { error?: string };
-        if (cancelled) return;
+        const payload = (await response.json().catch(() => ({}))) as Partial<ArcgisPreflightResponse> & {
+          error?: string;
+          mappingRequired?: boolean;
+          sheets?: { name: string; columns: string[] }[];
+        };
+        if (!isMountedRef.current) return;
 
         if (!response.ok) {
+          if (payload.mappingRequired && Array.isArray(payload.sheets)) {
+            const meta: ArcgisSourceMetadata = { format: SourceFormat.arcgis_xlsx, sheets: payload.sheets };
+            setArcgisMeta(meta);
+            setMapping(mappingArg ?? seedMapping(meta));
+            setMappingOpen(true);
+            return;
+          }
           const message = payload.error || `ArcGIS pre-flight failed with HTTP ${response.status}`;
           if ([400, 413, 422].includes(response.status)) {
             setErrorMessage(message);
@@ -184,19 +191,39 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
           throw new Error('ArcGIS pre-flight returned an incomplete import session response.');
         }
 
-        if (!cancelled) setResult(payload as ArcgisPreflightResponse);
+        setResult(payload as ArcgisPreflightResponse);
       } catch (error: unknown) {
-        if (cancelled) return;
+        if (!isMountedRef.current) return;
         const wrapped = error instanceof Error ? error : new Error(String(error));
         ailogger.error('ArcGIS pre-flight failed:', wrapped);
         onError(wrapped);
       }
+    },
+    [acceptedFiles, schema, plotID, censusID, onError]
+  );
+
+  useEffect(() => {
+    setResult(null);
+    setErrorMessage(null);
+    const file = acceptedFiles[0];
+    if (!file) {
+      setErrorMessage('No file provided for the ArcGIS import.');
+      return;
     }
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [acceptedFiles, schema, plotID, censusID, onError]);
+    if (acceptedFiles.length > 1) {
+      setErrorMessage(`ArcGIS import accepts exactly one workbook, but ${acceptedFiles.length} files were provided. Remove the extra file(s) and try again.`);
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith('.xlsx')) {
+      setErrorMessage('ArcGIS import requires a single .xlsx workbook.');
+      return;
+    }
+    if (!schema || !plotID || !censusID) {
+      setErrorMessage('ArcGIS import requires an active site, plot, and census selection.');
+      return;
+    }
+    void runPreflight();
+  }, [acceptedFiles, schema, plotID, censusID, runPreflight]);
 
   if (errorMessage) {
     return (
@@ -210,6 +237,40 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
           </Box>
         </Stack>
       </Alert>
+    );
+  }
+  if (!result && arcgisMeta && mapping) {
+    return (
+      <>
+        <Alert color="warning" variant="soft" sx={{ width: '100%' }}>
+          <Stack spacing={1}>
+            <Typography level="body-sm">
+              The workbook columns do not match the expected ArcGIS schema. Map your columns (and pick the trees/stems sheets) to continue.
+            </Typography>
+            <Stack direction="row" spacing={1}>
+              <Button size="sm" onClick={() => setMappingOpen(true)}>
+                Map columns
+              </Button>
+              <Button size="sm" variant="outlined" color="neutral" onClick={onBack}>
+                Back to file selection
+              </Button>
+            </Stack>
+          </Stack>
+        </Alert>
+        <ColumnMappingDialog
+          open={mappingOpen}
+          format={SourceFormat.arcgis_xlsx}
+          metadata={arcgisMeta}
+          mapping={mapping}
+          onChange={setMapping}
+          onApply={m => {
+            setMapping(m);
+            setMappingOpen(false);
+            void runPreflight(m);
+          }}
+          onClose={() => setMappingOpen(false)}
+        />
+      </>
     );
   }
   if (!result) {

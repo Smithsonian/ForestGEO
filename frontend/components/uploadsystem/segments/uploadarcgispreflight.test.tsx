@@ -119,6 +119,53 @@ describe('UploadArcgisPreflight', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('opens the mapping dialog when preflight returns mappingRequired and resubmits with the mapping', async () => {
+    const onProceed = vi.fn();
+    const onError = vi.fn();
+    const mappingRequiredBody = {
+      error: 'Trees sheet missing lx, ly.',
+      mappingRequired: true,
+      format: 'arcgis_xlsx',
+      sheets: [
+        { name: 'TreesCustom', columns: ['GlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'MyX', 'MyY', 'Date_measured'] },
+        { name: 'StemsCustom', columns: ['GlobalID', 'ParentGlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'Date_measured'] }
+      ],
+      missingRequired: ['lx', 'ly'],
+      missingSheetRoles: ['trees', 'stems']
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(mappingRequiredBody), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ importSessionId: 'arcgis-session-2', fileName: 'arcgis-export.xlsx', rowCount: 1, summary, warnings: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const file = new File(['workbook'], 'arcgis-export.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+
+    render(
+      <UploadArcgisPreflight
+        acceptedFiles={[file]}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        onProceed={onProceed}
+        onBack={() => {}}
+        onError={onError}
+      />
+    );
+
+    expect(await screen.findByRole('heading', { name: /map your columns/i })).toBeInTheDocument();
+    expect(onProceed).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('shows a recoverable file-selection error for multiple workbooks', async () => {
     const onBack = vi.fn();
     const onError = vi.fn();
