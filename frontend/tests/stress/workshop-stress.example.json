@@ -1,0 +1,18 @@
+{
+  "sites": [
+    {
+      "schema": "forestgeo_panama",
+      "plotID": 2,
+      "censusID": 9,
+      "plotCensusNumber": 3,
+      "label": "Panama workshop sample"
+    },
+    {
+      "schema": "forestgeo_serc",
+      "plotID": 1,
+      "censusID": 4,
+      "plotCensusNumber": 2,
+      "label": "SERC workshop sample"
+    }
+  ]
+}
