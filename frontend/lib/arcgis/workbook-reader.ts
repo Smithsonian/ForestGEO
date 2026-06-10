@@ -52,16 +52,34 @@ function buildHeaderMap(rawHeaders: string[], mapping?: ColumnMapping): { keys: 
   return { keys, keyByRawHeader };
 }
 
-function parseSheet(worksheet: ExcelJS.Worksheet, mapping?: ColumnMapping): ParsedSheet {
-  const columnCount = worksheet.columnCount;
+// Positional header cells, one entry per column (blanks preserved as ''), exactly as parseSheet
+// needs them for row reading.
+function extractRawHeaders(worksheet: ExcelJS.Worksheet): string[] {
   const headerRow = worksheet.getRow(1);
   const rawHeaders: string[] = [];
-  for (let column = 1; column <= columnCount; column++) {
+  for (let column = 1; column <= worksheet.columnCount; column++) {
     const value = normalizeCellValue(headerRow.getCell(column).value);
     rawHeaders.push(value === null ? '' : String(value));
   }
+  return rawHeaders;
+}
 
-  const rawColumns = rawHeaders.map(h => h.trim()).filter(h => h.length > 0);
+// Trimmed, non-empty header columns derived from the positional headers. This is the SINGLE
+// extraction path shared by parseSheet (rawColumns) and readArcgisSheetMetadata: the mapping
+// staleness round-trip (preflight metadata -> seedMapping signature -> resubmission) breaks if the
+// two ever diverge, so both MUST flow through these helpers.
+function toHeaderColumns(rawHeaders: string[]): string[] {
+  return rawHeaders.map(h => h.trim()).filter(h => h.length > 0);
+}
+
+function extractSheetHeaderColumns(worksheet: ExcelJS.Worksheet): string[] {
+  return toHeaderColumns(extractRawHeaders(worksheet));
+}
+
+function parseSheet(worksheet: ExcelJS.Worksheet, mapping?: ColumnMapping): ParsedSheet {
+  const columnCount = worksheet.columnCount;
+  const rawHeaders = extractRawHeaders(worksheet);
+  const rawColumns = toHeaderColumns(rawHeaders);
 
   const { keys, keyByRawHeader } = buildHeaderMap(rawHeaders, mapping);
 
@@ -174,16 +192,7 @@ export interface ArcgisWorkbookSheetInfo {
 export async function readArcgisSheetMetadata(buffer: ArrayBuffer): Promise<ArcgisWorkbookSheetInfo[]> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
-  return workbook.worksheets.map(worksheet => {
-    const headerRow = worksheet.getRow(1);
-    const columns: string[] = [];
-    for (let column = 1; column <= worksheet.columnCount; column++) {
-      const value = normalizeCellValue(headerRow.getCell(column).value);
-      const header = value === null ? '' : String(value).trim();
-      if (header.length > 0) columns.push(header);
-    }
-    return { name: worksheet.name, columns };
-  });
+  return workbook.worksheets.map(worksheet => ({ name: worksheet.name, columns: extractSheetHeaderColumns(worksheet) }));
 }
 
 export type ArcgisReadOutcome =

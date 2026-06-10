@@ -155,6 +155,7 @@ export default function ColumnMappingDialog({ open, format, fileName, metadata, 
               {validation.duplicateSourceColumns.length > 0 && (
                 <span>Mapped to more than one field: {validation.duplicateSourceColumns.join(', ')}. Each column can feed only one field. </span>
               )}
+              {validation.unknownFields.length > 0 && <span>Unknown fields (remove these): {validation.unknownFields.join(', ')}. </span>}
               {(validation.missingSheetRoles?.length ?? 0) > 0 && <span>Select sheet roles: {validation.missingSheetRoles!.join(', ')}. </span>}
               {validation.sheetRoleConflict && <span>Trees and stems must be different sheets.</span>}
             </Alert>

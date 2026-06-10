@@ -177,6 +177,109 @@ describe('UploadArcgisPreflight', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('repopulates the mapping dialog from the SERVER recovery mapping when a resubmission comes back mapping_required, so the next submit carries the corrected signature instead of looping on the stale one', async () => {
+    const initialSheets = [
+      { name: 'Trees', columns: ['GlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'lx', 'ly', 'Date_measured'] },
+      { name: 'Stems', columns: ['GlobalID', 'ParentGlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'Date_measured'] }
+    ];
+    const clientMapping = seedMapping({
+      format: SourceFormat.arcgis_xlsx,
+      sheets: initialSheets,
+      detectedTreesSheet: 'Trees',
+      detectedStemsSheet: 'Stems'
+    });
+
+    // Stale path: the server rejects the resubmitted mapping and answers with a FRESH seed built
+    // from the workbook it actually sees (quadrat column renamed -> different header signature).
+    const recoverySheets = [
+      { name: 'Trees', columns: ['GlobalID', 'QuadratServer', 'tag', 'StemTag', 'spcode', 'lx', 'ly', 'Date_measured'] },
+      { name: 'Stems', columns: ['GlobalID', 'ParentGlobalID', 'QuadratServer', 'tag', 'StemTag', 'spcode', 'Date_measured'] }
+    ];
+    const recoverySeed = seedMapping({
+      format: SourceFormat.arcgis_xlsx,
+      sheets: recoverySheets,
+      detectedTreesSheet: 'Trees',
+      detectedStemsSheet: 'Stems'
+    });
+    const serverRecoveryMapping = {
+      ...recoverySeed,
+      fields: recoverySeed.fields.map(f => (f.canonicalField === 'quadrat' ? { ...f, sourceColumns: ['QuadratServer'] } : f))
+    };
+    expect(serverRecoveryMapping.headerSignature).not.toBe(clientMapping.headerSignature);
+
+    const noFindingsValidation = {
+      valid: false,
+      missingRequired: [],
+      missingSourceColumns: [],
+      duplicateSourceColumns: [],
+      unknownFields: [],
+      ignoredSourceColumns: [],
+      missingSheetRoles: []
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: 'mapping_required',
+            error: 'No trees sheet found.',
+            format: 'arcgis_xlsx',
+            sheets: initialSheets,
+            mapping: clientMapping,
+            validation: noFindingsValidation
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: 'mapping_required',
+            error: 'The saved column mapping does not match this workbook.',
+            format: 'arcgis_xlsx',
+            sheets: recoverySheets,
+            mapping: serverRecoveryMapping,
+            validation: noFindingsValidation
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+      .mockReturnValueOnce(new Promise(() => {})); // third preflight stays in flight; only its payload matters
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <UploadArcgisPreflight
+        acceptedFiles={[new File(['a'], 'a.xlsx')]}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        onProceed={() => {}}
+        onBack={() => {}}
+        onError={() => {}}
+      />
+    );
+
+    expect(await screen.findByRole('heading', { name: /map your columns/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /apply mapping/i })); // resubmit the (now stale) client mapping
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('heading', { name: /map your columns/i })).toBeInTheDocument();
+
+    // The reopened dialog must be seeded from the SERVER's recovery mapping. With the old
+    // client-mapping precedence the draft would be invalid against the renamed column (quadrat
+    // mapped to a column that no longer exists), Apply would stay disabled, and the user would be
+    // stuck in the stale loop forever.
+    const apply = screen.getByRole('button', { name: /apply mapping/i });
+    await waitFor(() => expect(apply).toBeEnabled());
+    fireEvent.click(apply);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const resubmitBody = fetchMock.mock.calls[2][1].body as FormData;
+    const resubmitted = JSON.parse(resubmitBody.get('mapping') as string);
+    expect(resubmitted.headerSignature).toBe(serverRecoveryMapping.headerSignature);
+    expect(resubmitted.fields.find((f: { canonicalField: string }) => f.canonicalField === 'quadrat')?.sourceColumns).toEqual(['QuadratServer']);
+  });
+
   it('does not re-run preflight when the parent re-renders with new callback identities', async () => {
     const fetchMock = vi.fn(async () => {
       return new Response(JSON.stringify({ importSessionId: 's1', fileName: 'arcgis-export.xlsx', rowCount: 11181, summary, warnings: [] }), {

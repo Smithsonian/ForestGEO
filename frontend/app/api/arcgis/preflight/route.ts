@@ -20,6 +20,8 @@ export const runtime = 'nodejs';
 
 const MAX_ARCGIS_FILE_SIZE = 100 * 1024 * 1024;
 
+const INVALID_MAPPING_PAYLOAD = 'Invalid mapping payload.';
+
 function parsePositiveInteger(value: FormDataEntryValue | null): number | null {
   if (typeof value !== 'string' || !/^\d+$/.test(value.trim())) return null;
   const parsed = Number.parseInt(value.trim(), 10);
@@ -84,10 +86,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     try {
       parsed = JSON.parse(mappingRaw);
     } catch {
-      return NextResponse.json({ error: 'Invalid mapping payload.' }, { status: HTTPResponses.INVALID_REQUEST });
+      return NextResponse.json({ error: INVALID_MAPPING_PAYLOAD }, { status: HTTPResponses.INVALID_REQUEST });
     }
     if (!isColumnMappingShape(parsed)) {
-      return NextResponse.json({ error: 'Invalid mapping payload.' }, { status: HTTPResponses.INVALID_REQUEST });
+      return NextResponse.json({ error: INVALID_MAPPING_PAYLOAD }, { status: HTTPResponses.INVALID_REQUEST });
     }
     mapping = parsed;
   }
@@ -99,13 +101,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const buffer = await file.arrayBuffer();
 
     if (mapping) {
-      // 400-class: wrong format or unknown canonical fields = broken/tampered client, not a remappable workbook.
+      // 400-class: wrong format or unknown canonical fields = broken/tampered client, not a remappable
+      // workbook. The response body stays generic; the log records which check rejected.
       if (mapping.format !== SourceFormat.arcgis_xlsx) {
-        return NextResponse.json({ error: 'Invalid mapping payload.' }, { status: HTTPResponses.INVALID_REQUEST });
+        ailogger.warn(`ArcGIS preflight rejected mapping: format mismatch (${mapping.format})`);
+        return NextResponse.json({ error: INVALID_MAPPING_PAYLOAD }, { status: HTTPResponses.INVALID_REQUEST });
       }
       const known = new Set(canonicalFieldsFor(SourceFormat.arcgis_xlsx).map(d => d.canonicalField));
-      if (mapping.fields.some(f => !known.has(f.canonicalField))) {
-        return NextResponse.json({ error: 'Invalid mapping payload.' }, { status: HTTPResponses.INVALID_REQUEST });
+      const unknown = mapping.fields.map(f => f.canonicalField).filter(f => !known.has(f));
+      if (unknown.length > 0) {
+        ailogger.warn(`ArcGIS preflight rejected mapping: unknown canonical field(s): ${unknown.join(', ')}`);
+        return NextResponse.json({ error: INVALID_MAPPING_PAYLOAD }, { status: HTTPResponses.INVALID_REQUEST });
       }
 
       const sheetInfo = await readArcgisSheetMetadata(buffer);
@@ -129,7 +135,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             format: SourceFormat.arcgis_xlsx,
             sheets: sheetInfo,
             mapping: seeded,
-            validation: validateMapping(seeded, metadata)
+            validation: stale ? validateMapping(seeded, metadata) : validation
           } satisfies ArcgisMappingRequiredResponse,
           { status: HTTPResponses.OK }
         );

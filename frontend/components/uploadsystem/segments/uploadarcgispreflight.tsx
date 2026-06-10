@@ -215,10 +215,13 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
 
         if (payload.status === PREFLIGHT_STATUS_MAPPING_REQUIRED && Array.isArray(payload.sheets)) {
           const meta: ArcgisSourceMetadata = { format: SourceFormat.arcgis_xlsx, sheets: payload.sheets };
+          // Prefer the SERVER's echoed mapping over the one we submitted: on the stale path the
+          // server returns a freshly seeded mapping with a corrected header signature, and reusing
+          // our own submitted mapping would re-trip the stale gate on every resubmission.
           dispatch({
             type: 'MAPPING_REQUIRED',
             meta,
-            mapping: mappingArg ?? (isColumnMappingShape(payload.mapping) ? payload.mapping : seedMapping(meta)),
+            mapping: isColumnMappingShape(payload.mapping) ? payload.mapping : (mappingArg ?? seedMapping(meta)),
             serverError: typeof payload.error === 'string' ? payload.error : null
           });
           return;

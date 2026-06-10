@@ -10,7 +10,8 @@ const mocks = vi.hoisted(() => ({
   readArcgisSheetMetadata: vi.fn(),
   transformArcgisWorkbook: vi.fn(),
   createArcgisImportSession: vi.fn(),
-  loggerError: vi.fn()
+  loggerError: vi.fn(),
+  loggerWarn: vi.fn()
 }));
 
 vi.mock('@/auth', () => ({ auth: mocks.auth }));
@@ -32,7 +33,7 @@ vi.mock('@/lib/arcgis/import-session', () => ({ createArcgisImportSession: mocks
 vi.mock('@/config/connectionmanager', () => ({
   default: { getInstance: () => ({}) }
 }));
-vi.mock('@/ailogger', () => ({ default: { error: mocks.loggerError } }));
+vi.mock('@/ailogger', () => ({ default: { error: mocks.loggerError, warn: mocks.loggerWarn } }));
 
 import { POST } from './route';
 import { MissingColumnError, UnparseableDateError } from '@/lib/arcgis/errors';
@@ -162,6 +163,8 @@ describe('POST /api/arcgis/preflight mapping', () => {
 
     expect(res.status).toBe(400);
     expect(body.error).toMatch(/mapping/i);
+    // The response stays generic, but the log must say which check rejected (debuggability).
+    expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringMatching(/format mismatch \(csv\)/));
     expect(mocks.readArcgisWorkbookDetailed).not.toHaveBeenCalled();
     expect(mocks.createArcgisImportSession).not.toHaveBeenCalled();
   });
@@ -174,6 +177,7 @@ describe('POST /api/arcgis/preflight mapping', () => {
 
     expect(res.status).toBe(400);
     expect(body.error).toMatch(/mapping/i);
+    expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringMatching(/unknown canonical field\(s\): not_a_real_field/));
     expect(mocks.readArcgisWorkbookDetailed).not.toHaveBeenCalled();
     expect(mocks.createArcgisImportSession).not.toHaveBeenCalled();
   });

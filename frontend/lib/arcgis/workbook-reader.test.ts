@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import ExcelJS from 'exceljs';
-import { readArcgisWorkbook, readArcgisWorkbookDetailed } from './workbook-reader';
+import { readArcgisSheetMetadata, readArcgisWorkbook, readArcgisWorkbookDetailed } from './workbook-reader';
 import { transformArcgisWorkbook } from './transform';
 import { AmbiguousSheetError, MissingSheetError, MissingColumnError } from './errors';
 import { SourceFormat } from '@/config/macros/formdetails';
@@ -303,6 +303,39 @@ describe('readArcgisWorkbookDetailed', () => {
       expect(outcome.sheets.map(s => s.name)).toEqual(['TreesCustom', 'StemsCustom']);
       expect(outcome.sheets[0].columns).toContain('MyX'); // RAW header, not canonicalized
     }
+  });
+});
+
+describe('readArcgisSheetMetadata', () => {
+  it('reports per-sheet columns IDENTICAL to the sheets readArcgisWorkbookDetailed reports for the same workbook (the mapping staleness round-trip depends on the two extraction paths never diverging)', async () => {
+    // Headers deliberately stress normalization: surrounding whitespace, a blank header cell, and a
+    // whitespace-only header. Both extraction paths must trim and drop blanks identically.
+    const buffer = await buildWorkbook({
+      TreesCustom: [
+        ['GlobalID', '  TreeTag  ', '', 'Sp', 'Q', 'MyX', 'MyY', 'When'],
+        ['G1', '100', 'junk', 'QURU', 'A25', '5.1', '6.2', 46036]
+      ],
+      StemsCustom: [
+        ['GlobalID', 'ParentGlobalID', 'TreeTag', '   ', 'Sp', 'Q', 'When'],
+        ['S1', 'G1', '100', 'x', 'QURU', 'A25', 46036]
+      ]
+    });
+
+    const metadata = await readArcgisSheetMetadata(buffer);
+    const outcome = await readArcgisWorkbookDetailed(buffer);
+
+    // This workbook is mapping-resolvable but unreadable without one (no lx/ly aliases), so the
+    // detailed read takes the !ok path that reports rawColumns per sheet — the other extraction.
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(metadata).toEqual(outcome.sheets);
+    }
+
+    // Anchor the shared normalization explicitly: trimmed, blanks dropped, order preserved.
+    expect(metadata).toEqual([
+      { name: 'TreesCustom', columns: ['GlobalID', 'TreeTag', 'Sp', 'Q', 'MyX', 'MyY', 'When'] },
+      { name: 'StemsCustom', columns: ['GlobalID', 'ParentGlobalID', 'TreeTag', 'Sp', 'Q', 'When'] }
+    ]);
   });
 });
 
