@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DelimiterDetectionResult, DelimiterValidationResult, detectDelimiter, validateDelimiter } from './delimiterdetection';
+import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
 
 export interface UseFilePreviewAnalysisProps {
   file: File;
@@ -23,6 +24,7 @@ export interface UseFilePreviewAnalysisResult {
   validationResult: DelimiterValidationResult | null;
   isAnalyzing: boolean;
   previewData: string[][];
+  papaHeaders: string[] | null;
   handleDelimiterChange: (newDelimiter: string | null) => void;
 }
 
@@ -49,6 +51,7 @@ export function useFilePreviewAnalysis({
   const [validationResult, setValidationResult] = useState<DelimiterValidationResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(true);
   const [previewData, setPreviewData] = useState<string[][]>([]);
+  const [papaHeaders, setPapaHeaders] = useState<string[] | null>(null);
   const previousDelimiterRef = useRef<string>('');
 
   // Auto-detect delimiter on component mount
@@ -96,6 +99,26 @@ export function useFilePreviewAnalysis({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file, initialDelimiter, isArcgisWorkbook]);
 
+  // Papa Parse is the single authoritative source of CSV header identity: the headers reported
+  // to the mapping flow must be exactly what the upload's Papa.parse will key rows against.
+  useEffect(() => {
+    if (isArcgisWorkbook) {
+      setPapaHeaders(null);
+      return;
+    }
+    let cancelled = false;
+    extractCsvHeaderRow(file, selectedDelimiter)
+      .then(headers => {
+        if (!cancelled) setPapaHeaders(headers);
+      })
+      .catch(() => {
+        if (!cancelled) setPapaHeaders(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [file, selectedDelimiter, isArcgisWorkbook]);
+
   // Revalidate when delimiter changes (but not on initial mount)
   useEffect(() => {
     if (isAnalyzing) return; // Skip during initial analysis
@@ -132,6 +155,7 @@ export function useFilePreviewAnalysis({
     validationResult,
     isAnalyzing,
     previewData,
+    papaHeaders,
     handleDelimiterChange
   };
 }

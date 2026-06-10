@@ -35,6 +35,7 @@ import { abortChunkProcessingAfterPermanentUploadFailure, shouldTimeoutPausedPar
 import { generateShortBatchID } from '@/config/utils';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 import { mappingApplies, seedMapping } from '@/lib/column-mapping/mapping';
+import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
 import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
 import { aliasesFor } from '@/lib/column-mapping/fields';
 import { UploadMode } from '@/config/uploadmodes';
@@ -774,9 +775,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           // Log issues but continue parsing - user may have non-standard format that still works
         }
 
-        // Enhanced header validation with mapping feedback
+        // Enhanced header validation with mapping feedback. Headers come from the same
+        // Papa-based extractor that seeded the mapping UI, so the mapping plan and the
+        // upload's Papa.parse agree on header identity by construction.
         if (validation.preview && validation.preview.length > 0) {
-          csvHeaders = validation.preview[0];
+          csvHeaders = await extractCsvHeaderRow(file, delimiter);
           const requiredHeaderLabels = requiredHeaders.map(h => h.label);
           const mappingResults: string[] = [];
           const missingRequired: string[] = [];
@@ -1037,9 +1040,20 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             actualChunkCount += 1;
             totalRows += results.data.length;
             if (headerPlan && actualChunkCount === 1 && Array.isArray(results.meta.fields) && results.meta.fields.length !== headerPlan.outputKeys.length) {
-              ailogger.warn(
-                `Header plan misalignment for ${file.name}: preview tokenizer saw ${headerPlan.outputKeys.length} columns, papaparse saw ${results.meta.fields.length}. Falling back is not possible mid-parse; data may be mis-keyed.`
+              const divergence = new Error(
+                `Header plan misalignment for ${file.name}: mapping plan has ${headerPlan.outputKeys.length} columns but papaparse parsed ${results.meta.fields.length}. ` +
+                  `The file changed between preview and upload, or its header row is malformed. Re-review the column mapping before uploading.`
               );
+              // Mirror the file's fatal-error pattern: record the error, then abort. Papa's
+              // parser.abort() synchronously invokes the `complete` callback below, which
+              // rejects this upload's Promise with chunkProcessingError — so the error must
+              // be recorded BEFORE abort() and no chunk task may be queued for this data.
+              markFatalUploadError(divergence);
+              if (!chunkProcessingError) {
+                chunkProcessingError = divergence;
+              }
+              parser.abort();
+              return;
             }
             const chunkTask = (async () => {
               try {

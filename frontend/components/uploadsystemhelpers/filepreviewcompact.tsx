@@ -25,7 +25,7 @@ export default function FilePreviewCompact({
   onValidationStatusChange,
   isArcgisWorkbook
 }: FilePreviewCompactProps) {
-  const { selectedDelimiter, detectionResult, validationResult, isAnalyzing, previewData, handleDelimiterChange } = useFilePreviewAnalysis({
+  const { selectedDelimiter, detectionResult, validationResult, isAnalyzing, previewData, papaHeaders, handleDelimiterChange } = useFilePreviewAnalysis({
     file,
     expectedHeaders: validationHeaders,
     onDelimiterChange,
@@ -42,7 +42,8 @@ export default function FilePreviewCompact({
   // Extract stable primitive values from validation result for dependency tracking
   const validationIsValid = validationResult?.isValid ?? null;
   const validationIssuesKey = validationResult?.issues?.map(i => i.code + i.message).join('|') ?? '';
-  const detectedHeadersKey = (validationResult?.preview?.[0] ?? []).join('|');
+  // Papa-derived headers are authoritative; the tokenizer preview is only a stopgap until the Papa read resolves.
+  const detectedHeadersKey = (papaHeaders ?? validationResult?.preview?.[0] ?? []).join('|');
 
   // Report validation status changes to parent (only when values actually change)
   useEffect(() => {
@@ -58,7 +59,7 @@ export default function FilePreviewCompact({
         lastReportedValidation.current.headersKey !== current.headersKey
       ) {
         lastReportedValidation.current = current;
-        callback(validationIsValid, validationResult.issues, validationResult.preview?.[0] ?? []);
+        callback(validationIsValid, validationResult.issues, papaHeaders ?? validationResult.preview?.[0] ?? []);
       }
     }
     // Note: validationIssuesKey is derived from validationResult.issues, so we use it instead
