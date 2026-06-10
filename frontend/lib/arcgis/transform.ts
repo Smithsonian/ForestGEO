@@ -1,6 +1,7 @@
 import type { FileRow } from '@/config/macros/formdetails';
+import { joinMultiSourceValues } from '@/lib/column-mapping/resolution';
 import { excelSerialToISODate } from './excel-date';
-import { CODE_COLUMN_PREFIX, CODE_JOIN_SEPARATOR, NULL_CODE_TOKEN, normalizeHeader, resolveColumn } from './schema';
+import { CODE_COLUMN_PREFIX, normalizeHeader, resolveColumn } from './schema';
 import type { ArcgisCell, ArcgisRow, ArcgisWorkbook, TransformResult, TransformWarning } from './types';
 
 // Expand JS exponential notation (e.g. "1e-7", "1e+21") into a plain decimal string with the same
@@ -63,13 +64,12 @@ function dateToIso(value: ArcgisCell): string | null {
 const NORMALIZED_CODE_PREFIX = normalizeHeader(CODE_COLUMN_PREFIX);
 
 function joinCodes(row: ArcgisRow): string {
-  const codes: string[] = [];
+  const values: (string | null)[] = [];
   for (const [key, value] of Object.entries(row)) {
     if (!normalizeHeader(key).startsWith(NORMALIZED_CODE_PREFIX)) continue;
-    const text = cellToString(value);
-    if (text && text.toUpperCase() !== NULL_CODE_TOKEN) codes.push(text);
+    values.push(cellToString(value));
   }
-  return codes.join(CODE_JOIN_SEPARATOR);
+  return joinMultiSourceValues(values) ?? '';
 }
 
 interface CanonicalInput {

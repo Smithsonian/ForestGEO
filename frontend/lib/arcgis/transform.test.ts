@@ -178,6 +178,15 @@ describe('transformArcgisWorkbook', () => {
     expect(summary.missingRequired).toBe(3);
   });
 
+  it('drops the literal NULL code token exactly like the CSV mapping path', () => {
+    // COD_ columns contain 'M', 'NULL' (any case), and 'NA' — only 'M' should survive
+    const { rows } = transformArcgisWorkbook({
+      trees: [tree({ COD_M: 'M', COD_P: 'NULL', COD_Q: 'null' })],
+      stems: []
+    });
+    expect(rows[0].codes).toBe('M');
+  });
+
   it('does not fold a blank quadrat into missing-required (covered only by BLANK_QUADRAT)', () => {
     const { warnings, summary } = transformArcgisWorkbook({ trees: [tree({ GlobalID: 'G1', quadrat: null })], stems: [] });
     expect(warnings.some(w => w.type === 'BLANK_QUADRAT')).toBe(true);
