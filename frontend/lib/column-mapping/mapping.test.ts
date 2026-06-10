@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SourceFormat } from '@/config/macros/formdetails';
 import {
+  chooseEffectiveCsvMapping,
   HEADER_SIGNATURE_VERSION,
   headerSignature,
   isColumnMappingShape,
@@ -236,5 +237,38 @@ describe('headerSignature (positional identity)', () => {
     const mapping = seedMapping({ format: SourceFormat.csv, headers });
     expect(mappingApplies(mapping, headers)).toBe(true);
     expect(mappingApplies(mapping, ['Tag', 'Sp_Code'])).toBe(false);
+  });
+});
+
+describe('chooseEffectiveCsvMapping (upload-time revalidation)', () => {
+  const headers = ['tag', 'spcode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date'];
+
+  it('uses a valid, applicable stored mapping unchanged', () => {
+    const stored = seedMapping({ format: SourceFormat.csv, headers });
+    const result = chooseEffectiveCsvMapping(stored, headers);
+    expect(result.usedStored).toBe(true);
+    expect(result.reason).toBeUndefined();
+    expect(result.mapping).toBe(stored);
+  });
+
+  it('falls back to a seed when the stored signature does not match', () => {
+    const stored = seedMapping({ format: SourceFormat.csv, headers: ['totally', 'different'] });
+    const result = chooseEffectiveCsvMapping(stored, headers);
+    expect(result.usedStored).toBe(false);
+    expect(result.reason).toMatch(/different headers/i);
+  });
+
+  it('falls back to a seed when an applicable stored mapping is invalid', () => {
+    const stored = seedMapping({ format: SourceFormat.csv, headers });
+    const broken = { ...stored, fields: stored.fields.map(f => (f.canonicalField === 'tag' ? { ...f, sourceColumns: [] as string[] } : f)) };
+    const result = chooseEffectiveCsvMapping(broken, headers);
+    expect(result.usedStored).toBe(false);
+    expect(result.reason).toMatch(/no longer valid/i);
+  });
+
+  it('seeds with no reason when there is no stored mapping', () => {
+    const result = chooseEffectiveCsvMapping(undefined, headers);
+    expect(result.usedStored).toBe(false);
+    expect(result.reason).toBeUndefined();
   });
 });

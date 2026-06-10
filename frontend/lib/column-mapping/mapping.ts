@@ -99,6 +99,28 @@ export function seedMapping(metadata: SourceMetadata): ColumnMapping {
   return mapping;
 }
 
+export interface EffectiveCsvMapping {
+  mapping: ColumnMapping;
+  usedStored: boolean;
+  /** Set only when the stored mapping was rejected; a human-readable reason for the UI diagnostic. */
+  reason?: string;
+}
+
+/**
+ * Decide which mapping the upload should actually apply. A stored mapping is trusted only when it
+ * both applies to these exact headers AND passes full validation; otherwise we seed and report why.
+ */
+export function chooseEffectiveCsvMapping(stored: ColumnMapping | undefined, headers: string[]): EffectiveCsvMapping {
+  const metadata = { format: SourceFormat.csv as const, headers };
+  if (stored && !mappingApplies(stored, headers)) {
+    return { mapping: seedMapping(metadata), usedStored: false, reason: 'the saved column mapping was built from different headers' };
+  }
+  if (stored && !validateMapping(stored, metadata).valid) {
+    return { mapping: seedMapping(metadata), usedStored: false, reason: 'the saved column mapping is no longer valid for this file' };
+  }
+  return stored ? { mapping: stored, usedStored: true } : { mapping: seedMapping(metadata), usedStored: false };
+}
+
 export function validateMapping(mapping: ColumnMapping, metadata: SourceMetadata): MappingValidation {
   const defs = canonicalFieldsFor(mapping.format);
   const available = new Set(allSourceColumns(metadata).map(normalizeHeader));

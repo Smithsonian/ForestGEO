@@ -11,7 +11,7 @@ import {
   RequiredTableHeadersByFormType,
   SourceFormat
 } from '@/config/macros/formdetails';
-import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
+import { Alert, Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import Papa, { ParseResult } from 'papaparse';
 import moment from 'moment';
@@ -34,7 +34,7 @@ import {
 import { abortChunkProcessingAfterPermanentUploadFailure, shouldTimeoutPausedParser } from '@/components/uploadsystemhelpers/uploadqueueguards';
 import { generateShortBatchID } from '@/config/utils';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
-import { mappingApplies, seedMapping } from '@/lib/column-mapping/mapping';
+import { chooseEffectiveCsvMapping } from '@/lib/column-mapping/mapping';
 import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
 import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
 import { aliasesFor } from '@/lib/column-mapping/fields';
@@ -143,6 +143,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [uploaded, setUploaded] = useState<boolean>(false);
   const [processed, setProcessed] = useState<boolean>(false);
   const [_verificationStatus, setVerificationStatus] = useState<string>('');
+  // Per-file notices shown when a confirmed column mapping had to be discarded at upload time.
+  const [mappingFallbackWarnings, setMappingFallbackWarnings] = useState<string[]>([]);
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
   const [verificationStep, setVerificationStep] = useState<number>(0);
   const [totalVerificationSteps, setTotalVerificationSteps] = useState<number>(0);
@@ -748,7 +750,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         extraColumnRows: 0,
         extraColumnSample: null as string | null,
         invalidDateCount: 0,
-        invalidDateSamples: new Set<string>()
+        invalidDateSamples: new Set<string>(),
+        mappingFallbackReason: undefined as string | undefined
       };
       let csvHeaders: string[] | null = null;
 
@@ -891,15 +894,18 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       const mappingFlowActive = mappingRequired && csvHeaders !== null && csvHeaders.length > 0;
       const headerPlan = mappingFlowActive
         ? (() => {
-            const storedMapping = columnMappings?.[file.name];
-            const storedMappingApplies = storedMapping !== undefined && mappingApplies(storedMapping, csvHeaders!);
-            if (storedMapping && !storedMappingApplies) {
-              ailogger.warn(
-                `Confirmed column mapping for ${file.name} was built from different headers (signature mismatch); falling back to a seeded mapping.`
-              );
+            const chosen = chooseEffectiveCsvMapping(columnMappings?.[file.name], csvHeaders!);
+            const fallbackReason = chosen.reason;
+            if (fallbackReason) {
+              ailogger.warn(`Column mapping for ${file.name} not used: ${fallbackReason}; seeded from the file's headers instead.`);
+              parsingDiagnostics.mappingFallbackReason = fallbackReason;
+              const userWarning = `${file.name}: ${fallbackReason}, so its columns were matched automatically from the file's headers instead.`;
+              if (isMountedRef.current) {
+                // Deduplicate so a restarted upload attempt does not repeat the same notice.
+                setMappingFallbackWarnings(prev => (prev.includes(userWarning) ? prev : [...prev, userWarning]));
+              }
             }
-            const effectiveMapping = storedMappingApplies ? storedMapping : seedMapping({ format: SourceFormat.csv, headers: csvHeaders! });
-            return resolveHeaders(csvHeaders!, effectiveMapping, aliasesFor(SourceFormat.csv), CSV_RESOLVE_OPTIONS);
+            return resolveHeaders(csvHeaders!, chosen.mapping, aliasesFor(SourceFormat.csv), CSV_RESOLVE_OPTIONS);
           })()
         : null;
       const transformHeader = headerPlan ? transformHeaderFromPlan(headerPlan) : legacyTransformHeader;
@@ -1236,6 +1242,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               );
             }
 
+            if (parsingDiagnostics.mappingFallbackReason) {
+              ailogger.warn(
+                `Saved column mapping for ${file.name} was not used: ${parsingDiagnostics.mappingFallbackReason}; columns were seeded from the file's headers instead.`
+              );
+            }
+
             // Store expected row count for end-to-end verification
             expectedRowCounts.current.set(file.name, totalRows);
 
@@ -1274,6 +1286,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       uploadToSql,
       setCompletedChunks,
       setTotalChunks,
+      setMappingFallbackWarnings,
       pushErrorRowsToFailedMeasurements,
       waitForAllOperationsToComplete,
       markFatalUploadError,
@@ -2268,6 +2281,22 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     return getAnimationUrl('growing-plant.lottie'); // fallback
   };
 
+  const mappingFallbackAlert =
+    mappingFallbackWarnings.length > 0 ? (
+      <Alert color="warning" variant="soft" sx={{ width: '100%', maxWidth: '600px', textAlign: 'left' }}>
+        <Box>
+          <Typography level="title-sm" color="warning">
+            Saved column mapping not used
+          </Typography>
+          {mappingFallbackWarnings.map((warning, idx) => (
+            <Typography key={idx} level="body-sm" sx={{ mt: 0.5 }}>
+              {warning}
+            </Typography>
+          ))}
+        </Box>
+      </Alert>
+    ) : null;
+
   return (
     <>
       {!hasUploaded.current ? (
@@ -2384,6 +2413,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 Please do not close this window
               </Typography>
             </Box>
+
+            {mappingFallbackAlert}
           </Stack>
         </Box>
       ) : (
@@ -2397,8 +2428,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             mt: 4
           }}
         >
-          <Stack direction="column" sx={{ alignItems: 'center', textAlign: 'center' }}>
+          <Stack direction="column" spacing={2} sx={{ alignItems: 'center', textAlign: 'center' }}>
             <Typography level="title-md">Upload Complete</Typography>
+            {mappingFallbackAlert}
           </Stack>
         </Box>
       )}
