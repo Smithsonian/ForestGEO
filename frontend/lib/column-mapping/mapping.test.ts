@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { SourceFormat } from '@/config/macros/formdetails';
-import { headerSignature, isColumnMappingShape, joinMultiSourceValues, mappingApplies, seedMapping, validateMapping } from './mapping';
+import {
+  HEADER_SIGNATURE_VERSION,
+  headerSignature,
+  isColumnMappingShape,
+  joinMultiSourceValues,
+  mappingApplies,
+  seedMapping,
+  validateMapping
+} from './mapping';
 import { ArcgisSourceMetadata, CsvSourceMetadata } from './types';
 
 const csvMeta = (headers: string[]): CsvSourceMetadata => ({ format: SourceFormat.csv, headers });
@@ -218,7 +226,10 @@ describe('headerSignature (positional identity)', () => {
     expect(headerSignature(['tag', '', 'spcode'])).not.toEqual(headerSignature(['tag', 'spcode']));
   });
   it('carries a version prefix so a version bump invalidates old signatures', () => {
-    expect(headerSignature(['tag']).startsWith('v')).toBe(true);
+    expect(headerSignature(['tag']).startsWith(`v${HEADER_SIGNATURE_VERSION}:`)).toBe(true);
+  });
+  it('does not collide when a header literally contains the separator-prone pipe character', () => {
+    expect(headerSignature(['a|b'])).not.toEqual(headerSignature(['a', 'b']));
   });
   it('still round-trips through seedMapping/mappingApplies for identical headers', () => {
     const headers = ['Tag', 'Sp_Code', 'Quadrat'];

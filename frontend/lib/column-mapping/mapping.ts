@@ -30,9 +30,12 @@ const BLANK_HEADER_TOKEN = '∅'; // marks a blank header position so it can't b
  * Identity of an exact header SEQUENCE. Order- and duplicate-sensitive; blank positions are
  * preserved as a sentinel. Versioned so a parser change can invalidate stale signatures wholesale.
  * Compatibility is sequence identity, not "same normalized bag of headers".
+ *
+ * The '_' separator is safe because normalizeHeader strips underscores from every header, so no
+ * normalized token can contain it — the token sequence stays unambiguously recoverable.
  */
 export function headerSignature(headers: string[]): string {
-  const body = headers.map(h => normalizeHeader(h) || BLANK_HEADER_TOKEN).join('|');
+  const body = headers.map(h => normalizeHeader(h) || BLANK_HEADER_TOKEN).join('_');
   return `v${HEADER_SIGNATURE_VERSION}:${body}`;
 }
 
