@@ -62,7 +62,7 @@ export default function FilePreview({ file, expectedHeaders, onDelimiterChange, 
               <Typography level="title-sm">Validation Issues:</Typography>
               {validationResult.issues.map((issue, index) => (
                 <Typography key={index} level="body-sm">
-                  • {issue}
+                  • {issue.message}
                 </Typography>
               ))}
             </Alert>

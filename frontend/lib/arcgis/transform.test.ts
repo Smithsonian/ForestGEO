@@ -181,7 +181,7 @@ describe('transformArcgisWorkbook', () => {
   it('drops the literal NULL code token exactly like the CSV mapping path', () => {
     // COD_ columns contain 'M', 'NULL' (any case), and 'NA' — only 'M' should survive
     const { rows } = transformArcgisWorkbook({
-      trees: [tree({ COD_M: 'M', COD_P: 'NULL', COD_Q: 'null' })],
+      trees: [tree({ COD_M: 'M', COD_P: 'NULL', COD_Q: 'null', COD_R: 'NA' })],
       stems: []
     });
     expect(rows[0].codes).toBe('M');
