@@ -367,6 +367,22 @@ describe('readArcgisWorkbook with mapping', () => {
     expect(wb.stems[0].ParentGlobalID).toBe('G1');
   });
 
+  it('does not let a trees-scoped override cross-claim a same-named column on the stems sheet', async () => {
+    // lx is scoped 'trees' and explicitly mapped to 'MyX'. The stems sheet ALSO has a 'MyX'
+    // column; the scoped-out override must not claim it there, so it passes through under its
+    // raw name and the stems rows never grow a phantom lx field.
+    const stemHeaderWithSharedColumn = [...CUSTOM_STEM_HEADER, 'MyX'];
+    const buffer = await buildWorkbook({
+      TreesCustom: [CUSTOM_TREE_HEADER, ['G1', '100', '100', 'QURU', 'A25', '5.1', '6.2', 46036]],
+      StemsCustom: [stemHeaderWithSharedColumn, ['S1', 'G1', '100', '100-1', 'QURU', 'A25', 46036, '9.9']]
+    });
+    const wb = await readArcgisWorkbook(buffer, mapping);
+    expect(wb.trees[0].lx).toBe('5.1');
+    expect(wb.stems).toHaveLength(1);
+    expect(wb.stems[0].MyX).toBe('9.9'); // raw passthrough, NOT consumed as lx
+    expect(wb.stems[0].lx).toBeUndefined();
+  });
+
   it('throws MissingSheetError when a sheetRole names a sheet that does not exist', async () => {
     const buffer = await buildWorkbook({
       TreesCustom: [CUSTOM_TREE_HEADER, ['G1', '100', '100', 'QURU', 'A25', '5.1', '6.2', 46036]],

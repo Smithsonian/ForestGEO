@@ -2,6 +2,9 @@ import { SourceFormat } from '@/config/macros/formdetails';
 
 export type MappingScope = 'file' | 'trees' | 'stems' | 'both';
 
+/** The role a workbook sheet plays during scope-aware header resolution. */
+export type SheetRole = 'trees' | 'stems';
+
 export interface CanonicalFieldDef {
   canonicalField: string;
   required: boolean;

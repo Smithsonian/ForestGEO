@@ -2,7 +2,7 @@ import ExcelJS from 'exceljs';
 import { AmbiguousSheetError, MissingColumnError, MissingSheetError } from './errors';
 import { STEM_SIGNATURE_COLUMN, requiredColumnsForSheet } from './schema';
 import type { ArcgisCell, ArcgisRow, ArcgisWorkbook } from './types';
-import type { ColumnMapping } from '@/lib/column-mapping/types';
+import type { ColumnMapping, SheetRole } from '@/lib/column-mapping/types';
 import { ARCGIS_RESOLVE_OPTIONS, resolveHeaders } from '@/lib/column-mapping/resolution';
 import { aliasesFor } from '@/lib/column-mapping/fields';
 import { SourceFormat } from '@/config/macros/formdetails';
@@ -40,7 +40,7 @@ function normalizeCellValue(value: ExcelJS.CellValue): ArcgisCell {
 function buildHeaderMap(rawHeaders: string[], mapping?: ColumnMapping, sheetName?: string): { keys: string[]; keyByRawHeader: Map<string, string> } {
   // Role lookup only hits when sheetRoles name this sheet; the auto-detection flow (no sheetRoles)
   // resolves with no role and therefore no scope filtering.
-  const sheetRole: 'trees' | 'stems' | undefined = !sheetName
+  const sheetRole: SheetRole | undefined = !sheetName
     ? undefined
     : mapping?.sheetRoles?.treesSheetName === sheetName
       ? 'trees'

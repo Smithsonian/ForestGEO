@@ -236,6 +236,21 @@ describe('isColumnMappingShape', () => {
     expect(isColumnMappingShape({ version: 1, format: 'parquet', fields: [] })).toBe(false);
     expect(isColumnMappingShape({ version: 1, format: SourceFormat.arcgis_xlsx, fields: [], sheetRoles: 'Sheet1' })).toBe(false);
   });
+
+  it('rejects a field carrying an unrecognized scope (which would otherwise silently scope it out of every role-resolved sheet) but accepts valid and omitted scopes', () => {
+    const withScope = (scope: unknown) => ({
+      version: 1,
+      format: SourceFormat.arcgis_xlsx,
+      fields: [{ canonicalField: 'lx', sourceColumns: ['MyX'], scope }]
+    });
+    expect(isColumnMappingShape(withScope('TREES'))).toBe(false);
+    expect(isColumnMappingShape(withScope('tree'))).toBe(false);
+    expect(isColumnMappingShape(withScope(3))).toBe(false);
+    expect(isColumnMappingShape(withScope('trees'))).toBe(true);
+    expect(isColumnMappingShape(withScope('both'))).toBe(true);
+    expect(isColumnMappingShape(withScope(undefined))).toBe(true);
+    expect(isColumnMappingShape({ version: 1, format: SourceFormat.arcgis_xlsx, fields: [{ canonicalField: 'lx', sourceColumns: ['MyX'] }] })).toBe(true);
+  });
 });
 
 describe('joinMultiSourceValues re-export', () => {

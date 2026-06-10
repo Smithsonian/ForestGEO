@@ -67,6 +67,9 @@ export function isColumnMappingShape(value: unknown): value is ColumnMapping {
     const f = field as Record<string, unknown>;
     if (typeof f.canonicalField !== 'string') return false;
     if (!Array.isArray(f.sourceColumns) || !f.sourceColumns.every(c => typeof c === 'string')) return false;
+    // An unrecognized scope would silently scope the field out of every role-resolved sheet
+    // (fieldAppliesToSheet matches nothing), so reject it as malformed instead.
+    if (f.scope !== undefined && f.scope !== 'file' && f.scope !== 'trees' && f.scope !== 'stems' && f.scope !== 'both') return false;
   }
   if (mapping.sheetRoles !== undefined) {
     if (typeof mapping.sheetRoles !== 'object' || mapping.sheetRoles === null || Array.isArray(mapping.sheetRoles)) return false;

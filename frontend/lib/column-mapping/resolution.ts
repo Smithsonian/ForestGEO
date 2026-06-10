@@ -1,7 +1,7 @@
 import { FileRow } from '@/config/macros/formdetails';
 import { CODE_JOIN_SEPARATOR, NULL_CODE_TOKEN } from '@/lib/arcgis/schema';
 import { normalizeHeader } from './fields';
-import { ColumnMapping, MappingScope } from './types';
+import { ColumnMapping, MappingScope, SheetRole } from './types';
 
 export const MULTI_SOURCE_SEP = '#';
 export const IGNORED_COLUMN_KEY_SUFFIX = '__ignored';
@@ -33,7 +33,7 @@ export interface ResolveOptions {
   /** Key emitted for headers no field claims. */
   passthroughKey: (raw: string) => string;
   /** When set, only mapping fields whose scope applies to this sheet contribute explicit overrides. */
-  sheetRole?: 'trees' | 'stems';
+  sheetRole?: SheetRole;
 }
 
 export const CSV_RESOLVE_OPTIONS: ResolveOptions = {
@@ -48,7 +48,7 @@ export const ARCGIS_RESOLVE_OPTIONS: ResolveOptions = {
 
 // An undefined scope (wire mappings predating scope validation) applies everywhere rather than
 // silently dropping the field's explicit overrides.
-function fieldAppliesToSheet(scope: MappingScope | undefined, sheetRole?: 'trees' | 'stems'): boolean {
+function fieldAppliesToSheet(scope: MappingScope | undefined, sheetRole?: SheetRole): boolean {
   if (!sheetRole || scope === undefined) return true;
   return scope === 'both' || scope === 'file' || scope === sheetRole;
 }
@@ -69,6 +69,8 @@ export function resolveHeaders(
   const overrideByNorm = new Map<string, { field: string; slot: number }>();
   const reservedKeys = new Set<string>();
   for (const field of mapping?.fields ?? []) {
+    // Scoped-out fields contribute no overrides AND no reserved keys here; safe because reservedKeys
+    // is only consulted on the !allowAliasFill (CSV) path, and CSV never sets sheetRole.
     if (!fieldAppliesToSheet(field.scope, options.sheetRole)) continue;
     reservedKeys.add(field.canonicalField);
     const multi = field.sourceColumns.length > 1;
