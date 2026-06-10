@@ -121,7 +121,7 @@ describe('UploadArcgisPreflight', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
-  it('opens the mapping dialog when preflight returns mappingRequired and resubmits with the mapping', async () => {
+  it('opens the mapping dialog when preflight returns mapping_required and resubmits with the mapping', async () => {
     const onProceed = vi.fn();
     const onError = vi.fn();
     const mappingRequiredSheets = [

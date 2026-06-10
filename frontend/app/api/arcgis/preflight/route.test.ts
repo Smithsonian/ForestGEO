@@ -66,7 +66,7 @@ describe('POST /api/arcgis/preflight mapping', () => {
     mocks.auth.mockResolvedValue({ user: { email: 'user@example.com' } });
   });
 
-  it('returns mappingRequired metadata when detection fails and no mapping was provided', async () => {
+  it('returns mapping_required status when detection fails and no mapping was provided', async () => {
     mocks.readArcgisWorkbookDetailed.mockResolvedValue({ ok: false, error: new MissingColumnError('Trees sheet missing lx, ly.'), sheets: DESCRIBED_SHEETS });
 
     const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1' }) as any);
@@ -150,7 +150,7 @@ describe('POST /api/arcgis/preflight mapping', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.mappingRequired).toBeUndefined();
+    expect(body.status).toBeUndefined();
     expect(body.error).toBe('bad date');
   });
 
