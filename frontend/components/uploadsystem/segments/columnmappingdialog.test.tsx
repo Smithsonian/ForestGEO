@@ -187,12 +187,21 @@ describe('ColumnMappingDialog draft isolation', () => {
     const onApply = vi.fn();
     const onClose = vi.fn();
     const seeded = seedMapping(fullyResolvedMeta);
-    render(<ColumnMappingDialog open format={SourceFormat.csv} metadata={fullyResolvedMeta} mapping={seeded} onApply={onApply} onClose={onClose} />);
+    const { rerender } = render(
+      <ColumnMappingDialog open format={SourceFormat.csv} metadata={fullyResolvedMeta} mapping={seeded} onApply={onApply} onClose={onClose} />
+    );
     const tagRow = screen.getByTestId('mapping-row-tag');
-    openOption(tagRow, /^lx$/i);
+    openOption(tagRow, /^lx$/i); // bad edit: seeded-valid mapping becomes invalid
+    expect(screen.getByRole('button', { name: /apply mapping/i })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onApply).not.toHaveBeenCalled();
+
+    // Reopen with the SAME props (same file/signature). Closing must have nulled the seed key,
+    // so the dialog reseeds from the prop and the bad edit is gone → Apply is enabled again.
+    rerender(<ColumnMappingDialog open={false} format={SourceFormat.csv} metadata={fullyResolvedMeta} mapping={seeded} onApply={onApply} onClose={onClose} />);
+    rerender(<ColumnMappingDialog open format={SourceFormat.csv} metadata={fullyResolvedMeta} mapping={seeded} onApply={onApply} onClose={onClose} />);
+    expect(screen.getByRole('button', { name: /apply mapping/i })).toBeEnabled();
   });
 
   it('commits exactly the draft (the seed) on Apply when unchanged', () => {

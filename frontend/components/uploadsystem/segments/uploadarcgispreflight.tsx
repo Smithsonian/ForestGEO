@@ -305,6 +305,7 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
         <ColumnMappingDialog
           open={ui.dialogOpen}
           format={SourceFormat.arcgis_xlsx}
+          fileName={acceptedFiles[0]?.name}
           metadata={ui.meta}
           mapping={ui.mapping}
           serverError={ui.serverError ?? undefined}
