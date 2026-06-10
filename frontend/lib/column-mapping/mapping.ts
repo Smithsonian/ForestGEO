@@ -21,12 +21,19 @@ function allSourceColumns(metadata: SourceMetadata): string[] {
   return cols;
 }
 
+/** Bump to invalidate every previously-computed signature (e.g. after a parser-behavior change). */
+export const HEADER_SIGNATURE_VERSION = 2;
+
+const BLANK_HEADER_TOKEN = '∅'; // marks a blank header position so it can't be silently dropped.
+
+/**
+ * Identity of an exact header SEQUENCE. Order- and duplicate-sensitive; blank positions are
+ * preserved as a sentinel. Versioned so a parser change can invalidate stale signatures wholesale.
+ * Compatibility is sequence identity, not "same normalized bag of headers".
+ */
 export function headerSignature(headers: string[]): string {
-  return headers
-    .map(normalizeHeader)
-    .filter(h => h.length > 0)
-    .sort()
-    .join('|');
+  const body = headers.map(h => normalizeHeader(h) || BLANK_HEADER_TOKEN).join('|');
+  return `v${HEADER_SIGNATURE_VERSION}:${body}`;
 }
 
 export function mappingApplies(mapping: ColumnMapping, headers: string[]): boolean {

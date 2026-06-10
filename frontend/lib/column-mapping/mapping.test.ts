@@ -190,7 +190,8 @@ describe('mapping identity', () => {
   it('seedMapping stamps the header signature of its source metadata', () => {
     const m = seedMapping(csvMeta(['Tag', 'X_Coord']));
     expect(m.headerSignature).toBe(headerSignature(['Tag', 'X_Coord']));
-    expect(m.headerSignature).toBe(headerSignature(['x_coord', 'TAG'])); // order/case/separator-insensitive
+    expect(m.headerSignature).toBe(headerSignature(['TAG', 'x_coord'])); // case/separator-insensitive
+    expect(m.headerSignature).not.toBe(headerSignature(['x_coord', 'TAG'])); // but order-sensitive
   });
 
   it('mappingApplies rejects a mapping built from different headers', () => {
@@ -203,5 +204,26 @@ describe('mapping identity', () => {
     const base = seedMapping(csvMeta(['tag']));
     expect(isColumnMappingShape(JSON.parse(JSON.stringify(base)))).toBe(true);
     expect(isColumnMappingShape({ ...base, headerSignature: 42 })).toBe(false);
+  });
+});
+
+describe('headerSignature (positional identity)', () => {
+  it('distinguishes duplicate headers from a single header', () => {
+    expect(headerSignature(['tag', 'tag'])).not.toEqual(headerSignature(['tag']));
+  });
+  it('is order-sensitive', () => {
+    expect(headerSignature(['a', 'b'])).not.toEqual(headerSignature(['b', 'a']));
+  });
+  it('keeps blank header positions instead of dropping them', () => {
+    expect(headerSignature(['tag', '', 'spcode'])).not.toEqual(headerSignature(['tag', 'spcode']));
+  });
+  it('carries a version prefix so a version bump invalidates old signatures', () => {
+    expect(headerSignature(['tag']).startsWith('v')).toBe(true);
+  });
+  it('still round-trips through seedMapping/mappingApplies for identical headers', () => {
+    const headers = ['Tag', 'Sp_Code', 'Quadrat'];
+    const mapping = seedMapping({ format: SourceFormat.csv, headers });
+    expect(mappingApplies(mapping, headers)).toBe(true);
+    expect(mappingApplies(mapping, ['Tag', 'Sp_Code'])).toBe(false);
   });
 });
