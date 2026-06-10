@@ -34,6 +34,8 @@ export interface MappingValidation {
   missingSourceColumns: string[];
   /** Source columns assigned to more than one field (or twice to one field). */
   duplicateSourceColumns: string[];
+  /** Canonical fields named by the mapping that do not exist in this format's schema. */
+  unknownFields: string[];
   ignoredSourceColumns: string[];
   missingSheetRoles?: string[];
   /** True when the trees and stems roles name the same sheet. */

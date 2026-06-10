@@ -123,6 +123,8 @@ export function chooseEffectiveCsvMapping(stored: ColumnMapping | undefined, hea
 
 export function validateMapping(mapping: ColumnMapping, metadata: SourceMetadata): MappingValidation {
   const defs = canonicalFieldsFor(mapping.format);
+  const knownFields = new Set(defs.map(d => d.canonicalField));
+  const unknownFields = mapping.fields.map(f => f.canonicalField).filter(k => !knownFields.has(k));
   const available = new Set(allSourceColumns(metadata).map(normalizeHeader));
   const fieldByKey = new Map(mapping.fields.map(f => [f.canonicalField, f]));
 
@@ -202,8 +204,9 @@ export function validateMapping(mapping: ColumnMapping, metadata: SourceMetadata
     missingRequired.length === 0 &&
     missingSourceColumns.length === 0 &&
     duplicateSourceColumns.length === 0 &&
+    unknownFields.length === 0 &&
     (missingSheetRoles?.length ?? 0) === 0 &&
     !sheetRoleConflict;
 
-  return { valid, missingRequired, missingSourceColumns, duplicateSourceColumns, ignoredSourceColumns, missingSheetRoles, sheetRoleConflict };
+  return { valid, missingRequired, missingSourceColumns, duplicateSourceColumns, unknownFields, ignoredSourceColumns, missingSheetRoles, sheetRoleConflict };
 }

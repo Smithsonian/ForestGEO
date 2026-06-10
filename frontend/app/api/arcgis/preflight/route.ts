@@ -7,11 +7,12 @@ import { assertCanEditMeasurementScope, ScopeAccessError } from '@/config/editpl
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
 import { UnparseableDateError } from '@/lib/arcgis/errors';
-import { readArcgisWorkbookDetailed } from '@/lib/arcgis/workbook-reader';
+import { readArcgisSheetMetadata, readArcgisWorkbookDetailed } from '@/lib/arcgis/workbook-reader';
 import { transformArcgisWorkbook } from '@/lib/arcgis/transform';
 import { createArcgisImportSession } from '@/lib/arcgis/import-session';
 import { SourceFormat } from '@/config/macros/formdetails';
-import { isColumnMappingShape, seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
+import { canonicalFieldsFor } from '@/lib/column-mapping/fields';
+import { isColumnMappingShape, mappingApplies, seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
 import { ArcgisMappingRequiredResponse, PREFLIGHT_STATUS_MAPPING_REQUIRED } from '@/lib/arcgis/types';
 import type { ArcgisSourceMetadata, ColumnMapping } from '@/lib/column-mapping/types';
 
@@ -95,7 +96,52 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const connectionManager = ConnectionManager.getInstance();
     await assertCanEditMeasurementScope(connectionManager, session!, { schema, plotID, censusID });
 
-    const outcome = await readArcgisWorkbookDetailed(await file.arrayBuffer(), mapping);
+    const buffer = await file.arrayBuffer();
+
+    if (mapping) {
+      // 400-class: wrong format or unknown canonical fields = broken/tampered client, not a remappable workbook.
+      if (mapping.format !== SourceFormat.arcgis_xlsx) {
+        return NextResponse.json({ error: 'Invalid mapping payload.' }, { status: HTTPResponses.INVALID_REQUEST });
+      }
+      const known = new Set(canonicalFieldsFor(SourceFormat.arcgis_xlsx).map(d => d.canonicalField));
+      if (mapping.fields.some(f => !known.has(f.canonicalField))) {
+        return NextResponse.json({ error: 'Invalid mapping payload.' }, { status: HTTPResponses.INVALID_REQUEST });
+      }
+
+      const sheetInfo = await readArcgisSheetMetadata(buffer);
+      const metadata: ArcgisSourceMetadata = {
+        format: SourceFormat.arcgis_xlsx,
+        sheets: sheetInfo,
+        detectedTreesSheet: mapping.sheetRoles?.treesSheetName,
+        detectedStemsSheet: mapping.sheetRoles?.stemsSheetName
+      };
+
+      // Staleness: only a PRESENT signature that no longer matches the workbook is stale. A signature-less
+      // mapping is not auto-rejected here — validateMapping below is the gate for it.
+      const stale =
+        mapping.headerSignature !== undefined &&
+        !mappingApplies(
+          mapping,
+          sheetInfo.flatMap(s => s.columns)
+        );
+      const validation = validateMapping(mapping, metadata);
+      if (stale || !validation.valid) {
+        const seeded = stale ? seedMapping(metadata) : mapping;
+        return NextResponse.json(
+          {
+            status: PREFLIGHT_STATUS_MAPPING_REQUIRED,
+            error: stale ? 'The saved column mapping does not match this workbook.' : 'The column mapping is incomplete.',
+            format: SourceFormat.arcgis_xlsx,
+            sheets: sheetInfo,
+            mapping: seeded,
+            validation: validateMapping(seeded, metadata)
+          } satisfies ArcgisMappingRequiredResponse,
+          { status: HTTPResponses.OK }
+        );
+      }
+    }
+
+    const outcome = await readArcgisWorkbookDetailed(buffer, mapping);
     if (!outcome.ok) {
       const metadata: ArcgisSourceMetadata = {
         format: SourceFormat.arcgis_xlsx,

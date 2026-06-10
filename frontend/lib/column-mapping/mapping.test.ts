@@ -79,6 +79,19 @@ describe('validateMapping (csv)', () => {
     expect(v.missingSourceColumns).toContain('date');
   });
 
+  it('flags a canonical field that does not exist in the format schema', () => {
+    const headers = ['tag', 'spcode', 'quadrat', 'lx', 'ly', 'date'];
+    const m = seedMapping(csvMeta(headers));
+    expect(validateMapping(m, csvMeta(headers)).valid).toBe(true); // baseline: only the bogus field below invalidates
+    const withBogusField = {
+      ...m,
+      fields: [...m.fields, { canonicalField: 'not_a_real_field', sourceColumns: [] as string[], scope: 'file' as const }]
+    };
+    const v = validateMapping(withBogusField, csvMeta(headers));
+    expect(v.unknownFields).toContain('not_a_real_field');
+    expect(v.valid).toBe(false);
+  });
+
   it('reports ignored source columns', () => {
     const m = seedMapping(csvMeta(['tag', 'spcode', 'quadrat', 'lx', 'ly', 'date', 'DeviceID']));
     const v = validateMapping(m, csvMeta(['tag', 'spcode', 'quadrat', 'lx', 'ly', 'date', 'DeviceID']));

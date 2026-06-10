@@ -167,6 +167,25 @@ export interface ArcgisWorkbookSheetInfo {
   columns: string[];
 }
 
+/**
+ * Metadata-only scan: sheet names + raw header columns, with NO mapping applied. Used by the
+ * preflight route to validate a client-supplied mapping against the workbook before reading it.
+ */
+export async function readArcgisSheetMetadata(buffer: ArrayBuffer): Promise<ArcgisWorkbookSheetInfo[]> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  return workbook.worksheets.map(worksheet => {
+    const headerRow = worksheet.getRow(1);
+    const columns: string[] = [];
+    for (let column = 1; column <= worksheet.columnCount; column++) {
+      const value = normalizeCellValue(headerRow.getCell(column).value);
+      const header = value === null ? '' : String(value).trim();
+      if (header.length > 0) columns.push(header);
+    }
+    return { name: worksheet.name, columns };
+  });
+}
+
 export type ArcgisReadOutcome =
   | { ok: true; workbook: ArcgisWorkbook }
   | { ok: false; error: MissingSheetError | MissingColumnError | AmbiguousSheetError; sheets: ArcgisWorkbookSheetInfo[] };
