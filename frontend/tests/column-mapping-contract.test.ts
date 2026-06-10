@@ -39,6 +39,15 @@ const CUSTOM_STEM_HEADERS = ['GlobalID', 'ParentGlobalID', 'Q', 'TreeTag', 'Stem
 const CUSTOM_TREE_ROW = ['G1', 'A25', '100', '100', 'QURU', 46036, '5.1', '6.2'];
 const CUSTOM_STEM_ROW = ['S1', 'G1', 'A25', '100', '100-1', 'QURU', 46036];
 
+// Scope fixture: a coordinate column name ('XY_lx') is SHARED across both sheets, but lx is a
+// trees-scoped field. Its explicit override must claim the column on the trees sheet only and must
+// NOT cross-claim the identically-named stems column. Client validateMapping and the server reader
+// must AGREE this is valid (they now resolve each sheet with the same sheetRole).
+const SCOPE_TREE_HEADERS = ['GlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'Date_measured', 'XY_lx', 'XY_ly'];
+const SCOPE_STEM_HEADERS = ['GlobalID', 'ParentGlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'Date_measured', 'XY_lx'];
+const SCOPE_TREE_ROW = ['G1', 'A25', '100', '100', 'QURU', 46036, '5.1', '6.2'];
+const SCOPE_STEM_ROW = ['S1', 'G1', 'A25', '100', '100-1', 'QURU', 46036, '9.9'];
+
 interface ContractFixture {
   name: string;
   sheets: Record<string, unknown[][]>;
@@ -142,6 +151,27 @@ const fixtures: ContractFixture[] = [
     },
     buildMapping: baseMetaWithoutRoles => seedMapping({ ...baseMetaWithoutRoles, detectedTreesSheet: 'trees', detectedStemsSheet: 'stems' }),
     expectedBothValid: false
+  },
+  {
+    name: 'trees-scoped override on a column name shared by both sheets resolves on trees only (both valid)',
+    sheets: {
+      treesScope: [SCOPE_TREE_HEADERS, SCOPE_TREE_ROW],
+      stemsScope: [SCOPE_STEM_HEADERS, SCOPE_STEM_ROW]
+    },
+    buildMapping: baseMetaWithoutRoles => {
+      const seeded = seedMapping({ ...baseMetaWithoutRoles, detectedTreesSheet: 'treesScope', detectedStemsSheet: 'stemsScope' });
+      // lx/ly are trees-scoped (per ARCGIS_SCHEMA). Map them to the custom coord columns; 'XY_lx'
+      // also exists on the stems sheet but must NOT be claimed as lx there.
+      return {
+        ...seeded,
+        fields: seeded.fields.map(f => {
+          if (f.canonicalField === 'lx') return { ...f, sourceColumns: ['XY_lx'] };
+          if (f.canonicalField === 'ly') return { ...f, sourceColumns: ['XY_ly'] };
+          return f;
+        })
+      };
+    },
+    expectedBothValid: true
   }
 ];
 
