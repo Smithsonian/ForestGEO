@@ -102,8 +102,10 @@ export function useFilePreviewAnalysis({
   // Papa Parse is the single authoritative source of CSV header identity: the headers reported
   // to the mapping flow must be exactly what the upload's Papa.parse will key rows against.
   useEffect(() => {
+    // Clear immediately so a stale header row parsed with the previous delimiter
+    // never outlives its delimiter while the new read is in flight.
+    setPapaHeaders(null);
     if (isArcgisWorkbook) {
-      setPapaHeaders(null);
       return;
     }
     let cancelled = false;

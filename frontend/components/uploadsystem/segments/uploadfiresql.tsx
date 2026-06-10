@@ -760,6 +760,24 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         return;
       }
 
+      // Read the header row up front, outside the delimiter-validation try/catch below, so a
+      // failed read cannot be swallowed and silently downgrade a confirmed mapping to legacy
+      // header heuristics. For mapping-required uploads a failed read aborts the whole upload.
+      const mappingRequired = uploadForm === FormType.measurements && uploadMode !== UploadMode.REVISIONS;
+      try {
+        csvHeaders = await extractCsvHeaderRow(file, delimiter);
+      } catch (headerReadError) {
+        const err = headerReadError instanceof Error ? headerReadError : new Error(String(headerReadError));
+        if (mappingRequired) {
+          throw markFatalUploadError(
+            new Error(
+              `Could not read the header row of ${file.name} (${err.message}); upload blocked because the column mapping cannot be verified against the file.`
+            )
+          );
+        }
+        ailogger.warn(`Header extraction failed for ${file.name}; continuing with legacy header handling.`, err);
+      }
+
       // Validate delimiter and headers before parsing
       try {
         const validation = await validateDelimiter(
@@ -778,8 +796,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Enhanced header validation with mapping feedback. Headers come from the same
         // Papa-based extractor that seeded the mapping UI, so the mapping plan and the
         // upload's Papa.parse agree on header identity by construction.
-        if (validation.preview && validation.preview.length > 0) {
-          csvHeaders = await extractCsvHeaderRow(file, delimiter);
+        if (csvHeaders && validation.preview && validation.preview.length > 0) {
           const requiredHeaderLabels = requiredHeaders.map(h => h.label);
           const mappingResults: string[] = [];
           const missingRequired: string[] = [];
@@ -871,7 +888,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         return normalizedHeader;
       };
 
-      const mappingFlowActive = uploadForm === FormType.measurements && uploadMode !== UploadMode.REVISIONS && csvHeaders !== null && csvHeaders.length > 0;
+      const mappingFlowActive = mappingRequired && csvHeaders !== null && csvHeaders.length > 0;
       const headerPlan = mappingFlowActive
         ? (() => {
             const storedMapping = columnMappings?.[file.name];
