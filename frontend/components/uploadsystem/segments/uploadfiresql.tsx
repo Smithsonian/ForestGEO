@@ -897,7 +897,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             const chosen = chooseEffectiveCsvMapping(columnMappings?.[file.name], csvHeaders!);
             const fallbackReason = chosen.reason;
             if (fallbackReason) {
-              ailogger.warn(`Column mapping for ${file.name} not used: ${fallbackReason}; seeded from the file's headers instead.`);
               parsingDiagnostics.mappingFallbackReason = fallbackReason;
               const userWarning = `${file.name}: ${fallbackReason}, so its columns were matched automatically from the file's headers instead.`;
               if (isMountedRef.current) {

@@ -102,7 +102,7 @@ export function seedMapping(metadata: SourceMetadata): ColumnMapping {
 export interface EffectiveCsvMapping {
   mapping: ColumnMapping;
   usedStored: boolean;
-  /** Set only when the stored mapping was rejected; a human-readable reason for the UI diagnostic. */
+  /** Set only when the stored mapping was rejected. A lowercase clause with no terminal punctuation (it is composed mid-sentence in the UI diagnostic). */
   reason?: string;
 }
 
