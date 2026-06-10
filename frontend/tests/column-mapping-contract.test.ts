@@ -39,14 +39,17 @@ const CUSTOM_STEM_HEADERS = ['GlobalID', 'ParentGlobalID', 'Q', 'TreeTag', 'Stem
 const CUSTOM_TREE_ROW = ['G1', 'A25', '100', '100', 'QURU', 46036, '5.1', '6.2'];
 const CUSTOM_STEM_ROW = ['S1', 'G1', 'A25', '100', '100-1', 'QURU', 46036];
 
-// Scope fixture: a coordinate column name ('XY_lx') is SHARED across both sheets, but lx is a
-// trees-scoped field. Its explicit override must claim the column on the trees sheet only and must
-// NOT cross-claim the identically-named stems column. Client validateMapping and the server reader
-// must AGREE this is valid (they now resolve each sheet with the same sheetRole).
-const SCOPE_TREE_HEADERS = ['GlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'Date_measured', 'XY_lx', 'XY_ly'];
-const SCOPE_STEM_HEADERS = ['GlobalID', 'ParentGlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'Date_measured', 'XY_lx'];
+// Scope fixture: 'LocalX' (an alias of the trees-scoped `lx`) exists on BOTH sheets. The mapping
+// leaves lx unmapped (so it alias-fills from the trees sheet's LocalX) and explicitly maps the
+// stems-scoped `ParentGlobalID` to the stems sheet's LocalX (its parent link). With scope threading
+// the ParentGlobalID override is inert on the trees sheet, so trees' LocalX alias-fills lx and both
+// sheets validate. WITHOUT scope threading, ParentGlobalID's override cross-claims trees' LocalX,
+// lx goes unresolved on the trees sheet, and BOTH client validateMapping and the server reader
+// reject — so this fixture flips if Task 6's scope-awareness regresses.
+const SCOPE_TREE_HEADERS = ['GlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'Date_measured', 'LocalX', 'ly'];
+const SCOPE_STEM_HEADERS = ['GlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'Date_measured', 'LocalX'];
 const SCOPE_TREE_ROW = ['G1', 'A25', '100', '100', 'QURU', 46036, '5.1', '6.2'];
-const SCOPE_STEM_ROW = ['S1', 'G1', 'A25', '100', '100-1', 'QURU', 46036, '9.9'];
+const SCOPE_STEM_ROW = ['S1', 'A25', '100', '100-1', 'QURU', 46036, 'G1'];
 
 interface ContractFixture {
   name: string;
@@ -153,20 +156,21 @@ const fixtures: ContractFixture[] = [
     expectedBothValid: false
   },
   {
-    name: 'trees-scoped override on a column name shared by both sheets resolves on trees only (both valid)',
+    name: 'stems-scoped override does not cross-claim a trees alias column (scope-aware; both valid)',
     sheets: {
       treesScope: [SCOPE_TREE_HEADERS, SCOPE_TREE_ROW],
       stemsScope: [SCOPE_STEM_HEADERS, SCOPE_STEM_ROW]
     },
     buildMapping: baseMetaWithoutRoles => {
       const seeded = seedMapping({ ...baseMetaWithoutRoles, detectedTreesSheet: 'treesScope', detectedStemsSheet: 'stemsScope' });
-      // lx/ly are trees-scoped (per ARCGIS_SCHEMA). Map them to the custom coord columns; 'XY_lx'
-      // also exists on the stems sheet but must NOT be claimed as lx there.
+      // Leave lx unmapped so it alias-fills from the trees sheet's LocalX; map the stems-scoped
+      // ParentGlobalID to the stems sheet's LocalX. seedMapping would otherwise auto-claim LocalX
+      // for lx, which (with ParentGlobalID also on LocalX) would trip the scope-blind duplicate check.
       return {
         ...seeded,
         fields: seeded.fields.map(f => {
-          if (f.canonicalField === 'lx') return { ...f, sourceColumns: ['XY_lx'] };
-          if (f.canonicalField === 'ly') return { ...f, sourceColumns: ['XY_ly'] };
+          if (f.canonicalField === 'lx') return { ...f, sourceColumns: [] };
+          if (f.canonicalField === 'ParentGlobalID') return { ...f, sourceColumns: ['LocalX'] };
           return f;
         })
       };

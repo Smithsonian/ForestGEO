@@ -36,7 +36,7 @@ import { generateShortBatchID } from '@/config/utils';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 import { chooseEffectiveCsvMapping } from '@/lib/column-mapping/mapping';
 import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
-import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
+import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, planColumnCountMatches, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
 import { aliasesFor } from '@/lib/column-mapping/fields';
 import { UploadMode } from '@/config/uploadmodes';
 
@@ -1061,7 +1061,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           chunk(results: ParseResult<FileRow>, parser) {
             actualChunkCount += 1;
             totalRows += results.data.length;
-            if (headerPlan && actualChunkCount === 1 && Array.isArray(results.meta.fields) && results.meta.fields.length !== headerPlan.outputKeys.length) {
+            if (headerPlan && actualChunkCount === 1 && Array.isArray(results.meta.fields) && !planColumnCountMatches(headerPlan, results.meta.fields.length)) {
               const divergence = new Error(
                 `Header plan misalignment for ${file.name}: mapping plan has ${headerPlan.outputKeys.length} columns but papaparse parsed ${results.meta.fields.length}. ` +
                   `The file changed between preview and upload, or its header row is malformed. Re-review the column mapping before uploading.`

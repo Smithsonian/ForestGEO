@@ -143,6 +143,15 @@ export function transformHeaderFromPlan(plan: HeaderResolutionPlan): (header: st
   return (header: string, index: number) => plan.outputKeys[index] ?? normalizeHeader(header);
 }
 
+/**
+ * The plan is applied to parsed rows by header POSITION (see transformHeaderFromPlan), so it is only
+ * safe when the parser produced exactly as many columns as the plan was built from. The upload
+ * executor calls this on the first chunk and aborts when it returns false, rather than mis-keying.
+ */
+export function planColumnCountMatches(plan: HeaderResolutionPlan, parsedColumnCount: number): boolean {
+  return plan.outputKeys.length === parsedColumnCount;
+}
+
 export function joinMultiSourceValues(values: (string | null | undefined)[]): string | null {
   const kept = values.map(v => (v ?? '').trim()).filter(v => v.length > 0 && v.toUpperCase() !== NULL_CODE_TOKEN && v.toUpperCase() !== 'NULL');
   return kept.length > 0 ? kept.join(CODE_JOIN_SEPARATOR) : null;

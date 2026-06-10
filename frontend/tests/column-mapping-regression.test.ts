@@ -3,7 +3,7 @@ import Papa from 'papaparse';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
 import { chooseEffectiveCsvMapping, mappingApplies, seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
-import { CSV_RESOLVE_OPTIONS, resolveHeaders } from '@/lib/column-mapping/resolution';
+import { CSV_RESOLVE_OPTIONS, planColumnCountMatches, resolveHeaders } from '@/lib/column-mapping/resolution';
 import { aliasesFor } from '@/lib/column-mapping/fields';
 
 // Cross-cutting regressions that tie the column-mapping pieces together. Unit-level behavior
@@ -55,20 +55,21 @@ describe('CSV header plan preserves column count across parser edge cases (diver
   }
 });
 
-describe('divergence guard predicate (plan vs papa column count)', () => {
-  // The actual abort wiring lives in uploadfiresql.tsx (integration-only; verified by code-trace in
-  // the Task 3 review). This pins the comparison it depends on, in both directions.
-  it('does NOT fire when the plan was built from the same headers papa parsed', () => {
+describe('divergence guard predicate (planColumnCountMatches — the exact function the upload guard calls)', () => {
+  // uploadfiresql.tsx aborts the upload on the first chunk when `!planColumnCountMatches(plan, papaFields)`.
+  // Testing the shared predicate (not a re-derived `a !== b`) means a regression to the guard's
+  // comparison — flipped operator, wrong operand — fails here. The abort WIRING around it remains
+  // integration-only (verified by code-trace in the Task 3 review).
+  it('matches when the plan was built from the same number of columns papa parsed (guard does NOT fire)', () => {
     const headers = ['tag', 'spcode', 'quadrat'];
     const plan = resolveHeaders(headers, seedMapping({ format: CSV, headers }), csvAliases, CSV_RESOLVE_OPTIONS);
-    expect(plan.outputKeys.length).toBe(headers.length); // guard: outputKeys.length !== papaFields.length → false
+    expect(planColumnCountMatches(plan, headers.length)).toBe(true);
   });
 
-  it('FIRES when the plan column count differs from what papa parsed', () => {
-    const planHeaders = ['tag', 'spcode', 'quadrat']; // 3 columns
-    const plan = resolveHeaders(planHeaders, seedMapping({ format: CSV, headers: planHeaders }), csvAliases, CSV_RESOLVE_OPTIONS);
-    const papaFieldCountIfFileChanged = 4; // e.g. the file gained a column between preview and upload
-    expect(plan.outputKeys.length).not.toBe(papaFieldCountIfFileChanged); // guard condition is truthy → upload aborts
+  it('does NOT match when papa parsed a different column count, so the guard fires and the upload aborts', () => {
+    const headers = ['tag', 'spcode', 'quadrat']; // a 3-column plan
+    const plan = resolveHeaders(headers, seedMapping({ format: CSV, headers }), csvAliases, CSV_RESOLVE_OPTIONS);
+    expect(planColumnCountMatches(plan, 4)).toBe(false); // e.g. the file gained a column between preview and upload
   });
 });
 
