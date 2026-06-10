@@ -406,7 +406,6 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
           fileName={mappingFile}
           metadata={metadataFor(mappingFile)!}
           mapping={effectiveMappingFor(mappingFile)!}
-          onChange={m => setColumnMappingForFile?.(mappingFile, m)}
           onApply={m => {
             setColumnMappingForFile?.(mappingFile, m);
             setMappingOpen(false);

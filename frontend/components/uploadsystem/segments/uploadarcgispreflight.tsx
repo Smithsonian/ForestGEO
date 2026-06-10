@@ -146,7 +146,6 @@ type PreflightAction =
   | { type: 'RECOVERABLE_ERROR'; message: string }
   | { type: 'MAPPING_REQUIRED'; meta: ArcgisSourceMetadata; mapping: ColumnMapping; serverError: string | null }
   | { type: 'SUCCEEDED'; result: ArcgisPreflightResponse }
-  | { type: 'MAPPING_CHANGED'; mapping: ColumnMapping }
   | { type: 'DIALOG_OPENED' }
   | { type: 'DIALOG_CLOSED' }
   | { type: 'MAPPING_APPLIED'; mapping: ColumnMapping };
@@ -161,8 +160,6 @@ function preflightReducer(state: PreflightUiState, action: PreflightAction): Pre
       return { phase: 'mappingNeeded', meta: action.meta, mapping: action.mapping, serverError: action.serverError, dialogOpen: true };
     case 'SUCCEEDED':
       return { phase: 'ready', result: action.result };
-    case 'MAPPING_CHANGED':
-      return state.phase === 'mappingNeeded' ? { ...state, mapping: action.mapping } : state;
     case 'DIALOG_OPENED':
       return state.phase === 'mappingNeeded' ? { ...state, dialogOpen: true } : state;
     case 'DIALOG_CLOSED':
@@ -311,7 +308,6 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
           metadata={ui.meta}
           mapping={ui.mapping}
           serverError={ui.serverError ?? undefined}
-          onChange={m => dispatch({ type: 'MAPPING_CHANGED', mapping: m })}
           onApply={m => {
             dispatch({ type: 'MAPPING_APPLIED', mapping: m });
             void runPreflight(m);

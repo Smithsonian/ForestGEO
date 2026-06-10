@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, Chip, DialogContent, DialogTitle, Modal, ModalDialog, Option, Select, Stack, Typography } from '@mui/joy';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { canonicalFieldsFor } from '@/lib/column-mapping/fields';
@@ -16,7 +16,6 @@ interface ColumnMappingDialogProps {
   mapping: ColumnMapping;
   /** Server-side rejection of the last applied mapping; rendered so the user knows what to fix. */
   serverError?: string;
-  onChange: (next: ColumnMapping) => void;
   onApply: (mapping: ColumnMapping) => void;
   onClose: () => void;
 }
@@ -30,10 +29,25 @@ function setFieldSources(mapping: ColumnMapping, canonicalField: string, sources
   return { ...mapping, fields };
 }
 
-export default function ColumnMappingDialog({ open, format, fileName, metadata, mapping, serverError, onChange, onApply, onClose }: ColumnMappingDialogProps) {
+export default function ColumnMappingDialog({ open, format, fileName, metadata, mapping, serverError, onApply, onClose }: ColumnMappingDialogProps) {
+  // The dialog edits a local draft so nothing reaches the parent until Apply. The draft is keyed
+  // on fileName + headerSignature (not prop identity) because hosts may rebuild the mapping prop
+  // on every render; reseeding on identity alone would clobber in-progress edits.
+  const [draft, setDraft] = useState<ColumnMapping>(mapping);
+  const seededKey = useRef<string | null>(null);
+  const openKey = open ? `${fileName ?? ''}::${mapping.headerSignature ?? ''}` : null;
+  useEffect(() => {
+    if (open && openKey !== seededKey.current) {
+      setDraft(mapping);
+      seededKey.current = openKey;
+    } else if (!open) {
+      seededKey.current = null;
+    }
+  }, [open, openKey, mapping]);
+
   const defs = useMemo(() => canonicalFieldsFor(format), [format]);
   const sourceColumns = useMemo(() => sourceColumnsFromMetadata(metadata), [metadata]);
-  const validation = useMemo(() => validateMapping(mapping, metadata), [mapping, metadata]);
+  const validation = useMemo(() => validateMapping(draft, metadata), [draft, metadata]);
 
   const sheetNames = metadata.format === SourceFormat.arcgis_xlsx ? metadata.sheets.map(s => s.name) : [];
 
@@ -65,12 +79,12 @@ export default function ColumnMappingDialog({ open, format, fileName, metadata, 
                   <Typography sx={{ width: 80 }}>{role}</Typography>
                   <Select
                     placeholder={`Select ${role} sheet`}
-                    value={(role === 'trees' ? mapping.sheetRoles?.treesSheetName : mapping.sheetRoles?.stemsSheetName) ?? null}
+                    value={(role === 'trees' ? draft.sheetRoles?.treesSheetName : draft.sheetRoles?.stemsSheetName) ?? null}
                     onChange={(_e, v) =>
-                      onChange({
-                        ...mapping,
+                      setDraft({
+                        ...draft,
                         sheetRoles: {
-                          ...mapping.sheetRoles,
+                          ...draft.sheetRoles,
                           ...(role === 'trees' ? { treesSheetName: v ?? undefined } : { stemsSheetName: v ?? undefined })
                         }
                       })
@@ -89,7 +103,7 @@ export default function ColumnMappingDialog({ open, format, fileName, metadata, 
 
           <Stack spacing={0.5}>
             {defs.map(def => {
-              const field = mapping.fields.find(f => f.canonicalField === def.canonicalField);
+              const field = draft.fields.find(f => f.canonicalField === def.canonicalField);
               const selected = field?.sourceColumns ?? [];
               const unmappedRequired = def.required && selected.length === 0;
               return (
@@ -106,7 +120,7 @@ export default function ColumnMappingDialog({ open, format, fileName, metadata, 
                       multiple={def.multiSource}
                       placeholder={unmappedRequired ? 'Choose a column' : 'Unmapped'}
                       value={def.multiSource ? selected : (selected[0] ?? null)}
-                      onChange={(_e, v) => onChange(setFieldSources(mapping, def.canonicalField, def.multiSource ? (v as string[]) : v ? [v as string] : []))}
+                      onChange={(_e, v) => setDraft(setFieldSources(draft, def.canonicalField, def.multiSource ? (v as string[]) : v ? [v as string] : []))}
                     >
                       {sourceColumns.map(c => (
                         <Option key={c} value={c}>
@@ -155,7 +169,7 @@ export default function ColumnMappingDialog({ open, format, fileName, metadata, 
             <Button variant="plain" color="neutral" onClick={onClose}>
               Cancel
             </Button>
-            <Button disabled={!validation.valid} onClick={() => onApply(mapping)}>
+            <Button disabled={!validation.valid} onClick={() => onApply(draft)}>
               Apply mapping
             </Button>
           </Stack>
