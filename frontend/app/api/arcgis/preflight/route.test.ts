@@ -38,6 +38,7 @@ import { POST } from './route';
 import { MissingColumnError, UnparseableDateError } from '@/lib/arcgis/errors';
 import { PREFLIGHT_STATUS_MAPPING_REQUIRED } from '@/lib/arcgis/types';
 import { canonicalFieldsFor } from '@/lib/column-mapping/fields';
+import { seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
 import { SourceFormat } from '@/config/macros/formdetails';
 
 const DESCRIBED_SHEETS = [
@@ -189,6 +190,39 @@ describe('POST /api/arcgis/preflight mapping', () => {
     expect(body.sheets).toHaveLength(2);
     expect(mocks.readArcgisWorkbookDetailed).not.toHaveBeenCalled();
     expect(mocks.createArcgisImportSession).not.toHaveBeenCalled();
+  });
+
+  it('round-trips a server-seeded mapping against the same workbook into a staged session, not mapping_required', async () => {
+    // Canonical/alias column names so seedMapping resolves every required field, and shared columns
+    // across both sheets so the flatMap-vs-deduped signature basis actually diverges.
+    const SEEDABLE_SHEETS = [
+      { name: 'TreesLayer', columns: ['GlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'lx', 'ly', 'Date_measured'] },
+      { name: 'StemsLayer', columns: ['GlobalID', 'ParentGlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'Date_measured'] }
+    ];
+    const metadata = {
+      format: SourceFormat.arcgis_xlsx as const,
+      sheets: SEEDABLE_SHEETS,
+      detectedTreesSheet: 'TreesLayer',
+      detectedStemsSheet: 'StemsLayer'
+    };
+    const seeded = seedMapping(metadata);
+    // Guard the fixture itself: the seeded mapping must carry a real signature and pass validation,
+    // otherwise this test would exercise the incompleteness path instead of the staleness path.
+    expect(seeded.headerSignature).toBeDefined();
+    expect(validateMapping(seeded, metadata).valid).toBe(true);
+
+    mocks.readArcgisSheetMetadata.mockResolvedValue(SEEDABLE_SHEETS);
+    mocks.readArcgisWorkbookDetailed.mockResolvedValue({ ok: true, workbook: { trees: [{}], stems: [{}] } });
+    mocks.transformArcgisWorkbook.mockReturnValue({ rows: [{ tag: '100' }], summary: { totalRows: 1 }, warnings: [] });
+    mocks.createArcgisImportSession.mockResolvedValue({ importSessionId: 'sess-roundtrip' });
+
+    const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1', mapping: JSON.stringify(seeded) }) as any);
+    const body = await res.json();
+
+    expect(body.status).not.toBe(PREFLIGHT_STATUS_MAPPING_REQUIRED);
+    expect(res.status).toBe(200);
+    expect(body.importSessionId).toBe('sess-roundtrip');
+    expect(mocks.createArcgisImportSession).toHaveBeenCalledOnce();
   });
 
   it('rejects an unparseable mapping payload without reading the workbook', async () => {

@@ -7,6 +7,7 @@ import {
   isColumnMappingShape,
   joinMultiSourceValues,
   mappingApplies,
+  mappingMatchesSource,
   seedMapping,
   validateMapping
 } from './mapping';
@@ -226,6 +227,32 @@ describe('mapping identity', () => {
     const base = seedMapping(csvMeta(['tag']));
     expect(isColumnMappingShape(JSON.parse(JSON.stringify(base)))).toBe(true);
     expect(isColumnMappingShape({ ...base, headerSignature: 42 })).toBe(false);
+  });
+});
+
+describe('mappingMatchesSource (seed round-trip)', () => {
+  it('a freshly seeded ArcGIS mapping matches its own source (shared cross-sheet columns)', () => {
+    const metadata = {
+      format: SourceFormat.arcgis_xlsx as const,
+      sheets: [
+        { name: 'Trees', columns: ['GlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'lx', 'ly', 'When'] },
+        { name: 'Stems', columns: ['GlobalID', 'ParentGlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'When'] }
+      ]
+    };
+    const seeded = seedMapping(metadata);
+    expect(mappingMatchesSource(seeded, metadata)).toBe(true);
+  });
+
+  it('a freshly seeded CSV mapping matches its own source', () => {
+    const metadata = { format: SourceFormat.csv as const, headers: ['tag', 'spcode', 'quadrat', 'lx', 'ly', 'date'] };
+    const seeded = seedMapping(metadata);
+    expect(mappingMatchesSource(seeded, metadata)).toBe(true);
+  });
+
+  it('does not match when the source columns differ', () => {
+    const metadata = { format: SourceFormat.csv as const, headers: ['tag', 'spcode'] };
+    const seeded = seedMapping(metadata);
+    expect(mappingMatchesSource(seeded, { format: SourceFormat.csv as const, headers: ['tag', 'spcode', 'extra'] })).toBe(false);
   });
 });
 

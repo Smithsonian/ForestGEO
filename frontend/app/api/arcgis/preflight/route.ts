@@ -12,7 +12,7 @@ import { transformArcgisWorkbook } from '@/lib/arcgis/transform';
 import { createArcgisImportSession } from '@/lib/arcgis/import-session';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { canonicalFieldsFor } from '@/lib/column-mapping/fields';
-import { isColumnMappingShape, mappingApplies, seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
+import { isColumnMappingShape, mappingMatchesSource, seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
 import { ArcgisMappingRequiredResponse, PREFLIGHT_STATUS_MAPPING_REQUIRED } from '@/lib/arcgis/types';
 import type { ArcgisSourceMetadata, ColumnMapping } from '@/lib/column-mapping/types';
 
@@ -118,12 +118,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
       // Staleness: only a PRESENT signature that no longer matches the workbook is stale. A signature-less
       // mapping is not auto-rejected here — validateMapping below is the gate for it.
-      const stale =
-        mapping.headerSignature !== undefined &&
-        !mappingApplies(
-          mapping,
-          sheetInfo.flatMap(s => s.columns)
-        );
+      const stale = mapping.headerSignature !== undefined && !mappingMatchesSource(mapping, metadata);
       const validation = validateMapping(mapping, metadata);
       if (stale || !validation.valid) {
         const seeded = stale ? seedMapping(metadata) : mapping;

@@ -44,6 +44,15 @@ export function mappingApplies(mapping: ColumnMapping, headers: string[]): boole
 }
 
 /**
+ * Whether `mapping` was built from the same source columns `seedMapping` would derive from this
+ * metadata. Uses the identical column basis seedMapping signs (the de-duplicated union for ArcGIS),
+ * so a freshly seeded mapping resubmitted against the same source is never spuriously stale.
+ */
+export function mappingMatchesSource(mapping: ColumnMapping, metadata: SourceMetadata): boolean {
+  return mappingApplies(mapping, allSourceColumns(metadata));
+}
+
+/**
  * Structural guard for mappings arriving from the wire (JSON.parse output). Anything that fails
  * here would otherwise throw a TypeError deep inside header resolution.
  */
