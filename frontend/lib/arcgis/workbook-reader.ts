@@ -37,8 +37,17 @@ function normalizeCellValue(value: ExcelJS.CellValue): ArcgisCell {
  * Adapter over the shared resolution plan: ignored columns are not read at all (the column is
  * absent from keyByRawHeader), preserving the reader's historical drop semantics.
  */
-function buildHeaderMap(rawHeaders: string[], mapping?: ColumnMapping): { keys: string[]; keyByRawHeader: Map<string, string> } {
-  const plan = resolveHeaders(rawHeaders, mapping ?? null, ARCGIS_ALIASES, ARCGIS_RESOLVE_OPTIONS);
+function buildHeaderMap(rawHeaders: string[], mapping?: ColumnMapping, sheetName?: string): { keys: string[]; keyByRawHeader: Map<string, string> } {
+  // Role lookup only hits when sheetRoles name this sheet; the auto-detection flow (no sheetRoles)
+  // resolves with no role and therefore no scope filtering.
+  const sheetRole: 'trees' | 'stems' | undefined = !sheetName
+    ? undefined
+    : mapping?.sheetRoles?.treesSheetName === sheetName
+      ? 'trees'
+      : mapping?.sheetRoles?.stemsSheetName === sheetName
+        ? 'stems'
+        : undefined;
+  const plan = resolveHeaders(rawHeaders, mapping ?? null, ARCGIS_ALIASES, { ...ARCGIS_RESOLVE_OPTIONS, sheetRole });
   const keys: string[] = [];
   const keyByRawHeader = new Map<string, string>();
   const seen = new Set<string>();
@@ -81,7 +90,7 @@ function parseSheet(worksheet: ExcelJS.Worksheet, mapping?: ColumnMapping): Pars
   const rawHeaders = extractRawHeaders(worksheet);
   const rawColumns = toHeaderColumns(rawHeaders);
 
-  const { keys, keyByRawHeader } = buildHeaderMap(rawHeaders, mapping);
+  const { keys, keyByRawHeader } = buildHeaderMap(rawHeaders, mapping, worksheet.name);
 
   const rows: ArcgisRow[] = [];
   for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {

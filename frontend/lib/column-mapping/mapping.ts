@@ -178,8 +178,12 @@ export function validateMapping(mapping: ColumnMapping, metadata: SourceMetadata
   const perSheet = treesSheetColumns !== undefined && stemsSheetColumns !== undefined;
 
   const csvPlan = metadata.format === SourceFormat.csv ? resolveHeaders(metadata.headers, mapping, aliasesFor(mapping.format), CSV_RESOLVE_OPTIONS) : null;
-  const treesPlan = perSheet ? resolveHeaders(treesSheetColumns!, mapping, aliasesFor(mapping.format), ARCGIS_RESOLVE_OPTIONS) : null;
-  const stemsPlan = perSheet ? resolveHeaders(stemsSheetColumns!, mapping, aliasesFor(mapping.format), ARCGIS_RESOLVE_OPTIONS) : null;
+  const treesPlan = perSheet
+    ? resolveHeaders(treesSheetColumns!, mapping, aliasesFor(mapping.format), { ...ARCGIS_RESOLVE_OPTIONS, sheetRole: 'trees' })
+    : null;
+  const stemsPlan = perSheet
+    ? resolveHeaders(stemsSheetColumns!, mapping, aliasesFor(mapping.format), { ...ARCGIS_RESOLVE_OPTIONS, sheetRole: 'stems' })
+    : null;
 
   for (const def of defs) {
     if (!def.required) continue;

@@ -184,6 +184,41 @@ describe('validateMapping (arcgis per-sheet scope)', () => {
   });
 });
 
+describe('validateMapping (scope-aware resolution matches the reader)', () => {
+  // Same-name-per-sheet collision: on the stems sheet the column literally named 'GlobalID' is the
+  // PARENT link (the stem's own id lives in 'ObjectID'), while on the trees sheet 'GlobalID' is the
+  // tree's own id. Scoping ParentGlobalID's explicit source to the stems sheet is exactly what
+  // keeps that override from claiming the trees sheet's 'GlobalID' header. Without sheetRole
+  // threading in validateMapping, the override cross-claims and 'GlobalID (trees sheet)' is
+  // falsely reported missing.
+  const meta: ArcgisSourceMetadata = {
+    format: SourceFormat.arcgis_xlsx,
+    sheets: [
+      { name: 'TreesSheet', columns: ['GlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'lx', 'ly', 'Date_measured'] },
+      { name: 'StemsSheet', columns: ['ObjectID', 'GlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'Date_measured'] }
+    ],
+    detectedTreesSheet: 'TreesSheet',
+    detectedStemsSheet: 'StemsSheet'
+  };
+
+  it('a stems-scoped override on a column name shared with the trees sheet does not break trees validation', () => {
+    const m = seedMapping(meta);
+    const withScopedParentLink = {
+      ...m,
+      fields: m.fields.map(f =>
+        f.canonicalField === 'ParentGlobalID'
+          ? { ...f, sourceColumns: ['GlobalID'] }
+          : f.canonicalField === 'GlobalID'
+            ? { ...f, sourceColumns: ['ObjectID'] }
+            : f
+      )
+    };
+    const v = validateMapping(withScopedParentLink, meta);
+    expect(v.missingRequired).toEqual([]);
+    expect(v.valid).toBe(true);
+  });
+});
+
 describe('isColumnMappingShape', () => {
   it('accepts a structurally valid mapping', () => {
     const m = seedMapping(csvMeta(['tag', 'spcode', 'quadrat', 'lx', 'ly', 'date']));

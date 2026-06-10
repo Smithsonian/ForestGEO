@@ -86,6 +86,54 @@ describe('resolveHeaders (arcgis, allowAliasFill: true)', () => {
   });
 });
 
+describe('resolveHeaders (sheet-scoped explicit mappings)', () => {
+  const arcgisAliases = aliasesFor(SourceFormat.arcgis_xlsx);
+
+  it('a trees-scoped explicit mapping does not claim a same-named column on the stems sheet', () => {
+    const mapping: ColumnMapping = {
+      version: 1,
+      format: SourceFormat.arcgis_xlsx,
+      fields: [{ canonicalField: 'tag', sourceColumns: ['SharedLabel'], scope: 'trees' }]
+    };
+    const stemsPlan = resolveHeaders(['SharedLabel', 'GlobalID'], mapping, arcgisAliases, { ...ARCGIS_RESOLVE_OPTIONS, sheetRole: 'stems' });
+    const claimed = stemsPlan.resolutions.find(r => r.canonicalField === 'tag' && r.kind === 'mapped');
+    expect(claimed).toBeUndefined();
+  });
+
+  it('a trees-scoped explicit mapping STILL claims its column on the trees sheet', () => {
+    const mapping: ColumnMapping = {
+      version: 1,
+      format: SourceFormat.arcgis_xlsx,
+      fields: [{ canonicalField: 'tag', sourceColumns: ['SharedLabel'], scope: 'trees' }]
+    };
+    const treesPlan = resolveHeaders(['SharedLabel', 'GlobalID'], mapping, arcgisAliases, { ...ARCGIS_RESOLVE_OPTIONS, sheetRole: 'trees' });
+    const claimed = treesPlan.resolutions.find(r => r.canonicalField === 'tag' && r.kind === 'mapped');
+    expect(claimed?.rawHeader).toBe('SharedLabel');
+  });
+
+  it('a both-scoped explicit mapping claims on either sheet', () => {
+    const mapping: ColumnMapping = {
+      version: 1,
+      format: SourceFormat.arcgis_xlsx,
+      fields: [{ canonicalField: 'spcode', sourceColumns: ['Sp'], scope: 'both' }]
+    };
+    for (const role of ['trees', 'stems'] as const) {
+      const plan = resolveHeaders(['Sp', 'GlobalID'], mapping, arcgisAliases, { ...ARCGIS_RESOLVE_OPTIONS, sheetRole: role });
+      expect(plan.resolutions.find(r => r.canonicalField === 'spcode' && r.kind === 'mapped')?.rawHeader).toBe('Sp');
+    }
+  });
+
+  it('no sheetRole means no filtering: every field scope contributes overrides (current behavior preserved)', () => {
+    const mapping: ColumnMapping = {
+      version: 1,
+      format: SourceFormat.arcgis_xlsx,
+      fields: [{ canonicalField: 'tag', sourceColumns: ['SharedLabel'], scope: 'trees' }]
+    };
+    const plan = resolveHeaders(['SharedLabel', 'GlobalID'], mapping, arcgisAliases, ARCGIS_RESOLVE_OPTIONS);
+    expect(plan.resolutions.find(r => r.canonicalField === 'tag' && r.kind === 'mapped')?.rawHeader).toBe('SharedLabel');
+  });
+});
+
 describe('transformHeaderFromPlan', () => {
   it('looks keys up by papaparse index', () => {
     const m = csvMapping([{ canonicalField: 'lx', sourceColumns: ['MyX'], scope: 'file' }]);
