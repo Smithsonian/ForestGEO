@@ -1,4 +1,5 @@
 import type { FileRow } from '@/config/macros/formdetails';
+import type { ColumnMapping, MappingValidation } from '@/lib/column-mapping/types';
 
 export type ArcgisCell = string | number | Date | null;
 export type ArcgisRow = Record<string, ArcgisCell>;
@@ -47,4 +48,15 @@ export interface ArcgisImportReference {
 export interface ArcgisPreflightResponse extends ArcgisImportReference {
   summary: TransformSummary;
   warnings: TransformWarning[];
+}
+
+export const PREFLIGHT_STATUS_MAPPING_REQUIRED = 'mapping_required' as const;
+
+export interface ArcgisMappingRequiredResponse {
+  status: typeof PREFLIGHT_STATUS_MAPPING_REQUIRED;
+  error: string;
+  format: 'arcgis_xlsx';
+  sheets: { name: string; columns: string[] }[];
+  mapping: ColumnMapping;
+  validation: MappingValidation;
 }

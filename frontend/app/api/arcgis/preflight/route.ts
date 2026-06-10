@@ -6,12 +6,13 @@ import { HTTPResponses } from '@/config/macros';
 import { assertCanEditMeasurementScope, ScopeAccessError } from '@/config/editplan/scopeguard';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
-import { AmbiguousSheetError, MissingColumnError, MissingSheetError, UnparseableDateError } from '@/lib/arcgis/errors';
+import { UnparseableDateError } from '@/lib/arcgis/errors';
 import { readArcgisWorkbookDetailed } from '@/lib/arcgis/workbook-reader';
 import { transformArcgisWorkbook } from '@/lib/arcgis/transform';
 import { createArcgisImportSession } from '@/lib/arcgis/import-session';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { isColumnMappingShape, seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
+import { ArcgisMappingRequiredResponse, PREFLIGHT_STATUS_MAPPING_REQUIRED } from '@/lib/arcgis/types';
 import type { ArcgisSourceMetadata, ColumnMapping } from '@/lib/column-mapping/types';
 
 export const runtime = 'nodejs';
@@ -30,12 +31,7 @@ function getStringField(formData: FormData, name: string): string | null {
 }
 
 function workbookErrorResponse(error: Error): NextResponse | null {
-  if (
-    error instanceof MissingSheetError ||
-    error instanceof MissingColumnError ||
-    error instanceof AmbiguousSheetError ||
-    error instanceof UnparseableDateError
-  ) {
+  if (error instanceof UnparseableDateError) {
     return NextResponse.json({ error: error.message }, { status: HTTPResponses.INVALID_REQUEST });
   }
   return null;
@@ -111,14 +107,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const validation = validateMapping(seeded, metadata);
       return NextResponse.json(
         {
+          status: PREFLIGHT_STATUS_MAPPING_REQUIRED,
           error: outcome.error.message,
-          mappingRequired: true,
           format: SourceFormat.arcgis_xlsx,
           sheets: outcome.sheets,
-          missingRequired: validation.missingRequired,
-          missingSheetRoles: validation.missingSheetRoles ?? []
-        },
-        { status: HTTPResponses.INVALID_REQUEST }
+          mapping: seeded,
+          validation
+        } satisfies ArcgisMappingRequiredResponse,
+        { status: HTTPResponses.OK }
       );
     }
     const workbook = outcome.workbook;

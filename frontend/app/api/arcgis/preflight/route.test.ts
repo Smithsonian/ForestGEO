@@ -72,12 +72,31 @@ describe('POST /api/arcgis/preflight mapping', () => {
     const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1' }) as any);
     const body = await res.json();
 
-    expect(res.status).toBe(400);
-    expect(body.mappingRequired).toBe(true);
+    expect(res.status).toBe(200);
+    expect(body.status).toBe('mapping_required');
+    expect(body.error).toMatch(/missing/i);
     expect(body.format).toBe('arcgis_xlsx');
     expect(body.sheets).toHaveLength(2);
-    expect(body.missingRequired).toContain('lx');
-    expect(body.missingSheetRoles).toEqual(expect.arrayContaining(['trees', 'stems']));
+    expect(body.mapping.fields.length).toBeGreaterThan(0);
+    expect(body.validation.missingRequired).toContain('lx');
+    expect(mocks.createArcgisImportSession).not.toHaveBeenCalled();
+  });
+
+  it('echoes a client-supplied mapping back in the mapping_required 200 response', async () => {
+    const clientMapping = {
+      version: 1,
+      format: 'arcgis_xlsx',
+      fields: [{ canonicalField: 'lx', sourceColumns: ['MyX'], scope: 'trees' }],
+      sheetRoles: { treesSheetName: 'TreesCustom', stemsSheetName: 'StemsCustom' }
+    };
+    mocks.readArcgisWorkbookDetailed.mockResolvedValue({ ok: false, error: new MissingColumnError('Trees sheet missing ly.'), sheets: DESCRIBED_SHEETS });
+
+    const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1', mapping: JSON.stringify(clientMapping) }) as any);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.status).toBe('mapping_required');
+    expect(body.mapping.fields[0].sourceColumns).toEqual(['MyX']);
     expect(mocks.createArcgisImportSession).not.toHaveBeenCalled();
   });
 
@@ -146,6 +165,7 @@ describe('POST /api/arcgis/preflight mapping', () => {
     expect(res.status).toBe(200);
     expect(body.importSessionId).toBe('sess-2');
     expect(body.summary).toEqual({ totalRows: 1 });
+    expect(body.status).toBeUndefined();
     expect(mocks.readArcgisWorkbookDetailed).toHaveBeenCalledWith(expect.anything(), undefined);
   });
 });

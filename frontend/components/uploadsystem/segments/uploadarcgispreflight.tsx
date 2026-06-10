@@ -18,12 +18,13 @@ import {
   Typography
 } from '@mui/joy';
 import type { FileWithPath } from 'react-dropzone';
-import type { ArcgisImportReference, ArcgisPreflightResponse, TransformSummary, TransformWarning } from '@/lib/arcgis/types';
+import type { ArcgisMappingRequiredResponse, ArcgisImportReference, ArcgisPreflightResponse, TransformSummary, TransformWarning } from '@/lib/arcgis/types';
+import { PREFLIGHT_STATUS_MAPPING_REQUIRED } from '@/lib/arcgis/types';
 import { warningsToCsv } from '@/lib/arcgis/diagnostics-csv';
 import { arcgisHelpHeaders } from '@/lib/arcgis/schema';
 import ailogger from '@/ailogger';
 import ColumnMappingDialog from './columnmappingdialog';
-import { seedMapping } from '@/lib/column-mapping/mapping';
+import { isColumnMappingShape, seedMapping } from '@/lib/column-mapping/mapping';
 import { SourceFormat } from '@/config/macros/formdetails';
 import type { ArcgisSourceMetadata, ColumnMapping } from '@/lib/column-mapping/types';
 
@@ -168,28 +169,28 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
           body: formData,
           signal: controller.signal
         });
-        const payload = (await response.json().catch(() => ({}))) as Partial<ArcgisPreflightResponse> & {
-          error?: string;
-          mappingRequired?: boolean;
-          sheets?: { name: string; columns: string[] }[];
-        };
+        const payload = (await response.json().catch(() => ({}))) as Partial<ArcgisPreflightResponse> &
+          Partial<ArcgisMappingRequiredResponse> & {
+            error?: string;
+          };
         if (controller.signal.aborted) return;
 
         if (!response.ok) {
-          if (payload.mappingRequired && Array.isArray(payload.sheets)) {
-            const meta: ArcgisSourceMetadata = { format: SourceFormat.arcgis_xlsx, sheets: payload.sheets };
-            setArcgisMeta(meta);
-            setMapping(mappingArg ?? seedMapping(meta));
-            setMappingServerError(typeof payload.error === 'string' ? payload.error : null);
-            setMappingOpen(true);
-            return;
-          }
           const message = payload.error || `ArcGIS pre-flight failed with HTTP ${response.status}`;
           if ([400, 413, 422].includes(response.status)) {
             setErrorMessage(message);
             return;
           }
           throw new Error(message);
+        }
+
+        if (payload.status === PREFLIGHT_STATUS_MAPPING_REQUIRED && Array.isArray(payload.sheets)) {
+          const meta: ArcgisSourceMetadata = { format: SourceFormat.arcgis_xlsx, sheets: payload.sheets };
+          setArcgisMeta(meta);
+          setMapping(mappingArg ?? (isColumnMappingShape(payload.mapping) ? payload.mapping : seedMapping(meta)));
+          setMappingServerError(typeof payload.error === 'string' ? payload.error : null);
+          setMappingOpen(true);
+          return;
         }
 
         if (!payload.importSessionId || !payload.fileName || typeof payload.rowCount !== 'number' || !payload.summary || !Array.isArray(payload.warnings)) {

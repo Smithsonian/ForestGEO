@@ -2,6 +2,8 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import UploadArcgisPreflight, { ArcgisPreflightSummary } from './uploadarcgispreflight';
 import type { TransformSummary, TransformWarning } from '@/lib/arcgis/types';
+import { seedMapping } from '@/lib/column-mapping/mapping';
+import { SourceFormat } from '@/config/macros/formdetails';
 
 const summary: TransformSummary = {
   treesTransformed: 9958,
@@ -122,20 +124,29 @@ describe('UploadArcgisPreflight', () => {
   it('opens the mapping dialog when preflight returns mappingRequired and resubmits with the mapping', async () => {
     const onProceed = vi.fn();
     const onError = vi.fn();
+    const mappingRequiredSheets = [
+      { name: 'TreesCustom', columns: ['GlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'MyX', 'MyY', 'Date_measured'] },
+      { name: 'StemsCustom', columns: ['GlobalID', 'ParentGlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'Date_measured'] }
+    ];
+    const mappingRequiredMeta = { format: SourceFormat.arcgis_xlsx, sheets: mappingRequiredSheets };
     const mappingRequiredBody = {
+      status: 'mapping_required',
       error: 'Trees sheet missing lx, ly.',
-      mappingRequired: true,
       format: 'arcgis_xlsx',
-      sheets: [
-        { name: 'TreesCustom', columns: ['GlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'MyX', 'MyY', 'Date_measured'] },
-        { name: 'StemsCustom', columns: ['GlobalID', 'ParentGlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'Date_measured'] }
-      ],
-      missingRequired: ['lx', 'ly'],
-      missingSheetRoles: ['trees', 'stems']
+      sheets: mappingRequiredSheets,
+      mapping: seedMapping(mappingRequiredMeta),
+      validation: {
+        valid: false,
+        missingRequired: ['lx', 'ly'],
+        missingSourceColumns: [],
+        duplicateSourceColumns: [],
+        ignoredSourceColumns: [],
+        missingSheetRoles: ['trees', 'stems']
+      }
     };
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(mappingRequiredBody), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(mappingRequiredBody), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ importSessionId: 'arcgis-session-2', fileName: 'arcgis-export.xlsx', rowCount: 1, summary, warnings: [] }), {
           status: 200,
@@ -207,17 +218,26 @@ describe('UploadArcgisPreflight', () => {
   });
 
   it('clears stale mapping UI when the file selection changes', async () => {
+    const clearStaleSheets = [{ name: 'TreesCustom', columns: ['GlobalID'] }];
+    const clearStaleMeta = { format: SourceFormat.arcgis_xlsx, sheets: clearStaleSheets };
     const mappingRequiredBody = {
+      status: 'mapping_required',
       error: 'Trees sheet missing lx, ly.',
-      mappingRequired: true,
       format: 'arcgis_xlsx',
-      sheets: [{ name: 'TreesCustom', columns: ['GlobalID'] }],
-      missingRequired: ['lx'],
-      missingSheetRoles: ['trees', 'stems']
+      sheets: clearStaleSheets,
+      mapping: seedMapping(clearStaleMeta),
+      validation: {
+        valid: false,
+        missingRequired: ['lx'],
+        missingSourceColumns: [],
+        duplicateSourceColumns: [],
+        ignoredSourceColumns: [],
+        missingSheetRoles: ['trees', 'stems']
+      }
     };
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(mappingRequiredBody), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(mappingRequiredBody), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockReturnValueOnce(new Promise(() => {})); // second preflight stays in flight
     vi.stubGlobal('fetch', fetchMock);
 
@@ -253,17 +273,26 @@ describe('UploadArcgisPreflight', () => {
   });
 
   it('surfaces the server rejection message in the mapping flow instead of discarding it', async () => {
+    const surfaceSheets = [{ name: 'TreesCustom', columns: ['GlobalID'] }];
+    const surfaceMeta = { format: SourceFormat.arcgis_xlsx, sheets: surfaceSheets };
     const mappingRequiredBody = {
+      status: 'mapping_required',
       error: 'Trees sheet "TreesCustom" is missing required column(s): lx.',
-      mappingRequired: true,
       format: 'arcgis_xlsx',
-      sheets: [{ name: 'TreesCustom', columns: ['GlobalID'] }],
-      missingRequired: ['lx'],
-      missingSheetRoles: ['trees', 'stems']
+      sheets: surfaceSheets,
+      mapping: seedMapping(surfaceMeta),
+      validation: {
+        valid: false,
+        missingRequired: ['lx'],
+        missingSourceColumns: [],
+        duplicateSourceColumns: [],
+        ignoredSourceColumns: [],
+        missingSheetRoles: ['trees', 'stems']
+      }
     };
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(mappingRequiredBody), { status: 400, headers: { 'Content-Type': 'application/json' } }));
+      .mockResolvedValueOnce(new Response(JSON.stringify(mappingRequiredBody), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
 
     render(
