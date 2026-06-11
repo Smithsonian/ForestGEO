@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FormType, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
+import { FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
 import { ColumnMapping } from './types';
 import { headerSignature } from './mapping';
 import { resolveMeasurementChunk, transformMeasurementValue, validateMeasurementRow } from './measurement-rows';
@@ -156,6 +156,25 @@ describe('validateMeasurementRow', () => {
     const result = validateMeasurementRow(row, MEASUREMENTS_REQUIRED, DEFAULT_DELIMITER, FormType.measurements);
     expect(result.hasExtraColumns).toBe(true);
     expect(result.valid).toBe(true);
+  });
+
+  it('rejects a row whose __parsed_extra leading cell is an out-of-range number (parity with legacy validateRow)', () => {
+    // papaparse stores leftover cells as an array under __parsed_extra. The legacy inline validateRow
+    // did NOT exclude __parsed_extra from the decimal-range loop: Number.parseFloat(String(['-5','junk']))
+    // is -5 -> out of range -> the whole row was rejected. The shared validator must match that exactly.
+    const row = { tag: 'T1', stemtag: 'S1', spcode: 'abc', quadrat: 'q1', __parsed_extra: ['-5', 'junk'] } as unknown as FileRow;
+    const verdict = validateMeasurementRow(row, [{ label: 'tag' }, { label: 'spcode' }, { label: 'quadrat' }], ',', FormType.measurements);
+    expect(verdict.valid).toBe(false);
+    expect(verdict.failureReason).toContain('__parsed_extra');
+  });
+
+  it('does NOT range-reject a non-numeric __parsed_extra array (parseFloat of a non-numeric leading cell is NaN)', () => {
+    // Same code path as above, but the leading cell parses to NaN, so no range error is produced.
+    const row = { tag: 'T1', stemtag: 'S1', spcode: 'abc', quadrat: 'q1', __parsed_extra: ['foo', 'bar'] } as unknown as FileRow;
+    const verdict = validateMeasurementRow(row, [{ label: 'tag' }, { label: 'spcode' }, { label: 'quadrat' }], ',', FormType.measurements);
+    expect(verdict.valid).toBe(true);
+    expect(verdict.failureReason ?? '').not.toContain('out of range');
+    expect(verdict.hasExtraColumns).toBe(true);
   });
 
   it('does not range-reject a key that is simply absent from the row', () => {

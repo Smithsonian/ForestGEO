@@ -107,7 +107,7 @@ export function validateMeasurementRow(row: FileRow, requiredHeaders: { label: s
   }
 
   for (const [key, value] of Object.entries(row)) {
-    if (value !== null && value !== undefined && key !== '__parsed_extra' && !['tag', 'stemtag'].includes(key)) {
+    if (value !== null && value !== undefined && !['tag', 'stemtag'].includes(key)) {
       const num = Number.parseFloat(String(value));
       if (!Number.isNaN(num) && (num < 0 || num > MAX_DECIMAL)) {
         errors.push(`Decimal value for ${key} is out of range: ${value}`);
