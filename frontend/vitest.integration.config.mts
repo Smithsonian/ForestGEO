@@ -33,7 +33,14 @@ export default defineConfig({
       AZURE_SQL_SERVER: '127.0.0.1',
       AZURE_SQL_USER: 'root',
       AZURE_SQL_PASSWORD: 'testpassword',
-      AZURE_SQL_PORT: '3306'
+      AZURE_SQL_PORT: '3306',
+      // TEST_DB_HOST must be the SAME literal as AZURE_SQL_SERVER. 'localhost'
+      // resolves to ::1 first on macOS while '127.0.0.1' is IPv4 — when two
+      // MySQL servers split the port (e.g. native mysqld on IPv4, docker proxy
+      // on IPv6), the TEST_DB_* harness and ConnectionManager silently talk to
+      // DIFFERENT servers and every cross-stack test fails with
+      // "Unknown database 'forestgeo_test_N'".
+      TEST_DB_HOST: '127.0.0.1'
     },
 
     // Extended timeouts for database operations
