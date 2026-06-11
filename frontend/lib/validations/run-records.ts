@@ -8,6 +8,7 @@
 import type ConnectionManager from '@/config/connectionmanager';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
+import ailogger from '@/ailogger';
 
 /**
  * How long a "running" row is considered valid before we assume the owning
@@ -193,5 +194,8 @@ export async function updateValidationRunRecord(
   params.push(runID);
 
   const query = safeFormatQuery(schema, `UPDATE ??.validation_runs SET ${setClauses.join(', ')} WHERE RunID = ?`);
-  await connectionManager.executeQuery(query, params);
+  const result = await connectionManager.executeQuery(query, params);
+  if (Number((result as { affectedRows?: number })?.affectedRows ?? 0) === 0) {
+    ailogger.warn(`[ValidationRunRecord] updateValidationRunRecord: no row updated for RunID=${runID} — record may have been deleted`);
+  }
 }

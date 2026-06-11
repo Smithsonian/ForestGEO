@@ -462,6 +462,80 @@ describe('runCensusValidations — integration', () => {
   }, 120000);
 
   // -------------------------------------------------------------------------
+  // 4. Step failure — a validation with invalid SQL causes a step failure,
+  //    the run record is finalized 'failed' (not stranded 'running'), the
+  //    remaining steps still execute, and failedSteps is bounded to totalSteps.
+  // -------------------------------------------------------------------------
+
+  it('marks run failed when a validation definition is corrupted, without stranding a running record', async () => {
+    await stageAndIngestRows(buildCleanFixtureRows(), EXPECTED_CLEAN_ROW_COUNT);
+
+    // Sanity: target validation exists and is enabled.
+    const [targetDef] = await connection.query<RowDataPacket[]>(
+      'SELECT ValidationID, ProcedureName, Definition FROM sitespecificvalidations WHERE ValidationID = ?',
+      [ABNORMAL_DBH_VALIDATION_ID]
+    );
+    expect(targetDef).toHaveLength(1);
+    expect(
+      mysqlBitToNumber(
+        (await connection.query<RowDataPacket[]>('SELECT IsEnabled FROM sitespecificvalidations WHERE ValidationID = ?', [ABNORMAL_DBH_VALIDATION_ID]))[0][0]
+          .IsEnabled
+      )
+    ).toBe(1);
+
+    const originalDefinition = String(targetDef[0].Definition);
+    const INVALID_SQL = 'THIS IS NOT VALID SQL !!!';
+
+    // Corrupt the definition to guaranteed-unparseable SQL so runValidation
+    // takes the non-retryable error path and returns false.
+    await connection.query('UPDATE sitespecificvalidations SET Definition = ? WHERE ValidationID = ?', [INVALID_SQL, ABNORMAL_DBH_VALIDATION_ID]);
+    console.log(`[step-failure] corrupted ValidationID=${ABNORMAL_DBH_VALIDATION_ID} definition to invalid SQL`);
+
+    const expectedTotalSteps = await computeExpectedTotalSteps();
+
+    let summary: Awaited<ReturnType<typeof runCensusValidations>>;
+    try {
+      summary = await runCensusValidations(connectionManager, { schema, plotID, censusID });
+    } finally {
+      // Always restore the definition, even if the orchestrator itself throws.
+      await connection.query('UPDATE sitespecificvalidations SET Definition = ? WHERE ValidationID = ?', [originalDefinition, ABNORMAL_DBH_VALIDATION_ID]);
+      console.log(`[step-failure] restored ValidationID=${ABNORMAL_DBH_VALIDATION_ID} definition`);
+    }
+
+    console.log(`[summary] ${JSON.stringify(summary)}`);
+
+    // At least the corrupted step must be counted as failed.
+    expect(summary.failedSteps).toBeGreaterThanOrEqual(1);
+    // failedSteps must never exceed the task count — post-pass errors don't bleed in.
+    expect(summary.failedSteps).toBeLessThanOrEqual(summary.totalSteps);
+    // The error list must mention the corrupted validation by name.
+    const mentionsValidation = summary.errors.some(e => e.includes(ABNORMAL_DBH_PROCEDURE));
+    expect(mentionsValidation).toBe(true);
+    // The orchestrator still attempted every task.
+    expect(summary.totalSteps).toBe(expectedTotalSteps);
+    // Conflict must not be set.
+    expect(summary.conflict).toBe(false);
+
+    // The run record must be finalized — never left in 'running' state.
+    const runs = await fetchValidationRuns();
+    console.log(`[validation_runs] ${JSON.stringify(runs)}`);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].Status).toBe('failed');
+    expect(runs[0].CompletedAt).not.toBeNull();
+    // FailedSteps in the record must also be bounded to the task count.
+    expect(Number(runs[0].FailedSteps)).toBeGreaterThanOrEqual(1);
+    expect(Number(runs[0].FailedSteps)).toBeLessThanOrEqual(expectedTotalSteps);
+
+    // ErrorMessages is a JSON column — mysql2 auto-parses it; accept either
+    // an already-parsed array or a raw JSON string.
+    const rawMessages = runs[0].ErrorMessages;
+    const recordErrors: string[] = Array.isArray(rawMessages) ? rawMessages : typeof rawMessages === 'string' ? (JSON.parse(rawMessages) as string[]) : [];
+    expect(recordErrors.length).toBeGreaterThan(0);
+    const recordMentionsValidation = recordErrors.some((e: string) => e.includes(ABNORMAL_DBH_PROCEDURE));
+    expect(recordMentionsValidation).toBe(true);
+  }, 120000);
+
+  // -------------------------------------------------------------------------
   // 3. Conflict — fresh running row short-circuits the orchestrator
   // -------------------------------------------------------------------------
 
