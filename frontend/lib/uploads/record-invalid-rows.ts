@@ -15,7 +15,7 @@
 
 import moment from 'moment/moment';
 import ConnectionManager from '@/config/connectionmanager';
-import { insertIngestionFailureRows } from '@/config/measurementerrors';
+import { insertIngestionFailureRows, toFiniteNumber } from '@/config/measurementerrors';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 import { FileRow } from '@/config/macros/formdetails';
 import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
@@ -26,6 +26,18 @@ export interface InvalidRowContext {
   censusID: number;
   fileName: string;
   batchID: string;
+  /**
+   * Row-index offset for chunked callers.
+   *
+   * insertPreparedIngestionFailureRowsBulk selects inserted rows back by
+   * (UploadBatchID, SourceRowIndex), so chunked callers MUST pass a running
+   * offset or error-log rows mislink. Defaults to 0.
+   *
+   * Example: if a file is split into two chunks of 100 rows each, the first
+   * call passes sourceRowIndexOffset=0 (rows indexed 1–100) and the second
+   * passes sourceRowIndexOffset=100 (rows indexed 101–200).
+   */
+  sourceRowIndexOffset?: number;
 }
 
 /**
@@ -46,24 +58,25 @@ export async function recordInvalidRows(
 ): Promise<number> {
   if (rows.length === 0) return 0;
 
+  const offset = ctx.sourceRowIndexOffset ?? 0;
   const inputs = rows.map((row, idx) => ({
     plotID: ctx.plotID,
     censusID: ctx.censusID,
-    tag: row.tag ?? null,
-    stemTag: row.stemtag ?? null,
-    spCode: row.spcode ?? null,
-    quadrat: row.quadrat ?? null,
-    x: row.lx != null ? Number(row.lx) : null,
-    y: row.ly != null ? Number(row.ly) : null,
-    dbh: row.dbh != null ? Number(row.dbh) : null,
-    hom: row.hom != null ? Number(row.hom) : null,
+    tag: row.tag || null,
+    stemTag: row.stemtag || null,
+    spCode: row.spcode || null,
+    quadrat: row.quadrat || null,
+    x: toFiniteNumber(row.lx),
+    y: toFiniteNumber(row.ly),
+    dbh: toFiniteNumber(row.dbh),
+    hom: toFiniteNumber(row.hom),
     date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
-    codes: row.codes ?? null,
-    comments: row.comments ?? null,
-    failureReason: String(row.failureReason ?? 'Unknown parse error'),
+    codes: row.codes || null,
+    comments: row.comments || null,
+    failureReason: row.failureReason ? String(row.failureReason) : 'Unknown parse error',
     fileID: ctx.fileName,
     batchID: ctx.batchID,
-    sourceRowIndex: idx + 1
+    sourceRowIndex: idx + 1 + offset
   }));
 
   const insertedIDs = await insertIngestionFailureRows(connectionManager, ctx.schema, inputs, transactionID);

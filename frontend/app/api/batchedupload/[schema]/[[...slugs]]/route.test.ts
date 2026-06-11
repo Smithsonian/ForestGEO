@@ -110,6 +110,18 @@ describe('batchedupload POST route', () => {
     expect(typeof fileIDArg).toBe('string');
     expect(typeof batchIDArg).toBe('string');
 
+    // Per-row shape: the route enriches each row with plotID, censusID, batchID,
+    // fileID before passing to recordFailedMeasurementRows. Verify the mapped-in
+    // fields match the URL params so misrouted rows are caught early.
+    expect(rowsArg[0]).toMatchObject({ plotID: 42, censusID: 7 });
+    expect(rowsArg[1]).toMatchObject({ plotID: 42, censusID: 7 });
+
+    // failureReasons fallback: rows without an explicit failureReasons value should
+    // carry whatever field the route maps (reason field is not normalised here, but
+    // the batchID/fileID overrides must be strings).
+    expect(typeof (rowsArg[0] as any).batchID).toBe('string');
+    expect(typeof (rowsArg[0] as any).fileID).toBe('string');
+
     expect(validatedSchemaMock).toHaveBeenCalledWith('forestgeo_testing');
   });
 

@@ -534,7 +534,7 @@ const FIELD_LENGTH_LIMITS = {
   Codes: 255
 } as const;
 
-function toFiniteNumber(value: unknown): number | null {
+export function toFiniteNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;

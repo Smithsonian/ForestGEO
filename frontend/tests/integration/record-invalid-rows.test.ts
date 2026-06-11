@@ -253,6 +253,13 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatch — integration', () 
     expect(fullRecorded.RawSpCode).toBe('ACERRU');
     expect(fullRecorded.RawQuadrat).toBe('Q01');
     expect(String(fullRecorded.MeasurementDateText)).toBe('2024-05-20');
+    // Numeric fields: the fixture sends string values ('1.5', '2.75', etc.) which
+    // toFiniteNumber parses to finite numbers before storage. MySQL returns them
+    // as CAST-to-CHAR strings; compare numerically to tolerate decimal formatting.
+    expect(parseFloat(fullRecorded.RawXText)).toBeCloseTo(1.5);
+    expect(parseFloat(fullRecorded.RawYText)).toBeCloseTo(2.75);
+    expect(parseFloat(fullRecorded.MeasuredDBHText)).toBeCloseTo(12.345);
+    expect(parseFloat(fullRecorded.MeasuredHOMText)).toBeCloseTo(1.3);
     // Description stores the comments field; failure reason goes into measurement_error_log.
     expect(fullRecorded.Description).toBe('test comment');
 
