@@ -9,8 +9,12 @@ import type {
   CreateUploadJobInput,
   UploadJobPhase
 } from './types';
+import { UPLOAD_JOB_MAX_RETRIES } from './types';
 
-const ACTIVE_JOB_STATUSES: BackgroundJobStatus[] = ['created', 'queued', 'running', 'waiting_retry'];
+const ACTIVE_JOB_STATUSES: BackgroundJobStatus[] = ['queued', 'running', 'cancel_requested', 'waiting_retry'];
+
+// MySQL error number for duplicate key violations (ER_DUP_ENTRY).
+const MYSQL_ERRNO_DUPLICATE_ENTRY = 1062;
 
 function parseJsonObject(value: unknown): Record<string, unknown> | null {
   if (!value) return null;
@@ -50,10 +54,9 @@ function mapJob(row: any): BackgroundJobRecord {
     processedRows: Number(row.ProcessedRows ?? 0),
     failedRows: Number(row.FailedRows ?? 0),
     retryCount: Number(row.RetryCount ?? 0),
-    maxRetries: Number(row.MaxRetries ?? 0),
+    maxRetries: Number(row.MaxRetries ?? UPLOAD_JOB_MAX_RETRIES),
     nextAttemptAt: toDate(row.NextAttemptAt),
     lastError: row.LastError ?? null,
-    lastMessageID: row.LastMessageID ?? null,
     workerID: row.WorkerID ?? null,
     workerHeartbeatAt: toDate(row.WorkerHeartbeatAt),
     payload: parseJsonObject(row.Payload),
@@ -76,6 +79,7 @@ function mapFile(row: any): BackgroundJobFileRecord {
     checksumSha256: row.ChecksumSHA256 ?? null,
     sourceFormat: row.SourceFormat ?? null,
     formType: row.FormType ?? null,
+    batchID: row.BatchID ?? null,
     expectedRows: row.ExpectedRows === null || row.ExpectedRows === undefined ? null : Number(row.ExpectedRows),
     processedRows: Number(row.ProcessedRows ?? 0),
     failedRows: Number(row.FailedRows ?? 0),
@@ -113,38 +117,40 @@ export async function createUploadBackgroundJob(catalogPool: Pool, input: Create
   try {
     await conn.beginTransaction();
 
-    if (input.idempotencyKey) {
-      const [existingRows]: any = await conn.query(`SELECT * FROM catalog.background_jobs WHERE CreatedBy = ? AND IdempotencyKey = ? LIMIT 1 FOR UPDATE`, [
-        createdBy,
-        input.idempotencyKey
-      ]);
-      if (existingRows.length > 0) {
-        await conn.commit();
-        return mapJob(existingRows[0]);
-      }
-    }
-
     const totalRows = input.files.reduce((sum, file) => sum + Number(file.expectedRows ?? 0), 0);
-    const [insertResult] = await conn.query<ResultSetHeader>(
-      `INSERT INTO catalog.background_jobs
-       (JobType, Status, Phase, SchemaName, PlotID, CensusID, UploadMode, SourceFormat, FormType,
-        CreatedBy, IdempotencyKey, TotalFiles, TotalRows, Payload)
-       VALUES ('upload_validation', 'created', 'blob_received', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        input.schema,
-        input.plotID,
-        input.censusID,
-        input.uploadMode ?? null,
-        input.sourceFormat ?? null,
-        input.formType ?? null,
-        createdBy,
-        input.idempotencyKey ?? null,
-        input.files.length,
-        totalRows,
-        input.payload ? JSON.stringify(input.payload) : null
-      ]
-    );
-    const jobID = Number(insertResult.insertId);
+    let jobID: number;
+    try {
+      const [insertResult] = await conn.query<ResultSetHeader>(
+        `INSERT INTO catalog.background_jobs
+         (JobType, Status, Phase, SchemaName, PlotID, CensusID, UploadMode, SourceFormat, FormType,
+          CreatedBy, IdempotencyKey, TotalFiles, TotalRows, Payload)
+         VALUES ('upload_validation', 'queued', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          input.schema,
+          input.plotID,
+          input.censusID,
+          input.uploadMode ?? null,
+          input.sourceFormat ?? null,
+          input.formType ?? null,
+          createdBy,
+          input.idempotencyKey ?? null,
+          input.files.length,
+          totalRows,
+          input.payload ? JSON.stringify(input.payload) : null
+        ]
+      );
+      jobID = Number(insertResult.insertId);
+    } catch (err: any) {
+      if (err?.errno === MYSQL_ERRNO_DUPLICATE_ENTRY && input.idempotencyKey) {
+        await conn.rollback();
+        const [existingRows]: any = await conn.query(`SELECT * FROM catalog.background_jobs WHERE CreatedBy = ? AND IdempotencyKey = ? LIMIT 1`, [
+          createdBy,
+          input.idempotencyKey
+        ]);
+        if (existingRows.length > 0) return mapJob(existingRows[0]);
+      }
+      throw err;
+    }
 
     for (const file of input.files) {
       await conn.query(
@@ -167,7 +173,7 @@ export async function createUploadBackgroundJob(catalogPool: Pool, input: Create
       );
     }
 
-    await addJobEvent(conn, jobID, 'created', 'Upload job created after blob upload completed', {
+    await addJobEvent(conn, jobID, 'queued', 'Upload job created and queued', {
       fileCount: input.files.length,
       totalRows
     });
@@ -182,23 +188,6 @@ export async function createUploadBackgroundJob(catalogPool: Pool, input: Create
   } finally {
     conn.release();
   }
-}
-
-export async function markBackgroundJobQueued(catalogPool: Pool, jobID: number, messageID: string): Promise<void> {
-  await ensureBackgroundJobCatalogTables(catalogPool);
-  await catalogPool.query(
-    `UPDATE catalog.background_jobs
-     SET Status = 'queued', Phase = 'queued', LastMessageID = ?, LastError = NULL
-     WHERE JobID = ? AND Status IN ('created', 'waiting_retry')`,
-    [messageID, jobID]
-  );
-  await addJobEvent(catalogPool, jobID, 'queued', 'Upload job message sent to queue', { messageID });
-}
-
-export async function recordBackgroundJobQueueFailure(catalogPool: Pool, jobID: number, error: Error): Promise<void> {
-  await ensureBackgroundJobCatalogTables(catalogPool);
-  await catalogPool.query(`UPDATE catalog.background_jobs SET LastError = ? WHERE JobID = ?`, [error.message, jobID]);
-  await addJobEvent(catalogPool, jobID, 'queue_failed', error.message);
 }
 
 export async function getBackgroundJob(catalogPool: Pool, jobID: number): Promise<BackgroundJobRecord | null> {
@@ -277,7 +266,7 @@ export async function cancelBackgroundJob(catalogPool: Pool, jobID: number, canc
   const [result] = await catalogPool.query<ResultSetHeader>(
     `UPDATE catalog.background_jobs
      SET Status = 'cancelled', Phase = 'cancelled', FinishedAt = NOW(), LastError = NULL
-     WHERE JobID = ? AND Status IN ('created', 'queued', 'waiting_retry')`,
+     WHERE JobID = ? AND Status IN ('queued', 'waiting_retry')`,
     [jobID]
   );
   if (result.affectedRows === 0) return false;
@@ -301,7 +290,8 @@ export async function setBackgroundJobStatus(
   }
 ): Promise<void> {
   await ensureBackgroundJobCatalogTables(catalogPool);
-  const terminal = ['completed', 'failed', 'cancelled', 'dead_lettered'].includes(update.status);
+  const terminalStatuses: BackgroundJobStatus[] = ['completed', 'failed', 'cancelled'];
+  const terminal = terminalStatuses.includes(update.status);
   await catalogPool.query(
     `UPDATE catalog.background_jobs
      SET Status = ?, Phase = ?, PercentComplete = COALESCE(?, PercentComplete),
@@ -370,9 +360,10 @@ export async function markBackgroundJobWaitingRetry(
 
   const nextRetryCount = job.retryCount + 1;
   if (nextRetryCount >= job.maxRetries) {
+    // Retry budget exhausted — finalize as a permanent failure.
     await catalogPool.query(
       `UPDATE catalog.background_jobs
-       SET Status = 'dead_lettered',
+       SET Status = 'failed',
            Phase = 'failed',
            RetryCount = ?,
            LastError = ?,
@@ -381,7 +372,7 @@ export async function markBackgroundJobWaitingRetry(
        WHERE JobID = ?`,
       [nextRetryCount, error.message, jobID]
     );
-    await addJobEvent(catalogPool, jobID, 'dead_lettered', error.message, { retryCount: nextRetryCount });
+    await addJobEvent(catalogPool, jobID, 'failed', error.message, { retryCount: nextRetryCount });
     return getBackgroundJob(catalogPool, jobID);
   }
 
@@ -443,4 +434,18 @@ export async function updateBackgroundJobFileStatus(
      WHERE JobFileID = ?`,
     [update.status, update.processedRows ?? null, update.failedRows ?? null, update.errorMessage ?? null, jobFileID]
   );
+}
+
+/**
+ * Assigns a BatchID to a file record. The first caller wins — subsequent calls
+ * with a different value are ignored and the original BatchID is returned.
+ * This durability guarantee means retrying workers always use the same batch.
+ */
+export async function assignFileBatchID(catalogPool: Pool, jobFileID: number, batchID: string): Promise<string> {
+  await ensureBackgroundJobCatalogTables(catalogPool);
+  // Only update when no BatchID has been assigned yet (first assignment wins).
+  await catalogPool.query(`UPDATE catalog.background_job_files SET BatchID = ? WHERE JobFileID = ? AND BatchID IS NULL`, [batchID, jobFileID]);
+  const [rows]: any = await catalogPool.query(`SELECT BatchID FROM catalog.background_job_files WHERE JobFileID = ?`, [jobFileID]);
+  if (rows.length === 0) throw new Error(`background_job_files row ${jobFileID} not found`);
+  return rows[0].BatchID as string;
 }

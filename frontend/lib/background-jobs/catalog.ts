@@ -1,12 +1,20 @@
 import type { Pool } from 'mysql2/promise';
 
+// NOTE: This feature is UNRELEASED. No production data exists.
+// Any pre-existing catalog.background_jobs, catalog.background_job_files, or
+// catalog.background_job_events tables in dev/test databases must be manually
+// dropped before this bootstrap runs if they were created from an older version
+// of this file (they will have stale ENUM values such as 'created', 'dead_lettered',
+// 'blob_received', or a LastMessageID column).
+// Example: DROP TABLE IF EXISTS catalog.background_job_events, catalog.background_job_files, catalog.background_jobs;
+
 const BACKGROUND_JOB_BOOTSTRAP_STATEMENTS: readonly string[] = [
   `CREATE DATABASE IF NOT EXISTS catalog CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
   `CREATE TABLE IF NOT EXISTS catalog.background_jobs (
      JobID BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
      JobType ENUM('upload_validation') NOT NULL,
-     Status ENUM('created','queued','running','waiting_retry','completed','failed','cancelled','dead_lettered') NOT NULL DEFAULT 'created',
-     Phase ENUM('created','blob_received','queued','staging','ingestion','collapsing','validation','refreshing_views','completed','failed','cancelled') NOT NULL DEFAULT 'created',
+     Status ENUM('queued','running','cancel_requested','waiting_retry','completed','failed','cancelled') NOT NULL DEFAULT 'queued',
+     Phase ENUM('queued','staging','ingestion','collapsing','validation','refreshing_views','completed','failed','cancelled') NOT NULL DEFAULT 'queued',
      SchemaName VARCHAR(64) NOT NULL,
      PlotID INT NOT NULL,
      CensusID INT NOT NULL,
@@ -21,10 +29,9 @@ const BACKGROUND_JOB_BOOTSTRAP_STATEMENTS: readonly string[] = [
      ProcessedRows INT NOT NULL DEFAULT 0,
      FailedRows INT NOT NULL DEFAULT 0,
      RetryCount INT NOT NULL DEFAULT 0,
-     MaxRetries INT NOT NULL DEFAULT 10,
+     MaxRetries INT NOT NULL DEFAULT 3,
      NextAttemptAt DATETIME NULL,
      LastError TEXT NULL,
-     LastMessageID VARCHAR(128) NULL,
      WorkerID VARCHAR(128) NULL,
      WorkerHeartbeatAt DATETIME NULL,
      Payload JSON NULL,
@@ -48,6 +55,7 @@ const BACKGROUND_JOB_BOOTSTRAP_STATEMENTS: readonly string[] = [
      ChecksumSHA256 CHAR(64) NULL,
      SourceFormat VARCHAR(32) NULL,
      FormType VARCHAR(32) NULL,
+     BatchID VARCHAR(36) NULL,
      ExpectedRows INT NULL,
      ProcessedRows INT NOT NULL DEFAULT 0,
      FailedRows INT NOT NULL DEFAULT 0,

@@ -72,7 +72,7 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
 
   if (jobs.length === 0) return null;
 
-  const hasFailure = jobs.some(job => job.status === 'failed' || job.status === 'dead_lettered');
+  const hasFailure = jobs.some(job => job.status === 'failed');
   const hasWaitingRetry = jobs.some(job => job.status === 'waiting_retry');
   const primaryJob = jobs[0];
   const color = hasFailure ? 'danger' : hasWaitingRetry ? 'warning' : 'primary';

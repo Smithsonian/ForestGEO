@@ -90,8 +90,8 @@ describe('POST /api/uploadjobs', () => {
     mocks.auth.mockResolvedValue(session);
     mocks.createUploadBackgroundJob.mockResolvedValue({
       jobID: 42,
-      status: 'created',
-      phase: 'blob_received'
+      status: 'queued',
+      phase: 'queued'
     });
   });
 
@@ -144,7 +144,7 @@ describe('GET /api/uploadjobs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.auth.mockResolvedValue(session);
-    mocks.listBackgroundJobs.mockResolvedValue([{ jobID: 42, status: 'created' }]);
+    mocks.listBackgroundJobs.mockResolvedValue([{ jobID: 42, status: 'queued' }]);
   });
 
   it('lists active jobs for the authenticated user and optional scope', async () => {
@@ -153,7 +153,7 @@ describe('GET /api/uploadjobs', () => {
     const response = await GET(request);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ jobs: [{ jobID: 42, status: 'created' }] });
+    await expect(response.json()).resolves.toEqual({ jobs: [{ jobID: 42, status: 'queued' }] });
     expect(mocks.listBackgroundJobs).toHaveBeenCalledWith('catalog-pool', {
       userID: 'mason@example.com',
       includeAllUsers: false,

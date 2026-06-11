@@ -1,12 +1,10 @@
 export const BACKGROUND_JOB_TYPES = ['upload_validation'] as const;
 export type BackgroundJobType = (typeof BACKGROUND_JOB_TYPES)[number];
 
-export const BACKGROUND_JOB_STATUSES = ['created', 'queued', 'running', 'waiting_retry', 'completed', 'failed', 'cancelled', 'dead_lettered'] as const;
+export const BACKGROUND_JOB_STATUSES = ['queued', 'running', 'cancel_requested', 'waiting_retry', 'completed', 'failed', 'cancelled'] as const;
 export type BackgroundJobStatus = (typeof BACKGROUND_JOB_STATUSES)[number];
 
 export const UPLOAD_JOB_PHASES = [
-  'created',
-  'blob_received',
   'queued',
   'staging',
   'ingestion',
@@ -18,6 +16,8 @@ export const UPLOAD_JOB_PHASES = [
   'cancelled'
 ] as const;
 export type UploadJobPhase = (typeof UPLOAD_JOB_PHASES)[number];
+
+export const UPLOAD_JOB_MAX_RETRIES = 3;
 
 export const BACKGROUND_JOB_FILE_STATUSES = ['pending', 'staged', 'processed', 'failed', 'skipped'] as const;
 export type BackgroundJobFileStatus = (typeof BACKGROUND_JOB_FILE_STATUSES)[number];
@@ -68,7 +68,6 @@ export interface BackgroundJobRecord {
   maxRetries: number;
   nextAttemptAt: Date | null;
   lastError: string | null;
-  lastMessageID: string | null;
   workerID: string | null;
   workerHeartbeatAt: Date | null;
   payload: Record<string, unknown> | null;
@@ -89,6 +88,7 @@ export interface BackgroundJobFileRecord {
   checksumSha256: string | null;
   sourceFormat: string | null;
   formType: string | null;
+  batchID: string | null;
   expectedRows: number | null;
   processedRows: number;
   failedRows: number;
