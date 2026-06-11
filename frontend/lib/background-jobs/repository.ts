@@ -1,6 +1,6 @@
 import type { Pool, PoolConnection, ResultSetHeader } from 'mysql2/promise';
 import { ensureBackgroundJobCatalogTables } from './catalog';
-import { WorkerLeaseLostError } from './errors';
+import { JobFileNotFoundError, WorkerLeaseLostError } from './errors';
 import type {
   BackgroundJobEventRecord,
   BackgroundJobFileRecord,
@@ -118,15 +118,25 @@ async function addJobEvent(conn: Pool | PoolConnection, jobID: number, eventType
 
 /**
  * Confirms that a worker still holds the lease on a job. Returns true when the
- * lease is intact, false when it is not. Used by fenced writes to distinguish
- * a genuine lease loss from a no-op UPDATE (values unchanged → affectedRows=0).
+ * lease is intact, false when it is not.
+ *
+ * This pool runs with mysql2's default CLIENT_FOUND_ROWS flag, so UPDATE
+ * affectedRows counts matched rows, not changed rows. affectedRows=0 on a
+ * fenced UPDATE therefore means the WHERE predicate (JobID + WorkerID + Status
+ * IN fenced list) did not match — i.e., the lease was lost. This confirm
+ * SELECT exists for two reasons:
+ *   (a) Defense-in-depth in case pool flags change and affectedRows reverts to
+ *       "changed rows" semantics (a no-op write would then return 0 even with
+ *       the lease intact).
+ *   (b) Disambiguation for caller bugs in updateBackgroundJobFileStatus, where
+ *       a lease-intact + affectedRows=0 result can also indicate a missing or
+ *       mis-routed file record.
  */
 async function isLeaseIntact(conn: Pool | PoolConnection, jobID: number, workerID: string): Promise<boolean> {
-  const fencedStatusList = FENCED_WRITE_STATUSES.join("','");
-  const [rows]: any = await conn.query(`SELECT 1 FROM catalog.background_jobs WHERE JobID = ? AND WorkerID = ? AND Status IN ('${fencedStatusList}') LIMIT 1`, [
-    jobID,
-    workerID
-  ]);
+  const [rows]: any = await conn.query(
+    `SELECT 1 FROM catalog.background_jobs WHERE JobID = ? AND WorkerID = ? AND Status IN (${FENCED_WRITE_STATUSES.map(() => '?').join(', ')}) LIMIT 1`,
+    [jobID, workerID, ...FENCED_WRITE_STATUSES]
+  );
   return (rows as unknown[]).length > 0;
 }
 
@@ -313,14 +323,13 @@ export async function setBackgroundJobStatus(
   await ensureBackgroundJobCatalogTables(catalogPool);
   const terminalStatuses: BackgroundJobStatus[] = ['completed', 'failed', 'cancelled'];
   const terminal = terminalStatuses.includes(update.status);
-  const fencedStatusList = FENCED_WRITE_STATUSES.join("','");
   const [result] = await catalogPool.query<ResultSetHeader>(
     `UPDATE catalog.background_jobs
      SET Status = ?, Phase = ?, PercentComplete = COALESCE(?, PercentComplete),
          ProcessedRows = COALESCE(?, ProcessedRows), FailedRows = COALESCE(?, FailedRows),
          LastError = ?, StartedAt = IF(StartedAt IS NULL AND ? = 'running', NOW(), StartedAt),
          FinishedAt = IF(?, NOW(), FinishedAt)
-     WHERE JobID = ? AND WorkerID = ? AND Status IN ('${fencedStatusList}')`,
+     WHERE JobID = ? AND WorkerID = ? AND Status IN (${FENCED_WRITE_STATUSES.map(() => '?').join(', ')})`,
     [
       update.status,
       update.phase,
@@ -331,21 +340,41 @@ export async function setBackgroundJobStatus(
       update.status,
       terminal,
       jobID,
-      workerID
+      workerID,
+      ...FENCED_WRITE_STATUSES
     ]
   );
   if (result.affectedRows === 0) {
-    // Zero affected rows can mean either lease loss or a no-op write (identical
-    // values). Confirm before throwing to avoid false lease-loss errors.
+    // Under this pool's CLIENT_FOUND_ROWS flag affectedRows counts matched rows,
+    // so 0 strictly means the lease predicate (JobID + WorkerID + Status IN
+    // fenced list) did not match. The isLeaseIntact confirm below exists as
+    // defense-in-depth if pool flags ever change (fix a) and to aid caller-bug
+    // disambiguation in updateBackgroundJobFileStatus (fix b).
     const leaseIntact = await isLeaseIntact(catalogPool, jobID, workerID);
     if (!leaseIntact) throw new WorkerLeaseLostError(jobID, workerID);
-    // Lease is intact — values were unchanged, silently accept.
+    // Lease is intact — under current pool flags this path is only reachable if
+    // flags change and affectedRows reverts to "changed rows" semantics.
+    // Accept silently; skip event to avoid duplicate progress entries on retry.
+    return;
   }
   if (update.eventType) {
     await addJobEvent(catalogPool, jobID, update.eventType, update.eventMessage, update.eventDetails);
   }
 }
 
+/**
+ * Atomically claims a queued or waiting_retry job for the given worker. Returns
+ * the job with its files on success, or null if the job is not claimable (wrong
+ * status, NextAttemptAt in the future, or does not exist).
+ *
+ * INVARIANT: workerID MUST be unique per claim attempt, e.g.
+ *   `${process.pid}:${randomUUID()}`
+ * The confirm-then-throw fencing pattern in setBackgroundJobStatus and
+ * updateBackgroundJobFileStatus is race-free only when this invariant holds. If
+ * the same workerID is reused across claim attempts, a re-claim that races
+ * between the fenced UPDATE and its subsequent isLeaseIntact confirm SELECT
+ * would appear as a lease-intact no-op, silently swallowing a lost write.
+ */
 export async function claimBackgroundJobForWorker(catalogPool: Pool, jobID: number, workerID: string): Promise<BackgroundJobWithDetails | null> {
   await ensureBackgroundJobCatalogTables(catalogPool);
   const [result] = await catalogPool.query<ResultSetHeader>(
@@ -369,12 +398,11 @@ export async function claimBackgroundJobForWorker(catalogPool: Pool, jobID: numb
 
 export async function heartbeatBackgroundJob(catalogPool: Pool, jobID: number, workerID: string): Promise<boolean> {
   await ensureBackgroundJobCatalogTables(catalogPool);
-  const fencedStatusList = FENCED_WRITE_STATUSES.join("','");
   const [result] = await catalogPool.query<ResultSetHeader>(
     `UPDATE catalog.background_jobs
      SET WorkerHeartbeatAt = NOW()
-     WHERE JobID = ? AND WorkerID = ? AND Status IN ('${fencedStatusList}')`,
-    [jobID, workerID]
+     WHERE JobID = ? AND WorkerID = ? AND Status IN (${FENCED_WRITE_STATUSES.map(() => '?').join(', ')})`,
+    [jobID, workerID, ...FENCED_WRITE_STATUSES]
   );
   return result.affectedRows > 0;
 }
@@ -463,7 +491,7 @@ export async function finalizeJobAsSystem(
 ): Promise<boolean> {
   await ensureBackgroundJobCatalogTables(catalogPool);
   const phase = status === 'failed' ? 'failed' : 'staging';
-  const finishedAtClause = status === 'failed' ? 'FinishedAt = NOW(),' : '';
+  const isTerminal = status === 'failed';
   const [result] = await catalogPool.query<ResultSetHeader>(
     `UPDATE catalog.background_jobs
      SET Status = ?,
@@ -473,10 +501,10 @@ export async function finalizeJobAsSystem(
          WorkerHeartbeatAt = NULL,
          NextAttemptAt = ?,
          RetryCount = RetryCount + 1,
-         ${finishedAtClause}
+         FinishedAt = IF(?, NOW(), FinishedAt),
          UpdatedAt = NOW()
      WHERE JobID = ? AND Status = 'running'`,
-    [status, phase, reason, nextAttemptAt ?? null, jobID]
+    [status, phase, reason, nextAttemptAt ?? null, isTerminal, jobID]
   );
   if (result.affectedRows === 0) return false;
   await addJobEvent(catalogPool, jobID, 'reclaimed', reason, { finalStatus: status, nextAttemptAt: nextAttemptAt?.toISOString() ?? null });
@@ -496,7 +524,6 @@ export async function updateBackgroundJobFileStatus(
   }
 ): Promise<void> {
   await ensureBackgroundJobCatalogTables(catalogPool);
-  const fencedStatusList = FENCED_WRITE_STATUSES.join("','");
   const [result] = await catalogPool.query<ResultSetHeader>(
     `UPDATE catalog.background_job_files f
      JOIN catalog.background_jobs j ON j.JobID = f.JobID
@@ -504,14 +531,22 @@ export async function updateBackgroundJobFileStatus(
          f.ProcessedRows = COALESCE(?, f.ProcessedRows),
          f.FailedRows = COALESCE(?, f.FailedRows),
          f.ErrorMessage = ?
-     WHERE f.JobFileID = ? AND j.JobID = ? AND j.WorkerID = ? AND j.Status IN ('${fencedStatusList}')`,
-    [update.status, update.processedRows ?? null, update.failedRows ?? null, update.errorMessage ?? null, jobFileID, jobID, workerID]
+     WHERE f.JobFileID = ? AND j.JobID = ? AND j.WorkerID = ? AND j.Status IN (${FENCED_WRITE_STATUSES.map(() => '?').join(', ')})`,
+    [update.status, update.processedRows ?? null, update.failedRows ?? null, update.errorMessage ?? null, jobFileID, jobID, workerID, ...FENCED_WRITE_STATUSES]
   );
   if (result.affectedRows === 0) {
-    // Confirm before throwing — affectedRows=0 can also mean values were unchanged.
+    // Under this pool's CLIENT_FOUND_ROWS flag, affectedRows=0 means the WHERE
+    // predicate didn't match at all. The lease confirm below distinguishes two
+    // failure modes:
+    //   - Lease lost: WorkerID or Status predicate failed → throw WorkerLeaseLostError
+    //   - Lease intact + file missing: caller bug (wrong jobFileID or jobID) → throw JobFileNotFoundError
+    //   - Lease intact + file present: only reachable if pool flags change and
+    //     affectedRows reverts to "changed rows" semantics (no-op write) → accept silently
     const leaseIntact = await isLeaseIntact(catalogPool, jobID, workerID);
     if (!leaseIntact) throw new WorkerLeaseLostError(jobID, workerID);
-    // Lease is intact — values were unchanged, silently accept.
+    const [fileRows]: any = await catalogPool.query(`SELECT 1 FROM catalog.background_job_files WHERE JobFileID = ? AND JobID = ?`, [jobFileID, jobID]);
+    if ((fileRows as unknown[]).length === 0) throw new JobFileNotFoundError(jobID, jobFileID);
+    // File exists and lease is intact — genuine no-op (only reachable if pool flags change).
   }
 }
 

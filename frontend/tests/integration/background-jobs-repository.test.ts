@@ -12,7 +12,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import mysql, { type Pool } from 'mysql2/promise';
 import { ensureBackgroundJobCatalogTables } from '@/lib/background-jobs/catalog';
-import { WorkerLeaseLostError } from '@/lib/background-jobs/errors';
+import { JobFileNotFoundError, WorkerLeaseLostError } from '@/lib/background-jobs/errors';
 import {
   assignFileBatchID,
   cancelBackgroundJob,
@@ -537,6 +537,22 @@ describe('lease fencing — updateBackgroundJobFileStatus', () => {
     expect(file!.failedRows).toBe(1);
   });
 
+  it('throws JobFileNotFoundError when jobFileID does not belong to the given job', async () => {
+    const { jobID } = await createAndClaimJob(WORKER_A);
+
+    // Use an ID that cannot belong to this job (0 is never a valid auto-increment ID).
+    const nonExistentFileID = 0;
+
+    console.log(`[fence-file] writing non-existent fileID=${nonExistentFileID} as WORKER_A on jobID=${jobID}`);
+
+    await expect(
+      updateBackgroundJobFileStatus(pool, jobID, WORKER_A, nonExistentFileID, {
+        status: 'staged',
+        processedRows: 1
+      })
+    ).rejects.toThrow(JobFileNotFoundError);
+  });
+
   it('no-op file write (identical values) by the owning worker does NOT throw', async () => {
     const { jobID, fileIDs } = await createAndClaimJob(WORKER_A);
     const fileID = fileIDs[0];
@@ -630,18 +646,62 @@ describe('finalizeJobAsSystem — sweeper recovery', () => {
     expect(reclaimedEvent).toBeDefined();
   });
 
-  it('moves a running job to failed and sets FinishedAt', async () => {
+  it('moves a running job to failed, sets FinishedAt, and increments RetryCount', async () => {
     const { jobID } = await createAndClaimJob(WORKER_A);
 
     const moved = await finalizeJobAsSystem(pool, jobID, 'failed', 'Worker process crashed');
     expect(moved).toBe(true);
 
     const row = await getBackgroundJob(pool, jobID);
-    console.log(`[finalize-system] post-finalize-failed: status=${row?.status} finishedAt=${row?.finishedAt}`);
+    console.log(`[finalize-system] post-finalize-failed: status=${row?.status} finishedAt=${row?.finishedAt} retryCount=${row?.retryCount}`);
     expect(row!.status).toBe('failed');
     expect(row!.phase).toBe('failed');
     expect(row!.finishedAt).toBeInstanceOf(Date);
     expect(row!.workerID).toBeNull();
+    expect(row!.retryCount).toBe(1);
+  });
+
+  it('lease-loss composition: system finalizes running job, original worker then throws WorkerLeaseLostError; job is claimable by new worker', async () => {
+    // Worker A claims the job.
+    const { jobID } = await createAndClaimJob(WORKER_A);
+
+    console.log(`[lease-composition] jobID=${jobID} claimed by WORKER_A=${WORKER_A}`);
+
+    // System sweeper forcibly recovers the job (simulates heartbeat timeout).
+    const finalized = await finalizeJobAsSystem(pool, jobID, 'waiting_retry', 'heartbeat lost');
+    expect(finalized).toBe(true);
+
+    const midRow = await getBackgroundJob(pool, jobID);
+    console.log(`[lease-composition] after sweeper: status=${midRow?.status} workerID=${midRow?.workerID}`);
+    expect(midRow!.status).toBe('waiting_retry');
+    expect(midRow!.workerID).toBeNull();
+
+    // Worker A (stale) attempts to write progress — must be rejected with WorkerLeaseLostError.
+    // The fenced WHERE requires Status IN ('running', 'cancel_requested') AND WorkerID = WORKER_A.
+    // After finalizeJobAsSystem: Status='waiting_retry' and WorkerID=NULL, so neither predicate matches.
+    await expect(
+      setBackgroundJobStatus(pool, jobID, WORKER_A, {
+        status: 'running',
+        phase: 'ingestion',
+        percentComplete: 80,
+        eventType: 'progress',
+        eventMessage: 'Stale write from dead worker'
+      })
+    ).rejects.toThrow(WorkerLeaseLostError);
+
+    const afterStaleWrite = await getBackgroundJob(pool, jobID);
+    console.log(`[lease-composition] after stale write attempt: status=${afterStaleWrite?.status} pct=${afterStaleWrite?.percentComplete}`);
+    // Row must be unmodified by the stale write.
+    expect(afterStaleWrite!.status).toBe('waiting_retry');
+    expect(afterStaleWrite!.percentComplete).toBe(0);
+
+    // A new worker B can now claim the job (waiting_retry is claimable when NextAttemptAt is null or past).
+    const WORKER_B_CLAIM = 'worker-beta-new-claim-001';
+    const reclaimed = await claimBackgroundJobForWorker(pool, jobID, WORKER_B_CLAIM);
+    console.log(`[lease-composition] WORKER_B claim result: jobID=${reclaimed?.jobID} workerID=${reclaimed?.workerID}`);
+    expect(reclaimed).not.toBeNull();
+    expect(reclaimed!.workerID).toBe(WORKER_B_CLAIM);
+    expect(reclaimed!.status).toBe('running');
   });
 
   it('returns false and leaves row untouched when job is already in a terminal state', async () => {
