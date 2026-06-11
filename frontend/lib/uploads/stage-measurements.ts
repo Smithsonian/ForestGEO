@@ -15,7 +15,6 @@
 
 import crypto from 'crypto';
 import moment from 'moment/moment';
-import { format } from 'mysql2/promise';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 import { FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
@@ -176,7 +175,7 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
   // Count rows BEFORE insert so we can measure the delta (important when
   // multiple chunks share a single BatchID under batch consolidation).
   const expectedRowCount = chunkRows.length;
-  const countSQL = format(`SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [schema]);
+  const countSQL = safeFormatQuery(schema, `SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`);
   const preInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
   const preInsertCount = preInsertResult[0]?.count || 0;
 
@@ -263,12 +262,12 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
           // Critical: log to uploadintegrityalerts so data loss is not silent.
           try {
             const alertUploadId = buildUploadId(schema, plotID, censusID, fileName, batchID, 'failed-insert-to-unresolved-coremeasurements');
-            const alertSQL = format(
+            const alertSQL = safeFormatQuery(
+              schema,
               `INSERT INTO ??.uploadintegrityalerts
                (uploadId, fileID, batchID, plotID, censusID, type, message, severity,
                 sourceRecords, processedRecords, failedRecords, missingRecords)
-               VALUES (?, ?, ?, ?, ?, 'FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS', ?, 'critical', ?, ?, ?, ?)`,
-              [schema]
+               VALUES (?, ?, ?, ?, ?, 'FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS', ?, 'critical', ?, ?, ?, ?)`
             );
             const alertMessage = JSON.stringify({
               error: retryError.message,
@@ -294,12 +293,12 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
 
   // Track file upload in unifiedchangelog (single row per file, not per batch)
   try {
-    // Check if we've already logged this file upload - use format() for schema
-    const existingEntrySQL = format(
+    // Check if we've already logged this file upload
+    const existingEntrySQL = safeFormatQuery(
+      schema,
       `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
        WHERE TableName = '${CHANGELOG_TABLE_NAME}' AND RecordID = ? AND CensusID = ?
-       ORDER BY ChangeID DESC LIMIT 1`,
-      [schema]
+       ORDER BY ChangeID DESC LIMIT 1`
     );
     const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID], transactionID);
 
@@ -314,15 +313,15 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
         droppedCount: droppedRowCount,
         batchCount: 1
       });
-      const insertChangelogSQL = format(
+      const insertChangelogSQL = safeFormatQuery(
+        schema,
         `INSERT INTO ??.unifiedchangelog
         (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
-        VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
-        [schema]
+        VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`
       );
       await connectionManager.executeQuery(
         insertChangelogSQL,
-        [CHANGELOG_TABLE_NAME, fileName, 'INSERT', uploadMetadata, params.changedBy, plotID, censusID],
+        [CHANGELOG_TABLE_NAME, fileName, 'INSERT', uploadMetadata, params.changedBy ?? null, plotID, censusID],
         transactionID
       );
     } else {
@@ -334,7 +333,7 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
       metadata.rowCount = (metadata.rowCount || 0) + actualInsertedCount;
       metadata.droppedCount = (metadata.droppedCount || 0) + droppedRowCount;
       metadata.batchCount = (metadata.batchCount || 1) + 1;
-      const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
+      const updateChangelogSQL = safeFormatQuery(schema, `UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`);
       await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
     }
   } catch (logError: any) {
