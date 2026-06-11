@@ -319,7 +319,7 @@ describe('collapseCensus — integration', () => {
   // 1. Happy path
   // -------------------------------------------------------------------------
 
-  it('collapses a census: unique ingested rows all survive, zero DBH/HOM nullified', async () => {
+  it('collapses a census: unique ingested rows survive; injected zero-DBH row is removed by TreeTag+StemTag dedup', async () => {
     await stageAndIngestFixtureRows();
 
     // Verify all 5 unique rows are present before collapse.
@@ -400,6 +400,8 @@ describe('collapseCensus — integration', () => {
     await collapseCensus(connectionManager, { schema, censusID });
 
     const afterFirstRun = await fetchCollapserSnapshot();
+    // Guard against a vacuous '' === '' pass if ingestion ever regresses to zero rows.
+    expect(afterFirstRun.length).toBeGreaterThan(0);
     const firstDigest = snapshotDigest(afterFirstRun);
 
     console.log(`[idempotency] After first collapse — ${afterFirstRun.length} rows:`);

@@ -3,7 +3,8 @@
  * stored procedure against a census.
  *
  * Both the synchronous HTTP route (app/api/setupbulkcollapser/[censusID]) and
- * the background upload worker call collapseCensus; neither owns any collapse
+ * the background upload worker (pending, async-upload remediation Task 10) call
+ * collapseCensus; neither owns any collapse
  * internals of its own.
  *
  * What the collapser does (from storedprocedures.sql):
