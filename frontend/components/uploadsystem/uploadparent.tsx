@@ -8,6 +8,7 @@ import { useSession } from 'next-auth/react';
 import { Box, Typography } from '@mui/joy';
 import ContextValidationGuard from '@/components/shared/ContextValidationGuard';
 import UploadParseFiles from '@/components/uploadsystem/segments/uploadparsefiles';
+import UploadAsyncJob from '@/components/uploadsystem/segments/uploadasyncjob';
 import UploadFireSQL from '@/components/uploadsystem/segments/uploadfiresql';
 import UploadError from '@/components/uploadsystem/segments/uploaderror';
 import UploadValidation from '@/components/uploadsystem/segments/uploadvalidation';
@@ -32,6 +33,7 @@ import { canonicalizeRevisionRow, normalizeRevisionHeader } from '@/components/u
 import { EMPTY_REVISION_MATCH_COUNTS, RevisionInvalidRow, RevisionMatchedRow, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { BulkEditPlan } from '@/config/editplan/types';
 import type { ArcgisImportReference } from '@/lib/arcgis/types';
+import { useAsyncUploadFeature } from '@/app/hooks/useasyncuploadfeature';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -155,6 +157,10 @@ function UploadParentInner(props: UploadParentProps) {
 
   const currentPlotID = _currentPlot?.plotID ?? null;
   const currentCensusID = _currentCensus?.dateRanges?.[0]?.censusID ?? null;
+  const asyncUploadEnabled = useAsyncUploadFeature({
+    schema: currentSite?.schemaName,
+    formType: uploadState.state.uploadForm
+  });
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -454,6 +460,25 @@ function UploadParentInner(props: UploadParentProps) {
               schema={currentSite?.schemaName || ''}
               setReviewState={uploadState.setReviewState}
               setIsDataUnsaved={uploadState.setIsDataUnsaved}
+            />
+          );
+        }
+        if (asyncUploadEnabled) {
+          return (
+            <UploadAsyncJob
+              acceptedFiles={fileManagement.files}
+              parsedData={parsedData}
+              uploadForm={uploadState.state.uploadForm}
+              uploadMode={uploadState.state.uploadMode}
+              sourceFormat={uploadState.state.sourceFormat}
+              selectedDelimiters={selectedDelimiters}
+              columnMappings={columnMappings}
+              arcgisImportSession={arcgisImportSession}
+              setReviewState={uploadState.setReviewState}
+              setIsDataUnsaved={uploadState.setIsDataUnsaved}
+              setUploadError={(error: any) => errorHandling.setError(error)}
+              setErrorComponent={errorHandling.setErrorComponent}
+              onClose={onReset}
             />
           );
         }

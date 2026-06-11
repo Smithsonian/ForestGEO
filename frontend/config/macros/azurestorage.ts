@@ -81,7 +81,12 @@ export interface FileRowErrors {
   validationErrorID: number;
 }
 
-export async function uploadValidFileAsBuffer(
+export interface UploadValidFileResult {
+  response: BlobUploadCommonResponse;
+  blobName: string;
+}
+
+export async function uploadValidFileAsBufferWithMetadata(
   containerClient: ContainerClient,
   file: File,
   user: string,
@@ -89,7 +94,7 @@ export async function uploadValidFileAsBuffer(
   fileRowErrors: FileRowErrors[] = [],
   blobFileName: string = file.name,
   sourceFormat: string = 'csv'
-): Promise<BlobUploadCommonResponse> {
+): Promise<UploadValidFileResult> {
   let buffer: Buffer;
   try {
     buffer = Buffer.from(await file.arrayBuffer());
@@ -153,7 +158,7 @@ export async function uploadValidFileAsBuffer(
 
       // uploadData always returns a response on success
       ailogger.info(`Upload successful for ${newFileName} on attempt ${attempt}`);
-      return uploadResponse;
+      return { response: uploadResponse, blobName: newFileName };
     } catch (error: any) {
       lastError = error;
       ailogger.warn(`Upload attempt ${attempt}/${MAX_RETRIES} failed for ${newFileName}: ${error.message}`);
@@ -168,4 +173,17 @@ export async function uploadValidFileAsBuffer(
   const errorMsg = `All ${MAX_RETRIES} upload attempts failed for ${newFileName}`;
   ailogger.error(errorMsg, lastError ?? undefined);
   throw new Error(`${errorMsg}: ${lastError?.message || 'Unknown error'}`);
+}
+
+export async function uploadValidFileAsBuffer(
+  containerClient: ContainerClient,
+  file: File,
+  user: string,
+  formType: string,
+  fileRowErrors: FileRowErrors[] = [],
+  blobFileName: string = file.name,
+  sourceFormat: string = 'csv'
+): Promise<BlobUploadCommonResponse> {
+  const result = await uploadValidFileAsBufferWithMetadata(containerClient, file, user, formType, fileRowErrors, blobFileName, sourceFormat);
+  return result.response;
 }

@@ -44,9 +44,20 @@ param appServiceSkuName string = 'B1'
 @description('Node.js version for the App Service')
 param nodeVersion string = '24-lts'
 
+@description('Node.js major version for the async worker Function App')
+param functionNodeVersion string = '20'
+
 @description('Storage account redundancy')
 @allowed(['Standard_LRS', 'Standard_GRS'])
 param storageRedundancy string = 'Standard_LRS'
+
+@description('Service Bus SKU for background upload jobs')
+@allowed(['Standard', 'Premium'])
+param serviceBusSkuName string = 'Standard'
+
+@secure()
+@description('Shared token used by the async upload Function App to call the web app internal worker endpoint')
+param asyncUploadWorkerToken string = ''
 
 // ── Resource Group ──────────────────────────────────────────────────────────
 
@@ -78,7 +89,10 @@ module resources 'modules/resources.bicep' = {
     mysqlVersion: mysqlVersion
     appServiceSkuName: appServiceSkuName
     nodeVersion: nodeVersion
+    functionNodeVersion: functionNodeVersion
     storageRedundancy: storageRedundancy
+    serviceBusSkuName: serviceBusSkuName
+    asyncUploadWorkerToken: asyncUploadWorkerToken
   }
 }
 
@@ -90,3 +104,6 @@ output mysqlServerName string = resources.outputs.mysqlServerName
 output appServiceUrl string = resources.outputs.appServiceUrl
 output appServiceName string = resources.outputs.appServiceName
 output storageAccountName string = resources.outputs.storageAccountName
+output functionAppName string = resources.outputs.functionAppName
+output serviceBusNamespaceName string = resources.outputs.serviceBusNamespaceName
+output uploadJobQueueName string = resources.outputs.uploadJobQueueName

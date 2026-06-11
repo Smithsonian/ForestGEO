@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   isValidSchema: vi.fn(() => true),
   getContainerClient: vi.fn(),
-  uploadValidFileAsBuffer: vi.fn(),
+  uploadValidFileAsBufferWithMetadata: vi.fn(),
   generateBlobSASQueryParameters: vi.fn(() => ({ toString: () => 'sig=mock' })),
   blobDelete: vi.fn(),
   loggerInfo: vi.fn(),
@@ -24,7 +24,7 @@ vi.mock('@/config/utils/sqlsecurity', () => ({
 
 vi.mock('@/config/macros/azurestorage', () => ({
   getContainerClient: mocks.getContainerClient,
-  uploadValidFileAsBuffer: mocks.uploadValidFileAsBuffer
+  uploadValidFileAsBufferWithMetadata: mocks.uploadValidFileAsBufferWithMetadata
 }));
 
 vi.mock('@/ailogger', () => ({
@@ -99,7 +99,10 @@ describe('/api/files/[operation]', () => {
         }
       ])
     );
-    mocks.uploadValidFileAsBuffer.mockResolvedValue({ _response: { status: 201 } });
+    mocks.uploadValidFileAsBufferWithMetadata.mockImplementation(async (_containerClient, _file, _user, _formType, _fileRowErrors, blobFileName) => ({
+      response: { _response: { status: 201 } },
+      blobName: blobFileName
+    }));
     mocks.blobDelete.mockResolvedValue(undefined);
   });
 
@@ -220,7 +223,16 @@ describe('/api/files/[operation]', () => {
     const responseBody = await response.json();
     expect(response.status, JSON.stringify(responseBody)).toBe(200);
     expect(mocks.getContainerClient).toHaveBeenCalledWith('plot1-census2');
-    expect(mocks.uploadValidFileAsBuffer).toHaveBeenCalledWith(expect.anything(), file, 'mason@example.com', 'measurements', [], 'measurements.csv', 'csv');
+    expect(responseBody).toMatchObject({ blobContainer: 'plot1-census2', blobName: 'measurements.csv', byteSize: file.size });
+    expect(mocks.uploadValidFileAsBufferWithMetadata).toHaveBeenCalledWith(
+      expect.anything(),
+      file,
+      'mason@example.com',
+      'measurements',
+      [],
+      'measurements.csv',
+      'csv'
+    );
   });
 
   it('uploads using the sanitized filename that passed route validation', async () => {
@@ -238,7 +250,8 @@ describe('/api/files/[operation]', () => {
 
     const responseBody = await response.json();
     expect(response.status, JSON.stringify(responseBody)).toBe(200);
-    expect(mocks.uploadValidFileAsBuffer).toHaveBeenCalledWith(expect.anything(), file, 'mason@example.com', 'measurements', [], 'name.csv', 'csv');
+    expect(responseBody).toMatchObject({ blobName: 'name.csv', fileName: 'name.csv' });
+    expect(mocks.uploadValidFileAsBufferWithMetadata).toHaveBeenCalledWith(expect.anything(), file, 'mason@example.com', 'measurements', [], 'name.csv', 'csv');
   });
 
   it('propagates the arcgis_xlsx sourceFormat so archived blob provenance is preserved', async () => {
@@ -258,7 +271,8 @@ describe('/api/files/[operation]', () => {
 
     const responseBody = await response.json();
     expect(response.status, JSON.stringify(responseBody)).toBe(200);
-    expect(mocks.uploadValidFileAsBuffer).toHaveBeenCalledWith(
+    expect(responseBody).toMatchObject({ sourceFormat: 'arcgis_xlsx', blobName: 'arcgis-export.xlsx' });
+    expect(mocks.uploadValidFileAsBufferWithMetadata).toHaveBeenCalledWith(
       expect.anything(),
       file,
       'mason@example.com',
@@ -283,7 +297,7 @@ describe('/api/files/[operation]', () => {
     const response = await POST(request, props('upload'));
 
     expect(response.status).toBe(400);
-    expect(mocks.uploadValidFileAsBuffer).not.toHaveBeenCalled();
+    expect(mocks.uploadValidFileAsBufferWithMetadata).not.toHaveBeenCalled();
   });
 
   it('rejects arcgis_xlsx provenance for non-measurement uploads', async () => {
@@ -302,6 +316,6 @@ describe('/api/files/[operation]', () => {
     const response = await POST(request, props('upload'));
 
     expect(response.status).toBe(400);
-    expect(mocks.uploadValidFileAsBuffer).not.toHaveBeenCalled();
+    expect(mocks.uploadValidFileAsBufferWithMetadata).not.toHaveBeenCalled();
   });
 });

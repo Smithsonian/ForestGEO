@@ -34,8 +34,14 @@
     "nodeVersion": {
       "value": "24-lts"
     },
+    "functionNodeVersion": {
+      "value": "20"
+    },
     "storageRedundancy": {
       "value": "Standard_LRS"
+    },
+    "serviceBusSkuName": {
+      "value": "Standard"
     }
   }
 }
