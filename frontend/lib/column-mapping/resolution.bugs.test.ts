@@ -77,8 +77,7 @@ describe('BUG #4: alias fill ignores field scope (cross-sheet data bleed)', () =
 describe('BUG #5: ignored CSV columns survive into the row handed to validation', () => {
   const csvAliases = aliasesFor(SourceFormat.csv);
 
-  // Task 2 (strip ignored keys in collapseRowWithPlan) converts this back to a passing it().
-  it.fails('collapseRowWithPlan drops the inert __ignored key so it cannot reach validateRow', () => {
+  it('collapseRowWithPlan drops the inert __ignored key so it cannot reach validateRow', () => {
     // Headers ['lx','MyX'] with lx explicitly mapped to MyX: the literal 'lx' column collides
     // with the mapping-owned 'lx' key and is diverted to `lx__ignored#0` (resolution.ts:101-121).
     const mapping: ColumnMapping = { version: 1, format: SourceFormat.csv, fields: [{ canonicalField: 'lx', sourceColumns: ['MyX'], scope: 'file' }] };

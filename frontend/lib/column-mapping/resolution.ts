@@ -25,6 +25,8 @@ export interface HeaderResolutionPlan {
   multiSourceTempKeys: Map<string, string[]>;
   /** Canonical fields that resolved (mapped or alias) in this header set. */
   resolvedFields: Set<string>;
+  /** Output keys for kind==='ignored' columns; stripped before downstream validation/upload. */
+  ignoredKeys: Set<string>;
 }
 
 export interface ResolveOptions {
@@ -134,7 +136,9 @@ export function resolveHeaders(
   const finalized = resolutions as HeaderResolution[];
   const multiSourceTempKeys = new Map<string, string[]>();
   const resolvedFields = new Set<string>();
+  const ignoredKeys = new Set<string>();
   for (const r of finalized) {
+    if (r.kind === 'ignored') ignoredKeys.add(r.outputKey);
     if (r.canonicalField === undefined) continue;
     resolvedFields.add(r.canonicalField);
     if (r.outputKey.includes(MULTI_SOURCE_SEP)) {
@@ -143,7 +147,7 @@ export function resolveHeaders(
       multiSourceTempKeys.set(r.canonicalField, keys);
     }
   }
-  return { resolutions: finalized, outputKeys: finalized.map(r => r.outputKey), multiSourceTempKeys, resolvedFields };
+  return { resolutions: finalized, outputKeys: finalized.map(r => r.outputKey), multiSourceTempKeys, resolvedFields, ignoredKeys };
 }
 
 /** papaparse transformHeader callback: positional lookup into the plan. */
@@ -167,7 +171,7 @@ export function joinMultiSourceValues(values: (string | null | undefined)[]): st
 
 /** Collapse the temp keys the plan ACTUALLY emitted into their canonical joined fields. */
 export function collapseRowWithPlan(row: FileRow, plan: HeaderResolutionPlan): FileRow {
-  if (plan.multiSourceTempKeys.size === 0) return row;
+  if (plan.multiSourceTempKeys.size === 0 && plan.ignoredKeys.size === 0) return row;
   const out: FileRow = { ...row };
   for (const [canonicalField, tempKeys] of plan.multiSourceTempKeys) {
     const parts: (string | null)[] = [];
@@ -177,5 +181,7 @@ export function collapseRowWithPlan(row: FileRow, plan: HeaderResolutionPlan): F
     }
     out[canonicalField] = joinMultiSourceValues(parts);
   }
+  // Inert diverted columns never reach validation/upload, matching the XLSX reader which drops them at read time.
+  for (const key of plan.ignoredKeys) delete out[key];
   return out;
 }
