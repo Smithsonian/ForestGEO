@@ -36,20 +36,56 @@ const INGESTION_BATCH_SIZE = 10_000;
 const MAX_ATTEMPTS_PER_SUBBATCH = 5;
 const SETUP_PHASE_TIMEOUT_MS = 2 * 60 * 1000;
 
+// Retry / backoff constants for processSubBatch
+const INITIAL_RETRY_DELAY_MS = 100;
+
+// Give-up thresholds: once attempt count reaches these, stop retrying that class of error.
+const TIMEOUT_GIVE_UP_AFTER_ATTEMPTS = 3;
+const LOCK_GIVE_UP_AFTER_ATTEMPTS = 2;
+
+// Backoff delays and caps per error class
+const LOCK_CONTENTION_BACKOFF_MS = 15_000; // flat delay — don't escalate; just back off and retry once
+const CONNECTION_BACKOFF_MULTIPLIER = 3;
+const CONNECTION_BACKOFF_CAP_MS = 15_000;
+const DEADLOCK_BACKOFF_MULTIPLIER = 1.5;
+const DEADLOCK_BACKOFF_CAP_MS = 3_000;
+const DEFAULT_BACKOFF_MULTIPLIER = 2;
+const DEFAULT_BACKOFF_CAP_MS = 5_000; // timeout errors also fall into this bucket
+const RETRY_JITTER_MAX_MS = 1_000;
+
+// MySQL error numbers for connection-loss and deadlock conditions
+const MYSQL_ERRNO_SERVER_GONE = 1927; // ER_SERVER_LOST — server closed the connection
+const MYSQL_ERRNO_TCP_LOST = 2013; // CR_SERVER_LOST — TCP connection lost during query
+const MYSQL_ERRNO_DEADLOCK = 1213; // ER_LOCK_DEADLOCK
+
 /**
  * Thrown when the caller's isAborted probe fires between sub-batches.
  * Rows belonging to not-yet-processed sub-batches remain in
  * temporarymeasurements so a retry can resume them.
+ *
+ * When midBatch is true the abort was detected inside a sub-batch's retry loop
+ * (before the procedure call). Those rows are moved to unresolved
+ * coremeasurements internally — the error does NOT propagate to the caller.
+ * When midBatch is false the abort was detected between sub-batches and the
+ * error propagates so the caller sees a 499 / cancellation response.
  */
 export class IngestBatchAbortedError extends Error {
-  constructor(fileID: string, batchID: string) {
+  readonly midBatch: boolean;
+
+  constructor(fileID: string, batchID: string, midBatch: boolean = false) {
     super(`Ingestion aborted by caller for ${fileID}-${batchID}`);
     this.name = 'IngestBatchAbortedError';
+    this.midBatch = midBatch;
   }
 }
 
 export interface SubBatchResult {
   subBatchID: string;
+  /**
+   * On failure paths (retries exhausted or mid-batch abort): the number of
+   * rows moved from temporarymeasurements to unresolved coremeasurements.
+   * Always 0 on success (the procedure drained the rows itself).
+   */
   rowCount: number;
   durationMs: number;
   attemptsNeeded: number;
@@ -339,11 +375,11 @@ async function processSubBatch(
   isAborted: () => boolean
 ): Promise<SubBatchResult> {
   let attempt = 0;
-  let delay = 100;
+  let delay = INITIAL_RETRY_DELAY_MS;
 
   while (attempt < MAX_ATTEMPTS_PER_SUBBATCH) {
     if (isAborted()) {
-      throw new Error('Client disconnected');
+      throw new IngestBatchAbortedError(fileID, subBatchID, true);
     }
 
     try {
@@ -387,8 +423,9 @@ async function processSubBatch(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any) {
       const isTimeout = e.message?.includes('timed out');
-      const isConnectionError = e.code === 'ECONNRESET' || e.code === 'PROTOCOL_CONNECTION_LOST' || e.errno === 1927 || e.errno === 2013;
-      const isDeadlock = e.code === 'ER_LOCK_DEADLOCK' || e.errno === 1213;
+      const isConnectionError =
+        e.code === 'ECONNRESET' || e.code === 'PROTOCOL_CONNECTION_LOST' || e.errno === MYSQL_ERRNO_SERVER_GONE || e.errno === MYSQL_ERRNO_TCP_LOST;
+      const isDeadlock = e.code === 'ER_LOCK_DEADLOCK' || e.errno === MYSQL_ERRNO_DEADLOCK;
       const isLockContention = e.message?.includes('Failed to acquire application lock') || e.message?.includes('Another upload is in progress');
 
       ailogger.error(`Sub-batch ${subBatchID} attempt ${attempt} failed — MySQL error details:`, e, {
@@ -408,20 +445,20 @@ async function processSubBatch(
         subBatchID
       });
 
-      if (isTimeout && attempt >= 3) break;
-      if (isLockContention && attempt >= 2) break;
+      if (isTimeout && attempt >= TIMEOUT_GIVE_UP_AFTER_ATTEMPTS) break;
+      if (isLockContention && attempt >= LOCK_GIVE_UP_AFTER_ATTEMPTS) break;
 
       if (isLockContention) {
-        delay = 15000;
+        delay = LOCK_CONTENTION_BACKOFF_MS;
       } else if (isConnectionError) {
-        delay = Math.min(delay * 3, 15000);
+        delay = Math.min(delay * CONNECTION_BACKOFF_MULTIPLIER, CONNECTION_BACKOFF_CAP_MS);
       } else if (isDeadlock) {
-        delay = Math.min(delay * 1.5, 3000);
+        delay = Math.min(delay * DEADLOCK_BACKOFF_MULTIPLIER, DEADLOCK_BACKOFF_CAP_MS);
       } else {
-        delay = Math.min(delay * 2, 5000);
+        delay = Math.min(delay * DEFAULT_BACKOFF_MULTIPLIER, DEFAULT_BACKOFF_CAP_MS);
       }
 
-      await new Promise(resolve => setTimeout(resolve, delay + Math.random() * 1000));
+      await new Promise(resolve => setTimeout(resolve, delay + Math.random() * RETRY_JITTER_MAX_MS));
     }
   }
 
@@ -452,8 +489,6 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
   const procedureSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
 
   // --- Phase 1: Setup (count rows, get plot/census, recovery, split) ---
-  let recovered = false;
-
   const setupResult = await connectionManager.withTransaction(
     async tx => {
       const lockTimeoutMs = SETUP_PHASE_TIMEOUT_MS;
@@ -466,7 +501,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       const infoRows = await tx.query(infoSQL, [fileID, batchID]);
 
       if (!infoRows || infoRows.length === 0) {
-        return { plotID: null as number | null, censusID: null as number | null, totalRows: 0, subBatchIDs: [] as string[] };
+        return { plotID: null as number | null, censusID: null as number | null, totalRows: 0, subBatchIDs: [] as string[], recovered: false };
       }
 
       const currentPlotID = Number(infoRows[0].PlotID);
@@ -481,7 +516,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       }
 
       // Recovery check (uses original batchID before any splitting)
-      recovered = await recoverFailedInitialCensusIfNeeded(connectionManager, schema, fileID, batchID, currentPlotID, currentCensusID, tx.id);
+      const recovered = await recoverFailedInitialCensusIfNeeded(connectionManager, schema, fileID, batchID, currentPlotID, currentCensusID, tx.id);
 
       // If the same census is re-uploaded under a new filename, remove any old
       // unresolved ingestion rows that exactly match the currently staged rows.
@@ -492,7 +527,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
 
       ailogger.info(`Setup complete for ${fileID}: ${totalRows} rows → ${ids.length} batch(es), plot=${currentPlotID}, census=${currentCensusID}`);
 
-      return { plotID: currentPlotID, censusID: currentCensusID, totalRows, subBatchIDs: ids };
+      return { plotID: currentPlotID, censusID: currentCensusID, totalRows, subBatchIDs: ids, recovered };
     },
     { timeoutMs: SETUP_PHASE_TIMEOUT_MS }
   );
@@ -502,14 +537,14 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
     return {
       processedSubBatches: 0,
       totalRows: setupResult.totalRows,
-      recovered,
+      recovered: setupResult.recovered,
       noDataFound: true,
       totalDurationMs: 0,
       subBatchResults: []
     };
   }
 
-  const { totalRows, subBatchIDs } = setupResult;
+  const { totalRows, subBatchIDs, recovered } = setupResult;
 
   // --- Phase 2: Process each sub-batch sequentially ---
   const results: SubBatchResult[] = [];
@@ -530,8 +565,19 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       results.push(subResult);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (subError: any) {
-      // Client disconnect or truly unrecoverable error — move remaining sub-batches to failed
-      ailogger.error(`Unrecoverable error on sub-batch ${subBatchID}: ${subError.message}`, subError);
+      // Mid-batch abort (isAborted fired inside the retry loop) or truly
+      // unrecoverable error — move remaining sub-batches to failed.
+      // A between-batches IngestBatchAbortedError (midBatch=false) never
+      // reaches here; it is thrown above the processSubBatch call and
+      // propagates directly to the caller.
+      const isMidBatchAbort = subError instanceof IngestBatchAbortedError && subError.midBatch;
+      if (isMidBatchAbort) {
+        ailogger.warn(`Client disconnected mid-retry for sub-batch ${subBatchID}: moving remaining rows to unresolved`);
+      } else {
+        ailogger.error(`Unrecoverable error on sub-batch ${subBatchID}: ${subError.message}`, subError);
+      }
+
+      const failureReason = isMidBatchAbort ? 'Batch cancelled before completion' : `Sub-batch abandoned after unrecoverable error: ${subError.message}`;
 
       // Move all remaining sub-batches in a single transaction so cleanup
       // is atomic — either every remaining sub-batch is moved to failures
@@ -545,7 +591,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
             schema,
             fileID,
             subBatchIDs[j],
-            `Sub-batch abandoned after unrecoverable error: ${subError.message}`,
+            failureReason,
             cleanupTransactionID
           );
           results.push({

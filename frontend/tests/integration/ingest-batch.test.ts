@@ -129,7 +129,7 @@ vi.mock('@/ailogger', () => ({
 
 import ConnectionManager from '@/config/connectionmanager';
 import { stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
-import { ingestBatch, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
+import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -451,5 +451,112 @@ describe('ingestBatch — integration', () => {
     console.log(`[uploadmetrics] ${JSON.stringify(metrics)}`);
     expect(metrics).toHaveLength(1);
     expect(metrics[0].status).toBe(UPLOADMETRICS_STATUS_COMPLETED);
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // 5. Between-batches abort: isAborted=true from the start
+  //
+  // With isAborted returning true immediately, the between-batches check in
+  // ingestBatch fires before the first processSubBatch call and throws
+  // IngestBatchAbortedError (midBatch=false). Rows stay in temporarymeasurements
+  // because the procedure was never called — the caller is expected to retry.
+  // -------------------------------------------------------------------------
+
+  it('throws IngestBatchAbortedError and leaves rows staged when abort fires before the first sub-batch', async () => {
+    await stageFixtureRows();
+    expect(await countTemporaryRows()).toBe(EXPECTED_ROW_COUNT);
+
+    let thrownError: unknown;
+    try {
+      await ingestBatch(connectionManager, {
+        schema,
+        fileID: FILE_NAME,
+        batchID: BATCH_ID,
+        isAborted: () => true
+      });
+    } catch (err) {
+      thrownError = err;
+    }
+
+    console.log(`[abort-before] thrownError=${thrownError instanceof Error ? thrownError.message : String(thrownError)}`);
+    expect(thrownError).toBeInstanceOf(IngestBatchAbortedError);
+    const abortError = thrownError as IngestBatchAbortedError;
+    expect(abortError.midBatch).toBe(false); // propagates to caller — not handled internally
+
+    // Staged rows must remain so a retry can resume without data loss.
+    const remainingTemp = await countTemporaryRows();
+    console.log(`[abort-before] temporarymeasurements remaining=${remainingTemp}`);
+    expect(remainingTemp).toBe(EXPECTED_ROW_COUNT);
+
+    // No coremeasurements rows should have been created.
+    const [unresolvedRows] = await connection.query<RowDataPacket[]>(
+      'SELECT COUNT(*) AS count FROM coremeasurements WHERE UploadFileID = ? AND StemGUID IS NULL',
+      [FILE_NAME]
+    );
+    expect(Number(unresolvedRows[0].count)).toBe(0);
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // 6. Mid-retry abort: isAborted flips to true inside processSubBatch
+  //
+  // The abort probe returns false on the first call (the between-batches check
+  // in ingestBatch) and true on subsequent calls (the per-attempt check inside
+  // processSubBatch). With a single sub-batch this means the between-batches
+  // guard passes, processSubBatch is entered, and the abort is detected at the
+  // top of the retry loop before the procedure is called.
+  //
+  // Expected outcome: IngestBatchAbortedError (midBatch=true) is caught
+  // internally, staged rows are moved to unresolved coremeasurements, and
+  // ingestBatch returns normally (no exception propagates to the caller).
+  // -------------------------------------------------------------------------
+
+  it('handles a mid-retry abort internally: rows moved to unresolved coremeasurements, no exception propagates', async () => {
+    await stageFixtureRows();
+    expect(await countTemporaryRows()).toBe(EXPECTED_ROW_COUNT);
+
+    // First call to isAborted: the between-batches guard in ingestBatch (returns false → proceed).
+    // All subsequent calls: inside processSubBatch's retry loop (returns true → throw midBatch abort).
+    let abortCallCount = 0;
+    const isAborted = () => {
+      abortCallCount++;
+      const shouldAbort = abortCallCount > 1;
+      console.log(`[abort-mid] isAborted call #${abortCallCount} → ${shouldAbort}`);
+      return shouldAbort;
+    };
+
+    const result = await ingestBatch(connectionManager, {
+      schema,
+      fileID: FILE_NAME,
+      batchID: BATCH_ID,
+      isAborted
+    });
+
+    console.log(
+      `[abort-mid] result: processedSubBatches=${result.processedSubBatches} totalRows=${result.totalRows} ` +
+        `noDataFound=${result.noDataFound} subBatchResults=${JSON.stringify(result.subBatchResults)}`
+    );
+
+    // ingestBatch must return (not throw) — mid-batch abort is handled internally.
+    expect(result.noDataFound).toBe(false);
+    expect(result.processedSubBatches).toBe(1);
+    expect(result.subBatchResults).toHaveLength(1);
+    const subResult = result.subBatchResults[0];
+    expect(subResult.batchFailedButHandled).toBe(true);
+    // rowCount reflects how many rows were moved to unresolved coremeasurements.
+    expect(subResult.rowCount).toBe(EXPECTED_ROW_COUNT);
+    expect(subResult.message).toContain('unresolved coremeasurements');
+
+    // temporarymeasurements must be drained — rows were moved, not abandoned.
+    const remainingTemp = await countTemporaryRows();
+    console.log(`[abort-mid] temporarymeasurements remaining=${remainingTemp}`);
+    expect(remainingTemp).toBe(0);
+
+    // Rows must have landed in coremeasurements with StemGUID=NULL (unresolved/failed).
+    const [unresolvedRows] = await connection.query<RowDataPacket[]>(
+      'SELECT COUNT(*) AS count FROM coremeasurements WHERE UploadFileID = ? AND StemGUID IS NULL',
+      [FILE_NAME]
+    );
+    console.log(`[abort-mid] unresolved coremeasurements rows=${unresolvedRows[0].count}`);
+    expect(Number(unresolvedRows[0].count)).toBe(EXPECTED_ROW_COUNT);
   }, 60000);
 });
