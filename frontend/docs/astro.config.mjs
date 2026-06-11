@@ -36,6 +36,7 @@ export default defineConfig({
           label: 'Walking Through the Application',
           items: [
             { label: 'Upload Process Breakdown', slug: 'upload-process-breakdown' },
+            { label: 'Publishing a Census to the Smithsonian DB', slug: 'publishing-census-to-smithsonian-db' },
             { label: 'Understanding SAPD Datagrids', slug: 'understanding-sapd-datagrids' }
           ]
         },
@@ -65,8 +66,7 @@ export default defineConfig({
           items: [
             { label: 'CTFSWeb vs ForestGEO Comparison', slug: 'migration/ctfsweb-forestgeo-comparison' },
             { label: 'Data Model Reference', slug: 'migration/ctfsweb-data-model' },
-            { label: 'Data Specifications Guide', slug: 'migration/ctfsweb-data-specs' },
-            { label: 'Publishing a Census to CTFSWeb', slug: 'migration/publishing-census-to-ctfs' }
+            { label: 'Data Specifications Guide', slug: 'migration/ctfsweb-data-specs' }
           ]
         },
         {
