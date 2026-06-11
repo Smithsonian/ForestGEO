@@ -38,6 +38,7 @@ import { chooseEffectiveCsvMapping } from '@/lib/column-mapping/mapping';
 import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
 import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, planColumnCountMatches, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
 import { aliasesFor, legacyCsvHeaderKey } from '@/lib/column-mapping/fields';
+import { transformMeasurementValue, validateMeasurementRow } from '@/lib/column-mapping/measurement-rows';
 import { UploadMode } from '@/config/uploadmodes';
 
 function createAbortError(message: string): Error {
@@ -854,138 +855,19 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           })()
         : null;
       const transformHeader = headerPlan ? transformHeaderFromPlan(headerPlan) : legacyCsvHeaderKey;
-      const validateRow = (row: FileRow): boolean => {
-        const errors: string[] = [];
-        let extraData = false;
 
-        const missingFields = requiredHeaders.filter(header => {
-          const value = row[header.label];
-          return value === null || value === '' || value === 'NA' || value === 'NULL';
-        });
-        if (missingFields.length > 0) {
-          errors.push(`Missing required fields: ${missingFields.map(f => f.label).join(', ')}`);
-        }
-
-        if (row['__parsed_extra'] !== undefined) {
-          // Extra columns are common when re-uploading exported data with
-          // reference columns like stemID, treeID, or errors. Track once per file
-          // instead of logging once per row.
-          parsingDiagnostics.extraColumnRows += 1;
-          if (!parsingDiagnostics.extraColumnSample) {
-            parsingDiagnostics.extraColumnSample = JSON.stringify(row['__parsed_extra']);
-          }
-          extraData = true;
-        }
-
-        // Enhanced duplicate detection reporting
-        if (uploadForm === 'measurements') {
-          const { tag, stemtag } = row;
-          if (tag && stemtag) {
-            // Check for suspicious tag values that might indicate parsing issues
-            const tagStr = String(tag);
-            const stemtagStr = String(stemtag);
-
-            if (tagStr.includes(delimiter) || stemtagStr.includes(delimiter)) {
-              errors.push(`Tag values contain delimiter character "${delimiter}": tag="${tagStr}", stemtag="${stemtagStr}". This suggests parsing error.`);
-            }
-
-            if (tagStr.length > 50 || stemtagStr.length > 50) {
-              errors.push(
-                `Unusually long tag values detected: tag="${tagStr.slice(0, 30)}...", stemtag="${stemtagStr.slice(0, 30)}...". This may indicate concatenated fields due to parsing error.`
-              );
-            }
-          }
-        }
-
-        for (const [key, value] of Object.entries(row)) {
-          if (value !== null && !['tag', 'stemtag'].includes(key)) {
-            // tags and stemtags are NOT decimals
-            const num = parseFloat(value);
-            if (!isNaN(num) && (num < 0 || num > 999999.999999)) {
-              errors.push(`Decimal value for ${key} is out of range: ${value}`);
-            }
-          }
-        }
-
-        const rejectRow = errors.length > 0;
-        if (rejectRow) {
-          parsingInvalidRows.push({
-            ...row,
-            failureReason: errors.join('|'),
-            ...(extraData ? { excessData: row['__parsed_extra'] } : {})
-          });
-        }
-
-        return !rejectRow;
-      };
-
+      // Per-cell transform delegates to the shared pure function. The shared function returns the
+      // original string when a measurement date fails to parse; detect that here to preserve the
+      // invalid-date diagnostics the inline transform used to record.
       const transform = (value: string, field: string) => {
-        if (value === 'NA' || value === 'NULL' || value === '') return null;
-
-        // Enhanced date handling with multiple format support
-        if (uploadForm === FormType.measurements && field === 'date') {
-          const dateFormats = [
-            'YYYY-MM-DD',
-            'MM/DD/YYYY',
-            'DD/MM/YYYY',
-            'YYYY/MM/DD',
-            'MM-DD-YYYY',
-            'DD-MM-YYYY',
-            'YYYY.MM.DD',
-            'MM.DD.YYYY',
-            'DD.MM.YYYY',
-            'MMMM DD, YYYY',
-            'MMM DD, YYYY',
-            'DD MMM YYYY',
-            'DD MMMM YYYY',
-            'YYYY-MM-DD HH:mm:ss',
-            'MM/DD/YYYY HH:mm:ss',
-            'DD/MM/YYYY HH:mm:ss',
-            'YYYY-MM-DDTHH:mm:ss',
-            'YYYY-MM-DDTHH:mm:ss.SSS',
-            'YYYY-MM-DDTHH:mm:ss.SSSZ'
-          ];
-
-          // Try each format
-          for (const format of dateFormats) {
-            const parsed = moment(value.trim(), format, true);
-            if (parsed.isValid()) {
-              return parsed.toDate();
-            }
-          }
-
-          // Try moment's flexible parsing as fallback
-          const flexible = moment(value.trim());
-          if (flexible.isValid()) {
-            return flexible.toDate();
-          }
-
+        const transformed = transformMeasurementValue(value, field, uploadForm as FormType) as string;
+        if (uploadForm === FormType.measurements && field === 'date' && transformed === value && value !== 'NA' && value !== 'NULL' && value !== '') {
           parsingDiagnostics.invalidDateCount += 1;
           if (parsingDiagnostics.invalidDateSamples.size < 3) {
             parsingDiagnostics.invalidDateSamples.add(value);
           }
-          return value; // Return original value if parsing fails
         }
-
-        // Enhanced coordinate precision handling
-        if (uploadForm === FormType.measurements && (field === 'lx' || field === 'ly')) {
-          const numValue = parseFloat(value);
-          if (!isNaN(numValue)) {
-            // Round to 6 decimal places for coordinate precision
-            return Math.round(numValue * 1000000) / 1000000;
-          }
-        }
-
-        // Enhanced numeric field handling
-        if (uploadForm === FormType.measurements && (field === 'dbh' || field === 'hom')) {
-          const numValue = parseFloat(value);
-          if (!isNaN(numValue)) {
-            // Round to 2 decimal places for measurement precision
-            return Math.round(numValue * 100) / 100;
-          }
-        }
-
-        return value;
+        return transformed;
       };
 
       let totalRows = 0;
@@ -1057,8 +939,23 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 const validRows: FileRow[] = [];
                 results.data.forEach(rawRow => {
                   const row = headerPlan ? collapseRowWithPlan(rawRow, headerPlan) : rawRow;
-                  if (validateRow(row)) {
+                  const verdict = validateMeasurementRow(row, requiredHeaders, delimiter, uploadForm as FormType);
+                  if (verdict.hasExtraColumns) {
+                    // Extra columns are common when re-uploading exported data with reference
+                    // columns like stemID, treeID, or errors. Track once per file, not per row.
+                    parsingDiagnostics.extraColumnRows += 1;
+                    if (!parsingDiagnostics.extraColumnSample) {
+                      parsingDiagnostics.extraColumnSample = JSON.stringify(row['__parsed_extra']);
+                    }
+                  }
+                  if (verdict.valid) {
                     validRows.push(row);
+                  } else {
+                    parsingInvalidRows.push({
+                      ...row,
+                      failureReason: verdict.failureReason ?? 'Unknown error',
+                      ...(verdict.hasExtraColumns ? { excessData: row['__parsed_extra'] } : {})
+                    });
                   }
                 });
 
