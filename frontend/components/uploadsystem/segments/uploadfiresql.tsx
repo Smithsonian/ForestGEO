@@ -37,7 +37,7 @@ import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 import { chooseEffectiveCsvMapping } from '@/lib/column-mapping/mapping';
 import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
 import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, planColumnCountMatches, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
-import { aliasesFor } from '@/lib/column-mapping/fields';
+import { aliasesFor, legacyCsvHeaderKey } from '@/lib/column-mapping/fields';
 import { UploadMode } from '@/config/uploadmodes';
 
 function createAbortError(message: string): Error {
@@ -835,62 +835,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       }
 
       // Non-measurements forms and revision uploads only. The measurements flow resolves headers
-      // through lib/column-mapping/resolution (seeded mapping when the user confirmed none).
-      const legacyTransformHeader = (header: string) => {
-        const normalizedHeader = header
-          .trim()
-          .toLowerCase()
-          .replace(/[_\s-]/g, '');
-
-        // Map common header variations to expected field names
-        const headerMappings: Record<string, string> = {
-          tag: 'tag',
-          treetag: 'tag',
-          stemtag: 'stemtag',
-          stem: 'stemtag',
-          spcode: 'spcode',
-          species: 'spcode',
-          speciescode: 'spcode',
-          sp: 'spcode',
-          quadrat: 'quadrat',
-          quad: 'quadrat',
-          quadratname: 'quadrat',
-          lx: 'lx',
-          localx: 'lx',
-          x: 'lx',
-          xcoord: 'lx',
-          ly: 'ly',
-          localy: 'ly',
-          y: 'ly',
-          ycoord: 'ly',
-          dbh: 'dbh',
-          diameter: 'dbh',
-          hom: 'hom',
-          height: 'hom',
-          heightofmeasurement: 'hom',
-          date: 'date',
-          measurementdate: 'date',
-          dateof: 'date',
-          codes: 'codes',
-          code: 'codes',
-          attributes: 'codes',
-          attributecodes: 'codes',
-          comments: 'comments',
-          comment: 'comments',
-          description: 'comments',
-          notes: 'comments'
-        };
-
-        const mappedHeader = headerMappings[normalizedHeader];
-        if (mappedHeader) {
-          return mappedHeader;
-        }
-
-        // If no mapping found, return normalized header (lowercase, no underscores/spaces/hyphens)
-        // This ensures consistent key names for processPersonnel, processSpecies, etc.
-        return normalizedHeader;
-      };
-
+      // through lib/column-mapping/resolution (seeded mapping when the user confirmed none). The
+      // legacy fallback (legacyCsvHeaderKey) shares the single CSV_ALIASES source of truth.
       const mappingFlowActive = mappingRequired && csvHeaders !== null && csvHeaders.length > 0;
       const headerPlan = mappingFlowActive
         ? (() => {
@@ -907,7 +853,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             return resolveHeaders(csvHeaders!, chosen.mapping, aliasesFor(SourceFormat.csv), CSV_RESOLVE_OPTIONS);
           })()
         : null;
-      const transformHeader = headerPlan ? transformHeaderFromPlan(headerPlan) : legacyTransformHeader;
+      const transformHeader = headerPlan ? transformHeaderFromPlan(headerPlan) : legacyCsvHeaderKey;
       const validateRow = (row: FileRow): boolean => {
         const errors: string[] = [];
         let extraData = false;

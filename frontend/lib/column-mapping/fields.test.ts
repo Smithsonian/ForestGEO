@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FormType, RequiredTableHeadersByFormType, SourceFormat, TableHeadersByFormType } from '@/config/macros/formdetails';
-import { aliasesFor, canonicalFieldsFor, normalizeHeader } from './fields';
+import { aliasesFor, canonicalFieldsFor, legacyCsvHeaderKey, normalizeHeader } from './fields';
 
 describe('normalizeHeader', () => {
   it('lowercases, trims, and strips separators', () => {
@@ -67,5 +67,28 @@ describe('aliasesFor(csv)', () => {
     expect(csv['lx']).toEqual(expect.arrayContaining(['lx', 'localx', 'x', 'xcoord']));
     expect(csv['hom']).toEqual(expect.arrayContaining(['hom', 'height', 'heightofmeasurement']));
     expect(csv['stemtag']).toEqual(expect.arrayContaining(['stemtag', 'stem']));
+  });
+});
+
+describe('legacyCsvHeaderKey', () => {
+  // Iterates the real CSV alias map (via aliasesFor) so the legacy lookup cannot drift from CSV_ALIASES.
+  it('maps every alias of every CSV field to its canonical field', () => {
+    const csvAliases = aliasesFor(SourceFormat.csv);
+    for (const [canonicalField, aliases] of Object.entries(csvAliases)) {
+      for (const alias of aliases) {
+        expect(legacyCsvHeaderKey(alias), `alias "${alias}" of field "${canonicalField}"`).toBe(canonicalField);
+      }
+    }
+  });
+
+  it('renames raw (un-normalized) header variants to the canonical field', () => {
+    expect(legacyCsvHeaderKey('Tree_Tag')).toBe('tag');
+    expect(legacyCsvHeaderKey(' Local X ')).toBe('lx');
+    expect(legacyCsvHeaderKey('Species-Code')).toBe('spcode');
+    expect(legacyCsvHeaderKey('Notes')).toBe('comments');
+  });
+
+  it('passes unknown headers through normalized (lowercase, no whitespace/underscore/hyphen)', () => {
+    expect(legacyCsvHeaderKey('Device_ID')).toBe('deviceid');
   });
 });

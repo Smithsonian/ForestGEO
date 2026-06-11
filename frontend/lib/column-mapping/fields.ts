@@ -35,6 +35,26 @@ const CSV_ALIASES: Record<string, string[]> = {
 
 const CODE_AGGREGATE_FIELD = `${CODE_COLUMN_PREFIX}*`;
 
+// Reverse index (normalized alias -> canonical field), built once from CSV_ALIASES so the legacy
+// header lookup shares the same alias truth as the resolution plan. Used by the revision and
+// non-measurements upload flows, which bypass the column-mapping flow and need a plain header rename.
+const LEGACY_CSV_FIELD_BY_ALIAS: Record<string, string> = (() => {
+  const out: Record<string, string> = {};
+  for (const [canonicalField, aliases] of Object.entries(CSV_ALIASES)) {
+    for (const alias of aliases) out[normalizeHeader(alias)] = canonicalField;
+  }
+  return out;
+})();
+
+/**
+ * Renames a CSV header to its canonical field using the single CSV_ALIASES source. Unknown headers
+ * pass through normalized (lowercase, no whitespace/`_`/`-`), matching the legacy inline transform.
+ */
+export function legacyCsvHeaderKey(header: string): string {
+  const norm = normalizeHeader(header);
+  return LEGACY_CSV_FIELD_BY_ALIAS[norm] ?? norm;
+}
+
 function arcgisFields(): CanonicalFieldDef[] {
   return ARCGIS_SCHEMA.filter(def => def.field !== CODE_AGGREGATE_FIELD).map(def => ({
     canonicalField: def.field,
