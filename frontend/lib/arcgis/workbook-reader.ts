@@ -4,10 +4,11 @@ import { STEM_SIGNATURE_COLUMN, requiredColumnsForSheet } from './schema';
 import type { ArcgisCell, ArcgisRow, ArcgisWorkbook } from './types';
 import type { ColumnMapping, SheetRole } from '@/lib/column-mapping/types';
 import { ARCGIS_RESOLVE_OPTIONS, resolveHeaders } from '@/lib/column-mapping/resolution';
-import { aliasesFor } from '@/lib/column-mapping/fields';
+import { aliasesFor, fieldScopesFor } from '@/lib/column-mapping/fields';
 import { SourceFormat } from '@/config/macros/formdetails';
 
 const ARCGIS_ALIASES = aliasesFor(SourceFormat.arcgis_xlsx);
+const ARCGIS_ALIAS_SCOPES = fieldScopesFor(SourceFormat.arcgis_xlsx);
 
 interface ParsedSheet {
   name: string;
@@ -47,7 +48,7 @@ function buildHeaderMap(rawHeaders: string[], mapping?: ColumnMapping, sheetName
       : mapping?.sheetRoles?.stemsSheetName === sheetName
         ? 'stems'
         : undefined;
-  const plan = resolveHeaders(rawHeaders, mapping ?? null, ARCGIS_ALIASES, { ...ARCGIS_RESOLVE_OPTIONS, sheetRole });
+  const plan = resolveHeaders(rawHeaders, mapping ?? null, ARCGIS_ALIASES, { ...ARCGIS_RESOLVE_OPTIONS, sheetRole, aliasFieldScopes: ARCGIS_ALIAS_SCOPES });
   const keys: string[] = [];
   const keyByRawHeader = new Map<string, string>();
   const seen = new Set<string>();

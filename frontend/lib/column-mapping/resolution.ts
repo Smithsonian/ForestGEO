@@ -34,6 +34,8 @@ export interface ResolveOptions {
   passthroughKey: (raw: string) => string;
   /** When set, only mapping fields whose scope applies to this sheet contribute explicit overrides. */
   sheetRole?: SheetRole;
+  /** Canonical field -> scope. When set, alias fill skips fields whose scope excludes sheetRole. */
+  aliasFieldScopes?: Record<string, MappingScope>;
 }
 
 export const CSV_RESOLVE_OPTIONS: ResolveOptions = {
@@ -68,7 +70,13 @@ export function resolveHeaders(
 ): HeaderResolutionPlan {
   const overrideByNorm = new Map<string, { field: string; slot: number }>();
   const reservedKeys = new Set<string>();
+  // Effective scope per canonical field for alias-fill gating: the schema defaults (aliasFieldScopes)
+  // are overlaid by any scope the mapping itself declares on that field, so a field the author scoped
+  // to one role (e.g. trees-only lx) is never alias-filled on the other sheet even when the caller
+  // passed no aliasFieldScopes.
+  const aliasFieldScopes: Record<string, MappingScope> = { ...(options.aliasFieldScopes ?? {}) };
   for (const field of mapping?.fields ?? []) {
+    if (field.scope !== undefined) aliasFieldScopes[field.canonicalField] = field.scope;
     // Scoped-out fields contribute no overrides AND no reserved keys here; safe because reservedKeys
     // is only consulted on the !allowAliasFill (CSV) path, and CSV never sets sheetRole.
     if (!fieldAppliesToSheet(field.scope, options.sheetRole)) continue;
@@ -108,7 +116,7 @@ export function resolveHeaders(
     }
     if (options.allowAliasFill) {
       const field = fieldByAliasNorm.get(norm);
-      if (field !== undefined && !claimed.has(field)) {
+      if (field !== undefined && !claimed.has(field) && fieldAppliesToSheet(aliasFieldScopes[field], options.sheetRole)) {
         claimed.add(field);
         resolutions[index] = { index, rawHeader: raw, outputKey: field, kind: 'alias', canonicalField: field };
         return;

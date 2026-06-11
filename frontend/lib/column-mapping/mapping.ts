@@ -1,5 +1,5 @@
 import { SourceFormat } from '@/config/macros/formdetails';
-import { aliasesFor, canonicalFieldsFor, normalizeHeader } from './fields';
+import { aliasesFor, canonicalFieldsFor, fieldScopesFor, normalizeHeader } from './fields';
 import { ARCGIS_RESOLVE_OPTIONS, CSV_RESOLVE_OPTIONS, resolveHeaders } from './resolution';
 import { ColumnMapping, ColumnMappingField, MappingValidation, SourceMetadata } from './types';
 
@@ -180,12 +180,13 @@ export function validateMapping(mapping: ColumnMapping, metadata: SourceMetadata
   // enforcement); otherwise against the union of all columns.
   const perSheet = treesSheetColumns !== undefined && stemsSheetColumns !== undefined;
 
+  const arcgisScopes = fieldScopesFor(mapping.format);
   const csvPlan = metadata.format === SourceFormat.csv ? resolveHeaders(metadata.headers, mapping, aliasesFor(mapping.format), CSV_RESOLVE_OPTIONS) : null;
   const treesPlan = perSheet
-    ? resolveHeaders(treesSheetColumns!, mapping, aliasesFor(mapping.format), { ...ARCGIS_RESOLVE_OPTIONS, sheetRole: 'trees' })
+    ? resolveHeaders(treesSheetColumns!, mapping, aliasesFor(mapping.format), { ...ARCGIS_RESOLVE_OPTIONS, sheetRole: 'trees', aliasFieldScopes: arcgisScopes })
     : null;
   const stemsPlan = perSheet
-    ? resolveHeaders(stemsSheetColumns!, mapping, aliasesFor(mapping.format), { ...ARCGIS_RESOLVE_OPTIONS, sheetRole: 'stems' })
+    ? resolveHeaders(stemsSheetColumns!, mapping, aliasesFor(mapping.format), { ...ARCGIS_RESOLVE_OPTIONS, sheetRole: 'stems', aliasFieldScopes: arcgisScopes })
     : null;
 
   for (const def of defs) {

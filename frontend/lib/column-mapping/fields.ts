@@ -61,3 +61,10 @@ export function canonicalFieldsFor(format: SourceFormat): CanonicalFieldDef[] {
 export function aliasesFor(format: SourceFormat): Record<string, string[]> {
   return format === SourceFormat.arcgis_xlsx ? arcgisAliases() : CSV_ALIASES;
 }
+
+/** Canonical field -> declared scope, for scope-aware alias resolution. */
+export function fieldScopesFor(format: SourceFormat): Record<string, MappingScope> {
+  const out: Record<string, MappingScope> = {};
+  for (const def of canonicalFieldsFor(format)) out[def.canonicalField] = def.scope;
+  return out;
+}
