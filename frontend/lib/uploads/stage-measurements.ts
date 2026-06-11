@@ -77,6 +77,17 @@ export interface StageMeasurementChunkParams {
   /** Recorded as unifiedchangelog.ChangedBy for the file-upload tracking row. */
   changedBy?: string;
   /**
+   * Skip the CLEAN_REUPLOAD census-replacement cleanup for this chunk even when
+   * uploadMode is CLEAN_REUPLOAD. The async upload worker ingests file-by-file,
+   * so by the time its second file stages, the first file's batch is already
+   * 'completed' in uploadmetrics — running cleanupPreviousFileUploads again
+   * would destroy that batch's freshly ingested rows (the cleanup deletes every
+   * census batch except the current one). The worker therefore allows the
+   * census replacement only while staging the job's FIRST file. The synchronous
+   * upload route stages all files before any ingestion, so it never sets this.
+   */
+  suppressCensusReplacementCleanup?: boolean;
+  /**
    * Invoked with the resolution's parse rejects as soon as resolution finishes,
    * BEFORE any database writes — so callers can surface partial failures even
    * when a later statement throws and the transaction rolls back.
@@ -182,7 +193,7 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
   // A retry of the same file should not inherit stale batches that were left
   // behind by an earlier interrupted upload for the same plot/census.
   if (preInsertCount === 0) {
-    if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+    if (uploadMode === UploadMode.CLEAN_REUPLOAD && !params.suppressCensusReplacementCleanup) {
       // Clean up data from any previous uploads for this census.
       // Clean re-upload is census replacement, not filename replacement.
       await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);

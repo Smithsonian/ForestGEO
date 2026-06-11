@@ -17,3 +17,16 @@ export class JobFileNotFoundError extends Error {
     this.name = 'JobFileNotFoundError';
   }
 }
+
+/**
+ * Thrown by the worker when a job can never succeed no matter how many times it
+ * is retried (unsupported form-type routing, malformed file content, validation
+ * step failures, missing pre-flight references). The worker maps this to a
+ * fenced markBackgroundJobFailed instead of a waiting_retry transition.
+ */
+export class NonRetryableJobError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NonRetryableJobError';
+  }
+}

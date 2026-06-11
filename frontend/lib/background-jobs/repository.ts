@@ -323,14 +323,22 @@ export async function setBackgroundJobStatus(
   await ensureBackgroundJobCatalogTables(catalogPool);
   const terminalStatuses: BackgroundJobStatus[] = ['completed', 'failed', 'cancelled'];
   const terminal = terminalStatuses.includes(update.status);
+  // Status is "sticky" for cancel_requested: a progress write (status='running')
+  // from the owning worker must NOT flip a cancel_requested job back to running,
+  // or a user's cancellation racing a progress update would be silently lost.
+  // The worker only observes cancellation at stage boundaries, so progress
+  // writes can land while the cancel flag is set. Terminal/explicit statuses
+  // (cancelled/failed/completed/waiting_retry) still overwrite normally.
   const [result] = await catalogPool.query<ResultSetHeader>(
     `UPDATE catalog.background_jobs
-     SET Status = ?, Phase = ?, PercentComplete = COALESCE(?, PercentComplete),
+     SET Status = IF(Status = 'cancel_requested' AND ? = 'running', 'cancel_requested', ?),
+         Phase = ?, PercentComplete = COALESCE(?, PercentComplete),
          ProcessedRows = COALESCE(?, ProcessedRows), FailedRows = COALESCE(?, FailedRows),
          LastError = ?, StartedAt = IF(StartedAt IS NULL AND ? = 'running', NOW(), StartedAt),
          FinishedAt = IF(?, NOW(), FinishedAt)
      WHERE JobID = ? AND WorkerID = ? AND Status IN (${FENCED_WRITE_STATUSES.map(() => '?').join(', ')})`,
     [
+      update.status,
       update.status,
       update.phase,
       update.percentComplete ?? null,
@@ -407,49 +415,72 @@ export async function heartbeatBackgroundJob(catalogPool: Pool, jobID: number, w
   return result.affectedRows > 0;
 }
 
-export async function markBackgroundJobWaitingRetry(
+export interface WaitingRetryOptions {
+  /**
+   * When false the transition does not consume retry budget. Used for external
+   * contention (an interactive upload session or validation run owns the
+   * plot/census scope) where the job itself did nothing wrong. Defaults to true.
+   */
+  incrementRetry?: boolean;
+}
+
+/**
+ * Fenced worker transition to waiting_retry — or directly to failed when the
+ * retry budget is exhausted. The RetryCount arithmetic and the
+ * failed-vs-waiting_retry decision both live IN the UPDATE statement so the
+ * read-decide-write race of the old unfenced markBackgroundJobWaitingRetry
+ * cannot occur.
+ *
+ * MySQL evaluates SET assignments left-to-right and later assignments observe
+ * earlier ones, so RetryCount is assigned LAST and every earlier expression
+ * recomputes the prospective value (RetryCount + IF(increment,1,0)) against the
+ * column's pre-update value.
+ *
+ * Throws WorkerLeaseLostError when the caller no longer owns the lease
+ * (confirm-then-throw, same pattern as setBackgroundJobStatus).
+ */
+export async function markBackgroundJobWaitingRetryAsWorker(
   catalogPool: Pool,
   jobID: number,
+  workerID: string,
   error: Error,
-  retryDelaySeconds: number
+  retryDelaySeconds: number,
+  opts: WaitingRetryOptions = {}
 ): Promise<BackgroundJobRecord | null> {
   await ensureBackgroundJobCatalogTables(catalogPool);
-  const job = await getBackgroundJob(catalogPool, jobID);
-  if (!job) return null;
+  const incrementRetry = opts.incrementRetry !== false;
+  const nextAttemptAt = new Date(Date.now() + Math.max(retryDelaySeconds, 1) * 1000);
 
-  const nextRetryCount = job.retryCount + 1;
-  if (nextRetryCount >= job.maxRetries) {
-    // Retry budget exhausted — finalize as a permanent failure.
-    await catalogPool.query(
-      `UPDATE catalog.background_jobs
-       SET Status = 'failed',
-           Phase = 'failed',
-           RetryCount = ?,
-           LastError = ?,
-           NextAttemptAt = NULL,
-           FinishedAt = NOW()
-       WHERE JobID = ?`,
-      [nextRetryCount, error.message, jobID]
-    );
-    await addJobEvent(catalogPool, jobID, 'failed', error.message, { retryCount: nextRetryCount });
+  const [result] = await catalogPool.query<ResultSetHeader>(
+    `UPDATE catalog.background_jobs
+     SET Status = IF(RetryCount + IF(?, 1, 0) >= MaxRetries, 'failed', 'waiting_retry'),
+         Phase = IF(RetryCount + IF(?, 1, 0) >= MaxRetries, 'failed', 'staging'),
+         LastError = ?,
+         NextAttemptAt = IF(RetryCount + IF(?, 1, 0) >= MaxRetries, NULL, ?),
+         FinishedAt = IF(RetryCount + IF(?, 1, 0) >= MaxRetries, NOW(), FinishedAt),
+         WorkerID = NULL,
+         WorkerHeartbeatAt = NULL,
+         RetryCount = RetryCount + IF(?, 1, 0)
+     WHERE JobID = ? AND WorkerID = ? AND Status IN (${FENCED_WRITE_STATUSES.map(() => '?').join(', ')})`,
+    [incrementRetry, incrementRetry, error.message, incrementRetry, nextAttemptAt, incrementRetry, incrementRetry, jobID, workerID, ...FENCED_WRITE_STATUSES]
+  );
+
+  if (result.affectedRows === 0) {
+    // See setBackgroundJobStatus for the CLIENT_FOUND_ROWS rationale: 0 matched
+    // rows means the lease predicate did not match. Confirm before throwing.
+    const leaseIntact = await isLeaseIntact(catalogPool, jobID, workerID);
+    if (!leaseIntact) throw new WorkerLeaseLostError(jobID, workerID);
     return getBackgroundJob(catalogPool, jobID);
   }
 
-  const nextAttemptAt = new Date(Date.now() + Math.max(retryDelaySeconds, 1) * 1000);
-  await catalogPool.query(
-    `UPDATE catalog.background_jobs
-     SET Status = 'waiting_retry',
-         Phase = 'staging',
-         RetryCount = ?,
-         LastError = ?,
-         NextAttemptAt = ?,
-         WorkerID = NULL,
-         WorkerHeartbeatAt = NULL
-     WHERE JobID = ?`,
-    [nextRetryCount, error.message, nextAttemptAt, jobID]
-  );
-  await addJobEvent(catalogPool, jobID, 'waiting_retry', error.message, { retryCount: nextRetryCount, nextAttemptAt: nextAttemptAt.toISOString() });
-  return getBackgroundJob(catalogPool, jobID);
+  const job = await getBackgroundJob(catalogPool, jobID);
+  const eventType = job?.status === 'failed' ? 'failed' : 'waiting_retry';
+  await addJobEvent(catalogPool, jobID, eventType, error.message, {
+    retryCount: job?.retryCount ?? null,
+    incrementRetry,
+    nextAttemptAt: job?.status === 'failed' ? null : nextAttemptAt.toISOString()
+  });
+  return job;
 }
 
 export async function markBackgroundJobCompleted(catalogPool: Pool, jobID: number, workerID: string): Promise<void> {

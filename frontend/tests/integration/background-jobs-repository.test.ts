@@ -23,7 +23,7 @@ import {
   getBackgroundJobWithDetails,
   heartbeatBackgroundJob,
   listBackgroundJobs,
-  markBackgroundJobWaitingRetry,
+  markBackgroundJobWaitingRetryAsWorker,
   setBackgroundJobStatus,
   updateBackgroundJobFileStatus
 } from '@/lib/background-jobs/repository';
@@ -376,8 +376,8 @@ describe('cancelBackgroundJob', () => {
   });
 });
 
-describe('markBackgroundJobWaitingRetry — retry budget exhaustion', () => {
-  it('transitions directly to failed when retry budget is exhausted', async () => {
+describe('markBackgroundJobWaitingRetryAsWorker — fenced retry transitions', () => {
+  it('transitions directly to failed when retry budget is exhausted (budget arithmetic in SQL)', async () => {
     const job = await createUploadBackgroundJob(pool, makeJobInput(), TEST_USER_A);
 
     // Exhaust all retries by setting RetryCount to maxRetries - 1, so the next
@@ -391,7 +391,7 @@ describe('markBackgroundJobWaitingRetry — retry budget exhaustion', () => {
     console.log(`[retry-budget] jobID=${job.jobID} RetryCount before call: ${UPLOAD_JOB_MAX_RETRIES - 1} maxRetries=${UPLOAD_JOB_MAX_RETRIES}`);
 
     const budgetError = new Error('Persistent validation failure — budget exhausted');
-    const result = await markBackgroundJobWaitingRetry(pool, job.jobID, budgetError, 30);
+    const result = await markBackgroundJobWaitingRetryAsWorker(pool, job.jobID, WORKER_A, budgetError, 30);
 
     console.log(`[retry-budget] result status=${result?.status} phase=${result?.phase} retryCount=${result?.retryCount}`);
 
@@ -402,6 +402,7 @@ describe('markBackgroundJobWaitingRetry — retry budget exhaustion', () => {
     expect(result!.lastError).toBe(budgetError.message);
     expect(result!.finishedAt).toBeInstanceOf(Date);
     expect(result!.nextAttemptAt).toBeNull();
+    expect(result!.workerID).toBeNull();
 
     // Verify event was logged
     const details = await getBackgroundJobWithDetails(pool, job.jobID);
@@ -411,21 +412,74 @@ describe('markBackgroundJobWaitingRetry — retry budget exhaustion', () => {
     expect(failedEvent!.message).toBe(budgetError.message);
   });
 
-  it('transitions to waiting_retry when budget remains', async () => {
+  it('transitions to waiting_retry when budget remains, releasing the lease', async () => {
     const job = await createUploadBackgroundJob(pool, makeJobInput(), TEST_USER_A);
     await pool.query(`UPDATE catalog.background_jobs SET Status = 'running', Phase = 'staging', WorkerID = ? WHERE JobID = ?`, [WORKER_A, job.jobID]);
 
     const retryError = new Error('Transient staging failure');
     const retryDelay = 60;
-    const result = await markBackgroundJobWaitingRetry(pool, job.jobID, retryError, retryDelay);
+    const result = await markBackgroundJobWaitingRetryAsWorker(pool, job.jobID, WORKER_A, retryError, retryDelay);
 
     console.log(`[retry-budget] result status=${result?.status} retryCount=${result?.retryCount}`);
 
     expect(result).not.toBeNull();
     expect(result!.status).toBe('waiting_retry');
+    expect(result!.phase).toBe('staging');
     expect(result!.retryCount).toBe(1);
     expect(result!.nextAttemptAt).toBeInstanceOf(Date);
     expect(result!.workerID).toBeNull();
+    expect(result!.finishedAt).toBeNull();
+
+    const details = await getBackgroundJobWithDetails(pool, job.jobID);
+    const retryEvent = details!.events.find(e => e.eventType === 'waiting_retry');
+    expect(retryEvent).toBeDefined();
+  });
+
+  it('does not consume retry budget when incrementRetry is false (scope-conflict parking)', async () => {
+    const job = await createUploadBackgroundJob(pool, makeJobInput(), TEST_USER_A);
+    await pool.query(`UPDATE catalog.background_jobs SET Status = 'running', Phase = 'staging', WorkerID = ? WHERE JobID = ?`, [WORKER_A, job.jobID]);
+
+    const conflictError = new Error('Another upload session owns this plot/census');
+    const result = await markBackgroundJobWaitingRetryAsWorker(pool, job.jobID, WORKER_A, conflictError, 120, { incrementRetry: false });
+
+    console.log(`[retry-no-burn] result status=${result?.status} retryCount=${result?.retryCount} nextAttemptAt=${result?.nextAttemptAt?.toISOString()}`);
+
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe('waiting_retry');
+    expect(result!.retryCount).toBe(0); // budget untouched
+    expect(result!.nextAttemptAt).toBeInstanceOf(Date);
+    expect(result!.workerID).toBeNull();
+  });
+
+  it('incrementRetry=false at RetryCount = MaxRetries - 1 still parks as waiting_retry (no spurious fail)', async () => {
+    const job = await createUploadBackgroundJob(pool, makeJobInput(), TEST_USER_A);
+    await pool.query(`UPDATE catalog.background_jobs SET Status = 'running', Phase = 'staging', RetryCount = ?, WorkerID = ? WHERE JobID = ?`, [
+      UPLOAD_JOB_MAX_RETRIES - 1,
+      WORKER_A,
+      job.jobID
+    ]);
+
+    const conflictError = new Error('Scope conflict on last-budget job');
+    const result = await markBackgroundJobWaitingRetryAsWorker(pool, job.jobID, WORKER_A, conflictError, 120, { incrementRetry: false });
+
+    console.log(`[retry-no-burn-edge] result status=${result?.status} retryCount=${result?.retryCount}`);
+    expect(result!.status).toBe('waiting_retry');
+    expect(result!.retryCount).toBe(UPLOAD_JOB_MAX_RETRIES - 1);
+  });
+
+  it('throws WorkerLeaseLostError when called by a worker that does not own the lease; row unchanged', async () => {
+    const { jobID } = await createAndClaimJob(WORKER_A);
+
+    console.log(`[retry-fence] WORKER_B=${WORKER_B} attempts waiting_retry on jobID=${jobID} owned by WORKER_A=${WORKER_A}`);
+
+    await expect(markBackgroundJobWaitingRetryAsWorker(pool, jobID, WORKER_B, new Error('stale worker write'), 60)).rejects.toThrow(WorkerLeaseLostError);
+
+    const row = await getBackgroundJob(pool, jobID);
+    console.log(`[retry-fence] post-reject: status=${row?.status} retryCount=${row?.retryCount} workerID=${row?.workerID}`);
+    expect(row!.status).toBe('running');
+    expect(row!.retryCount).toBe(0);
+    expect(row!.workerID).toBe(WORKER_A);
+    expect(row!.lastError).toBeNull();
   });
 });
 

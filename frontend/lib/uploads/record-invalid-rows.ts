@@ -36,6 +36,14 @@ export interface InvalidRowContext {
    * Example: if a file is split into two chunks of 100 rows each, the first
    * call passes sourceRowIndexOffset=0 (rows indexed 1–100) and the second
    * passes sourceRowIndexOffset=100 (rows indexed 101–200).
+   *
+   * COLLISION HAZARD: coremeasurements enforces
+   * UNIQUE ux_cm_uploadbatch_rowindex (UploadBatchID, SourceRowIndex), and
+   * bulkingestionprocess writes its rows (both ingested and failed) under the
+   * same batch keyed by temporarymeasurements.id. Callers recording rejects
+   * for a batch the procedure also writes MUST keep their indices out of the
+   * positive auto-increment range (the async worker uses a negative offset),
+   * or the ON DUPLICATE KEY UPDATE silently rewrites a procedure-owned row.
    */
   sourceRowIndexOffset?: number;
 }
@@ -134,6 +142,15 @@ export async function recordFailedMeasurementRows(
  *
  * Called before retrying a crashed upload job to prevent duplicate failure rows
  * accumulating across retry attempts.
+ *
+ * PRECONDITION — never call this for a batch whose uploadmetrics row is
+ * status='completed'. Under the same (UploadFileID, UploadBatchID), completed
+ * batches hold BOTH the worker-recorded parse rejects AND the failure rows the
+ * bulkingestionprocess stored procedure recorded during ingestion — all with
+ * StemGUID NULL and indistinguishable here. Deleting them would permanently
+ * destroy the procedure's recorded failures: the idempotent re-run of a
+ * completed batch skips ingestion entirely and never regenerates them. Callers
+ * must probe uploadmetrics first and skip completed batches.
  *
  * Returns the count of rows deleted.
  */
