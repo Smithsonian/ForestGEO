@@ -551,6 +551,51 @@ export async function finalizeJobAsSystem(
   return true;
 }
 
+export interface StaleRunningJob {
+  jobID: number;
+  retryCount: number;
+  maxRetries: number;
+}
+
+/**
+ * Sweeper reclaim query: 'running' jobs whose worker heartbeat is missing or
+ * older than staleSeconds. Pure read — the caller decides waiting_retry vs
+ * failed from retryCount/maxRetries and applies it via finalizeJobAsSystem.
+ */
+export async function findStaleRunningJobs(catalogPool: Pool, staleSeconds: number): Promise<StaleRunningJob[]> {
+  await ensureBackgroundJobCatalogTables(catalogPool);
+  const [rows]: any = await catalogPool.query(
+    `SELECT JobID, RetryCount, MaxRetries FROM catalog.background_jobs
+     WHERE Status = 'running'
+       AND (WorkerHeartbeatAt IS NULL OR WorkerHeartbeatAt < NOW() - INTERVAL ? SECOND)
+     ORDER BY JobID`,
+    [staleSeconds]
+  );
+  return rows.map((row: any) => ({
+    jobID: Number(row.JobID),
+    retryCount: Number(row.RetryCount ?? 0),
+    maxRetries: Number(row.MaxRetries ?? UPLOAD_JOB_MAX_RETRIES)
+  }));
+}
+
+/**
+ * Sweeper dispatch query: jobs a worker could claim right now — queued, or
+ * waiting_retry whose NextAttemptAt has passed (or was never set). Ordered by
+ * JobID so older jobs are dispatched first.
+ */
+export async function findRunnableJobIDs(catalogPool: Pool, limit: number): Promise<number[]> {
+  await ensureBackgroundJobCatalogTables(catalogPool);
+  const [rows]: any = await catalogPool.query(
+    `SELECT JobID FROM catalog.background_jobs
+     WHERE Status = 'queued'
+        OR (Status = 'waiting_retry' AND (NextAttemptAt IS NULL OR NextAttemptAt <= NOW()))
+     ORDER BY JobID
+     LIMIT ?`,
+    [limit]
+  );
+  return rows.map((row: any) => Number(row.JobID));
+}
+
 export async function updateBackgroundJobFileStatus(
   catalogPool: Pool,
   jobID: number,
