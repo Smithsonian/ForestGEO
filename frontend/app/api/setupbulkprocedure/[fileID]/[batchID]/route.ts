@@ -6,7 +6,6 @@ import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
-import { isInternalUploadWorkerRequest } from '@/lib/background-jobs/internal-auth';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -416,11 +415,10 @@ export async function GET(
   }
 
   const sessionId = request.headers.get('x-upload-session-id');
-  const isInternalWorker = isInternalUploadWorkerRequest(request);
-  if (!sessionId && !isInternalWorker) {
+  if (!sessionId) {
     return new NextResponse(JSON.stringify({ error: 'Upload session is required for batch processing' }), { status: HTTPResponses.CONFLICT });
   }
-  ailogger.info(`Processing batch ${fileID}-${batchID} for ${isInternalWorker ? 'async upload worker' : `session ${sessionId}`}`);
+  ailogger.info(`Processing batch ${fileID}-${batchID} for session ${sessionId}`);
 
   let procedureSQL: string;
   try {
@@ -457,16 +455,14 @@ export async function GET(
         const currentCensusID = Number(infoRows[0].CensusID);
         const totalRows = toCount(infoRows[0].rowCount);
 
-        if (!isInternalWorker) {
-          await requireUploadSessionOwnership({
-            schema,
-            sessionId,
-            plotId: currentPlotID,
-            censusId: currentCensusID,
-            allowedStates: [UploadSessionState.UPLOADED, UploadSessionState.PROCESSING],
-            contextLabel: `batch processing for ${fileID}-${batchID}`
-          });
-        }
+        await requireUploadSessionOwnership({
+          schema,
+          sessionId,
+          plotId: currentPlotID,
+          censusId: currentCensusID,
+          allowedStates: [UploadSessionState.UPLOADED, UploadSessionState.PROCESSING],
+          contextLabel: `batch processing for ${fileID}-${batchID}`
+        });
 
         // Acquire lock for setup phase
         const lockKey = `upload:file:${fileID}:plot:${currentPlotID}:census:${currentCensusID}`;

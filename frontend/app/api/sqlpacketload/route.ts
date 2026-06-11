@@ -21,7 +21,6 @@ import { RoleResult } from '@/config/sqlrdsdefinitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import { resolveMeasurementChunk } from '@/lib/column-mapping/measurement-rows';
-import { isInternalUploadWorkerRequest } from '@/lib/background-jobs/internal-auth';
 import {
   buildDroppedMeasurementFailureReason,
   cleanupPreviousFileUploads,
@@ -693,9 +692,8 @@ export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   // Authentication check
-  const isInternalWorker = isInternalUploadWorkerRequest(request);
-  const session = isInternalWorker ? null : await auth();
-  const authError = isInternalWorker ? null : requireSession(session);
+  const session = await auth();
+  const authError = requireSession(session);
   if (authError) {
     ailogger.warn('Unauthorized upload attempt - no session');
     return authError;
@@ -743,7 +741,7 @@ export async function POST(request: NextRequest) {
   const uploadMode = normalizeUploadMode(body.uploadMode);
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
-  const user: string = body.user || session?.user?.name || 'async-upload-worker';
+  const user: string = body.user;
   const fileRowSet: FileRowSet = body.fileRowSet ?? {};
   const fileName: string = body.fileName;
   // Optional RAW-rows path (#6, server half): when present, the server re-resolves/keys/validates
@@ -781,31 +779,29 @@ export async function POST(request: NextRequest) {
     }
     const { plotID: resolvedPlotID, censusID: resolvedCensusID } = scopeValidation;
 
-    if (!isInternalWorker) {
-      try {
-        await requireUploadSessionOwnership({
-          schema,
-          sessionId,
-          plotId: resolvedPlotID,
-          censusId: resolvedCensusID,
-          allowedStates: [TrackedUploadSessionState.INITIALIZED, TrackedUploadSessionState.UPLOADING],
-          contextLabel: `measurement chunk upload for ${fileName}-${batchID}`
-        });
-      } catch (error: unknown) {
-        if (error instanceof UploadSessionOwnershipError) {
-          ailogger.warn(`Rejected measurement upload for ${fileName}-${batchID}: ${error.message}`);
-          return new NextResponse(
-            JSON.stringify({
-              responseMessage: 'Upload session conflict',
-              error: error.message,
-              fileName,
-              batchID
-            }),
-            { status: error.status }
-          );
-        }
-        throw error;
+    try {
+      await requireUploadSessionOwnership({
+        schema,
+        sessionId,
+        plotId: resolvedPlotID,
+        censusId: resolvedCensusID,
+        allowedStates: [TrackedUploadSessionState.INITIALIZED, TrackedUploadSessionState.UPLOADING],
+        contextLabel: `measurement chunk upload for ${fileName}-${batchID}`
+      });
+    } catch (error: unknown) {
+      if (error instanceof UploadSessionOwnershipError) {
+        ailogger.warn(`Rejected measurement upload for ${fileName}-${batchID}: ${error.message}`);
+        return new NextResponse(
+          JSON.stringify({
+            responseMessage: 'Upload session conflict',
+            error: error.message,
+            fileName,
+            batchID
+          }),
+          { status: error.status }
+        );
       }
+      throw error;
     }
 
     // SERVER-RESOLUTION STAGE (#6): when the client sends RAW rows, the server is authoritative

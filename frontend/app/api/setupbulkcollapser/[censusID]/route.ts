@@ -4,7 +4,6 @@ import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
-import { isInternalUploadWorkerRequest } from '@/lib/background-jobs/internal-auth';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -29,21 +28,19 @@ export async function GET(
     return new NextResponse(JSON.stringify({ error: 'Missing parameters' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  if (!isInternalUploadWorkerRequest(request)) {
-    try {
-      await requireUploadSessionOwnership({
-        schema,
-        sessionId: request.headers.get('x-upload-session-id'),
-        censusId: Number(censusID),
-        allowedStates: [UploadSessionState.PROCESSING, UploadSessionState.COLLAPSING],
-        contextLabel: `collapser for census ${censusID}`
-      });
-    } catch (error: unknown) {
-      if (error instanceof UploadSessionOwnershipError) {
-        return new NextResponse(JSON.stringify({ error: error.message }), { status: error.status });
-      }
-      throw error;
+  try {
+    await requireUploadSessionOwnership({
+      schema,
+      sessionId: request.headers.get('x-upload-session-id'),
+      censusId: Number(censusID),
+      allowedStates: [UploadSessionState.PROCESSING, UploadSessionState.COLLAPSING],
+      contextLabel: `collapser for census ${censusID}`
+    });
+  } catch (error: unknown) {
+    if (error instanceof UploadSessionOwnershipError) {
+      return new NextResponse(JSON.stringify({ error: error.message }), { status: error.status });
     }
+    throw error;
   }
 
   // Validate schema to prevent SQL injection

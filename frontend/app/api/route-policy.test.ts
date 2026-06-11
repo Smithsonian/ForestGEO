@@ -217,7 +217,7 @@ describe('Route authorization policy matrix', () => {
   });
 
   it('policy distribution matches expected counts', () => {
-    const counts: Record<RoutePolicy, number> = { public: 0, authed: 0, 'site-scoped': 0, admin: 0, internal: 0 };
+    const counts: Record<RoutePolicy, number> = { public: 0, authed: 0, 'site-scoped': 0, admin: 0 };
     for (const policy of Object.values(ROUTE_POLICIES)) {
       counts[policy]++;
     }
@@ -227,7 +227,6 @@ describe('Route authorization policy matrix', () => {
     expect(counts.authed).toBeGreaterThan(0);
     expect(counts['site-scoped']).toBeGreaterThan(0);
     expect(counts.admin).toBeGreaterThan(0);
-    expect(counts.internal).toBeGreaterThan(0);
     // Total must match all discovered routes
     const totalClassified = Object.values(counts).reduce((a, b) => a + b, 0);
     expect(totalClassified).toBe(allRouteKeys.length);

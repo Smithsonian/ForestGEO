@@ -9,7 +9,6 @@ import { generateShortBatchID } from '@/config/utils';
 import { validatedSchema, type SchemaName } from '@/config/utils/sqlsecurity';
 import { auth } from '@/auth';
 import { assertSchemaAccess } from '@/lib/authz';
-import { isInternalUploadWorkerRequest } from '@/lib/background-jobs/internal-auth';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -19,7 +18,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
   const params = await props.params;
   let errorRows: FailedMeasurementsRDS[] = await request.json();
   const { schema: schemaParam, slugs } = params;
-  const isInternalWorker = isInternalUploadWorkerRequest(request);
 
   if (!errorRows || errorRows.length === 0) {
     return new NextResponse(JSON.stringify({ message: 'No data provided for batch upload!' }), { status: HTTPResponses.INVALID_REQUEST });
@@ -50,21 +48,19 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
         return new NextResponse(JSON.stringify({ message: 'Invalid plotID or censusID in URL parameters!' }), { status: HTTPResponses.INVALID_REQUEST });
       }
 
+      const session = await auth();
+      if (!session?.user) {
+        return NextResponse.json({ error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: HTTPResponses.UNAUTHORIZED });
+      }
+
       try {
         schema = validatedSchema(schemaParam);
       } catch {
         return NextResponse.json({ error: 'Invalid schema', code: 'INVALID_SCHEMA' }, { status: HTTPResponses.INVALID_REQUEST });
       }
 
-      if (!isInternalWorker) {
-        const session = await auth();
-        if (!session?.user) {
-          return NextResponse.json({ error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: HTTPResponses.UNAUTHORIZED });
-        }
-
-        const denied = assertSchemaAccess(session, schema);
-        if (denied) return denied;
-      }
+      const denied = assertSchemaAccess(session, schema);
+      if (denied) return denied;
     } else {
       return validation.response!;
     }

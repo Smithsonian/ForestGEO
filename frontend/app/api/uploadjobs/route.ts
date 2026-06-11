@@ -7,8 +7,7 @@ import { isValidSchema } from '@/config/utils/sqlsecurity';
 import ConnectionManager from '@/config/connectionmanager';
 import { assertCanEditMeasurementScope, ScopeAccessError } from '@/config/editplan/scopeguard';
 import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
-import { createUploadBackgroundJob, listBackgroundJobs, markBackgroundJobQueued, recordBackgroundJobQueueFailure } from '@/lib/background-jobs/repository';
-import { enqueueUploadBackgroundJob } from '@/lib/background-jobs/service-bus';
+import { createUploadBackgroundJob, listBackgroundJobs } from '@/lib/background-jobs/repository';
 import { isPrivilegedSession, parseOptionalPositiveInteger } from '@/lib/background-jobs/route-helpers';
 import ailogger from '@/ailogger';
 
@@ -40,7 +39,6 @@ const CreateUploadJobSchema = z.object({
   formType: z.string().trim().max(32).nullable().optional(),
   idempotencyKey: z.string().trim().max(255).nullable().optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
-  enqueue: z.boolean().optional().default(true),
   files: z.array(UploadJobFileSchema).min(1)
 });
 
@@ -113,30 +111,7 @@ export async function POST(request: NextRequest) {
     userID
   );
 
-  if (!input.enqueue) {
-    return NextResponse.json({ job, enqueued: false }, { status: HTTPResponses.CREATED });
-  }
-
-  try {
-    const sendResult = await enqueueUploadBackgroundJob({ jobID: job.jobID, kind: 'upload_validation' });
-    await markBackgroundJobQueued(catalogPool, job.jobID, sendResult.messageID);
-    return NextResponse.json(
-      { job: { ...job, status: 'queued', phase: 'queued', lastMessageID: sendResult.messageID }, enqueued: true },
-      { status: HTTPResponses.ACCEPTED }
-    );
-  } catch (error) {
-    const err = error instanceof Error ? error : new Error(String(error));
-    await recordBackgroundJobQueueFailure(catalogPool, job.jobID, err);
-    ailogger.error('[UploadJobs API] Failed to enqueue upload job:', err);
-    return NextResponse.json(
-      {
-        error: 'Upload job was created but could not be enqueued',
-        jobID: job.jobID,
-        details: err.message
-      },
-      { status: HTTPResponses.SERVICE_UNAVAILABLE }
-    );
-  }
+  return NextResponse.json({ job, enqueued: false }, { status: HTTPResponses.CREATED });
 }
 
 export async function GET(request: NextRequest) {

@@ -15,17 +15,13 @@
  *   authed        – requires a logged-in session; no per-site restriction
  *   site-scoped   – operates on a per-site schema; must enforce per-site access
  *   admin         – privileged / cross-site / destructive; requires admin role
- *   internal      – authenticated by a shared internal-worker token (not a user
- *                   session); reachable only by trusted in-cluster background
- *                   workers. Per-site authorization is enforced upstream at the
- *                   user-facing route that enqueues the job.
  *
  * Keys are the route path relative to app/api (without leading slash and
  * without the trailing /route.ts suffix), e.g.:
  *   'dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDParam]'
  */
 
-export type RoutePolicy = 'public' | 'authed' | 'site-scoped' | 'admin' | 'internal';
+export type RoutePolicy = 'public' | 'authed' | 'site-scoped' | 'admin';
 
 export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   // ── Public routes (no auth required) ─────────────────────────────────────
@@ -160,12 +156,7 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   uploadjobs: 'site-scoped',
   // Job status by id (jobId-only URL, no declared schema); requireSession with
   // per-user ownership enforced inside the handler — 'authed' (like 'query').
-  'uploadjobs/[jobId]': 'authed',
-  // Internal background-worker processing step: authenticated by the shared
-  // worker token (isInternalUploadWorkerRequest), NOT a user session. Per-site
-  // authorization is enforced upstream at job creation (the site-scoped
-  // 'uploadjobs' route's assertCanEditMeasurementScope).
-  'uploadjobs/[jobId]/process': 'internal'
+  'uploadjobs/[jobId]': 'authed'
 };
 
 /**

@@ -10,7 +10,6 @@ import { UploadMode } from '@/config/uploadmodes';
 import { assertCanEditMeasurementScope, ScopeAccessError } from '@/config/editplan/scopeguard';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
-import { isInternalUploadWorkerRequest } from '@/lib/background-jobs/internal-auth';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 import {
   ArcgisImportSessionError,
@@ -40,10 +39,14 @@ function toNullableNumber(value: unknown): number | null {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const isInternalWorker = isInternalUploadWorkerRequest(request);
-  const session = isInternalWorker ? null : await auth();
-  const authError = isInternalWorker ? null : requireSession(session);
+  const session = await auth();
+  const authError = requireSession(session);
   if (authError) return authError;
+
+  const userId = getSessionUserId(session!);
+  if (!userId) {
+    return NextResponse.json({ error: 'Authenticated session has no user identifier' }, { status: HTTPResponses.UNAUTHORIZED });
+  }
 
   let body: Record<string, unknown>;
   try {
@@ -60,19 +63,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const requestedFileName = typeof body.fileName === 'string' ? body.fileName.trim() : '';
   const uploadMode: UploadMode = body.uploadMode === UploadMode.CLEAN_REUPLOAD ? UploadMode.CLEAN_REUPLOAD : UploadMode.REVISIONS;
   const sessionId = request.headers.get('x-upload-session-id') ?? '';
-  const userId = isInternalWorker ? (typeof body.userId === 'string' ? body.userId.trim() : '') : getSessionUserId(session!);
-  const uploadSessionIdForCommit = isInternalWorker
-    ? typeof body.uploadSessionID === 'string' && body.uploadSessionID.trim()
-      ? body.uploadSessionID.trim()
-      : `async-upload-${importSessionId}`
-    : sessionId;
-
-  if (!userId) {
-    return NextResponse.json(
-      { error: isInternalWorker ? 'Internal ArcGIS commit request is missing userId' : 'Authenticated session has no user identifier' },
-      { status: HTTPResponses.UNAUTHORIZED }
-    );
-  }
 
   if (
     !schema ||
@@ -94,19 +84,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
-    let uploadSessionID = uploadSessionIdForCommit;
-    if (!isInternalWorker) {
-      await assertCanEditMeasurementScope(connectionManager, session!, { schema, plotID, censusID });
-      const uploadSession = await requireUploadSessionOwnership({
-        schema,
-        sessionId,
-        plotId: plotID,
-        censusId: censusID,
-        allowedStates: [TrackedUploadSessionState.INITIALIZED, TrackedUploadSessionState.UPLOADING],
-        contextLabel: `arcgis commit for session ${importSessionId}`
-      });
-      uploadSessionID = uploadSession.sessionId ?? sessionId;
-    }
+    await assertCanEditMeasurementScope(connectionManager, session!, { schema, plotID, censusID });
+    const uploadSession = await requireUploadSessionOwnership({
+      schema,
+      sessionId,
+      plotId: plotID,
+      censusId: censusID,
+      allowedStates: [TrackedUploadSessionState.INITIALIZED, TrackedUploadSessionState.UPLOADING],
+      contextLabel: `arcgis commit for session ${importSessionId}`
+    });
+    const uploadSessionID = uploadSession.sessionId ?? sessionId;
 
     await ensureArcgisImportTables(schema);
     await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, schema);
