@@ -1,0 +1,234 @@
+---
+title: Publishing a Census to the Smithsonian DB
+description: How to use the Publish census button to load a finished ForestGEO census into the Smithsonian database.
+---
+
+The **Publish census** button generates a self-contained `.sql` artifact that loads a finished ForestGEO census into the Smithsonian database. Operators download the artifact, run it against the destination database, and the validated measurements land in the Smithsonian tables used for tree, stem, measurement, and measurement-attribute records. The artifact also rebuilds the full-table reporting view after the data load commits.
+
+This page covers when to use the feature, what each option does, what the artifact contains, how to run it, and the common ways it can refuse to publish.
+
+---
+
+## When to publish a census
+
+Use **Publish census** when a census has completed application-side validation and is ready to become part of the Smithsonian database.
+
+The publish flow is intended for finished census data only. If a census still has unresolved validation or upload errors, fix those records in the ForestGEO app before generating the SQL artifact.
+
+---
+
+## Prerequisites
+
+The export will refuse to publish unless every one of these is true.
+
+### 1. The census must be "Finished"
+
+Every measurement included in the export must satisfy:
+
+- `IsValidated = TRUE` (not `FALSE`, not `NULL`)
+- No unresolved row in `measurement_error_log`
+- `StemGUID IS NOT NULL` (no app-side failure markers)
+- Joined `stems` and `trees` are active (`IsActive = 1`, `DeletedAt IS NULL`)
+- Every `cmattributes.Code` resolves to an active `attributes` row
+- Species row has `SpeciesCode`, `SpeciesName`, `Genus`, and `Family` set
+- All destination-bound strings fit Smithsonian DB column widths (Tag at most 10 characters, StemTag at most 32 characters, QuadratName at most 8 characters, etc.)
+
+If anything fails, the modal returns a structured list of disqualifying `CoreMeasurementID`s grouped by failure kind. Fix them in the app and retry.
+
+### 2. The destination must have the reporting-view rebuild helper installed
+
+The artifact checks for the stored procedure that rebuilds `ViewFullTable` before doing any data work. If the procedure is missing, the artifact aborts with an install hint and zero data lands.
+
+Coordinate with the database administrator if the destination database has not yet had the reporting-view helper installed.
+
+### 3. The destination must be on the current Smithsonian DB schema
+
+The artifact verifies the expected measurement-attribute table shape before loading data. If it detects the older schema shape, it aborts with an upgrade hint and zero data lands.
+
+Coordinate with the database administrator before retrying against a database that needs a schema update.
+
+### 4. Your account must have export permission
+
+- **Lead technicians**: can publish censuses for schemas in their session-scoped site list. Normal exports only; reload options are hidden.
+- **Admins** (`global` / `db admin`): can publish for any schema and can generate reload artifacts (see [Reload semantics](#reload-semantics)).
+
+---
+
+## Step by step
+
+1. Sign in and select a site, plot, and validated census.
+2. Navigate to **Measurements Hub -> Census Overview**.
+3. Click **Publish census** in the page header.
+4. The modal shows the source app context: schema, PlotID, CensusID, and PlotCensusNumber.
+5. Enter the destination Plot ID that this census should attach to in the Smithsonian database. The destination plot must already exist; the artifact will refuse to publish if it does not.
+6. Admins can optionally tick **Allow reload** and/or **Dry run**; see [Reload semantics](#reload-semantics).
+7. Click **Download SQL artifact**.
+8. Run the file against the destination database; see [Running the artifact](#running-the-artifact).
+
+---
+
+## Options
+
+| Option | Who can use it | What it does |
+|---|---|---|
+| Destination Plot ID | All | Names which destination `Plot.PlotID` this census attaches to. Must already exist on the destination. |
+| Allow reload | Admins | The artifact deletes existing measurement-attribute and measurement rows for the target census before re-inserting. Identity rows (`Tree`, `Stem`) are never deleted; orphan counts are reported instead. |
+| Dry run | Admins | Generates a preview-only artifact that runs the reload-impact SELECTs and then `ROLLBACK`s. Useful to confirm what a reload would touch before doing it. |
+
+:::caution
+**Allow reload is destructive.** It removes every measurement and measurement-attribute row for the target census on the destination. Use Dry run first if you are not certain about scope.
+:::
+
+---
+
+## What's in the artifact
+
+The generated `.sql` file is a single self-contained script.
+
+```sql
+-- BEGIN HEADER (metadata: timestamp, source/destination IDs, row counts, options)
+-- END HEADER
+
+DROP PROCEDURE IF EXISTS load_published_census_<destPlot>_<slug>_<hash>;
+DELIMITER //
+CREATE PROCEDURE load_published_census_<destPlot>_<slug>_<hash>()
+main: BEGIN
+  -- DECLAREs and EXIT HANDLER for rollback
+  -- GET_LOCK on (destPlot, census): concurrent exports serialize here
+  START TRANSACTION;
+
+  -- Stage 0a: destination schema probes
+  -- Stage 0:  Census row exists for (destPlot, plotCensusNumber)? Continue, else SIGNAL
+  -- Stage 0b: reload only: DELETE measurement attributes + measurements for the target census
+  -- Stage 1:  temporary InnoDB staging tables, populated with all rows
+  -- Stage 2:  destination identity lookup (Quadrat, Family -> Genus -> Species -> SubSpecies, Tree, Stem, TSMAttributes)
+  -- Stage 2c: destination normalization (HOM=1.3 for new stems where DBH>0 AND HOM IS NULL)
+  -- Stage 5:  destination contract checks: per-row error reasons, SIGNAL on any failure
+  -- Stage 6:  bulk insert new Tree rows
+  -- Stage 7:  bulk insert new Stem rows
+  -- Stage 8:  bulk insert measurement rows
+  -- Stage 9:  bulk insert measurement-attribute rows
+  -- Stage 10: final tally
+
+  COMMIT;
+  DO RELEASE_LOCK(...);
+END //
+DELIMITER ;
+
+CALL load_published_census_...();
+DROP PROCEDURE load_published_census_...;
+
+-- After the load procedure, the artifact rebuilds ViewFullTable.
+```
+
+A few invariants worth knowing:
+
+- **The procedure name has a deterministic hash suffix** derived from the source schema, source plot/census, and destination plot/census. Two operators exporting the same census from the same schema get the same suffix. Two operators exporting from different source schemas to the same destination get different suffixes, so their `DROP PROCEDURE` / `CREATE PROCEDURE` statements do not collide.
+- **The body is byte-deterministic for the same input.** Only the header timestamp varies between runs. This is useful for ticket attachments and golden-file regression testing.
+- **A destination census lock** ensures two operators exporting to the same destination census serialize. The second one fails fast if another export is already running.
+- **`ViewFullTable` rebuild runs after the load procedure commits.** If the rebuild fails after a successful load, the data is committed and the operator can re-run the rebuild step independently.
+
+---
+
+## Running the artifact
+
+```bash
+mysql -u <user> -p <destination_database> < <downloaded-sql-artifact>.sql
+```
+
+You will see:
+
+- One or more `SELECT` result sets while the script runs, including reload counts when reload mode is enabled and a final tally when the load completes.
+- An `ERROR 1644 (45000): ...` line if anything fails. The procedure rolls back automatically; no partial data is committed.
+
+The final tally looks like:
+
+```text
++-------------------+------------+------------+
+| measurement_rows  | tree_count | stem_count |
++-------------------+------------+------------+
+|             10256 |       4823 |       9974 |
++-------------------+------------+------------+
+```
+
+If the artifact completes without an error and reports the expected final tally, the publish succeeded.
+
+---
+
+## Reload semantics
+
+Reload mode (`allowReload=true`) is the way to re-publish a census after fixing data in the app. The artifact will:
+
+1. Verify the destination Census row still exists.
+2. Snapshot which stems and trees would become orphans if this census's measurement rows were deleted.
+3. SELECT how many measurement-attribute and measurement rows the reload will delete.
+4. DELETE those rows.
+5. SELECT post-delete orphan counts: stems with no remaining measurements and trees with no remaining stems.
+6. Continue with normal insert path.
+7. Rebuild `ViewFullTable`.
+
+**Identity rows are never deleted.** A reload only removes measurements and measurement attributes for the target census. If a tree or stem is left with no surviving measurements, the operator decides whether to prune it manually outside this script. Identity-table deletion would risk breaking foreign-key references that exist outside the script's knowledge.
+
+### Dry run (`reloadDryRun=true`)
+
+Dry-run mode wraps the reload preview in a `SAVEPOINT` and `ROLLBACK TO SAVEPOINT`. The script:
+
+- Runs the reload-impact `SELECT`s for real, using the counts you would actually see in a reload.
+- Performs the `DELETE`s so the orphan counts are accurate.
+- Rolls everything back so no destination row changes.
+- Skips the insert stages entirely.
+- Skips the `ViewFullTable` rebuild.
+
+The net effect on the destination is zero. The net effect on the operator's screen is a set of result sets describing the impact of a real reload.
+
+---
+
+## Troubleshooting
+
+### "Census is not finished"
+
+The modal returns a structured list of failure kinds with the first 20 disqualifying `CoreMeasurementID`s per kind. Each kind maps to one of the preconditions:
+
+| Kind | What to fix |
+|---|---|
+| `not-validated` | Re-run validation in the app for those rows. |
+| `unresolved-error` | Resolve the rows in **Measurements Hub -> Errors**. |
+| `no-stem-guid` | App-side failure marker. The row needs re-ingestion. |
+| `inactive-join` | The joined stem or tree is soft-deleted. Restore or remove the measurement. |
+| `unknown-attribute-code` | One or more `cmattributes.Code` values do not exist in `attributes`. Add the codes or fix the measurement. |
+| `missing-taxonomy-fields` | The species row is missing `SpeciesCode`, `SpeciesName`, `Genus`, or `Family`. Fix in **Fixed Data Input -> All Taxonomies**. |
+| `string-too-long` | A destination-bound value exceeds the Smithsonian DB column width. Shorten the offending field. |
+| `zero-exportable-rows` | No measurements remain after applying all filters. Verify the census, plot, and validated state. |
+
+### "Expected exactly one Census row for PlotID=N, PlotCensusNumber=X; found 0"
+
+The destination does not have a Census row for the `(destinationPlotID, plotCensusNumber)` pair. Create the destination Census row first, then retry. The artifact never creates Census rows for you.
+
+### "Another publish is running for this destination (plot, census)"
+
+A concurrent export holds the destination census lock. Wait for it to finish or ask a database administrator to confirm whether the lock belongs to an active session.
+
+### "Validation failed; see prior SELECT for per-row details"
+
+A destination contract check failed. The SELECT result sets immediately preceding the error list every offending row with a `CoreMeasurementID`, the natural keys, and an `Errors` column describing each failure. Common causes:
+
+- **Ambiguous tree key**: The destination has multiple `Tree` rows with the same `(Tag, SpeciesID, SubSpeciesID)` in the target plot. Deduplicate or fix the destination.
+- **Ambiguous stem key**: The destination has multiple `Stem` rows with the same `(TreeID, StemTag)`. Deduplicate or fix.
+- **Taxonomy not uniquely resolved**: The taxonomy chain on the destination resolves to multiple `(SpeciesID, SubSpeciesID)` pairs. Usually this means a stale `CurrentTaxonFlag`. The error message includes the conflicting destination SpeciesIDs.
+- **Unknown quadrat / Unknown TSMCode**: The destination is missing a referenced quadrat or TSM attribute. Add it first.
+- **Empty StemTag collides with another stem under same Tree+Quadrat**: Two stems with `StemTag = ''` under the same tree and quadrat would collide on the destination. Assign distinct tags.
+
+---
+
+## Audit
+
+Every Publish census action is logged with:
+
+- Authenticated user id
+- Source schema, source app PlotID, source app CensusID, source PlotCensusNumber
+- Destination PlotID
+- Measurement and attribute row counts
+- Options (`allowReload`, `reloadDryRun`)
+- Generated procedure name, lock name, download filename
+
+These appear in the app's `ailogger.info` stream and can be correlated with the artifact's header comment, which includes the same metadata, when investigating an incident.
