@@ -21,7 +21,7 @@ function allSourceColumns(metadata: SourceMetadata): string[] {
   return cols;
 }
 
-/** Bump to invalidate every previously-computed signature (e.g. after a parser-behavior change). */
+/** Bump to invalidate every previously-computed signature (e.g. after a parser-behavior change). Wholesale invalidation — see docs/column-mapping-limitations.md (mappings are ephemeral React state, so a bump only affects in-flight mappings). */
 export const HEADER_SIGNATURE_VERSION = 3;
 
 /**
