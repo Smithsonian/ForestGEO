@@ -22,20 +22,25 @@ function allSourceColumns(metadata: SourceMetadata): string[] {
 }
 
 /** Bump to invalidate every previously-computed signature (e.g. after a parser-behavior change). */
-export const HEADER_SIGNATURE_VERSION = 2;
-
-const BLANK_HEADER_TOKEN = '∅'; // marks a blank header position so it can't be silently dropped.
+export const HEADER_SIGNATURE_VERSION = 3;
 
 /**
- * Identity of an exact header SEQUENCE. Order- and duplicate-sensitive; blank positions are
- * preserved as a sentinel. Versioned so a parser change can invalidate stale signatures wholesale.
- * Compatibility is sequence identity, not "same normalized bag of headers".
+ * Identity of an exact header SEQUENCE. Each position is emitted as `c<norm>` for a content header
+ * or `b` for a blank position, so the content and blank token spaces are disjoint — a real header
+ * that normalizes to any sentinel-like value cannot collide with a genuine blank marker.
+ * Order- and duplicate-sensitive. Versioned so a parser change can invalidate stale signatures
+ * wholesale. Compatibility is sequence identity, not "same normalized bag of headers".
  *
  * The '_' separator is safe because normalizeHeader strips underscores from every header, so no
  * normalized token can contain it — the token sequence stays unambiguously recoverable.
  */
 export function headerSignature(headers: string[]): string {
-  const body = headers.map(h => normalizeHeader(h) || BLANK_HEADER_TOKEN).join('_');
+  const body = headers
+    .map(h => {
+      const norm = normalizeHeader(h);
+      return norm ? `c${norm}` : 'b';
+    })
+    .join('_');
   return `v${HEADER_SIGNATURE_VERSION}:${body}`;
 }
 

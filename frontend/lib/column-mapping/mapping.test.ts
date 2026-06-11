@@ -317,7 +317,13 @@ describe('headerSignature (positional identity)', () => {
     expect(headerSignature(['tag', '', 'spcode'])).not.toEqual(headerSignature(['tag', 'spcode']));
   });
   it('carries a version prefix so a version bump invalidates old signatures', () => {
+    expect(HEADER_SIGNATURE_VERSION).toBe(3);
     expect(headerSignature(['tag']).startsWith(`v${HEADER_SIGNATURE_VERSION}:`)).toBe(true);
+  });
+  it('distinguishes a literal sentinel header from a genuine blank column (no token collision)', () => {
+    // A header that normalizes to the old '∅' sentinel must not be indistinguishable from a blank
+    // position. Content tokens are namespaced 'c<norm>' and blank positions 'b', so they stay disjoint.
+    expect(headerSignature(['∅'])).not.toBe(headerSignature(['']));
   });
   it('does not collide when a header literally contains the separator-prone pipe character', () => {
     expect(headerSignature(['a|b'])).not.toEqual(headerSignature(['a', 'b']));
