@@ -10,7 +10,7 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { format } from 'mysql2/promise';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
 import crypto from 'crypto';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
@@ -194,7 +194,11 @@ async function upsertQuadratRows(
     // any downstream measurements, even if the same QuadratName appears again in
     // the upload. Only allow this path when the plot has no stems attached to any
     // active quadrat rows yet.
-    const blockingQuadratSQL = format(
+    // safeFormatQuery fills BOTH ?? with the schema; mysql2 format() with
+    // [schema, schema] would put the second schema into `q.PlotID = ?` and
+    // leave the second ?? to be misfilled by plotID at execute time.
+    const blockingQuadratSQL = safeFormatQuery(
+      schema,
       `SELECT DISTINCT q.QuadratName
        FROM ??.quadrats q
        WHERE q.PlotID = ?
@@ -205,8 +209,7 @@ async function upsertQuadratRows(
            FROM ??.stems s
            WHERE s.QuadratID = q.QuadratID
          )
-       ORDER BY q.QuadratName`,
-      [schema, schema]
+       ORDER BY q.QuadratName`
     );
     const blockingQuadratRows = await connectionManager.executeQuery(blockingQuadratSQL, [plotID], transactionID);
     const blockingQuadratNames = Array.isArray(blockingQuadratRows)

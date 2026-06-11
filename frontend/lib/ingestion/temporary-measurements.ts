@@ -1,5 +1,6 @@
 import { format } from 'mysql2/promise';
 import moment from 'moment/moment';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 import { FileRow, SourceFormat } from '@/config/macros/formdetails';
@@ -320,7 +321,14 @@ export async function findDroppedMeasurementCandidates(
       );
     }
 
-    const droppedRowsSQL = format(
+    // safeFormatQuery substitutes EVERY ?? with the validated schema, leaving
+    // the value `?` placeholders for executeQuery. Do NOT use mysql2 format()
+    // with [schema, schema] here: format fills placeholders strictly in order,
+    // so the second array value lands in `tm.FileID = ?` and the second ??
+    // never gets the schema (it would be filled by a value param at execute
+    // time and treated as a database name).
+    const droppedRowsSQL = safeFormatQuery(
+      schema,
       `SELECT drc.RowOrdinal as rowOrdinal,
               MIN(dup.BatchID) as existingBatch
        FROM ${tempTable} drc
@@ -341,8 +349,7 @@ export async function findDroppedMeasurementCandidates(
         AND dup.QuadratName <=> drc.QuadratName
        WHERE tm.id IS NULL
        GROUP BY drc.RowOrdinal
-       ORDER BY drc.RowOrdinal`,
-      [schema, schema]
+       ORDER BY drc.RowOrdinal`
     );
 
     const results = await connectionManager.executeQuery(droppedRowsSQL, [fileName, batchID, fileName, plotID, censusID], transactionID);
