@@ -4,7 +4,7 @@ import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import connectionmanager from '@/config/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
-import { insertIngestionFailureRows } from '@/config/measurementerrors';
+import { recordFailedMeasurementRows } from '@/lib/uploads/record-invalid-rows';
 import { generateShortBatchID } from '@/config/utils';
 import { validatedSchema, type SchemaName } from '@/config/utils/sqlsecurity';
 import { auth } from '@/auth';
@@ -91,30 +91,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
 
   try {
     transactionID = await connectionManager.beginTransaction();
-    await insertIngestionFailureRows(
-      connectionManager,
-      schema,
-      errorRows.map((row, idx) => ({
-        plotID,
-        censusID,
-        tag: row.tag ?? null,
-        stemTag: row.stemTag ?? null,
-        spCode: row.spCode ?? null,
-        quadrat: row.quadrat ?? null,
-        x: row.x ?? null,
-        y: row.y ?? null,
-        dbh: row.dbh ?? null,
-        hom: row.hom ?? null,
-        date: row.date ?? null,
-        codes: row.codes ?? null,
-        comments: row.description ?? null,
-        failureReason: row.failureReasons ?? 'Unknown error',
-        fileID: (row as any).fileID ?? fileID,
-        batchID: (row as any).batchID ?? batchID,
-        sourceRowIndex: idx + 1
-      })),
-      transactionID
-    );
+    await recordFailedMeasurementRows(connectionManager, schema, errorRows, fileID, batchID, plotID, censusID, transactionID);
     await connectionManager.commitTransaction(transactionID);
 
     return new NextResponse(JSON.stringify({ message: 'Inserted ingestion error rows', rowCount: errorRows.length }), { status: HTTPResponses.OK });
