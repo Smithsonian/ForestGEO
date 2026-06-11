@@ -89,7 +89,7 @@ describe('delimiter-change staleness invalidates a confirmed mapping', () => {
     // Upload-time revalidation must seed instead of reusing the now-stale mapping.
     const chosen = chooseEffectiveCsvMapping(mapping, headersSemicolon);
     expect(chosen.usedStored).toBe(false);
-    expect(chosen.reason).toMatch(/different headers/i);
+    expect(chosen.reasonCode).toBe('stale');
   });
 });
 

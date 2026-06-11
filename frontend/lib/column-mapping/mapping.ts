@@ -116,11 +116,13 @@ export function seedMapping(metadata: SourceMetadata): ColumnMapping {
   return mapping;
 }
 
+export type CsvMappingRejectionCode = 'stale' | 'invalid';
+
 export interface EffectiveCsvMapping {
   mapping: ColumnMapping;
   usedStored: boolean;
-  /** Set only when the stored mapping was rejected. A lowercase clause with no terminal punctuation (it is composed mid-sentence in the UI diagnostic). */
-  reason?: string;
+  /** Set only when the stored mapping was rejected; the UI composes the user-facing sentence. */
+  reasonCode?: CsvMappingRejectionCode;
 }
 
 /**
@@ -130,10 +132,10 @@ export interface EffectiveCsvMapping {
 export function chooseEffectiveCsvMapping(stored: ColumnMapping | undefined, headers: string[]): EffectiveCsvMapping {
   const metadata = { format: SourceFormat.csv as const, headers };
   if (stored && !mappingApplies(stored, headers)) {
-    return { mapping: seedMapping(metadata), usedStored: false, reason: 'the saved column mapping was built from different headers' };
+    return { mapping: seedMapping(metadata), usedStored: false, reasonCode: 'stale' };
   }
   if (stored && !validateMapping(stored, metadata).valid) {
-    return { mapping: seedMapping(metadata), usedStored: false, reason: 'the saved column mapping is no longer valid for this file' };
+    return { mapping: seedMapping(metadata), usedStored: false, reasonCode: 'invalid' };
   }
   return stored ? { mapping: stored, usedStored: true } : { mapping: seedMapping(metadata), usedStored: false };
 }

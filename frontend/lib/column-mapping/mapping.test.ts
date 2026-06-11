@@ -343,28 +343,28 @@ describe('chooseEffectiveCsvMapping (upload-time revalidation)', () => {
     const stored = seedMapping({ format: SourceFormat.csv, headers });
     const result = chooseEffectiveCsvMapping(stored, headers);
     expect(result.usedStored).toBe(true);
-    expect(result.reason).toBeUndefined();
+    expect(result.reasonCode).toBeUndefined();
     expect(result.mapping).toBe(stored);
   });
 
-  it('falls back to a seed when the stored signature does not match', () => {
+  it('falls back to a seed with a stale code when the stored signature does not match', () => {
     const stored = seedMapping({ format: SourceFormat.csv, headers: ['totally', 'different'] });
     const result = chooseEffectiveCsvMapping(stored, headers);
     expect(result.usedStored).toBe(false);
-    expect(result.reason).toMatch(/different headers/i);
+    expect(result.reasonCode).toBe('stale');
   });
 
-  it('falls back to a seed when an applicable stored mapping is invalid', () => {
+  it('falls back to a seed with an invalid code when an applicable stored mapping fails validation', () => {
     const stored = seedMapping({ format: SourceFormat.csv, headers });
     const broken = { ...stored, fields: stored.fields.map(f => (f.canonicalField === 'tag' ? { ...f, sourceColumns: [] as string[] } : f)) };
     const result = chooseEffectiveCsvMapping(broken, headers);
     expect(result.usedStored).toBe(false);
-    expect(result.reason).toMatch(/no longer valid/i);
+    expect(result.reasonCode).toBe('invalid');
   });
 
-  it('seeds with no reason when there is no stored mapping', () => {
+  it('seeds with no reasonCode when there is no stored mapping', () => {
     const result = chooseEffectiveCsvMapping(undefined, headers);
     expect(result.usedStored).toBe(false);
-    expect(result.reason).toBeUndefined();
+    expect(result.reasonCode).toBeUndefined();
   });
 });

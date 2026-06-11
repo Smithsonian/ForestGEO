@@ -34,12 +34,17 @@ import {
 import { abortChunkProcessingAfterPermanentUploadFailure, shouldTimeoutPausedParser } from '@/components/uploadsystemhelpers/uploadqueueguards';
 import { generateShortBatchID } from '@/config/utils';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
-import { chooseEffectiveCsvMapping } from '@/lib/column-mapping/mapping';
+import { chooseEffectiveCsvMapping, type CsvMappingRejectionCode } from '@/lib/column-mapping/mapping';
 import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
 import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, planColumnCountMatches, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
 import { aliasesFor, legacyCsvHeaderKey } from '@/lib/column-mapping/fields';
 import { transformMeasurementValue, validateMeasurementRow } from '@/lib/column-mapping/measurement-rows';
 import { UploadMode } from '@/config/uploadmodes';
+
+const CSV_MAPPING_REJECTION_SENTENCE: Record<CsvMappingRejectionCode, string> = {
+  stale: 'the saved column mapping was built from different headers',
+  invalid: 'the saved column mapping is no longer valid for this file'
+};
 
 function createAbortError(message: string): Error {
   const error = new Error(message);
@@ -842,10 +847,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       const headerPlan = mappingFlowActive
         ? (() => {
             const chosen = chooseEffectiveCsvMapping(columnMappings?.[file.name], csvHeaders!);
-            const fallbackReason = chosen.reason;
-            if (fallbackReason) {
-              parsingDiagnostics.mappingFallbackReason = fallbackReason;
-              const userWarning = `${file.name}: ${fallbackReason}, so its columns were matched automatically from the file's headers instead.`;
+            const clause = chosen.reasonCode ? CSV_MAPPING_REJECTION_SENTENCE[chosen.reasonCode] : undefined;
+            if (clause) {
+              parsingDiagnostics.mappingFallbackReason = clause;
+              const userWarning = `${file.name}: ${clause}, so its columns were matched automatically from the file's headers instead.`;
               if (isMountedRef.current) {
                 // Deduplicate so a restarted upload attempt does not repeat the same notice.
                 setMappingFallbackWarnings(prev => (prev.includes(userWarning) ? prev : [...prev, userWarning]));
