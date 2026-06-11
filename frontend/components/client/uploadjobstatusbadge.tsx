@@ -39,6 +39,9 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
   const [jobs, setJobs] = useState<UploadJobSummary[]>([]);
   const [detailOpen, setDetailOpen] = useState(false);
   const [cancellingJobIDs, setCancellingJobIDs] = useState<Set<number>>(new Set());
+  // Bumped to force an immediate refetch outside the poll cadence (e.g. after
+  // a cancel request was rejected, so stale local state resyncs right away).
+  const [refetchNonce, setRefetchNonce] = useState(0);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function handleCancelJob(jobID: number) {
@@ -51,6 +54,10 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
       });
       if (!response.ok) {
         ailogger.warn(`[UploadJobStatusBadge] Cancel request for job ${jobID} returned HTTP ${response.status}`);
+        // The job may have changed state since the last poll (e.g. finished or
+        // already cancelled); refetch immediately so the UI resyncs instead of
+        // showing a stale cancellable job until the next poll tick.
+        setRefetchNonce(nonce => nonce + 1);
         return;
       }
       const payload = (await response.json()) as { success?: boolean; pending?: boolean };
@@ -108,7 +115,7 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
         pollTimerRef.current = null;
       }
     };
-  }, [schema, plotID, censusID]);
+  }, [schema, plotID, censusID, refetchNonce]);
 
   if (jobs.length === 0) return null;
 

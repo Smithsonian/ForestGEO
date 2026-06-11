@@ -71,6 +71,13 @@ export async function POST(
     return NextResponse.json({ error: 'Unsupported job action' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
+  // Idempotent cancel: a job already flipped to cancel_requested needs no
+  // further write — the owning worker will finalize it. Report the same
+  // pending shape the original cancel returned instead of a 409.
+  if (job.status === 'cancel_requested') {
+    return NextResponse.json({ success: true, pending: true }, { status: HTTPResponses.OK });
+  }
+
   const userID = getSessionUserId(session!) ?? 'unknown';
   const catalogPool = getPoolMonitorInstance().pool;
 

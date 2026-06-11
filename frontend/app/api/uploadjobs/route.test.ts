@@ -159,6 +159,22 @@ describe('POST /api/uploadjobs', () => {
     expect(mocks.runJobIfClaimable).toHaveBeenCalledWith(42);
   });
 
+  it('still returns 202 when the worker kick rejects, and logs the kick failure', async () => {
+    mocks.runJobIfClaimable.mockRejectedValueOnce(new Error('claim-time infrastructure outage'));
+
+    const response = await POST(makeCreateRequest(makeCreateBody()));
+
+    expect(response.status).toBe(202);
+    const body = await response.json();
+    expect(body).toMatchObject({ accepted: true, job: { jobID: 42 } });
+    expect(mocks.runJobIfClaimable).toHaveBeenCalledWith(42);
+    // The kick is fire-and-forget; the rejection is handled on a microtask
+    // after the response is returned.
+    await vi.waitFor(() => {
+      expect(mocks.loggerError).toHaveBeenCalledWith(expect.stringContaining('Failed to start worker for job 42'), expect.any(Error));
+    });
+  });
+
   it('rejects invalid schemas before creating a job', async () => {
     mocks.isValidSchema.mockReturnValueOnce(false);
 

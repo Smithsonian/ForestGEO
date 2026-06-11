@@ -116,6 +116,17 @@ describe('POST /api/uploadjobs/[jobId]', () => {
     expect(mocks.requestBackgroundJobCancel).toHaveBeenCalledWith('catalog-pool', 42, 'mason@example.com');
   });
 
+  it('treats a repeat cancel of a cancel_requested job as idempotent pending success', async () => {
+    mocks.getBackgroundJobWithDetails.mockResolvedValueOnce({ ...ownedJob, status: 'cancel_requested' });
+
+    const response = await POST(makeCancelRequest(), { params: Promise.resolve({ jobId: '42' }) });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true, pending: true });
+    expect(mocks.cancelBackgroundJob).not.toHaveBeenCalled();
+    expect(mocks.requestBackgroundJobCancel).not.toHaveBeenCalled();
+  });
+
   it('returns 409 when the job is already terminal', async () => {
     mocks.getBackgroundJobWithDetails.mockResolvedValueOnce({ ...ownedJob, status: 'completed' });
     mocks.cancelBackgroundJob.mockResolvedValueOnce(false);

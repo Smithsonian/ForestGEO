@@ -12,6 +12,7 @@ import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import { SUPPORTED_DELIMITERS } from '@/lib/uploads/detect-delimiter';
 import { isAsyncUploadEnabledFor } from '@/lib/background-jobs/feature-gate';
+import { isAllowedAsyncPipeline } from '@/lib/background-jobs/types';
 import { createUploadBackgroundJob, listBackgroundJobs } from '@/lib/background-jobs/repository';
 import { isPrivilegedSession, parseOptionalPositiveInteger } from '@/lib/background-jobs/route-helpers';
 import { runJobIfClaimable } from '@/lib/background-jobs/worker';
@@ -21,22 +22,7 @@ export const runtime = 'nodejs';
 
 const ASYNC_UPLOADS_DISABLED_MESSAGE = 'Async uploads are not enabled for this form/site/user';
 
-/**
- * The async worker's resolveJobPipeline only routes measurements uploads in
- * csv or arcgis_xlsx format (async v1 scope). Any other combination is
- * rejected at creation time so a job that the worker would refuse anyway is
- * never enqueued.
- */
-const ALLOWED_ASYNC_PIPELINES: ReadonlyArray<{ formType: FormType; sourceFormat: SourceFormat }> = [
-  { formType: FormType.measurements, sourceFormat: SourceFormat.csv },
-  { formType: FormType.measurements, sourceFormat: SourceFormat.arcgis_xlsx }
-];
-
 const SUPPORTED_DELIMITER_SET = new Set<string>(SUPPORTED_DELIMITERS);
-
-function isAllowedAsyncPipeline(formType: FormType, sourceFormat: SourceFormat): boolean {
-  return ALLOWED_ASYNC_PIPELINES.some(pipeline => pipeline.formType === formType && pipeline.sourceFormat === sourceFormat);
-}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -190,6 +176,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: ASYNC_UPLOADS_DISABLED_MESSAGE }, { status: HTTPResponses.FORBIDDEN });
   }
 
+  // ASYNC_UPLOAD_V1_PIPELINES guard: reject at creation time any combination
+  // the worker's resolveJobPipeline would refuse anyway.
   if (!isAllowedAsyncPipeline(input.formType, input.sourceFormat)) {
     return NextResponse.json(
       {

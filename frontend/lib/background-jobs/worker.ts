@@ -24,7 +24,7 @@ import ailogger from '@/ailogger';
 import ConnectionManager from '@/config/connectionmanager';
 import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
 import { getContainerClient } from '@/config/macros/azurestorage';
-import { FileRow, FormType, SourceFormat } from '@/config/macros/formdetails';
+import { FileRow, SourceFormat } from '@/config/macros/formdetails';
 import { generateShortBatchID } from '@/config/utils';
 import { normalizeUploadMode } from '@/config/uploadmodes';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
@@ -60,7 +60,7 @@ import {
   updateBackgroundJobFileStatus
 } from './repository';
 import type { BackgroundJobFileRecord, BackgroundJobWithDetails, UploadJobPhase } from './types';
-import { UPLOAD_JOB_PHASE_PROGRESS } from './types';
+import { isAllowedAsyncPipeline, UPLOAD_JOB_PHASE_PROGRESS } from './types';
 
 export { UPLOAD_JOB_PHASE_PROGRESS } from './types';
 
@@ -487,10 +487,12 @@ async function releaseUploadSession(ctx: WorkerRunContext, completed: boolean): 
 type JobPipeline = 'measurements_csv' | 'arcgis_xlsx';
 
 function resolveJobPipeline(job: BackgroundJobWithDetails): JobPipeline {
-  if (job.formType === FormType.measurements && job.sourceFormat === SourceFormat.csv) return 'measurements_csv';
-  if (job.formType === FormType.measurements && job.sourceFormat === SourceFormat.arcgis_xlsx) return 'arcgis_xlsx';
-  // Fixed-data forms are out of scope for async v1. The feature gate should
-  // prevent such jobs from being created; the worker still refuses them.
+  if (isAllowedAsyncPipeline(job.formType, job.sourceFormat)) {
+    return job.sourceFormat === SourceFormat.arcgis_xlsx ? 'arcgis_xlsx' : 'measurements_csv';
+  }
+  // Fixed-data forms are out of scope for async v1. The creation route's
+  // ASYNC_UPLOAD_V1_PIPELINES guard should prevent such jobs from being
+  // created; the worker still refuses them.
   throw new NonRetryableJobError(
     `Unsupported upload job routing: formType="${job.formType ?? 'missing'}" sourceFormat="${job.sourceFormat ?? 'missing'}". ` +
       `The async worker only processes measurements uploads in csv or arcgis_xlsx format.`

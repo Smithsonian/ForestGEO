@@ -1,3 +1,5 @@
+import { FormType, SourceFormat } from '@/config/macros/formdetails';
+
 export const BACKGROUND_JOB_TYPES = ['upload_validation'] as const;
 export type BackgroundJobType = (typeof BACKGROUND_JOB_TYPES)[number];
 
@@ -18,6 +20,25 @@ export const UPLOAD_JOB_PHASES = [
 export type UploadJobPhase = (typeof UPLOAD_JOB_PHASES)[number];
 
 export const UPLOAD_JOB_MAX_RETRIES = 3;
+
+/**
+ * The form-type/source-format pairs the async upload pipeline supports in v1.
+ * Single source of truth shared by the creation route's guard (reject anything
+ * the worker would refuse) and the worker's pipeline routing. Lives here
+ * because types.ts is cycle-free: config/macros/formdetails is a leaf module.
+ */
+export const ASYNC_UPLOAD_V1_PIPELINES: ReadonlyArray<{ formType: FormType; sourceFormat: SourceFormat }> = [
+  { formType: FormType.measurements, sourceFormat: SourceFormat.csv },
+  { formType: FormType.measurements, sourceFormat: SourceFormat.arcgis_xlsx }
+];
+
+/**
+ * Accepts plain strings (job records store formType/sourceFormat as nullable
+ * strings) and compares against the string-valued enums in the allowlist.
+ */
+export function isAllowedAsyncPipeline(formType: string | null | undefined, sourceFormat: string | null | undefined): boolean {
+  return ASYNC_UPLOAD_V1_PIPELINES.some(pipeline => pipeline.formType === formType && pipeline.sourceFormat === sourceFormat);
+}
 
 /**
  * Single owner of every PercentComplete value written to a job, keyed by
