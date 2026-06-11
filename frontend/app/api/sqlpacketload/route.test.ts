@@ -50,9 +50,13 @@ vi.mock('@/auth', () => ({
   auth: authMock
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
-  isValidSchema: vi.fn(() => true)
-}));
+vi.mock('@/config/utils/sqlsecurity', async importOriginal => {
+  const actual = (await importOriginal()) as object;
+  return {
+    ...actual,
+    isValidSchema: vi.fn(() => true)
+  };
+});
 
 vi.mock('@/config/utils', async importOriginal => {
   const actual = (await importOriginal()) as object;
@@ -582,7 +586,7 @@ describe('sqlpacketload measurement scope validation', () => {
 
     const alertCall = mockConnectionManager.executeQuery.mock.calls.find(
       (call: any[]) =>
-        String(call[0]).includes('INSERT INTO forestgeo_testing.uploadintegrityalerts') &&
+        String(call[0]).includes('INSERT INTO `forestgeo_testing`.uploadintegrityalerts') &&
         String(call[0]).includes('FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS')
     );
 
