@@ -10,6 +10,15 @@ import { SourceFormat } from '@/config/macros/formdetails';
 const ARCGIS_ALIASES = aliasesFor(SourceFormat.arcgis_xlsx);
 const ARCGIS_ALIAS_SCOPES = fieldScopesFor(SourceFormat.arcgis_xlsx);
 
+// exceljs ships an ambient `declare interface Buffer extends ArrayBuffer {}` that merges with and
+// diverges from @types/node's Buffer, so neither a node Buffer nor an ArrayBuffer is assignable to
+// its load() parameter at the type level. load() accepts the raw ArrayBuffer at runtime.
+async function loadWorkbook(buffer: ArrayBuffer): Promise<ExcelJS.Workbook> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  return workbook;
+}
+
 interface ParsedSheet {
   name: string;
   columns: string[];
@@ -200,8 +209,7 @@ export interface ArcgisWorkbookSheetInfo {
  * preflight route to validate a client-supplied mapping against the workbook before reading it.
  */
 export async function readArcgisSheetMetadata(buffer: ArrayBuffer): Promise<ArcgisWorkbookSheetInfo[]> {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  const workbook = await loadWorkbook(buffer);
   return workbook.worksheets.map(worksheet => ({ name: worksheet.name, columns: extractSheetHeaderColumns(worksheet) }));
 }
 
@@ -210,11 +218,7 @@ export type ArcgisReadOutcome =
   | { ok: false; error: MissingSheetError | MissingColumnError | AmbiguousSheetError; sheets: ArcgisWorkbookSheetInfo[] };
 
 export async function readArcgisWorkbookDetailed(buffer: ArrayBuffer, mapping?: ColumnMapping): Promise<ArcgisReadOutcome> {
-  const workbook = new ExcelJS.Workbook();
-  // exceljs ships an ambient `declare interface Buffer extends ArrayBuffer {}` that merges with and
-  // diverges from @types/node's Buffer, so neither a node Buffer nor an ArrayBuffer is assignable to
-  // its load() parameter at the type level. load() accepts the raw ArrayBuffer at runtime.
-  await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  const workbook = await loadWorkbook(buffer);
   const sheets = workbook.worksheets.map(worksheet => parseSheet(worksheet, mapping));
   try {
     const { trees, stems } = selectSheets(sheets, mapping?.sheetRoles);
