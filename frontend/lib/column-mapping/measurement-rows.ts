@@ -1,0 +1,180 @@
+import moment from 'moment';
+import { FileRow, FormType, SourceFormat } from '@/config/macros/formdetails';
+import { aliasesFor } from './fields';
+import { ColumnMapping } from './types';
+import { chooseEffectiveCsvMapping } from './mapping';
+import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, HeaderResolutionPlan, planColumnCountMatches, resolveHeaders, transformHeaderFromPlan } from './resolution';
+
+/**
+ * The exact date-format list the client's inline `transform` uses, in priority order.
+ * Ported verbatim from components/uploadsystem/segments/uploadfiresql.tsx.
+ */
+const DATE_FORMATS = [
+  'YYYY-MM-DD',
+  'MM/DD/YYYY',
+  'DD/MM/YYYY',
+  'YYYY/MM/DD',
+  'MM-DD-YYYY',
+  'DD-MM-YYYY',
+  'YYYY.MM.DD',
+  'MM.DD.YYYY',
+  'DD.MM.YYYY',
+  'MMMM DD, YYYY',
+  'MMM DD, YYYY',
+  'DD MMM YYYY',
+  'DD MMMM YYYY',
+  'YYYY-MM-DD HH:mm:ss',
+  'MM/DD/YYYY HH:mm:ss',
+  'DD/MM/YYYY HH:mm:ss',
+  'YYYY-MM-DDTHH:mm:ss',
+  'YYYY-MM-DDTHH:mm:ss.SSS',
+  'YYYY-MM-DDTHH:mm:ss.SSSZ'
+] as const;
+
+const NULLISH = new Set(['NA', 'NULL', '']);
+const MAX_DECIMAL = 999999.999999;
+
+/**
+ * Per-cell transform for a measurement upload. Pure port of the client's inline `transform`:
+ * NA/NULL/'' collapse to null; measurement dates parse through the format list then fall back to
+ * flexible parsing (returning the original string when nothing parses); lx/ly round to 6 decimals;
+ * dbh/hom round to 2 decimals; everything else passes through unchanged.
+ */
+export function transformMeasurementValue(value: string, field: string, formType: FormType): unknown {
+  if (NULLISH.has(value)) return null;
+
+  if (formType === FormType.measurements && field === 'date') {
+    for (const fmt of DATE_FORMATS) {
+      const parsed = moment(value.trim(), fmt, true);
+      if (parsed.isValid()) return parsed.toDate();
+    }
+    const flexible = moment(value.trim());
+    return flexible.isValid() ? flexible.toDate() : value;
+  }
+
+  if (formType === FormType.measurements && (field === 'lx' || field === 'ly')) {
+    const n = Number.parseFloat(value);
+    if (!Number.isNaN(n)) return Math.round(n * 1000000) / 1000000;
+  }
+
+  if (formType === FormType.measurements && (field === 'dbh' || field === 'hom')) {
+    const n = Number.parseFloat(value);
+    if (!Number.isNaN(n)) return Math.round(n * 100) / 100;
+  }
+
+  return value;
+}
+
+export interface RowValidation {
+  valid: boolean;
+  failureReason?: string;
+  hasExtraColumns: boolean;
+}
+
+/**
+ * Row-level validation, ported from the client's inline `validateRow`. The row MUST already be
+ * plan-collapsed (no `__ignored` keys) before this is called, so out-of-range values diverted to
+ * ignored columns never reach the decimal-range check.
+ */
+export function validateMeasurementRow(row: FileRow, requiredHeaders: { label: string }[], delimiter: string, formType: FormType): RowValidation {
+  const errors: string[] = [];
+
+  const missing = requiredHeaders.filter(h => {
+    const v = row[h.label];
+    return v === null || v === '' || v === 'NA' || v === 'NULL' || v === undefined;
+  });
+  if (missing.length > 0) {
+    errors.push(`Missing required fields: ${missing.map(f => f.label).join(', ')}`);
+  }
+
+  const hasExtraColumns = row['__parsed_extra'] !== undefined;
+
+  if (formType === FormType.measurements) {
+    const tag = row.tag;
+    const stemtag = row.stemtag;
+    if (tag && stemtag) {
+      const tagText = String(tag);
+      const stemTagText = String(stemtag);
+      if (tagText.includes(delimiter) || stemTagText.includes(delimiter)) {
+        errors.push(`Tag values contain delimiter character "${delimiter}": tag="${tagText}", stemtag="${stemTagText}". This suggests parsing error.`);
+      }
+      if (tagText.length > 50 || stemTagText.length > 50) {
+        errors.push(
+          `Unusually long tag values detected: tag="${tagText.slice(0, 30)}...", stemtag="${stemTagText.slice(0, 30)}...". This may indicate concatenated fields due to parsing error.`
+        );
+      }
+    }
+  }
+
+  for (const [key, value] of Object.entries(row)) {
+    if (value !== null && value !== undefined && key !== '__parsed_extra' && !['tag', 'stemtag'].includes(key)) {
+      const num = Number.parseFloat(String(value));
+      if (!Number.isNaN(num) && (num < 0 || num > MAX_DECIMAL)) {
+        errors.push(`Decimal value for ${key} is out of range: ${value}`);
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, failureReason: errors.length ? errors.join('|') : undefined, hasExtraColumns };
+}
+
+export interface MeasurementChunkResult {
+  validRows: FileRow[];
+  invalidRows: FileRow[];
+  plan: HeaderResolutionPlan | null;
+  columnCountMismatch: boolean;
+  diagnostics: { invalidDateValues: string[]; extraColumnRows: number };
+}
+
+export interface ResolveChunkOptions {
+  formType: FormType;
+  uploadMode: 'revisions' | 'other';
+  delimiter: string;
+  requiredHeaders: { label: string }[];
+  csvHeaders: string[];
+  storedMapping?: ColumnMapping;
+}
+
+/**
+ * Resolve one chunk of raw parsed CSV rows into validated measurement rows. Owns the chunk-level
+ * header resolution: it builds a single resolution plan, rejects the whole chunk on a column-count
+ * mismatch, then per-row keys, transforms, collapses, and validates. Collapsing happens BEFORE
+ * validation so ignored source columns never reach the range check.
+ */
+export function resolveMeasurementChunk(rawRows: Record<string, string>[], parsedFieldCount: number, options: ResolveChunkOptions): MeasurementChunkResult {
+  const { formType, uploadMode, delimiter, requiredHeaders, csvHeaders, storedMapping } = options;
+
+  const mappingFlow = formType === FormType.measurements && uploadMode !== 'revisions' && csvHeaders.length > 0;
+  const plan = mappingFlow
+    ? resolveHeaders(csvHeaders, chooseEffectiveCsvMapping(storedMapping, csvHeaders).mapping, aliasesFor(SourceFormat.csv), CSV_RESOLVE_OPTIONS)
+    : null;
+
+  if (plan && !planColumnCountMatches(plan, parsedFieldCount)) {
+    return { validRows: [], invalidRows: [], plan, columnCountMismatch: true, diagnostics: { invalidDateValues: [], extraColumnRows: 0 } };
+  }
+
+  const keyOf = plan ? transformHeaderFromPlan(plan) : (h: string) => h;
+  const validRows: FileRow[] = [];
+  const invalidRows: FileRow[] = [];
+  const invalidDateValues: string[] = [];
+  let extraColumnRows = 0;
+
+  for (const rawRow of rawRows) {
+    const keyed: FileRow = {};
+    Object.entries(rawRow).forEach(([rawKey, rawVal], index) => {
+      const key = plan ? (plan.outputKeys[index] ?? keyOf(rawKey, index)) : keyOf(rawKey, index);
+      const transformed = transformMeasurementValue((rawVal ?? '').toString(), key, formType);
+      if (formType === FormType.measurements && key === 'date' && typeof transformed === 'string' && (rawVal ?? '') !== '') {
+        invalidDateValues.push(String(rawVal));
+      }
+      keyed[key] = transformed as string | null;
+    });
+    const collapsed = plan ? collapseRowWithPlan(keyed, plan) : keyed;
+    const result = validateMeasurementRow(collapsed, requiredHeaders, delimiter, formType);
+    if (result.hasExtraColumns) extraColumnRows += 1;
+    if (result.valid) validRows.push(collapsed);
+    else invalidRows.push({ ...collapsed, failureReason: result.failureReason ?? 'Unknown error' });
+  }
+
+  return { validRows, invalidRows, plan, columnCountMismatch: false, diagnostics: { invalidDateValues, extraColumnRows } };
+}
