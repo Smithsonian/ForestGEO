@@ -4,6 +4,7 @@ import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
+import { collapseCensus } from '@/lib/uploads/collapse-census';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -11,10 +12,6 @@ export const runtime = 'nodejs';
 
 // Next.js route segment config: allow up to 5 minutes for large censuses
 export const maxDuration = 300;
-
-// The collapser can be slow on large censuses (dedup queries with ROW_NUMBER + JOINs).
-// 5 minutes gives plenty of headroom while still catching genuine hangs.
-const COLLAPSER_TIMEOUT_MS = 5 * 60 * 1000;
 
 export async function GET(
   request: NextRequest,
@@ -43,10 +40,10 @@ export async function GET(
     throw error;
   }
 
-  // Validate schema to prevent SQL injection
-  let collapserSQL: string;
+  // Validate schema before delegating — collapseCensus calls safeFormatQuery
+  // internally, but we want to return a 400 rather than a 500 on a bad schema.
   try {
-    collapserSQL = safeFormatQuery(schema, 'CALL ??.bulkingestioncollapser(?)');
+    safeFormatQuery(schema, 'SELECT 1');
   } catch (error: any) {
     ailogger.error(`Invalid schema in setupbulkcollapser: ${schema}`);
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
@@ -55,21 +52,8 @@ export async function GET(
   const connectionManager = ConnectionManager.getInstance();
 
   try {
-    // The stored procedure manages its own START TRANSACTION / COMMIT internally,
-    // so we use withTransaction only for connection lifecycle (keep-alive pings,
-    // extended session timeouts) — the outer BEGIN/COMMIT is effectively a no-op
-    // since the procedure's START TRANSACTION implicitly commits it.
-    const result = await connectionManager.withTransaction(
-      async tx => {
-        ailogger.info(`Triggering collapser for census ${censusID} in schema ${schema}`);
-        await tx.query(collapserSQL, [censusID]);
-        ailogger.info('Successfully collapsed & de-duped data!');
-        return { responseMessage: 'Processing procedure executed' };
-      },
-      { timeoutMs: COLLAPSER_TIMEOUT_MS }
-    );
-
-    return new NextResponse(JSON.stringify(result), { status: HTTPResponses.OK });
+    await collapseCensus(connectionManager, { schema, censusID: Number(censusID) });
+    return new NextResponse(JSON.stringify({ responseMessage: 'Processing procedure executed' }), { status: HTTPResponses.OK });
   } catch (e: any) {
     ailogger.error(`Collapser failed for census ${censusID}:`, e.message);
     return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
