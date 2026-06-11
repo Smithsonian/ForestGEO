@@ -21,12 +21,17 @@
  *      UPLOAD_JOB_MAX_RETRIES fenced transitions into terminal 'failed'.
  *   4. Cancellation — cancel_requested set mid-run (during file 2's fetch):
  *      job finalizes 'cancelled', file 2's non-completed batch is cleaned,
- *      file 1's completed batch is untouched.
+ *      file 1's completed batch is untouched. A second scenario cancels a
+ *      RETRY attempt before it reaches file 2 and asserts the cleanup also
+ *      covers file 2's prior-attempt batch (persisted BatchID union).
  *   5. Session conflict — an active interactive upload session for the same
  *      plot/census parks the job waiting_retry WITHOUT a RetryCount increment.
  *   6. Lease loss — the sweeper (finalizeJobAsSystem) reclaims the job after
  *      claim; the worker's next fenced write aborts silently and the job is
  *      claimable again.
+ *   7. Crash recovery mid-ingestion — file 1's uploadmetrics row stuck at
+ *      'processing' with stale staged temp rows and already-written ingested/
+ *      reject rows; the re-run produces exactly one clean row set.
  *
  * Prerequisites: docker compose up -d mysql
  *
@@ -66,7 +71,11 @@ const sharedState = vi.hoisted(() => ({
   connection: null as import('mysql2/promise').Connection | null,
   activeTransactionID: null as string | null,
   transactionCounter: 0,
-  catalogPool: null as import('mysql2/promise').Pool | null
+  catalogPool: null as import('mysql2/promise').Pool | null,
+  // Test hook: awaited before every schema-side query so a test can inject
+  // state changes (e.g. flip the job to cancel_requested) at a deterministic
+  // point inside the worker's pipeline. Reset to null in beforeEach.
+  onSchemaQuery: null as null | ((query: string, params: unknown[]) => Promise<void> | void)
 }));
 
 // ConnectionManager mock — mirrors the ingest-batch/collapse-census pattern.
@@ -78,6 +87,7 @@ vi.mock('@/config/connectionmanager', () => {
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
         throw new Error(`ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
+      if (sharedState.onSchemaQuery) await sharedState.onSchemaQuery(query, (params as unknown[]) ?? []);
       const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
       return rows;
     },
@@ -167,8 +177,10 @@ import {
 import { runJobIfClaimable, SESSION_CONFLICT_RETRY_DELAY_SECONDS, type WorkerDeps } from '@/lib/background-jobs/worker';
 import { UPLOAD_JOB_MAX_RETRIES, type BackgroundJobFileRecord } from '@/lib/background-jobs/types';
 import { createUploadSession, ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
-import { FormType, SourceFormat } from '@/config/macros/formdetails';
+import { FormType, SourceFormat, type FileRow } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
+import ConnectionManager from '@/config/connectionmanager';
+import { recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -282,6 +294,7 @@ describe('runJobIfClaimable — integration', () => {
   });
 
   beforeEach(async () => {
+    sharedState.onSchemaQuery = null;
     if (sharedState.activeTransactionID) {
       await connection.rollback();
       sharedState.activeTransactionID = null;
@@ -375,6 +388,16 @@ describe('runJobIfClaimable — integration', () => {
   async function fetchWorkerSessionStates(jobID: number): Promise<string[]> {
     const [rows] = await connection.query<RowDataPacket[]>(`SELECT state FROM upload_sessions WHERE file_id = ? ORDER BY created_at`, [`async-job-${jobID}`]);
     return rows.map(row => String(row.state));
+  }
+
+  /** Inserts a staged temporarymeasurements row, simulating a prior attempt's staging output. */
+  async function insertStagedTempRow(fileName: string, batchID: string, tag: string, quadrat: string, dbh: number): Promise<void> {
+    await connection.query(
+      `INSERT INTO temporarymeasurements
+         (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes)
+       VALUES (?, ?, ?, ?, ?, '1', 'ACERRU', ?, 1.5, 2.5, ?, 1.3, ?, 'A')`,
+      [fileName, batchID, plotID, censusID, tag, quadrat, dbh, MEASUREMENT_DATE]
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -584,6 +607,89 @@ describe('runJobIfClaimable — integration', () => {
     expect(sessionStates).toEqual(['failed']);
   }, 180000);
 
+  it('cancel during a retry attempt also cleans prior-attempt batches the attempt never reached', async () => {
+    const jobID = await createTwoFileJob();
+
+    // Attempt 1: file 1 fully completes; file 2's fetch crashes AFTER its
+    // BatchID was durably assigned in the catalog.
+    await runJobIfClaimable(jobID, {
+      fetchFileText: async file => {
+        if (file.fileName === FILE2_NAME) throw new Error('simulated crash after file 2 batch assignment');
+        return FIXTURE_TEXTS[file.fileName];
+      }
+    });
+    const parked = await getBackgroundJob(catalogPool, jobID);
+    console.log(`[cancel-prior-attempt] after attempt 1: status=${parked?.status} retryCount=${parked?.retryCount}`);
+    expect(parked!.status).toBe('waiting_retry');
+
+    const batch1 = await batchIDForFile(jobID, FILE1_NAME);
+    const batch2 = await batchIDForFile(jobID, FILE2_NAME);
+
+    // Simulate attempt 1 having staged file 2 before it crashed: leftover
+    // temporarymeasurements rows plus a recorded parse reject under file 2's
+    // persisted batch (the worker records rejects in the negative index
+    // namespace, mirrored here).
+    await insertStagedTempRow(FILE2_NAME, batch2, 'W2001', 'Q01', 12.5);
+    await insertStagedTempRow(FILE2_NAME, batch2, 'W2002', 'Q02', 22.4);
+    const priorAttemptReject: FileRow = {
+      tag: 'W2099',
+      stemtag: '1',
+      spcode: 'ACERRU',
+      quadrat: null,
+      lx: '1.0',
+      ly: '1.0',
+      dbh: '9.9',
+      hom: '1.3',
+      date: MEASUREMENT_DATE,
+      codes: 'A',
+      failureReason: 'Missing required field: quadrat'
+    };
+    await recordInvalidRows(ConnectionManager.getInstance(), { schema, plotID, censusID, fileName: FILE2_NAME, batchID: batch2, sourceRowIndexOffset: -2 }, [
+      priorAttemptReject
+    ]);
+    expect(await countTempRows(FILE2_NAME)).toBe(2);
+    expect(await fetchRejectIDs(FILE2_NAME)).toHaveLength(1);
+
+    // Attempt 2: the user cancels while the worker is probing completed
+    // file 1 — BEFORE file 2's iteration starts, so file 2's batch is never
+    // assigned in this run and ordinary per-file retry hygiene never touches
+    // its prior-attempt artifacts. Only the cancellation cleanup can.
+    await setNextAttemptPast(jobID);
+    let cancelTriggered = false;
+    sharedState.onSchemaQuery = async (query, params) => {
+      if (!cancelTriggered && query.includes('uploadmetrics') && query.includes(`status = 'completed'`) && params.includes(batch1)) {
+        cancelTriggered = true;
+        await catalogPool.query(`UPDATE catalog.background_jobs SET Status = 'cancel_requested' WHERE JobID = ? AND Status = 'running'`, [jobID]);
+        console.log('[cancel-prior-attempt] cancel_requested set during file 1 completed-probe');
+      }
+    };
+    const fetchCalls: string[] = [];
+    try {
+      await runJobIfClaimable(jobID, healthyDeps(fetchCalls));
+    } finally {
+      sharedState.onSchemaQuery = null;
+    }
+
+    expect(cancelTriggered).toBe(true);
+    // File 1 was skipped via the completed guard and file 2 was never reached.
+    expect(fetchCalls).toEqual([]);
+
+    const job = await getBackgroundJob(catalogPool, jobID);
+    console.log(`[cancel-prior-attempt] job status=${job?.status} phase=${job?.phase}`);
+    expect(job!.status).toBe('cancelled');
+    expect(job!.phase).toBe('cancelled');
+
+    // File 2's prior-attempt artifacts are cleaned even though THIS attempt
+    // never assigned its batch — the cleanup unioned the persisted BatchID.
+    expect(await countTempRows(FILE2_NAME)).toBe(0);
+    expect(await fetchRejectIDs(FILE2_NAME)).toHaveLength(0);
+
+    // File 1's completed batch remains untouched.
+    expect(await fetchUploadMetricsStatus(batch1)).toEqual([UPLOADMETRICS_STATUS_COMPLETED]);
+    expect(await fetchIngestedIDs(FILE1_NAME)).toHaveLength(FILE1_VALID_ROW_COUNT);
+    expect(await fetchRejectIDs(FILE1_NAME)).toHaveLength(FILE1_REJECT_ROW_COUNT);
+  }, 180000);
+
   // -------------------------------------------------------------------------
   // 5. Session conflict — parks WITHOUT RetryCount increment
   // -------------------------------------------------------------------------
@@ -651,4 +757,80 @@ describe('runJobIfClaimable — integration', () => {
     expect(reclaim).not.toBeNull();
     expect(reclaim!.status).toBe('running');
   }, 120000);
+
+  // -------------------------------------------------------------------------
+  // 7. Crash recovery mid-ingestion — uploadmetrics 'processing' + stale rows
+  // -------------------------------------------------------------------------
+
+  it('recovers a crash mid-ingestion of file 1: exactly one clean row set, no duplicate rows or rejects', async () => {
+    const jobID = await createTwoFileJob();
+
+    // Phase 1: run the job partially — file 1 stages AND ingests fully, then
+    // the attempt halts at file 2's fetch so file 1's real post-ingest state
+    // (ingested rows, recorded reject, completed uploadmetrics) exists.
+    await runJobIfClaimable(jobID, {
+      fetchFileText: async file => {
+        if (file.fileName === FILE2_NAME) throw new Error('halt before file 2 to isolate file 1 state');
+        return FIXTURE_TEXTS[file.fileName];
+      }
+    });
+    const batch1 = await batchIDForFile(jobID, FILE1_NAME);
+    expect(await fetchUploadMetricsStatus(batch1)).toEqual([UPLOADMETRICS_STATUS_COMPLETED]);
+    const ingestedAfterAttempt1 = await fetchIngestedIDs(FILE1_NAME);
+    expect(ingestedAfterAttempt1).toHaveLength(FILE1_VALID_ROW_COUNT);
+    expect(await fetchRejectIDs(FILE1_NAME)).toHaveLength(FILE1_REJECT_ROW_COUNT);
+
+    // Phase 2: simulate the worker dying MID-INGESTION of file 1 — the
+    // uploadmetrics row never reached 'completed', undrained staged temp rows
+    // linger, and rows the interrupted run already wrote (ingested rows and
+    // the recorded reject) are still present.
+    await connection.query(`UPDATE uploadmetrics SET status = 'processing' WHERE batchID = ?`, [batch1]);
+    await insertStagedTempRow(FILE1_NAME, batch1, 'W1004', 'Q02', 15.2);
+    await insertStagedTempRow(FILE1_NAME, batch1, 'W1005', 'Q03', 25.8);
+    await catalogPool.query(
+      `UPDATE catalog.background_jobs SET Status = 'queued', NextAttemptAt = NULL, WorkerID = NULL, WorkerHeartbeatAt = NULL WHERE JobID = ?`,
+      [jobID]
+    );
+    console.log(`[crash-recovery] simulated mid-ingestion crash: batch1=${batch1} → status=processing, 2 stale temp rows re-staged`);
+
+    // Phase 3: re-run the worker with healthy deps.
+    await runJobIfClaimable(jobID, healthyDeps());
+
+    const job = await getBackgroundJob(catalogPool, jobID);
+    console.log(`[crash-recovery] post-recovery: status=${job?.status} pct=${job?.percentComplete} processed=${job?.processedRows} failed=${job?.failedRows}`);
+    expect(job!.status).toBe('completed');
+    expect(job!.percentComplete).toBe(100);
+
+    // Exactly one clean row set: no duplicates anywhere.
+    expect(await countTempRows()).toBe(0);
+    const file1Ingested = await fetchIngestedIDs(FILE1_NAME);
+    const file1Rejects = await fetchRejectIDs(FILE1_NAME);
+    const file2Ingested = await fetchIngestedIDs(FILE2_NAME);
+    console.log(
+      `[crash-recovery] file1 ingested=${JSON.stringify(file1Ingested)} rejects=${JSON.stringify(file1Rejects)} file2 ingested=${JSON.stringify(file2Ingested)}`
+    );
+    expect(file1Ingested).toHaveLength(FILE1_VALID_ROW_COUNT);
+    expect(file1Rejects).toHaveLength(FILE1_REJECT_ROW_COUNT);
+    expect(file2Ingested).toHaveLength(FILE2_VALID_ROW_COUNT);
+
+    // Census-wide row count proves no duplicate measurements survived.
+    const [censusRows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS count FROM coremeasurements WHERE CensusID = ? AND StemGUID IS NOT NULL`, [
+      censusID
+    ]);
+    expect(Number(censusRows[0].count)).toBe(FILE1_VALID_ROW_COUNT + FILE2_VALID_ROW_COUNT);
+    const [tagDupRows] = await connection.query<RowDataPacket[]>(
+      `SELECT t.TreeTag, COUNT(*) AS count
+       FROM coremeasurements cm
+       JOIN stems s ON s.StemGUID = cm.StemGUID
+       JOIN trees t ON t.TreeID = s.TreeID
+       WHERE cm.CensusID = ?
+       GROUP BY t.TreeTag HAVING COUNT(*) > 1`,
+      [censusID]
+    );
+    console.log(`[crash-recovery] duplicate tags: ${JSON.stringify(tagDupRows)}`);
+    expect(tagDupRows).toHaveLength(0);
+
+    // uploadmetrics: file 1's batch is completed again, exactly once.
+    expect(await fetchUploadMetricsStatus(batch1)).toEqual([UPLOADMETRICS_STATUS_COMPLETED]);
+  }, 180000);
 });

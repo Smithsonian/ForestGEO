@@ -467,6 +467,37 @@ describe('markBackgroundJobWaitingRetryAsWorker — fenced retry transitions', (
     expect(result!.retryCount).toBe(UPLOAD_JOB_MAX_RETRIES - 1);
   });
 
+  it('SQL backstop: a park attempt on a cancel_requested job finalizes as cancelled, not waiting_retry', async () => {
+    const { jobID } = await createAndClaimJob(WORKER_A);
+
+    // The user cancels while the worker's failing attempt is unwinding — the
+    // park write itself must observe the cancel and finalize terminally.
+    await pool.query(`UPDATE catalog.background_jobs SET Status = 'cancel_requested' WHERE JobID = ?`, [jobID]);
+
+    const raceError = new Error('transient failure racing a user cancel');
+    const result = await markBackgroundJobWaitingRetryAsWorker(pool, jobID, WORKER_A, raceError, 60);
+
+    console.log(
+      `[cancel-backstop] result status=${result?.status} phase=${result?.phase} nextAttemptAt=${result?.nextAttemptAt} finishedAt=${result?.finishedAt}`
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe('cancelled');
+    expect(result!.phase).toBe('cancelled');
+    expect(result!.finishedAt).toBeInstanceOf(Date);
+    expect(result!.nextAttemptAt).toBeNull();
+    expect(result!.workerID).toBeNull();
+
+    const details = await getBackgroundJobWithDetails(pool, jobID);
+    const cancelledEvent = details!.events.find(e => e.eventType === 'cancelled');
+    console.log(`[cancel-backstop] events: ${details!.events.map(e => e.eventType).join(', ')}`);
+    expect(cancelledEvent).toBeDefined();
+
+    // The job must NOT be claimable again — cancelled is terminal.
+    const reclaim = await claimBackgroundJobForWorker(pool, jobID, WORKER_B);
+    expect(reclaim).toBeNull();
+  });
+
   it('throws WorkerLeaseLostError when called by a worker that does not own the lease; row unchanged', async () => {
     const { jobID } = await createAndClaimJob(WORKER_A);
 

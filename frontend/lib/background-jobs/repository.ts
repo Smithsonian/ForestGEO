@@ -10,7 +10,7 @@ import type {
   CreateUploadJobInput,
   UploadJobPhase
 } from './types';
-import { UPLOAD_JOB_MAX_RETRIES } from './types';
+import { UPLOAD_JOB_MAX_RETRIES, UPLOAD_JOB_PHASE_PROGRESS } from './types';
 
 // Statuses in which a worker lease is considered active. cancel_requested is
 // included so the owning worker can still write cleanup progress and the
@@ -431,10 +431,19 @@ export interface WaitingRetryOptions {
  * read-decide-write race of the old unfenced markBackgroundJobWaitingRetry
  * cannot occur.
  *
+ * CANCEL BACKSTOP: if the user requested cancellation while the failing
+ * attempt was unwinding (Status='cancel_requested'), parking the job to
+ * waiting_retry would silently erase the cancel. The worker re-checks status
+ * before calling this, but the check races a concurrent cancel — so the SQL
+ * itself finalizes the job as terminal 'cancelled' in that case.
+ *
  * MySQL evaluates SET assignments left-to-right and later assignments observe
- * earlier ones, so RetryCount is assigned LAST and every earlier expression
- * recomputes the prospective value (RetryCount + IF(increment,1,0)) against the
- * column's pre-update value.
+ * earlier ones. Two columns are therefore assigned at the END, after every
+ * expression that needs their PRE-update values:
+ *   - Status is second-to-last (Phase/NextAttemptAt/FinishedAt all branch on
+ *     the pre-update Status for the cancel backstop), and
+ *   - RetryCount is last (every earlier expression recomputes the prospective
+ *     value RetryCount + IF(increment,1,0) against the pre-update column).
  *
  * Throws WorkerLeaseLostError when the caller no longer owns the lease
  * (confirm-then-throw, same pattern as setBackgroundJobStatus).
@@ -453,16 +462,16 @@ export async function markBackgroundJobWaitingRetryAsWorker(
 
   const [result] = await catalogPool.query<ResultSetHeader>(
     `UPDATE catalog.background_jobs
-     SET Status = IF(RetryCount + IF(?, 1, 0) >= MaxRetries, 'failed', 'waiting_retry'),
-         Phase = IF(RetryCount + IF(?, 1, 0) >= MaxRetries, 'failed', 'staging'),
+     SET Phase = IF(Status = 'cancel_requested', 'cancelled', IF(RetryCount + IF(?, 1, 0) >= MaxRetries, 'failed', 'staging')),
          LastError = ?,
-         NextAttemptAt = IF(RetryCount + IF(?, 1, 0) >= MaxRetries, NULL, ?),
-         FinishedAt = IF(RetryCount + IF(?, 1, 0) >= MaxRetries, NOW(), FinishedAt),
+         NextAttemptAt = IF(Status = 'cancel_requested' OR RetryCount + IF(?, 1, 0) >= MaxRetries, NULL, ?),
+         FinishedAt = IF(Status = 'cancel_requested' OR RetryCount + IF(?, 1, 0) >= MaxRetries, NOW(), FinishedAt),
          WorkerID = NULL,
          WorkerHeartbeatAt = NULL,
+         Status = IF(Status = 'cancel_requested', 'cancelled', IF(RetryCount + IF(?, 1, 0) >= MaxRetries, 'failed', 'waiting_retry')),
          RetryCount = RetryCount + IF(?, 1, 0)
      WHERE JobID = ? AND WorkerID = ? AND Status IN (${FENCED_WRITE_STATUSES.map(() => '?').join(', ')})`,
-    [incrementRetry, incrementRetry, error.message, incrementRetry, nextAttemptAt, incrementRetry, incrementRetry, jobID, workerID, ...FENCED_WRITE_STATUSES]
+    [incrementRetry, error.message, incrementRetry, nextAttemptAt, incrementRetry, incrementRetry, incrementRetry, jobID, workerID, ...FENCED_WRITE_STATUSES]
   );
 
   if (result.affectedRows === 0) {
@@ -474,11 +483,11 @@ export async function markBackgroundJobWaitingRetryAsWorker(
   }
 
   const job = await getBackgroundJob(catalogPool, jobID);
-  const eventType = job?.status === 'failed' ? 'failed' : 'waiting_retry';
+  const eventType = job?.status === 'failed' ? 'failed' : job?.status === 'cancelled' ? 'cancelled' : 'waiting_retry';
   await addJobEvent(catalogPool, jobID, eventType, error.message, {
     retryCount: job?.retryCount ?? null,
     incrementRetry,
-    nextAttemptAt: job?.status === 'failed' ? null : nextAttemptAt.toISOString()
+    nextAttemptAt: job?.status === 'waiting_retry' ? nextAttemptAt.toISOString() : null
   });
   return job;
 }
@@ -487,7 +496,7 @@ export async function markBackgroundJobCompleted(catalogPool: Pool, jobID: numbe
   await setBackgroundJobStatus(catalogPool, jobID, workerID, {
     status: 'completed',
     phase: 'completed',
-    percentComplete: 100,
+    percentComplete: UPLOAD_JOB_PHASE_PROGRESS.completed,
     lastError: null,
     eventType: 'completed',
     eventMessage: 'Upload job completed'

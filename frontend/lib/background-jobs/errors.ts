@@ -25,8 +25,8 @@ export class JobFileNotFoundError extends Error {
  * fenced markBackgroundJobFailed instead of a waiting_retry transition.
  */
 export class NonRetryableJobError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'NonRetryableJobError';
   }
 }

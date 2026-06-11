@@ -19,6 +19,24 @@ export type UploadJobPhase = (typeof UPLOAD_JOB_PHASES)[number];
 
 export const UPLOAD_JOB_MAX_RETRIES = 3;
 
+/**
+ * Single owner of every PercentComplete value written to a job, keyed by
+ * pipeline milestone. Lives in types.ts (not worker.ts) so the repository can
+ * reference the terminal value without importing the worker (cycle risk).
+ * Reported progress is clamped monotonically non-decreasing WITHIN AN ATTEMPT
+ * because the per-file pipeline revisits earlier phases for later files; a
+ * fresh attempt starts its clamp from zero again.
+ */
+export const UPLOAD_JOB_PHASE_PROGRESS = {
+  claimed: 1,
+  staging: 10,
+  ingestion: 45,
+  collapsing: 72,
+  validation: 82,
+  refreshingViews: 98,
+  completed: 100
+} as const;
+
 export const BACKGROUND_JOB_FILE_STATUSES = ['pending', 'staged', 'processed', 'failed', 'skipped'] as const;
 export type BackgroundJobFileStatus = (typeof BACKGROUND_JOB_FILE_STATUSES)[number];
 

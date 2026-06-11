@@ -33,6 +33,7 @@ import {
   ensureUploadSessionsTable,
   findActiveSessionsForPlotCensus,
   isUploadSessionStale,
+  sendHeartbeat,
   updateSessionState,
   UploadSessionOwnershipError,
   UploadSessionState
@@ -44,7 +45,7 @@ import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { detectDelimiter } from '@/lib/uploads/detect-delimiter';
 import { ingestBatch, IngestBatchAbortedError } from '@/lib/uploads/ingest-batch';
 import { deleteUnresolvedRowsForBatch, recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
-import { countStagedRows, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
+import { countStagedRows, MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
 import { runCensusValidations } from '@/lib/uploads/validation-orchestrator';
 import { NonRetryableJobError, WorkerLeaseLostError } from './errors';
 import {
@@ -59,6 +60,9 @@ import {
   updateBackgroundJobFileStatus
 } from './repository';
 import type { BackgroundJobFileRecord, BackgroundJobWithDetails, UploadJobPhase } from './types';
+import { UPLOAD_JOB_PHASE_PROGRESS } from './types';
+
+export { UPLOAD_JOB_PHASE_PROGRESS } from './types';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -90,19 +94,11 @@ const RETRY_BACKOFF_BASE = 2;
 export const SESSION_CONFLICT_RETRY_DELAY_SECONDS = 120;
 
 /**
- * Single owner of every PercentComplete value the worker writes, keyed by
- * pipeline milestone. Reported progress is clamped monotonically non-decreasing
- * because the per-file pipeline revisits earlier phases for later files.
+ * Job EVENT rows are only written for every Nth staged chunk; percent and
+ * processedRows still update on every chunk. Without sampling, a million-row
+ * file at 5K rows/chunk would write 200 near-identical event rows.
  */
-export const UPLOAD_JOB_PHASE_PROGRESS = {
-  claimed: 1,
-  staging: 10,
-  ingestion: 45,
-  collapsing: 72,
-  validation: 82,
-  refreshingViews: 98,
-  completed: 100
-} as const;
+export const CHUNK_EVENT_SAMPLE_RATE = 10;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -143,6 +139,7 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
     failedRows: 0,
     lastPercent: 0,
     assignedBatches: new Map(),
+    deferredInvalidRows: [],
     heartbeatTimer: null
   };
 
@@ -212,6 +209,8 @@ interface WorkerRunContext {
   failedRows: number;
   lastPercent: number;
   assignedBatches: Map<number, { file: BackgroundJobFileRecord; batchID: string }>;
+  /** Parse rejects from zero-valid-row files, recorded after the last ingest (see runMeasurementsPipeline). */
+  deferredInvalidRows: Array<{ fileName: string; batchID: string; rows: FileRow[] }>;
   heartbeatTimer: NodeJS.Timeout | null;
 }
 
@@ -244,7 +243,10 @@ async function downloadBlobText(file: BackgroundJobFileRecord): Promise<string> 
 }
 
 function startHeartbeat(ctx: WorkerRunContext): void {
+  let tickInFlight = false;
   const tick = async () => {
+    if (tickInFlight) return; // a slow catalog round-trip must not stack ticks
+    tickInFlight = true;
     try {
       const leaseAlive = await heartbeatBackgroundJob(ctx.catalogPool, ctx.job.jobID, ctx.workerID);
       if (!leaseAlive) {
@@ -253,9 +255,24 @@ function startHeartbeat(ctx: WorkerRunContext): void {
       }
       const current = await getBackgroundJob(ctx.catalogPool, ctx.job.jobID);
       if (current?.status === 'cancel_requested') ctx.cancelRequested = true;
+
+      // Keep the upload session alive too: the worker only transitions session
+      // state at phase boundaries, but uploadsessiontracker considers a session
+      // stale after HEARTBEAT_TIMEOUT (90s) — a long ingest would otherwise
+      // expose the scope to reclaim/sweep mid-run. A false return (session
+      // already terminal or deleted) is benign; the run-level lease is the
+      // authoritative ownership signal.
+      if (ctx.sessionID) {
+        const sessionAlive = await sendHeartbeat(ctx.job.schemaName, ctx.sessionID);
+        if (!sessionAlive) {
+          ailogger.warn(`[UploadWorker] Upload session ${ctx.sessionID} did not accept a heartbeat for job ${ctx.job.jobID} (already terminal?)`);
+        }
+      }
     } catch (error) {
       // Transient catalog hiccups must not kill the run; the next tick retries.
       ailogger.warn(`[UploadWorker] Heartbeat tick failed for job ${ctx.job.jobID}: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      tickInFlight = false;
     }
   };
   ctx.heartbeatTimer = setInterval(tick, HEARTBEAT_INTERVAL_MS);
@@ -290,9 +307,38 @@ async function assertStillOwned(ctx: WorkerRunContext): Promise<void> {
   }
   if (!ctx.cancelRequested) return;
 
-  for (const { file, batchID } of ctx.assignedBatches.values()) {
+  await finalizeCancelledJob(ctx);
+  throw new JobCancelledSignal(ctx.job.jobID);
+}
+
+/**
+ * Cancellation is terminal, so it must clean batches from EVERY attempt — not
+ * just this run's. A retrying job may be cancelled before its loop reaches a
+ * file whose previous attempt left staged temporarymeasurements and recorded
+ * rejects behind; those batches exist only in the durably persisted
+ * background_job_files.BatchID (first-write-wins), never in this run's
+ * in-memory assignedBatches. Union both sources, keyed by jobFileID.
+ */
+function collectCancellationCleanupTargets(ctx: WorkerRunContext): Array<{ fileName: string; batchID: string }> {
+  const targets = new Map<number, { fileName: string; batchID: string }>();
+  for (const file of ctx.job.files) {
+    if (file.batchID) targets.set(file.jobFileID, { fileName: file.fileName, batchID: file.batchID });
+  }
+  for (const [jobFileID, { file, batchID }] of ctx.assignedBatches) {
+    targets.set(jobFileID, { fileName: file.fileName, batchID });
+  }
+  return [...targets.values()];
+}
+
+/**
+ * Cleans every non-completed batch across all attempts and writes the fenced
+ * terminal 'cancelled' state. Shared by the stage-boundary probe and by
+ * handleRunFailure's cancel-wins-over-park path.
+ */
+async function finalizeCancelledJob(ctx: WorkerRunContext): Promise<void> {
+  for (const { fileName, batchID } of collectCancellationCleanupTargets(ctx)) {
     if (await isBatchCompleted(ctx, batchID)) continue; // completed-batch guard: never clean
-    await cleanupBatchArtifacts(ctx, file.fileName, batchID);
+    await cleanupBatchArtifacts(ctx, fileName, batchID);
   }
   await setBackgroundJobStatus(ctx.catalogPool, ctx.job.jobID, ctx.workerID, {
     status: 'cancelled',
@@ -300,7 +346,6 @@ async function assertStillOwned(ctx: WorkerRunContext): Promise<void> {
     eventType: 'cancelled',
     eventMessage: 'Upload job cancelled while running; non-completed batches cleaned'
   });
-  throw new JobCancelledSignal(ctx.job.jobID);
 }
 
 async function handleRunFailure(ctx: WorkerRunContext, error: unknown): Promise<void> {
@@ -319,6 +364,18 @@ async function handleRunFailure(ctx: WorkerRunContext, error: unknown): Promise<
 
   const err = error instanceof Error ? error : new Error(String(error));
   try {
+    // Cancel wins over retry parking: a cancel_requested set while this
+    // failure was unwinding must finalize as 'cancelled', not be erased by a
+    // waiting_retry/failed transition. (markBackgroundJobWaitingRetryAsWorker
+    // carries an in-SQL backstop for the race where the cancel lands after
+    // this read.)
+    const current = await getBackgroundJob(catalogPool, job.jobID);
+    if (current?.status === 'cancel_requested') {
+      ctx.cancelRequested = true;
+      ailogger.info(`[UploadWorker] Job ${job.jobID} failed (${err.message}) but cancellation was requested; finalizing as cancelled`);
+      await finalizeCancelledJob(ctx);
+      return;
+    }
     if (err instanceof UploadScopeConflictError) {
       ailogger.info(`[UploadWorker] Job ${job.jobID} parked on scope conflict: ${err.message}`);
       await markBackgroundJobWaitingRetryAsWorker(catalogPool, job.jobID, workerID, err, SESSION_CONFLICT_RETRY_DELAY_SECONDS, { incrementRetry: false });
@@ -403,6 +460,13 @@ async function transitionSessionState(ctx: WorkerRunContext, state: UploadSessio
  */
 async function releaseUploadSession(ctx: WorkerRunContext, completed: boolean): Promise<void> {
   if (!ctx.sessionID) return;
+  if (ctx.leaseLost) {
+    // The reclaiming worker owns this session row now (registerUploadSession
+    // reuses a still-active session from a previous attempt of the same job).
+    // A stale FAILED write here would de-activate the new attempt's session.
+    ailogger.info(`[UploadWorker] Lease lost for job ${ctx.job.jobID}; leaving upload session ${ctx.sessionID} to the new owner`);
+    return;
+  }
   try {
     await transitionSessionState(
       ctx,
@@ -469,10 +533,12 @@ async function cleanupBatchArtifacts(ctx: WorkerRunContext, fileName: string, ba
 // Progress
 // ---------------------------------------------------------------------------
 
-async function setProgress(ctx: WorkerRunContext, phase: UploadJobPhase, percent: number, message: string): Promise<void> {
-  // Clamp monotonic: the per-file pipeline revisits earlier phases for later
-  // files and reported progress should never move backwards.
+async function setProgress(ctx: WorkerRunContext, phase: UploadJobPhase, percent: number, message: string, opts: { emitEvent?: boolean } = {}): Promise<void> {
+  // Clamp monotonic WITHIN AN ATTEMPT: the per-file pipeline revisits earlier
+  // phases for later files and reported progress should never move backwards
+  // while a single attempt runs. A fresh attempt resets the clamp.
   ctx.lastPercent = Math.max(ctx.lastPercent, percent);
+  const emitEvent = opts.emitEvent !== false;
   await setBackgroundJobStatus(ctx.catalogPool, ctx.job.jobID, ctx.workerID, {
     status: 'running',
     phase,
@@ -480,20 +546,13 @@ async function setProgress(ctx: WorkerRunContext, phase: UploadJobPhase, percent
     processedRows: ctx.processedRows,
     failedRows: ctx.failedRows,
     lastError: null,
-    eventType: phase,
-    eventMessage: message
+    ...(emitEvent ? { eventType: phase, eventMessage: message } : {})
   });
 }
 
 // ---------------------------------------------------------------------------
 // Measurements CSV pipeline
 // ---------------------------------------------------------------------------
-
-interface ArcgisImportSessionPayload {
-  importSessionId?: string;
-  fileName?: string;
-  rowCount?: number;
-}
 
 async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
   const { job, connectionManager } = ctx;
@@ -587,9 +646,19 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
               `${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
           );
         }
+        if (error instanceof MeasurementChunkResolutionError) {
+          // A header-plan misalignment is deterministic — every retry would
+          // re-parse the same file and fail identically. Fail fast instead of
+          // burning the retry budget.
+          throw new NonRetryableJobError(`Header resolution failed for ${file.fileName}: ${error.message}`, { cause: error });
+        }
         throw error;
       }
-      await setProgress(ctx, 'staging', UPLOAD_JOB_PHASE_PROGRESS.staging, `Staged chunk ${chunkIndex + 1}/${chunkCount} of ${file.fileName}`);
+      // Percent/processedRows update every chunk; the EVENT row is sampled.
+      const emitChunkEvent = (chunkIndex + 1) % CHUNK_EVENT_SAMPLE_RATE === 0;
+      await setProgress(ctx, 'staging', UPLOAD_JOB_PHASE_PROGRESS.staging, `Staged chunk ${chunkIndex + 1}/${chunkCount} of ${file.fileName}`, {
+        emitEvent: emitChunkEvent
+      });
     }
 
     // Strict staging verification: every row the resolution accepted must be
@@ -620,7 +689,7 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
       await runIngestForBatch(ctx, file.fileName, batchID);
     }
 
-    if (fileInvalidRows.length > 0) {
+    if (fileInvalidRows.length > 0 && fileInsertedRows > 0) {
       // ORDER IS LOAD-BEARING: parse rejects are recorded AFTER the file's
       // ingest, not before. On the first-ever upload of a census, ingestBatch's
       // failed-initial-census recovery preflight treats any pre-existing
@@ -649,14 +718,42 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
         },
         fileInvalidRows
       );
+    } else if (fileInvalidRows.length > 0) {
+      // DEFERRED RECORDING for zero-valid-row files: this file never runs
+      // ingestBatch, so its batch never reaches uploadmetrics 'completed'.
+      // Recording its rejects now would plant coremeasurements rows that the
+      // NEXT file's ingest preflight — on a census with zero completed
+      // uploads — reads as residue from a crashed first load and wipes
+      // (shouldRecoverFailedInitialCensus). Defer recording to after the last
+      // file's ingest, when completed uploads exist and the preflight can no
+      // longer fire.
+      ctx.deferredInvalidRows.push({ fileName: file.fileName, batchID, rows: fileInvalidRows });
     }
 
     await updateBackgroundJobFileStatus(ctx.catalogPool, job.jobID, ctx.workerID, file.jobFileID, {
       status: fileInsertedRows > 0 ? 'processed' : fileInvalidRows.length + fileDroppedRows > 0 ? 'failed' : 'skipped',
       processedRows: fileInsertedRows,
       failedRows: fileInvalidRows.length + fileDroppedRows,
-      errorMessage: fileInsertedRows === 0 && fileInvalidRows.length + fileDroppedRows > 0 ? 'All rows were rejected during parsing' : null
+      errorMessage:
+        fileInsertedRows === 0 && fileInvalidRows.length + fileDroppedRows > 0
+          ? `No rows could be staged: ${fileInvalidRows.length} row(s) rejected during parsing, ${fileDroppedRows} row(s) dropped during column resolution`
+          : null
     });
+  }
+
+  for (const deferred of ctx.deferredInvalidRows) {
+    await recordInvalidRows(
+      connectionManager,
+      {
+        schema,
+        plotID: job.plotID,
+        censusID: job.censusID,
+        fileName: deferred.fileName,
+        batchID: deferred.batchID,
+        sourceRowIndexOffset: parseRejectIndexOffset(deferred.rows.length)
+      },
+      deferred.rows
+    );
   }
 }
 
@@ -685,8 +782,20 @@ async function runIngestForBatch(ctx: WorkerRunContext, fileName: string, batchI
 // ArcGIS XLSX pipeline
 // ---------------------------------------------------------------------------
 
+interface ArcgisImportSessionPayload {
+  importSessionId?: string;
+  fileName?: string;
+  rowCount?: number;
+}
+
 async function runArcgisPipeline(ctx: WorkerRunContext): Promise<void> {
   const { job } = ctx;
+  const sessionID = ctx.sessionID;
+  if (!sessionID) {
+    // registerUploadSession runs before any pipeline; a null here is a worker
+    // lifecycle bug, never a recoverable job state.
+    throw new Error(`Upload session was not registered before the ArcGIS pipeline for job ${job.jobID}`);
+  }
   const rawArcgisSession = job.payload?.arcgisImportSession;
   const arcgisSession =
     rawArcgisSession && typeof rawArcgisSession === 'object' && !Array.isArray(rawArcgisSession) ? (rawArcgisSession as ArcgisImportSessionPayload) : null;
@@ -722,13 +831,13 @@ async function runArcgisPipeline(ctx: WorkerRunContext): Promise<void> {
         uploadMode,
         // MUST equal the pre-flight user or the session claim throws FORBIDDEN.
         userId: job.createdBy,
-        uploadSessionID: ctx.sessionID ?? uploadSessionFileID(job.jobID)
+        uploadSessionID: sessionID
       });
       rowCount = commitResult.rowCount;
     } catch (error) {
       if (error instanceof ArcgisImportSessionError) {
         // Ownership/expiry/empty-session failures cannot heal on retry.
-        throw new NonRetryableJobError(`ArcGIS import session commit failed: ${error.message}`);
+        throw new NonRetryableJobError(`ArcGIS import session commit failed: ${error.message}`, { cause: error });
       }
       throw error;
     }
