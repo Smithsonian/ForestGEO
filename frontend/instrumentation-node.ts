@@ -18,7 +18,7 @@
  */
 import ailogger from '@/ailogger';
 import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
-import { startUploadJobSweeper, stopUploadJobSweeper, sweepOnce } from '@/lib/background-jobs/sweeper';
+import { installUploadSweeperShutdown, startUploadJobSweeper, sweepOnce } from '@/lib/background-jobs/sweeper';
 import { ensureCatalogTables } from '@/lib/provisioning/orchestrator';
 import { installShutdownHandler, pickupStaleRuns } from '@/lib/provisioning/worker';
 
@@ -54,10 +54,11 @@ void (async () => {
   // startup sweep fails (the next tick retries).
   try {
     startUploadJobSweeper(pool);
-    // process.once registrations are additive with provisioning's
-    // installShutdownHandler — both shutdown hooks coexist.
-    process.once('SIGTERM', stopUploadJobSweeper);
-    process.once('SIGINT', stopUploadJobSweeper);
+    // installUploadSweeperShutdown is HMR-safe: the shutdownInstalled flag on
+    // the globalThis sentinel prevents stacking listeners across module reloads.
+    // Both shutdown hooks (provisioning's installShutdownHandler and this one)
+    // coexist via separate process.once registrations.
+    installUploadSweeperShutdown();
     const { reclaimed, dispatched } = await sweepOnce(pool);
     if (reclaimed.length > 0 || dispatched.length > 0) {
       ailogger.info('upload.sweeper.startup', { reclaimed, dispatched });

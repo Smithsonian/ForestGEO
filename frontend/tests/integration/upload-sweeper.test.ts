@@ -14,7 +14,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import mysql, { type Pool } from 'mysql2/promise';
 import { ensureBackgroundJobCatalogTables } from '@/lib/background-jobs/catalog';
 import { createUploadBackgroundJob, getBackgroundJob, getBackgroundJobWithDetails } from '@/lib/background-jobs/repository';
-import { startUploadJobSweeper, stopUploadJobSweeper, sweepOnce, type SweepDeps } from '@/lib/background-jobs/sweeper';
+import { runSweepTick, startUploadJobSweeper, stopUploadJobSweeper, sweepOnce, SWEEP_DISPATCH_LIMIT, type SweepDeps } from '@/lib/background-jobs/sweeper';
 import type { CreateUploadJobInput } from '@/lib/background-jobs/types';
 import { UPLOAD_JOB_MAX_RETRIES } from '@/lib/background-jobs/types';
 
@@ -280,27 +280,145 @@ describe('sweepOnce — runnable-job dispatch', () => {
 // Interval lifecycle
 // ---------------------------------------------------------------------------
 
+interface SweeperSentinelValue {
+  interval: NodeJS.Timeout;
+  inFlight: boolean;
+  shutdownInstalled: boolean;
+}
+type SweeperGlobal = typeof globalThis & { [SWEEPER_SENTINEL]?: SweeperSentinelValue };
+
 describe('startUploadJobSweeper / stopUploadJobSweeper — sentinel lifecycle', () => {
   it('double start keeps a single interval; stop clears the sentinel', () => {
-    const sweeperGlobal = globalThis as typeof globalThis & { [SWEEPER_SENTINEL]?: NodeJS.Timeout };
+    const sweeperGlobal = globalThis as SweeperGlobal;
 
     expect(sweeperGlobal[SWEEPER_SENTINEL]).toBeUndefined();
 
     startUploadJobSweeper(pool);
-    const firstHandle = sweeperGlobal[SWEEPER_SENTINEL];
-    console.log(`[sentinel] after first start: handle present=${firstHandle !== undefined}`);
-    expect(firstHandle).toBeDefined();
+    const firstSentinel = sweeperGlobal[SWEEPER_SENTINEL];
+    console.log(`[sentinel] after first start: sentinel present=${firstSentinel !== undefined}, inFlight=${firstSentinel?.inFlight}`);
+    expect(firstSentinel).toBeDefined();
+    expect(firstSentinel?.inFlight).toBe(false);
 
     startUploadJobSweeper(pool);
-    const secondHandle = sweeperGlobal[SWEEPER_SENTINEL];
-    console.log(`[sentinel] after double start: same handle=${secondHandle === firstHandle}`);
-    expect(secondHandle).toBe(firstHandle);
+    const secondSentinel = sweeperGlobal[SWEEPER_SENTINEL];
+    console.log(`[sentinel] after double start: same object=${secondSentinel === firstSentinel}`);
+    expect(secondSentinel).toBe(firstSentinel);
 
     stopUploadJobSweeper();
-    console.log(`[sentinel] after stop: handle present=${sweeperGlobal[SWEEPER_SENTINEL] !== undefined}`);
+    console.log(`[sentinel] after stop: sentinel present=${sweeperGlobal[SWEEPER_SENTINEL] !== undefined}`);
     expect(sweeperGlobal[SWEEPER_SENTINEL]).toBeUndefined();
 
     // Stop is idempotent.
     expect(() => stopUploadJobSweeper()).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dispatch limit
+// ---------------------------------------------------------------------------
+
+describe('sweepOnce — dispatch limit', () => {
+  it(`dispatches exactly SWEEP_DISPATCH_LIMIT jobs per pass; a second pass picks up the remainder`, async () => {
+    const totalJobs = SWEEP_DISPATCH_LIMIT + 1;
+    const jobIDs: number[] = [];
+    for (let i = 0; i < totalJobs; i++) {
+      jobIDs.push(await seedQueuedJob(`limit-job-${i}.csv`));
+    }
+    const remainderID = jobIDs[SWEEP_DISPATCH_LIMIT];
+    console.log(`[dispatch-limit] seeded jobIDs=[${jobIDs.join(', ')}] (SWEEP_DISPATCH_LIMIT=${SWEEP_DISPATCH_LIMIT}, remainderID=${remainderID})`);
+
+    const { deps: deps1, calls: calls1 } = makeDispatchStub();
+    const result1 = await sweepOnce(pool, deps1);
+    console.log(`[dispatch-limit] pass 1: dispatched=[${result1.dispatched.join(', ')}] stub calls=[${calls1.join(', ')}]`);
+
+    expect(result1.dispatched).toHaveLength(SWEEP_DISPATCH_LIMIT);
+    // Lowest JobIDs dispatched first (ORDER BY JobID).
+    expect(result1.dispatched).toEqual(jobIDs.slice(0, SWEEP_DISPATCH_LIMIT));
+    // The job beyond the limit was not touched.
+    expect(result1.dispatched).not.toContain(remainderID);
+
+    // Advance the first SWEEP_DISPATCH_LIMIT jobs out of 'queued' so the
+    // second pass sees only the remainder. The stub never mutates DB status, so
+    // we do it directly. Mark them 'running' (any non-runnable status works).
+    await pool.query(
+      `UPDATE catalog.background_jobs SET Status = 'running', WorkerID = 'test-advance', WorkerHeartbeatAt = NOW() WHERE JobID IN (${jobIDs.slice(0, SWEEP_DISPATCH_LIMIT).join(', ')})`
+    );
+
+    const { deps: deps2, calls: calls2 } = makeDispatchStub();
+    const result2 = await sweepOnce(pool, deps2);
+    console.log(`[dispatch-limit] pass 2: dispatched=[${result2.dispatched.join(', ')}] stub calls=[${calls2.join(', ')}]`);
+
+    // Only the remainder is queued now.
+    expect(result2.dispatched).toEqual([remainderID]);
+    expect(calls2).toEqual([remainderID]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// In-flight tick guard
+// ---------------------------------------------------------------------------
+
+describe('runSweepTick — in-flight guard', () => {
+  it('skips a concurrent tick while the first pass is still awaiting', async () => {
+    // Use a deferred dispatch so the first tick stays in-flight while the
+    // second tick is invoked.
+    let resolveFirstDispatch!: () => void;
+    const firstDispatchBlocked = new Promise<void>(resolve => {
+      resolveFirstDispatch = resolve;
+    });
+
+    const dispatchCalls: number[] = [];
+    const blockingDeps: SweepDeps = {
+      dispatch: vi.fn(async (jobID: number) => {
+        dispatchCalls.push(jobID);
+        await firstDispatchBlocked;
+      })
+    };
+
+    const jobID = await seedQueuedJob('in-flight-guard.csv');
+    console.log(`[in-flight] seeded jobID=${jobID}`);
+
+    // Start the sweeper so the sentinel exists and runSweepTick can read inFlight.
+    startUploadJobSweeper(pool);
+    const sweeperGlobal = globalThis as SweeperGlobal;
+
+    // Kick off tick 1 — does NOT await yet; it sets inFlight=true and then
+    // waits inside blockingDeps.dispatch.
+    const tick1Promise = runSweepTick(pool, blockingDeps);
+
+    // Yield to let tick 1 reach its first await (the sweepOnce DB queries).
+    // A short real delay is unavoidable here — the alternative is to instrument
+    // sweepOnce, which adds production complexity for a test concern.
+    await new Promise<void>(resolve => setTimeout(resolve, 50));
+
+    // At this point inFlight should be true because tick 1 hasn't resolved yet.
+    const inFlightDuringFirstTick = sweeperGlobal[SWEEPER_SENTINEL]?.inFlight ?? false;
+    console.log(`[in-flight] inFlight during tick 1: ${inFlightDuringFirstTick}`);
+
+    // Tick 2 should be skipped because inFlight=true.
+    const skippingDeps: SweepDeps = {
+      dispatch: vi.fn(async (jobID: number) => {
+        dispatchCalls.push(jobID);
+      })
+    };
+    await runSweepTick(pool, skippingDeps);
+    console.log(`[in-flight] after tick 2: dispatchCalls=[${dispatchCalls.join(', ')}]`);
+
+    // tick 2 must NOT have dispatched anything — the skip guard fired.
+    expect(skippingDeps.dispatch).not.toHaveBeenCalled();
+
+    // Unblock tick 1 and let it finish.
+    resolveFirstDispatch();
+    await tick1Promise;
+    console.log(`[in-flight] after tick 1 resolves: inFlight=${sweeperGlobal[SWEEPER_SENTINEL]?.inFlight}`);
+
+    // inFlight resets to false after the pass completes.
+    expect(sweeperGlobal[SWEEPER_SENTINEL]?.inFlight).toBe(false);
+
+    // A third tick now runs freely.
+    const { deps: deps3, calls: calls3 } = makeDispatchStub();
+    await runSweepTick(pool, deps3);
+    console.log(`[in-flight] tick 3 (free): calls=[${calls3.join(', ')}]`);
+    expect(deps3.dispatch).toHaveBeenCalled();
   });
 });

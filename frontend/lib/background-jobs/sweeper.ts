@@ -46,12 +46,21 @@ const RECLAIM_IMMEDIATE_RETRY_SKEW_MS = MS_PER_SECOND;
 
 /**
  * Cross-module-instance sentinel: dev-mode HMR (and any double-registration of
- * instrumentation) re-evaluates this module, so the interval handle must live
- * on globalThis rather than in module scope for the double-start guard to hold.
+ * instrumentation) re-evaluates this module, so the interval handle and all
+ * related state must live on globalThis rather than in module scope for the
+ * double-start and in-flight guards to hold across HMR reloads.
  */
 const SWEEPER_SENTINEL = Symbol.for('forestgeo.uploadJobSweeper');
 
-type SweeperGlobal = typeof globalThis & { [SWEEPER_SENTINEL]?: NodeJS.Timeout };
+interface SweeperSentinelValue {
+  interval: NodeJS.Timeout;
+  /** True while a sweepOnce pass is awaiting; the next tick is skipped. */
+  inFlight: boolean;
+  /** True once SIGTERM/SIGINT listeners have been installed for this process. */
+  shutdownInstalled: boolean;
+}
+
+type SweeperGlobal = typeof globalThis & { [SWEEPER_SENTINEL]?: SweeperSentinelValue };
 
 // ---------------------------------------------------------------------------
 // Sweep pass
@@ -125,30 +134,76 @@ export async function sweepOnce(catalogPool: Pool, deps: SweepDeps = defaultSwee
 // ---------------------------------------------------------------------------
 
 /**
+ * One interval tick: skips when a previous pass hasn't resolved yet (in-flight
+ * guard), otherwise runs a sweep pass. Used by the interval and exported for
+ * direct use in tests.
+ */
+export async function runSweepTick(catalogPool: Pool, deps: SweepDeps = defaultSweepDeps): Promise<void> {
+  const sweeperGlobal = globalThis as SweeperGlobal;
+  const sentinel = sweeperGlobal[SWEEPER_SENTINEL];
+  if (sentinel?.inFlight) {
+    ailogger.info('upload.sweeper.tick_skipped_in_flight');
+    return;
+  }
+  if (sentinel) sentinel.inFlight = true;
+  try {
+    await sweepOnce(catalogPool, deps);
+  } catch (error: unknown) {
+    // A failed pass must never kill the interval — the next tick retries.
+    ailogger.warn('upload.sweeper.pass_failed', {
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
+  } finally {
+    const afterSentinel = (globalThis as SweeperGlobal)[SWEEPER_SENTINEL];
+    if (afterSentinel) afterSentinel.inFlight = false;
+  }
+}
+
+/**
  * Starts the sweeper interval. A second call while the interval is alive is a
  * no-op (globalThis sentinel). The interval is unref()d so it never keeps the
  * process alive on its own.
+ *
+ * Within one process, jobs run sequentially: the in-flight guard in
+ * runSweepTick ensures concurrent interval ticks (e.g. a long ingestion
+ * spanning multiple minute boundaries) do not stack.
  */
 export function startUploadJobSweeper(catalogPool: Pool): void {
   const sweeperGlobal = globalThis as SweeperGlobal;
   if (sweeperGlobal[SWEEPER_SENTINEL]) return;
 
   const interval = setInterval(() => {
-    void sweepOnce(catalogPool).catch((error: unknown) => {
-      // A failed pass must never kill the interval — the next tick retries.
-      ailogger.warn('upload.sweeper.pass_failed', {
-        errorMessage: error instanceof Error ? error.message : String(error)
-      });
-    });
+    void runSweepTick(catalogPool);
   }, SWEEP_INTERVAL_MS);
   interval.unref?.();
-  sweeperGlobal[SWEEPER_SENTINEL] = interval;
+  sweeperGlobal[SWEEPER_SENTINEL] = { interval, inFlight: false, shutdownInstalled: false };
 }
 
 export function stopUploadJobSweeper(): void {
   const sweeperGlobal = globalThis as SweeperGlobal;
-  const interval = sweeperGlobal[SWEEPER_SENTINEL];
-  if (!interval) return;
-  clearInterval(interval);
+  const sentinel = sweeperGlobal[SWEEPER_SENTINEL];
+  if (!sentinel) return;
+  clearInterval(sentinel.interval);
   delete sweeperGlobal[SWEEPER_SENTINEL];
+}
+
+/**
+ * Installs SIGTERM and SIGINT handlers that call stopUploadJobSweeper. Safe to
+ * call from HMR-reloaded module instances: the shutdownInstalled flag lives on
+ * the same globalThis sentinel as the interval, so only one set of listeners is
+ * ever registered per process lifetime. An in-flight sweep pass is allowed to
+ * finish naturally; the interval is cleared immediately so no new pass starts.
+ *
+ * Must be called AFTER startUploadJobSweeper (so the sentinel exists to host
+ * the shutdownInstalled flag). If no sentinel is present, the handlers are
+ * registered unconditionally and will be no-ops if the sweeper was never
+ * started.
+ */
+export function installUploadSweeperShutdown(): void {
+  const sweeperGlobal = globalThis as SweeperGlobal;
+  const sentinel = sweeperGlobal[SWEEPER_SENTINEL];
+  if (sentinel?.shutdownInstalled) return;
+  if (sentinel) sentinel.shutdownInstalled = true;
+  process.once('SIGTERM', stopUploadJobSweeper);
+  process.once('SIGINT', stopUploadJobSweeper);
 }
