@@ -15,7 +15,8 @@ export interface CanonicalFieldDef {
 
 // LIMITATION: a single canonicalField cannot map to DIFFERENT source columns per sheet. `scope`
 // selects WHICH sheet(s) a field's explicit sourceColumns apply to; it does not support per-sheet
-// source-header variation. Alias auto-detection is NOT scope-filtered. An unsatisfiable per-sheet
+// source-header variation. Alias auto-detection IS scope-filtered (via mapping-declared field scope /
+// aliasFieldScopes). An unsatisfiable per-sheet
 // expectation surfaces as a per-sheet missingRequired in validateMapping rather than mis-resolving.
 export interface ColumnMappingField {
   canonicalField: string;
