@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 
@@ -43,7 +43,7 @@ export async function GET(
   // Validate schema before delegating — collapseCensus calls safeFormatQuery
   // internally, but we want to return a 400 rather than a 500 on a bad schema.
   try {
-    safeFormatQuery(schema, 'SELECT 1');
+    validateSchemaOrThrow(schema);
   } catch (error: any) {
     ailogger.error(`Invalid schema in setupbulkcollapser: ${schema}`);
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });

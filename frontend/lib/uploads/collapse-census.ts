@@ -9,6 +9,10 @@
  *
  * What the collapser does (from storedprocedures.sql):
  *   1. Assigns `CensusID` to any trees rows that have a NULL CensusID.
+ *      SCHEMA-GLOBAL HAZARD: this step stamps EVERY tree in the schema whose
+ *      CensusID IS NULL with the supplied censusID, regardless of plot. Under
+ *      interleaved multi-census uploads the wrong census can be assigned to
+ *      trees from a concurrent upload.
  *   2. Nullifies zero-valued DBH/HOM in coremeasurements for the census.
  *   3. Deduplicates coremeasurements by StemGUID+MeasurementDate (keeps the
  *      row with the lowest CoreMeasurementID).
@@ -16,12 +20,13 @@
  *      (keeps the row with the lowest CoreMeasurementID).
  *   Deduplication events are logged to uploadintegrityalerts.
  *
- * The procedure wraps all mutations in a single START TRANSACTION / COMMIT block
- * and manages its own rollback on error. Do NOT wrap this call in an outer
- * withTransaction — mysql2 would implicitly commit the outer transaction on the
- * first inner START TRANSACTION statement, leaving the wrapper's state corrupt.
- * We use withTransaction only for connection lifecycle (keep-alive pings,
- * session timeout extension).
+ * Transaction contract: the procedure owns its own START TRANSACTION / COMMIT /
+ * ROLLBACK. Callers must NOT wrap this call in an additional transaction layer.
+ * In mysql2, issuing START TRANSACTION inside an active connection-level
+ * transaction implicitly commits that outer transaction, voiding any atomicity
+ * the caller expected. collapseCensus uses withTransaction solely for connection
+ * lifecycle management (keep-alive pings, session-timeout extension); the
+ * procedure's internal transaction is the authoritative atomicity boundary.
  *
  * Idempotency: the collapser is safe to re-run. After the first run all
  * duplicates are gone, so the deduplication DELETE statements match zero rows on

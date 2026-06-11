@@ -17,10 +17,18 @@
  *   Deduplication events are logged to uploadintegrityalerts.
  *
  * Covered semantics:
- *   1. Happy path — stage+ingest fixture rows → collapseCensus → assert
- *      post-collapse state: duplicate rows removed, zero DBH/HOM nullified,
- *      unique rows preserved.
- *   2. Idempotency proof — run collapseCensus twice on the same census; capture
+ *   1a. Zero-fixup strict — inject a lone zero-DBH/HOM measurement (the only
+ *       row for its stem) → collapseCensus → assert it survives with both fields
+ *       IS NULL. No alternate outcome.
+ *   1b. TreeTag+StemTag dedup strict — inject a same-tag row with a different
+ *       MeasurementDate (bypasses StemGUID+Date dedup) → collapseCensus → assert
+ *       the lower-ID original survives, the higher-ID duplicate is deleted, and a
+ *       COLLAPSER_DEDUPLICATION alert containing 'same TreeTag+StemTag in census'
+ *       is logged.
+ *   2. StemGUID+Date dedup — manually insert a coremeasurements row sharing
+ *      (StemGUID, MeasurementDate) with an existing row; assert the duplicate is
+ *      removed and a COLLAPSER_DEDUPLICATION alert is logged.
+ *   3. Idempotency proof — run collapseCensus twice on the same census; capture
  *      deterministic coremeasurements snapshot after each run and assert identical.
  *      If these differ the collapser is NOT idempotent and the test fails with
  *      BLOCKED evidence.
@@ -316,77 +324,142 @@ describe('collapseCensus — integration', () => {
   }
 
   // -------------------------------------------------------------------------
-  // 1. Happy path
+  // 1a. Zero-fixup strict
+  //
+  // Insert a stem whose ONLY coremeasurement in the census has MeasuredDBH=0
+  // and MeasuredHOM=0. Because it uses a date that cannot appear in any ingested
+  // row (far-future) AND a distinct StemGUID, it is skipped by both dedup passes.
+  // After collapse the row must survive with MeasuredDBH IS NULL and
+  // MeasuredHOM IS NULL — no if/else, no alternate outcome.
   // -------------------------------------------------------------------------
 
-  it('collapses a census: unique ingested rows survive; injected zero-DBH row is removed by TreeTag+StemTag dedup', async () => {
+  it('zero→NULL fixup: a lone zero-DBH/HOM measurement survives collapse with both fields nullified', async () => {
     await stageAndIngestFixtureRows();
 
-    // Verify all 5 unique rows are present before collapse.
-    const beforeCount = await countCensusMeasurements();
-    console.log(`[happy-path] Before collapse: ${beforeCount} resolved rows`);
-    expect(beforeCount).toBe(EXPECTED_CLEAN_ROW_COUNT);
+    // Pick the StemGUID of the first ingested stem so we have a valid foreign
+    // key. We then DELETE its ingested coremeasurements row and replace it with
+    // a zero-valued row on a date the other 4 stems never use. That guarantees
+    // this StemGUID has exactly one census measurement and it is zero-valued.
+    const ZERO_ROW_DATE = '2099-12-31';
 
-    // Now insert an extra row on a stem that has already been ingested, but on
-    // a DIFFERENT date and with DBH=0/HOM=0, so it is NOT a StemGUID+Date or
-    // TreeTag+StemTag duplicate of any existing row. This lets us verify the
-    // zero→NULL fixup in isolation.
-    //
-    // We pick a stem that belongs to the census and assign a date that cannot
-    // match any ingested row (all ingested rows use MEASUREMENT_DATE = 2024-03-15).
-    const ZERO_ROW_DATE = '2099-12-31'; // far-future date, guaranteed unique
     const [stemRows] = await connection.query<RowDataPacket[]>(
       `SELECT s.StemGUID
        FROM stems s
-       INNER JOIN trees t ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
        WHERE s.CensusID = ?
+       ORDER BY s.StemGUID
        LIMIT 1`,
       [censusID]
     );
+    expect(stemRows.length).toBeGreaterThan(0);
+    const isolatedStemGUID = stemRows[0].StemGUID;
 
-    // Only run the zero-fixup subtest when we have at least one resolved stem.
-    let zeroFixupID: number | null = null;
-    if (stemRows.length > 0) {
-      const stemGUID = stemRows[0].StemGUID;
-      const [insertResult] = await connection.query<any>(
-        `INSERT INTO coremeasurements (CensusID, StemGUID, MeasuredDBH, MeasuredHOM, MeasurementDate, IsValidated)
-         VALUES (?, ?, 0, 0, ?, FALSE)`,
-        [censusID, stemGUID, ZERO_ROW_DATE]
-      );
-      zeroFixupID = Number(insertResult.insertId);
-      console.log(`[happy-path] Inserted zero-DBH/HOM row CoreMeasurementID=${zeroFixupID} stemGUID=${stemGUID} date=${ZERO_ROW_DATE}`);
-    }
+    // Remove the ingested measurement for this stem so it has no prior row in
+    // the census. This prevents the TreeTag+StemTag dedup from treating our
+    // zero row as the duplicate (the ingested row would be the lower-ID survivor
+    // and our zero row the one removed).
+    await connection.query(`DELETE FROM coremeasurements WHERE CensusID = ? AND StemGUID = ?`, [censusID, isolatedStemGUID]);
+
+    const [insertResult] = await connection.query<any>(
+      `INSERT INTO coremeasurements (CensusID, StemGUID, MeasuredDBH, MeasuredHOM, MeasurementDate, IsValidated)
+       VALUES (?, ?, 0, 0, ?, FALSE)`,
+      [censusID, isolatedStemGUID, ZERO_ROW_DATE]
+    );
+    const zeroRowID = Number(insertResult.insertId);
+    console.log(`[zero-fixup] Inserted sole zero-DBH/HOM row CoreMeasurementID=${zeroRowID} stemGUID=${isolatedStemGUID} date=${ZERO_ROW_DATE}`);
+
+    // 4 remaining ingested rows + 1 zero row
+    const beforeCount = await countCensusMeasurements();
+    expect(beforeCount).toBe(EXPECTED_CLEAN_ROW_COUNT);
+
+    await collapseCensus(connectionManager, { schema, censusID });
+
+    // The zero row is the ONLY measurement for its stem — no dedup can remove it.
+    const [fixupRows] = await connection.query<RowDataPacket[]>(`SELECT MeasuredDBH, MeasuredHOM FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+      zeroRowID
+    ]);
+    console.log(`[zero-fixup] Post-collapse row: ${JSON.stringify(fixupRows[0] ?? '(absent)')}`);
+    expect(fixupRows).toHaveLength(1);
+    expect(fixupRows[0].MeasuredDBH).toBeNull();
+    expect(fixupRows[0].MeasuredHOM).toBeNull();
+
+    // Total row count stays at EXPECTED_CLEAN_ROW_COUNT: 4 survivors + the zero row (now nullified).
+    const afterCount = await countCensusMeasurements();
+    expect(afterCount).toBe(EXPECTED_CLEAN_ROW_COUNT);
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // 1b. TreeTag+StemTag dedup strict
+  //
+  // Ingest the 5 fixture rows normally. Then insert a second coremeasurements
+  // row for one of those stems using a DIFFERENT MeasurementDate, so that the
+  // StemGUID+Date dedup pass does NOT remove it. The TreeTag+StemTag dedup pass
+  // must then remove the higher-ID row (our injected duplicate), keep the
+  // lower-ID original, and log a COLLAPSER_DEDUPLICATION alert whose message
+  // contains the marker text 'same TreeTag+StemTag in census'.
+  // -------------------------------------------------------------------------
+
+  it('TreeTag+StemTag dedup: injected same-tag duplicate (different date) is removed with a COLLAPSER_DEDUPLICATION alert', async () => {
+    await stageAndIngestFixtureRows();
+
+    // Pick the lowest-ID ingested measurement so we know which CoreMeasurementID
+    // will survive (the procedure keeps the lowest ID per TreeTag+StemTag).
+    const [existingRows] = await connection.query<RowDataPacket[]>(
+      `SELECT cm.CoreMeasurementID, cm.StemGUID, cm.MeasurementDate, t.TreeTag, s.StemTag
+       FROM coremeasurements cm
+       INNER JOIN stems s ON cm.StemGUID = s.StemGUID AND s.CensusID = cm.CensusID
+       INNER JOIN trees t ON s.TreeID = t.TreeID AND t.CensusID = cm.CensusID
+       WHERE cm.CensusID = ? AND cm.StemGUID IS NOT NULL
+       ORDER BY cm.CoreMeasurementID
+       LIMIT 1`,
+      [censusID]
+    );
+    expect(existingRows.length).toBe(1);
+
+    const { CoreMeasurementID: survivorID, StemGUID: targetStemGUID, TreeTag: targetTreeTag, StemTag: targetStemTag } = existingRows[0];
+    console.log(`[tag-dedup] Target: CoreMeasurementID=${survivorID} TreeTag=${targetTreeTag} StemTag=${targetStemTag} StemGUID=${targetStemGUID}`);
+
+    // Insert a duplicate that shares the same StemGUID (and therefore same
+    // TreeTag+StemTag) but uses a different date, bypassing the StemGUID+Date
+    // dedup partition. The higher CoreMeasurementID marks it as the duplicate.
+    const DUPLICATE_DATE = '2025-06-01';
+    const [insertResult] = await connection.query<any>(
+      `INSERT INTO coremeasurements (CensusID, StemGUID, MeasuredDBH, MeasuredHOM, MeasurementDate, IsValidated)
+       VALUES (?, ?, 12.0, 1.3, ?, FALSE)`,
+      [censusID, targetStemGUID, DUPLICATE_DATE]
+    );
+    const duplicateID = Number(insertResult.insertId);
+    console.log(`[tag-dedup] Inserted duplicate CoreMeasurementID=${duplicateID} date=${DUPLICATE_DATE}`);
+
+    // Verify the duplicate has a higher ID than the survivor so the partition
+    // keeps the right row (this is guaranteed by AUTO_INCREMENT ordering, but
+    // assert explicitly for debuggability).
+    expect(duplicateID).toBeGreaterThan(Number(survivorID));
+
+    const beforeCount = await countCensusMeasurements();
+    expect(beforeCount).toBe(EXPECTED_CLEAN_ROW_COUNT + 1);
 
     await collapseCensus(connectionManager, { schema, censusID });
 
     const afterCount = await countCensusMeasurements();
-    console.log(`[happy-path] After collapse: ${afterCount} resolved rows`);
+    console.log(`[tag-dedup] After collapse: ${afterCount} rows`);
+    // Duplicate must be removed — back to the clean count.
+    expect(afterCount).toBe(EXPECTED_CLEAN_ROW_COUNT);
 
-    if (zeroFixupID !== null) {
-      // The extra row uses a unique date and a different tree's stem — it cannot
-      // collide on (StemGUID+Date). However the collapser also deduplicates by
-      // (TreeTag+StemTag): if the injected stem already has a measurement in the
-      // census it will be removed as a TreeTag+StemTag duplicate, otherwise it
-      // survives with NULL DBH/HOM.
-      const [fixupRows] = await connection.query<RowDataPacket[]>(`SELECT MeasuredDBH, MeasuredHOM FROM coremeasurements WHERE CoreMeasurementID = ?`, [
-        zeroFixupID
-      ]);
-      if (fixupRows.length > 0) {
-        // Survived — the zero→NULL fixup must have applied.
-        console.log(`[happy-path] Zero-fixup row survived: DBH=${fixupRows[0].MeasuredDBH} HOM=${fixupRows[0].MeasuredHOM}`);
-        expect(fixupRows[0].MeasuredDBH).toBeNull();
-        expect(fixupRows[0].MeasuredHOM).toBeNull();
-        // With the extra row surviving, total should be EXPECTED+1.
-        expect(afterCount).toBe(EXPECTED_CLEAN_ROW_COUNT + 1);
-      } else {
-        // Deduped as a TreeTag+StemTag duplicate — back to the clean row count.
-        console.log(`[happy-path] Zero-fixup row deduped away (TreeTag+StemTag collision)`);
-        expect(afterCount).toBe(EXPECTED_CLEAN_ROW_COUNT);
-      }
-    } else {
-      // No extra row was inserted; only the 5 clean rows exist.
-      expect(afterCount).toBe(EXPECTED_CLEAN_ROW_COUNT);
-    }
+    // Original (lower-ID) row must survive; injected (higher-ID) row must be gone.
+    const [survivorCheck] = await connection.query<RowDataPacket[]>(`SELECT CoreMeasurementID FROM coremeasurements WHERE CoreMeasurementID = ?`, [survivorID]);
+    const [duplicateCheck] = await connection.query<RowDataPacket[]>(`SELECT CoreMeasurementID FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+      duplicateID
+    ]);
+    console.log(`[tag-dedup] Survivor present: ${survivorCheck.length === 1}, Duplicate removed: ${duplicateCheck.length === 0}`);
+    expect(survivorCheck).toHaveLength(1);
+    expect(duplicateCheck).toHaveLength(0);
+
+    // A COLLAPSER_DEDUPLICATION alert with the TreeTag+StemTag marker must exist.
+    const alerts = await fetchIntegrityAlerts();
+    console.log(`[tag-dedup] Integrity alerts: ${JSON.stringify(alerts)}`);
+    const tagDedupAlerts = alerts.filter(a => a.type === 'COLLAPSER_DEDUPLICATION' && a.message.includes('same TreeTag+StemTag in census'));
+    expect(tagDedupAlerts.length).toBeGreaterThan(0);
+    expect(tagDedupAlerts[0].failedRecords).toBe(1);
   }, 60000);
 
   // -------------------------------------------------------------------------
