@@ -35,6 +35,7 @@ import { abortChunkProcessingAfterPermanentUploadFailure, shouldTimeoutPausedPar
 import { generateShortBatchID } from '@/config/utils';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 import { chooseEffectiveCsvMapping, type CsvMappingRejectionCode } from '@/lib/column-mapping/mapping';
+import type { ColumnMapping } from '@/lib/column-mapping/types';
 import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
 import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, planColumnCountMatches, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
 import { aliasesFor, legacyCsvHeaderKey } from '@/lib/column-mapping/fields';
@@ -520,7 +521,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   }, [uploadForm, processed, completedChunks, processedChunks, verificationStep, uploaded, totalChunks, totalBatches, isVerifying, totalVerificationSteps]);
 
   const uploadToSql = useCallback(
-    async (fileData: FileCollectionRowSet, fileName: string, batchID?: string, _retryCount = 0) => {
+    async (
+      fileData: FileCollectionRowSet | null,
+      fileName: string,
+      batchID?: string,
+      rawPayload?: { rawRows: FileRow[]; csvHeaders: string[]; mapping: ColumnMapping | null; delimiter: string },
+      _retryCount = 0
+    ) => {
       if (!isMountedRef.current) {
         throw createAbortError(`Upload cancelled before starting ${fileName}`);
       }
@@ -548,18 +555,36 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 'Content-Type': 'application/json',
                 'x-upload-session-id': getRequiredUploadSessionId()
               },
-              body: JSON.stringify({
-                schema,
-                formType: uploadForm,
-                sourceFormat: sourceFormat ?? SourceFormat.csv,
-                uploadMode,
-                fileName,
-                plot: currentPlot,
-                census: currentCensus,
-                user: session?.user?.name ?? null,
-                fileRowSet: fileData[fileName] ?? {},
-                ...(batchID ? { batchID } : {})
-              })
+              body: JSON.stringify(
+                rawPayload
+                  ? {
+                      schema,
+                      formType: uploadForm,
+                      sourceFormat: sourceFormat ?? SourceFormat.csv,
+                      uploadMode,
+                      fileName,
+                      plot: currentPlot,
+                      census: currentCensus,
+                      user: session?.user?.name ?? null,
+                      rawRows: rawPayload.rawRows,
+                      csvHeaders: rawPayload.csvHeaders,
+                      mapping: rawPayload.mapping,
+                      delimiter: rawPayload.delimiter,
+                      ...(batchID ? { batchID } : {})
+                    }
+                  : {
+                      schema,
+                      formType: uploadForm,
+                      sourceFormat: sourceFormat ?? SourceFormat.csv,
+                      uploadMode,
+                      fileName,
+                      plot: currentPlot,
+                      census: currentCensus,
+                      user: session?.user?.name ?? null,
+                      fileRowSet: fileData?.[fileName] ?? {},
+                      ...(batchID ? { batchID } : {})
+                    }
+              )
             },
             300000
           ); // 5 minute timeout for large batches
@@ -844,6 +869,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       // through lib/column-mapping/resolution (seeded mapping when the user confirmed none). The
       // legacy fallback (legacyCsvHeaderKey) shares the single CSV_ALIASES source of truth.
       const mappingFlowActive = mappingRequired && csvHeaders !== null && csvHeaders.length > 0;
+      // When the mapping flow is active the server is the single authority over how columns are
+      // keyed: the client ships raw rows and the server resolves/keys/validates them. Legacy
+      // (non-measurements / revisions) uploads keep keying locally below.
+      const serverResolves = mappingFlowActive;
       const headerPlan = mappingFlowActive
         ? (() => {
             const chosen = chooseEffectiveCsvMapping(columnMappings?.[file.name], csvHeaders!);
@@ -859,24 +888,32 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             return resolveHeaders(csvHeaders!, chosen.mapping, aliasesFor(SourceFormat.csv), CSV_RESOLVE_OPTIONS);
           })()
         : null;
-      const transformHeader = headerPlan ? transformHeaderFromPlan(headerPlan) : legacyCsvHeaderKey;
+      // On the server-resolved path we send raw headers + raw string values so the server is
+      // authoritative over keying; Papa treats `undefined` transforms as identity.
+      const transformHeader = serverResolves ? undefined : headerPlan ? transformHeaderFromPlan(headerPlan) : legacyCsvHeaderKey;
 
       // Per-cell transform delegates to the shared pure function. The shared function returns the
       // original string when a measurement date fails to parse; detect that here to preserve the
       // invalid-date diagnostics the inline transform used to record.
-      const transform = (value: string, field: string) => {
-        const transformed = transformMeasurementValue(value, field, uploadForm as FormType) as string;
-        if (uploadForm === FormType.measurements && field === 'date' && transformed === value && value !== 'NA' && value !== 'NULL' && value !== '') {
-          parsingDiagnostics.invalidDateCount += 1;
-          if (parsingDiagnostics.invalidDateSamples.size < 3) {
-            parsingDiagnostics.invalidDateSamples.add(value);
-          }
-        }
-        return transformed;
-      };
+      const transform = serverResolves
+        ? undefined
+        : (value: string, field: string) => {
+            const transformed = transformMeasurementValue(value, field, uploadForm as FormType) as string;
+            if (uploadForm === FormType.measurements && field === 'date' && transformed === value && value !== 'NA' && value !== 'NULL' && value !== '') {
+              parsingDiagnostics.invalidDateCount += 1;
+              if (parsingDiagnostics.invalidDateSamples.size < 3) {
+                parsingDiagnostics.invalidDateSamples.add(value);
+              }
+            }
+            return transformed;
+          };
 
       let totalRows = 0;
       let actualChunkCount = 0;
+      // Server-resolved path bookkeeping: the server returns the rows it rejected, so the client
+      // tracks that count for row-reconciliation instead of computing invalid rows locally.
+      let serverFailingRowsCount = 0;
+      let serverCsvHeaders: string[] = csvHeaders ?? [];
       let firstChunkUploadError: Error | null = null;
       let chunkProcessingError: Error | null = null;
       const chunkTasks = new Set<Promise<void>>();
@@ -894,7 +931,20 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           chunk(results: ParseResult<FileRow>, parser) {
             actualChunkCount += 1;
             totalRows += results.data.length;
-            if (headerPlan && actualChunkCount === 1 && Array.isArray(results.meta.fields) && !planColumnCountMatches(headerPlan, results.meta.fields.length)) {
+            if (serverResolves && actualChunkCount === 1) {
+              // Capture the parsed header row once so every chunk ships the same authoritative
+              // header list to the server. Fall back to the up-front extracted headers.
+              serverCsvHeaders = Array.isArray(results.meta.fields) ? results.meta.fields : (csvHeaders ?? []);
+            }
+            // The client-side divergence guard only ever applied to the mapping flow, which is now
+            // server-resolved; the server enforces the same column-count contract and returns 422.
+            if (
+              !serverResolves &&
+              headerPlan &&
+              actualChunkCount === 1 &&
+              Array.isArray(results.meta.fields) &&
+              !planColumnCountMatches(headerPlan, results.meta.fields.length)
+            ) {
               const divergence = new Error(
                 `Header plan misalignment for ${file.name}: mapping plan has ${headerPlan.outputKeys.length} columns but papaparse parsed ${results.meta.fields.length}. ` +
                   `The file changed between preview and upload, or its header row is malformed. Re-review the column mapping before uploading.`
@@ -941,45 +991,57 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   parser.resume();
                 }
 
-                const validRows: FileRow[] = [];
-                results.data.forEach(rawRow => {
-                  const row = headerPlan ? collapseRowWithPlan(rawRow, headerPlan) : rawRow;
-                  const verdict = validateMeasurementRow(row, requiredHeaders, delimiter, uploadForm as FormType);
-                  if (verdict.hasExtraColumns) {
-                    // Extra columns are common when re-uploading exported data with reference
-                    // columns like stemID, treeID, or errors. Track once per file, not per row.
-                    parsingDiagnostics.extraColumnRows += 1;
-                    if (!parsingDiagnostics.extraColumnSample) {
-                      parsingDiagnostics.extraColumnSample = JSON.stringify(row['__parsed_extra']);
+                // Server-resolved (measurements mapping) path: ship the chunk's raw rows untouched
+                // and let the server key + validate them. Legacy path keys + validates locally.
+                let fileCollectionRowSet: FileCollectionRowSet | null = null;
+                if (!serverResolves) {
+                  const validRows: FileRow[] = [];
+                  results.data.forEach(rawRow => {
+                    const row = headerPlan ? collapseRowWithPlan(rawRow, headerPlan) : rawRow;
+                    const verdict = validateMeasurementRow(row, requiredHeaders, delimiter, uploadForm as FormType);
+                    if (verdict.hasExtraColumns) {
+                      // Extra columns are common when re-uploading exported data with reference
+                      // columns like stemID, treeID, or errors. Track once per file, not per row.
+                      parsingDiagnostics.extraColumnRows += 1;
+                      if (!parsingDiagnostics.extraColumnSample) {
+                        parsingDiagnostics.extraColumnSample = JSON.stringify(row['__parsed_extra']);
+                      }
                     }
-                  }
-                  if (verdict.valid) {
-                    validRows.push(row);
-                  } else {
-                    parsingInvalidRows.push({
-                      ...row,
-                      failureReason: verdict.failureReason ?? 'Unknown error',
-                      ...(verdict.hasExtraColumns ? { excessData: row['__parsed_extra'] } : {})
-                    });
-                  }
-                });
+                    if (verdict.valid) {
+                      validRows.push(row);
+                    } else {
+                      parsingInvalidRows.push({
+                        ...row,
+                        failureReason: verdict.failureReason ?? 'Unknown error',
+                        ...(verdict.hasExtraColumns ? { excessData: row['__parsed_extra'] } : {})
+                      });
+                    }
+                  });
 
-                if (validRows.length === 0) {
-                  // Increment completedChunks even if there is nothing to upload.
+                  if (validRows.length === 0) {
+                    // Increment completedChunks even if there is nothing to upload.
+                    setCompletedChunks(prev => prev + 1);
+                    parser.resume();
+                    return;
+                  }
+
+                  const fileRowSet: FileRowSet = {};
+                  validRows.forEach(row => {
+                    const rowId = `row-${v4()}`;
+                    fileRowSet[rowId] = row;
+                  });
+
+                  fileCollectionRowSet = {
+                    [file.name]: fileRowSet
+                  };
+                } else if (results.data.length === 0) {
+                  // Nothing parsed in this chunk; mirror the legacy empty-chunk short-circuit.
                   setCompletedChunks(prev => prev + 1);
                   parser.resume();
                   return;
                 }
 
-                const fileRowSet: FileRowSet = {};
-                validRows.forEach(row => {
-                  const rowId = `row-${v4()}`;
-                  fileRowSet[rowId] = row;
-                });
-
-                const fileCollectionRowSet: FileCollectionRowSet = {
-                  [file.name]: fileRowSet
-                };
+                const rawChunkRows = results.data;
 
                 queue.add(async () => {
                   if (!isMountedRef.current) {
@@ -991,7 +1053,20 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   }
 
                   try {
-                    await uploadToSql(fileCollectionRowSet, file.name, fileBatchID);
+                    if (serverResolves) {
+                      const data = await uploadToSql(null, file.name, fileBatchID, {
+                        rawRows: rawChunkRows,
+                        csvHeaders: serverCsvHeaders,
+                        mapping: columnMappings?.[file.name] ?? null,
+                        delimiter
+                      });
+                      if (data?.failingRows?.length) {
+                        serverFailingRowsCount += data.failingRows.length;
+                        await pushErrorRowsToFailedMeasurements(data.failingRows, file.name);
+                      }
+                    } else {
+                      await uploadToSql(fileCollectionRowSet, file.name, fileBatchID);
+                    }
                   } catch (error: unknown) {
                     const errorObj = error instanceof Error ? error : new Error(String(error));
                     if (errorObj.name === 'AbortError') {
@@ -1098,15 +1173,18 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             // Store expected row count for end-to-end verification
             expectedRowCounts.current.set(file.name, totalRows);
 
-            // Enhanced processing summary
-            const validRowsCount = totalRows - parsingInvalidRows.length;
+            // Enhanced processing summary. On the server-resolved path invalid rows are the ones
+            // the server rejected (returned in failingRows); on the legacy path they are the rows
+            // the client itself rejected during validation.
+            const invalidCount = serverResolves ? serverFailingRowsCount : parsingInvalidRows.length;
+            const validRowsCount = totalRows - invalidCount;
             expectedTemporaryRowCounts.current.set(file.name, validRowsCount);
             const processingEfficiency = totalRows > 0 ? ((validRowsCount / totalRows) * 100).toFixed(1) : '0';
 
             ailogger.info(`Enhanced CSV processing completed for ${file.name}:`);
             ailogger.info(`  • Total rows processed: ${totalRows} (stored for verification)`);
             ailogger.info(`  • Valid rows: ${validRowsCount}`);
-            ailogger.info(`  • Invalid/rejected rows: ${parsingInvalidRows.length}`);
+            ailogger.info(`  • Invalid/rejected rows: ${invalidCount}`);
             ailogger.info(`  • Processing efficiency: ${processingEfficiency}%`);
             ailogger.info(`  • Header mapping: Enhanced (order-independent)`);
             ailogger.info(`  • Date format support: Multi-format enabled`);
