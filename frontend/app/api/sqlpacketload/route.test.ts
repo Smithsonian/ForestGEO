@@ -3,6 +3,9 @@ import { POST } from './route';
 import ConnectionManager from '@/config/connectionmanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests, TEMP_MEASUREMENT_INSERT_BATCH_SIZE } from '@/lib/ingestion/temporary-measurements';
+import { SourceFormat } from '@/config/macros/formdetails';
+import { headerSignature } from '@/lib/column-mapping/mapping';
+import type { ColumnMapping } from '@/lib/column-mapping/types';
 
 const { getCookieMock, authMock, handleUpsertMock } = vi.hoisted(() => ({
   getCookieMock: vi.fn(),
@@ -958,5 +961,185 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
     immediateSetTimeout.mockRestore();
     global.setTimeout = originalSetTimeout;
+  });
+});
+
+describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
+  let mockConnectionManager: any;
+
+  // A complete, trusted CSV mapping that renames the canonical `lx` field to a source column `MyX`.
+  // Every required field is named, so chooseEffectiveCsvMapping trusts it. The literal `lx` header is
+  // intentionally left unclaimed so the server-side keying (not the raw header) is what produces `lx`.
+  function lxRenamedMapping(csvHeaders: string[]): ColumnMapping {
+    const field = (canonicalField: string, sourceColumns: string[]): ColumnMapping['fields'][number] => ({ canonicalField, sourceColumns, scope: 'file' });
+    return {
+      version: 1,
+      format: SourceFormat.csv,
+      fields: [
+        field('tag', ['tag']),
+        field('spcode', ['spcode']),
+        field('quadrat', ['quadrat']),
+        field('lx', ['MyX']),
+        field('ly', ['ly']),
+        field('date', ['date'])
+      ],
+      headerSignature: headerSignature(csvHeaders)
+    };
+  }
+
+  const RESOLUTION_CSV_HEADERS = ['MyX', 'tag', 'spcode', 'quadrat', 'ly', 'date'];
+
+  function makeRawRowsRequest(rawRows: Record<string, string>[], overrides: Partial<Record<string, unknown>> = {}) {
+    const body: Record<string, unknown> = {
+      schema: 'forestgeo_testing',
+      formType: 'measurements',
+      fileName: TEST_FILE_NAME,
+      plot: { plotID: TEST_PLOT_ID },
+      census: { dateRanges: [{ censusID: TEST_CENSUS_ID }] },
+      user: 'Test User',
+      batchID: TEST_BATCH_ID,
+      // Deliberately empty: the rawRows path must NOT trust a client-keyed fileRowSet.
+      fileRowSet: {},
+      rawRows,
+      csvHeaders: RESOLUTION_CSV_HEADERS,
+      mapping: lxRenamedMapping(RESOLUTION_CSV_HEADERS),
+      delimiter: ',',
+      ...overrides
+    };
+
+    const req = new Request('http://localhost/api/sqlpacketload', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-upload-session-id': TEST_SESSION_ID
+      },
+      body: JSON.stringify(body)
+    }) as any;
+    req.json = async () => body;
+    req.nextUrl = new URL('http://localhost/api/sqlpacketload');
+    return req;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConnectionManager = ConnectionManager.getInstance();
+    vi.mocked(insertIngestionFailureRows).mockResolvedValue([]);
+    handleUpsertMock.mockResolvedValue({ id: 1, operation: 'inserted' });
+    authMock.mockResolvedValue({ user: { id: 'user-1' } });
+    getCookieMock.mockResolvedValue(undefined);
+    requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
+    resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+    mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
+    mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
+    mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
+  });
+
+  it('rejects a malformed mapping at the wire boundary when rawRows are present', async () => {
+    const rawRow = { MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17' };
+
+    // Scope validation runs before the resolution stage; provide the two scope queries so we reach it.
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }]);
+
+    const res = (await POST(makeRawRowsRequest([rawRow], { mapping: { version: 99 } })))!;
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      responseMessage: 'Invalid mapping payload',
+      fileName: TEST_FILE_NAME
+    });
+    // The malformed mapping must be rejected BEFORE any transaction work.
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('server-resolves raw rows into canonically-keyed rows and inserts them (not the raw header)', async () => {
+    // 'lx' is sourced from 'MyX'; the server must key the inserted row as `lx`, never `MyX`.
+    const rawRow = { MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17' };
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(undefined);
+
+    const res = (await POST(makeRawRowsRequest([rawRow])))!;
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.insertedCount).toBe(1);
+
+    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
+    );
+    expect(insertCall).toBeDefined();
+    // The INSERT params must carry the canonical lx value (12.5) sourced from MyX, never the raw header.
+    expect(insertCall[1]).toContain(12.5);
+    expect(insertCall[1]).not.toContain('MyX');
+  });
+
+  it('surfaces an invalid raw row in failingRows while a valid sibling is still inserted', async () => {
+    const validRow = { MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17' };
+    // Missing a required field (tag empty) -> resolution classifies this as an invalid row.
+    const invalidRow = { MyX: '13.0', tag: '', spcode: 'def', quadrat: 'q2', ly: '4.0', date: '2023-05-18' };
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(undefined);
+
+    const res = (await POST(makeRawRowsRequest([validRow, invalidRow])))!;
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Only the valid row reaches the insert path.
+    expect(body.insertedCount).toBe(1);
+    // The invalid row is surfaced to the client as a failing row, the valid one is not.
+    expect(body.failingRows).toHaveLength(1);
+    // Empty tag collapses to null via the transform, so identify the failing row by its species code.
+    const failingSpcodes = body.failingRows.map((row: any) => row.spcode);
+    expect(failingSpcodes).toContain('def');
+    expect(failingSpcodes).not.toContain('abc');
+    expect(body.failingRows[0].failureReason).toMatch(/Missing required fields/i);
+  });
+
+  it('leaves the legacy fileRowSet path byte-identical when rawRows is absent', async () => {
+    // Same shape as the existing happy-path test; no rawRows -> the new stage must not run.
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(undefined);
+
+    const res = (await POST(makeMeasurementRequest()))!;
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.insertedCount).toBe(1);
+    expect(body.failingRows).toEqual([]);
+
+    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
+    );
+    expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
   });
 });

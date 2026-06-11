@@ -1,6 +1,6 @@
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
-import { FileRow, FileRowSet, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
+import { FileRow, FileRowSet, FormType, normalizeSourceFormat, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
 import { NextRequest, NextResponse } from 'next/server';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
@@ -19,6 +19,8 @@ import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
 import { FamilyResult, GenusResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { RoleResult } from '@/config/sqlrdsdefinitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
+import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
+import { resolveMeasurementChunk } from '@/lib/column-mapping/measurement-rows';
 import {
   buildDroppedMeasurementFailureReason,
   cleanupPreviousFileUploads,
@@ -742,13 +744,19 @@ export async function POST(request: NextRequest) {
   const user: string = body.user;
   const fileRowSet: FileRowSet = body.fileRowSet ?? {};
   const fileName: string = body.fileName;
+  // Optional RAW-rows path (#6, server half): when present, the server re-resolves/keys/validates
+  // CSV headers via the shared pipeline instead of trusting client-computed keys in fileRowSet.
+  const rawRows: Record<string, string>[] | undefined = Array.isArray(body.rawRows) ? body.rawRows : undefined;
+  const csvHeaders: string[] = Array.isArray(body.csvHeaders) ? body.csvHeaders : [];
+  const clientMapping: unknown = body.mapping;
+  const csvDelimiter: string = typeof body.delimiter === 'string' && body.delimiter.length > 0 ? body.delimiter : ',';
   let transactionID: string | undefined;
   const failingRows: Set<FileRow> = new Set<FileRow>();
   const connectionManager = ConnectionManager.getInstance();
   const maxRetries = 3;
   let retryCount = 0;
   if (formType === 'measurements') {
-    const chunkRows = Object.values(fileRowSet ?? {});
+    let chunkRows = Object.values(fileRowSet ?? {});
     const batchID = body.batchID || generateShortBatchID();
     const sessionId = request.headers.get('x-upload-session-id');
     let scopeValidation: Awaited<ReturnType<typeof validateMeasurementUploadScope>>;
@@ -796,8 +804,38 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
+    // SERVER-RESOLUTION STAGE (#6): when the client sends RAW rows, the server is authoritative
+    // over CSV header resolution. We re-key/validate via the shared pipeline rather than trusting
+    // client-computed keys. Gated on rawRows + non-revisions so the legacy fileRowSet path is byte
+    // identical. Revisions uploads keep their existing measurementID-matching path untouched.
+    if (rawRows && uploadMode !== UploadMode.REVISIONS) {
+      // Reject a malformed/tampered mapping at the wire boundary (parity with the arcgis preflight route).
+      if (clientMapping !== undefined && clientMapping !== null && !isColumnMappingShape(clientMapping)) {
+        return new NextResponse(JSON.stringify({ responseMessage: 'Invalid mapping payload', fileName, batchID }), { status: HTTPResponses.INVALID_REQUEST });
+      }
+      const requiredHeaders = RequiredTableHeadersByFormType[FormType.measurements] ?? [];
+      const resolved = resolveMeasurementChunk(rawRows, csvHeaders.length, {
+        formType: FormType.measurements,
+        uploadMode: 'other',
+        delimiter: csvDelimiter,
+        requiredHeaders,
+        csvHeaders,
+        storedMapping: isColumnMappingShape(clientMapping) ? clientMapping : undefined
+      });
+      if (resolved.columnCountMismatch) {
+        return new NextResponse(JSON.stringify({ responseMessage: 'Header plan misalignment for the uploaded file', fileName, batchID }), {
+          status: HTTPResponses.UNPROCESSABLE_ENTITY
+        });
+      }
+      chunkRows = resolved.validRows;
+      for (const invalid of resolved.invalidRows) failingRows.add(invalid);
+    }
+
     const rowCount = chunkRows.length;
-    const contentHash = hashChunkContent(fileRowSet);
+    // On the rawRows path fileRowSet is `{}`, which would make the hash constant across distinct
+    // chunks and break idempotency. Hash the rows actually being inserted instead.
+    const effectiveRowSet: FileRowSet = rawRows ? Object.fromEntries(chunkRows.map((row, index) => [`row-${index}`, row] as const)) : fileRowSet;
+    const contentHash = hashChunkContent(effectiveRowSet);
     const idempotencyKey = generateIdempotencyKey(fileName, resolvedPlotID, resolvedCensusID, rowCount, contentHash);
     await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, schema);
 
