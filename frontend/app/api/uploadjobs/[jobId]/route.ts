@@ -3,7 +3,7 @@ import { auth } from '@/auth';
 import { requireSession, getSessionUserId } from '@/lib/auth-helpers';
 import { HTTPResponses } from '@/config/macros';
 import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
-import { cancelBackgroundJob, getBackgroundJobWithDetails } from '@/lib/background-jobs/repository';
+import { cancelBackgroundJob, getBackgroundJobWithDetails, requestBackgroundJobCancel } from '@/lib/background-jobs/repository';
 import { parseJobID, requireJobAccess } from '@/lib/background-jobs/route-helpers';
 
 export const runtime = 'nodejs';
@@ -72,10 +72,20 @@ export async function POST(
   }
 
   const userID = getSessionUserId(session!) ?? 'unknown';
-  const cancelled = await cancelBackgroundJob(getPoolMonitorInstance().pool, parsedJobID, userID);
-  if (!cancelled) {
-    return NextResponse.json({ error: 'Upload job cannot be cancelled from its current state' }, { status: HTTPResponses.CONFLICT });
+  const catalogPool = getPoolMonitorInstance().pool;
+
+  // queued/waiting_retry jobs have no worker and are cancelled directly.
+  const cancelled = await cancelBackgroundJob(catalogPool, parsedJobID, userID);
+  if (cancelled) {
+    return NextResponse.json({ success: true }, { status: HTTPResponses.OK });
   }
 
-  return NextResponse.json({ success: true }, { status: HTTPResponses.OK });
+  // Running jobs flip to cancel_requested; the owning worker finalizes the
+  // terminal 'cancelled' state cooperatively at its next stage boundary.
+  const cancelPending = await requestBackgroundJobCancel(catalogPool, parsedJobID, userID);
+  if (cancelPending) {
+    return NextResponse.json({ success: true, pending: true }, { status: HTTPResponses.OK });
+  }
+
+  return NextResponse.json({ error: 'Upload job cannot be cancelled from its current state' }, { status: HTTPResponses.CONFLICT });
 }

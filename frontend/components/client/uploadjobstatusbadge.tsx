@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Box, Chip, LinearProgress, Modal, ModalClose, Sheet, Stack, Typography } from '@mui/joy';
+import { Box, Button, Chip, LinearProgress, Modal, ModalClose, Sheet, Stack, Typography } from '@mui/joy';
 import CloudUploadOutlined from '@mui/icons-material/CloudUploadOutlined';
 import ErrorOutline from '@mui/icons-material/ErrorOutline';
 import ailogger from '@/ailogger';
 
 const JOB_POLL_INTERVAL_MS = 10_000;
+
+const CANCELLABLE_JOB_STATUSES = new Set(['queued', 'running', 'waiting_retry']);
 
 interface UploadJobSummary {
   jobID: number;
@@ -26,10 +28,48 @@ function formatPhase(phase: string): string {
     .join(' ');
 }
 
+/** Status-derived label that overrides the phase text when set. */
+function describeJobStatus(status: string): string | null {
+  if (status === 'cancel_requested') return 'Cancelling…';
+  if (status === 'waiting_retry') return 'Retrying soon';
+  return null;
+}
+
 export default function UploadJobStatusBadge({ schema, plotID, censusID }: { schema?: string; plotID?: number; censusID?: number }) {
   const [jobs, setJobs] = useState<UploadJobSummary[]>([]);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [cancellingJobIDs, setCancellingJobIDs] = useState<Set<number>>(new Set());
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  async function handleCancelJob(jobID: number) {
+    setCancellingJobIDs(prev => new Set(prev).add(jobID));
+    try {
+      const response = await fetch(`/api/uploadjobs/${jobID}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel' })
+      });
+      if (!response.ok) {
+        ailogger.warn(`[UploadJobStatusBadge] Cancel request for job ${jobID} returned HTTP ${response.status}`);
+        return;
+      }
+      const payload = (await response.json()) as { success?: boolean; pending?: boolean };
+      // pending=true means a running job flipped to cancel_requested and the
+      // worker will finalize it; otherwise the job is already cancelled and
+      // drops out of the active list immediately.
+      setJobs(prev =>
+        payload.pending ? prev.map(job => (job.jobID === jobID ? { ...job, status: 'cancel_requested' } : job)) : prev.filter(job => job.jobID !== jobID)
+      );
+    } catch (error) {
+      ailogger.warn('[UploadJobStatusBadge] Failed to cancel upload job:', error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      setCancellingJobIDs(prev => {
+        const next = new Set(prev);
+        next.delete(jobID);
+        return next;
+      });
+    }
+  }
 
   useEffect(() => {
     if (!schema || !plotID || !censusID) {
@@ -106,7 +146,7 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             {hasFailure ? <ErrorOutline fontSize="small" /> : <CloudUploadOutlined fontSize="small" />}
             <Typography level="body-sm" sx={{ fontWeight: 600, flex: 1 }}>
-              Upload job {primaryJob.jobID}: {formatPhase(primaryJob.phase)}
+              Upload job {primaryJob.jobID}: {describeJobStatus(primaryJob.status) ?? formatPhase(primaryJob.phase)}
             </Typography>
             <Chip variant="soft" color={color} size="sm">
               {jobs.length} active
@@ -147,7 +187,11 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
             {jobs.map(job => (
               <Stack key={job.jobID} spacing={0.75}>
                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Chip variant="soft" color={job.status === 'waiting_retry' ? 'warning' : hasFailure ? 'danger' : 'primary'} size="sm">
+                  <Chip
+                    variant="soft"
+                    color={job.status === 'waiting_retry' || job.status === 'cancel_requested' ? 'warning' : hasFailure ? 'danger' : 'primary'}
+                    size="sm"
+                  >
                     Job {job.jobID}
                   </Chip>
                   <Typography level="body-xs" color="neutral">
@@ -155,12 +199,25 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
                   </Typography>
                 </Stack>
                 <Typography level="body-xs" color="neutral">
-                  {formatPhase(job.phase)} - {job.totalFiles} file{job.totalFiles === 1 ? '' : 's'} - {job.processedRows} processed - {job.failedRows} failed
+                  {describeJobStatus(job.status) ?? formatPhase(job.phase)} - {job.totalFiles} file{job.totalFiles === 1 ? '' : 's'} - {job.processedRows}{' '}
+                  processed - {job.failedRows} failed
                 </Typography>
                 {job.lastError && (
                   <Typography level="body-xs" color="danger">
                     {job.lastError}
                   </Typography>
+                )}
+                {CANCELLABLE_JOB_STATUSES.has(job.status) && (
+                  <Button
+                    size="sm"
+                    variant="soft"
+                    color="danger"
+                    loading={cancellingJobIDs.has(job.jobID)}
+                    onClick={() => handleCancelJob(job.jobID)}
+                    sx={{ alignSelf: 'flex-start' }}
+                  >
+                    Cancel
+                  </Button>
                 )}
               </Stack>
             ))}

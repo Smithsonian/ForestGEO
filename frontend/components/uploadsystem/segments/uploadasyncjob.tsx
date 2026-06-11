@@ -29,6 +29,7 @@ interface UploadJobResponse {
     status: string;
     phase: string;
   };
+  accepted?: boolean;
   jobID?: number;
   error?: string;
   details?: string;
@@ -187,6 +188,8 @@ export default function UploadAsyncJob({
           })
         });
 
+        // The server responds 202 Accepted with { job, accepted: true } and
+        // kicks the worker immediately, so processing may already be running.
         const jobPayload = (await jobResponse.json().catch(() => ({}))) as UploadJobResponse;
         if (!jobResponse.ok || !jobPayload.job?.jobID) {
           throw new Error(jobPayload.error || jobPayload.details || `Failed to queue background upload job: HTTP ${jobResponse.status}`);
@@ -194,7 +197,7 @@ export default function UploadAsyncJob({
 
         setQueuedJobID(jobPayload.job.jobID);
         setProgress(100);
-        setCurrentStep('Background processing queued.');
+        setCurrentStep('Background processing accepted.');
         setIsDataUnsaved(false);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
@@ -235,7 +238,7 @@ export default function UploadAsyncJob({
       <Stack spacing={2.5} sx={{ width: '100%', maxWidth: 640, alignItems: 'stretch' }}>
         <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
           {queuedJobID ? <CheckCircleOutline color="success" /> : <CloudUploadOutlined color="primary" />}
-          <Typography level="h4">{queuedJobID ? 'Upload queued' : 'Starting background upload'}</Typography>
+          <Typography level="h4">{queuedJobID ? 'Upload accepted' : 'Starting background upload'}</Typography>
         </Stack>
 
         <LinearProgress determinate value={progress} aria-label="Async upload queueing progress" />
@@ -246,7 +249,7 @@ export default function UploadAsyncJob({
 
         {queuedJobID && (
           <Alert color="success" variant="soft">
-            Job {queuedJobID} is queued. You can close this dialog; processing will continue in the background.
+            Job {queuedJobID} was accepted and is processing in the background. You can close this dialog; progress is shown in the upload job badge.
           </Alert>
         )}
 

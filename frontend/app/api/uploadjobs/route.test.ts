@@ -5,11 +5,14 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   requireSession: vi.fn(() => null),
   getSessionUserId: vi.fn(() => 'mason@example.com'),
+  getSessionUserIds: vi.fn(() => ['mason@example.com', 'Mason']),
   isValidSchema: vi.fn(() => true),
   assertCanEditMeasurementScope: vi.fn(async () => undefined),
   getPoolMonitorInstance: vi.fn(() => ({ pool: 'catalog-pool' })),
   createUploadBackgroundJob: vi.fn(),
   listBackgroundJobs: vi.fn(),
+  isAsyncUploadEnabledFor: vi.fn(() => true),
+  runJobIfClaimable: vi.fn(async () => undefined),
   loggerError: vi.fn()
 }));
 
@@ -19,7 +22,8 @@ vi.mock('@/auth', () => ({
 
 vi.mock('@/lib/auth-helpers', () => ({
   requireSession: mocks.requireSession,
-  getSessionUserId: mocks.getSessionUserId
+  getSessionUserId: mocks.getSessionUserId,
+  getSessionUserIds: mocks.getSessionUserIds
 }));
 
 vi.mock('@/config/utils/sqlsecurity', () => ({
@@ -46,6 +50,14 @@ vi.mock('@/lib/background-jobs/repository', () => ({
   listBackgroundJobs: mocks.listBackgroundJobs
 }));
 
+vi.mock('@/lib/background-jobs/feature-gate', () => ({
+  isAsyncUploadEnabledFor: mocks.isAsyncUploadEnabledFor
+}));
+
+vi.mock('@/lib/background-jobs/worker', () => ({
+  runJobIfClaimable: mocks.runJobIfClaimable
+}));
+
 vi.mock('@/ailogger', () => ({
   default: {
     error: mocks.loggerError
@@ -59,6 +71,12 @@ const session = {
     userStatus: 'field crew',
     sites: [{ schemaName: 'forestgeo_testing' }]
   }
+};
+
+const VALID_COLUMN_MAPPING = {
+  version: 1,
+  format: 'csv',
+  fields: [{ canonicalField: 'tag', sourceColumns: ['Tag'] }]
 };
 
 function makeCreateBody(overrides: Record<string, unknown> = {}) {
@@ -84,6 +102,13 @@ function makeCreateBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeCreateRequest(body: Record<string, unknown>) {
+  return new Request('http://localhost/api/uploadjobs', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  }) as any;
+}
+
 describe('POST /api/uploadjobs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -95,23 +120,31 @@ describe('POST /api/uploadjobs', () => {
     });
   });
 
-  it('creates a job and returns 201 with enqueued: false', async () => {
-    const request = new Request('http://localhost/api/uploadjobs', {
-      method: 'POST',
-      body: JSON.stringify(makeCreateBody())
-    }) as any;
+  it('creates a job, kicks the worker, and returns 202 with accepted: true', async () => {
+    const response = await POST(
+      makeCreateRequest(
+        makeCreateBody({
+          payload: {
+            selectedDelimiters: { 'measurements.csv': ',' },
+            columnMappings: { 'measurements.csv': VALID_COLUMN_MAPPING }
+          }
+        })
+      )
+    );
 
-    const response = await POST(request);
-
-    expect(response.status).toBe(201);
-    await expect(response.json()).resolves.toMatchObject({
-      enqueued: false,
-      job: { jobID: 42 }
-    });
+    expect(response.status).toBe(202);
+    const body = await response.json();
+    expect(body).toMatchObject({ accepted: true, job: { jobID: 42 } });
+    expect(body).not.toHaveProperty('enqueued');
     expect(mocks.assertCanEditMeasurementScope).toHaveBeenCalledWith(expect.anything(), session, {
       schema: 'forestgeo_testing',
       plotID: 1,
       censusID: 2
+    });
+    expect(mocks.isAsyncUploadEnabledFor).toHaveBeenCalledWith({
+      schema: 'forestgeo_testing',
+      formType: 'measurements',
+      userIds: ['mason@example.com', 'Mason']
     });
     expect(mocks.createUploadBackgroundJob).toHaveBeenCalledWith(
       'catalog-pool',
@@ -123,20 +156,128 @@ describe('POST /api/uploadjobs', () => {
       }),
       'mason@example.com'
     );
+    expect(mocks.runJobIfClaimable).toHaveBeenCalledWith(42);
   });
 
   it('rejects invalid schemas before creating a job', async () => {
     mocks.isValidSchema.mockReturnValueOnce(false);
 
-    const request = new Request('http://localhost/api/uploadjobs', {
-      method: 'POST',
-      body: JSON.stringify(makeCreateBody({ schema: 'bad-schema' }))
-    }) as any;
-
-    const response = await POST(request);
+    const response = await POST(makeCreateRequest(makeCreateBody({ schema: 'bad-schema' })));
 
     expect(response.status).toBe(400);
     expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    expect(mocks.runJobIfClaimable).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown formType with a field-level issue', async () => {
+    const response = await POST(makeCreateRequest(makeCreateBody({ formType: 'bogus' })));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe('Validation failed');
+    expect(body.errors).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'formType' })]));
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown sourceFormat with a field-level issue', async () => {
+    const response = await POST(makeCreateRequest(makeCreateBody({ sourceFormat: 'xlsx' })));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.errors).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'sourceFormat' })]));
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unrecognized uploadMode', async () => {
+    const response = await POST(makeCreateRequest(makeCreateBody({ uploadMode: 'overwrite_everything' })));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.errors).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'uploadMode' })]));
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed column mapping value with the offending file in the field path', async () => {
+    const response = await POST(
+      makeCreateRequest(
+        makeCreateBody({
+          payload: { columnMappings: { 'measurements.csv': { version: 2, fields: 'not-an-array' } } }
+        })
+      )
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.errors).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'payload.columnMappings.measurements.csv' })]));
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unsupported delimiter selection', async () => {
+    const response = await POST(
+      makeCreateRequest(
+        makeCreateBody({
+          payload: { selectedDelimiters: { 'measurements.csv': '##' } }
+        })
+      )
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.errors).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'payload.selectedDelimiters.measurements.csv' })]));
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  it('rejects a formType/sourceFormat combination the worker does not support', async () => {
+    const response = await POST(makeCreateRequest(makeCreateBody({ formType: 'species', sourceFormat: 'csv' })));
+
+    expect(response.status).toBe(403);
+    const body = await response.json();
+    expect(body.error).toContain('Async uploads only support measurements');
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    expect(mocks.runJobIfClaimable).not.toHaveBeenCalled();
+  });
+
+  it('rejects job creation when the async upload feature gate is disabled', async () => {
+    mocks.isAsyncUploadEnabledFor.mockReturnValueOnce(false);
+
+    const response = await POST(makeCreateRequest(makeCreateBody()));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'Async uploads are not enabled for this form/site/user' });
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    expect(mocks.runJobIfClaimable).not.toHaveBeenCalled();
+  });
+
+  it('rejects arcgis_xlsx jobs that are missing the pre-flight import session', async () => {
+    const response = await POST(
+      makeCreateRequest(
+        makeCreateBody({
+          sourceFormat: 'arcgis_xlsx',
+          payload: { arcgisImportSession: null }
+        })
+      )
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.errors).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'payload.arcgisImportSession' })]));
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  it('accepts arcgis_xlsx jobs that carry a complete pre-flight import session', async () => {
+    const response = await POST(
+      makeCreateRequest(
+        makeCreateBody({
+          sourceFormat: 'arcgis_xlsx',
+          payload: {
+            arcgisImportSession: { importSessionId: 'import-1', fileName: 'survey.xlsx', rowCount: 100 }
+          }
+        })
+      )
+    );
+
+    expect(response.status).toBe(202);
+    expect(mocks.runJobIfClaimable).toHaveBeenCalledWith(42);
   });
 });
 

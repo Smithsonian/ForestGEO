@@ -304,6 +304,26 @@ export async function cancelBackgroundJob(catalogPool: Pool, jobID: number, canc
   return true;
 }
 
+/**
+ * Requests cancellation of a RUNNING job. The owning worker observes the
+ * cancel_requested status at its next stage boundary (or heartbeat), cleans
+ * non-completed batches, and writes the terminal 'cancelled' state itself.
+ * Returns false when the job is not running (use cancelBackgroundJob for
+ * queued/waiting_retry jobs, which have no worker to cooperate with).
+ */
+export async function requestBackgroundJobCancel(catalogPool: Pool, jobID: number, requestedBy: string): Promise<boolean> {
+  await ensureBackgroundJobCatalogTables(catalogPool);
+  const [result] = await catalogPool.query<ResultSetHeader>(
+    `UPDATE catalog.background_jobs
+     SET Status = 'cancel_requested'
+     WHERE JobID = ? AND Status = 'running'`,
+    [jobID]
+  );
+  if (result.affectedRows === 0) return false;
+  await addJobEvent(catalogPool, jobID, 'cancel_requested', 'Upload job cancellation requested', { requestedBy });
+  return true;
+}
+
 export async function setBackgroundJobStatus(
   catalogPool: Pool,
   jobID: number,

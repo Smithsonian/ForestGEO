@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
   getSessionUserId: vi.fn(() => 'mason@example.com'),
   getPoolMonitorInstance: vi.fn(() => ({ pool: 'catalog-pool' })),
   getBackgroundJobWithDetails: vi.fn(),
-  cancelBackgroundJob: vi.fn()
+  cancelBackgroundJob: vi.fn(),
+  requestBackgroundJobCancel: vi.fn()
 }));
 
 vi.mock('@/auth', () => ({
@@ -25,7 +26,8 @@ vi.mock('@/config/poolmonitorsingleton', () => ({
 
 vi.mock('@/lib/background-jobs/repository', () => ({
   getBackgroundJobWithDetails: mocks.getBackgroundJobWithDetails,
-  cancelBackgroundJob: mocks.cancelBackgroundJob
+  cancelBackgroundJob: mocks.cancelBackgroundJob,
+  requestBackgroundJobCancel: mocks.requestBackgroundJobCancel
 }));
 
 const session = {
@@ -82,30 +84,54 @@ describe('POST /api/uploadjobs/[jobId]', () => {
     mocks.auth.mockResolvedValue(session);
     mocks.getBackgroundJobWithDetails.mockResolvedValue(ownedJob);
     mocks.cancelBackgroundJob.mockResolvedValue(true);
+    mocks.requestBackgroundJobCancel.mockResolvedValue(false);
   });
 
-  it('cancels an owned queued job', async () => {
-    const request = new Request('http://localhost/api/uploadjobs/42', {
+  function makeCancelRequest(action: string = 'cancel') {
+    return new Request('http://localhost/api/uploadjobs/42', {
       method: 'POST',
-      body: JSON.stringify({ action: 'cancel' })
+      body: JSON.stringify({ action })
     }) as any;
+  }
 
-    const response = await POST(request, { params: Promise.resolve({ jobId: '42' }) });
+  it('cancels an owned queued job directly', async () => {
+    const response = await POST(makeCancelRequest(), { params: Promise.resolve({ jobId: '42' }) });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ success: true });
     expect(mocks.cancelBackgroundJob).toHaveBeenCalledWith('catalog-pool', 42, 'mason@example.com');
+    expect(mocks.requestBackgroundJobCancel).not.toHaveBeenCalled();
+  });
+
+  it('flips a running job to cancel_requested and reports the cancellation as pending', async () => {
+    mocks.getBackgroundJobWithDetails.mockResolvedValueOnce({ ...ownedJob, status: 'running' });
+    mocks.cancelBackgroundJob.mockResolvedValueOnce(false);
+    mocks.requestBackgroundJobCancel.mockResolvedValueOnce(true);
+
+    const response = await POST(makeCancelRequest(), { params: Promise.resolve({ jobId: '42' }) });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true, pending: true });
+    expect(mocks.cancelBackgroundJob).toHaveBeenCalledWith('catalog-pool', 42, 'mason@example.com');
+    expect(mocks.requestBackgroundJobCancel).toHaveBeenCalledWith('catalog-pool', 42, 'mason@example.com');
+  });
+
+  it('returns 409 when the job is already terminal', async () => {
+    mocks.getBackgroundJobWithDetails.mockResolvedValueOnce({ ...ownedJob, status: 'completed' });
+    mocks.cancelBackgroundJob.mockResolvedValueOnce(false);
+    mocks.requestBackgroundJobCancel.mockResolvedValueOnce(false);
+
+    const response = await POST(makeCancelRequest(), { params: Promise.resolve({ jobId: '42' }) });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: 'Upload job cannot be cancelled from its current state' });
   });
 
   it('rejects unsupported actions', async () => {
-    const request = new Request('http://localhost/api/uploadjobs/42', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'retry' })
-    }) as any;
-
-    const response = await POST(request, { params: Promise.resolve({ jobId: '42' }) });
+    const response = await POST(makeCancelRequest('retry'), { params: Promise.resolve({ jobId: '42' }) });
 
     expect(response.status).toBe(400);
     expect(mocks.cancelBackgroundJob).not.toHaveBeenCalled();
+    expect(mocks.requestBackgroundJobCancel).not.toHaveBeenCalled();
   });
 });
