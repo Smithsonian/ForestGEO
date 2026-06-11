@@ -1,5 +1,6 @@
 import type { Pool, PoolConnection, ResultSetHeader } from 'mysql2/promise';
 import { ensureBackgroundJobCatalogTables } from './catalog';
+import { WorkerLeaseLostError } from './errors';
 import type {
   BackgroundJobEventRecord,
   BackgroundJobFileRecord,
@@ -10,6 +11,11 @@ import type {
   UploadJobPhase
 } from './types';
 import { UPLOAD_JOB_MAX_RETRIES } from './types';
+
+// Statuses in which a worker lease is considered active. cancel_requested is
+// included so the owning worker can still write cleanup progress and the
+// terminal 'cancelled' state before releasing the lease.
+const FENCED_WRITE_STATUSES = ['running', 'cancel_requested'] as const;
 
 const ACTIVE_JOB_STATUSES: BackgroundJobStatus[] = ['queued', 'running', 'cancel_requested', 'waiting_retry'];
 
@@ -108,6 +114,20 @@ async function addJobEvent(conn: Pool | PoolConnection, jobID: number, eventType
     message ?? null,
     details ? JSON.stringify(details) : null
   ]);
+}
+
+/**
+ * Confirms that a worker still holds the lease on a job. Returns true when the
+ * lease is intact, false when it is not. Used by fenced writes to distinguish
+ * a genuine lease loss from a no-op UPDATE (values unchanged → affectedRows=0).
+ */
+async function isLeaseIntact(conn: Pool | PoolConnection, jobID: number, workerID: string): Promise<boolean> {
+  const fencedStatusList = FENCED_WRITE_STATUSES.join("','");
+  const [rows]: any = await conn.query(`SELECT 1 FROM catalog.background_jobs WHERE JobID = ? AND WorkerID = ? AND Status IN ('${fencedStatusList}') LIMIT 1`, [
+    jobID,
+    workerID
+  ]);
+  return (rows as unknown[]).length > 0;
 }
 
 export async function createUploadBackgroundJob(catalogPool: Pool, input: CreateUploadJobInput, createdBy: string): Promise<BackgroundJobRecord> {
@@ -277,6 +297,7 @@ export async function cancelBackgroundJob(catalogPool: Pool, jobID: number, canc
 export async function setBackgroundJobStatus(
   catalogPool: Pool,
   jobID: number,
+  workerID: string,
   update: {
     status: BackgroundJobStatus;
     phase: UploadJobPhase;
@@ -292,13 +313,14 @@ export async function setBackgroundJobStatus(
   await ensureBackgroundJobCatalogTables(catalogPool);
   const terminalStatuses: BackgroundJobStatus[] = ['completed', 'failed', 'cancelled'];
   const terminal = terminalStatuses.includes(update.status);
-  await catalogPool.query(
+  const fencedStatusList = FENCED_WRITE_STATUSES.join("','");
+  const [result] = await catalogPool.query<ResultSetHeader>(
     `UPDATE catalog.background_jobs
      SET Status = ?, Phase = ?, PercentComplete = COALESCE(?, PercentComplete),
          ProcessedRows = COALESCE(?, ProcessedRows), FailedRows = COALESCE(?, FailedRows),
          LastError = ?, StartedAt = IF(StartedAt IS NULL AND ? = 'running', NOW(), StartedAt),
          FinishedAt = IF(?, NOW(), FinishedAt)
-     WHERE JobID = ?`,
+     WHERE JobID = ? AND WorkerID = ? AND Status IN ('${fencedStatusList}')`,
     [
       update.status,
       update.phase,
@@ -308,9 +330,17 @@ export async function setBackgroundJobStatus(
       update.lastError ?? null,
       update.status,
       terminal,
-      jobID
+      jobID,
+      workerID
     ]
   );
+  if (result.affectedRows === 0) {
+    // Zero affected rows can mean either lease loss or a no-op write (identical
+    // values). Confirm before throwing to avoid false lease-loss errors.
+    const leaseIntact = await isLeaseIntact(catalogPool, jobID, workerID);
+    if (!leaseIntact) throw new WorkerLeaseLostError(jobID, workerID);
+    // Lease is intact — values were unchanged, silently accept.
+  }
   if (update.eventType) {
     await addJobEvent(catalogPool, jobID, update.eventType, update.eventMessage, update.eventDetails);
   }
@@ -339,10 +369,11 @@ export async function claimBackgroundJobForWorker(catalogPool: Pool, jobID: numb
 
 export async function heartbeatBackgroundJob(catalogPool: Pool, jobID: number, workerID: string): Promise<boolean> {
   await ensureBackgroundJobCatalogTables(catalogPool);
+  const fencedStatusList = FENCED_WRITE_STATUSES.join("','");
   const [result] = await catalogPool.query<ResultSetHeader>(
     `UPDATE catalog.background_jobs
      SET WorkerHeartbeatAt = NOW()
-     WHERE JobID = ? AND WorkerID = ? AND Status = 'running'`,
+     WHERE JobID = ? AND WorkerID = ? AND Status IN ('${fencedStatusList}')`,
     [jobID, workerID]
   );
   return result.affectedRows > 0;
@@ -393,8 +424,8 @@ export async function markBackgroundJobWaitingRetry(
   return getBackgroundJob(catalogPool, jobID);
 }
 
-export async function markBackgroundJobCompleted(catalogPool: Pool, jobID: number): Promise<void> {
-  await setBackgroundJobStatus(catalogPool, jobID, {
+export async function markBackgroundJobCompleted(catalogPool: Pool, jobID: number, workerID: string): Promise<void> {
+  await setBackgroundJobStatus(catalogPool, jobID, workerID, {
     status: 'completed',
     phase: 'completed',
     percentComplete: 100,
@@ -404,8 +435,8 @@ export async function markBackgroundJobCompleted(catalogPool: Pool, jobID: numbe
   });
 }
 
-export async function markBackgroundJobFailed(catalogPool: Pool, jobID: number, error: Error): Promise<void> {
-  await setBackgroundJobStatus(catalogPool, jobID, {
+export async function markBackgroundJobFailed(catalogPool: Pool, jobID: number, workerID: string, error: Error): Promise<void> {
+  await setBackgroundJobStatus(catalogPool, jobID, workerID, {
     status: 'failed',
     phase: 'failed',
     lastError: error.message,
@@ -414,8 +445,48 @@ export async function markBackgroundJobFailed(catalogPool: Pool, jobID: number, 
   });
 }
 
+/**
+ * Unfenced transition used by the sweeper to recover jobs whose worker died.
+ * Unlike the fenced writes, this does NOT require the caller to own the lease.
+ * It guards its WHERE with Status = 'running' to prevent stomping terminal
+ * states (completed/failed/cancelled/waiting_retry are all left untouched).
+ *
+ * Returns true when the job was moved, false when the guard prevented the
+ * update (job is not in 'running' state or does not exist).
+ */
+export async function finalizeJobAsSystem(
+  catalogPool: Pool,
+  jobID: number,
+  status: 'failed' | 'waiting_retry',
+  reason: string,
+  nextAttemptAt?: Date
+): Promise<boolean> {
+  await ensureBackgroundJobCatalogTables(catalogPool);
+  const phase = status === 'failed' ? 'failed' : 'staging';
+  const finishedAtClause = status === 'failed' ? 'FinishedAt = NOW(),' : '';
+  const [result] = await catalogPool.query<ResultSetHeader>(
+    `UPDATE catalog.background_jobs
+     SET Status = ?,
+         Phase = ?,
+         LastError = ?,
+         WorkerID = NULL,
+         WorkerHeartbeatAt = NULL,
+         NextAttemptAt = ?,
+         RetryCount = RetryCount + 1,
+         ${finishedAtClause}
+         UpdatedAt = NOW()
+     WHERE JobID = ? AND Status = 'running'`,
+    [status, phase, reason, nextAttemptAt ?? null, jobID]
+  );
+  if (result.affectedRows === 0) return false;
+  await addJobEvent(catalogPool, jobID, 'reclaimed', reason, { finalStatus: status, nextAttemptAt: nextAttemptAt?.toISOString() ?? null });
+  return true;
+}
+
 export async function updateBackgroundJobFileStatus(
   catalogPool: Pool,
+  jobID: number,
+  workerID: string,
   jobFileID: number,
   update: {
     status: BackgroundJobFileRecord['status'];
@@ -425,15 +496,23 @@ export async function updateBackgroundJobFileStatus(
   }
 ): Promise<void> {
   await ensureBackgroundJobCatalogTables(catalogPool);
-  await catalogPool.query(
-    `UPDATE catalog.background_job_files
-     SET Status = ?,
-         ProcessedRows = COALESCE(?, ProcessedRows),
-         FailedRows = COALESCE(?, FailedRows),
-         ErrorMessage = ?
-     WHERE JobFileID = ?`,
-    [update.status, update.processedRows ?? null, update.failedRows ?? null, update.errorMessage ?? null, jobFileID]
+  const fencedStatusList = FENCED_WRITE_STATUSES.join("','");
+  const [result] = await catalogPool.query<ResultSetHeader>(
+    `UPDATE catalog.background_job_files f
+     JOIN catalog.background_jobs j ON j.JobID = f.JobID
+     SET f.Status = ?,
+         f.ProcessedRows = COALESCE(?, f.ProcessedRows),
+         f.FailedRows = COALESCE(?, f.FailedRows),
+         f.ErrorMessage = ?
+     WHERE f.JobFileID = ? AND j.JobID = ? AND j.WorkerID = ? AND j.Status IN ('${fencedStatusList}')`,
+    [update.status, update.processedRows ?? null, update.failedRows ?? null, update.errorMessage ?? null, jobFileID, jobID, workerID]
   );
+  if (result.affectedRows === 0) {
+    // Confirm before throwing — affectedRows=0 can also mean values were unchanged.
+    const leaseIntact = await isLeaseIntact(catalogPool, jobID, workerID);
+    if (!leaseIntact) throw new WorkerLeaseLostError(jobID, workerID);
+    // Lease is intact — values were unchanged, silently accept.
+  }
 }
 
 /**

@@ -7,6 +7,10 @@ import type { Pool } from 'mysql2/promise';
 // of this file (they will have stale ENUM values such as 'created', 'dead_lettered',
 // 'blob_received', or a LastMessageID column).
 // Example: DROP TABLE IF EXISTS catalog.background_job_events, catalog.background_job_files, catalog.background_jobs;
+//
+// SCHEMA SYNC: Keep this file in sync with
+// sqlscripting/catalog-background-job-tables.sql — that file is the authoritative
+// DDL reference; this file bootstraps the same tables from the deployed app bundle.
 
 const BACKGROUND_JOB_BOOTSTRAP_STATEMENTS: readonly string[] = [
   `CREATE DATABASE IF NOT EXISTS catalog CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,

@@ -7,27 +7,47 @@
  * Prerequisites: docker compose up -d mysql
  *
  * Run in isolation:
- *   npx vitest run tests/integration/background-jobs-repository.test.ts
+ *   npx vitest run --config vitest.integration.config.mts tests/integration/background-jobs-repository.test.ts
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import mysql, { type Pool } from 'mysql2/promise';
 import { ensureBackgroundJobCatalogTables } from '@/lib/background-jobs/catalog';
+import { WorkerLeaseLostError } from '@/lib/background-jobs/errors';
 import {
   assignFileBatchID,
   cancelBackgroundJob,
+  claimBackgroundJobForWorker,
   createUploadBackgroundJob,
+  finalizeJobAsSystem,
   getBackgroundJob,
   getBackgroundJobWithDetails,
-  listBackgroundJobs
+  heartbeatBackgroundJob,
+  listBackgroundJobs,
+  markBackgroundJobWaitingRetry,
+  setBackgroundJobStatus,
+  updateBackgroundJobFileStatus
 } from '@/lib/background-jobs/repository';
 import type { CreateUploadJobInput } from '@/lib/background-jobs/types';
 import { UPLOAD_JOB_MAX_RETRIES } from '@/lib/background-jobs/types';
 
 // ---------------------------------------------------------------------------
-// Constants
+// Safety guard — this suite DELETEs from the shared `catalog` schema and must
+// never run against a remote database.
 // ---------------------------------------------------------------------------
 
 const TEST_DB_HOST = process.env.TEST_DB_HOST || 'localhost';
+
+if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
+  throw new Error(
+    `[background-jobs-repository] Refusing to run: TEST_DB_HOST="${TEST_DB_HOST}" is not a local address. ` +
+      `This suite deletes all rows from catalog.background_jobs and must only run against a local test database.`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 const TEST_DB_PORT = Number(process.env.TEST_DB_PORT || 3306);
 const TEST_DB_USER = process.env.TEST_DB_USER || 'root';
 const TEST_DB_PASSWORD = process.env.TEST_DB_PASSWORD || 'testpassword';
@@ -40,6 +60,9 @@ const TEST_PLOT_ID = 1;
 const TEST_CENSUS_ID = 2;
 
 const BLOB_CONTAINER = 'forestgeo-testing-storage';
+
+const WORKER_A = 'worker-alpha-001';
+const WORKER_B = 'worker-beta-002';
 
 // ---------------------------------------------------------------------------
 // Pool lifecycle
@@ -110,6 +133,16 @@ function makeJobInput(overrides: Partial<CreateUploadJobInput> = {}): CreateUplo
     ],
     ...overrides
   };
+}
+
+/** Creates a job and claims it for the given worker. Returns both job and its file IDs. */
+async function createAndClaimJob(workerID: string): Promise<{ jobID: number; fileIDs: number[] }> {
+  const job = await createUploadBackgroundJob(pool, makeJobInput(), TEST_USER_A);
+  const claimed = await claimBackgroundJobForWorker(pool, job.jobID, workerID);
+  if (!claimed) throw new Error(`[test helper] Failed to claim jobID=${job.jobID} for worker=${workerID}`);
+  const fileIDs = claimed.files.map(f => f.jobFileID);
+  console.log(`[helper] created jobID=${job.jobID}, claimed by ${workerID}, fileIDs=[${fileIDs.join(', ')}]`);
+  return { jobID: job.jobID, fileIDs };
 }
 
 // ---------------------------------------------------------------------------
@@ -340,5 +373,289 @@ describe('cancelBackgroundJob', () => {
     const unchanged = await getBackgroundJob(pool, job.jobID);
     console.log(`[cancel] status after refused cancel: ${unchanged?.status}`);
     expect(unchanged!.status).toBe('running');
+  });
+});
+
+describe('markBackgroundJobWaitingRetry — retry budget exhaustion', () => {
+  it('transitions directly to failed when retry budget is exhausted', async () => {
+    const job = await createUploadBackgroundJob(pool, makeJobInput(), TEST_USER_A);
+
+    // Exhaust all retries by setting RetryCount to maxRetries - 1, so the next
+    // call pushes it to maxRetries and triggers permanent failure.
+    await pool.query(`UPDATE catalog.background_jobs SET Status = 'running', Phase = 'staging', RetryCount = ?, WorkerID = ? WHERE JobID = ?`, [
+      UPLOAD_JOB_MAX_RETRIES - 1,
+      WORKER_A,
+      job.jobID
+    ]);
+
+    console.log(`[retry-budget] jobID=${job.jobID} RetryCount before call: ${UPLOAD_JOB_MAX_RETRIES - 1} maxRetries=${UPLOAD_JOB_MAX_RETRIES}`);
+
+    const budgetError = new Error('Persistent validation failure — budget exhausted');
+    const result = await markBackgroundJobWaitingRetry(pool, job.jobID, budgetError, 30);
+
+    console.log(`[retry-budget] result status=${result?.status} phase=${result?.phase} retryCount=${result?.retryCount}`);
+
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe('failed');
+    expect(result!.phase).toBe('failed');
+    expect(result!.retryCount).toBe(UPLOAD_JOB_MAX_RETRIES);
+    expect(result!.lastError).toBe(budgetError.message);
+    expect(result!.finishedAt).toBeInstanceOf(Date);
+    expect(result!.nextAttemptAt).toBeNull();
+
+    // Verify event was logged
+    const details = await getBackgroundJobWithDetails(pool, job.jobID);
+    const failedEvent = details!.events.find(e => e.eventType === 'failed');
+    console.log(`[retry-budget] events: ${details!.events.map(e => e.eventType).join(', ')}`);
+    expect(failedEvent).toBeDefined();
+    expect(failedEvent!.message).toBe(budgetError.message);
+  });
+
+  it('transitions to waiting_retry when budget remains', async () => {
+    const job = await createUploadBackgroundJob(pool, makeJobInput(), TEST_USER_A);
+    await pool.query(`UPDATE catalog.background_jobs SET Status = 'running', Phase = 'staging', WorkerID = ? WHERE JobID = ?`, [WORKER_A, job.jobID]);
+
+    const retryError = new Error('Transient staging failure');
+    const retryDelay = 60;
+    const result = await markBackgroundJobWaitingRetry(pool, job.jobID, retryError, retryDelay);
+
+    console.log(`[retry-budget] result status=${result?.status} retryCount=${result?.retryCount}`);
+
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe('waiting_retry');
+    expect(result!.retryCount).toBe(1);
+    expect(result!.nextAttemptAt).toBeInstanceOf(Date);
+    expect(result!.workerID).toBeNull();
+  });
+});
+
+describe('lease fencing — setBackgroundJobStatus', () => {
+  it('worker B cannot write to a job owned by worker A — throws WorkerLeaseLostError; row is unchanged', async () => {
+    const { jobID } = await createAndClaimJob(WORKER_A);
+
+    console.log(`[fence-status] writing as WORKER_B=${WORKER_B} on jobID=${jobID} owned by WORKER_A=${WORKER_A}`);
+
+    await expect(
+      setBackgroundJobStatus(pool, jobID, WORKER_B, {
+        status: 'running',
+        phase: 'ingestion',
+        percentComplete: 50,
+        eventType: 'progress'
+      })
+    ).rejects.toThrow(WorkerLeaseLostError);
+
+    // Row must be unchanged — still in staging phase, 0% complete.
+    const row = await getBackgroundJob(pool, jobID);
+    console.log(`[fence-status] post-reject: status=${row?.status} phase=${row?.phase} pct=${row?.percentComplete}`);
+    expect(row!.phase).toBe('staging');
+    expect(row!.percentComplete).toBe(0);
+    expect(row!.workerID).toBe(WORKER_A);
+  });
+
+  it('worker A can write to its own job', async () => {
+    const { jobID } = await createAndClaimJob(WORKER_A);
+
+    await setBackgroundJobStatus(pool, jobID, WORKER_A, {
+      status: 'running',
+      phase: 'ingestion',
+      percentComplete: 42,
+      processedRows: 7,
+      eventType: 'progress',
+      eventMessage: 'Processing batch'
+    });
+
+    const row = await getBackgroundJob(pool, jobID);
+    console.log(`[fence-status] post-write: status=${row?.status} phase=${row?.phase} pct=${row?.percentComplete}`);
+    expect(row!.phase).toBe('ingestion');
+    expect(row!.percentComplete).toBe(42);
+    expect(row!.processedRows).toBe(7);
+  });
+
+  it('no-op write (identical values) by the owning worker does NOT throw', async () => {
+    const { jobID } = await createAndClaimJob(WORKER_A);
+
+    // Write specific values once.
+    await setBackgroundJobStatus(pool, jobID, WORKER_A, {
+      status: 'running',
+      phase: 'ingestion',
+      percentComplete: 25
+    });
+
+    // Write the exact same values again — must not throw.
+    await expect(
+      setBackgroundJobStatus(pool, jobID, WORKER_A, {
+        status: 'running',
+        phase: 'ingestion',
+        percentComplete: 25
+      })
+    ).resolves.toBeUndefined();
+
+    const row = await getBackgroundJob(pool, jobID);
+    console.log(`[fence-status] no-op: status=${row?.status} phase=${row?.phase} pct=${row?.percentComplete}`);
+    expect(row!.percentComplete).toBe(25);
+  });
+});
+
+describe('lease fencing — updateBackgroundJobFileStatus', () => {
+  it('worker B cannot update a file on a job owned by worker A — throws WorkerLeaseLostError', async () => {
+    const { jobID, fileIDs } = await createAndClaimJob(WORKER_A);
+    const fileID = fileIDs[0];
+
+    console.log(`[fence-file] writing file ${fileID} as WORKER_B on jobID=${jobID} owned by WORKER_A`);
+
+    await expect(
+      updateBackgroundJobFileStatus(pool, jobID, WORKER_B, fileID, {
+        status: 'staged',
+        processedRows: 5
+      })
+    ).rejects.toThrow(WorkerLeaseLostError);
+
+    // File row must be unchanged.
+    const details = await getBackgroundJobWithDetails(pool, jobID);
+    const file = details!.files.find(f => f.jobFileID === fileID);
+    console.log(`[fence-file] post-reject: file.status=${file?.status} processedRows=${file?.processedRows}`);
+    expect(file!.status).toBe('pending');
+    expect(file!.processedRows).toBe(0);
+  });
+
+  it('worker A can update a file on its own job', async () => {
+    const { jobID, fileIDs } = await createAndClaimJob(WORKER_A);
+    const fileID = fileIDs[0];
+
+    await updateBackgroundJobFileStatus(pool, jobID, WORKER_A, fileID, {
+      status: 'processed',
+      processedRows: 10,
+      failedRows: 1,
+      errorMessage: null
+    });
+
+    const details = await getBackgroundJobWithDetails(pool, jobID);
+    const file = details!.files.find(f => f.jobFileID === fileID);
+    console.log(`[fence-file] post-write: file.status=${file?.status} processedRows=${file?.processedRows}`);
+    expect(file!.status).toBe('processed');
+    expect(file!.processedRows).toBe(10);
+    expect(file!.failedRows).toBe(1);
+  });
+
+  it('no-op file write (identical values) by the owning worker does NOT throw', async () => {
+    const { jobID, fileIDs } = await createAndClaimJob(WORKER_A);
+    const fileID = fileIDs[0];
+
+    // Write once.
+    await updateBackgroundJobFileStatus(pool, jobID, WORKER_A, fileID, {
+      status: 'staged',
+      processedRows: 3
+    });
+
+    // Write the exact same values again — must not throw.
+    await expect(
+      updateBackgroundJobFileStatus(pool, jobID, WORKER_A, fileID, {
+        status: 'staged',
+        processedRows: 3
+      })
+    ).resolves.toBeUndefined();
+
+    const details = await getBackgroundJobWithDetails(pool, jobID);
+    const file = details!.files.find(f => f.jobFileID === fileID);
+    expect(file!.status).toBe('staged');
+    expect(file!.processedRows).toBe(3);
+  });
+});
+
+describe('lease fencing — heartbeatBackgroundJob', () => {
+  it('heartbeat from worker B returns false for a job owned by worker A', async () => {
+    const { jobID } = await createAndClaimJob(WORKER_A);
+
+    const result = await heartbeatBackgroundJob(pool, jobID, WORKER_B);
+    console.log(`[fence-heartbeat] WORKER_B heartbeat result=${result}`);
+    expect(result).toBe(false);
+  });
+
+  it('heartbeat from worker A returns true and updates WorkerHeartbeatAt', async () => {
+    const { jobID } = await createAndClaimJob(WORKER_A);
+
+    // Small delay to ensure heartbeat timestamp changes.
+    await new Promise(resolve => setTimeout(resolve, 1100));
+
+    const beforeRow = await getBackgroundJob(pool, jobID);
+    const heartbeatBefore = beforeRow!.workerHeartbeatAt!.getTime();
+
+    const result = await heartbeatBackgroundJob(pool, jobID, WORKER_A);
+    console.log(`[fence-heartbeat] WORKER_A heartbeat result=${result}`);
+    expect(result).toBe(true);
+
+    const afterRow = await getBackgroundJob(pool, jobID);
+    const heartbeatAfter = afterRow!.workerHeartbeatAt!.getTime();
+    console.log(`[fence-heartbeat] heartbeatBefore=${heartbeatBefore} heartbeatAfter=${heartbeatAfter}`);
+    expect(heartbeatAfter).toBeGreaterThan(heartbeatBefore);
+  });
+
+  it('heartbeat succeeds when job is in cancel_requested state (owning worker can still write)', async () => {
+    const { jobID } = await createAndClaimJob(WORKER_A);
+
+    // Transition to cancel_requested (the user cancelled while the worker is running).
+    await pool.query(`UPDATE catalog.background_jobs SET Status = 'cancel_requested' WHERE JobID = ?`, [jobID]);
+
+    const result = await heartbeatBackgroundJob(pool, jobID, WORKER_A);
+    console.log(`[fence-heartbeat] cancel_requested heartbeat result=${result}`);
+    expect(result).toBe(true);
+  });
+});
+
+describe('finalizeJobAsSystem — sweeper recovery', () => {
+  it('moves a running job to waiting_retry, clears WorkerID, increments RetryCount', async () => {
+    const { jobID } = await createAndClaimJob(WORKER_A);
+    const nextAttempt = new Date(Date.now() + 120_000);
+
+    console.log(`[finalize-system] finalizing jobID=${jobID} as waiting_retry`);
+
+    const moved = await finalizeJobAsSystem(pool, jobID, 'waiting_retry', 'Worker heartbeat expired', nextAttempt);
+    expect(moved).toBe(true);
+
+    const row = await getBackgroundJob(pool, jobID);
+    console.log(`[finalize-system] post-finalize: status=${row?.status} workerID=${row?.workerID} retryCount=${row?.retryCount}`);
+    expect(row!.status).toBe('waiting_retry');
+    expect(row!.phase).toBe('staging');
+    expect(row!.workerID).toBeNull();
+    expect(row!.workerHeartbeatAt).toBeNull();
+    expect(row!.retryCount).toBe(1);
+    expect(row!.lastError).toBe('Worker heartbeat expired');
+    expect(row!.nextAttemptAt).toBeInstanceOf(Date);
+    expect(row!.finishedAt).toBeNull(); // waiting_retry does NOT set finishedAt
+
+    // Reclaimed event must be logged.
+    const details = await getBackgroundJobWithDetails(pool, jobID);
+    const reclaimedEvent = details!.events.find(e => e.eventType === 'reclaimed');
+    console.log(`[finalize-system] events: ${details!.events.map(e => e.eventType).join(', ')}`);
+    expect(reclaimedEvent).toBeDefined();
+  });
+
+  it('moves a running job to failed and sets FinishedAt', async () => {
+    const { jobID } = await createAndClaimJob(WORKER_A);
+
+    const moved = await finalizeJobAsSystem(pool, jobID, 'failed', 'Worker process crashed');
+    expect(moved).toBe(true);
+
+    const row = await getBackgroundJob(pool, jobID);
+    console.log(`[finalize-system] post-finalize-failed: status=${row?.status} finishedAt=${row?.finishedAt}`);
+    expect(row!.status).toBe('failed');
+    expect(row!.phase).toBe('failed');
+    expect(row!.finishedAt).toBeInstanceOf(Date);
+    expect(row!.workerID).toBeNull();
+  });
+
+  it('returns false and leaves row untouched when job is already in a terminal state', async () => {
+    const job = await createUploadBackgroundJob(pool, makeJobInput(), TEST_USER_A);
+    await pool.query(`UPDATE catalog.background_jobs SET Status = 'completed', Phase = 'completed', FinishedAt = NOW() WHERE JobID = ?`, [job.jobID]);
+
+    console.log(`[finalize-system] attempting finalize on completed jobID=${job.jobID}`);
+
+    const moved = await finalizeJobAsSystem(pool, job.jobID, 'failed', 'Should not overwrite');
+    expect(moved).toBe(false);
+
+    const row = await getBackgroundJob(pool, job.jobID);
+    console.log(`[finalize-system] post-no-op: status=${row?.status}`);
+    expect(row!.status).toBe('completed');
+    expect(row!.lastError).toBeNull();
   });
 });
