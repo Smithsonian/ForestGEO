@@ -51,7 +51,8 @@ vi.mock('@/auth', () => ({
 }));
 
 vi.mock('@/lib/db/sqlsecurity', () => ({
-  isValidSchema: vi.fn(() => true)
+  isValidSchema: vi.fn(() => true),
+  safeFormatQuery: vi.fn((schema: string, query: string) => query.replace(/\?\?/g, `\`${schema}\``))
 }));
 
 vi.mock('@/config/utils', async importOriginal => {
@@ -847,7 +848,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(body.error).toContain('1012');
     expect(body.error).toContain('stems and downstream measurements');
     expect(body.error).toContain('Use Revisions Upload instead');
-    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('FROM forestgeo_testing.stems');
+    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('FROM `forestgeo_testing`.stems');
     const deleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
       String(call[0]).includes('DELETE FROM forestgeo_testing.quadrats')
     );
@@ -874,7 +875,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     );
 
     expect(res?.status).toBe(200);
-    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('FROM forestgeo_testing.stems');
+    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('FROM `forestgeo_testing`.stems');
   });
 
   it('allows a revisions upload to add a new quadrat to a real layout', async () => {
