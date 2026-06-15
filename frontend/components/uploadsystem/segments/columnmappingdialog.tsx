@@ -53,7 +53,7 @@ export default function ColumnMappingDialog({ open, format, fileName, metadata, 
 
   return (
     <Modal open={open} onClose={onClose}>
-      <ModalDialog sx={{ minWidth: 640, maxWidth: 820 }}>
+      <ModalDialog data-testid="column-mapping-dialog" sx={{ minWidth: 640, maxWidth: 820 }}>
         <DialogTitle>Map your columns</DialogTitle>
         {fileName && (
           <Typography level="body-sm" textColor="text.tertiary">
@@ -78,6 +78,7 @@ export default function ColumnMappingDialog({ open, format, fileName, metadata, 
                 <Stack key={role} direction="row" alignItems="center" spacing={1} sx={{ my: 0.5 }}>
                   <Typography sx={{ width: 80 }}>{role}</Typography>
                   <Select
+                    data-testid={`mapping-sheet-role-select-${role}`}
                     placeholder={`Select ${role} sheet`}
                     value={(role === 'trees' ? draft.sheetRoles?.treesSheetName : draft.sheetRoles?.stemsSheetName) ?? null}
                     onChange={(_e, v) =>
@@ -117,6 +118,7 @@ export default function ColumnMappingDialog({ open, format, fileName, metadata, 
                 >
                   <Box sx={{ flex: 1 }}>
                     <Select
+                      data-testid={`mapping-source-select-${def.canonicalField}`}
                       multiple={def.multiSource}
                       placeholder={unmappedRequired ? 'Choose a column' : 'Unmapped'}
                       value={def.multiSource ? selected : (selected[0] ?? null)}
@@ -167,10 +169,10 @@ export default function ColumnMappingDialog({ open, format, fileName, metadata, 
           )}
 
           <Stack direction="row" justifyContent="flex-end" spacing={1} sx={{ mt: 2 }}>
-            <Button variant="plain" color="neutral" onClick={onClose}>
+            <Button data-testid="mapping-cancel" variant="plain" color="neutral" onClick={onClose}>
               Cancel
             </Button>
-            <Button disabled={!validation.valid} onClick={() => onApply(draft)}>
+            <Button data-testid="mapping-apply" disabled={!validation.valid} onClick={() => onApply(draft)}>
               Apply mapping
             </Button>
           </Stack>

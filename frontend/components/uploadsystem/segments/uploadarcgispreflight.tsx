@@ -285,7 +285,7 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
   if (ui.phase === 'mappingNeeded') {
     return (
       <>
-        <Alert color="warning" variant="soft" sx={{ width: '100%' }}>
+        <Alert data-testid="arcgis-mapping-required" color="warning" variant="soft" sx={{ width: '100%' }}>
           <Stack spacing={1}>
             <Typography level="body-sm">
               The workbook columns do not match the expected ArcGIS schema. Map your columns (and pick the trees/stems sheets) to continue.
@@ -296,7 +296,7 @@ export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, c
               </Typography>
             )}
             <Stack direction="row" spacing={1}>
-              <Button size="sm" onClick={() => dispatch({ type: 'DIALOG_OPENED' })}>
+              <Button data-testid="arcgis-open-mapping" size="sm" onClick={() => dispatch({ type: 'DIALOG_OPENED' })}>
                 Map columns
               </Button>
               <Button size="sm" variant="outlined" color="neutral" onClick={onBack}>

@@ -27,6 +27,13 @@ describe('ColumnMappingDialog (csv)', () => {
     expect(onApply).toHaveBeenCalledWith(resolved);
   });
 
+  it('exposes stable data-testid hooks for the dialog root, Apply, and Cancel', () => {
+    render(<ColumnMappingDialog open format={SourceFormat.csv} metadata={meta} mapping={seedMapping(meta)} onApply={() => {}} onClose={() => {}} />);
+    expect(screen.getByTestId('column-mapping-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('mapping-apply')).toBeInTheDocument();
+    expect(screen.getByTestId('mapping-cancel')).toBeInTheDocument();
+  });
+
   it('shows a required badge for tag and optional for comments', () => {
     render(<ColumnMappingDialog open format={SourceFormat.csv} metadata={meta} mapping={seedMapping(meta)} onApply={() => {}} onClose={() => {}} />);
     const tagRow = screen.getByTestId('mapping-row-tag');

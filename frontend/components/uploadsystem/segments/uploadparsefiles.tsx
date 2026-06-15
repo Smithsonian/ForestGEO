@@ -313,6 +313,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                           null;
                         return (
                           <JoyButton
+                            data-testid="open-column-mapping"
                             variant="outlined"
                             color={mappingValid ? 'neutral' : 'primary'}
                             size="lg"
