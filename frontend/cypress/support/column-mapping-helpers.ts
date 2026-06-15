@@ -42,7 +42,13 @@ Cypress.Commands.add('applyColumnMapping', (mapping: MappingTable) => {
   cy.get(`[data-testid="${DIALOG_TESTID}"]`).should('be.visible');
   Object.entries(mapping).forEach(([field, sourceColumn]) => {
     cy.get(`[data-testid="mapping-source-select-${field}"]`).click();
-    cy.get('[role="option"]').contains(sourceColumn).click();
+    // Exact-match the option label. `.contains()` is a substring match, so a
+    // source column of `Tag` would also hit a `StemTag` option — the ArcGIS
+    // fixture carries both headers, so an anchored regex is required here.
+    const escapedSourceColumn = sourceColumn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    cy.get('[role="option"]')
+      .contains(new RegExp(`^${escapedSourceColumn}$`))
+      .click();
   });
   cy.get(`[data-testid="${APPLY_TESTID}"]`).should('not.be.disabled').click();
 });
