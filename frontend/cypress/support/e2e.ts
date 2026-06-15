@@ -17,6 +17,7 @@
 import './commands';
 import './demo-commands';
 import './test-data-helpers';
+import './column-mapping-helpers';
 
 Cypress.on('uncaught:exception', error => {
   if (error.message.includes('ResizeObserver loop completed with undelivered notifications')) {
