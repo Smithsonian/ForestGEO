@@ -42,13 +42,20 @@ Cypress.Commands.add('applyColumnMapping', (mapping: MappingTable) => {
   cy.get(`[data-testid="${DIALOG_TESTID}"]`).should('be.visible');
   Object.entries(mapping).forEach(([field, sourceColumn]) => {
     cy.get(`[data-testid="mapping-source-select-${field}"]`).click();
-    // Exact-match the option label. `.contains()` is a substring match, so a
-    // source column of `Tag` would also hit a `StemTag` option — the ArcGIS
-    // fixture carries both headers, so an anchored regex is required here.
+    // Every per-field Joy Select renders the SAME source columns as options, and
+    // Joy keeps closed listboxes' options mounted but `display:none`. Scope to the
+    // single open listbox so we click the option in THIS field's popper, not a
+    // hidden duplicate in another field's closed Select.
     const escapedSourceColumn = sourceColumn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    cy.get('[role="option"]')
-      .contains(new RegExp(`^${escapedSourceColumn}$`))
-      .click();
+    cy.get('[role="listbox"]')
+      .filter(':visible')
+      .first()
+      .within(() => {
+        // Exact-match the option label. `.contains()` is a substring match, so a
+        // source column of `Tag` would also hit a `StemTag` option — the ArcGIS
+        // fixture carries both headers, so an anchored regex is required here.
+        cy.contains('[role="option"]', new RegExp(`^${escapedSourceColumn}$`)).click();
+      });
   });
   cy.get(`[data-testid="${APPLY_TESTID}"]`).should('not.be.disabled').click();
 });
