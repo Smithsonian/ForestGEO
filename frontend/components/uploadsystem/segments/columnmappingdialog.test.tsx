@@ -164,6 +164,52 @@ describe('ColumnMappingDialog (arcgis sheet roles)', () => {
     expect(screen.getByText(/different sheets/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /apply mapping/i })).toBeDisabled();
   });
+
+  // The sheet-role Joy Select carries the testid on its trigger button; clicking it opens the
+  // listbox, then we pick the option by sheet name (only the open listbox is in the a11y tree).
+  function selectSheetRole(testId: string, sheetName: string) {
+    fireEvent.click(within(screen.getByTestId(testId)).getByRole('combobox'));
+    fireEvent.click(screen.getByRole('option', { name: sheetName }));
+  }
+
+  // Closes the gap the ArcGIS e2e cannot: that e2e proves Apply fires another pre-flight, but the
+  // multipart request body is opaque to Cypress, so it cannot prove the SELECTED sheet roles ride
+  // the resubmission rather than a stale mapping. Here we assert the dialog's onApply draft carries
+  // exactly the roles the user picked. A regression that emitted a stale/empty mapping fails here.
+  it('commits the user-selected sheet roles in the onApply draft (not a stale mapping)', () => {
+    const onApply = vi.fn();
+    const arcgisMeta: ArcgisSourceMetadata = {
+      format: SourceFormat.arcgis_xlsx,
+      sheets: [
+        { name: 'Sheet1', columns: ['GlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'lx', 'ly', 'Date_measured', 'ParentGlobalID'] },
+        { name: 'Sheet2', columns: ['GlobalID', 'ParentGlobalID', 'tag', 'StemTag', 'spcode', 'quadrat', 'Date_measured'] }
+      ]
+      // No detected*Sheet: seedMapping leaves sheetRoles empty, so Apply stays disabled until the
+      // user assigns both roles by hand — the exact interaction the ArcGIS e2e drives.
+    };
+    render(
+      <ColumnMappingDialog
+        open
+        format={SourceFormat.arcgis_xlsx}
+        metadata={arcgisMeta}
+        mapping={seedMapping(arcgisMeta)}
+        onApply={onApply}
+        onClose={() => {}}
+      />
+    );
+
+    const apply = screen.getByTestId('mapping-apply');
+    expect(apply).toBeDisabled();
+
+    selectSheetRole('mapping-sheet-role-select-trees', 'Sheet1');
+    selectSheetRole('mapping-sheet-role-select-stems', 'Sheet2');
+
+    expect(apply).toBeEnabled();
+    fireEvent.click(apply);
+
+    expect(onApply).toHaveBeenCalledTimes(1);
+    expect(onApply.mock.calls[0][0].sheetRoles).toEqual({ treesSheetName: 'Sheet1', stemsSheetName: 'Sheet2' });
+  });
 });
 
 describe('ColumnMappingDialog draft isolation', () => {
