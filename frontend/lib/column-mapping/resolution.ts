@@ -50,8 +50,9 @@ export const ARCGIS_RESOLVE_OPTIONS: ResolveOptions = {
   passthroughKey: raw => raw.trim()
 };
 
-// An undefined scope (wire mappings predating scope validation) applies everywhere rather than
-// silently dropping the field's explicit overrides.
+// Scope is required on validated wire mappings (isColumnMappingShape) and always stamped by
+// seedMapping, so `undefined` only reaches here on non-role-resolved (CSV) paths where sheetRole is
+// also undefined — handled by the `!sheetRole` short-circuit. The undefined branch is kept defensive.
 function fieldAppliesToSheet(scope: MappingScope | undefined, sheetRole?: SheetRole): boolean {
   if (!sheetRole || scope === undefined) return true;
   return scope === 'both' || scope === 'file' || scope === sheetRole;

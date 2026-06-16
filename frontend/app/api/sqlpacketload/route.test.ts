@@ -1155,6 +1155,34 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     expect(insertedParams).not.toContain('__parsed_extra');
   });
 
+  it('surfaces dropped-column diagnostics in the response so mis-mapped columns are not silent (M4)', async () => {
+    // The mapping sources lx from MyX, so the literal 'lx' header is diverted to an inert ignored key
+    // and dropped. The response must report that a column was dropped rather than swallowing it.
+    const rawRow = { MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17', lx: '9.9' };
+    const headersWithIgnoredLx = ['MyX', 'tag', 'spcode', 'quadrat', 'ly', 'date', 'lx'];
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(undefined);
+
+    const res = (await POST(
+      makeRawRowsRequest([rawRow], { csvHeaders: headersWithIgnoredLx, mapping: lxRenamedMapping(headersWithIgnoredLx) })
+    ))!;
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.mappingDiagnostics).toBeDefined();
+    expect(body.mappingDiagnostics.ignoredColumnCount).toBe(1);
+  });
+
   it('leaves the legacy fileRowSet path byte-identical when rawRows is absent', async () => {
     // Same shape as the existing happy-path test; no rawRows -> the new stage must not run.
     mockConnectionManager.executeQuery

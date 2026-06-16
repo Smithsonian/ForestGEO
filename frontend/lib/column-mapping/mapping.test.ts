@@ -238,19 +238,26 @@ describe('isColumnMappingShape', () => {
     expect(isColumnMappingShape({ version: 1, format: SourceFormat.arcgis_xlsx, fields: [], sheetRoles: 'Sheet1' })).toBe(false);
   });
 
-  it('rejects a field carrying an unrecognized scope (which would otherwise silently scope it out of every role-resolved sheet) but accepts valid and omitted scopes', () => {
+  it('requires a valid scope on every field — rejects unrecognized AND omitted scope (M3: closes the cross-sheet bypass)', () => {
     const withScope = (scope: unknown) => ({
       version: 1,
       format: SourceFormat.arcgis_xlsx,
       fields: [{ canonicalField: 'lx', sourceColumns: ['MyX'], scope }]
     });
+    // Unrecognized scope strings/types are malformed.
     expect(isColumnMappingShape(withScope('TREES'))).toBe(false);
     expect(isColumnMappingShape(withScope('tree'))).toBe(false);
     expect(isColumnMappingShape(withScope(3))).toBe(false);
+    // Every valid scope passes.
     expect(isColumnMappingShape(withScope('trees'))).toBe(true);
+    expect(isColumnMappingShape(withScope('stems'))).toBe(true);
     expect(isColumnMappingShape(withScope('both'))).toBe(true);
-    expect(isColumnMappingShape(withScope(undefined))).toBe(true);
-    expect(isColumnMappingShape({ version: 1, format: SourceFormat.arcgis_xlsx, fields: [{ canonicalField: 'lx', sourceColumns: ['MyX'] }] })).toBe(true);
+    expect(isColumnMappingShape(withScope('file'))).toBe(true);
+    // M3: an undefined or omitted scope is now REJECTED at the wire boundary. Otherwise a trees-only
+    // field could omit scope and resolve onto the stems sheet (fieldAppliesToSheet treats undefined
+    // as "applies everywhere"). seedMapping always stamps scope, so legitimate mappings are unaffected.
+    expect(isColumnMappingShape(withScope(undefined))).toBe(false);
+    expect(isColumnMappingShape({ version: 1, format: SourceFormat.arcgis_xlsx, fields: [{ canonicalField: 'lx', sourceColumns: ['MyX'] }] })).toBe(false);
   });
 });
 
