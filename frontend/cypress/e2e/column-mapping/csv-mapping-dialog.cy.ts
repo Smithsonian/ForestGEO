@@ -141,3 +141,5 @@ describe('CSV column-mapping dialog journey', () => {
     cy.get(OPEN_MAPPING_BUTTON).should('be.visible').and('contain', MAPPING_REVIEW_LABEL).and('not.contain', MAPPING_REQUIRED_LABEL);
   });
 });
+
+export {};
