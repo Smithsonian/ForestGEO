@@ -115,6 +115,7 @@ export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
                   </Stack>
                   <Button
                     component="span"
+                    data-testid={`remove-file-${index}`}
                     onClick={e => {
                       e.stopPropagation();
                       onRemoveFile(index);
