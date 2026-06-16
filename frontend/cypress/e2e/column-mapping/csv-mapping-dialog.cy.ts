@@ -54,13 +54,7 @@ const CONTINUE_UPLOAD_LABEL = 'Continue Upload';
 const FIX_ERRORS_LABEL = 'Fix validation errors to continue';
 
 function stubAuthAndPipeline() {
-  cy.intercept('GET', '**/api/auth/session**', {
-    statusCode: 200,
-    body: {
-      user: { name: 'E2E Admin', email: 'e2e-admin@forestgeo.si.edu', userStatus: 'global' },
-      expires: '2099-12-31T23:59:59.999Z'
-    }
-  }).as('session');
+  cy.stubMappingSession();
 
   // The uploader opens a session before any chunk POST; return a usable sessionId
   // so UploadFireSQL proceeds to /api/sqlpacketload instead of erroring out.

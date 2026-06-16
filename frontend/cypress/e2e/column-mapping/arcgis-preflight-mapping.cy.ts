@@ -115,16 +115,6 @@ const APPLY_MAPPING_BUTTON = '[data-testid="mapping-apply"]';
 const CLEAN_REUPLOAD_BUTTON_LABEL = 'Use Clean Re-Upload';
 const CONTINUE_TO_PREFLIGHT_LABEL = 'Continue to pre-flight';
 
-function stubAuth() {
-  cy.intercept('GET', '**/api/auth/session**', {
-    statusCode: 200,
-    body: {
-      user: { name: 'E2E Admin', email: 'e2e-admin@forestgeo.si.edu', userStatus: 'global' },
-      expires: '2099-12-31T23:59:59.999Z'
-    }
-  }).as('session');
-}
-
 /** Selects the ArcGIS workbook into the dropzone and advances into the pre-flight step. */
 function uploadWorkbookAndEnterPreflight() {
   cy.visit(HARNESS_ARCGIS_ROUTE);
@@ -154,7 +144,7 @@ function selectSheetRole(selectTestid: string, sheetName: string) {
 
 describe('ArcGIS pre-flight mapping journey', () => {
   beforeEach(() => {
-    stubAuth();
+    cy.stubMappingSession();
   });
 
   it('forces mapping, then resubmits pre-flight carrying the chosen sheet roles', () => {

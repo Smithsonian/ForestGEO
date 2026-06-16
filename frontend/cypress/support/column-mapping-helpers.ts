@@ -17,6 +17,12 @@ const UPLOAD_INPUT_SELECTOR = 'input[type="file"]';
 const DIALOG_TESTID = 'column-mapping-dialog';
 const APPLY_TESTID = 'mapping-apply';
 
+// Minimal NextAuth session for the mapping journeys. Deliberately leaner than the
+// `loginAsAdmin` command (no sites/allsites): these specs only need an authenticated
+// user so the upload UI mounts, not a fully scoped site list.
+const E2E_ADMIN_EMAIL = 'e2e-admin@forestgeo.si.edu';
+const E2E_SESSION_EXPIRY = '2099-12-31T23:59:59.999Z';
+
 /** canonicalField -> source column label to assign in the mapping dialog. */
 type MappingTable = Record<string, string>;
 
@@ -77,6 +83,16 @@ Cypress.Commands.add('interceptMappingPreflight', (response: PreflightInterceptR
   cy.intercept('POST', '/api/arcgis/preflight', response).as('preflight');
 });
 
+Cypress.Commands.add('stubMappingSession', () => {
+  cy.intercept('GET', '**/api/auth/session**', {
+    statusCode: 200,
+    body: {
+      user: { name: 'E2E Admin', email: E2E_ADMIN_EMAIL, userStatus: 'global' },
+      expires: E2E_SESSION_EXPIRY
+    }
+  }).as('session');
+});
+
 declare global {
   namespace Cypress {
     interface Chainable {
@@ -88,6 +104,8 @@ declare global {
       interceptMappingUploadFlow(options?: MappingUploadFlowOptions): Chainable<void>;
       /** Stubs the ArcGIS preflight route with the supplied response. */
       interceptMappingPreflight(response: PreflightInterceptResponse): Chainable<void>;
+      /** Stubs the minimal NextAuth session (leaner than loginAsAdmin) shared by the mapping journeys. */
+      stubMappingSession(): Chainable<void>;
     }
   }
 }
