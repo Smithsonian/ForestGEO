@@ -21,36 +21,20 @@
  * measurements summary grid.
  */
 
-const HARNESS_ROUTE = '/e2e-upload-harness';
+import { CONTINUE_UPLOAD_LABEL, MAPPING_REQUIRED_LABEL, MAPPING_REVIEW_LABEL, MINIMAL_MAPPING } from '../../support/column-mapping-helpers';
+
 const HARNESS_SCHEMA = 'forestgeo_testing';
 
 const NONSTANDARD_FIXTURE = 'measurements-nonstandard-headers.csv';
 const STANDARD_FIXTURE = 'measurements-standard-headers.csv';
 
-// The nonstandard fixture's required `date` field is the ONLY field that does not
-// auto-resolve: its header `Measured` is not a CSV `date` alias, while Tag/SpCode/
-// QuadratName/X/Y seed to tag/spcode/quadrat/lx/ly automatically. Mapping date ->
-// Measured is therefore the minimal mapping that satisfies validateMapping and
-// enables Apply. (See lib/column-mapping/fields.ts CSV_ALIASES + mapping.ts.)
-const MINIMAL_MAPPING = { date: 'Measured' } as const;
-
 const MAPPING_DIALOG = '[data-testid="column-mapping-dialog"]';
 const OPEN_MAPPING_BUTTON = '[data-testid="open-column-mapping"]';
 const CANCEL_MAPPING_BUTTON = '[data-testid="mapping-cancel"]';
 
-// UploadParseFiles renders the mapping button for every measurements CSV upload,
-// but its label is the signal: "Map columns (required)" when an unmapped required
-// field forces the dialog, "Review column mapping" when the file already resolves.
-const MAPPING_REQUIRED_LABEL = 'Map columns (required)';
-const MAPPING_REVIEW_LABEL = 'Review column mapping';
-
-// Real control labels harvested from the components, not guessed:
-// - UploadParentModal mode picker -> "Use Clean Re-Upload" (REVISIONS mode disables mapping).
-// - UploadParseFiles primary advance button is label-shifting: it reads
-//   "Continue Upload (N file(s))" only when every file is valid, and
-//   "Fix validation errors to continue" (disabled) while a required field is unmapped.
-const CLEAN_REUPLOAD_BUTTON_LABEL = 'Use Clean Re-Upload';
-const CONTINUE_UPLOAD_LABEL = 'Continue Upload';
+// UploadParseFiles primary advance button reads "Fix validation errors to continue"
+// (disabled) while a required field is unmapped; it flips to CONTINUE_UPLOAD_LABEL
+// only when every file is valid.
 const FIX_ERRORS_LABEL = 'Fix validation errors to continue';
 
 function stubAuthAndPipeline() {
@@ -68,26 +52,13 @@ function stubAuthAndPipeline() {
   cy.interceptMappingUploadFlow();
 }
 
-/** Enters the parse-files step with the given fixture loaded and validated. */
-function enterParseStepWithFile(fixture: string) {
-  cy.visit(HARNESS_ROUTE);
-  cy.get('[data-testid="e2e-upload-harness"]').should('exist');
-
-  // Advance past the upload-mode picker into the parse-files step. Clean re-upload
-  // keeps the column-mapping flow enabled (REVISIONS would disable it).
-  cy.contains('button', CLEAN_REUPLOAD_BUTTON_LABEL).click();
-
-  cy.uploadMeasurementFile(fixture);
-  cy.contains(fixture).should('be.visible');
-}
-
 describe('CSV column-mapping dialog journey', () => {
   beforeEach(() => {
     stubAuthAndPipeline();
   });
 
   it('maps a non-standard CSV, then POSTs raw rows + mapping to sqlpacketload', () => {
-    enterParseStepWithFile(NONSTANDARD_FIXTURE);
+    cy.enterUploadParseStep(NONSTANDARD_FIXTURE);
 
     // The unmapped required `date` field forces mapping: the affordance is the
     // required-mapping button, and Continue Upload stays disabled until mapped.
@@ -109,7 +80,7 @@ describe('CSV column-mapping dialog journey', () => {
   });
 
   it('cancels the dialog: no mapping is applied and no upload fires', () => {
-    enterParseStepWithFile(NONSTANDARD_FIXTURE);
+    cy.enterUploadParseStep(NONSTANDARD_FIXTURE);
 
     cy.get(OPEN_MAPPING_BUTTON, { timeout: 15000 }).should('be.visible').click();
     cy.get(MAPPING_DIALOG).should('be.visible');
@@ -126,7 +97,7 @@ describe('CSV column-mapping dialog journey', () => {
   });
 
   it('never forces mapping when a standard CSV fully auto-resolves', () => {
-    enterParseStepWithFile(STANDARD_FIXTURE);
+    cy.enterUploadParseStep(STANDARD_FIXTURE);
 
     // A fully canonical header row auto-resolves every required field, so the
     // mapping is never *required*: Continue Upload is immediately enabled and the

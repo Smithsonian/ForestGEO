@@ -25,8 +25,6 @@
  * point is buried in the fully populated measurements summary grid.
  */
 
-const HARNESS_ARCGIS_ROUTE = '/e2e-upload-harness?mode=arcgis';
-
 const ARCGIS_FIXTURE = 'arcgis-two-sheet.xlsx';
 
 // Sheet roles offered by the dialog come from the pre-flight `sheets` payload,
@@ -109,22 +107,14 @@ const SHEET_ROLE_SELECT_TREES = '[data-testid="mapping-sheet-role-select-trees"]
 const SHEET_ROLE_SELECT_STEMS = '[data-testid="mapping-sheet-role-select-stems"]';
 const APPLY_MAPPING_BUTTON = '[data-testid="mapping-apply"]';
 
-// Real control labels harvested from the components, not guessed:
-// - UploadParentModal ArcGIS confirm screen -> "Use Clean Re-Upload".
+// Real control label harvested from the components, not guessed:
 // - UploadParseFiles advance button reads "Continue to pre-flight" for arcgis_xlsx.
-const CLEAN_REUPLOAD_BUTTON_LABEL = 'Use Clean Re-Upload';
+// (The shared cy.enterUploadParseStep command owns the "Use Clean Re-Upload" step.)
 const CONTINUE_TO_PREFLIGHT_LABEL = 'Continue to pre-flight';
 
 /** Selects the ArcGIS workbook into the dropzone and advances into the pre-flight step. */
 function uploadWorkbookAndEnterPreflight() {
-  cy.visit(HARNESS_ARCGIS_ROUTE);
-  cy.get('[data-testid="e2e-upload-harness"]').should('exist');
-
-  // ArcGIS workbooks are imported as a clean re-upload (the only mode offered).
-  cy.contains('button', CLEAN_REUPLOAD_BUTTON_LABEL).click();
-
-  cy.uploadMeasurementFile(ARCGIS_FIXTURE, 'arcgis');
-  cy.contains(ARCGIS_FIXTURE).should('be.visible');
+  cy.enterUploadParseStep(ARCGIS_FIXTURE, { mode: 'arcgis' });
 
   // Advancing fires the first pre-flight POST automatically (UploadArcgisPreflight
   // runs pre-flight on mount), which the @preflight intercept answers.

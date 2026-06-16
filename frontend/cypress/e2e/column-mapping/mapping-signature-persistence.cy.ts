@@ -40,14 +40,10 @@
  * the real measurements UploadParentModal with a fixed site/plot/census).
  */
 
-const HARNESS_ROUTE = '/e2e-upload-harness';
+import { CONTINUE_UPLOAD_LABEL, MAPPING_REQUIRED_LABEL, MAPPING_REVIEW_LABEL, MINIMAL_MAPPING } from '../../support/column-mapping-helpers';
 
 const NONSTANDARD_FIXTURE = 'measurements-nonstandard-headers.csv';
 
-// The nonstandard fixture's required `date` field is the ONLY field that does not
-// auto-resolve (its header is `Measured`); Tag/SpCode/QuadratName/X/Y all seed
-// automatically. Mapping date -> Measured is the minimal mapping that enables Apply.
-const MINIMAL_MAPPING = { date: 'Measured' } as const;
 // When `date` is mapped, the Joy Select trigger renders the chosen source column; when it
 // is unmapped the trigger falls back to the required-field placeholder (columnmappingdialog.tsx:123).
 const MAPPED_SOURCE_COLUMN = 'Measured';
@@ -56,19 +52,6 @@ const UNMAPPED_PLACEHOLDER = 'Choose a column';
 const MAPPING_DIALOG = '[data-testid="column-mapping-dialog"]';
 const OPEN_MAPPING_BUTTON = '[data-testid="open-column-mapping"]';
 const DATE_SOURCE_SELECT = '[data-testid="mapping-source-select-date"]';
-
-// UploadParseFiles renders one mapping button; its label is the signal:
-// "Map columns (required)" while an unmapped required field forces the dialog,
-// "Review column mapping" once the file resolves.
-const MAPPING_REQUIRED_LABEL = 'Map columns (required)';
-const MAPPING_REVIEW_LABEL = 'Review column mapping';
-
-// Real control labels harvested from the components:
-// - UploadParentModal mode picker -> "Use Clean Re-Upload" (REVISIONS disables mapping).
-// - UploadParseFiles advance button reads "Continue Upload (N file(s))" only when every
-//   file is valid (i.e. the mapping has satisfied the required `date` field).
-const CLEAN_REUPLOAD_BUTTON_LABEL = 'Use Clean Re-Upload';
-const CONTINUE_UPLOAD_LABEL = 'Continue Upload';
 
 // Per-file remove control in FileListEnhanced. It carries a stable `remove-file-<index>` testid
 // (MUI's icon data-testids are stripped by turbopack, and Joy's class hashes are not stable hooks).
@@ -85,15 +68,6 @@ function stubAuthAndPipeline() {
   cy.interceptMappingUploadFlow();
 }
 
-/** Enters the parse-files step with the given fixture loaded. */
-function enterParseStepWithFile(fixture: string) {
-  cy.visit(HARNESS_ROUTE);
-  cy.get('[data-testid="e2e-upload-harness"]').should('exist');
-  cy.contains('button', CLEAN_REUPLOAD_BUTTON_LABEL).click();
-  cy.uploadMeasurementFile(fixture);
-  cy.contains(fixture).should('be.visible');
-}
-
 /** Opens the mapping dialog from the parse step (whatever label the button currently shows). */
 function openMappingDialog() {
   cy.get(OPEN_MAPPING_BUTTON, { timeout: 15000 }).should('be.visible').click();
@@ -106,7 +80,7 @@ describe('In-session column-mapping retention journey', () => {
   });
 
   it('retains a confirmed mapping across dialog close/reopen and parse-step navigation', () => {
-    enterParseStepWithFile(NONSTANDARD_FIXTURE);
+    cy.enterUploadParseStep(NONSTANDARD_FIXTURE);
 
     // Unmapped required `date` forces mapping: the affordance is the required-mapping button.
     cy.get(OPEN_MAPPING_BUTTON, { timeout: 15000 }).should('be.visible').and('contain', MAPPING_REQUIRED_LABEL).click();
@@ -131,7 +105,7 @@ describe('In-session column-mapping retention journey', () => {
   });
 
   it('clears the mapping when the file is removed and re-added', () => {
-    enterParseStepWithFile(NONSTANDARD_FIXTURE);
+    cy.enterUploadParseStep(NONSTANDARD_FIXTURE);
 
     openMappingDialog();
     cy.applyColumnMapping(MINIMAL_MAPPING);
