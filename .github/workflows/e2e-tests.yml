@@ -2,7 +2,7 @@ name: E2E Tests
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, forestgeo-app-development]
   workflow_dispatch:
 
 concurrency:
@@ -36,7 +36,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24.x'
+          node-version: "24.x"
 
       - name: Create .env for E2E testing
         run: |
@@ -54,7 +54,7 @@ jobs:
           ENVEOF
 
       - name: Install dependencies
-        run: cd frontend && npm install
+        run: cd frontend && npm ci
 
       - name: Dependency-cycle gate
         run: node scripts/check-cycles.mjs
@@ -70,7 +70,7 @@ jobs:
         run: cd frontend && npm run db:seed:e2e
         env:
           TEST_DB_HOST: 127.0.0.1
-          TEST_DB_PORT: '3306'
+          TEST_DB_PORT: "3306"
           TEST_DB_USER: root
           TEST_DB_PASSWORD: testpassword
 
@@ -82,7 +82,7 @@ jobs:
         with:
           working-directory: frontend
           start: npx next dev --turbo
-          wait-on: 'http://localhost:3000'
+          wait-on: "http://localhost:3000"
           wait-on-timeout: 120
           browser: chrome
           headed: false
@@ -91,9 +91,14 @@ jobs:
           # mocks the NextAuth session + site/plot/census + grid/error APIs via
           # cy.intercept, and their mock helpers are stateful (edits/clears mutate
           # the mock store), so they assert real UI behaviour without the DB.
-          spec: cypress/e2e/census-creation.cy.ts,cypress/e2e/validation-invalid-codes.cy.ts,cypress/e2e/data-viewing-comprehensive.cy.ts,cypress/e2e/cross-feature-integration.cy.ts,cypress/e2e/errors-explorer.cy.ts
+          # The column-mapping/* specs are mock-driven too: they drive the real
+          # upload UI via the e2e-upload-harness route and stub the upload pipeline
+          # (sqlpacketload/setup*) with cy.intercept. The Tier B realdb anchor
+          # (cypress/e2e/column-mapping-realdb/**) is intentionally NOT gated here
+          # — it needs Docker MySQL and runs via `npm run test:e2e:realdb`.
+          spec: cypress/e2e/census-creation.cy.ts,cypress/e2e/validation-invalid-codes.cy.ts,cypress/e2e/data-viewing-comprehensive.cy.ts,cypress/e2e/cross-feature-integration.cy.ts,cypress/e2e/errors-explorer.cy.ts,cypress/e2e/a11y-responsive.cy.ts,cypress/e2e/column-mapping/csv-mapping-dialog.cy.ts,cypress/e2e/column-mapping/arcgis-preflight-mapping.cy.ts,cypress/e2e/column-mapping/mapping-signature-persistence.cy.ts,cypress/e2e/column-mapping/mapping-negative-paths.cy.ts
         env:
-          NEXT_PUBLIC_E2E_TESTING: 'true'
+          NEXT_PUBLIC_E2E_TESTING: "true"
 
       - name: Upload Cypress screenshots on failure
         uses: actions/upload-artifact@v4
