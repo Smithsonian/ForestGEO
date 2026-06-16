@@ -799,7 +799,7 @@ export async function teardownTestDatabase(
  *   stems → quadrats (preserved)
  *   trees → species (preserved), census
  */
-const MEASUREMENT_TABLES_DELETE_ORDER = [
+export const MEASUREMENT_TABLES_DELETE_ORDER = [
   'measurement_error_log', // Leaf: depends on coremeasurements + measurement_errors
   'cmattributes', // Leaf: depends on coremeasurements
   'coremeasurements', // Parent of measurement_error_log, cmattributes; child of stems

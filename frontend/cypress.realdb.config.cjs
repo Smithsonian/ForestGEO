@@ -33,7 +33,18 @@ require.extensions['.ts'] = function (module, filename) {
   module._compile(code, filename);
 };
 
-const { setupTestDatabase, teardownTestDatabase } = require('./tests/setup/local-db-setup.ts');
+const { setupTestDatabase, teardownTestDatabase, MEASUREMENT_TABLES_DELETE_ORDER } = require('./tests/setup/local-db-setup.ts');
+
+// The reset task clears the measurement pipeline using the SAME canonical FK-safe
+// delete order that the shared test setup defines (MEASUREMENT_TABLES_DELETE_ORDER),
+// so this config no longer duplicates that FK knowledge or drifts from the real FK
+// chain. The anchor drives the sqlpacketload -> bulkingestionprocess path, which
+// populates exactly these measurement tables; no session-tracking table is written,
+// so none needs clearing here. (The old inline list also named `upload_sessions`,
+// which loadSchema does not even create in the test DB — its CREATE sits behind a
+// `--` banner that the schema splitter drops — so the prior per-DELETE `.catch`
+// was silently swallowing a missing-table error on every reset.)
+const REALDB_RESET_TABLES = [...MEASUREMENT_TABLES_DELETE_ORDER];
 
 // The harness site (app/e2e-upload-harness) advertises schemaName 'forestgeo_testing'
 // with plotID 1 / censusID 1. That schema name is on the sqlpacketload whitelist
@@ -116,18 +127,12 @@ module.exports = defineConfig({
           const connection = await mysql.createConnection(LOCAL_DB_CONFIG);
           try {
             await connection.query('SET FOREIGN_KEY_CHECKS = 0');
-            for (const table of [
-              'measurement_error_log',
-              'cmattributes',
-              'coremeasurements',
-              'stems',
-              'trees',
-              'temporarymeasurements',
-              'uploadmetrics',
-              'uploadintegrityalerts',
-              'upload_sessions'
-            ]) {
-              await connection.query(`DELETE FROM \`${REALDB_SCHEMA}\`.${table}`).catch(() => {});
+            // Reuse the canonical FK-safe delete order from the shared test setup so
+            // this config never drifts from the schema's real FK chain. Every table in
+            // REALDB_RESET_TABLES is created by loadSchema's full tablestructures.sql,
+            // so a failing DELETE is a genuine error and is allowed to throw.
+            for (const table of REALDB_RESET_TABLES) {
+              await connection.query(`DELETE FROM \`${REALDB_SCHEMA}\`.${table}`);
             }
             await connection.query('SET FOREIGN_KEY_CHECKS = 1');
           } finally {
