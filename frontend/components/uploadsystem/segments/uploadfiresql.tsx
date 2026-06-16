@@ -34,10 +34,10 @@ import {
 import { abortChunkProcessingAfterPermanentUploadFailure, shouldTimeoutPausedParser } from '@/components/uploadsystemhelpers/uploadqueueguards';
 import { generateShortBatchID } from '@/config/utils';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
-import { chooseEffectiveCsvMapping, type CsvMappingRejectionCode } from '@/lib/column-mapping/mapping';
+import { chooseEffectiveCsvMapping, headerBasisMatches, type CsvMappingRejectionCode } from '@/lib/column-mapping/mapping';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
-import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, planColumnCountMatches, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
+import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
 import { aliasesFor, legacyCsvHeaderKey } from '@/lib/column-mapping/fields';
 import { transformMeasurementValue, validateMeasurementRow } from '@/lib/column-mapping/measurement-rows';
 import { UploadMode } from '@/config/uploadmodes';
@@ -936,18 +936,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               // header list to the server. Fall back to the up-front extracted headers.
               serverCsvHeaders = Array.isArray(results.meta.fields) ? results.meta.fields : (csvHeaders ?? []);
             }
-            // The client-side divergence guard only ever applied to the mapping flow, which is now
-            // server-resolved; the server enforces the same column-count contract and returns 422.
-            if (
-              !serverResolves &&
-              headerPlan &&
-              actualChunkCount === 1 &&
-              Array.isArray(results.meta.fields) &&
-              !planColumnCountMatches(headerPlan, results.meta.fields.length)
-            ) {
+            // The mapping plan + signature were validated against the up-front extracted header basis
+            // (csvHeaders, read with Papa header:false). The server keys rows against THIS chunk's
+            // header:true fields (serverCsvHeaders), which RENAMES duplicate headers (dbh,dbh ->
+            // dbh,dbh_1). If the two bases diverge at any position the client validated a mapping the
+            // server cannot reproduce, so duplicate/renamed columns would be keyed differently than the
+            // user reviewed. Abort rather than upload a misaligned file.
+            if (serverResolves && actualChunkCount === 1 && csvHeaders && !headerBasisMatches(csvHeaders, serverCsvHeaders)) {
               const divergence = new Error(
-                `Header plan misalignment for ${file.name}: mapping plan has ${headerPlan.outputKeys.length} columns but papaparse parsed ${results.meta.fields.length}. ` +
-                  `The file changed between preview and upload, or its header row is malformed. Re-review the column mapping before uploading.`
+                `Header basis mismatch for ${file.name}: the column mapping was validated against [${csvHeaders.join(', ')}] ` +
+                  `but the upload parser produced [${serverCsvHeaders.join(', ')}]. Duplicate or renamed column headers make the ` +
+                  `mapping ambiguous — give each column a unique header and re-review the mapping before uploading.`
               );
               // Mirror the file's fatal-error pattern: record the error, then abort. Papa's
               // parser.abort() synchronously invokes the `complete` callback below, which

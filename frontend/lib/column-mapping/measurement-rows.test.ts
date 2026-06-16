@@ -304,6 +304,73 @@ describe('resolveMeasurementChunk', () => {
     expect(result.diagnostics.extraColumnRows).toBe(1);
   });
 
+  describe('ragged-row rejection on the server mapping path (C1/C3)', () => {
+    // On the server-authoritative rawRows path the plan keys parsed rows BY POSITION. papaparse
+    // (header:true) breaks positional alignment two ways that the old chunk resolver let through:
+    //   - too-many fields  -> a trailing `__parsed_extra` array the plan has no slot for;
+    //   - too-few fields   -> the row object simply omits the missing trailing header keys.
+    // Both indicate a malformed line and MUST be rejected, never silently keyed/ingested.
+    const MAPPING_HEADERS = ['tag', 'spcode', 'quadrat', 'dbh'];
+
+    function resolveOnMappingPath(rawRows: Record<string, unknown>[]) {
+      return resolveMeasurementChunk(rawRows as Record<string, string>[], MAPPING_HEADERS.length, {
+        formType: FormType.measurements,
+        uploadMode: 'other',
+        delimiter: DEFAULT_DELIMITER,
+        requiredHeaders: MEASUREMENTS_REQUIRED,
+        csvHeaders: MAPPING_HEADERS
+      });
+    }
+
+    it('rejects a too-many-fields row carrying __parsed_extra instead of ingesting a phantom column', () => {
+      // papaparse emits the leftover cell as `__parsed_extra: ['leftover']`. The plan has 4 slots;
+      // the 5th entry has no output key and previously fell through to normalizeHeader('__parsed_extra')
+      // === 'parsedextra', silently injecting an unmapped column into the upload.
+      const ragged = { tag: 'T1', spcode: 'abc', quadrat: 'q1', dbh: '12.5', __parsed_extra: ['leftover'] };
+
+      const result = resolveOnMappingPath([ragged]);
+
+      expect(result.validRows).toHaveLength(0);
+      expect(result.invalidRows).toHaveLength(1);
+      expect(result.invalidRows[0].failureReason).toMatch(/extra|too many columns/i);
+      // The phantom column must never survive under ANY key (literal or normalized).
+      for (const row of [...result.validRows, ...result.invalidRows]) {
+        expect(Object.keys(row)).not.toContain('__parsed_extra');
+        expect(Object.keys(row)).not.toContain('parsedextra');
+      }
+    });
+
+    it('rejects a too-few-fields row whose trailing header keys papaparse omitted', () => {
+      // A line with fewer delimited values than headers yields an object missing the trailing keys
+      // (a trailing EMPTY value still produces the key, so absent keys reliably mean a malformed line).
+      // The omitted column here is the OPTIONAL `dbh`: all required fields are present, so this row
+      // would pass validation today — it can only be rejected by genuine too-few-column detection,
+      // not by the pre-existing missing-required-field check.
+      const tooFew = { tag: 'T1', spcode: 'abc', quadrat: 'q1' };
+
+      const result = resolveOnMappingPath([tooFew]);
+
+      expect(result.validRows).toHaveLength(0);
+      expect(result.invalidRows).toHaveLength(1);
+      expect(result.invalidRows[0].failureReason).toMatch(/too few columns/i);
+    });
+
+    it('rejects only the ragged rows in a mixed chunk and keeps the well-formed one', () => {
+      const good = { tag: 'T2', spcode: 'def', quadrat: 'q2', dbh: '8.25' };
+      const tooMany = { tag: 'T1', spcode: 'abc', quadrat: 'q1', dbh: '12.5', __parsed_extra: ['junk'] };
+      const tooFew = { tag: 'T3', spcode: 'ghi' };
+
+      const result = resolveOnMappingPath([good, tooMany, tooFew]);
+
+      expect(result.validRows).toHaveLength(1);
+      expect(result.validRows[0].tag).toBe('T2');
+      expect(result.validRows[0].dbh).toBe(8.25);
+      expect(result.invalidRows).toHaveLength(2);
+      // The well-formed row must not carry any extra-column residue.
+      expect(Object.keys(result.validRows[0])).not.toContain('parsedextra');
+    });
+  });
+
   it('uses RequiredTableHeadersByFormType[measurements] to drive validation', () => {
     const required = RequiredTableHeadersByFormType[FormType.measurements];
     expect(required.length).toBeGreaterThan(0);

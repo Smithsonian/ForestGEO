@@ -49,6 +49,18 @@ export function mappingApplies(mapping: ColumnMapping, headers: string[]): boole
 }
 
 /**
+ * Whether two header bases are the SAME sequence. The column-mapping plan and its signature are
+ * validated against the basis read by extractCsvHeaderRow (Papa `header:false`), while the upload
+ * keys rows with Papa `header:true` — which renames duplicate headers (`dbh,dbh` -> `dbh,dbh_1`).
+ * When the two bases disagree the client validated a mapping the server cannot reproduce, so the
+ * upload must abort. Comparison is the order- and duplicate-sensitive signature, so whitespace/case/
+ * underscore-only differences do not false-positive but a duplicate at any position does.
+ */
+export function headerBasisMatches(validatedBasis: string[], uploadBasis: string[]): boolean {
+  return headerSignature(validatedBasis) === headerSignature(uploadBasis);
+}
+
+/**
  * Whether `mapping` was built from the same source columns `seedMapping` would derive from this
  * metadata. Uses the identical column basis seedMapping signs (the de-duplicated union for ArcGIS),
  * so a freshly seeded mapping resubmitted against the same source is never spuriously stale.

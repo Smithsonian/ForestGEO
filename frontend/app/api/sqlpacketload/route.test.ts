@@ -1116,6 +1116,45 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     expect(body.failingRows[0].failureReason).toMatch(/Missing required fields/i);
   });
 
+  it('rejects a ragged raw row (papaparse __parsed_extra) instead of injecting a phantom column into the insert', async () => {
+    const validRow = { MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17' };
+    // papaparse parks an over-wide line's leftover cell under `__parsed_extra` (an array). The server
+    // must reject this row, not key the leftover as a normalized `parsedextra` column on the upload.
+    const raggedRow = { MyX: '13.0', tag: 'T9', spcode: 'def', quadrat: 'q2', ly: '4.0', date: '2023-05-18', __parsed_extra: ['leftover'] } as unknown as Record<string, string>;
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(undefined);
+
+    const res = (await POST(makeRawRowsRequest([validRow, raggedRow])))!;
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Only the well-formed sibling reaches the insert path.
+    expect(body.insertedCount).toBe(1);
+    expect(body.failingRows).toHaveLength(1);
+    expect(body.failingRows[0].spcode).toBe('def');
+    expect(body.failingRows[0].failureReason).toMatch(/too many columns/i);
+
+    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
+    );
+    expect(insertCall).toBeDefined();
+    // The leftover cell and any normalized __parsed_extra key must never reach the insert params.
+    const insertedParams = JSON.stringify(insertCall[1]);
+    expect(insertedParams).not.toContain('leftover');
+    expect(insertedParams).not.toContain('parsedextra');
+    expect(insertedParams).not.toContain('__parsed_extra');
+  });
+
   it('leaves the legacy fileRowSet path byte-identical when rawRows is absent', async () => {
     // Same shape as the existing happy-path test; no rawRows -> the new stage must not run.
     mockConnectionManager.executeQuery

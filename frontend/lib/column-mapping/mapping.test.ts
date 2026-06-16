@@ -3,6 +3,7 @@ import { SourceFormat } from '@/config/macros/formdetails';
 import {
   chooseEffectiveCsvMapping,
   HEADER_SIGNATURE_VERSION,
+  headerBasisMatches,
   headerSignature,
   isColumnMappingShape,
   joinMultiSourceValues,
@@ -277,6 +278,33 @@ describe('mapping identity', () => {
     const base = seedMapping(csvMeta(['tag']));
     expect(isColumnMappingShape(JSON.parse(JSON.stringify(base)))).toBe(true);
     expect(isColumnMappingShape({ ...base, headerSignature: 42 })).toBe(false);
+  });
+});
+
+describe('headerBasisMatches (C2: validated basis vs upload basis)', () => {
+  // The mapping plan + signature are validated against the basis from extractCsvHeaderRow (Papa
+  // header:false), but the upload keys rows with Papa header:true. The two MUST agree or the server
+  // keys columns differently than the user reviewed.
+  it('matches identical header sequences', () => {
+    expect(headerBasisMatches(['tag', 'dbh', 'date'], ['tag', 'dbh', 'date'])).toBe(true);
+  });
+
+  it('detects the duplicate-header rename that papaparse header:true introduces', () => {
+    // header:false preview yields the raw duplicate; header:true renames the second occurrence.
+    // This is the exact C2 divergence and must be caught.
+    expect(headerBasisMatches(['dbh', 'dbh'], ['dbh', 'dbh_1'])).toBe(false);
+  });
+
+  it('does not false-positive on whitespace/underscore/case differences (normalized away)', () => {
+    expect(headerBasisMatches([' DBH ', 'X_Coord'], ['dbh', 'xcoord'])).toBe(true);
+  });
+
+  it('detects a column-order change between the two bases', () => {
+    expect(headerBasisMatches(['tag', 'dbh'], ['dbh', 'tag'])).toBe(false);
+  });
+
+  it('detects a differing column count', () => {
+    expect(headerBasisMatches(['tag', 'dbh'], ['tag', 'dbh', 'extra'])).toBe(false);
   });
 });
 

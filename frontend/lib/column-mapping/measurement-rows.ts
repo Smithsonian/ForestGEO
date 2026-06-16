@@ -33,6 +33,8 @@ const DATE_FORMATS = [
 
 const NULLISH = new Set(['NA', 'NULL', '']);
 const MAX_DECIMAL = 999999.999999;
+// papaparse parks the leftover cells of an over-wide row under this synthetic key (an array value).
+const PARSED_EXTRA_KEY = '__parsed_extra';
 
 /**
  * Per-cell transform for a measurement upload. Pure port of the client's inline `transform`:
@@ -159,21 +161,55 @@ export function resolveMeasurementChunk(rawRows: Record<string, string>[], parse
   const invalidDateValues: string[] = [];
   let extraColumnRows = 0;
 
-  for (const rawRow of rawRows) {
+  // Key one parsed row's entries positionally through the active plan (or identity when plan-less),
+  // applying the per-cell measurement transform and recording unparseable dates as we go.
+  const keyEntries = (entries: [string, string][]): FileRow => {
     const keyed: FileRow = {};
-    Object.entries(rawRow).forEach(([rawKey, rawVal], index) => {
-      const key = plan ? (plan.outputKeys[index] ?? keyOf(rawKey, index)) : keyOf(rawKey, index);
+    entries.forEach(([rawKey, rawVal], index) => {
+      const key = keyOf(rawKey, index);
       const transformed = transformMeasurementValue((rawVal ?? '').toString(), key, formType);
       if (formType === FormType.measurements && key === 'date' && typeof transformed === 'string' && (rawVal ?? '') !== '') {
         invalidDateValues.push(String(rawVal));
       }
       keyed[key] = transformed as string | null;
     });
-    const collapsed = plan ? collapseRowWithPlan(keyed, plan) : keyed;
-    const result = validateMeasurementRow(collapsed, requiredHeaders, delimiter, formType);
+    return keyed;
+  };
+
+  for (const rawRow of rawRows) {
+    const allEntries = Object.entries(rawRow) as [string, string][];
+
+    if (plan) {
+      // Server-authoritative mapping path: the plan keys parsed rows BY POSITION, so it is only valid
+      // when the parsed row width matches the plan. papaparse signals an over-wide line with a trailing
+      // `__parsed_extra` array and an under-wide line by omitting trailing header keys. Both are
+      // malformed lines: reject them here rather than mis-key (which previously injected a normalized
+      // `__parsed_extra` column straight into the upload).
+      const hasExtraCells = Object.prototype.hasOwnProperty.call(rawRow, PARSED_EXTRA_KEY);
+      const entries = allEntries.filter(([rawKey]) => rawKey !== PARSED_EXTRA_KEY);
+      const collapsed = collapseRowWithPlan(keyEntries(entries), plan);
+
+      if (hasExtraCells || entries.length < plan.outputKeys.length) {
+        if (hasExtraCells) extraColumnRows += 1;
+        const failureReason = hasExtraCells
+          ? `Row has too many columns: expected ${plan.outputKeys.length} but the parsed line carried extra delimited values`
+          : `Row has too few columns: expected ${plan.outputKeys.length}, found ${entries.length}`;
+        invalidRows.push({ ...collapsed, failureReason });
+        continue;
+      }
+
+      const result = validateMeasurementRow(collapsed, requiredHeaders, delimiter, formType);
+      if (result.valid) validRows.push(collapsed);
+      else invalidRows.push({ ...collapsed, failureReason: result.failureReason ?? 'Unknown error' });
+      continue;
+    }
+
+    // Plan-less (revisions) path: unchanged — raw keys survive and __parsed_extra is counted, not rejected.
+    const keyed = keyEntries(allEntries);
+    const result = validateMeasurementRow(keyed, requiredHeaders, delimiter, formType);
     if (result.hasExtraColumns) extraColumnRows += 1;
-    if (result.valid) validRows.push(collapsed);
-    else invalidRows.push({ ...collapsed, failureReason: result.failureReason ?? 'Unknown error' });
+    if (result.valid) validRows.push(keyed);
+    else invalidRows.push({ ...keyed, failureReason: result.failureReason ?? 'Unknown error' });
   }
 
   return { validRows, invalidRows, plan, columnCountMismatch: false, diagnostics: { invalidDateValues, extraColumnRows } };
