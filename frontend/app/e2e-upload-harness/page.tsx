@@ -6,7 +6,8 @@
  * genuine UploadParseFiles -> UploadFireSQL journey without navigating the entire
  * populated measurements summary grid (the only production entry point).
  *
- * Hard-gated to NEXT_PUBLIC_E2E_TESTING so it never renders in a real deployment.
+ * Hard-gated to NEXT_PUBLIC_E2E_TESTING === 'true' && NODE_ENV !== 'production' so it
+ * never renders in a real deployment.
  */
 
 import { useEffect, useState } from 'react';
@@ -16,6 +17,8 @@ import { FormType } from '@/config/macros/formdetails';
 import { useAppStore } from '@/config/store/appstore';
 import type { Site, Plot } from '@/config/sqlrdsdefinitions/zones';
 import type { OrgCensusRDS } from '@/config/sqlrdsdefinitions/timekeeping';
+
+const isE2EHarnessEnabled = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
 
 const HARNESS_SCHEMA = 'forestgeo_testing';
 
@@ -46,13 +49,16 @@ export default function E2EUploadHarnessPage() {
   const [contextReady, setContextReady] = useState(false);
 
   useEffect(() => {
+    if (!isE2EHarnessEnabled) {
+      return;
+    }
     setSite(HARNESS_SITE);
     setPlot(HARNESS_PLOT);
     setCensus(HARNESS_CENSUS);
     setContextReady(true);
   }, [setSite, setPlot, setCensus]);
 
-  if (process.env.NEXT_PUBLIC_E2E_TESTING !== 'true') {
+  if (!isE2EHarnessEnabled) {
     return <Typography level="body-lg">Not available.</Typography>;
   }
 
