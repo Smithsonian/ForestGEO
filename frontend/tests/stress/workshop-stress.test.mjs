@@ -115,4 +115,21 @@ describe('workshop stress helpers', () => {
       )
     ).toEqual(['Error rate 25.00% exceeded 10.00%.', 'Overall p95 400ms exceeded 350ms.']);
   });
+
+  it('flags the multi-site guardrail when fewer site targets resolved than minSites', () => {
+    // The whole point of a multi-site workshop tool is keeping several schemas hot; the previous
+    // threshold test passed targetCount === minSites, so this branch was never exercised.
+    const samples = [{ site: 'forestgeo_a', operation: 'dashboard', status: 200, ok: true, durationMs: 100 }];
+    const summary = buildReportSummary(samples);
+    // Only 1 site resolved against a minSites of 3 -> the guard must fire, and alone (error/p95 pass).
+    expect(evaluateThresholds(summary, { minSites: 3, maxErrorRate: 0.5, maxP95Ms: 1000 }, 1)).toEqual([
+      'Only 1 site target(s) resolved; expected at least 3.'
+    ]);
+  });
+
+  it('does not flag the multi-site guardrail when targetCount meets minSites', () => {
+    const samples = [{ site: 'forestgeo_a', operation: 'dashboard', status: 200, ok: true, durationMs: 100 }];
+    const summary = buildReportSummary(samples);
+    expect(evaluateThresholds(summary, { minSites: 2, maxErrorRate: 0.5, maxP95Ms: 1000 }, 2)).toEqual([]);
+  });
 });
