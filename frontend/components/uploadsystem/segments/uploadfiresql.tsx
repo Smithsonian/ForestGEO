@@ -1265,6 +1265,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       setVerificationStatus('');
       setVerificationStep(0);
       setTotalVerificationSteps(0);
+      // Clear stale mapping-fallback notices from a prior attempt so a corrected re-upload does not
+      // show a "saved mapping not used" warning that no longer applies to this run.
+      setMappingFallbackWarnings([]);
       ailogger.info(`Prepared fresh upload attempt: ${uploadAttemptKey}`);
       return;
     }

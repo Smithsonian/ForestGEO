@@ -185,11 +185,16 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     acceptedFiles.forEach(file => {
       const status = fileValidationStatuses[file.name];
       if (status && !fileEffectivelyValid(file.name) && status.issues.length > 0) {
-        issues.push({ fileName: file.name, issues: status.issues.map(i => i.message) });
+        // When a confirmed mapping covers the header-coverage gaps, hide those resolved messages so
+        // only the structural blockers that still keep the file from validating are surfaced.
+        const surfaced = mappingValidForFile(file.name) ? status.issues.filter(issue => !isHeaderCoverageIssue(issue)) : status.issues;
+        if (surfaced.length > 0) {
+          issues.push({ fileName: file.name, issues: surfaced.map(i => i.message) });
+        }
       }
     });
     return sourceFormat === SourceFormat.arcgis_xlsx ? [...arcgisValidationIssues, ...issues] : issues;
-  }, [acceptedFiles, arcgisValidationIssues, fileEffectivelyValid, fileValidationStatuses, sourceFormat]);
+  }, [acceptedFiles, arcgisValidationIssues, fileEffectivelyValid, fileValidationStatuses, mappingValidForFile, sourceFormat]);
 
   // Check if any file is still being analyzed (no validation status yet)
   const isAnalyzing = useMemo(() => {
