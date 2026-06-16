@@ -1,4 +1,14 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
+// SECURITY: never ship a production build with the e2e bypass enabled. NEXT_PUBLIC_E2E_TESTING gates
+// both the e2e-upload-harness route and the e2e-credentials auth bypass, and because it is a
+// NEXT_PUBLIC_ var it is inlined into the client bundle at build time — so a single mis-set
+// production build would ship both live. Fail the build loudly instead of relying on process discipline.
+if (process.env.NODE_ENV === 'production' && process.env.NEXT_PUBLIC_E2E_TESTING === 'true') {
+  throw new Error(
+    'Refusing to build: NEXT_PUBLIC_E2E_TESTING=true with NODE_ENV=production would ship the e2e upload harness and auth bypass to a live deployment. Unset NEXT_PUBLIC_E2E_TESTING for production builds.'
+  );
+}
+
 const withBundleAnalyzer = require('@next/bundle-analyzer')({
   enabled: process.env.ANALYZE === 'true'
 });

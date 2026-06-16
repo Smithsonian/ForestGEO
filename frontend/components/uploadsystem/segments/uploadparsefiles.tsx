@@ -125,17 +125,21 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   );
 
   // The mapping must resolve against every selected file's headers, not just the seeding file's.
-  const mappingValidForFile = useCallback(
-    (fileName: string): boolean => {
-      if (!mappingEnabled) return false;
-      const meta = metadataFor(fileName);
-      if (!meta) return false;
-      const effective = effectiveMappingFor(fileName);
-      if (!effective) return false;
-      return validateMapping(effective, meta).valid;
-    },
-    [mappingEnabled, metadataFor, effectiveMappingFor]
-  );
+  // Compute each file's validity ONCE per render: seedMapping + validateMapping are otherwise re-run
+  // for every file by each consumer (mappingValid, fileEffectivelyValid, allValidationIssues, JSX).
+  const perFileMappingValid = useMemo(() => {
+    const out = new Map<string, boolean>();
+    if (mappingEnabled) {
+      for (const file of acceptedFiles) {
+        const meta = metadataFor(file.name);
+        const effective = meta ? effectiveMappingFor(file.name) : null;
+        out.set(file.name, Boolean(meta && effective && validateMapping(effective, meta).valid));
+      }
+    }
+    return out;
+  }, [acceptedFiles, mappingEnabled, metadataFor, effectiveMappingFor]);
+
+  const mappingValidForFile = useCallback((fileName: string): boolean => perFileMappingValid.get(fileName) ?? false, [perFileMappingValid]);
 
   const mappingValid = useMemo(
     () => acceptedFiles.length > 0 && acceptedFiles.every(file => mappingValidForFile(file.name)),
