@@ -55,11 +55,13 @@ describe('CSV header plan preserves column count across parser edge cases (diver
   }
 });
 
-describe('divergence guard predicate (planColumnCountMatches — the exact function the upload guard calls)', () => {
-  // uploadfiresql.tsx aborts the upload on the first chunk when `!planColumnCountMatches(plan, papaFields)`.
-  // Testing the shared predicate (not a re-derived `a !== b`) means a regression to the guard's
-  // comparison — flipped operator, wrong operand — fails here. The abort WIRING around it remains
-  // integration-only (verified by code-trace in the Task 3 review).
+describe('column-count guard predicate (planColumnCountMatches — the SERVER-side chunk guard)', () => {
+  // resolveMeasurementChunk aborts a chunk (columnCountMismatch -> the route's 422) when
+  // `!planColumnCountMatches(plan, parsedFieldCount)`. Testing the shared predicate (not a
+  // re-derived `a !== b`) means a regression to the guard's comparison — flipped operator, wrong
+  // operand — fails here. The client's own divergence guard is now the full-vector header-basis
+  // check `headerBasisMatches` (covered in lib/column-mapping/mapping.test.ts), which also catches
+  // the duplicate-header rename that a bare column-count comparison cannot.
   it('matches when the plan was built from the same number of columns papa parsed (guard does NOT fire)', () => {
     const headers = ['tag', 'spcode', 'quadrat'];
     const plan = resolveHeaders(headers, seedMapping({ format: CSV, headers }), csvAliases, CSV_RESOLVE_OPTIONS);

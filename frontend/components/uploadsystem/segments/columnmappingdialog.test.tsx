@@ -41,6 +41,15 @@ describe('ColumnMappingDialog (csv)', () => {
     const commentsRow = screen.getByTestId('mapping-row-comments');
     expect(within(commentsRow).getByText(/optional/i)).toBeInTheDocument();
   });
+
+  it('gives every source-column select an accessible name keyed to its canonical field (a11y)', () => {
+    // The visible field label sits in a sibling box, not programmatically tied to the combobox, so a
+    // screen reader would otherwise announce an unnamed "Unmapped" control. Each select must carry an
+    // aria-label naming the field it maps.
+    render(<ColumnMappingDialog open format={SourceFormat.csv} metadata={meta} mapping={seedMapping(meta)} onApply={() => {}} onClose={() => {}} />);
+    expect(screen.getByRole('combobox', { name: /source column for tag/i })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /source column for date/i })).toBeInTheDocument();
+  });
 });
 
 describe('ColumnMappingDialog validation messages', () => {

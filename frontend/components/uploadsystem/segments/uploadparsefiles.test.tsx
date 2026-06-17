@@ -233,6 +233,35 @@ describe('mapping rescue is wording-independent (code-based eligibility)', () =>
   });
 });
 
+// When a confirmed mapping covers the header-coverage gap but a real STRUCTURAL issue still blocks
+// the file, the issue panel must not keep showing the resolved coverage message beside the blocker.
+describe('issue-list masking when a mapping resolves coverage gaps (M6)', () => {
+  it('hides header-coverage messages the mapping resolved, showing only the structural blocker', () => {
+    fileValidationEvents.clear();
+    fileValidationEvents.set(SURVEY_FILE_NAME, {
+      isValid: false,
+      issues: [
+        // Coverage gap — rescued by the canonical-header mapping.
+        { code: DelimiterIssueCode.MISSING_REQUIRED_COLUMNS, message: 'Missing required columns: tag' },
+        // Structural blocker — NOT a coverage issue, so the file still cannot validate.
+        { code: DelimiterIssueCode.INCONSISTENT_COLUMNS, message: 'Inconsistent column counts across rows' }
+      ],
+      headers: CANONICAL_HEADERS
+    });
+
+    const setColumnMappingForFile = vi.fn();
+
+    act(() => {
+      renderUploadParseFiles([buildFile(SURVEY_FILE_NAME)], setColumnMappingForFile);
+    });
+
+    // The real structural blocker is still surfaced...
+    expect(screen.getByText(/Inconsistent column counts across rows/i)).toBeDefined();
+    // ...but the coverage message the mapping already resolved must NOT be shown.
+    expect(screen.queryByText(/Missing required columns: tag/i)).toBeNull();
+  });
+});
+
 describe('CSV mapping gating rule', () => {
   it('is invalid when a required field is unmapped', () => {
     const meta = { format: SourceFormat.csv as const, headers: ['X_Coord', 'Y_Coord', 'Sp', 'quadrat', 'date'] }; // no tag

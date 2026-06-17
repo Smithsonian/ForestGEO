@@ -13,10 +13,11 @@
  *   4. a row whose REQUIRED column cannot be resolved is routed to invalidRows with a
  *      "Missing required fields" reason — the server never silently mis-keys it.
  *
- * Reference data lives OUTSIDE the repo (external sample data, intentionally not
- * committed). The default path is the RABI census-3 demo; override with SMOKE_CSV.
- * The suite AUTO-SKIPS when the file is absent, so it is safe to leave in the tree
- * and harmless in CI.
+ * By default it runs against a small COMMITTED fixture (tests/smoke/fixtures), so it
+ * executes in CI (the PR gate's `test:unit`) and gates regressions instead of skipping.
+ * Point SMOKE_CSV at a real census export (e.g. the RABI census-3 demo) to drive the
+ * same resolution against full live data. The suite only skips if SMOKE_CSV is set to a
+ * path that does not exist.
  *
  * Run:
  *   npx vitest run tests/smoke/csv-server-resolution.smoke.test.ts
@@ -30,13 +31,17 @@
  * contract is covered by app/api/sqlpacketload/route.test.ts.
  */
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Papa from 'papaparse';
 import { describe, it, expect } from 'vitest';
 import { FormType, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
 import { resolveMeasurementChunk } from '@/lib/column-mapping/measurement-rows';
 import { isColumnMappingShape, seedMapping } from '@/lib/column-mapping/mapping';
 
-const CSV_PATH = process.env.SMOKE_CSV ?? '/Users/mason/Documents/fgeo_sample_data/RABI/rabi_census3_demo.csv';
+// Default to the committed fixture so the suite runs in CI; SMOKE_CSV overrides with real data.
+const FIXTURE_CSV = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'measurements-canonical-sample.csv');
+const CSV_PATH = process.env.SMOKE_CSV ?? FIXTURE_CSV;
 const CSV_EXISTS = fs.existsSync(CSV_PATH);
 
 const CANONICAL_FIELDS_PRESENT = ['tag', 'stemtag', 'spcode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date'] as const;
@@ -72,12 +77,12 @@ function renameColumn(rows: Record<string, string>[], headers: string[], from: s
   return { headers: newHeaders, rows: newRows };
 }
 
-// Auto-skip when the external reference file is not present (keeps CI green).
+// Runs by default against the committed fixture; only skips if SMOKE_CSV points to a missing file.
 const suite = CSV_EXISTS ? describe : describe.skip;
 
 if (!CSV_EXISTS) {
   // eslint-disable-next-line no-console
-  console.warn(`[smoke] SKIPPED — reference CSV not found at ${CSV_PATH}. Set SMOKE_CSV to run.`);
+  console.warn(`[smoke] SKIPPED — SMOKE_CSV path not found: ${CSV_PATH}`);
 }
 
 suite('smoke: server-authoritative CSV resolution (#6)', () => {

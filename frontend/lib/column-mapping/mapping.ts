@@ -21,7 +21,13 @@ function allSourceColumns(metadata: SourceMetadata): string[] {
   return cols;
 }
 
-/** Bump to invalidate every previously-computed signature (e.g. after a parser-behavior change). Wholesale invalidation — see docs/column-mapping-limitations.md (mappings are ephemeral React state, so a bump only affects in-flight mappings). */
+/**
+ * Bump to invalidate every previously-computed signature (e.g. after a parser-behavior change).
+ * Forward-insurance, currently a NO-OP: mappings are ephemeral React state (never persisted), so a
+ * bump only affects in-flight mappings and nothing survives a page load. Kept deliberately so the
+ * invalidation lever already exists if mappings ever gain durable storage. See
+ * docs/column-mapping-limitations.md.
+ */
 export const HEADER_SIGNATURE_VERSION = 3;
 
 /**
@@ -49,6 +55,18 @@ export function mappingApplies(mapping: ColumnMapping, headers: string[]): boole
 }
 
 /**
+ * Whether two header bases are the SAME sequence. The column-mapping plan and its signature are
+ * validated against the basis read by extractCsvHeaderRow (Papa `header:false`), while the upload
+ * keys rows with Papa `header:true` — which renames duplicate headers (`dbh,dbh` -> `dbh,dbh_1`).
+ * When the two bases disagree the client validated a mapping the server cannot reproduce, so the
+ * upload must abort. Comparison is the order- and duplicate-sensitive signature, so whitespace/case/
+ * underscore-only differences do not false-positive but a duplicate at any position does.
+ */
+export function headerBasisMatches(validatedBasis: string[], uploadBasis: string[]): boolean {
+  return headerSignature(validatedBasis) === headerSignature(uploadBasis);
+}
+
+/**
  * Whether `mapping` was built from the same source columns `seedMapping` would derive from this
  * metadata. Uses the identical column basis seedMapping signs (the de-duplicated union for ArcGIS),
  * so a freshly seeded mapping resubmitted against the same source is never spuriously stale.
@@ -72,9 +90,11 @@ export function isColumnMappingShape(value: unknown): value is ColumnMapping {
     const f = field as Record<string, unknown>;
     if (typeof f.canonicalField !== 'string') return false;
     if (!Array.isArray(f.sourceColumns) || !f.sourceColumns.every(c => typeof c === 'string')) return false;
-    // An unrecognized scope would silently scope the field out of every role-resolved sheet
-    // (fieldAppliesToSheet matches nothing), so reject it as malformed instead.
-    if (f.scope !== undefined && f.scope !== 'file' && f.scope !== 'trees' && f.scope !== 'stems' && f.scope !== 'both') return false;
+    // Scope is REQUIRED on every field. An unrecognized scope would silently scope the field out of
+    // every role-resolved sheet; an OMITTED scope is worse — fieldAppliesToSheet treats undefined as
+    // "applies everywhere", so a trees-only field could omit scope and cross-claim the stems sheet.
+    // seedMapping always stamps scope, so this only rejects malformed/tampered wire mappings.
+    if (f.scope !== 'file' && f.scope !== 'trees' && f.scope !== 'stems' && f.scope !== 'both') return false;
   }
   if (mapping.sheetRoles !== undefined) {
     if (typeof mapping.sheetRoles !== 'object' || mapping.sheetRoles === null || Array.isArray(mapping.sheetRoles)) return false;

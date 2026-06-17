@@ -33,6 +33,19 @@ const DATE_FORMATS = [
 
 const NULLISH = new Set(['NA', 'NULL', '']);
 const MAX_DECIMAL = 999999.999999;
+// papaparse parks the leftover cells of an over-wide row under this synthetic key (an array value).
+const PARSED_EXTRA_KEY = '__parsed_extra';
+// Measurement fields that must hold a number; a non-numeric value here rejects the row rather than
+// being coerced (transform) or nulled — dbh/hom are optional, so nulling would silently accept bad input.
+const NUMERIC_MEASUREMENT_FIELDS = ['dbh', 'hom', 'lx', 'ly'] as const;
+
+/** A value that is present (non-nullish) but does not strictly parse as a finite number. */
+function isPresentNonNumeric(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  const text = String(value).trim();
+  if (text === '' || NULLISH.has(text)) return false;
+  return !Number.isFinite(Number(text));
+}
 
 /**
  * Per-cell transform for a measurement upload. Pure port of the client's inline `transform`:
@@ -41,24 +54,28 @@ const MAX_DECIMAL = 999999.999999;
  * dbh/hom round to 2 decimals; everything else passes through unchanged.
  */
 export function transformMeasurementValue(value: string, field: string, formType: FormType): unknown {
-  if (NULLISH.has(value)) return null;
+  const trimmed = value.trim();
+  if (NULLISH.has(trimmed)) return null;
 
   if (formType === FormType.measurements && field === 'date') {
     for (const fmt of DATE_FORMATS) {
-      const parsed = moment(value.trim(), fmt, true);
+      const parsed = moment(trimmed, fmt, true);
       if (parsed.isValid()) return parsed.toDate();
     }
-    const flexible = moment(value.trim());
+    const flexible = moment(trimmed);
     return flexible.isValid() ? flexible.toDate() : value;
   }
 
+  // Strict numeric parsing: Number() rejects partially-numeric strings like '12.5abc' that
+  // Number.parseFloat would silently truncate to 12.5. A non-numeric value is returned unchanged
+  // (as a string) so validateMeasurementRow can reject the row instead of ingesting a coerced value.
   if (formType === FormType.measurements && (field === 'lx' || field === 'ly')) {
-    const n = Number.parseFloat(value);
+    const n = Number(trimmed);
     if (!Number.isNaN(n)) return Math.round(n * 1000000) / 1000000;
   }
 
   if (formType === FormType.measurements && (field === 'dbh' || field === 'hom')) {
-    const n = Number.parseFloat(value);
+    const n = Number(trimmed);
     if (!Number.isNaN(n)) return Math.round(n * 100) / 100;
   }
 
@@ -104,6 +121,23 @@ export function validateMeasurementRow(row: FileRow, requiredHeaders: { label: s
         );
       }
     }
+
+    // A numeric measurement field that is present but not strictly numeric must reject the row.
+    for (const field of NUMERIC_MEASUREMENT_FIELDS) {
+      if (isPresentNonNumeric(row[field])) {
+        errors.push(`Non-numeric value for ${field}: ${String(row[field])}`);
+      }
+    }
+
+    // After transform a valid date is a Date; an unparseable one survives as a non-empty string.
+    // FileRow types values as string|null, but transformMeasurementValue stores a real Date here.
+    const dateValue: unknown = row.date;
+    if (dateValue !== null && dateValue !== undefined && !(dateValue instanceof Date)) {
+      const dateText = String(dateValue).trim();
+      if (dateText !== '' && !NULLISH.has(dateText)) {
+        errors.push(`Unparseable date value: ${dateText}`);
+      }
+    }
   }
 
   for (const [key, value] of Object.entries(row)) {
@@ -123,7 +157,7 @@ export interface MeasurementChunkResult {
   invalidRows: FileRow[];
   plan: HeaderResolutionPlan | null;
   columnCountMismatch: boolean;
-  diagnostics: { invalidDateValues: string[]; extraColumnRows: number };
+  diagnostics: { invalidDateValues: string[]; extraColumnRows: number; ignoredColumnCount: number };
 }
 
 export interface ResolveChunkOptions {
@@ -149,8 +183,10 @@ export function resolveMeasurementChunk(rawRows: Record<string, string>[], parse
     ? resolveHeaders(csvHeaders, chooseEffectiveCsvMapping(storedMapping, csvHeaders).mapping, aliasesFor(SourceFormat.csv), CSV_RESOLVE_OPTIONS)
     : null;
 
+  const ignoredColumnCount = plan ? plan.ignoredKeys.size : 0;
+
   if (plan && !planColumnCountMatches(plan, parsedFieldCount)) {
-    return { validRows: [], invalidRows: [], plan, columnCountMismatch: true, diagnostics: { invalidDateValues: [], extraColumnRows: 0 } };
+    return { validRows: [], invalidRows: [], plan, columnCountMismatch: true, diagnostics: { invalidDateValues: [], extraColumnRows: 0, ignoredColumnCount } };
   }
 
   const keyOf = plan ? transformHeaderFromPlan(plan) : (h: string) => h;
@@ -159,22 +195,56 @@ export function resolveMeasurementChunk(rawRows: Record<string, string>[], parse
   const invalidDateValues: string[] = [];
   let extraColumnRows = 0;
 
-  for (const rawRow of rawRows) {
+  // Key one parsed row's entries positionally through the active plan (or identity when plan-less),
+  // applying the per-cell measurement transform and recording unparseable dates as we go.
+  const keyEntries = (entries: [string, string][]): FileRow => {
     const keyed: FileRow = {};
-    Object.entries(rawRow).forEach(([rawKey, rawVal], index) => {
-      const key = plan ? (plan.outputKeys[index] ?? keyOf(rawKey, index)) : keyOf(rawKey, index);
+    entries.forEach(([rawKey, rawVal], index) => {
+      const key = keyOf(rawKey, index);
       const transformed = transformMeasurementValue((rawVal ?? '').toString(), key, formType);
       if (formType === FormType.measurements && key === 'date' && typeof transformed === 'string' && (rawVal ?? '') !== '') {
         invalidDateValues.push(String(rawVal));
       }
       keyed[key] = transformed as string | null;
     });
-    const collapsed = plan ? collapseRowWithPlan(keyed, plan) : keyed;
-    const result = validateMeasurementRow(collapsed, requiredHeaders, delimiter, formType);
+    return keyed;
+  };
+
+  for (const rawRow of rawRows) {
+    const allEntries = Object.entries(rawRow) as [string, string][];
+
+    if (plan) {
+      // Server-authoritative mapping path: the plan keys parsed rows BY POSITION, so it is only valid
+      // when the parsed row width matches the plan. papaparse signals an over-wide line with a trailing
+      // `__parsed_extra` array and an under-wide line by omitting trailing header keys. Both are
+      // malformed lines: reject them here rather than mis-key (which previously injected a normalized
+      // `__parsed_extra` column straight into the upload).
+      const hasExtraCells = Object.prototype.hasOwnProperty.call(rawRow, PARSED_EXTRA_KEY);
+      const entries = allEntries.filter(([rawKey]) => rawKey !== PARSED_EXTRA_KEY);
+      const collapsed = collapseRowWithPlan(keyEntries(entries), plan);
+
+      if (hasExtraCells || entries.length < plan.outputKeys.length) {
+        if (hasExtraCells) extraColumnRows += 1;
+        const failureReason = hasExtraCells
+          ? `Row has too many columns: expected ${plan.outputKeys.length} but the parsed line carried extra delimited values`
+          : `Row has too few columns: expected ${plan.outputKeys.length}, found ${entries.length}`;
+        invalidRows.push({ ...collapsed, failureReason });
+        continue;
+      }
+
+      const result = validateMeasurementRow(collapsed, requiredHeaders, delimiter, formType);
+      if (result.valid) validRows.push(collapsed);
+      else invalidRows.push({ ...collapsed, failureReason: result.failureReason ?? 'Unknown error' });
+      continue;
+    }
+
+    // Plan-less (revisions) path: unchanged — raw keys survive and __parsed_extra is counted, not rejected.
+    const keyed = keyEntries(allEntries);
+    const result = validateMeasurementRow(keyed, requiredHeaders, delimiter, formType);
     if (result.hasExtraColumns) extraColumnRows += 1;
-    if (result.valid) validRows.push(collapsed);
-    else invalidRows.push({ ...collapsed, failureReason: result.failureReason ?? 'Unknown error' });
+    if (result.valid) validRows.push(keyed);
+    else invalidRows.push({ ...keyed, failureReason: result.failureReason ?? 'Unknown error' });
   }
 
-  return { validRows, invalidRows, plan, columnCountMismatch: false, diagnostics: { invalidDateValues, extraColumnRows } };
+  return { validRows, invalidRows, plan, columnCountMismatch: false, diagnostics: { invalidDateValues, extraColumnRows, ignoredColumnCount } };
 }
