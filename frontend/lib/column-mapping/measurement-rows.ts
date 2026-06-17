@@ -54,14 +54,15 @@ function isPresentNonNumeric(value: unknown): boolean {
  * dbh/hom round to 2 decimals; everything else passes through unchanged.
  */
 export function transformMeasurementValue(value: string, field: string, formType: FormType): unknown {
-  if (NULLISH.has(value)) return null;
+  const trimmed = value.trim();
+  if (NULLISH.has(trimmed)) return null;
 
   if (formType === FormType.measurements && field === 'date') {
     for (const fmt of DATE_FORMATS) {
-      const parsed = moment(value.trim(), fmt, true);
+      const parsed = moment(trimmed, fmt, true);
       if (parsed.isValid()) return parsed.toDate();
     }
-    const flexible = moment(value.trim());
+    const flexible = moment(trimmed);
     return flexible.isValid() ? flexible.toDate() : value;
   }
 
@@ -69,12 +70,12 @@ export function transformMeasurementValue(value: string, field: string, formType
   // Number.parseFloat would silently truncate to 12.5. A non-numeric value is returned unchanged
   // (as a string) so validateMeasurementRow can reject the row instead of ingesting a coerced value.
   if (formType === FormType.measurements && (field === 'lx' || field === 'ly')) {
-    const n = Number(value.trim());
+    const n = Number(trimmed);
     if (!Number.isNaN(n)) return Math.round(n * 1000000) / 1000000;
   }
 
   if (formType === FormType.measurements && (field === 'dbh' || field === 'hom')) {
-    const n = Number(value.trim());
+    const n = Number(trimmed);
     if (!Number.isNaN(n)) return Math.round(n * 100) / 100;
   }
 

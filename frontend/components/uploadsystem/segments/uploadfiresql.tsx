@@ -150,8 +150,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [uploaded, setUploaded] = useState<boolean>(false);
   const [processed, setProcessed] = useState<boolean>(false);
   const [_verificationStatus, setVerificationStatus] = useState<string>('');
-  // Per-file notices shown when a confirmed column mapping had to be discarded at upload time.
-  const [mappingFallbackWarnings, setMappingFallbackWarnings] = useState<string[]>([]);
+  // Per-file notices shown when upload-time mapping resolution differs from what the user reviewed.
+  const [mappingWarnings, setMappingWarnings] = useState<string[]>([]);
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
   const [verificationStep, setVerificationStep] = useState<number>(0);
   const [totalVerificationSteps, setTotalVerificationSteps] = useState<number>(0);
@@ -882,7 +882,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               const userWarning = `${file.name}: ${clause}, so its columns were matched automatically from the file's headers instead.`;
               if (isMountedRef.current) {
                 // Deduplicate so a restarted upload attempt does not repeat the same notice.
-                setMappingFallbackWarnings(prev => (prev.includes(userWarning) ? prev : [...prev, userWarning]));
+                setMappingWarnings(prev => (prev.includes(userWarning) ? prev : [...prev, userWarning]));
               }
             }
             return resolveHeaders(csvHeaders!, chosen.mapping, aliasesFor(SourceFormat.csv), CSV_RESOLVE_OPTIONS);
@@ -1063,6 +1063,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                         serverFailingRowsCount += data.failingRows.length;
                         await pushErrorRowsToFailedMeasurements(data.failingRows, file.name);
                       }
+                      const ignoredColumnCount = Number(data?.mappingDiagnostics?.ignoredColumnCount ?? 0);
+                      if (ignoredColumnCount > 0 && isMountedRef.current) {
+                        const warning = `${file.name}: ${ignoredColumnCount} unmatched column(s) were ignored by the active column mapping and were not ingested.`;
+                        setMappingWarnings(prev => (prev.includes(warning) ? prev : [...prev, warning]));
+                      }
                     } else {
                       await uploadToSql(fileCollectionRowSet, file.name, fileBatchID);
                     }
@@ -1210,7 +1215,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       uploadToSql,
       setCompletedChunks,
       setTotalChunks,
-      setMappingFallbackWarnings,
+      setMappingWarnings,
       pushErrorRowsToFailedMeasurements,
       waitForAllOperationsToComplete,
       markFatalUploadError,
@@ -1265,9 +1270,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       setVerificationStatus('');
       setVerificationStep(0);
       setTotalVerificationSteps(0);
-      // Clear stale mapping-fallback notices from a prior attempt so a corrected re-upload does not
-      // show a "saved mapping not used" warning that no longer applies to this run.
-      setMappingFallbackWarnings([]);
+      // Clear stale mapping notices from a prior attempt so corrected re-uploads do not show
+      // warnings that no longer apply to this run.
+      setMappingWarnings([]);
       ailogger.info(`Prepared fresh upload attempt: ${uploadAttemptKey}`);
       return;
     }
@@ -2208,14 +2213,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     return getAnimationUrl('growing-plant.lottie'); // fallback
   };
 
-  const mappingFallbackAlert =
-    mappingFallbackWarnings.length > 0 ? (
+  const mappingWarningsAlert =
+    mappingWarnings.length > 0 ? (
       <Alert color="warning" variant="soft" sx={{ width: '100%', maxWidth: '600px', textAlign: 'left' }}>
         <Box>
           <Typography level="title-sm" color="warning">
-            Saved column mapping not used
+            Column mapping warnings
           </Typography>
-          {mappingFallbackWarnings.map((warning, idx) => (
+          {mappingWarnings.map((warning, idx) => (
             <Typography key={idx} level="body-sm" sx={{ mt: 0.5 }}>
               {warning}
             </Typography>
@@ -2341,7 +2346,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               </Typography>
             </Box>
 
-            {mappingFallbackAlert}
+            {mappingWarningsAlert}
           </Stack>
         </Box>
       ) : (
@@ -2357,7 +2362,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         >
           <Stack direction="column" spacing={2} sx={{ alignItems: 'center', textAlign: 'center' }}>
             <Typography level="title-md">Upload Complete</Typography>
-            {mappingFallbackAlert}
+            {mappingWarningsAlert}
           </Stack>
         </Box>
       )}

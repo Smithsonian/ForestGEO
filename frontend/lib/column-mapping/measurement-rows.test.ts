@@ -86,6 +86,11 @@ describe('transformMeasurementValue', () => {
     expect(transformMeasurementValue('12.5abc', 'dbh', FormType.measurements)).toBe('12.5abc');
     expect(transformMeasurementValue('12.5abc', 'lx', FormType.measurements)).toBe('12.5abc');
   });
+
+  it('treats whitespace-only numeric cells as blank, not zero', () => {
+    expect(transformMeasurementValue('   ', 'dbh', FormType.measurements)).toBeNull();
+    expect(transformMeasurementValue('   ', 'lx', FormType.measurements)).toBeNull();
+  });
 });
 
 describe('validateMeasurementRow', () => {
@@ -501,8 +506,7 @@ describe('resolveMeasurementChunk', () => {
     const rawRow: Record<string, string> = {};
     // Give each required field a type-valid value: numeric fields need a number, date a real date,
     // everything else a plain token. (A complete, VALID row must be accepted.)
-    const valueForField = (label: string): string =>
-      ['dbh', 'hom', 'lx', 'ly'].includes(label) ? '1' : label === 'date' ? '2023-05-17' : 'x';
+    const valueForField = (label: string): string => (['dbh', 'hom', 'lx', 'ly'].includes(label) ? '1' : label === 'date' ? '2023-05-17' : 'x');
     csvHeaders.forEach(label => (rawRow[label] = valueForField(label)));
 
     const result = resolveMeasurementChunk([rawRow], csvHeaders.length, {
