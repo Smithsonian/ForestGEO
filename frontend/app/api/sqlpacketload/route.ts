@@ -757,6 +757,7 @@ export async function POST(request: NextRequest) {
   let retryCount = 0;
   if (formType === 'measurements') {
     let chunkRows = Object.values(fileRowSet ?? {});
+    let mappingDiagnostics: { invalidDateValues: string[]; extraColumnRows: number; ignoredColumnCount: number } | null = null;
     const batchID = body.batchID || generateShortBatchID();
     const sessionId = request.headers.get('x-upload-session-id');
     let scopeValidation: Awaited<ReturnType<typeof validateMeasurementUploadScope>>;
@@ -829,6 +830,14 @@ export async function POST(request: NextRequest) {
       }
       chunkRows = resolved.validRows;
       for (const invalid of resolved.invalidRows) failingRows.add(invalid);
+      // Surface resolution diagnostics so silently-dropped columns / unparseable inputs are visible to
+      // the client instead of vanishing. Logged here too for server-side observability.
+      mappingDiagnostics = resolved.diagnostics;
+      if (mappingDiagnostics.ignoredColumnCount > 0) {
+        ailogger.warn(
+          `Column mapping for ${fileName}-${batchID} dropped ${mappingDiagnostics.ignoredColumnCount} unmatched column(s); they will not be ingested.`
+        );
+      }
     }
 
     const rowCount = chunkRows.length;
@@ -1098,7 +1107,8 @@ export async function POST(request: NextRequest) {
             transactionCompleted: true,
             batchID: batchID,
             uploadMode,
-            idempotencyKey
+            idempotencyKey,
+            ...(mappingDiagnostics ? { mappingDiagnostics } : {})
           }),
           { status: HTTPResponses.OK }
         );

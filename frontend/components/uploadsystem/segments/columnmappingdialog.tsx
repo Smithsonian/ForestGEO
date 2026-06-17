@@ -79,6 +79,7 @@ export default function ColumnMappingDialog({ open, format, fileName, metadata, 
                   <Typography sx={{ width: 80 }}>{role}</Typography>
                   <Select
                     data-testid={`mapping-sheet-role-select-${role}`}
+                    aria-label={`Worksheet for the ${role} role`}
                     placeholder={`Select ${role} sheet`}
                     value={(role === 'trees' ? draft.sheetRoles?.treesSheetName : draft.sheetRoles?.stemsSheetName) ?? null}
                     onChange={(_e, v) =>
@@ -119,6 +120,7 @@ export default function ColumnMappingDialog({ open, format, fileName, metadata, 
                   <Box sx={{ flex: 1 }}>
                     <Select
                       data-testid={`mapping-source-select-${def.canonicalField}`}
+                      aria-label={`Source column for ${def.canonicalField}`}
                       multiple={def.multiSource}
                       placeholder={unmappedRequired ? 'Choose a column' : 'Unmapped'}
                       value={def.multiSource ? selected : (selected[0] ?? null)}

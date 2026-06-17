@@ -3,6 +3,7 @@ import { SourceFormat } from '@/config/macros/formdetails';
 import {
   chooseEffectiveCsvMapping,
   HEADER_SIGNATURE_VERSION,
+  headerBasisMatches,
   headerSignature,
   isColumnMappingShape,
   joinMultiSourceValues,
@@ -237,19 +238,26 @@ describe('isColumnMappingShape', () => {
     expect(isColumnMappingShape({ version: 1, format: SourceFormat.arcgis_xlsx, fields: [], sheetRoles: 'Sheet1' })).toBe(false);
   });
 
-  it('rejects a field carrying an unrecognized scope (which would otherwise silently scope it out of every role-resolved sheet) but accepts valid and omitted scopes', () => {
+  it('requires a valid scope on every field — rejects unrecognized AND omitted scope (M3: closes the cross-sheet bypass)', () => {
     const withScope = (scope: unknown) => ({
       version: 1,
       format: SourceFormat.arcgis_xlsx,
       fields: [{ canonicalField: 'lx', sourceColumns: ['MyX'], scope }]
     });
+    // Unrecognized scope strings/types are malformed.
     expect(isColumnMappingShape(withScope('TREES'))).toBe(false);
     expect(isColumnMappingShape(withScope('tree'))).toBe(false);
     expect(isColumnMappingShape(withScope(3))).toBe(false);
+    // Every valid scope passes.
     expect(isColumnMappingShape(withScope('trees'))).toBe(true);
+    expect(isColumnMappingShape(withScope('stems'))).toBe(true);
     expect(isColumnMappingShape(withScope('both'))).toBe(true);
-    expect(isColumnMappingShape(withScope(undefined))).toBe(true);
-    expect(isColumnMappingShape({ version: 1, format: SourceFormat.arcgis_xlsx, fields: [{ canonicalField: 'lx', sourceColumns: ['MyX'] }] })).toBe(true);
+    expect(isColumnMappingShape(withScope('file'))).toBe(true);
+    // M3: an undefined or omitted scope is now REJECTED at the wire boundary. Otherwise a trees-only
+    // field could omit scope and resolve onto the stems sheet (fieldAppliesToSheet treats undefined
+    // as "applies everywhere"). seedMapping always stamps scope, so legitimate mappings are unaffected.
+    expect(isColumnMappingShape(withScope(undefined))).toBe(false);
+    expect(isColumnMappingShape({ version: 1, format: SourceFormat.arcgis_xlsx, fields: [{ canonicalField: 'lx', sourceColumns: ['MyX'] }] })).toBe(false);
   });
 });
 
@@ -277,6 +285,33 @@ describe('mapping identity', () => {
     const base = seedMapping(csvMeta(['tag']));
     expect(isColumnMappingShape(JSON.parse(JSON.stringify(base)))).toBe(true);
     expect(isColumnMappingShape({ ...base, headerSignature: 42 })).toBe(false);
+  });
+});
+
+describe('headerBasisMatches (C2: validated basis vs upload basis)', () => {
+  // The mapping plan + signature are validated against the basis from extractCsvHeaderRow (Papa
+  // header:false), but the upload keys rows with Papa header:true. The two MUST agree or the server
+  // keys columns differently than the user reviewed.
+  it('matches identical header sequences', () => {
+    expect(headerBasisMatches(['tag', 'dbh', 'date'], ['tag', 'dbh', 'date'])).toBe(true);
+  });
+
+  it('detects the duplicate-header rename that papaparse header:true introduces', () => {
+    // header:false preview yields the raw duplicate; header:true renames the second occurrence.
+    // This is the exact C2 divergence and must be caught.
+    expect(headerBasisMatches(['dbh', 'dbh'], ['dbh', 'dbh_1'])).toBe(false);
+  });
+
+  it('does not false-positive on whitespace/underscore/case differences (normalized away)', () => {
+    expect(headerBasisMatches([' DBH ', 'X_Coord'], ['dbh', 'xcoord'])).toBe(true);
+  });
+
+  it('detects a column-order change between the two bases', () => {
+    expect(headerBasisMatches(['tag', 'dbh'], ['dbh', 'tag'])).toBe(false);
+  });
+
+  it('detects a differing column count', () => {
+    expect(headerBasisMatches(['tag', 'dbh'], ['tag', 'dbh', 'extra'])).toBe(false);
   });
 });
 

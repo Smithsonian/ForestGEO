@@ -79,6 +79,18 @@ describe('transformMeasurementValue', () => {
   it('passes through an unrecognized measurement field unchanged', () => {
     expect(transformMeasurementValue('abc', 'spcode', FormType.measurements)).toBe('abc');
   });
+
+  it('does NOT coerce a partially-numeric measurement value (strict parse)', () => {
+    // Number.parseFloat('12.5abc') is 12.5 (lenient); strict parsing must NOT silently accept it.
+    // The raw string is returned unchanged so validation can reject the row.
+    expect(transformMeasurementValue('12.5abc', 'dbh', FormType.measurements)).toBe('12.5abc');
+    expect(transformMeasurementValue('12.5abc', 'lx', FormType.measurements)).toBe('12.5abc');
+  });
+
+  it('treats whitespace-only numeric cells as blank, not zero', () => {
+    expect(transformMeasurementValue('   ', 'dbh', FormType.measurements)).toBeNull();
+    expect(transformMeasurementValue('   ', 'lx', FormType.measurements)).toBeNull();
+  });
 });
 
 describe('validateMeasurementRow', () => {
@@ -182,6 +194,49 @@ describe('validateMeasurementRow', () => {
     const row = { tag: 'T1', spcode: 'abc', quadrat: 'q1' };
     const result = validateMeasurementRow(row, MEASUREMENTS_REQUIRED, DEFAULT_DELIMITER, FormType.measurements);
     expect(result.valid).toBe(true);
+  });
+
+  describe('numeric and date field rejection (M1/M2)', () => {
+    // dbh/hom are OPTIONAL, so nulling a bad value would silently accept it. A non-numeric value
+    // present in any measurement numeric field must REJECT the row, not coerce or drop it.
+    it('rejects a non-numeric value in the optional dbh field', () => {
+      const row = { tag: 'T1', spcode: 'abc', quadrat: 'q1', dbh: 'oops' };
+      const result = validateMeasurementRow(row, MEASUREMENTS_REQUIRED, DEFAULT_DELIMITER, FormType.measurements);
+      expect(result.valid).toBe(false);
+      expect(result.failureReason).toContain('Non-numeric value for dbh');
+    });
+
+    it('rejects a partially-numeric value like "12.5abc" in a numeric field (strict)', () => {
+      const row = { tag: 'T1', spcode: 'abc', quadrat: 'q1', lx: '12.5abc' };
+      const result = validateMeasurementRow(row, MEASUREMENTS_REQUIRED, DEFAULT_DELIMITER, FormType.measurements);
+      expect(result.valid).toBe(false);
+      expect(result.failureReason).toContain('Non-numeric value for lx');
+    });
+
+    it('accepts clean numeric values whether passed as a string or a number', () => {
+      const asString = { tag: 'T1', spcode: 'abc', quadrat: 'q1', dbh: '12.5', hom: '1.3' };
+      expect(validateMeasurementRow(asString, MEASUREMENTS_REQUIRED, DEFAULT_DELIMITER, FormType.measurements).valid).toBe(true);
+      const asNumber = { tag: 'T1', spcode: 'abc', quadrat: 'q1', dbh: 12.5 as unknown as string };
+      expect(validateMeasurementRow(asNumber, MEASUREMENTS_REQUIRED, DEFAULT_DELIMITER, FormType.measurements).valid).toBe(true);
+    });
+
+    it('treats a null/NA numeric value as absent, not as a non-numeric error', () => {
+      const row = { tag: 'T1', spcode: 'abc', quadrat: 'q1', dbh: null };
+      expect(validateMeasurementRow(row, MEASUREMENTS_REQUIRED, DEFAULT_DELIMITER, FormType.measurements).valid).toBe(true);
+    });
+
+    it('rejects a date field that stayed an unparseable string after transform', () => {
+      // After transformMeasurementValue, a valid date is a Date and an unparseable one stays a string.
+      const row = { tag: 'T1', spcode: 'abc', quadrat: 'q1', date: 'not-a-date' as unknown as string };
+      const result = validateMeasurementRow(row, MEASUREMENTS_REQUIRED, DEFAULT_DELIMITER, FormType.measurements);
+      expect(result.valid).toBe(false);
+      expect(result.failureReason).toContain('Unparseable date');
+    });
+
+    it('accepts a Date-valued date field', () => {
+      const row = { tag: 'T1', spcode: 'abc', quadrat: 'q1', date: new Date('2023-05-17') as unknown as string };
+      expect(validateMeasurementRow(row, MEASUREMENTS_REQUIRED, DEFAULT_DELIMITER, FormType.measurements).valid).toBe(true);
+    });
   });
 });
 
@@ -304,12 +359,155 @@ describe('resolveMeasurementChunk', () => {
     expect(result.diagnostics.extraColumnRows).toBe(1);
   });
 
+  describe('ragged-row rejection on the server mapping path (C1/C3)', () => {
+    // On the server-authoritative rawRows path the plan keys parsed rows BY POSITION. papaparse
+    // (header:true) breaks positional alignment two ways that the old chunk resolver let through:
+    //   - too-many fields  -> a trailing `__parsed_extra` array the plan has no slot for;
+    //   - too-few fields   -> the row object simply omits the missing trailing header keys.
+    // Both indicate a malformed line and MUST be rejected, never silently keyed/ingested.
+    const MAPPING_HEADERS = ['tag', 'spcode', 'quadrat', 'dbh'];
+
+    function resolveOnMappingPath(rawRows: Record<string, unknown>[]) {
+      return resolveMeasurementChunk(rawRows as Record<string, string>[], MAPPING_HEADERS.length, {
+        formType: FormType.measurements,
+        uploadMode: 'other',
+        delimiter: DEFAULT_DELIMITER,
+        requiredHeaders: MEASUREMENTS_REQUIRED,
+        csvHeaders: MAPPING_HEADERS
+      });
+    }
+
+    it('rejects a too-many-fields row carrying __parsed_extra instead of ingesting a phantom column', () => {
+      // papaparse emits the leftover cell as `__parsed_extra: ['leftover']`. The plan has 4 slots;
+      // the 5th entry has no output key and previously fell through to normalizeHeader('__parsed_extra')
+      // === 'parsedextra', silently injecting an unmapped column into the upload.
+      const ragged = { tag: 'T1', spcode: 'abc', quadrat: 'q1', dbh: '12.5', __parsed_extra: ['leftover'] };
+
+      const result = resolveOnMappingPath([ragged]);
+
+      expect(result.validRows).toHaveLength(0);
+      expect(result.invalidRows).toHaveLength(1);
+      expect(result.invalidRows[0].failureReason).toMatch(/extra|too many columns/i);
+      // The phantom column must never survive under ANY key (literal or normalized).
+      for (const row of [...result.validRows, ...result.invalidRows]) {
+        expect(Object.keys(row)).not.toContain('__parsed_extra');
+        expect(Object.keys(row)).not.toContain('parsedextra');
+      }
+    });
+
+    it('rejects a too-few-fields row whose trailing header keys papaparse omitted', () => {
+      // A line with fewer delimited values than headers yields an object missing the trailing keys
+      // (a trailing EMPTY value still produces the key, so absent keys reliably mean a malformed line).
+      // The omitted column here is the OPTIONAL `dbh`: all required fields are present, so this row
+      // would pass validation today — it can only be rejected by genuine too-few-column detection,
+      // not by the pre-existing missing-required-field check.
+      const tooFew = { tag: 'T1', spcode: 'abc', quadrat: 'q1' };
+
+      const result = resolveOnMappingPath([tooFew]);
+
+      expect(result.validRows).toHaveLength(0);
+      expect(result.invalidRows).toHaveLength(1);
+      expect(result.invalidRows[0].failureReason).toMatch(/too few columns/i);
+    });
+
+    it('rejects only the ragged rows in a mixed chunk and keeps the well-formed one', () => {
+      const good = { tag: 'T2', spcode: 'def', quadrat: 'q2', dbh: '8.25' };
+      const tooMany = { tag: 'T1', spcode: 'abc', quadrat: 'q1', dbh: '12.5', __parsed_extra: ['junk'] };
+      const tooFew = { tag: 'T3', spcode: 'ghi' };
+
+      const result = resolveOnMappingPath([good, tooMany, tooFew]);
+
+      expect(result.validRows).toHaveLength(1);
+      expect(result.validRows[0].tag).toBe('T2');
+      expect(result.validRows[0].dbh).toBe(8.25);
+      expect(result.invalidRows).toHaveLength(2);
+      // The well-formed row must not carry any extra-column residue.
+      expect(Object.keys(result.validRows[0])).not.toContain('parsedextra');
+    });
+  });
+
+  describe('ignored/dropped-column diagnostics (M4)', () => {
+    it('reports the count of columns the plan dropped (so a mis-mapped column is not silent)', () => {
+      // 'lx' is sourced from 'MyX'; the literal 'lx' header is unclaimed and diverted to an inert
+      // ignored key, then stripped on collapse. That dropped column must be surfaced as a count.
+      const csvHeaders = ['lx', 'MyX', 'tag', 'spcode', 'quadrat', 'ly', 'date'];
+      const rawRow = { lx: '9.9', MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17' };
+
+      const result = resolveMeasurementChunk([rawRow], csvHeaders.length, {
+        formType: FormType.measurements,
+        uploadMode: 'other',
+        delimiter: DEFAULT_DELIMITER,
+        requiredHeaders: MEASUREMENTS_REQUIRED,
+        csvHeaders,
+        storedMapping: lxRenamedMapping(csvHeaders)
+      });
+
+      expect(result.diagnostics.ignoredColumnCount).toBe(1);
+    });
+
+    it('reports zero ignored columns when every header resolves cleanly', () => {
+      const csvHeaders = ['tag', 'spcode', 'quadrat', 'dbh'];
+      const rawRow = { tag: 'T1', spcode: 'abc', quadrat: 'q1', dbh: '12.5' };
+
+      const result = resolveMeasurementChunk([rawRow], csvHeaders.length, {
+        formType: FormType.measurements,
+        uploadMode: 'other',
+        delimiter: DEFAULT_DELIMITER,
+        requiredHeaders: MEASUREMENTS_REQUIRED,
+        csvHeaders
+      });
+
+      expect(result.diagnostics.ignoredColumnCount).toBe(0);
+    });
+  });
+
+  describe('bad-input rejection through the server path (M1/M2)', () => {
+    const HEADERS = ['tag', 'spcode', 'quadrat', 'dbh', 'date'];
+
+    function resolveOnMappingPath(rawRow: Record<string, string>) {
+      return resolveMeasurementChunk([rawRow], HEADERS.length, {
+        formType: FormType.measurements,
+        uploadMode: 'other',
+        delimiter: DEFAULT_DELIMITER,
+        requiredHeaders: MEASUREMENTS_REQUIRED,
+        csvHeaders: HEADERS
+      });
+    }
+
+    it('rejects a non-numeric dbh instead of ingesting it verbatim', () => {
+      const result = resolveOnMappingPath({ tag: 'T1', spcode: 'abc', quadrat: 'q1', dbh: 'oops', date: '2023-05-17' });
+      expect(result.validRows).toHaveLength(0);
+      expect(result.invalidRows).toHaveLength(1);
+      expect(result.invalidRows[0].failureReason).toContain('Non-numeric value for dbh');
+    });
+
+    it('rejects an unparseable date instead of inserting the raw string', () => {
+      const result = resolveOnMappingPath({ tag: 'T1', spcode: 'abc', quadrat: 'q1', dbh: '12.5', date: 'definitely-not-a-date' });
+      expect(result.validRows).toHaveLength(0);
+      expect(result.invalidRows).toHaveLength(1);
+      expect(result.invalidRows[0].failureReason).toContain('Unparseable date');
+      // The diagnostic is still recorded for logging.
+      expect(result.diagnostics.invalidDateValues).toContain('definitely-not-a-date');
+    });
+
+    it('still accepts a clean row through the same path', () => {
+      const result = resolveOnMappingPath({ tag: 'T1', spcode: 'abc', quadrat: 'q1', dbh: '12.5', date: '2023-05-17' });
+      expect(result.invalidRows).toHaveLength(0);
+      expect(result.validRows).toHaveLength(1);
+      expect(result.validRows[0].dbh).toBe(12.5);
+      expect(result.validRows[0].date).toBeInstanceOf(Date);
+    });
+  });
+
   it('uses RequiredTableHeadersByFormType[measurements] to drive validation', () => {
     const required = RequiredTableHeadersByFormType[FormType.measurements];
     expect(required.length).toBeGreaterThan(0);
     const csvHeaders = required.map(h => h.label);
     const rawRow: Record<string, string> = {};
-    csvHeaders.forEach(label => (rawRow[label] = 'x'));
+    // Give each required field a type-valid value: numeric fields need a number, date a real date,
+    // everything else a plain token. (A complete, VALID row must be accepted.)
+    const valueForField = (label: string): string => (['dbh', 'hom', 'lx', 'ly'].includes(label) ? '1' : label === 'date' ? '2023-05-17' : 'x');
+    csvHeaders.forEach(label => (rawRow[label] = valueForField(label)));
 
     const result = resolveMeasurementChunk([rawRow], csvHeaders.length, {
       formType: FormType.measurements,
