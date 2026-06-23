@@ -157,14 +157,14 @@ describe('ArcGIS pre-flight mapping journey', () => {
     // The first pre-flight fires automatically on mount.
     cy.wait('@preflight');
 
-    // Entering the mapping-required phase renders the alert AND auto-opens the mapping
-    // dialog (reducer MAPPING_REQUIRED -> dialogOpen: true). The "Map columns" button is
-    // the re-open affordance after a cancel; here the dialog is already open. We assert
-    // the affordance exists, then drive the open dialog directly.
-    cy.get(MAPPING_REQUIRED_ALERT, { timeout: 15000 }).should('be.visible');
+    // Entering the mapping-required phase renders the background alert AND auto-opens the
+    // mapping dialog (reducer MAPPING_REQUIRED -> dialogOpen: true). The modal can cover
+    // the alert, so assert the active state via existence plus the visible dialog message.
+    cy.get(MAPPING_REQUIRED_ALERT, { timeout: 15000 }).should('exist');
     cy.get(OPEN_MAPPING_BUTTON).should('exist');
 
     cy.get(MAPPING_DIALOG).should('be.visible');
+    cy.contains(MAPPING_DIALOG, PREFLIGHT_ERROR_MESSAGE).should('be.visible');
     cy.get(SHEET_ROLE_SELECT_TREES).should('be.visible');
     cy.get(SHEET_ROLE_SELECT_STEMS).should('be.visible');
 
@@ -211,11 +211,12 @@ describe('ArcGIS pre-flight mapping journey', () => {
     uploadWorkbookAndEnterPreflight();
 
     // The dialog auto-opens on the mapping-required phase (see test above); assert the
-    // re-open affordance exists, then read the already-open dialog.
-    cy.get(MAPPING_REQUIRED_ALERT, { timeout: 15000 }).should('be.visible');
+    // background affordance exists, then read the already-open visible dialog.
+    cy.get(MAPPING_REQUIRED_ALERT, { timeout: 15000 }).should('exist');
     cy.get(OPEN_MAPPING_BUTTON).should('exist');
 
     cy.get(MAPPING_DIALOG).should('be.visible');
+    cy.contains(MAPPING_DIALOG, PREFLIGHT_ERROR_MESSAGE).should('be.visible');
 
     // Sheet-role selects render the recovered assignments, not empty placeholders.
     cy.get(SHEET_ROLE_SELECT_TREES).should('contain.text', TREES_SHEET_NAME);
