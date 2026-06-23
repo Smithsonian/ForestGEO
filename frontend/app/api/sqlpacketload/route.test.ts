@@ -1120,7 +1120,15 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     const validRow = { MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17' };
     // papaparse parks an over-wide line's leftover cell under `__parsed_extra` (an array). The server
     // must reject this row, not key the leftover as a normalized `parsedextra` column on the upload.
-    const raggedRow = { MyX: '13.0', tag: 'T9', spcode: 'def', quadrat: 'q2', ly: '4.0', date: '2023-05-18', __parsed_extra: ['leftover'] } as unknown as Record<string, string>;
+    const raggedRow = {
+      MyX: '13.0',
+      tag: 'T9',
+      spcode: 'def',
+      quadrat: 'q2',
+      ly: '4.0',
+      date: '2023-05-18',
+      __parsed_extra: ['leftover']
+    } as unknown as Record<string, string>;
 
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
@@ -1173,9 +1181,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(undefined);
 
-    const res = (await POST(
-      makeRawRowsRequest([rawRow], { csvHeaders: headersWithIgnoredLx, mapping: lxRenamedMapping(headersWithIgnoredLx) })
-    ))!;
+    const res = (await POST(makeRawRowsRequest([rawRow], { csvHeaders: headersWithIgnoredLx, mapping: lxRenamedMapping(headersWithIgnoredLx) })))!;
 
     expect(res.status).toBe(200);
     const body = await res.json();
