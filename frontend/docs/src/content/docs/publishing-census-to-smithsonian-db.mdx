@@ -61,7 +61,7 @@ If anything fails, the modal returns a structured list of disqualifying `CoreMea
 |---|---|---|
 | Destination Plot ID | All | Names which destination `Plot.PlotID` this census attaches to. Must already exist on the destination. |
 | Allow reload | Admins | The artifact deletes existing measurement-attribute and measurement rows for the target census before re-inserting. Identity rows (`Tree`, `Stem`) are never deleted; orphan counts are reported instead. |
-| Dry run | Admins | Generates a preview-only artifact that runs the reload-impact SELECTs and then `ROLLBACK`s. Useful to confirm what a reload would touch before doing it. |
+| Dry run | Admins | Generates a preview-only artifact that runs the reload-impact SELECTs and then `ROLLBACK`s. Allowed even when the census still has unresolved errors: the checks that would block a real publish are shown as warnings in the modal and the artifact header. Useful to confirm what a reload would touch before doing it. |
 
 :::caution
 **Allow reload is destructive.** It removes every measurement and measurement-attribute row for the target census on the destination. Use Dry run first if you are not certain about scope.
@@ -163,6 +163,8 @@ Dry-run mode wraps the reload preview in a `SAVEPOINT` and `ROLLBACK TO SAVEPOIN
 - Skips the insert stages entirely.
 
 The net effect on the destination is zero. The net effect on the operator's screen is a set of result sets describing the impact of a real reload.
+
+Unlike a real publish, a Dry run does **not** require a finished census. If the source census still has unresolved validation or upload errors, the Dry run still produces an artifact (HTTP 200); the failures that would block a real publish are listed as non-blocking warnings in the modal and as comment lines in the artifact header (`-- DRY-RUN PRECONDITION WARNINGS`). A Dry run does not validate the dirty rows or change which errors are fatal — it only previews reload impact and surfaces the existing precondition failures.
 
 ---
 

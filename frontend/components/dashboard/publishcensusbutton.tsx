@@ -61,11 +61,13 @@ export default function PublishCensusButton(props: PublishCensusButtonProps) {
   const [status, setStatus] = useState<PublishStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reasons, setReasons] = useState<PreconditionFailure[]>([]);
+  const [warnings, setWarnings] = useState<PreconditionFailure[]>([]);
 
   const reset = useCallback(() => {
     setStatus('idle');
     setErrorMessage(null);
     setReasons([]);
+    setWarnings([]);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -78,6 +80,7 @@ export default function PublishCensusButton(props: PublishCensusButtonProps) {
     setStatus('pending');
     setErrorMessage(null);
     setReasons([]);
+    setWarnings([]);
 
     const parsed = Number.parseInt(destinationPlotId, 10);
     if (!Number.isInteger(parsed) || parsed < 0 || String(parsed) !== destinationPlotId) {
@@ -105,6 +108,17 @@ export default function PublishCensusButton(props: PublishCensusButtonProps) {
         setErrorMessage(body?.error ?? `Export failed with HTTP ${response.status}`);
         setReasons(body?.reasons ?? []);
         return;
+      }
+
+      // D6: a dry run can succeed (200) while carrying non-blocking precondition
+      // warnings — the failures that WOULD block a real publish.
+      const warnHeader = response.headers.get('X-CTFS-Precondition-Warnings');
+      if (warnHeader) {
+        try {
+          setWarnings(JSON.parse(warnHeader) as PreconditionFailure[]);
+        } catch {
+          // Malformed header — surface nothing rather than crash the download.
+        }
       }
 
       // Successful artifact — pull filename from Content-Disposition, fall back
@@ -231,6 +245,29 @@ export default function PublishCensusButton(props: PublishCensusButtonProps) {
               {status === 'success' && (
                 <Alert color="success" variant="soft">
                   Artifact downloaded. Run it against the destination MySQL when ready.
+                </Alert>
+              )}
+
+              {warnings.length > 0 && (
+                <Alert color="warning" variant="soft" startDecorator={<WarningIcon />}>
+                  <Box>
+                    <Typography level="title-sm">Dry run: these would block a real publish</Typography>
+                    <Box sx={{ mt: 1 }}>
+                      {warnings.map(warning => (
+                        <Box key={warning.kind} sx={{ mt: 1 }}>
+                          <Typography level="body-sm" sx={{ fontWeight: 600 }}>
+                            {warning.kind}: {warning.message}
+                          </Typography>
+                          {warning.coreMeasurementIds.length > 0 && (
+                            <Typography level="body-xs" sx={{ ml: 1, color: 'neutral.500' }}>
+                              CoreMeasurementIDs: {warning.coreMeasurementIds.slice(0, 20).join(', ')}
+                              {warning.coreMeasurementIds.length > 20 && ` (+${warning.coreMeasurementIds.length - 20} more)`}
+                            </Typography>
+                          )}
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
                 </Alert>
               )}
             </Stack>

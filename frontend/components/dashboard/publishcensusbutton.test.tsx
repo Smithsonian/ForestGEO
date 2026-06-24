@@ -181,4 +181,27 @@ describe('PublishCensusButton', () => {
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith('blob:mock');
     expect(await screen.findByText(/Artifact downloaded/i)).toBeTruthy();
   });
+
+  it('renders dry-run precondition warnings as non-fatal while still downloading the artifact', async () => {
+    const warnings = [{ kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] }];
+    (global.fetch as any).mockResolvedValue(
+      new Response(new Blob(['-- dry run --']), {
+        status: 200,
+        headers: {
+          'Content-Disposition': 'attachment; filename=ctfs-export-1-2024-1.sql',
+          'X-CTFS-Precondition-Warnings': JSON.stringify(warnings)
+        }
+      })
+    );
+
+    renderButton({ canReload: true });
+    fireEvent.click(screen.getByRole('button', { name: /publish census/i }));
+    fireEvent.click(await screen.findByLabelText(/dry run/i));
+    fireEvent.click(screen.getByRole('button', { name: /download dry-run artifact/i }));
+
+    await waitFor(() => expect(createObjectUrlSpy).toHaveBeenCalled());
+    expect(await screen.findByText(/would block a real publish/i)).toBeTruthy();
+    expect(screen.getByText(/not-validated/)).toBeTruthy();
+    expect(screen.getByText(/2 rows not yet validated/)).toBeTruthy();
+  });
 });
