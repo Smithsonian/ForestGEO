@@ -605,7 +605,7 @@ describe('renderStage5', () => {
   });
 
   it('check 10: string lengths for measurements + TSMCode width for attributes', () => {
-    expect(sql()).toMatch(/CHAR_LENGTH\(Tag\) > 10/);
+    expect(sql()).toMatch(/CHAR_LENGTH\(Tag\) > 20/);
     expect(sql()).toMatch(/CHAR_LENGTH\(StemTag\) > 32/);
     expect(sql()).toMatch(/CHAR_LENGTH\(Mnemonic\) > 10/);
     expect(sql()).toMatch(/CHAR_LENGTH\(QuadratName\) > 8/);

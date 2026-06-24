@@ -254,7 +254,7 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
   // Check 7: Destination-bound value exceeds CTFS legacy column width.
   // Source column widths in the app schema may be larger than CTFS column widths.
   // Specific limits (from spec):
-  //   Tree.Tag 10, Stem.StemTag 32, Quadrat.QuadratName 8, TSMAttributes.TSMCode 10,
+  //   Tree.Tag 20, Stem.StemTag 32, Quadrat.QuadratName 8, TSMAttributes.TSMCode 10,
   //   DBH.Comments 128, Species.Mnemonic / SubSpecies.Mnemonic 10,
   //   taxonomy names 64, taxonomy authorities 128.
   // App coremeasurements.Description maps to CTFS DBH.Comments (128 char limit).

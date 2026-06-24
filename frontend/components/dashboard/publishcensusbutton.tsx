@@ -8,9 +8,8 @@
  *   - The legacy CSV export emits the historical 10-column ctfsweb measurement
  *     file. Keep using it for downstream consumers that still parse the CSV.
  *   - "Publish census" emits a destination-loadable `.sql` artifact targeting
- *     on-prem CTFS MySQL (`/api/export/ctfs-sql/...`). Run it against the
- *     destination MySQL after Suzanne's `creating_ViewFullTable.sql` is
- *     installed.
+ *     on-prem CTFS MySQL (`/api/export/ctfs-sql/...`). Rebuilding
+ *     ViewFullTable is now a separate operator-triggered artifact.
  *
  * The button calls the export endpoint, streams the response into a Blob, and
  * triggers a browser download. Server-side preconditions ("Finished Census"
@@ -169,8 +168,8 @@ export default function PublishCensusButton(props: PublishCensusButtonProps) {
           <DialogContent>
             <Stack spacing={2}>
               <Typography level="body-sm">
-                Generates a <code>.sql</code> artifact you can run against the on-prem CTFS MySQL. The destination must already have{' '}
-                <code>creating_ViewFullTable.sql</code> sourced into <code>ctfsweb_webuser</code>.
+                Generates a <code>.sql</code> artifact you can run against the on-prem CTFS MySQL. Rebuild <code>ViewFullTable</code> separately after
+                confirming the load succeeded.
               </Typography>
 
               <Box>

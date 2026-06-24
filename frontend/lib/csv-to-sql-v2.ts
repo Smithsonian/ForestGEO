@@ -669,7 +669,7 @@ ${appendErr(
 ${appendErr(
   m,
   'String too long for CTFS',
-  `CHAR_LENGTH(Tag) > 10
+  `CHAR_LENGTH(Tag) > 20
      OR CHAR_LENGTH(StemTag) > 32
      OR CHAR_LENGTH(Mnemonic) > 10
      OR CHAR_LENGTH(QuadratName) > 8
@@ -851,9 +851,8 @@ export function renderStage10(opts: { measurementsTable: string; attributesTable
  * Emit the post-COMMIT, post-procedure CTFSWeb reporting rebuild step.
  *
  * Suzanne's provided `creating_ViewFullTable.sql` installs `CreateFullView`
- * (and helpers) into `ctfsweb_webuser`. The Stage 0 install probe already
- * SIGNALed if the procedure was missing, so by the time we reach this point
- * the procedure is known to exist on the destination.
+ * (and helpers) into `ctfsweb_webuser`. Callers should probe first so missing
+ * helper failures produce the install hint before this CALL runs.
  *
  * `CreateFullView` does DROP/CREATE TABLE (DDL → implicit commit), so it
  * cannot live inside the load transaction. It runs outside the procedure
@@ -862,9 +861,8 @@ export function renderStage10(opts: { measurementsTable: string; attributesTable
  */
 export function renderPostLoadViewFullTableCall(): string {
   return `-- Post-load: rebuild CTFSWeb ViewFullTable (DDL — runs outside the load transaction).
--- The Stage 0 install probe SIGNALed earlier if ctfsweb_webuser.CreateFullView
--- was missing, so the load only reaches this line when the procedure is
--- installed on the destination.
+-- The caller should have already probed for ctfsweb_webuser.CreateFullView,
+-- so reaching this line implies the procedure is installed on the destination.
 CALL ctfsweb_webuser.CreateFullView(DATABASE(), 'ViewFullTable');
 SELECT 'ViewFullTable rebuild' AS scope, 'completed' AS status;
 `;

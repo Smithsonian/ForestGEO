@@ -25,7 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import { splitSqlFile } from '../../lib/provisioning/sql-runner';
-import { checkFinishedCensus, selectMeasurements, renderArtifact } from '../../lib/ctfs-export';
+import { checkFinishedCensus, selectMeasurements, renderArtifact, renderRebuildViewFullTableArtifact } from '../../lib/ctfs-export';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -500,28 +500,9 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
   // ViewFullTable handling
   // -------------------------------------------------------------------------
 
-  it('post-load CALLs the installed ctfsweb_webuser.CreateFullView (no longer a SELECT instruction)', async () => {
-    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
-    for (const stmt of splitSqlFile(ctfsSeed)) {
-      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
-    }
-
-    const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
-    // The artifact itself must contain a real CALL outside the load procedure.
-    expect(artifact.sql).toMatch(/CALL ctfsweb_webuser\.CreateFullView\(DATABASE\(\), 'ViewFullTable'\);/);
-
-    const resultSets = await executeCtfsSql(ctfsConn, artifact.sql);
-    // The stub procedure SELECTs a sentinel scope so we can verify it ran.
-    const stubResultSet = resultSets.find(rs => rs.length > 0 && rs[0].scope === 'ctfsweb_webuser.CreateFullView (test stub)');
-    expect(stubResultSet, 'post-load CALL must execute the installed stub procedure').toBeDefined();
-
-    // And a final 'completed' sentinel from renderPostLoadViewFullTableCall.
-    const completedSet = resultSets.find(rs => rs.length > 0 && rs[0].scope === 'ViewFullTable rebuild' && rs[0].status === 'completed');
-    expect(completedSet, 'post-load step must emit the "completed" sentinel').toBeDefined();
-  });
-
-  it('refuses to load when ctfsweb_webuser.CreateFullView is missing', async () => {
-    // Remove the stub to simulate an un-provisioned destination.
+  it('publish artifact does not call or probe CreateFullView and succeeds when the helper is missing', async () => {
+    // Remove the stub to simulate an un-provisioned destination. Publish should
+    // still load data; rebuilding ViewFullTable is now a separate artifact.
     await ctfsConn.query('DROP PROCEDURE IF EXISTS ctfsweb_webuser.CreateFullView');
 
     const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
@@ -530,11 +511,51 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
     }
 
     const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
-    await expect(executeCtfsSql(ctfsConn, artifact.sql)).rejects.toThrow(/creating_ViewFullTable\.sql/);
+    expect(artifact.sql).not.toMatch(/CreateFullView/);
+    expect(artifact.sql).not.toMatch(/creating_ViewFullTable\.sql/);
 
-    // And no data should have landed — Stage 0 SIGNAL fires before Stage 1.
+    await executeCtfsSql(ctfsConn, artifact.sql);
     const after = await captureCtfsCounts(ctfsConn);
-    expect(after.dbh, 'no DBH rows must be inserted when probe fails').toBe(0);
+    expect(after.dbh, 'publish must insert data even when CreateFullView is absent').toBe(1);
+  });
+
+  it('standalone rebuild artifact probes and CALLs the installed ctfsweb_webuser.CreateFullView', async () => {
+    const resultSets = await executeCtfsSql(ctfsConn, renderRebuildViewFullTableArtifact());
+
+    const stubResultSet = resultSets.find(rs => rs.length > 0 && rs[0].scope === 'ctfsweb_webuser.CreateFullView (test stub)');
+    expect(stubResultSet, 'rebuild artifact must execute the installed stub procedure').toBeDefined();
+
+    const completedSet = resultSets.find(rs => rs.length > 0 && rs[0].scope === 'ViewFullTable rebuild' && rs[0].status === 'completed');
+    expect(completedSet, 'rebuild artifact must emit the "completed" sentinel').toBeDefined();
+  });
+
+  it('standalone rebuild artifact fails fast when ctfsweb_webuser.CreateFullView is missing', async () => {
+    await ctfsConn.query('DROP PROCEDURE IF EXISTS ctfsweb_webuser.CreateFullView');
+
+    await expect(executeCtfsSql(ctfsConn, renderRebuildViewFullTableArtifact())).rejects.toThrow(/creating_ViewFullTable\.sql/);
+  });
+
+  // -------------------------------------------------------------------------
+  // 20-character tree tags (D4)
+  // -------------------------------------------------------------------------
+
+  it('exports a 20-character tree tag when the destination Tree.Tag column is widened', async () => {
+    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
+    for (const stmt of splitSqlFile(ctfsSeed)) {
+      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
+    }
+
+    // The canonical fixture still models old CTFS with Tree.Tag char(10).
+    // D4 is gated on the live server column being widened, so mirror that here.
+    await ctfsConn.query('ALTER TABLE Tree MODIFY COLUMN Tag VARCHAR(20)');
+    await appConn.query(`UPDATE \`${appSchema}\`.trees SET TreeTag = '12345678901234567890' WHERE TreeID = 1`);
+
+    const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
+    expect(artifact.sql).toMatch(/CHAR_LENGTH\(Tag\) > 20/);
+
+    await executeCtfsSql(ctfsConn, artifact.sql);
+    const [treeRows] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT Tag FROM Tree WHERE Tag = ?', ['12345678901234567890']);
+    expect(treeRows).toHaveLength(1);
   });
 });
 
