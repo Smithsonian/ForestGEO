@@ -41,13 +41,7 @@ The artifact checks for the stored procedure that rebuilds `ViewFullTable` befor
 
 Coordinate with the database administrator if the destination database has not yet had the reporting-view helper installed.
 
-### 3. The destination must be on the current Smithsonian DB schema
-
-The artifact verifies the expected measurement-attribute table shape before loading data. If it detects the older schema shape, it aborts with an upgrade hint and zero data lands.
-
-Coordinate with the database administrator before retrying against a database that needs a schema update.
-
-### 4. Your account must have export permission
+### 3. Your account must have export permission
 
 - **Lead technicians**: can publish censuses for schemas in their session-scoped site list. Normal exports only; reload options are hidden.
 - **Admins** (`global` / `db admin`): can publish for any schema and can generate reload artifacts (see [Reload semantics](#reload-semantics)).
