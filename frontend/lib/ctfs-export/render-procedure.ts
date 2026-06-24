@@ -17,7 +17,8 @@ import {
   renderStage7NewStems,
   renderStage8DBH,
   renderStage9DBHAttributes,
-  renderStage10
+  renderStage10,
+  renderPostLoadViewFullTableCall
 } from '../csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../csv-to-sql-shared';
 import { buildProcedureName, buildLockName } from './identifier-safety';
@@ -152,4 +153,57 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
   const sql = header + envelope;
 
   return { sql, procedureName, lockName };
+}
+
+// ---------------------------------------------------------------------------
+// Standalone ViewFullTable rebuild artifact (D5)
+// ---------------------------------------------------------------------------
+
+const REBUILD_PROBE_PROCEDURE = 'rebuild_viewfulltable_probe';
+
+/**
+ * Compose the standalone "Rebuild ViewFullTable" artifact.
+ *
+ * Decoupled from publish (D5): the publish artifact no longer rebuilds the
+ * reporting view, so operators run this separately after confirming a load.
+ *
+ * The artifact is INPUT-INDEPENDENT — it carries no plot/census/destination
+ * fields and no timestamp, so it is byte-identical for every caller (only the
+ * endpoint's audit record varies). The rebuild targets DATABASE(), so it
+ * rebuilds whichever destination DB the operator runs it against.
+ *
+ * The CreateFullView install probe SIGNALs (with the install hint) if the
+ * helper is missing. SIGNAL and the declared scalar are only valid inside a
+ * compound statement, so the probe is wrapped in a real one-shot procedure
+ * (CREATE / CALL / DROP) rather than pasted at top level. The actual rebuild
+ * CALL runs AFTER the probe procedure is dropped — CreateFullView does DDL
+ * (DROP/CREATE TABLE) and must not run inside another procedure's transaction.
+ */
+export function renderRebuildViewFullTableArtifact(): string {
+  const probe = `DROP PROCEDURE IF EXISTS ${REBUILD_PROBE_PROCEDURE};
+
+DELIMITER //
+CREATE PROCEDURE ${REBUILD_PROBE_PROCEDURE}()
+BEGIN
+  DECLARE _viewfulltable_installed INT DEFAULT 0;
+
+  -- Fail fast if the destination has not installed the rebuild helper.
+  SELECT COUNT(*) INTO _viewfulltable_installed
+    FROM information_schema.ROUTINES
+    WHERE ROUTINE_SCHEMA = 'ctfsweb_webuser'
+      AND ROUTINE_NAME = 'CreateFullView'
+      AND ROUTINE_TYPE = 'PROCEDURE';
+  IF _viewfulltable_installed = 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'ctfsweb_webuser.CreateFullView missing. Source creating_ViewFullTable.sql into the destination MySQL, then retry.';
+  END IF;
+END //
+DELIMITER ;
+
+CALL ${REBUILD_PROBE_PROCEDURE}();
+DROP PROCEDURE ${REBUILD_PROBE_PROCEDURE};
+`;
+
+  // renderPostLoadViewFullTableCall() emits the CALL + status SELECT.
+  return probe + '\n' + renderPostLoadViewFullTableCall();
 }

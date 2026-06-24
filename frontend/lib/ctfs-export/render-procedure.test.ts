@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderArtifact, type RenderArtifactInput } from './render-procedure';
+import { renderArtifact, renderRebuildViewFullTableArtifact, type RenderArtifactInput } from './render-procedure';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../csv-to-sql-shared';
 
 const baseInput = (overrides: Partial<RenderArtifactInput> = {}): RenderArtifactInput => ({
@@ -249,5 +249,39 @@ describe('renderArtifact', () => {
     const { sql } = renderArtifact(baseInput({ allowReload: false, reloadDryRun: true }));
     expect(sql).toMatch(/Stage 0b: reload/);
     expect(sql).toMatch(/SAVEPOINT reload_dry/);
+  });
+});
+
+describe('renderRebuildViewFullTableArtifact', () => {
+  it('emits the CreateFullView install probe with the install hint', () => {
+    const sql = renderRebuildViewFullTableArtifact();
+    expect(sql).toMatch(/information_schema\.ROUTINES[\s\S]+CreateFullView/);
+    expect(sql).toMatch(/Source creating_ViewFullTable\.sql/);
+  });
+
+  it('emits the rebuild CALL and a status SELECT after the probe', () => {
+    const sql = renderRebuildViewFullTableArtifact();
+    expect(sql).toMatch(/CALL ctfsweb_webuser\.CreateFullView\(DATABASE\(\), 'ViewFullTable'\);/);
+    expect(sql).toMatch(/'ViewFullTable rebuild' AS scope/);
+    const probeIdx = sql.indexOf("ROUTINE_NAME = 'CreateFullView'");
+    const callIdx = sql.indexOf("CALL ctfsweb_webuser.CreateFullView(DATABASE(), 'ViewFullTable');");
+    expect(probeIdx).toBeGreaterThan(-1);
+    expect(callIdx).toBeGreaterThan(probeIdx);
+  });
+
+  it('wraps the probe in a real CREATE PROCEDURE ... CALL ... DROP PROCEDURE (valid standalone SQL)', () => {
+    const sql = renderRebuildViewFullTableArtifact();
+    expect(sql).toMatch(/CREATE PROCEDURE rebuild_viewfulltable_probe\(\)/);
+    expect(sql).toMatch(/DECLARE _viewfulltable_installed INT DEFAULT 0;/);
+    expect(sql).toMatch(/CALL rebuild_viewfulltable_probe\(\);/);
+    expect(sql).toMatch(/DROP PROCEDURE rebuild_viewfulltable_probe;/);
+    // No undeclared top-level IF after the probe procedure is dropped.
+    const dropProcIdx = sql.indexOf('DROP PROCEDURE rebuild_viewfulltable_probe;');
+    const afterDrop = sql.slice(dropProcIdx);
+    expect(afterDrop).not.toMatch(/^\s*IF /m);
+  });
+
+  it('is byte-identical across calls (input-independent)', () => {
+    expect(renderRebuildViewFullTableArtifact()).toBe(renderRebuildViewFullTableArtifact());
   });
 });
