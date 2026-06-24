@@ -17,8 +17,7 @@ import {
   renderStage7NewStems,
   renderStage8DBH,
   renderStage9DBHAttributes,
-  renderStage10,
-  renderPostLoadViewFullTableCall
+  renderStage10
 } from '../csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../csv-to-sql-shared';
 import { buildProcedureName, buildLockName } from './identifier-safety';
@@ -103,7 +102,8 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
     renderStage0({
       destinationPlotId: input.destinationPlotId,
       censusNumber: input.plotCensusNumber,
-      allowReload: effectiveAllowReload
+      allowReload: effectiveAllowReload,
+      includeViewFullTableProbe: false
     })
   ];
 
@@ -138,12 +138,10 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
 
   const body = stages.join('\n\n');
 
-  // The ViewFullTable rebuild CALL must run OUTSIDE the procedure body — it
-  // executes DROP/CREATE TABLE inside ctfsweb_webuser.CreateFullView, which
-  // would cause implicit commits inside the load procedure's transaction.
-  // The Stage 0 install probe SIGNALs earlier if CreateFullView is missing,
-  // so reaching the post-procedure CALL line implies the proc exists.
-  // Dry-run skips both because no data is loaded.
+  // The publish artifact no longer rebuilds ViewFullTable (D5): the rebuild is a
+  // separate operator-triggered step (renderRebuildViewFullTableArtifact). The
+  // publish path therefore emits neither the CreateFullView install probe (see
+  // includeViewFullTableProbe: false above) nor the post-load CALL.
   const envelope = renderProcedureEnvelope({
     procedureName,
     lockName,
@@ -151,9 +149,7 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
     body
   });
 
-  const postProcedure = input.reloadDryRun ? '' : '\n' + renderPostLoadViewFullTableCall();
-
-  const sql = header + envelope + postProcedure;
+  const sql = header + envelope;
 
   return { sql, procedureName, lockName };
 }

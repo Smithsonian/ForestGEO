@@ -121,6 +121,14 @@ export interface Stage0Options {
   destinationPlotId: number;
   censusNumber: string;
   allowReload: boolean;
+  /**
+   * Emit the ctfsweb_webuser.CreateFullView install probe. Defaults to true to
+   * preserve existing callers. The publish path passes false: after D5 the
+   * publish artifact no longer calls CreateFullView, so probing for it would
+   * wrongly reject destinations that have not yet installed the rebuild helper.
+   * The standalone rebuild artifact carries its own probe instead.
+   */
+  includeViewFullTableProbe?: boolean;
 }
 
 /**
@@ -148,7 +156,7 @@ export function renderStage0(opts: Stage0Options): string {
 
   const censusLit = SqlString.escape(opts.censusNumber);
 
-  const guard = `  -- Stage 0a: destination schema probes (fail before any inserts if the
+  const dbhAttributesProbe = `  -- Stage 0a: destination schema probes (fail before any inserts if the
   -- destination is missing required CTFSWeb post-load infrastructure).
 
   -- Detect a pre-DBCHANGES2014f destination — DBHAttributes.CensusID was
@@ -164,7 +172,12 @@ export function renderStage0(opts: Stage0Options): string {
       SET MESSAGE_TEXT = 'DBHAttributes still has a CensusID column — apply DBCHANGES2014f.sql to the destination first.';
   END IF;
   SET _existing_dbh_count = 0;
+`;
 
+  const viewFullTableProbe =
+    opts.includeViewFullTableProbe === false
+      ? ''
+      : `
   -- ctfsweb_webuser.CreateFullView is invoked AFTER the load commits, so if it
   -- is missing the operator gets data in but no reporting table refresh. Probe
   -- here so the load aborts cleanly with installation instructions.
@@ -179,7 +192,9 @@ export function renderStage0(opts: Stage0Options): string {
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'ctfsweb_webuser.CreateFullView missing. Source creating_ViewFullTable.sql into the destination MySQL, then retry.';
   END IF;
+`;
 
+  const censusGuard = `
   -- Stage 0: target census guard
   SELECT COUNT(*), MIN(CensusID)
     INTO _census_count, _target_census_id
@@ -197,6 +212,8 @@ export function renderStage0(opts: Stage0Options): string {
   SET @target_census_id := _target_census_id;
   SET @target_plot_id := ${opts.destinationPlotId};
 `;
+
+  const guard = dbhAttributesProbe + viewFullTableProbe + censusGuard;
 
   if (opts.allowReload) {
     return guard;

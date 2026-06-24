@@ -164,25 +164,15 @@ describe('renderArtifact', () => {
     expect(sql).toMatch(/Stage 10:/);
   });
 
-  it('non-dry-run emits the ViewFullTable rebuild CALL outside the load procedure', () => {
+  it('non-dry-run does NOT emit the ViewFullTable rebuild CALL (D5: rebuild is a separate step)', () => {
     const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
-    // The CALL must run AFTER the load procedure's DROP PROCEDURE: CreateFullView
-    // does DDL (DROP/CREATE TABLE) which would auto-commit and break the load txn.
-    expect(sql).toMatch(/CALL ctfsweb_webuser\.CreateFullView\(DATABASE\(\), 'ViewFullTable'\);/);
-    const callIdx = sql.indexOf("CALL ctfsweb_webuser.CreateFullView(DATABASE(), 'ViewFullTable');");
-    const lastDropIdx = sql.lastIndexOf('DROP PROCEDURE ');
-    expect(callIdx).toBeGreaterThan(lastDropIdx);
+    expect(sql).not.toMatch(/CALL ctfsweb_webuser\.CreateFullView/);
   });
 
-  it('Stage 0 probes for ctfsweb_webuser.CreateFullView before loading anything', () => {
+  it('publish Stage 0 does NOT probe for ctfsweb_webuser.CreateFullView (D5)', () => {
     const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
-    expect(sql).toMatch(/information_schema\.ROUTINES[\s\S]+CreateFullView/);
-    expect(sql).toMatch(/Source creating_ViewFullTable\.sql/);
-    // Probe must come BEFORE the data-load WHERE/JOIN section.
-    const probeIdx = sql.indexOf("ROUTINE_NAME = 'CreateFullView'");
-    const stage1Idx = sql.indexOf('Stage 1:');
-    expect(probeIdx).toBeGreaterThan(0);
-    expect(probeIdx).toBeLessThan(stage1Idx);
+    expect(sql).not.toMatch(/CreateFullView/);
+    expect(sql).not.toMatch(/Source creating_ViewFullTable\.sql/);
   });
 
   it('Stage 0 probes that DBHAttributes no longer has CensusID (post-DBCHANGES2014f)', () => {

@@ -147,6 +147,15 @@ describe('renderStage0', () => {
     expect(sql).toMatch(/Source creating_ViewFullTable\.sql/);
   });
 
+  it('omits the CreateFullView probe when includeViewFullTableProbe is false', () => {
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false, includeViewFullTableProbe: false });
+    expect(sql).not.toMatch(/CreateFullView/);
+    expect(sql).not.toMatch(/Source creating_ViewFullTable\.sql/);
+    // The DBHAttributes 2014f probe and the census guard must still be present.
+    expect(sql).toMatch(/DBHAttributes still has a CensusID column/);
+    expect(sql).toMatch(/Stage 0: target census guard/);
+  });
+
   it('probes that DBHAttributes does not have a CensusID column (post-2014f)', () => {
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
     expect(sql).toMatch(/DBHAttributes still has a CensusID column/);
