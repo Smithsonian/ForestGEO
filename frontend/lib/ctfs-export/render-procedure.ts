@@ -21,6 +21,7 @@ import {
   renderPostLoadViewFullTableCall
 } from '../csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../csv-to-sql-shared';
+import type { PreconditionFailure } from './precondition';
 import { buildProcedureName, buildLockName } from './identifier-safety';
 
 const MEASUREMENTS_TABLE = 'staging_measurements';
@@ -41,6 +42,12 @@ export interface RenderArtifactInput {
   generatedAt: Date;
   measurementRows: MeasurementStagingRow[];
   attributeRows: AttributeStagingRow[];
+  /**
+   * Precondition failures to surface as NON-BLOCKING warnings in a dry-run
+   * artifact header (D6). Ignored for non-dry-run renders. Each line names the
+   * kind, message, and the sampled CoreMeasurementIDs (capped upstream).
+   */
+  preconditionWarnings?: PreconditionFailure[];
 }
 
 export interface RenderArtifactResult {
@@ -84,6 +91,14 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
   });
 
   // Header carries generation metadata between BEGIN HEADER and END HEADER markers
+  const warningLines =
+    input.reloadDryRun && input.preconditionWarnings && input.preconditionWarnings.length > 0
+      ? [
+          '-- DRY-RUN PRECONDITION WARNINGS (would block a real publish):',
+          ...input.preconditionWarnings.map(w => `--   ${w.kind} - ${w.message} - listed CoreMeasurementIDs: ${w.coreMeasurementIds.join(', ')}`)
+        ]
+      : [];
+
   const header = [
     '-- BEGIN HEADER',
     `-- Generated: ${input.generatedAt.toISOString()}`,
@@ -95,6 +110,7 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
     `-- Measurement rows: ${input.measurementRows.length}`,
     `-- Attribute rows: ${input.attributeRows.length}`,
     `-- Options: allowReload=${input.allowReload} reloadDryRun=${input.reloadDryRun}`,
+    ...warningLines,
     '-- END HEADER',
     ''
   ].join('\n');

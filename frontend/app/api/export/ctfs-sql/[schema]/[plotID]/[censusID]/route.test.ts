@@ -320,14 +320,8 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
   // Precondition failure
   // -------------------------------------------------------------------------
 
-  it('returns 400 with structured reasons when checkFinishedCensus returns ok: false', async () => {
-    const reasons = [
-      {
-        kind: 'not-validated',
-        message: '2 rows not yet validated',
-        coreMeasurementIds: [10, 11]
-      }
-    ];
+  it('returns 400 with structured reasons when checkFinishedCensus fails on a real publish', async () => {
+    const reasons = [{ kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] }];
     mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons });
 
     const res = await GET(makeRequest(), makeProps());
@@ -336,8 +330,37 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     const body = await res.json();
     expect(body.error).toMatch(/census is not finished/i);
     expect(body.reasons).toEqual(reasons);
-    // Connection must still be released even on early returns from the try block.
     expect(mocks.connRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 200 with a dry-run artifact + warning header when preconditions fail in dry-run mode', async () => {
+    const reasons = [{ kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] }];
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons });
+    mocks.auth.mockResolvedValue({
+      user: { email: 'admin@example.com', name: 'Admin', userStatus: 'db admin', sites: [], allsites: [] }
+    });
+
+    const res = await GET(makeRequest(makeUrl({ reloadDryRun: 'true' })), makeProps());
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(await res.text()).toBe(STUB_RENDER_RESULT.sql);
+    const warnHeader = res.headers.get('X-CTFS-Precondition-Warnings');
+    expect(warnHeader).toBeTruthy();
+    expect(JSON.parse(warnHeader!)).toEqual([{ kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] }]);
+    expect(mocks.renderArtifact).toHaveBeenCalledWith(expect.objectContaining({ reloadDryRun: true, preconditionWarnings: reasons }));
+    expect(mocks.connRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not set the warning header on a dry run whose preconditions pass', async () => {
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: true, count: 3 });
+    mocks.auth.mockResolvedValue({
+      user: { email: 'admin@example.com', name: 'Admin', userStatus: 'db admin', sites: [], allsites: [] }
+    });
+
+    const res = await GET(makeRequest(makeUrl({ reloadDryRun: 'true' })), makeProps());
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(res.headers.get('X-CTFS-Precondition-Warnings')).toBeNull();
   });
 
   // -------------------------------------------------------------------------

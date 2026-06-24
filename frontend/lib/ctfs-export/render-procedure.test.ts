@@ -250,6 +250,28 @@ describe('renderArtifact', () => {
     expect(sql).toMatch(/Stage 0b: reload/);
     expect(sql).toMatch(/SAVEPOINT reload_dry/);
   });
+
+  it('dry-run header includes precondition warnings when provided', () => {
+    const { sql } = renderArtifact(
+      baseInput({
+        reloadDryRun: true,
+        preconditionWarnings: [{ kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] }]
+      })
+    );
+    expect(sql).toMatch(/-- DRY-RUN PRECONDITION WARNINGS \(would block a real publish\):/);
+    expect(sql).toMatch(/--   not-validated - 2 rows not yet validated - listed CoreMeasurementIDs: 10, 11/);
+  });
+
+  it('non-dry-run does not embed precondition warnings even if provided', () => {
+    const { sql } = renderArtifact(
+      baseInput({
+        reloadDryRun: false,
+        measurementRows: [sampleMeasurement],
+        preconditionWarnings: [{ kind: 'not-validated', message: 'x', coreMeasurementIds: [1] }]
+      })
+    );
+    expect(sql).not.toMatch(/DRY-RUN PRECONDITION WARNINGS/);
+  });
 });
 
 describe('renderRebuildViewFullTableArtifact', () => {

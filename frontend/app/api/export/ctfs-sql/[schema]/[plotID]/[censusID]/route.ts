@@ -5,7 +5,7 @@ import { getConn } from '@/lib/db/primitives';
 import { auth } from '@/auth';
 import { requireSession, getSessionUserId } from '@/lib/auth-helpers';
 import ailogger from '@/ailogger';
-import { checkFinishedCensus, selectMeasurements, renderArtifact } from '@/lib/ctfs-export';
+import { checkFinishedCensus, selectMeasurements, renderArtifact, type PreconditionFailure } from '@/lib/ctfs-export';
 import { userCanExportSchema, userIsAdmin } from '@/lib/ctfs-export/export-permissions';
 import type { Session } from 'next-auth';
 
@@ -111,10 +111,17 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
     }
     const plotCensusNumber = String(censusRows[0].PlotCensusNumber);
 
-    // Precondition: census must be fully validated and clean before export.
+    // Precondition: census must be fully validated and clean before a real
+    // publish. D6: a Dry run is allowed even when preconditions fail — the
+    // failures are surfaced as non-blocking warnings instead of a 400, so the
+    // operator can preview reload impact and see what would block a real publish.
     const precondition = await checkFinishedCensus(conn, { schema, plotId: appPlotId, censusId: appCensusId });
+    let preconditionWarnings: PreconditionFailure[] = [];
     if (!precondition.ok) {
-      return NextResponse.json({ error: 'Census is not finished', reasons: precondition.reasons }, { status: HTTPResponses.BAD_REQUEST });
+      if (!reloadDryRun) {
+        return NextResponse.json({ error: 'Census is not finished', reasons: precondition.reasons }, { status: HTTPResponses.BAD_REQUEST });
+      }
+      preconditionWarnings = precondition.reasons;
     }
 
     // Fetch measurement + attribute rows from the app database.
@@ -135,7 +142,8 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
       reloadDryRun,
       generatedAt,
       measurementRows,
-      attributeRows
+      attributeRows,
+      preconditionWarnings
     });
 
     const filename = buildDownloadFilename(destinationPlotId, plotCensusNumber, generatedAt.getTime());
@@ -158,13 +166,20 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
       filename
     });
 
-    return new NextResponse(sql, {
-      status: HTTPResponses.OK,
-      headers: {
-        'Content-Type': 'application/sql; charset=utf-8',
-        'Content-Disposition': `attachment; filename=${filename}`
-      }
-    });
+    const responseHeaders: Record<string, string> = {
+      'Content-Type': 'application/sql; charset=utf-8',
+      'Content-Disposition': `attachment; filename=${filename}`
+    };
+    if (preconditionWarnings.length > 0) {
+      // JSON-encoded so the modal can render a non-blocking warning panel
+      // without a second request. Exact totals are intentionally NOT reported —
+      // checkFinishedCensus returns capped CoreMeasurementID samples only.
+      responseHeaders['X-CTFS-Precondition-Warnings'] = JSON.stringify(
+        preconditionWarnings.map(w => ({ kind: w.kind, message: w.message, coreMeasurementIds: w.coreMeasurementIds }))
+      );
+    }
+
+    return new NextResponse(sql, { status: HTTPResponses.OK, headers: responseHeaders });
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
     ailogger.error('ctfs-sql export failed', error, { schema, appPlotId, appCensusId });
