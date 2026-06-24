@@ -326,13 +326,33 @@ describe('checkFinishedCensus', () => {
   // Check 7: string-too-long
   // -------------------------------------------------------------------------
 
-  it('fails with string-too-long when TreeTag exceeds 10 characters (CTFS Tree.Tag limit)', async () => {
-    // trees.TreeTag is varchar(20), so 11-char value is within app schema but over CTFS limit.
+  it('passes an 11-character TreeTag (within the new CTFS Tree.Tag limit of 20)', async () => {
+    // trees.TreeTag is varchar(20); 11 chars is now within the CTFS Tree.Tag limit.
     await conn.query("UPDATE trees SET TreeTag = '12345678901' WHERE TreeID = 1");
 
     const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
 
-    expect(result.ok, 'expected ok=false for 11-char TreeTag').toBe(false);
+    expect(result.ok, 'expected ok=true for 11-char TreeTag under the 20-char limit').toBe(true);
+  });
+
+  it('passes a 20-character TreeTag (exactly at the new CTFS Tree.Tag limit)', async () => {
+    await conn.query("UPDATE trees SET TreeTag = '12345678901234567890' WHERE TreeID = 1");
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'expected ok=true for 20-char TreeTag exactly at the limit').toBe(true);
+  });
+
+  it('fails with string-too-long when TreeTag exceeds 20 characters (CTFS Tree.Tag limit)', async () => {
+    // The seed trees.TreeTag column is varchar(20), so a 21-char value would be
+    // truncated on insert and never trip the check. Widen the column for this
+    // test only (the test DB is dropped per run, so no restore is needed).
+    await conn.query('ALTER TABLE trees MODIFY COLUMN TreeTag VARCHAR(40)');
+    await conn.query("UPDATE trees SET TreeTag = '123456789012345678901' WHERE TreeID = 1");
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'expected ok=false for 21-char TreeTag over the 20-char limit').toBe(false);
     if (!result.ok) {
       const failure = result.reasons.find(r => r.kind === 'string-too-long');
       expect(failure, 'string-too-long failure should be present for oversized TreeTag').toBeDefined();

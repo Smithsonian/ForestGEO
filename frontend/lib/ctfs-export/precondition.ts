@@ -27,7 +27,7 @@ const SCHEMA_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 // CTFS destination column widths that bound source values at export time.
 const CTFS_LIMITS = {
-  treeTag: 10,
+  treeTag: 20,
   stemTag: 32,
   quadratName: 8,
   tsmCode: 10,

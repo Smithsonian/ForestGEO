@@ -31,7 +31,7 @@ Every measurement included in the export must satisfy:
 - Joined `stems` and `trees` are active (`IsActive = 1`, `DeletedAt IS NULL`)
 - Every `cmattributes.Code` resolves to an active `attributes` row
 - Species row has `SpeciesCode`, `SpeciesName`, `Genus`, and `Family` set
-- All destination-bound strings fit Smithsonian DB column widths (Tag at most 10 characters, StemTag at most 32 characters, QuadratName at most 8 characters, etc.)
+- All destination-bound strings fit Smithsonian DB column widths (Tag at most 20 characters, StemTag at most 32 characters, QuadratName at most 8 characters, etc.)
 
 If anything fails, the modal returns a structured list of disqualifying `CoreMeasurementID`s grouped by failure kind. Fix them in the app and retry.
 
