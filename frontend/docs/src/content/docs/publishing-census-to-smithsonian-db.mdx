@@ -164,7 +164,7 @@ Dry-run mode wraps the reload preview in a `SAVEPOINT` and `ROLLBACK TO SAVEPOIN
 
 The net effect on the destination is zero. The net effect on the operator's screen is a set of result sets describing the impact of a real reload.
 
-Unlike a real publish, a Dry run does **not** require a finished census. If the source census still has unresolved validation or upload errors, the Dry run still produces an artifact (HTTP 200); the failures that would block a real publish are listed as non-blocking warnings in the modal and as comment lines in the artifact header (`-- DRY-RUN PRECONDITION WARNINGS`). A Dry run does not validate the dirty rows or change which errors are fatal — it only previews reload impact and surfaces the existing precondition failures.
+Unlike a real publish, a Dry run does **not** require a finished census. If the source census still has unresolved validation or upload errors, the Dry run still produces an artifact (HTTP 200); the failures that would block a real publish are listed as non-blocking warnings in the modal and as comment lines in the artifact header (`-- DRY-RUN PRECONDITION WARNINGS`). A Dry run does not validate the dirty rows or change which errors are fatal — it only previews reload impact and surfaces the existing precondition failures. The reload-impact counts reflect only the rows that are currently exportable; the would-block rows appear as warnings (by `CoreMeasurementID`), not as data in the preview.
 
 ---
 

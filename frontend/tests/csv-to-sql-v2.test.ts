@@ -156,6 +156,15 @@ describe('renderStage0', () => {
     expect(sql).toMatch(/Stage 0: target census guard/);
   });
 
+  it('preserves the exact whitespace seam between the CreateFullView probe and the census guard (default path)', () => {
+    // The renderStage0 body is assembled by concatenating three fragments
+    // (DBHAttributes probe + CreateFullView probe + census guard). This locks
+    // the seam so a future edit cannot silently collapse the blank-line
+    // separator that keeps the emitted SQL readable and matches the goldens.
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
+    expect(sql).toContain('END IF;\n\n  -- Stage 0: target census guard');
+  });
+
   it('probes that DBHAttributes does not have a CensusID column (post-2014f)', () => {
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
     expect(sql).toMatch(/DBHAttributes still has a CensusID column/);
