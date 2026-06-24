@@ -6,6 +6,7 @@ import { auth } from '@/auth';
 import { requireSession, getSessionUserId } from '@/lib/auth-helpers';
 import ailogger from '@/ailogger';
 import { checkFinishedCensus, selectMeasurements, renderArtifact } from '@/lib/ctfs-export';
+import { userCanExportSchema, userIsAdmin } from '@/lib/ctfs-export/export-permissions';
 import type { Session } from 'next-auth';
 
 // Force Node.js runtime — mysql2 and the ctfs-export renderer are not compatible
@@ -31,23 +32,8 @@ type RouteProps = { params: Promise<{ schema: string; plotID: string; censusID: 
 //     non-reload only.
 // ---------------------------------------------------------------------------
 
-function userCanExportSchema(session: Session, schema: string): boolean {
-  const role = session.user?.userStatus;
-  if (userIsAdmin(session)) {
-    return true;
-  }
-  if (role !== 'lead technician') {
-    return false;
-  }
-  return (session.user?.sites ?? []).some(site => site.schemaName === schema);
-}
-
 function userCanReload(session: Session): boolean {
   return userIsAdmin(session);
-}
-
-function userIsAdmin(session: Session): boolean {
-  return session.user?.userStatus === 'global' || session.user?.userStatus === 'db admin';
 }
 
 function buildDownloadFilename(destinationPlotId: number, plotCensusNumber: string, timestampMs: number): string {

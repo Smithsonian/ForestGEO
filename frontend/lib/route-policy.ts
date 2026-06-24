@@ -142,6 +142,7 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   'edits/revert': 'site-scoped',
   // Export
   'export/ctfs-sql/[schema]/[plotID]/[censusID]': 'site-scoped',
+  'export/ctfs-rebuild-view/[schema]': 'site-scoped',
   // File management
   'files/[operation]': 'site-scoped',
   // Census rollover (currently a no-op stub, but operates on site data)
@@ -238,7 +239,11 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   // prevalidate: requireSession confirms identity but no schema-ownership check
   'prevalidate',
   // export: requireSession confirms identity but schema access is not verified
+  // via a recognised signal (uses custom userCanExportSchema helper)
   'export/ctfs-sql/[schema]/[plotID]/[censusID]',
+  // export rebuild-view: schema-scoped via userCanExportSchema (custom helper the
+  // static analyzer does not recognize), no per-row verification
+  'export/ctfs-rebuild-view/[schema]',
   // files: requireSession confirms identity but no per-schema ownership check
   'files/[operation]'
 ]);
