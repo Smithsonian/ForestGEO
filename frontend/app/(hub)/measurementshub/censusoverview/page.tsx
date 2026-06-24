@@ -16,6 +16,7 @@ import { useRouter } from 'next/navigation';
 import CensusStatsView from '@/components/dashboard/censusstatsview';
 import DataQualityCard from '@/components/dashboard/dataqualitycard';
 import PublishCensusButton from '@/components/dashboard/publishcensusbutton';
+import RebuildViewFullTableButton from '@/components/dashboard/rebuildviewfulltablebutton';
 import ailogger from '@/ailogger';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { useSession } from 'next-auth/react';
@@ -151,13 +152,16 @@ export default function CensusOverviewPage() {
           </Box>
         </Stack>
         {currentSite.schemaName && currentPlot.plotID && censusID && (
-          <PublishCensusButton
-            schema={currentSite.schemaName}
-            appPlotId={currentPlot.plotID}
-            appCensusId={censusID}
-            plotCensusNumber={currentCensus.plotCensusNumber ?? ''}
-            canReload={canReload}
-          />
+          <Stack direction="row" spacing={1}>
+            <PublishCensusButton
+              schema={currentSite.schemaName}
+              appPlotId={currentPlot.plotID}
+              appCensusId={censusID}
+              plotCensusNumber={currentCensus.plotCensusNumber ?? ''}
+              canReload={canReload}
+            />
+            <RebuildViewFullTableButton schema={currentSite.schemaName} />
+          </Stack>
         )}
       </Stack>
 

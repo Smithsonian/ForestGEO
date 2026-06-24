@@ -3,7 +3,7 @@ title: Publishing a Census to the Smithsonian DB
 description: How to use the Publish census button to load a finished ForestGEO census into the Smithsonian database.
 ---
 
-The **Publish census** button generates a self-contained `.sql` artifact that loads a finished ForestGEO census into the Smithsonian database. Operators download the artifact, run it against the destination database, and the validated measurements land in the Smithsonian tables used for tree, stem, measurement, and measurement-attribute records. The artifact also rebuilds the full-table reporting view after the data load commits.
+The **Publish census** button generates a self-contained `.sql` artifact that loads a finished ForestGEO census into the Smithsonian database. Operators download the artifact, run it against the destination database, and the validated measurements land in the Smithsonian tables used for tree, stem, measurement, and measurement-attribute records. Rebuilding the full-table reporting view is a separate, operator-triggered step (see [Rebuilding ViewFullTable](#rebuilding-viewfulltable)).
 
 This page covers when to use the feature, what each option does, what the artifact contains, how to run it, and the common ways it can refuse to publish.
 
@@ -35,13 +35,7 @@ Every measurement included in the export must satisfy:
 
 If anything fails, the modal returns a structured list of disqualifying `CoreMeasurementID`s grouped by failure kind. Fix them in the app and retry.
 
-### 2. The destination must have the reporting-view rebuild helper installed
-
-The artifact checks for the stored procedure that rebuilds `ViewFullTable` before doing any data work. If the procedure is missing, the artifact aborts with an install hint and zero data lands.
-
-Coordinate with the database administrator if the destination database has not yet had the reporting-view helper installed.
-
-### 3. Your account must have export permission
+### 2. Your account must have export permission
 
 - **Lead technicians**: can publish censuses for schemas in their session-scoped site list. Normal exports only; reload options are hidden.
 - **Admins** (`global` / `db admin`): can publish for any schema and can generate reload artifacts (see [Reload semantics](#reload-semantics)).
@@ -111,8 +105,6 @@ DELIMITER ;
 
 CALL load_published_census_...();
 DROP PROCEDURE load_published_census_...;
-
--- After the load procedure, the artifact rebuilds ViewFullTable.
 ```
 
 A few invariants worth knowing:
@@ -120,7 +112,6 @@ A few invariants worth knowing:
 - **The procedure name has a deterministic hash suffix** derived from the source schema, source plot/census, and destination plot/census. Two operators exporting the same census from the same schema get the same suffix. Two operators exporting from different source schemas to the same destination get different suffixes, so their `DROP PROCEDURE` / `CREATE PROCEDURE` statements do not collide.
 - **The body is byte-deterministic for the same input.** Only the header timestamp varies between runs. This is useful for ticket attachments and golden-file regression testing.
 - **A destination census lock** ensures two operators exporting to the same destination census serialize. The second one fails fast if another export is already running.
-- **`ViewFullTable` rebuild runs after the load procedure commits.** If the rebuild fails after a successful load, the data is committed and the operator can re-run the rebuild step independently.
 
 ---
 
@@ -159,7 +150,6 @@ Reload mode (`allowReload=true`) is the way to re-publish a census after fixing 
 4. DELETE those rows.
 5. SELECT post-delete orphan counts: stems with no remaining measurements and trees with no remaining stems.
 6. Continue with normal insert path.
-7. Rebuild `ViewFullTable`.
 
 **Identity rows are never deleted.** A reload only removes measurements and measurement attributes for the target census. If a tree or stem is left with no surviving measurements, the operator decides whether to prune it manually outside this script. Identity-table deletion would risk breaking foreign-key references that exist outside the script's knowledge.
 
@@ -171,9 +161,20 @@ Dry-run mode wraps the reload preview in a `SAVEPOINT` and `ROLLBACK TO SAVEPOIN
 - Performs the `DELETE`s so the orphan counts are accurate.
 - Rolls everything back so no destination row changes.
 - Skips the insert stages entirely.
-- Skips the `ViewFullTable` rebuild.
 
 The net effect on the destination is zero. The net effect on the operator's screen is a set of result sets describing the impact of a real reload.
+
+---
+
+## Rebuilding ViewFullTable
+
+Publishing a census no longer rebuilds the CTFSWeb `ViewFullTable` reporting view automatically. The rebuild is slow on large plots, and operators usually want to confirm the load committed before refreshing the reporting view. Use the **Rebuild ViewFullTable** button (next to **Publish census** on the Census Overview header) when you are ready.
+
+1. Confirm the publish artifact ran successfully against the destination.
+2. Click **Rebuild ViewFullTable**, then **Download rebuild artifact**.
+3. Run the downloaded `.sql` against the destination database.
+
+The rebuild artifact first checks that `ctfsweb_webuser.CreateFullView` is installed and aborts with an install hint if it is missing — source `creating_ViewFullTable.sql` into the destination's `ctfsweb_webuser` first. It then calls `CreateFullView(DATABASE(), 'ViewFullTable')` against whichever destination database you run it on.
 
 ---
 
