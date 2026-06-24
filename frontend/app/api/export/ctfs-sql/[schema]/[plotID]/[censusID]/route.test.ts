@@ -447,6 +447,11 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     expect(meta.procedureName).toBe(STUB_RENDER_RESULT.procedureName);
     expect(meta.lockName).toBe(STUB_RENDER_RESULT.lockName);
     expect(meta.filename).toMatch(/^ctfs-export-1-2025A-\d+\.sql$/);
+
+    // D3: generatedAt is an ISO-8601 string equal to the Date passed to renderArtifact.
+    const renderCall = mocks.renderArtifact.mock.calls[0][0];
+    expect(meta.generatedAt).toBe(renderCall.generatedAt.toISOString());
+    expect(meta.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 
   it('releases the connection on success', async () => {

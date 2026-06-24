@@ -166,6 +166,7 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
       attributeCount: attributeRows.length,
       allowReload,
       reloadDryRun,
+      generatedAt: generatedAt.toISOString(),
       procedureName,
       lockName,
       filename
