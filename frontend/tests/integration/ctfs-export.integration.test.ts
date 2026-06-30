@@ -539,15 +539,14 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
   // 20-character tree tags (D4)
   // -------------------------------------------------------------------------
 
-  it('exports a 20-character tree tag when the destination Tree.Tag column is widened', async () => {
+  it('exports a 20-character tree tag against the migrated destination (Tree.Tag varchar(20))', async () => {
     const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
     for (const stmt of splitSqlFile(ctfsSeed)) {
       if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
     }
 
-    // The canonical fixture still models old CTFS with Tree.Tag char(10).
-    // D4 is gated on the live server column being widened, so mirror that here.
-    await ctfsConn.query('ALTER TABLE Tree MODIFY COLUMN Tag VARCHAR(20)');
+    // The canonical fixture now models the migrated CTFS destination
+    // (Tree.Tag varchar(20)), so no per-test ALTER is needed.
     await appConn.query(`UPDATE \`${appSchema}\`.trees SET TreeTag = '12345678901234567890' WHERE TreeID = 1`);
 
     const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
@@ -556,6 +555,37 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
     await executeCtfsSql(ctfsConn, artifact.sql);
     const [treeRows] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT Tag FROM Tree WHERE Tag = ?', ['12345678901234567890']);
     expect(treeRows).toHaveLength(1);
+  });
+
+  it('publish fails at the Stage 0a probe when the destination Tree.Tag is still char(10) (un-migrated)', async () => {
+    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
+    for (const stmt of splitSqlFile(ctfsSeed)) {
+      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
+    }
+
+    // Simulate a destination that predates the Tag widen migration. Even a
+    // short, valid tag must be refused because the probe checks the COLUMN
+    // width, not the value — loading would otherwise truncate or error later.
+    await ctfsConn.query('ALTER TABLE Tree MODIFY COLUMN Tag char(10)');
+
+    const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
+    await expect(executeCtfsSql(ctfsConn, artifact.sql)).rejects.toThrow(/Tree\.Tag is missing or narrower than 20 chars/);
+  });
+
+  it('dry run also fails at the Stage 0a probe against an un-migrated char(10) destination (no false green)', async () => {
+    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
+    for (const stmt of splitSqlFile(ctfsSeed)) {
+      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
+    }
+
+    await ctfsConn.query('ALTER TABLE Tree MODIFY COLUMN Tag char(10)');
+
+    // The dry-run artifact skips Stages 1-10, so this Stage 0a probe is the only
+    // destination-width check a dry run runs. It must still reject — otherwise a
+    // dry run reports success and the real publish later truncates/errors.
+    const dryRunArtifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1', reloadDryRun: true });
+    expect(dryRunArtifact.sql).not.toMatch(/Stage 1:/);
+    await expect(executeCtfsSql(ctfsConn, dryRunArtifact.sql)).rejects.toThrow(/Tree\.Tag is missing or narrower than 20 chars/);
   });
 });
 

@@ -12,6 +12,7 @@
 
 import type { Connection } from 'mysql2/promise';
 import { exportableMeasurementBaseWhere } from './exportable-measurement';
+import { TREE_TAG_MAX_WIDTH } from '../csv-to-sql-v2';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -26,8 +27,10 @@ export const MAX_DISPLAY_FAILURES = 50;
 const SCHEMA_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 // CTFS destination column widths that bound source values at export time.
+// treeTag is shared with the generated procedure's Stage 0 probe and Stage 5
+// length check via TREE_TAG_MAX_WIDTH so the gates can never drift.
 const CTFS_LIMITS = {
-  treeTag: 20,
+  treeTag: TREE_TAG_MAX_WIDTH,
   stemTag: 32,
   quadratName: 8,
   tsmCode: 10,

@@ -31,14 +31,21 @@ export interface ProcedureEnvelopeOptions {
 export const LEGACY_DEFAULT_STEM_NUMBER = 0;
 export const LEGACY_DEFAULT_MEASURE_ID = 0;
 
+// Destination CTFS `Tree.Tag` column width. The Stage 0a destination probe and
+// the Stage 5 per-row length check share this so they can never drift; it must
+// match `CTFS_LIMITS.treeTag` in lib/ctfs-export/precondition.ts.
+export const TREE_TAG_MAX_WIDTH = 20;
+
 // Live scalars only — resprout/cursor scratch removed with the pivot.
 // `_viewfulltable_installed` is populated by the Stage 0 ViewFullTable probe.
+// `_tag_col_width` is populated by the Stage 0 Tree.Tag width probe.
 const SCALAR_DECLARES = [
   'DECLARE _message TEXT;',
   'DECLARE _census_count INT DEFAULT 0;',
   'DECLARE _target_census_id INT UNSIGNED;',
   'DECLARE _existing_dbh_count INT DEFAULT 0;',
   'DECLARE _viewfulltable_installed INT DEFAULT 0;',
+  'DECLARE _tag_col_width INT DEFAULT 0;',
   'DECLARE _lock_result INT DEFAULT 0;'
 ];
 
@@ -172,6 +179,22 @@ export function renderStage0(opts: Stage0Options): string {
       SET MESSAGE_TEXT = 'DBHAttributes still has a CensusID column — apply DBCHANGES2014f.sql to the destination first.';
   END IF;
   SET _existing_dbh_count = 0;
+
+  -- Detect a destination whose Tree.Tag column predates the widen-to-20
+  -- migration. The app-side precondition assumes the destination accepts
+  -- ${TREE_TAG_MAX_WIDTH}-char tags; if the real column is narrower, the Stage 6 Tree INSERT
+  -- would truncate (non-strict) or abort with a raw "Data too long" error.
+  -- Fail here so the mismatch surfaces during a dry run (Stage 0a always runs),
+  -- not at real-publish time. A missing column reads as width NULL -> fail-closed.
+  SELECT CHARACTER_MAXIMUM_LENGTH INTO _tag_col_width
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'Tree'
+      AND COLUMN_NAME = 'Tag';
+  IF COALESCE(_tag_col_width, 0) < ${TREE_TAG_MAX_WIDTH} THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Destination Tree.Tag is missing or narrower than ${TREE_TAG_MAX_WIDTH} chars. Apply the Tag widen migration to the destination, then retry.';
+  END IF;
 `;
 
   const viewFullTableProbe =
@@ -669,7 +692,7 @@ ${appendErr(
 ${appendErr(
   m,
   'String too long for CTFS',
-  `CHAR_LENGTH(Tag) > 20
+  `CHAR_LENGTH(Tag) > ${TREE_TAG_MAX_WIDTH}
      OR CHAR_LENGTH(StemTag) > 32
      OR CHAR_LENGTH(Mnemonic) > 10
      OR CHAR_LENGTH(QuadratName) > 8

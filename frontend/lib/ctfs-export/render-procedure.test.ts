@@ -181,6 +181,29 @@ describe('renderArtifact', () => {
     expect(sql).toMatch(/apply DBCHANGES2014f\.sql/);
   });
 
+  it('Stage 0 probes the destination Tree.Tag column width and SIGNALs when narrower than 20', () => {
+    const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
+    expect(sql).toMatch(/information_schema\.COLUMNS[\s\S]+TABLE_NAME = 'Tree'[\s\S]+COLUMN_NAME = 'Tag'/);
+    expect(sql).toMatch(/COALESCE\(_tag_col_width, 0\) < 20/);
+    expect(sql).toMatch(/Destination Tree\.Tag is missing or narrower than 20 chars/);
+  });
+
+  it('the Tree.Tag width probe runs in a reloadDryRun artifact (Stage 0a always emits)', () => {
+    // Regression guard: a dry run against an un-migrated char(10) destination
+    // must surface the width mismatch. Stages 1-10 (and the Stage 5 length
+    // check) are skipped in dry-run, so this Stage 0a probe is the ONLY place
+    // the destination width is verified during a dry run.
+    const { sql } = renderArtifact(baseInput({ reloadDryRun: true, measurementRows: [sampleMeasurement] }));
+    expect(sql).not.toMatch(/Stage 1:/);
+    expect(sql).toMatch(/COALESCE\(_tag_col_width, 0\) < 20/);
+    expect(sql).toMatch(/Destination Tree\.Tag is missing or narrower than 20 chars/);
+  });
+
+  it('declares the _tag_col_width scalar used by the Stage 0 width probe', () => {
+    const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
+    expect(sql).toMatch(/DECLARE _tag_col_width INT DEFAULT 0;/);
+  });
+
   it('allowReload=true (non-dry-run) emits Stage 0b but not SAVEPOINT', () => {
     const { sql } = renderArtifact(baseInput({ allowReload: true, reloadDryRun: false, measurementRows: [sampleMeasurement] }));
     expect(sql).toMatch(/Stage 0b: reload/);

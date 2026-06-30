@@ -536,7 +536,9 @@ CREATE TABLE IF NOT EXISTS `SubSpecies` (
 
 CREATE TABLE IF NOT EXISTS `Tree` (
   `TreeID` int(10) unsigned NOT NULL auto_increment,
-  `Tag` char(10) default NULL,
+  -- Widened from char(10) to match the migrated CTFS destination (Tag widen
+  -- migration). The Stage 0a probe rejects destinations still on char(10).
+  `Tag` varchar(20) default NULL,
   `SpeciesID` int(10) unsigned NOT NULL,
   `SubSpeciesID` int(10) unsigned default NULL,
   PRIMARY KEY  (`TreeID`),
