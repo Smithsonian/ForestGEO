@@ -30,7 +30,13 @@ const CSV_ALIASES: Record<string, string[]> = {
   hom: ['hom', 'height', 'heightofmeasurement'],
   date: ['date', 'measurementdate', 'dateof'],
   codes: ['codes', 'code', 'attributes', 'attributecodes'],
-  comments: ['comments', 'comment', 'description', 'notes']
+  comments: ['comments', 'comment', 'description', 'notes'],
+  // In MEASUREMENT uploads, a `StemID` header is the Smithsonian/SI-assigned stem identifier
+  // and maps to `publishedstemid`. This is deliberately scoped to the measurement flow: revision
+  // uploads have their own header normalizer (revisionfileparse.ts:normalizeRevisionHeader) where
+  // `StemID`/`StemGUID` mean the app's internal `StemGUID` — that path does not use these aliases,
+  // so the two meanings never collide. ArcGIS `GlobalID` is intentionally NOT mapped here.
+  publishedstemid: ['publishedstemid', 'stemid', 'si_stemid', 'ctfs_stemid']
 };
 
 const CODE_AGGREGATE_FIELD = `${CODE_COLUMN_PREFIX}*`;

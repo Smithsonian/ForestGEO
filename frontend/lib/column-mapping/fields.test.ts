@@ -13,9 +13,22 @@ describe('normalizeHeader', () => {
 describe('canonicalFieldsFor(csv)', () => {
   const fields = canonicalFieldsFor(SourceFormat.csv);
 
-  it('lists the 11 CSV import fields', () => {
+  it('lists the 12 CSV import fields', () => {
     // Order matches TableHeadersByFormType[measurements] (registry is source of truth; export-only fields excluded).
-    expect(fields.map(f => f.canonicalField)).toEqual(['tag', 'stemtag', 'spcode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes', 'comments']);
+    expect(fields.map(f => f.canonicalField)).toEqual([
+      'tag',
+      'stemtag',
+      'spcode',
+      'quadrat',
+      'lx',
+      'ly',
+      'dbh',
+      'hom',
+      'date',
+      'codes',
+      'comments',
+      'publishedstemid'
+    ]);
   });
 
   it('marks tag/spcode/quadrat/lx/ly/date required and the rest optional', () => {
