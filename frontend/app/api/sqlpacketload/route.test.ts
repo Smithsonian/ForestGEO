@@ -98,8 +98,8 @@ vi.mock('mysql2/promise', () => ({
   })
 }));
 
-/** Number of columns in the temporarymeasurements INSERT (FileID through Comments) */
-const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 17;
+/** Number of columns in the temporarymeasurements INSERT (FileID through PublishedStemID) */
+const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 18;
 
 const TEST_SESSION_ID = 'session-1';
 const TEST_PLOT_ID = 22;

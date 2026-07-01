@@ -87,6 +87,7 @@ function mockUnresolvedRows(count: number) {
     MeasuredHOM: 1.3,
     MeasurementDate: '2024-01-01',
     RawCodes: idx === 0 ? 'AL' : null,
+    RawPublishedStemID: idx === 0 ? 5001 : null,
     RawComments: null
   }));
 }
@@ -345,9 +346,11 @@ describe('reingest API routes', () => {
 
       expect(insertCall).toBeDefined();
       expect(insertCall[0]).toContain('Codes');
+      expect(insertCall[0]).toContain('PublishedStemID');
       const valuesParam = insertCall[1]?.[0];
       expect(Array.isArray(valuesParam)).toBe(true);
       expect(valuesParam[0][13]).toBe('AL'); // Codes value preserved in insert payload
+      expect(valuesParam[0][15]).toBe(5001); // RawPublishedStemID value preserved in insert payload
     });
   });
 });

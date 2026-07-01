@@ -51,7 +51,7 @@ export async function GET(
     shiftQuery = safeFormatQuery(
       schema,
       `INSERT INTO ??.temporarymeasurements
-        (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+        (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments, PublishedStemID)
        SELECT
          ? AS FileID,
          ? AS BatchID,
@@ -67,7 +67,8 @@ export async function GET(
          cm.MeasuredHOM,
          cm.MeasurementDate,
          cm.RawCodes,
-         cm.RawComments
+         cm.RawComments,
+         cm.RawPublishedStemID
        FROM ??.coremeasurements cm
        JOIN ??.census c ON c.CensusID = cm.CensusID
        WHERE cm.CoreMeasurementID = ?
@@ -121,6 +122,7 @@ export async function GET(
          RawX,
          RawY,
          RawCodes,
+         RawPublishedStemID,
          RawComments,
          IsActive
        FROM ??.coremeasurements
@@ -157,6 +159,7 @@ export async function GET(
            orig.RawX = ?,
            orig.RawY = ?,
            orig.RawCodes = ?,
+           orig.RawPublishedStemID = ?,
            orig.RawComments = ?,
            orig.IsActive = ?
        WHERE orig.CoreMeasurementID = ?`
@@ -237,6 +240,7 @@ export async function GET(
         snapshot.RawX,
         snapshot.RawY,
         snapshot.RawCodes,
+        snapshot.RawPublishedStemID,
         snapshot.RawComments,
         snapshot.IsActive,
         targetMeasurementID

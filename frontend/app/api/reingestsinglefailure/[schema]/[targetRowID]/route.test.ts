@@ -83,6 +83,7 @@ describe('reingestsinglefailure API route', () => {
           RawX: 1.23,
           RawY: 4.56,
           RawCodes: 'AL',
+          RawPublishedStemID: 5001,
           RawComments: null,
           IsActive: 1
         }
@@ -111,6 +112,8 @@ describe('reingestsinglefailure API route', () => {
 
     const syncCall = calls.find((call: any[]) => String(call[0]).includes('SET orig.CensusID'));
     expect(syncCall).toBeDefined();
+    expect(String(syncCall?.[0])).toContain('orig.RawPublishedStemID');
+    expect(syncCall?.[1]).toContain(5001);
     expect(String(syncCall?.[0])).not.toContain('orig.UploadFileID');
     expect(String(syncCall?.[0])).not.toContain('orig.UploadBatchID');
     expect(String(syncCall?.[0])).not.toContain('orig.SourceRowIndex');

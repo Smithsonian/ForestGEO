@@ -31,6 +31,7 @@ interface ReingestionSourceRow {
   MeasurementDate: string | null;
   RawCodes: string | null;
   RawComments: string | null;
+  RawPublishedStemID: number | null;
 }
 
 interface ReingestionRowMapping {
@@ -129,7 +130,8 @@ async function getFailedMeasurementRows(
        cm.MeasuredHOM,
        cm.MeasurementDate,
        cm.RawCodes,
-       cm.RawComments
+       cm.RawComments,
+       cm.RawPublishedStemID
      FROM ??.coremeasurements cm
      JOIN ??.census c ON c.CensusID = cm.CensusID
      WHERE c.PlotID = ?
@@ -188,13 +190,14 @@ async function moveFailedToTemporary(
     row.MeasuredHOM,
     row.MeasurementDate,
     row.RawCodes,
-    row.RawComments
+    row.RawComments,
+    row.RawPublishedStemID
   ]);
 
   const insertTempSQL = safeFormatQuery(
     schema,
     `INSERT INTO ??.temporarymeasurements
-      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments, PublishedStemID)
      VALUES ?`
   );
   const insertResult: any = await connectionManager.executeQuery(insertTempSQL, [values], transactionID);
@@ -275,6 +278,7 @@ async function createReingestionSnapshotTables(connectionManager: any, schema: s
       RawX DECIMAL(12, 6) NULL,
       RawY DECIMAL(12, 6) NULL,
       RawCodes VARCHAR(255) NULL,
+      RawPublishedStemID INT UNSIGNED NULL,
       RawComments VARCHAR(255) NULL,
       IsActive TINYINT(1) NOT NULL
     )`,
@@ -287,7 +291,7 @@ async function createReingestionSnapshotTables(connectionManager: any, schema: s
     `INSERT INTO reingestion_results
       (OriginalID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
        Description, UserDefinedFields, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
-       RawCodes, RawComments, IsActive)
+       RawCodes, RawPublishedStemID, RawComments, IsActive)
      SELECT
        rm.OriginalID,
        cm_new.CensusID,
@@ -305,6 +309,7 @@ async function createReingestionSnapshotTables(connectionManager: any, schema: s
        cm_new.RawX,
        cm_new.RawY,
        cm_new.RawCodes,
+       cm_new.RawPublishedStemID,
        cm_new.RawComments,
        cm_new.IsActive
      FROM ??.coremeasurements cm_new
@@ -411,6 +416,7 @@ async function reconcileReingestionRows(
            orig.RawX = rr.RawX,
            orig.RawY = rr.RawY,
            orig.RawCodes = rr.RawCodes,
+           orig.RawPublishedStemID = rr.RawPublishedStemID,
            orig.RawComments = rr.RawComments,
            orig.IsActive = rr.IsActive`
     );
