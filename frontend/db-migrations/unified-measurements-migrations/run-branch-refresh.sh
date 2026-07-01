@@ -75,6 +75,7 @@ POST_STORED_PROCEDURE_MIGRATIONS=(
     "56_relax_edit_operations_target_id.sql"
     "57_backfill_measurementssummary_stemguid.sql"
     "58_refresh_rawcodes_empty_token_handling.sql"
+    "60_add_published_stemid.sql"
 )
 
 REQUIRED_BASE_TABLES=(

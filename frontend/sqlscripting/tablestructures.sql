@@ -637,6 +637,7 @@ create table if not exists temporarymeasurements
     MeasurementDate date                                null,
     Codes           varchar(255)                        null,
     Comments        varchar(255)                        null,
+    PublishedStemID int unsigned                        null,
     UploadedAt      timestamp default CURRENT_TIMESTAMP null
 );
 
@@ -733,6 +734,7 @@ create table if not exists stems
     QuadratID       int                  null,
     CensusID        int                  null,
     StemCrossID     int                  null,
+    PublishedStemID int unsigned         null,
     StemTag         varchar(10)          default '' not null,
     LocalX          decimal(12, 6)       null,
     LocalY          decimal(12, 6)       null,
@@ -776,6 +778,7 @@ create table if not exists coremeasurements
     RawX              decimal(12, 6)          null,
     RawY              decimal(12, 6)          null,
     RawCodes          varchar(255)            null,
+    RawPublishedStemID int unsigned           null,
     RawComments       varchar(255)            null,
     SourceRowIndex    int                     null,
     IsActive          tinyint(1) default 1    not null,
@@ -898,6 +901,7 @@ values ('ingestion', 'MISSING_FIELD_TREETAG', 'Missing required field: TreeTag')
        ('ingestion', 'TREE_RESOLUTION_FAILED', 'Tree resolution failed after tree materialization'),
        ('ingestion', 'STEM_TREE_RESOLUTION_FAILED', 'Stem resolution failed because no active tree matched'),
        ('ingestion', 'STEM_RESOLUTION_FAILED', 'Stem resolution failed after stem materialization'),
+       ('ingestion', 'PUBLISHED_STEMID_CONFLICT', 'Uploaded PublishedStemID conflicts with an existing stem identity'),
        ('ingestion', 'MEASUREMENT_INSERT_SKIPPED', 'Measurement insert skipped during core materialization'),
        ('ingestion', 'DUPLICATE_TAG_CONFLICT', 'Conflicting duplicate TreeTag/StemTag rows detected in upload batch'),
        ('ingestion', 'DUPLICATE_TAG_CONFLICT_EXISTING', 'Conflicting TreeTag/StemTag matches existing census measurement'),
@@ -1001,6 +1005,9 @@ create index idx_stems_census_tree_tag_active
 
 create index ix_stems_treeid_stemtag_quadratid
     on stems (TreeID, StemTag, QuadratID);
+
+create index idx_stems_publishedstemid
+    on stems (PublishedStemID);
 
 create index idx_speciesid
     on trees (SpeciesID);
