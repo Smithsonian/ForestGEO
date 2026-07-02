@@ -935,8 +935,9 @@ export async function POST(request: NextRequest) {
               ],
               transactionID
             );
-          } catch (alertError: any) {
-            ailogger.error(`Failed to log INVALID_PUBLISHED_STEMID alert for ${fileName}-${batchID}: ${alertError.message}`);
+          } catch (alertError: unknown) {
+            const message = alertError instanceof Error ? alertError.message : String(alertError);
+            ailogger.error(`Failed to log INVALID_PUBLISHED_STEMID alert for ${fileName}-${batchID}: ${message}`);
           }
         }
 
