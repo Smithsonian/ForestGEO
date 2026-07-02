@@ -1215,4 +1215,54 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     );
     expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
   });
+
+  it('raises an INVALID_PUBLISHED_STEMID warning alert when a present PublishedStemID cannot be parsed (ingests NULL, not silent)', async () => {
+    // The row is otherwise valid, so it ingests; its StemID value "5,001" is unparseable and is coerced
+    // to NULL. The upload must record a visible warning rather than silently discarding the SI identifier.
+    const field = (canonicalField: string, sourceColumns: string[]): ColumnMapping['fields'][number] => ({ canonicalField, sourceColumns, scope: 'file' });
+    const headersWithStemId = [...RESOLUTION_CSV_HEADERS, 'StemID'];
+    const mappingWithPublishedStemId: ColumnMapping = {
+      version: 1,
+      format: SourceFormat.csv,
+      fields: [
+        field('tag', ['tag']),
+        field('spcode', ['spcode']),
+        field('quadrat', ['quadrat']),
+        field('lx', ['MyX']),
+        field('ly', ['ly']),
+        field('date', ['date']),
+        field('publishedstemid', ['StemID'])
+      ],
+      headerSignature: headerSignature(headersWithStemId)
+    };
+    const rawRow = { MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17', StemID: '5,001' };
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce(undefined) // INSERT IGNORE temporarymeasurements
+      .mockResolvedValueOnce(undefined) // INSERT uploadintegrityalerts (INVALID_PUBLISHED_STEMID)
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(undefined);
+
+    const res = (await POST(makeRawRowsRequest([rawRow], { csvHeaders: headersWithStemId, mapping: mappingWithPublishedStemId })))!;
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.insertedCount).toBe(1);
+
+    const alertCall = mockConnectionManager.executeQuery.mock.calls.find(
+      (call: any[]) => String(call[0]).includes('uploadintegrityalerts') && String(call[0]).includes('INVALID_PUBLISHED_STEMID')
+    );
+    expect(alertCall).toBeDefined();
+    // Severity is a warning (row still ingested) and the offending value is captured in the message.
+    expect(String(alertCall[0])).toContain("'warning'");
+    const alertMessage = String(alertCall[1].find((param: unknown) => typeof param === 'string' && param.includes('coercedToNullCount')));
+    expect(alertMessage).toContain('5,001');
+  });
 });

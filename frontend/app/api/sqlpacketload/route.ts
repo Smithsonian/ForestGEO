@@ -28,6 +28,7 @@ import {
   ensureTemporaryMeasurementsSourceFormatColumn,
   findDroppedMeasurementCandidates,
   insertTemporaryMeasurementsInBatches,
+  isUnsignedIntFieldInvalid,
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
 
@@ -889,6 +890,55 @@ export async function POST(request: NextRequest) {
           resolvedCensusID,
           transactionID
         );
+
+        // A present-but-unparseable PublishedStemID is coerced to NULL at staging so the row still
+        // ingests, but the SI-assigned identifier the upload carried is lost. Surface it as a
+        // visible warning alert rather than dropping it silently.
+        const invalidPublishedStemIdRows = chunkRows
+          .map((row, index) => ({ value: row.publishedstemid, sourceRowIndex: index + 1 }))
+          .filter(candidate => isUnsignedIntFieldInvalid(candidate.value));
+
+        if (invalidPublishedStemIdRows.length > 0) {
+          ailogger.warn(
+            `Coerced ${invalidPublishedStemIdRows.length} unparseable PublishedStemID value(s) to NULL for ${fileName}-${batchID}; ` +
+              `the SI-assigned identifier was not stored for those rows.`
+          );
+          try {
+            const publishedStemIdAlertSQL = format(
+              `INSERT INTO ??.uploadintegrityalerts
+               (uploadId, fileID, batchID, plotID, censusID, type, message, severity,
+                sourceRecords, processedRecords, failedRecords, missingRecords)
+               VALUES (?, ?, ?, ?, ?, 'INVALID_PUBLISHED_STEMID', ?, 'warning', ?, ?, ?, ?)`,
+              [schema]
+            );
+            const publishedStemIdAlertMessage = JSON.stringify({
+              coercedToNullCount: invalidPublishedStemIdRows.length,
+              sample: invalidPublishedStemIdRows.slice(0, 10).map(candidate => ({
+                sourceRowIndex: candidate.sourceRowIndex,
+                value: `${candidate.value}`
+              })),
+              note: 'PublishedStemID values that are present but not a positive integer were stored as NULL; the row was still ingested.'
+            });
+            await connectionManager.executeQuery(
+              publishedStemIdAlertSQL,
+              [
+                buildUploadId(schema, resolvedPlotID, resolvedCensusID, fileName, batchID, 'invalid-published-stemid'),
+                fileName,
+                batchID,
+                resolvedPlotID,
+                resolvedCensusID,
+                publishedStemIdAlertMessage,
+                expectedRowCount,
+                expectedRowCount,
+                0,
+                0
+              ],
+              transactionID
+            );
+          } catch (alertError: any) {
+            ailogger.error(`Failed to log INVALID_PUBLISHED_STEMID alert for ${fileName}-${batchID}: ${alertError.message}`);
+          }
+        }
 
         // CRITICAL FIX: Verify expected vs actual row count to detect silent data loss from INSERT IGNORE
         const postInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);

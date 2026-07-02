@@ -69,6 +69,16 @@ export function parseUnsignedIntField(value: unknown): number | null {
   return Number.isInteger(n) && n > 0 && n <= MYSQL_UNSIGNED_INT_MAX ? n : null;
 }
 
+/**
+ * True when a value is present and non-empty but does not parse to a valid unsigned int.
+ * Absent/blank values are legitimately optional and return false; only present-but-garbage
+ * values (e.g. "5,001", "STEM-5001") return true so callers can surface the coerced-to-NULL loss.
+ */
+export function isUnsignedIntFieldInvalid(value: unknown): boolean {
+  if (value === undefined || value === null || `${value}`.trim() === '') return false;
+  return parseUnsignedIntField(value) === null;
+}
+
 function collectMeasurementValidationIssues(row: FileRow): string[] {
   const issues: string[] = [];
   if (!row.tag || row.tag.trim() === '') issues.push('empty TreeTag');
