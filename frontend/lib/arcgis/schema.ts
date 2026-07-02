@@ -52,6 +52,17 @@ export const ARCGIS_SCHEMA: ArcgisFieldDef[] = [
     category: 'required'
   },
   { field: 'StemTag', aliases: ['StemTag'], scope: 'both', required: true, help: 'Stem tag for the row.', category: 'required' },
+  {
+    // SI-assigned published stem identifier carried in the ArcGIS forms. Distinct from the Esri
+    // `GlobalID` (which is ArcPro-generated and not census-stable, so never mapped to identity).
+    // Aliases are the source header(s) ArcPro exports; adjust once the exact form column is confirmed.
+    field: 'publishedstemid',
+    aliases: ['StemID', 'PublishedStemID', 'SI_StemID'],
+    scope: 'both',
+    required: false,
+    help: 'SI-assigned published stem identifier, when present. Optional; blank for sites that have not been issued one.',
+    category: 'optional'
+  },
   { field: 'spcode', aliases: ['spcode'], scope: 'both', required: true, help: 'Species code.', category: 'required' },
   {
     field: 'DBH_CURRENT',

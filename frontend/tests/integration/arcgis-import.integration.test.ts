@@ -446,6 +446,71 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     expect(await countStagedRows(seeded.fileName, batchID)).toBe(0);
   });
 
+  it('captures a StemID column from the ArcGIS workbook all the way to stems.PublishedStemID', async () => {
+    const schema = config.database;
+    const plotID = testData.plots[0].plotID;
+    const censusID = testData.census[0].censusID;
+    const speciesCode = testData.species[0].SpeciesCode;
+    const quadratName = testData.quadrats[0].QuadratName;
+    const dateSerial = 46036;
+    const treePublishedStemId = 7001;
+    const stemPublishedStemId = 7002;
+
+    // Both sheets carry a StemID column; the tree-sheet id belongs to the primary stem, the
+    // stem-sheet id to the additional stem.
+    const TREE_HEADER = ['GlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'DBH_CURRENT', 'HOM', 'notes', 'Date_measured', 'lx', 'ly', 'COD_M', 'StemID'];
+    const STEM_HEADER = [
+      'ParentGlobalID',
+      'GlobalID',
+      'quadrat',
+      'tag',
+      'StemTag',
+      'spcode',
+      'DBH_CURRENT',
+      'HOM',
+      'notes',
+      'Date_measured',
+      'COD_A',
+      'StemID'
+    ];
+    const buffer = await buildWorkbook({
+      trees: [
+        TREE_HEADER,
+        ['GP1', quadratName, 'PSID400', 'PSID400', speciesCode, 11.1, 1.3, 'primary', dateSerial, 1.111111, 2.222222, 'M', treePublishedStemId]
+      ],
+      stems: [STEM_HEADER, ['GP1', 'SP1', quadratName, 'PSID400', 'PSID400-2', speciesCode, 3.3, 1.3, '', dateSerial, 'A', stemPublishedStemId]]
+    });
+    const result = transformArcgisWorkbook(await readArcgisWorkbook(buffer));
+
+    // FileID is varchar(36); keep the generated name within that width.
+    const fileName = `arcgis-psid-${Date.now()}.xlsx`;
+    const importReference = await createArcgisImportSession({ schema, plotID, censusID, userId: AUTH_USER_EMAIL, fileName, result });
+    const batchID = `arcgis_psid_${Date.now()}`;
+
+    const response = await commitPOST(
+      buildCommitRequest(
+        { schema, plotID, censusID, importSessionId: importReference.importSessionId, fileName, batchID, uploadMode: UploadMode.REVISIONS },
+        'upload-session-arcgis-publishedstemid'
+      )
+    );
+    expect(response.status).toBe(HTTPResponses.OK);
+
+    const ingestion = await runBulkIngestion(connection, fileName, batchID);
+    expect(ingestion.batch_failed).toBe(false);
+
+    const [stemRows] = await connection.query<RowDataPacket[]>(
+      `SELECT s.StemTag, s.PublishedStemID
+         FROM stems s
+         INNER JOIN coremeasurements cm ON cm.StemGUID = s.StemGUID
+        WHERE cm.UploadFileID = ? AND cm.UploadBatchID = ?
+        ORDER BY s.StemTag`,
+      [fileName, batchID]
+    );
+    const byTag = Object.fromEntries(stemRows.map(r => [r.StemTag, r.PublishedStemID]));
+    expect(byTag['PSID400']).toBe(treePublishedStemId);
+    expect(byTag['PSID400-2']).toBe(stemPublishedStemId);
+  });
+
   it('treats an exact same-batch commit replay as idempotent and does not duplicate rows or changelog metadata', async () => {
     const seeded = await seedValidStagedSession({ fileName: `arcgis-idempotent-${Date.now()}.xlsx` });
     const batchID = `arcgis_idempotent_${Date.now()}`;
