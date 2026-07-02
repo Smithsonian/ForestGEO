@@ -2794,6 +2794,13 @@ BEGIN
         KEY idx_core_insert_failures_error (ErrorCode)
     );
 
+    -- PublishedStemID conflict detection runs four distinct checks, each flagging a different way an
+    -- uploaded id can be inconsistent. They share the INSERT-into-core_insert_failures boilerplate but
+    -- are deliberately separate because their joins and predicates differ:
+    --   1. Same uploaded id lands on more than one resolved StemCrossID in this batch.
+    --   2. One resolved StemCrossID receives more than one distinct uploaded id in this batch.
+    --   3. Resolved StemCrossID already has a different PublishedStemID from a prior census.
+    --   4. Uploaded id already belongs to a different StemCrossID elsewhere in the plot.
     CREATE TEMPORARY TABLE published_stemid_batch_id_conflicts AS
     SELECT rbr.PublishedStemID
     FROM resolved_batch_rows rbr
@@ -2877,6 +2884,12 @@ BEGIN
     WHERE rbr.PublishedStemID IS NOT NULL
       AND NOT (s_owner.StemCrossID <=> s_current.StemCrossID);
 
+    -- Final assignment: propagate the uploaded PublishedStemID across EVERY census row of the same
+    -- physical stem (matched by StemCrossID within this plot), not just the uploaded census. This is
+    -- intentional: PublishedStemID is cross-census stem-identity metadata, so once an upload supplies it
+    -- the whole StemCrossID history should carry it. `s_target.PublishedStemID IS NULL` makes this a
+    -- fill-only back-fill that never overwrites an existing value, and rows with a conflict failure
+    -- (present in core_insert_failures) are excluded so contested ids are never assigned.
     UPDATE stems s_target
     INNER JOIN census c_target
         ON c_target.CensusID = s_target.CensusID
