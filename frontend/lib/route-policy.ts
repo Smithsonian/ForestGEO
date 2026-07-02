@@ -23,7 +23,7 @@
 
 export type RoutePolicy = 'public' | 'authed' | 'site-scoped' | 'admin';
 
-export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
+export const ROUTE_POLICIES = {
   // ── Public routes (no auth required) ─────────────────────────────────────
   // Health probe – intentionally public for Azure App Service health checks
   health: 'public',
@@ -147,7 +147,11 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   'files/[operation]': 'site-scoped',
   // Census rollover (currently a no-op stub, but operates on site data)
   'rollover/[primaryKey]/[schema]/[plotIDParam]/[censusIDParam]/[newCensusIDParam]': 'site-scoped'
-};
+} satisfies Record<string, RoutePolicy>;
+
+/** Compile-time union of every declared route key. Adoption sites use this so a
+ * typo'd or stale routeKey is a build error, not a runtime authz downgrade. */
+export type RouteKey = keyof typeof ROUTE_POLICIES;
 
 /**
  * Site-scoped routes that do NOT yet reference a recognised authz signal in
