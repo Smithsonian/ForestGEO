@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import type { Connection } from 'mysql2/promise';
 import { setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 import { HTTPResponses } from '@/config/macros';
-import { INVALID_DATATYPE_CODE } from '@/app/api/fetchall/[[...slugs]]/route';
+import { INVALID_DATATYPE_CODE } from '@/app/api/fetchall/[[...slugs]]/constants';
 
 const AUTH_USER_EMAIL = 'integration-runner@forestgeo.test';
 

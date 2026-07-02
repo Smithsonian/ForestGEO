@@ -8,44 +8,11 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { getErrorMessage, getErrorCode, errorMessageContains, toError } from '@/lib/errorhelpers';
 import { safeEscapeId, safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { FETCHALL_ALLOWED_TABLES, INVALID_DATATYPE_CODE } from './constants';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
-
-// Error code returned when a requested dataType is not servable by this endpoint.
-export const INVALID_DATATYPE_CODE = 'INVALID_DATATYPE';
-
-// Per-site schema tables/views fetchall may serve via the generic branch. Derived
-// from the MapperFactory registry (config/datamapper.ts); excludes the cross-site
-// catalog tables (sites/users/usersiterelations) and the types already
-// special-cased in this handler (stems/trees/plots/personnel/census/species).
-// `roles` is a per-site table (FK'd by personnel) served here via the generic branch.
-const FETCHALL_ALLOWED_TABLES: ReadonlySet<string> = new Set([
-  'alltaxonomiesview',
-  'attributes',
-  'coremeasurements',
-  'coremeasurements_staging',
-  'cmattributes',
-  'failedmeasurements',
-  'measurementssummary',
-  'measurementssummaryview',
-  'postvalidationqueries',
-  'quadratpersonnel',
-  'quadrats',
-  'roles',
-  'family',
-  'genus',
-  'reference',
-  'speciesinventory',
-  'specieslimits',
-  'specimens',
-  'unifiedchangelog',
-  'validationchangelog',
-  'sitespecificvalidations',
-  'viewfulltable',
-  'viewfulltableview'
-]);
 
 function parsePositiveInt(value: string | undefined): number | undefined {
   if (!value || value === 'undefined') return undefined;

@@ -4,6 +4,7 @@ import MapperFactory from '@/config/datamapper';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
+import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -52,6 +53,15 @@ export async function GET(request: NextRequest, props: { params: Promise<{ chang
     plotID = values.plotID!;
     // For changelog, we might need to derive PCN from context
     pcn = parseInt(params.options[1]);
+  }
+
+  // SQL Injection Prevention: the fallback branch above assigns the raw query-param
+  // schema without re-validating, so gate it here before any interpolation below.
+  try {
+    validateSchemaOrThrow(schema);
+  } catch (error: any) {
+    ailogger.error(`[changelog API] Invalid schema provided: ${schema}`);
+    return NextResponse.json({ error: error.message }, { status: HTTPResponses.BAD_REQUEST });
   }
 
   const connectionManager = ConnectionManager.getInstance();

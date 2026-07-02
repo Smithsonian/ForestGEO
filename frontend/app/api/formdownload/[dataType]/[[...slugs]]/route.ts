@@ -7,6 +7,7 @@ import { buildFilterModelStub, buildSearchStub } from '@/components/processors/p
 import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
+import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -51,6 +52,15 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
   const [schema, plotIDParam, censusIDParam] = slugs;
   if (!schema) {
     return new NextResponse(JSON.stringify({ error: 'no schema provided' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
+  // SQL Injection Prevention: gate the raw ${schema} identifier interpolations below
+  try {
+    validateSchemaOrThrow(schema);
+  } catch (error: any) {
+    ailogger.error(`[formdownload API] Invalid schema provided: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: error.message }), {
       status: HTTPResponses.INVALID_REQUEST
     });
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -12,7 +13,9 @@ export async function GET(request: NextRequest) {
   if (!schema) throw new Error('no schema variable provided!');
   const connectionManager = ConnectionManager.getInstance();
   try {
-    const query = `
+    const query = safeFormatQuery(
+      schema,
+      `
         SELECT
             cm.CoreMeasurementID,
             p.PlotName,
@@ -22,21 +25,22 @@ export async function GET(request: NextRequest) {
             c.EndDate,
             s.SpeciesName
         FROM
-            ${schema}.coremeasurements cm
+            ??.coremeasurements cm
                 INNER JOIN
-            ${schema}.census c ON cm.CensusID = c.CensusID
+            ??.census c ON cm.CensusID = c.CensusID
                 INNER JOIN
-            ${schema}.stems st ON cm.StemGUID = st.StemGUID and st.CensusID = c.CensusID
+            ??.stems st ON cm.StemGUID = st.StemGUID and st.CensusID = c.CensusID
                 INNER JOIN
-            ${schema}.trees t ON st.TreeID = t.TreeID and t.CensusID = c.CensusID
+            ??.trees t ON st.TreeID = t.TreeID and t.CensusID = c.CensusID
                 INNER JOIN
-            ${schema}.species s ON t.SpeciesID = s.SpeciesID
+            ??.species s ON t.SpeciesID = s.SpeciesID
                 INNER JOIN
-            ${schema}.quadrats q ON st.QuadratID = q.QuadratID
+            ??.quadrats q ON st.QuadratID = q.QuadratID
                 INNER JOIN
-            ${schema}.plots p ON q.PlotID = p.PlotID 
+            ??.plots p ON q.PlotID = p.PlotID
         WHERE
-            cm.CoreMeasurementID = ?;`;
+            cm.CoreMeasurementID = ?;`
+    );
     const results = await connectionManager.executeQuery(query, [cmID]);
     return new NextResponse(
       JSON.stringify(
