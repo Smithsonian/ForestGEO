@@ -30,7 +30,14 @@ const CSV_ALIASES: Record<string, string[]> = {
   hom: ['hom', 'height', 'heightofmeasurement'],
   date: ['date', 'measurementdate', 'dateof'],
   codes: ['codes', 'code', 'attributes', 'attributecodes'],
-  comments: ['comments', 'comment', 'description', 'notes']
+  comments: ['comments', 'comment', 'description', 'notes'],
+  // `publishedstemid` is the Smithsonian/SI-assigned stem identifier. Only unambiguous headers are
+  // aliased. A bare `StemID`/`stemid` header is deliberately NOT aliased: ForestGEO labels its own
+  // internal `StemGUID` as `stemID` in the measurements grid and its CSV/form exports, so a re-uploaded
+  // app export would otherwise feed internal StemGUID values into PublishedStemID. A genuine SI file
+  // headed `StemID` can still be mapped by hand in the column-mapping UI. ArcGIS `GlobalID` is also
+  // intentionally NOT mapped here.
+  publishedstemid: ['publishedstemid', 'si_stemid', 'ctfs_stemid']
 };
 
 const CODE_AGGREGATE_FIELD = `${CODE_COLUMN_PREFIX}*`;

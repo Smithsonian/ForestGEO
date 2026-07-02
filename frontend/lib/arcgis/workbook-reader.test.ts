@@ -35,6 +35,22 @@ describe('readArcgisWorkbook', () => {
     expect(stems[0].ParentGlobalID).toBe('G1');
   });
 
+  it('canonicalizes a StemID header to the publishedstemid key on both sheets', async () => {
+    const treeHeader = [...TREE_HEADER, 'StemID'];
+    const stemHeader = [...STEM_HEADER, 'StemID'];
+    const buffer = await buildWorkbook({
+      trees: [treeHeader, ['G1', 'A25', '100', '100', 'QURU', '12.3', '1.3', 'ok', 46036, '5.1', '6.2', 'M', 'NA', '5001']],
+      stems: [stemHeader, ['G1', 'S1', 'A25', '100', '100-2', 'QURU', '4.4', '1.3', '', 46036, 'A', 'NA', '5002']]
+    });
+
+    const { trees, stems } = await readArcgisWorkbook(buffer);
+
+    // The raw 'StemID' header is exposed under the canonical FileRow key, never the raw string.
+    expect(trees[0].publishedstemid).toBe('5001');
+    expect(trees[0].StemID).toBeUndefined();
+    expect(stems[0].publishedstemid).toBe('5002');
+  });
+
   it('treats empty cells as null', async () => {
     const buffer = await buildWorkbook({
       trees: [TREE_HEADER, ['G1', '', '100', '100', 'QURU', '12.3', '1.3', '', 46036, '5.1', '6.2', '', '']],

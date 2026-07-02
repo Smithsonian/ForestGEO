@@ -241,4 +241,39 @@ describe('cellToString numeric formatting (via transformArcgisWorkbook)', () => 
     expect(rows[0].tag).toBe('1234567890123456');
     expect(rows[0].stemtag).toBe('9007199254740991');
   });
+
+  describe('PublishedStemID capture', () => {
+    it('captures a tree-sheet StemID onto the canonical row as publishedstemid', () => {
+      const { rows } = transformArcgisWorkbook({ trees: [tree({ publishedstemid: '5001' })], stems: [] });
+      expect(rows[0].publishedstemid).toBe('5001');
+    });
+
+    it('captures the stem-sheet StemID from the stem row, not the parent tree', () => {
+      // The joined stem inherits coordinates from the parent but its published id is its own.
+      const { rows } = transformArcgisWorkbook({
+        trees: [tree({ publishedstemid: '5001' })],
+        stems: [stem({ publishedstemid: '5002' })]
+      });
+      const joinedStem = rows.find(r => r.stemtag === '100-2');
+      expect(joinedStem?.publishedstemid).toBe('5002');
+    });
+
+    it("captures an orphan stem's StemID", () => {
+      const { rows } = transformArcgisWorkbook({ trees: [], stems: [stem({ ParentGlobalID: 'MISSING', publishedstemid: '5003' })] });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].publishedstemid).toBe('5003');
+    });
+
+    it('preserves an exact integer StemID without significant-digit rounding', () => {
+      const { rows } = transformArcgisWorkbook({ trees: [tree({ publishedstemid: 4294967295 as unknown as string })], stems: [] });
+      expect(rows[0].publishedstemid).toBe('4294967295');
+    });
+
+    it('emits null publishedstemid when the StemID column is absent or blank', () => {
+      const { rows } = transformArcgisWorkbook({ trees: [tree({ publishedstemid: '' })], stems: [] });
+      expect(rows[0].publishedstemid).toBeNull();
+      const { rows: rowsNoCol } = transformArcgisWorkbook({ trees: [tree()], stems: [] });
+      expect(rowsNoCol[0].publishedstemid).toBeNull();
+    });
+  });
 });

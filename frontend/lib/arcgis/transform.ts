@@ -84,6 +84,7 @@ interface CanonicalInput {
   date: string | null;
   codes: string;
   comments: string | null;
+  publishedstemid: string | null;
 }
 
 // Canonical fields the bulkingestionprocess stored procedure treats as required (recording a
@@ -105,7 +106,8 @@ function toFileRow(input: CanonicalInput): FileRow {
     hom: input.hom,
     date: input.date,
     codes: input.codes,
-    comments: input.comments
+    comments: input.comments,
+    publishedstemid: input.publishedstemid
   };
 }
 
@@ -209,7 +211,8 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       hom: decimalCellToString(field(tree, 'HOM')),
       date: dateToIso(field(tree, 'Date_measured')),
       codes: joinCodes(tree),
-      comments: cellToString(field(tree, 'notes'))
+      comments: cellToString(field(tree, 'notes')),
+      publishedstemid: cellToString(field(tree, 'publishedstemid'))
     });
     collectMissingRequired(row, 'trees', rowIndex, globalId);
     rows.push(row);
@@ -258,7 +261,8 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
         hom: decimalCellToString(field(stem, 'HOM')),
         date: dateToIso(field(stem, 'Date_measured')),
         codes: joinCodes(stem),
-        comments: cellToString(field(stem, 'notes'))
+        comments: cellToString(field(stem, 'notes')),
+        publishedstemid: cellToString(field(stem, 'publishedstemid'))
       });
       collectMissingRequired(orphanRow, 'stems', rowIndex, stemGlobalId);
       rows.push(orphanRow);
@@ -306,7 +310,8 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       hom: decimalCellToString(field(stem, 'HOM')),
       date: dateToIso(field(stem, 'Date_measured')),
       codes: joinCodes(stem),
-      comments: cellToString(field(stem, 'notes'))
+      comments: cellToString(field(stem, 'notes')),
+      publishedstemid: cellToString(field(stem, 'publishedstemid'))
     });
     collectMissingRequired(row, 'stems', rowIndex, stemGlobalId);
     rows.push(row);

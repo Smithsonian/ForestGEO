@@ -59,6 +59,26 @@ export function normalizeMeasurementDate(value: unknown): string | null {
   return value ? moment(value).format('YYYY-MM-DD') : null;
 }
 
+// Maximum value of a MySQL INT UNSIGNED column (2^32 - 1).
+export const MYSQL_UNSIGNED_INT_MAX = 4294967295;
+
+/** Parses a value into a positive MySQL-unsigned-int, or null if absent/invalid. */
+export function parseUnsignedIntField(value: unknown): number | null {
+  if (value === undefined || value === null || `${value}`.trim() === '') return null;
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 && n <= MYSQL_UNSIGNED_INT_MAX ? n : null;
+}
+
+/**
+ * True when a value is present and non-empty but does not parse to a valid unsigned int.
+ * Absent/blank values are legitimately optional and return false; only present-but-garbage
+ * values (e.g. "5,001", "STEM-5001") return true so callers can surface the coerced-to-NULL loss.
+ */
+export function isUnsignedIntFieldInvalid(value: unknown): boolean {
+  if (value === undefined || value === null || `${value}`.trim() === '') return false;
+  return parseUnsignedIntField(value) === null;
+}
+
 function collectMeasurementValidationIssues(row: FileRow): string[] {
   const issues: string[] = [];
   if (!row.tag || row.tag.trim() === '') issues.push('empty TreeTag');
@@ -93,10 +113,11 @@ export function buildTemporaryMeasurementInsertParams(
   plotID: number,
   censusID: number
 ): (string | number | null)[] {
-  const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments } = row;
+  const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments, publishedstemid } = row;
   const formattedDate = normalizeMeasurementDate(date);
   const parsedLx = lx !== undefined && lx !== null && lx !== '' && !isNaN(Number(lx)) ? Number(lx) : null;
   const parsedLy = ly !== undefined && ly !== null && ly !== '' && !isNaN(Number(ly)) ? Number(ly) : null;
+  const parsedPublishedStemID = parseUnsignedIntField(publishedstemid);
 
   return [
     fileName,
@@ -115,7 +136,8 @@ export function buildTemporaryMeasurementInsertParams(
     hom ?? null,
     formattedDate,
     codes ?? null,
-    comments ?? null
+    comments ?? null,
+    parsedPublishedStemID
   ];
 }
 
@@ -133,14 +155,14 @@ export async function insertTemporaryMeasurementsInBatches(
 ): Promise<void> {
   const insertSQLPrefix = format(
     `INSERT IGNORE INTO ??.temporarymeasurements
-      (FileID, BatchID, SessionID, SourceFormat, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+      (FileID, BatchID, SessionID, SourceFormat, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments, PublishedStemID)
       VALUES `,
     [schema]
   );
 
   for (let start = 0; start < rows.length; start += TEMP_MEASUREMENT_INSERT_BATCH_SIZE) {
     const slice = rows.slice(start, start + TEMP_MEASUREMENT_INSERT_BATCH_SIZE);
-    const placeholders = slice.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
+    const placeholders = slice.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
     const values = slice.flatMap(row => buildTemporaryMeasurementInsertParams(row, fileName, batchID, sessionId, sourceFormat, plotID, censusID));
     await connectionManager.executeQuery(`${insertSQLPrefix}${placeholders}`, values, transactionID);
   }

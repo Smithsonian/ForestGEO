@@ -110,6 +110,11 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     { label: 'date', explanation: 'The date of the measurement', category: 'required' },
     { label: 'codes', explanation: 'The attribute codes associated with the measurement and stem', category: 'optional' },
     { label: 'comments', explanation: 'Comments about the measurement', category: 'optional' }, // optional - users should be able to submit comments if needed
+    {
+      label: 'publishedstemid',
+      explanation: 'The Smithsonian/SI-assigned stem identifier (StemID). Present only for previously-published stems; leave blank for new stems.',
+      category: 'optional'
+    },
     { label: 'errors', explanation: 'Validation errors detected for this measurement', category: 'optional' }
   ]
 };

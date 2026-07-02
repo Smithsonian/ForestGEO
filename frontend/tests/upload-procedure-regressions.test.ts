@@ -50,10 +50,10 @@ describe('upload procedure regressions', () => {
     const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
 
     expect(canonicalSql).toContain(
-      'INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
+      'INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
     );
     expect(canonicalSql).not.toContain(
-      'INSERT INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
+      'INSERT INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
     );
   });
 
@@ -63,10 +63,21 @@ describe('upload procedure regressions', () => {
     expect(canonicalSql).toContain('CREATE TEMPORARY TABLE source_row_insert_conflicts AS');
     expect(canonicalSql).toContain("'Measurement insert skipped: source row resolved to multiple candidate measurements'");
     expect(canonicalSql).toContain(
-      'INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields, UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawCodes, RawComments, SourceRowIndex, IsActive)'
+      'INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields, UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)'
     );
     expect(canonicalSql).toContain('FROM core_insert_candidates cic ORDER BY cic.id;');
     expect(canonicalSql).toContain('core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements');
+  });
+
+  it('backfills uploaded PublishedStemID through stem resolution with conflict guards', () => {
+    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const tableStructuresSql = readSql('sqlscripting/tablestructures.sql');
+
+    expect(canonicalSql).toContain('srr.UploadedPublishedStemID AS PublishedStemID');
+    expect(canonicalSql).toContain("'PUBLISHED_STEMID_CONFLICT'");
+    expect(canonicalSql).toContain('SET s_target.PublishedStemID = rbr.PublishedStemID');
+    expect(canonicalSql).toContain('RawCodes, RawPublishedStemID, RawComments');
+    expect(tableStructuresSql).toContain("('ingestion', 'PUBLISHED_STEMID_CONFLICT'");
   });
 
   it('builds a deduped previous-census lookup before cross-census location validation aggregation', () => {

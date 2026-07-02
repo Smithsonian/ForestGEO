@@ -1605,7 +1605,7 @@ BEGIN
                 (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
                  Description, UploadFileID, UploadBatchID,
                  RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
-                 RawCodes, RawComments, SourceRowIndex, IsActive)
+                 RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)
             SELECT
                 (SELECT CensusID FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID LIMIT 1),
                 NULL, FALSE,
@@ -1613,11 +1613,14 @@ BEGIN
                 LEFT(CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150)), 255),
                 vFileID, vBatchID,
                 NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
-                LocalX, LocalY, NULLIF(Codes, ''), NULLIF(Comments, ''),
+                LocalX, LocalY, NULLIF(Codes, ''), PublishedStemID, NULLIF(Comments, ''),
                 id, 1
             FROM temporarymeasurements
             WHERE FileID = vFileID AND BatchID = vBatchID
-            ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
+            ON DUPLICATE KEY UPDATE
+                IsValidated = FALSE,
+                Description = VALUES(Description),
+                RawPublishedStemID = VALUES(RawPublishedStemID);
 
             -- Link to error log
             INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
@@ -1637,6 +1640,7 @@ BEGIN
                 prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
                 current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
                 unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
+                published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
                 core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
                 orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
                 species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
@@ -1864,6 +1868,7 @@ BEGIN
         prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
         current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
         unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
+        published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
         core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
         orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
         species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
@@ -1970,6 +1975,12 @@ BEGIN
            COUNT(*) AS duplicate_count,
            FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode,
            QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate,
+           -- PublishedStemID is intentionally NOT part of the dedup key: two otherwise-identical
+           -- rows (one carrying the SI-assigned id, its duplicate blank) must still collapse into a
+           -- single measurement. MAX() ignores NULLs, so the surviving row keeps a non-null id when
+           -- any duplicate supplied one. A genuine cross-stem conflict is caught later by the
+           -- PUBLISHED_STEMID_CONFLICT stage against resolved_batch_rows.
+           MAX(PublishedStemID) AS PublishedStemID,
            NULLIF(GROUP_CONCAT(DISTINCT CASE WHEN Codes IS NOT NULL AND TRIM(Codes) != '' THEN TRIM(Codes) END
                    ORDER BY Codes SEPARATOR ';'), '') AS Codes,
            NULLIF(GROUP_CONCAT(DISTINCT CASE WHEN Comments IS NOT NULL AND TRIM(Comments) != '' THEN TRIM(Comments) END
@@ -1999,6 +2010,8 @@ BEGIN
         AND COALESCE(tm.DBH, 0) = COALESCE(idf.DBH, 0)
         AND COALESCE(tm.HOM, 0) = COALESCE(idf.HOM, 0)
         AND COALESCE(tm.MeasurementDate, '1900-01-01') = COALESCE(idf.MeasurementDate, '1900-01-01')
+        -- PublishedStemID deliberately omitted here to match the dedup key above; including it would
+        -- leave the non-surviving row unmatched and let it slip through as a spurious MEASUREMENT_INSERT_SKIPPED.
     WHERE tm.id != idf.id AND idf.duplicate_count > 1;
 
     CREATE INDEX idx_duplicate_failures_id ON duplicate_failures (id);
@@ -2150,7 +2163,7 @@ BEGIN
            IFNULL(i.StemTag, '') AS StemTag, i.SpeciesCode, i.QuadratName,
            i.LocalX, i.LocalY,
            IFNULL(i.DBH, 0) AS DBH, IFNULL(i.HOM, 0) AS HOM,
-           i.MeasurementDate, i.Codes, i.Comments,
+           i.MeasurementDate, i.Codes, i.Comments, i.PublishedStemID,
            CASE
                WHEN tq.PlotID IS NULL
                    THEN CONCAT('Invalid quadrat name: "', i.QuadratName, '" not found in database')
@@ -2273,7 +2286,8 @@ BEGIN
                MIN(s.LocalX) AS PrevX,
                MIN(s.LocalY) AS PrevY,
                MIN(q.QuadratName) AS PrevQuadratName,
-               MIN(s.StemCrossID) AS PrevStemCrossID
+               MIN(s.StemCrossID) AS PrevStemCrossID,
+               MIN(s.PublishedStemID) AS PrevPublishedStemID
         FROM requested_prev_stems rps
         INNER JOIN trees t
             ON t.TreeTag = rps.TreeTag
@@ -2330,6 +2344,7 @@ BEGIN
             PrevY           DECIMAL(12,6) NULL,
             PrevQuadratName VARCHAR(255)  NULL,
             PrevStemCrossID INT           NULL,
+            PrevPublishedStemID INT UNSIGNED NULL,
             PRIMARY KEY (TreeTag, StemTag)
         );
 
@@ -2583,6 +2598,7 @@ BEGIN
            cf.MeasurementDate,
            cf.Codes,
            cf.Comments,
+           cf.PublishedStemID AS UploadedPublishedStemID,
            cf.QuadratID,
            cf.SpeciesID,
            cf.tree_state,
@@ -2590,7 +2606,11 @@ BEGIN
            CASE
                WHEN psl.MatchCount = 1 AND psl.PrevStemCrossID IS NOT NULL THEN psl.PrevStemCrossID
                ELSE NULL
-           END AS PrevStemCrossID
+           END AS PrevStemCrossID,
+           CASE
+               WHEN psl.MatchCount = 1 AND psl.PrevPublishedStemID IS NOT NULL THEN psl.PrevPublishedStemID
+               ELSE NULL
+           END AS PrevPublishedStemID
     FROM classified_filtered cf
     INNER JOIN current_tree_lookup ctl
         ON ctl.TreeTag = cf.TreeTag
@@ -2634,6 +2654,7 @@ BEGIN
            srr.QuadratID,
            srr.CensusID,
            srr.PrevStemCrossID AS StemCrossID,
+           srr.PrevPublishedStemID AS PublishedStemID,
            CASE
                WHEN TRIM(COALESCE(srr.StemTag, '')) = '' THEN NULL
                ELSE TRIM(srr.StemTag)
@@ -2645,11 +2666,9 @@ BEGIN
     CREATE INDEX idx_stem_insert_candidates_key
         ON stem_insert_candidates (TreeID, CensusID, StemTag);
 
-    -- Inline StemCrossID inheritance: set PrevStemCrossID at INSERT time for
-    -- stems that have an unambiguous match in the previous census. Existing
-    -- same-tree/same-stem rows are skipped explicitly and resolved below.
-    INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)
-    SELECT sic.TreeID, sic.QuadratID, sic.CensusID, sic.StemCrossID,
+    -- Inline StemCrossID/PublishedStemID inheritance: set the previous census's values at INSERT time for stems with an unambiguous previous-census match.
+    INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)
+    SELECT sic.TreeID, sic.QuadratID, sic.CensusID, sic.StemCrossID, sic.PublishedStemID,
            sic.StemTag, sic.LocalX, sic.LocalY, 0, NULL, 1
     FROM stem_insert_candidates sic
     LEFT JOIN stems s_existing
@@ -2657,6 +2676,17 @@ BEGIN
         AND s_existing.CensusID = sic.CensusID
         AND s_existing.StemTag <=> sic.StemTag
     WHERE s_existing.StemGUID IS NULL;
+
+    -- Catch-up fill for stems that already existed in the current census (skipped by INSERT IGNORE above).
+    -- Intentionally NOT batch-scoped: fills any current-census stem with an unambiguous previous-census value.
+    UPDATE stems s
+    INNER JOIN stem_insert_candidates sic
+        ON sic.TreeID = s.TreeID
+        AND sic.CensusID = s.CensusID
+        AND sic.StemTag <=> s.StemTag
+    SET s.PublishedStemID = sic.PublishedStemID
+    WHERE s.PublishedStemID IS NULL
+      AND sic.PublishedStemID IS NOT NULL;
 
     CREATE TEMPORARY TABLE current_stem_lookup AS
     SELECT DISTINCT srr.id,
@@ -2718,6 +2748,7 @@ BEGIN
            srr.MeasurementDate,
            srr.Codes,
            srr.Comments,
+           srr.UploadedPublishedStemID AS PublishedStemID,
            srr.QuadratID,
            srr.SpeciesID,
            srr.tree_state,
@@ -2728,6 +2759,7 @@ BEGIN
 
     CREATE INDEX idx_resolved_batch_rows_id ON resolved_batch_rows (id);
     CREATE INDEX idx_resolved_batch_rows_stem ON resolved_batch_rows (StemGUID);
+    CREATE INDEX idx_resolved_batch_rows_publishedstemid ON resolved_batch_rows (PublishedStemID);
 
     SET vTreeStemInsertMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
 
@@ -2761,6 +2793,118 @@ BEGIN
         PRIMARY KEY (SourceRowIndex, ErrorCode),
         KEY idx_core_insert_failures_error (ErrorCode)
     );
+
+    -- PublishedStemID conflict detection runs four distinct checks, each flagging a different way an
+    -- uploaded id can be inconsistent. They share the INSERT-into-core_insert_failures boilerplate but
+    -- are deliberately separate because their joins and predicates differ:
+    --   1. Same uploaded id lands on more than one resolved StemCrossID in this batch.
+    --   2. One resolved StemCrossID receives more than one distinct uploaded id in this batch.
+    --   3. Resolved StemCrossID already has a different PublishedStemID from a prior census.
+    --   4. Uploaded id already belongs to a different StemCrossID elsewhere in the plot.
+    CREATE TEMPORARY TABLE published_stemid_batch_id_conflicts AS
+    SELECT rbr.PublishedStemID
+    FROM resolved_batch_rows rbr
+    INNER JOIN stems s_current
+        ON s_current.StemGUID = rbr.StemGUID
+    WHERE rbr.PublishedStemID IS NOT NULL
+      AND s_current.StemCrossID IS NOT NULL
+    GROUP BY rbr.PublishedStemID
+    HAVING COUNT(DISTINCT s_current.StemCrossID) > 1;
+
+    CREATE INDEX idx_published_stemid_batch_id_conflicts
+        ON published_stemid_batch_id_conflicts (PublishedStemID);
+
+    INSERT IGNORE INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT rbr.id,
+           'PUBLISHED_STEMID_CONFLICT',
+           LEFT(CONCAT('PublishedStemID conflict: uploaded ID ', rbr.PublishedStemID,
+                       ' appears on multiple resolved stem identities in this batch'), 255)
+    FROM resolved_batch_rows rbr
+    INNER JOIN published_stemid_batch_id_conflicts conflicted_ids
+        ON conflicted_ids.PublishedStemID = rbr.PublishedStemID
+    WHERE rbr.PublishedStemID IS NOT NULL;
+
+    CREATE TEMPORARY TABLE published_stemid_batch_group_conflicts AS
+    SELECT s_current.StemCrossID
+    FROM resolved_batch_rows rbr
+    INNER JOIN stems s_current
+        ON s_current.StemGUID = rbr.StemGUID
+    WHERE rbr.PublishedStemID IS NOT NULL
+      AND s_current.StemCrossID IS NOT NULL
+    GROUP BY s_current.StemCrossID
+    HAVING COUNT(DISTINCT rbr.PublishedStemID) > 1;
+
+    CREATE INDEX idx_published_stemid_batch_group_conflicts
+        ON published_stemid_batch_group_conflicts (StemCrossID);
+
+    INSERT IGNORE INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT rbr.id,
+           'PUBLISHED_STEMID_CONFLICT',
+           LEFT(CONCAT('PublishedStemID conflict: resolved StemCrossID ', s_current.StemCrossID,
+                       ' received multiple uploaded IDs in this batch'), 255)
+    FROM resolved_batch_rows rbr
+    INNER JOIN stems s_current
+        ON s_current.StemGUID = rbr.StemGUID
+    INNER JOIN published_stemid_batch_group_conflicts conflicted_groups
+        ON conflicted_groups.StemCrossID = s_current.StemCrossID
+    WHERE rbr.PublishedStemID IS NOT NULL;
+
+    INSERT IGNORE INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT DISTINCT rbr.id,
+           'PUBLISHED_STEMID_CONFLICT',
+           LEFT(CONCAT('PublishedStemID conflict: resolved StemCrossID ', s_current.StemCrossID,
+                       ' already has PublishedStemID ', s_existing.PublishedStemID,
+                       ', uploaded ', rbr.PublishedStemID), 255)
+    FROM resolved_batch_rows rbr
+    INNER JOIN stems s_current
+        ON s_current.StemGUID = rbr.StemGUID
+    INNER JOIN stems s_existing
+        ON s_existing.StemCrossID = s_current.StemCrossID
+    INNER JOIN census c_existing
+        ON c_existing.CensusID = s_existing.CensusID
+        AND c_existing.PlotID = vCurrentPlotID
+    WHERE rbr.PublishedStemID IS NOT NULL
+      AND s_current.StemCrossID IS NOT NULL
+      AND s_existing.PublishedStemID IS NOT NULL
+      AND s_existing.PublishedStemID <> rbr.PublishedStemID;
+
+    INSERT IGNORE INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT DISTINCT rbr.id,
+           'PUBLISHED_STEMID_CONFLICT',
+           LEFT(CONCAT('PublishedStemID conflict: uploaded ID ', rbr.PublishedStemID,
+                       ' is already assigned to another stem identity in this plot'), 255)
+    FROM resolved_batch_rows rbr
+    INNER JOIN stems s_current
+        ON s_current.StemGUID = rbr.StemGUID
+    INNER JOIN stems s_owner
+        ON s_owner.PublishedStemID = rbr.PublishedStemID
+    INNER JOIN census c_owner
+        ON c_owner.CensusID = s_owner.CensusID
+        AND c_owner.PlotID = vCurrentPlotID
+    WHERE rbr.PublishedStemID IS NOT NULL
+      AND NOT (s_owner.StemCrossID <=> s_current.StemCrossID);
+
+    -- Final assignment: propagate the uploaded PublishedStemID across EVERY census row of the same
+    -- physical stem (matched by StemCrossID within this plot), not just the uploaded census. This is
+    -- intentional: PublishedStemID is cross-census stem-identity metadata, so once an upload supplies it
+    -- the whole StemCrossID history should carry it. `s_target.PublishedStemID IS NULL` makes this a
+    -- fill-only back-fill that never overwrites an existing value, and rows with a conflict failure
+    -- (present in core_insert_failures) are excluded so contested ids are never assigned.
+    UPDATE stems s_target
+    INNER JOIN census c_target
+        ON c_target.CensusID = s_target.CensusID
+        AND c_target.PlotID = vCurrentPlotID
+    INNER JOIN stems s_source
+        ON s_source.StemCrossID = s_target.StemCrossID
+    INNER JOIN resolved_batch_rows rbr
+        ON rbr.StemGUID = s_source.StemGUID
+    LEFT JOIN core_insert_failures cif
+        ON cif.SourceRowIndex = rbr.id
+    SET s_target.PublishedStemID = rbr.PublishedStemID
+    WHERE s_target.PublishedStemID IS NULL
+      AND rbr.PublishedStemID IS NOT NULL
+      AND s_source.StemCrossID IS NOT NULL
+      AND cif.SourceRowIndex IS NULL;
 
     INSERT IGNORE INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
     SELECT rbr.id,
@@ -2834,7 +2978,7 @@ BEGIN
     INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
                                   Description, UserDefinedFields, UploadFileID, UploadBatchID,
                                   RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
-                                  RawCodes, RawComments, SourceRowIndex, IsActive)
+                                  RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)
     SELECT cic.CensusID, cic.StemGUID, NULL,
            cic.MeasurementDate,
            NULLIF(cic.DBH, 0),
@@ -2851,7 +2995,7 @@ BEGIN
            vFileID,
            vBatchID,
            cic.TreeTag, cic.StemTag, cic.SpeciesCode, cic.QuadratName,
-           cic.LocalX, cic.LocalY, cic.Codes, cic.Comments,
+           cic.LocalX, cic.LocalY, cic.Codes, cic.PublishedStemID, cic.Comments,
            cic.id,
            1
     FROM core_insert_candidates cic
@@ -2923,13 +3067,13 @@ BEGIN
         (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
          Description, UploadFileID, UploadBatchID,
          RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
-         RawCodes, RawComments, SourceRowIndex, IsActive)
+         RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)
     SELECT vCurrentCensusID, NULL, FALSE,
            NULLIF(tm.MeasurementDate, '1900-01-01'), NULLIF(tm.DBH, 0), NULLIF(tm.HOM, 0),
            grouped_failures.FailureReason,
            vFileID, vBatchID,
            NULLIF(tm.TreeTag, ''), NULLIF(tm.StemTag, ''), NULLIF(tm.SpeciesCode, ''), NULLIF(tm.QuadratName, ''),
-           tm.LocalX, tm.LocalY, NULLIF(tm.Codes, ''), NULLIF(tm.Comments, ''),
+           tm.LocalX, tm.LocalY, NULLIF(tm.Codes, ''), tm.PublishedStemID, NULLIF(tm.Comments, ''),
            tm.id, 1
     FROM (
         SELECT SourceRowIndex,
@@ -2945,7 +3089,10 @@ BEGIN
     WHERE tm.FileID = vFileID
       AND tm.BatchID = vBatchID
       AND (cm_existing.CoreMeasurementID IS NULL OR cm_existing.StemGUID IS NULL)
-    ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
+    ON DUPLICATE KEY UPDATE
+        IsValidated = FALSE,
+        Description = VALUES(Description),
+        RawPublishedStemID = VALUES(RawPublishedStemID);
 
     INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
     SELECT DISTINCT cm.CoreMeasurementID, me.ErrorID, FALSE
@@ -3079,7 +3226,8 @@ BEGIN
         prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
         current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
         unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
-        core_insert_candidates, core_insert_failures, resolved_coremeasurements,
+        published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
+        core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
         orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
         species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 
@@ -3138,6 +3286,7 @@ BEGIN
             prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
             current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
             unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
+            published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
             core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
             orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
             species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;

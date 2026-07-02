@@ -888,6 +888,7 @@ export async function insertTestMeasurements(
     date: string;
     codes?: string;
     comments?: string;
+    publishedStemID?: number | null;
   }>,
   options: {
     censusID?: number;
@@ -905,8 +906,8 @@ export async function insertTestMeasurements(
     await connection.query(
       `INSERT INTO temporarymeasurements
        (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName,
-        LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments, PublishedStemID)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         fileID,
         batchID,
@@ -922,7 +923,8 @@ export async function insertTestMeasurements(
         meas.hom,
         meas.date,
         meas.codes || null,
-        meas.comments || null
+        meas.comments || null,
+        meas.publishedStemID ?? null
       ]
     );
   }

@@ -4,6 +4,20 @@ import { NextResponse } from 'next/server';
 import { GET, POST } from './route';
 import ConnectionManager from '@/config/connectionmanager';
 
+// Sentinel values placed only on the first mock row so we can assert they survive the staging INSERT.
+const FIRST_ROW_RAW_CODES = 'AL';
+const FIRST_ROW_RAW_PUBLISHED_STEM_ID = 5001;
+
+// Reads the column position out of the staging INSERT's own column list, so payload assertions
+// track the real layout instead of hard-coded offsets that break silently on column reordering.
+function stagingInsertColumnIndex(insertSQL: string, columnName: string): number {
+  const columnList = insertSQL.match(/temporarymeasurements\s*\(([^)]+)\)/i)?.[1] ?? '';
+  return columnList
+    .split(',')
+    .map(column => column.trim())
+    .indexOf(columnName);
+}
+
 const { authMock, assertSchemaAccessMock } = vi.hoisted(() => ({
   authMock: vi.fn(),
   assertSchemaAccessMock: vi.fn()
@@ -86,7 +100,8 @@ function mockUnresolvedRows(count: number) {
     MeasuredDBH: 12.3,
     MeasuredHOM: 1.3,
     MeasurementDate: '2024-01-01',
-    RawCodes: idx === 0 ? 'AL' : null,
+    RawCodes: idx === 0 ? FIRST_ROW_RAW_CODES : null,
+    RawPublishedStemID: idx === 0 ? FIRST_ROW_RAW_PUBLISHED_STEM_ID : null,
     RawComments: null
   }));
 }
@@ -345,9 +360,17 @@ describe('reingest API routes', () => {
 
       expect(insertCall).toBeDefined();
       expect(insertCall[0]).toContain('Codes');
+      expect(insertCall[0]).toContain('PublishedStemID');
       const valuesParam = insertCall[1]?.[0];
       expect(Array.isArray(valuesParam)).toBe(true);
-      expect(valuesParam[0][13]).toBe('AL'); // Codes value preserved in insert payload
+
+      const codesIndex = stagingInsertColumnIndex(String(insertCall[0]), 'Codes');
+      const publishedStemIdIndex = stagingInsertColumnIndex(String(insertCall[0]), 'PublishedStemID');
+      expect(codesIndex).toBeGreaterThanOrEqual(0);
+      expect(publishedStemIdIndex).toBeGreaterThanOrEqual(0);
+
+      expect(valuesParam[0][codesIndex]).toBe(FIRST_ROW_RAW_CODES); // Codes value preserved in insert payload
+      expect(valuesParam[0][publishedStemIdIndex]).toBe(FIRST_ROW_RAW_PUBLISHED_STEM_ID); // RawPublishedStemID preserved
     });
   });
 });
