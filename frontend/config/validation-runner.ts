@@ -122,7 +122,7 @@ function buildValidationTasks(validationMessages: ValidationMessages, schema: st
   for (const procedureName of allNames) {
     if (combinedNames.has(procedureName)) continue;
 
-    const { id: validationProcedureID, definition: cursorQuery } = validationMessages[procedureName];
+    const { id: validationProcedureID } = validationMessages[procedureName];
     tasks.push({
       name: procedureName,
       run: async (signal: AbortSignal) => {
@@ -130,7 +130,7 @@ function buildValidationTasks(validationMessages: ValidationMessages, schema: st
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal,
-          body: JSON.stringify({ schema, validationProcedureID, cursorQuery, p_CensusID: censusID, p_PlotID: plotID })
+          body: JSON.stringify({ schema, validationProcedureID, p_CensusID: censusID, p_PlotID: plotID })
         });
         if (!response.ok) {
           const body = await response.json().catch(() => null);

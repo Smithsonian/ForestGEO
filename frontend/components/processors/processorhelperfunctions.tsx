@@ -2,6 +2,7 @@ import MapperFactory from '@/config/datamapper';
 import { handleUpsert } from '@/config/utils';
 import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/lib/db/definitions/views';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
@@ -393,12 +394,24 @@ function formatValidationQuery(schema: string, cursorQuery: string, validationPr
     .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
 }
 
+/**
+ * Loads the server-owned validation SQL (the Definition column) for a validation
+ * by its ValidationID. Replaces trusting a client-supplied cursorQuery.
+ * Returns null when no enabled validation matches.
+ */
+export async function loadValidationDefinition(schema: string, validationProcedureID: number): Promise<string | null> {
+  const connectionManager = ConnectionManager.getInstance();
+  const sql = safeFormatQuery(schema, 'SELECT Definition FROM ??.sitespecificvalidations WHERE ValidationID = ? AND IsEnabled = 1 LIMIT 1;');
+  const rows: Array<{ Definition: string }> = await connectionManager.executeQuery(sql, [validationProcedureID]);
+  return rows.length > 0 ? rows[0].Definition : null;
+}
+
 // Generalized runValidation function
 export async function runValidation(
   validationProcedureID: number,
   validationProcedureName: string,
   schema: string,
-  cursorQuery: string,
+  definition: string,
   params: ValidationExecutionParams = {}
 ): Promise<boolean> {
   const connectionManager = ConnectionManager.getInstance();
@@ -416,7 +429,7 @@ export async function runValidation(
       await prepareValidationRun(connectionManager, schema, validationProcedureID, validationProcedureName, transactionID, params);
 
       // STEP 2: Dynamically replace SQL variables with actual TypeScript input values
-      const formattedCursorQuery = formatValidationQuery(schema, cursorQuery, validationProcedureID, params);
+      const formattedCursorQuery = formatValidationQuery(schema, definition, validationProcedureID, params);
 
       // STEP 3: Execute the validation query to insert new errors
       const finalCursorQuery =
