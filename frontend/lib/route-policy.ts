@@ -205,10 +205,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'specieslimits/[plotID]/[plotCensusNumber]',
   // validatefailed: validateSchemaOrThrow (SQL safety only), no user auth
   'validatefailed/[schema]/[plotID]/[censusID]',
-  // validations/procedures/*: accept schema from POST body, no auth check
-  'validations/procedures/[validationType]',
-  'validations/procedures/shared-cross-census-location',
-  'validations/procedures/shared-dbh',
   // validations/run: uses safeFormatQuery, no auth
   'validations/run',
   // validations/updatepassedvalidations: raw schema from body/query, no auth
