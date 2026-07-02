@@ -7,10 +7,45 @@ import { validateContextualValues } from '@/lib/contextvalidation';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { getErrorMessage, getErrorCode, errorMessageContains, toError } from '@/lib/errorhelpers';
+import { safeEscapeId, safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
+
+// Error code returned when a requested dataType is not servable by this endpoint.
+export const INVALID_DATATYPE_CODE = 'INVALID_DATATYPE';
+
+// Per-site schema tables/views fetchall may serve via the generic branch. Derived
+// from the MapperFactory registry (config/datamapper.ts); excludes the cross-site
+// catalog tables (sites/users/usersiterelations) and the types already
+// special-cased in this handler (stems/trees/plots/personnel/census/species).
+// `roles` is a per-site table (FK'd by personnel) served here via the generic branch.
+const FETCHALL_ALLOWED_TABLES: ReadonlySet<string> = new Set([
+  'alltaxonomiesview',
+  'attributes',
+  'coremeasurements',
+  'coremeasurements_staging',
+  'cmattributes',
+  'failedmeasurements',
+  'measurementssummary',
+  'measurementssummaryview',
+  'postvalidationqueries',
+  'quadratpersonnel',
+  'quadrats',
+  'roles',
+  'family',
+  'genus',
+  'reference',
+  'speciesinventory',
+  'specieslimits',
+  'specimens',
+  'unifiedchangelog',
+  'validationchangelog',
+  'sitespecificvalidations',
+  'viewfulltable',
+  'viewfulltableview'
+]);
 
 function parsePositiveInt(value: string | undefined): number | undefined {
   if (!value || value === 'undefined') return undefined;
@@ -153,7 +188,13 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
         ORDER BY SpeciesCode`;
       results = await connectionManager.executeQuery(query);
     } else {
-      const query = `SELECT * FROM ${schema}.${dataType}`;
+      if (!FETCHALL_ALLOWED_TABLES.has(dataType)) {
+        return NextResponse.json(
+          { error: `Data type '${dataType}' is not available for this endpoint.`, code: INVALID_DATATYPE_CODE },
+          { status: HTTPResponses.BAD_REQUEST }
+        );
+      }
+      const query = safeFormatQuery(schema, `SELECT * FROM ??.${safeEscapeId(dataType)}`);
       results = await connectionManager.executeQuery(query);
     }
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });
