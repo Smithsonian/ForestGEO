@@ -81,6 +81,21 @@ describe('aliasesFor(csv)', () => {
     expect(csv['hom']).toEqual(expect.arrayContaining(['hom', 'height', 'heightofmeasurement']));
     expect(csv['stemtag']).toEqual(expect.arrayContaining(['stemtag', 'stem']));
   });
+
+  it('aliases only unambiguous SI headers to publishedstemid', () => {
+    const csv = aliasesFor(SourceFormat.csv);
+    expect(csv['publishedstemid']).toEqual(expect.arrayContaining(['publishedstemid', 'si_stemid', 'ctfs_stemid']));
+  });
+
+  it("does NOT alias a bare stemid/StemID header to publishedstemid (collides with the app's own StemGUID export label)", () => {
+    // The measurements grid and CSV/form exports label internal StemGUID as "stemID"; auto-mapping that
+    // header to publishedstemid on re-upload would feed StemGUID into the SI identifier. See fields.ts.
+    const csv = aliasesFor(SourceFormat.csv);
+    for (const aliases of Object.values(csv)) {
+      expect(aliases).not.toContain(normalizeHeader('StemID'));
+      expect(aliases).not.toContain('stemid');
+    }
+  });
 });
 
 describe('legacyCsvHeaderKey', () => {
