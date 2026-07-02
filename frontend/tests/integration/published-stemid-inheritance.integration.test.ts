@@ -347,4 +347,62 @@ describe('PublishedStemID cross-census inheritance', () => {
     );
     expect(finalRows[0].PublishedStemID).toBe(8001);
   });
+
+  it('collapses two within-batch rows that differ only in PublishedStemID: one ingests keeping the non-null id, the duplicate is a clear DUPLICATE_ENTRY (not a spurious MEASUREMENT_INSERT_SKIPPED)', async () => {
+    const census1 = testData.census[0].censusID;
+    // Same physical measurement of the same stem, duplicated: one line carries the SI id, the other is blank
+    // (e.g. a doubled export row). PublishedStemID must not split these into two distinct dedup groups.
+    const identical = {
+      speciesCode: testData.species[0].SpeciesCode,
+      quadratName: testData.quadrats[0].QuadratName,
+      treeTag: 'PUBDUP1',
+      stemTag: '1',
+      x: 7,
+      y: 7,
+      dbh: 15,
+      hom: 1.3,
+      date: '2026-03-01'
+    };
+
+    await insertTestMeasurements(
+      connection,
+      testData,
+      [
+        { ...identical, publishedStemID: 5555 },
+        { ...identical, publishedStemID: null }
+      ],
+      { fileID: 'f_dup', batchID: 'b_dup', censusID: census1 }
+    );
+    await runBulkIngestion(connection, 'f_dup', 'b_dup');
+
+    const [batchRows] = await connection.query<any[]>(
+      `SELECT cm.CoreMeasurementID, cm.StemGUID
+       FROM coremeasurements cm
+       WHERE cm.UploadFileID = 'f_dup' AND cm.UploadBatchID = 'b_dup'`
+    );
+    // Exactly one row ingests successfully; the duplicate does not silently multiply into a second stem.
+    expect(batchRows.filter(r => r.StemGUID !== null)).toHaveLength(1);
+
+    const [errorRows] = await connection.query<any[]>(
+      `SELECT me.ErrorCode
+       FROM coremeasurements cm
+       JOIN measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+       JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+       WHERE cm.UploadFileID = 'f_dup' AND cm.UploadBatchID = 'b_dup' AND cm.StemGUID IS NULL`
+    );
+    const errorCodes = errorRows.map(r => r.ErrorCode);
+    // The collapsed-away duplicate is reported as a duplicate, never as the confusing insert-skip that
+    // the pre-fix (PublishedStemID-in-dedup-key) behavior produced.
+    expect(errorCodes).toContain('DUPLICATE_ENTRY');
+    expect(errorCodes).not.toContain('MEASUREMENT_INSERT_SKIPPED');
+
+    const [stemRows] = await connection.query<any[]>(
+      `SELECT s.PublishedStemID FROM stems s JOIN trees t ON t.TreeID = s.TreeID
+       WHERE t.TreeTag = 'PUBDUP1' AND s.StemTag = '1' AND s.CensusID = ?`,
+      [census1]
+    );
+    // MAX() across the collapsed group preserves the non-null SI identifier the blank duplicate lacked.
+    expect(stemRows).toHaveLength(1);
+    expect(stemRows[0].PublishedStemID).toBe(5555);
+  });
 });

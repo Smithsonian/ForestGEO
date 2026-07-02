@@ -1974,7 +1974,13 @@ BEGIN
     SELECT MIN(id) AS id,
            COUNT(*) AS duplicate_count,
            FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode,
-           QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, PublishedStemID,
+           QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate,
+           -- PublishedStemID is intentionally NOT part of the dedup key: two otherwise-identical
+           -- rows (one carrying the SI-assigned id, its duplicate blank) must still collapse into a
+           -- single measurement. MAX() ignores NULLs, so the surviving row keeps a non-null id when
+           -- any duplicate supplied one. A genuine cross-stem conflict is caught later by the
+           -- PUBLISHED_STEMID_CONFLICT stage against resolved_batch_rows.
+           MAX(PublishedStemID) AS PublishedStemID,
            NULLIF(GROUP_CONCAT(DISTINCT CASE WHEN Codes IS NOT NULL AND TRIM(Codes) != '' THEN TRIM(Codes) END
                    ORDER BY Codes SEPARATOR ';'), '') AS Codes,
            NULLIF(GROUP_CONCAT(DISTINCT CASE WHEN Comments IS NOT NULL AND TRIM(Comments) != '' THEN TRIM(Comments) END
@@ -1985,7 +1991,7 @@ BEGIN
       -- is equivalent here but would mask the intent if future stages insert into it earlier
       AND id NOT IN (SELECT id FROM validation_failures)
     GROUP BY FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode,
-             QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, PublishedStemID;
+             QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate;
 
     CREATE INDEX idx_dup_filter_id ON initial_dup_filter (id);
     CREATE INDEX idx_dup_tree_species ON initial_dup_filter (TreeTag, SpeciesCode);
@@ -2004,7 +2010,8 @@ BEGIN
         AND COALESCE(tm.DBH, 0) = COALESCE(idf.DBH, 0)
         AND COALESCE(tm.HOM, 0) = COALESCE(idf.HOM, 0)
         AND COALESCE(tm.MeasurementDate, '1900-01-01') = COALESCE(idf.MeasurementDate, '1900-01-01')
-        AND tm.PublishedStemID <=> idf.PublishedStemID
+        -- PublishedStemID deliberately omitted here to match the dedup key above; including it would
+        -- leave the non-surviving row unmatched and let it slip through as a spurious MEASUREMENT_INSERT_SKIPPED.
     WHERE tm.id != idf.id AND idf.duplicate_count > 1;
 
     CREATE INDEX idx_duplicate_failures_id ON duplicate_failures (id);
