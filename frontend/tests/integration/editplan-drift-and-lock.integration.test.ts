@@ -45,7 +45,7 @@ vi.mock('@/auth', () => ({
 //   acquireApplicationLock EXECUTES a real GET_LOCK so a separately-held
 //   lock on a different mysql2 connection will cause it to return false.
 //   That's required for the 423 scope-lock test.
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) {
@@ -128,7 +128,7 @@ vi.mock('@/config/editplan/authorization', async () => {
 import { POST as previewPOST } from '@/app/api/edits/preview/route';
 import { POST as applyPOST } from '@/app/api/edits/apply/route';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { writeMeasurementsSummary } from '@/config/editplan/writers/measurementssummary';
 import { applyEditInTransaction } from '@/config/editplan/apply';
 import { SessionExpiredError } from '@/config/editplan/authorization';

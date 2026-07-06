@@ -4,7 +4,7 @@ import { HTTPResponses } from '@/config/macros';
 import { validateContextualValues } from '@/lib/contextvalidation';
 // ========== Import route AFTER mocks ==========
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager'; // ========== Helpers ==========
+import ConnectionManager from '@/lib/db/connectionmanager'; // ========== Helpers ==========
 
 // ========== Hoisted spies/fixtures used by mocks ==========
 const { getCookieMock, mapDataSpy, getMapperSpy, loggerErr } = vi.hoisted(() => ({
@@ -17,8 +17,8 @@ const { getCookieMock, mapDataSpy, getMapperSpy, loggerErr } = vi.hoisted(() => 
 // ========== Mocks (must be BEFORE importing the route) ==========
 
 // Ensure ConnectionManager.getInstance() returns the shared mock instance
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
@@ -56,7 +56,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 // Mock schema validation to accept test schemas
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     return ['myschema', 'testschema'].includes(schema);
   })

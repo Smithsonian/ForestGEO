@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 import { auth } from '@/auth';

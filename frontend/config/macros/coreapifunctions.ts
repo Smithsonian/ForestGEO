@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { AllTaxonomiesViewQueryConfig, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
 import MapperFactory from '@/config/datamapper';
 import { handleUpsert } from '@/config/utils';

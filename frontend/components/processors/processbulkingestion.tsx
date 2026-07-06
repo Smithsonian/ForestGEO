@@ -3,9 +3,9 @@ import { buildBulkUpsertQuery, createError } from '@/config/utils';
 import { StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 import { SpecialBulkProcessingProps } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { IngestionFailureRowInput, insertIngestionFailureRows } from '@/config/measurementerrors';
 
 export interface TemporaryMeasurement {

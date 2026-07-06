@@ -2,7 +2,7 @@
 import { GridFilterItem, GridFilterModel } from '@mui/x-data-grid';
 import { capitalizeAndTransformField } from '@/config/utils';
 import { escape } from 'mysql2';
-import { safeEscapeId } from '@/config/utils/sqlsecurity';
+import { safeEscapeId } from '@/lib/db/sqlsecurity';
 
 export type Operator =
   | '='

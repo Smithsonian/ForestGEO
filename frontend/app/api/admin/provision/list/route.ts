@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { requireGlobalAdmin, provisioningErrorResponse } from '@/lib/provisioning/route-helpers';
 import { ProvisioningError } from '@/lib/provisioning/errors';
-import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { listRuns } from '@/lib/provisioning/orchestrator';
 import { HTTPResponses } from '@/config/macros';
 

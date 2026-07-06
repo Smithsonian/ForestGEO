@@ -10,13 +10,13 @@
 // They never resolve to trees/stems/cmattributes — edits only touch the raw
 // staging columns and the measurement error log. The writer runs INSIDE an
 // outer transaction and MUST NOT begin, commit, or rollback.
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { EditPlan } from '../types';
 import type { ApplyInTransactionInput } from '../apply';
 import type { EditOperationStateRow } from '@/config/editoperations';
 import { refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
 import type { WriterResult } from './measurementssummary';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 function normalizeFailedRowDate(value: unknown): string | null {
   if (value === null || value === undefined || value === '') return null;

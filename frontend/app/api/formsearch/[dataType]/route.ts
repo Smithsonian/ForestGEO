@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility

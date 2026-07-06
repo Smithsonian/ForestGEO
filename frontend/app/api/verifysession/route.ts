@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility

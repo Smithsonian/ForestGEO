@@ -6,7 +6,7 @@ const { authMock } = vi.hoisted(() => ({ authMock: vi.fn() }));
 vi.mock('@/auth', () => ({ auth: authMock }));
 
 // ---- Mock SQL security utilities ----
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   validateSchemaOrThrow: vi.fn(),
   safeFormatQuery: vi.fn((schema, query) => query)
 }));
@@ -37,8 +37,8 @@ vi.mock('mysql2/promise', () => ({
 }));
 
 // ---- Wrap ConnectionManager BEFORE importing the route ----
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
@@ -77,7 +77,7 @@ function makeRequest(url: string) {
 
 // ---- Import handler AFTER mocks ----
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
 describe('GET /api/clearcensus', () => {
   beforeEach(() => {

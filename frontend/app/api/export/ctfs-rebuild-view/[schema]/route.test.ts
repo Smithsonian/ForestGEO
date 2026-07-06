@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/auth', () => ({ auth: mocks.auth }));
-vi.mock('@/config/utils/sqlsecurity', () => ({ isValidSchema: mocks.isValidSchema }));
+vi.mock('@/lib/db/sqlsecurity', () => ({ isValidSchema: mocks.isValidSchema }));
 vi.mock('@/lib/ctfs-export', () => ({ renderRebuildViewFullTableArtifact: mocks.renderRebuild }));
 vi.mock('@/ailogger', () => ({ default: { info: mocks.loggerInfo, error: mocks.loggerError } }));
 

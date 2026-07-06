@@ -1,5 +1,5 @@
-import ConnectionManager from '@/config/connectionmanager';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 
 export type EditOperationType = 'single-row-edit' | 'bulk-revision-row' | 'revert';

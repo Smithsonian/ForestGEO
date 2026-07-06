@@ -29,7 +29,7 @@ vi.mock('@/ailogger', () => ({ default: mocks.ailogger }));
 vi.mock('@/auth', () => ({ auth: mocks.auth }));
 
 let testPool: Pool;
-vi.mock('@/config/poolmonitorsingleton', () => ({
+vi.mock('@/lib/db/poolmonitorsingleton', () => ({
   getPoolMonitorInstance: () => ({ pool: testPool })
 }));
 

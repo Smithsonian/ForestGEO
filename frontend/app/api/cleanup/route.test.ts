@@ -18,7 +18,7 @@ vi.mock('@/config/uploadsessiontracker', () => ({
   ensureUploadSessionsTable: ensureUploadSessionsTableMock
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: isValidSchemaMock
 }));
 

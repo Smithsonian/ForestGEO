@@ -177,12 +177,12 @@ vi.mock('@/auth', () => ({
   auth: mocks.auth
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: mocks.isValidSchema,
   safeFormatQuery: mocks.safeFormatQuery
 }));
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({
       closeConnection: mocks.closeConnection

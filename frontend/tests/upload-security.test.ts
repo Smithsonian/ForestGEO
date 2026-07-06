@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { isValidSchema, ALLOWED_SCHEMAS } from '@/config/utils/sqlsecurity';
+import { isValidSchema, ALLOWED_SCHEMAS } from '@/lib/db/sqlsecurity';
 
 describe('File Upload Security', () => {
   describe('File Extension Validation', () => {

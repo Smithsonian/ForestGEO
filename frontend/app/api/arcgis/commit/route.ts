@@ -3,12 +3,12 @@ import { format } from 'mysql2/promise';
 import moment from 'moment';
 import { auth } from '@/auth';
 import ailogger from '@/ailogger';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { assertCanEditMeasurementScope, ScopeAccessError } from '@/config/editplan/scopeguard';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 import {

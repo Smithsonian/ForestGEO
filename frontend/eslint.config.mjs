@@ -214,7 +214,7 @@ export default [
         {
           patterns: [
             {
-              group: ['@/config/connectionmanager', '@/lib/db/*', '@/lib/db'],
+              group: ['@/lib/db/connectionmanager', '@/lib/db/*', '@/lib/db'],
               message: 'UI must not import the DB layer. Call a feature server module instead.'
             }
           ]

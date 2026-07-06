@@ -1,4 +1,4 @@
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { BulkEditPlan, DuplicateDeletion, EditPlanDataType, Effect, PreviewError, RowPlan, SEVERITY_RANK, Severity } from './types';
 import { AnalyzeEditOptions, RoleForbiddenFieldError, TargetNotFoundError, analyzeEdit, isRoleForbiddenPreviewError } from './analyzer';
 import { applyDuplicateRules } from './rules/duplicates';

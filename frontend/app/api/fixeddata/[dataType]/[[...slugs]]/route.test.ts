@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // Import handler after mocks are set up
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager'; // ---------- helpers ----------
+import ConnectionManager from '@/lib/db/connectionmanager'; // ---------- helpers ----------
 
 // ---------- hoisted spies (safe for vi.mock factories) ----------
 const { getMapperSpy, mapDataSpy } = vi.hoisted(() => ({
@@ -22,7 +22,7 @@ vi.mock('@/config/datamapper', () => ({
 }));
 
 // Mock schema validation to accept test schemas
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     return ['myschema', 'testschema'].includes(schema);
   })
@@ -33,8 +33,8 @@ vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
 }));
 
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance?.()) ||
     (actual?.default && typeof actual.default.getInstance === 'function' && actual.default.getInstance?.()) ||

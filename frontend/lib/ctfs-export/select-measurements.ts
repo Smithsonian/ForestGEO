@@ -22,7 +22,7 @@
 import type { Connection } from 'mysql2/promise';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../csv-to-sql-shared';
 import { exportableMeasurementSelect, exportableMeasurementBaseWhere } from './exportable-measurement';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 // ---------------------------------------------------------------------------
 // Public types

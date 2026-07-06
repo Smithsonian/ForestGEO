@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CMError } from '@/config/macros/uploadsystemmacros';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility

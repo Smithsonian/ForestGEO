@@ -5,7 +5,7 @@ import {
   resolveMeasurementSummaryTree,
   resolveMeasurementSummaryStem
 } from './resolvers-mutating';
-import type ConnectionManager from '@/config/connectionmanager';
+import type ConnectionManager from '@/lib/db/connectionmanager';
 
 // ---------------------------------------------------------------------------
 // Minimal ConnectionManager stub that returns caller-supplied rows.

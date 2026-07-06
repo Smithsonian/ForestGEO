@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const beginTransaction = vi.fn();
   const executeQuery = vi.fn();
   const commitTransaction = vi.fn();

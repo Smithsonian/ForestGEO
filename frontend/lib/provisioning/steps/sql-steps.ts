@@ -2,7 +2,7 @@ import path from 'path';
 import mysql, { type PoolOptions } from 'mysql2/promise';
 import type { ProvisioningStep, StepContext } from '../types';
 import { executeSqlFile } from '../sql-runner';
-import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 
 const TABLES_FILE = () => path.join(process.cwd(), 'sqlscripting/tablestructures.sql');
 const PROCS_FILE = () => path.join(process.cwd(), 'sqlscripting/storedprocedures.sql');

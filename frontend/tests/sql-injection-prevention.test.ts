@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { isValidSchema, validateSchemaOrThrow, formatWithSchema, safeFormatQuery, ALLOWED_SCHEMAS } from '@/config/utils/sqlsecurity';
+import { isValidSchema, validateSchemaOrThrow, formatWithSchema, safeFormatQuery, ALLOWED_SCHEMAS } from '@/lib/db/sqlsecurity';
 
 describe('SQL Security Utility Functions', () => {
   describe('isValidSchema', () => {

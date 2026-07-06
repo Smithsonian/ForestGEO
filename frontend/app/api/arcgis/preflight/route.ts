@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import ailogger from '@/ailogger';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { assertCanEditMeasurementScope, ScopeAccessError } from '@/config/editplan/scopeguard';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
 import { UnparseableDateError } from '@/lib/arcgis/errors';
 import { readArcgisSheetMetadata, readArcgisWorkbookDetailed } from '@/lib/arcgis/workbook-reader';

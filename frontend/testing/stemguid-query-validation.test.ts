@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 // Mock ConnectionManager
 const mockExecuteQuery = vi.fn();
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({
       executeQuery: mockExecuteQuery,

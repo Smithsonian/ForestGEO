@@ -11,7 +11,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 

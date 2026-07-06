@@ -16,7 +16,7 @@ const sharedState = vi.hoisted(() => ({
 
 const TEST_TRANSACTION_ID = 'test-transaction-id';
 
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) {
@@ -81,7 +81,7 @@ vi.mock('@/ailogger', () => ({
 
 // Imports below must come after vi.mock calls so the mocked ConnectionManager
 // is the one wired into the module under test.
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import {
   CONFLICT_REASON_DIFFERENT_QUADRAT,
   CONFLICT_REASON_INACTIVE_STEM,

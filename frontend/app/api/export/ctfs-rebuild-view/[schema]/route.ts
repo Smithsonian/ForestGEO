@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { requireSession, getSessionUserId } from '@/lib/auth-helpers';
 import ailogger from '@/ailogger';

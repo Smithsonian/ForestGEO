@@ -18,7 +18,7 @@ vi.mock('@/auth', () => ({
   auth: mocks.auth
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: mocks.isValidSchema
 }));
 

@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ========== Import handler AFTER mocks ==========
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
 // ========== Mocks (must be BEFORE importing the route) ==========
 
 // Ensure ConnectionManager.getInstance() exists and returns the shared mock instance
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
     (actual?.default && typeof actual.default.getInstance === 'function' && actual.default.getInstance()) ||
@@ -45,7 +45,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 // Mock schema validation to accept test schemas
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     // Accept test schemas used in tests
     return ['forestgeo_testing', 'myschema', 's1', 'sch', 'schema'].includes(schema);

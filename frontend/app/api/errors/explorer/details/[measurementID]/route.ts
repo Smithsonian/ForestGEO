@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { ContradictionType } from '@/config/errorsexplorer';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { buildErrorExplorerDetails } from '../../_shared';
 import ailogger from '@/ailogger';
 

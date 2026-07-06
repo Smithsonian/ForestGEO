@@ -3,11 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { FileRowSet } from '@/config/macros/formdetails';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import ailogger from '@/ailogger';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { generateShortBatchID } from '@/config/utils';
 
 // Force Node.js runtime for database and Azure SDK compatibility

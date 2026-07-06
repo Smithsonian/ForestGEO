@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
-import { safeFormatQuery, validatedSchema, validateSchemaOrThrow, type SchemaName } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery, validatedSchema, validateSchemaOrThrow, type SchemaName } from '@/lib/db/sqlsecurity';
 import { generateShortBatchID } from '@/config/utils';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { auth } from '@/auth';

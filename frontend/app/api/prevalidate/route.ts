@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { FileRow } from '@/config/macros/formdetails';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
-import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import moment from 'moment/moment';
 import { requireSession } from '@/lib/auth-helpers';
 

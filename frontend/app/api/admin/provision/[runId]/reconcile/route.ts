@@ -3,7 +3,7 @@ import { auth } from '@/auth';
 import { parseRunId, requireGlobalAdmin, provisioningErrorResponse } from '@/lib/provisioning/route-helpers';
 import { reconcileStaleRun } from '@/lib/provisioning/orchestrator';
 import { ProvisioningError } from '@/lib/provisioning/errors';
-import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { HTTPResponses } from '@/config/macros';
 
 // Force Node.js runtime — mysql2 is not compatible with Edge Runtime

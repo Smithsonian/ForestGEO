@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ========== Import the module under test AFTER mocks ==========
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager'; // ========== Helpers ==========
+import ConnectionManager from '@/lib/db/connectionmanager'; // ========== Helpers ==========
 
 // ========== Hoisted spies (used by mocks below) ==========
 const { mapDataSpy, getMapperSpy } = vi.hoisted(() => {
@@ -14,8 +14,8 @@ const { mapDataSpy, getMapperSpy } = vi.hoisted(() => {
 // ========== Mocks (must come BEFORE importing the route) ==========
 
 // Wrap ConnectionManager so getInstance() is guaranteed while preserving your setup singleton
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||

@@ -3,11 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ---- Import route AFTER mocks ----
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager'; // ---- Helpers ----
+import ConnectionManager from '@/lib/db/connectionmanager'; // ---- Helpers ----
 
 // ---- Ensure ConnectionManager.getInstance() returns the shared mock instance ----
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||

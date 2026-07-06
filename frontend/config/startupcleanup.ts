@@ -11,7 +11,7 @@
 
 import ailogger from '@/ailogger';
 import { runSessionCleanup, purgeOldSessions, ensureUploadSessionsTable } from './uploadsessiontracker';
-import ConnectionManager from './connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { cleanupStaleArcgisImportSessions } from '@/lib/arcgis/import-session';
 
 let cleanupIntervalHandle: NodeJS.Timeout | null = null;

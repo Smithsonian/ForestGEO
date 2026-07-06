@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockExecuteQuery = vi.fn();
 const mockCloseConnection = vi.fn(async () => {});
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({
       executeQuery: mockExecuteQuery,
@@ -12,7 +12,7 @@ vi.mock('@/config/connectionmanager', () => ({
   }
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   safeFormatQuery: vi.fn((_schema: string, query: string) => query)
 }));
 

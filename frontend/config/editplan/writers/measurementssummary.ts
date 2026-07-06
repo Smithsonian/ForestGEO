@@ -8,7 +8,7 @@
 // The writer runs INSIDE an outer transaction (owned by `applyEditInTransaction`
 // or a batch caller such as revision apply). It MUST NOT begin, commit, or
 // rollback transactions, and it MUST NOT close the connection.
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
 import { EditPlan } from '../types';
 import type { ApplyInTransactionInput } from '../apply';
@@ -17,7 +17,7 @@ import { computeTreeStemState, resolveMeasurementSummaryQuadratID, resolveMeasur
 import { refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
 import { refreshMeasurementViewsForCoreMeasurements, refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { handleUpsert } from '@/config/utils';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
 
 export interface WriterResult {

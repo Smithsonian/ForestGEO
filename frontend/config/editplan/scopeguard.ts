@@ -1,6 +1,6 @@
 import type { Session } from 'next-auth';
-import ConnectionManager from '@/config/connectionmanager';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
 import { ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS, STALE_VALIDATION_RUN_THRESHOLD_MINUTES } from '@/config/measurementscopepolicy';
 import { getErrorCode } from '@/lib/errorhelpers';

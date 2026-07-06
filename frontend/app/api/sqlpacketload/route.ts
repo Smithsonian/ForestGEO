@@ -1,4 +1,4 @@
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
 import { FileRow, FileRowSet, FormType, normalizeSourceFormat, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
 import { NextRequest, NextResponse } from 'next/server';
@@ -11,7 +11,7 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { format } from 'mysql2/promise';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import crypto from 'crypto';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';

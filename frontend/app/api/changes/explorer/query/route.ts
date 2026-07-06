@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { DEFAULT_RECENT_CHANGES_FILTERS, RecentChangesQueryRequest } from '@/config/recentchangesexplorer';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { queryRecentChanges } from '../_shared';
 import ailogger from '@/ailogger';
 

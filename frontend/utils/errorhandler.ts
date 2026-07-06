@@ -1,4 +1,4 @@
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 
 // utils/errorHandler.ts

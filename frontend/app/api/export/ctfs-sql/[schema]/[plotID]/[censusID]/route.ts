@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { getConn } from '@/lib/db/primitives';
 import { auth } from '@/auth';
 import { requireSession, getSessionUserId } from '@/lib/auth-helpers';

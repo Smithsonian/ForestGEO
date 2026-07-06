@@ -11,7 +11,7 @@ const mockConnectionManager = {
   rollbackTransaction: vi.fn()
 };
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => mockConnectionManager
   }

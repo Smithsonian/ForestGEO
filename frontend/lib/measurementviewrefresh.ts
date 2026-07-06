@@ -1,5 +1,5 @@
-import type ConnectionManager from '@/config/connectionmanager';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import type ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 function normalizeCoreMeasurementIDs(coreMeasurementIDs: readonly number[]): number[] {
   const unique = new Set<number>();

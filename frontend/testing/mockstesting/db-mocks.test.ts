@@ -44,8 +44,8 @@ describe('db-mocks wiring (PoolMonitor + mysql2 echo + queues)', () => {
     __clearDbQueues();
 
     // load mocked modules after mock import
-    ({ getPoolMonitorInstance } = await import('@/config/poolmonitorsingleton'));
-    ({ PoolMonitor: PoolMonitorClass } = await import('@/config/poolmonitor'));
+    ({ getPoolMonitorInstance } = await import('@/lib/db/poolmonitorsingleton'));
+    ({ PoolMonitor: PoolMonitorClass } = await import('@/lib/db/poolmonitor'));
   });
 
   it('returns a singleton PoolMonitor and provides a shared connection', async () => {

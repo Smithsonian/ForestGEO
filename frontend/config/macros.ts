@@ -5,7 +5,7 @@
  */
 import { FileRejection, FileWithPath } from 'react-dropzone';
 import '@/styles/customtablesettings.css';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { processPersonnel } from '@/components/processors/processpersonnel';
 import { processSpecies } from '@/components/processors/processspecies';

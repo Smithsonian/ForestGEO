@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
 const { loggerInfo, loggerWarn, loggerError, loggerDebug } = vi.hoisted(() => ({
   loggerInfo: vi.fn(),
@@ -13,7 +13,7 @@ const { requireUploadSessionOwnershipMock } = vi.hoisted(() => ({
   requireUploadSessionOwnershipMock: vi.fn()
 }));
 
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const executeQuery = vi.fn();
   const instance = { executeQuery };
   return {
@@ -23,7 +23,7 @@ vi.mock('@/config/connectionmanager', () => {
   };
 });
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   safeFormatQuery: vi.fn((schema: string, sql: string) => sql.replace(/\?\?/g, schema))
 }));
 

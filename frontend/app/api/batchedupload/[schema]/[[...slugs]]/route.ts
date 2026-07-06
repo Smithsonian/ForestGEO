@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
-import connectionmanager from '@/config/connectionmanager';
+import connectionmanager from '@/lib/db/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { generateShortBatchID } from '@/config/utils';
-import { validatedSchema, type SchemaName } from '@/config/utils/sqlsecurity';
+import { validatedSchema, type SchemaName } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { assertSchemaAccess } from '@/lib/authz';
 

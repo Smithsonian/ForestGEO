@@ -14,7 +14,7 @@
  *     SIGKILLed.
  */
 import ailogger from '@/ailogger';
-import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { ensureCatalogTables } from '@/lib/provisioning/orchestrator';
 import { installShutdownHandler, pickupStaleRuns } from '@/lib/provisioning/worker';
 

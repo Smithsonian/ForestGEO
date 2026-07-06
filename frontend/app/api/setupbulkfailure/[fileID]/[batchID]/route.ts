@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
-import { safeFormatQuery, validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery, validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { moveTemporaryBatchToFailedMeasurements, moveTemporarySubBatchesToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';

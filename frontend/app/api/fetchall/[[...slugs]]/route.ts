@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import { getCookie } from '@/app/actions/cookiemanager';

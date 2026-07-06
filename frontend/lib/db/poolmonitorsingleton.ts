@@ -1,5 +1,5 @@
 // poolmonitorsingleton.ts
-import { PoolMonitor } from '@/config/poolmonitor';
+import { PoolMonitor } from '@/lib/db/poolmonitor';
 import { PoolOptions } from 'mysql2/promise';
 
 let monitor: PoolMonitor | null = null;

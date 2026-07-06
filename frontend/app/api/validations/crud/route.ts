@@ -3,11 +3,11 @@ import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations'
 import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
 import MapperFactory from '@/config/datamapper';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
-import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime

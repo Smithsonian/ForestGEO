@@ -6,7 +6,7 @@ import ailogger from '@/ailogger';
 import { getContainerNameWithFallback } from '@/config/macros/containernames';
 import { auth } from '@/auth';
 import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import path from 'path';
 import type { Session } from 'next-auth';
 import { FormType, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';

@@ -23,8 +23,8 @@ import {
   UploadSessionOwnershipError
 } from '@/config/uploadsessiontracker';
 import ailogger from '@/ailogger';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
-import ConnectionManager from '@/config/connectionmanager';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { auth } from '@/auth';
 import { getSessionUserId, getSessionUserIds, requireAdmin, requireSession } from '@/lib/auth-helpers';

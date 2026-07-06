@@ -21,7 +21,7 @@ describe('bg-mocks wiring', () => {
   };
 
   beforeEach(async () => {
-    const mod = await import('@/config/connectionmanager');
+    const mod = await import('@/lib/db/connectionmanager');
     ConnectionManager = mod.default as unknown as CM;
     __BgMocks = (mod as any).__cm as typeof __BgMocks;
     __BgMocks.clear();

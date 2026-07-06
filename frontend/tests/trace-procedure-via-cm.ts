@@ -9,8 +9,8 @@ process.env.AZURE_SQL_USER = 'azureroot';
 // AZURE_SQL_PASSWORD must be set in environment
 process.env.AZURE_SQL_SCHEMA = 'forestgeo_testing_mason';
 
-import ConnectionManager from '../config/connectionmanager';
-import { safeFormatQuery } from '../config/utils/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 const SCHEMA = 'forestgeo_testing_mason';
 

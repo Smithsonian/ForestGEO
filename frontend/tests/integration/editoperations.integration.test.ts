@@ -28,7 +28,7 @@ const MIGRATION_PATH = path.join(process.cwd(), 'db-migrations', 'unified-measur
 // writeEditOperation and markEditOperationReverted, and commit/rollback run
 // against the same live connection.
 // ---------------------------------------------------------------------------
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) {
@@ -110,7 +110,7 @@ vi.mock('@/ailogger', () => ({
 
 // Imports below must come after vi.mock calls so the mocked ConnectionManager
 // is the one wired into the module under test.
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import {
   ensureEditOperationsTable,
   markEditOperationReverted,
