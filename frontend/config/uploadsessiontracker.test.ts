@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   loggerError: vi.fn()
 }));
 
-vi.mock('./connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({
       beginTransaction: mocks.beginTransaction,
