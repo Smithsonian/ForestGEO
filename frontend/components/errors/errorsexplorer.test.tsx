@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorsexplorer';
 import type { EditPlan } from '@/config/editplan/types';
-import type { UseEditPreviewFlowReturn } from '@/hooks/useEditPreviewFlow';
+import type { UseEditPreviewFlowReturn } from '@/app/hooks/useEditPreviewFlow';
 
 describe('ErrorsExplorer — Codes column helpers', () => {
   describe('parseCodesString', () => {
@@ -235,7 +235,7 @@ vi.mock('@/components/editplan/undotoast', () => ({
   )
 }));
 
-vi.mock('@/hooks/useEditPreviewFlow', () => ({
+vi.mock('@/app/hooks/useEditPreviewFlow', () => ({
   useEditPreviewFlow: (args: Record<string, unknown>): UseEditPreviewFlowReturn => {
     lastEditFlowArgs = args;
     return {

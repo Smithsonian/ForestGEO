@@ -103,7 +103,7 @@ const mockCancelDialog = vi.fn();
 let mockEditFlowArgs: any = null;
 let mockEditFlowDialogState: any = { open: false, plan: null, busy: false };
 
-vi.mock('@/hooks/useEditPreviewFlow', () => ({
+vi.mock('@/app/hooks/useEditPreviewFlow', () => ({
   useEditPreviewFlow: (args: any) => {
     mockEditFlowArgs = args;
     return {

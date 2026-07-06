@@ -6,8 +6,8 @@ import { redirect, usePathname } from 'next/navigation';
 import { Box, IconButton, Stack, Typography, useTheme } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
 import { useLoading } from '@/app/contexts/loadingprovider';
-import { useAsyncOperation } from '@/hooks/useAsyncOperation';
-import { useLoadState, combineLoadStates } from '@/hooks/useLoadState';
+import { useAsyncOperation } from '@/app/hooks/useAsyncOperation';
+import { useLoadState, combineLoadStates } from '@/app/hooks/useLoadState';
 import {
   useOrgCensusContext,
   useOrgCensusDispatch,

@@ -93,7 +93,7 @@ import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegri
 import { getSelectableOptionsForField, loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
-import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
+import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast from '@/components/editplan/undotoast';
 import { isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';

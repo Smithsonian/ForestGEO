@@ -11,7 +11,7 @@ import {
   useSiteDispatch
 } from '@/app/contexts/userselectionprovider';
 import { useOrgCensusListContext, usePlotListContext, useQuadratListContext, useSiteListContext } from '@/app/contexts/listselectionprovider';
-import { useAsyncOperation } from '@/hooks/useAsyncOperation';
+import { useAsyncOperation } from '@/app/hooks/useAsyncOperation';
 
 // Mock all the context hooks
 vi.mock('@/app/contexts/userselectionprovider', () => ({
@@ -63,7 +63,7 @@ vi.mock('@/app/contexts/lockanimationcontext', () => ({
   useLockAnimation: () => ({ isPulsing: false })
 }));
 
-vi.mock('@/hooks/useAsyncOperation');
+vi.mock('@/app/hooks/useAsyncOperation');
 
 vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), log: vi.fn(), warn: vi.fn() }

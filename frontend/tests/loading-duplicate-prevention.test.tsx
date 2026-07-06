@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import React from 'react';
-import { useAsyncOperation } from '@/hooks/useAsyncOperation';
+import { useAsyncOperation } from '@/app/hooks/useAsyncOperation';
 import { useLoading } from '@/app/contexts/loadingprovider';
 
 // Mock the loading provider

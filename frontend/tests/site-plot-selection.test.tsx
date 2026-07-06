@@ -57,7 +57,7 @@ vi.mock('@/app/contexts/lockanimationcontext', () => ({
   useLockAnimation: () => ({ isPulsing: false })
 }));
 
-vi.mock('@/hooks/useAsyncOperation', () => ({
+vi.mock('@/app/hooks/useAsyncOperation', () => ({
   useAsyncOperation: vi.fn()
 }));
 
@@ -213,7 +213,7 @@ describe('Site and Plot Selection Flow Tests', () => {
 
   describe('Site Selection Logic', () => {
     it('loads sites from session when available', async () => {
-      const { useAsyncOperation } = await import('@/hooks/useAsyncOperation');
+      const { useAsyncOperation } = await import('@/app/hooks/useAsyncOperation');
 
       // This tests the logic that would be in the layout
       const mockExecute = vi.fn();

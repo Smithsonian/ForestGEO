@@ -16,7 +16,7 @@ vi.mock('@/components/processors/processorhelperfunctions', () => ({
   AllTaxonomiesViewQueryConfig: { mockConfig: true },
   handleUpsertForSlices: vi.fn()
 }));
-vi.mock('@/utils/errorhandler', () => ({
+vi.mock('@/lib/errorhandler', () => ({
   handleError: vi.fn(error => NextResponse.json({ error: error.message }, { status: 500 }))
 }));
 vi.mock('@/app/actions/cookiemanager', () => ({
