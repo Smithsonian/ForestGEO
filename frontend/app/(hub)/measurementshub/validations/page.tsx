@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
-import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
+import { ValidationProceduresRDS } from '@/lib/db/definitions/validations';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
 import { useTheme } from '@mui/joy';

@@ -3,7 +3,7 @@
 import { Alert, Box, Button, Checkbox, CircularProgress, Input, Option, Select, Stack, Table } from '@mui/joy';
 import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
-import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
+import { AdminSiteRDS, AdminUserRDS } from '@/lib/db/definitions/admin';
 import ailogger from '@/ailogger';
 
 type UserWithSite = Omit<AdminUserRDS, 'userSites'> & { userSites: AdminSiteRDS[] };

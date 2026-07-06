@@ -1,8 +1,8 @@
 // cypress/support/mocks.ts
 
 import * as nextAuthReact from 'next-auth/react';
-import { PlotRDS, SitesRDS } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensusRDS } from '@/config/sqlrdsdefinitions/timekeeping';
+import { PlotRDS, SitesRDS } from '@/lib/db/definitions/zones';
+import { OrgCensusRDS } from '@/lib/db/definitions/timekeeping';
 import * as userContext from '@/app/contexts/userselectionprovider';
 import * as lockAnimationContext from '@/app/contexts/lockanimationcontext';
 

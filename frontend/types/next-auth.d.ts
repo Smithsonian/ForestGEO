@@ -1,7 +1,7 @@
 import 'next-auth';
 import { Profile } from 'next-auth';
 import { UserAuthRoles } from '@/config/macros';
-import { SitesRDS } from '@/config/sqlrdsdefinitions/zones';
+import { SitesRDS } from '@/lib/db/definitions/zones';
 
 declare module 'next-auth' {
   /**

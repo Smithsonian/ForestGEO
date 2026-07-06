@@ -10,8 +10,8 @@ import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { processPersonnel } from '@/components/processors/processpersonnel';
 import { processSpecies } from '@/components/processors/processspecies';
 import { processBulkIngestion } from '@/components/processors/processbulkingestion';
-import { Plot } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { Plot } from '@/lib/db/definitions/zones';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 
 export type ColumnStates = Record<string, boolean>;
 

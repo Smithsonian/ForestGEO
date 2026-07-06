@@ -1,5 +1,5 @@
 import { Dispatch, SetStateAction } from 'react';
-import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
+import { AttributeStatusOptions } from '@/lib/db/definitions/core';
 
 export enum FormType {
   attributes = 'attributes',

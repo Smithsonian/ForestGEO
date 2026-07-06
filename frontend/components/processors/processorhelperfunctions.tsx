@@ -1,6 +1,6 @@
 import MapperFactory from '@/config/datamapper';
 import { handleUpsert } from '@/config/utils';
-import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/config/sqlrdsdefinitions/views';
+import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/lib/db/definitions/views';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 import ailogger from '@/ailogger';

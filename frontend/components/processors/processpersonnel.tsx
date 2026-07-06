@@ -1,5 +1,5 @@
 import { createError, handleUpsert } from '@/config/utils';
-import { PersonnelResult, RoleResult } from '@/config/sqlrdsdefinitions/personnel';
+import { PersonnelResult, RoleResult } from '@/lib/db/definitions/personnel';
 import { SpecialProcessingProps } from '@/config/macros';
 
 export async function processPersonnel(props: Readonly<SpecialProcessingProps>) {

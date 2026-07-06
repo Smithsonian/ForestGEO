@@ -1,7 +1,7 @@
 import * as moment from 'moment';
 import { buildBulkUpsertQuery, createError } from '@/config/utils';
-import { StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
+import { StemResult, TreeResult } from '@/lib/db/definitions/taxonomies';
+import { CMAttributesResult, CoreMeasurementsResult } from '@/lib/db/definitions/core';
 import { SpecialBulkProcessingProps } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';

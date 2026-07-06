@@ -56,14 +56,14 @@ describe('platform-mocks wiring', () => {
 
   it('RDS definition modules are stubbed and importable', async () => {
     // They don’t need to export anything; just ensure they’re resolvable
-    await expect(import('@/config/sqlrdsdefinitions/taxonomies')).resolves.toBeDefined();
-    await expect(import('@/config/sqlrdsdefinitions/zones')).resolves.toBeDefined();
-    await expect(import('@/config/sqlrdsdefinitions/views')).resolves.toBeDefined();
-    await expect(import('@/config/sqlrdsdefinitions/validations')).resolves.toBeDefined();
-    await expect(import('@/config/sqlrdsdefinitions/timekeeping')).resolves.toBeDefined();
-    await expect(import('@/config/sqlrdsdefinitions/personnel')).resolves.toBeDefined();
-    await expect(import('@/config/sqlrdsdefinitions/core')).resolves.toBeDefined();
-    await expect(import('@/config/sqlrdsdefinitions/admin')).resolves.toBeDefined();
+    await expect(import('@/lib/db/definitions/taxonomies')).resolves.toBeDefined();
+    await expect(import('@/lib/db/definitions/zones')).resolves.toBeDefined();
+    await expect(import('@/lib/db/definitions/views')).resolves.toBeDefined();
+    await expect(import('@/lib/db/definitions/validations')).resolves.toBeDefined();
+    await expect(import('@/lib/db/definitions/timekeeping')).resolves.toBeDefined();
+    await expect(import('@/lib/db/definitions/personnel')).resolves.toBeDefined();
+    await expect(import('@/lib/db/definitions/core')).resolves.toBeDefined();
+    await expect(import('@/lib/db/definitions/admin')).resolves.toBeDefined();
   });
 
   it('chalk + logger are mocked quietly', async () => {

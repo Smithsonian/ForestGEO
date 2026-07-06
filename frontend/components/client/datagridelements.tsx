@@ -52,8 +52,8 @@ import VerifiedIcon from '@mui/icons-material/Verified';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
-import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { Plot, Site } from '@/lib/db/definitions/zones';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { CallSplit, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore, Warning } from '@mui/icons-material';
 
 export function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {

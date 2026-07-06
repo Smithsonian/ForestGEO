@@ -13,21 +13,21 @@ let echoSamePaginationOnRender = false;
 const ORIGINAL_TEST_SP_CODE = 'TEST_SP_CODE_A';
 const UPDATED_TEST_SP_CODE = 'TEST_SP_CODE_B';
 
-vi.mock('@/config/sqlrdsdefinitions/views', () => ({
+vi.mock('@/lib/db/definitions/views', () => ({
   getAllTaxonomiesViewHCs: () => ({}),
   getAllViewFullTableViewsHCs: () => ({}),
   getMeasurementsSummaryViewHCs: () => ({})
 }));
 
-vi.mock('@/config/sqlrdsdefinitions/zones', () => ({
+vi.mock('@/lib/db/definitions/zones', () => ({
   getQuadratHCs: () => ({})
 }));
 
-vi.mock('@/config/sqlrdsdefinitions/personnel', () => ({
+vi.mock('@/lib/db/definitions/personnel', () => ({
   getPersonnelHCs: () => ({})
 }));
 
-vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
+vi.mock('@/lib/db/definitions/core', async importOriginal => {
   const actual = (await importOriginal()) as any;
   return {
     ...actual,
@@ -36,7 +36,7 @@ vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
   };
 });
 
-vi.mock('@/config/sqlrdsdefinitions/taxonomies', () => ({
+vi.mock('@/lib/db/definitions/taxonomies', () => ({
   getSpeciesLimitsHCs: () => ({})
 }));
 

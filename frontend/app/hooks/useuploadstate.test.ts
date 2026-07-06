@@ -11,7 +11,7 @@ import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
 
 // Mock the AttributeStatusOptions export from core
-vi.mock('@/config/sqlrdsdefinitions/core', () => ({
+vi.mock('@/lib/db/definitions/core', () => ({
   AttributeStatusOptions: ['alive', 'dead', 'stem dead', 'broken below', 'omitted', 'missing']
 }));
 

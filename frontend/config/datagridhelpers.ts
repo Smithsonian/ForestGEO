@@ -1,14 +1,14 @@
-import { getQuadratHCs, Plot, Site } from '@/config/sqlrdsdefinitions/zones';
-import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs } from '@/config/sqlrdsdefinitions/views';
-import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
-import { getCoreMeasurementsHCs, getFailedMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
+import { getQuadratHCs, Plot, Site } from '@/lib/db/definitions/zones';
+import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs } from '@/lib/db/definitions/views';
+import { getPersonnelHCs } from '@/lib/db/definitions/personnel';
+import { getCoreMeasurementsHCs, getFailedMeasurementsHCs } from '@/lib/db/definitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
 import { Dispatch, ReactElement, RefObject, SetStateAction } from 'react';
 import { AlertProps } from '@mui/material';
 import styled from '@emotion/styled';
-import { getSpeciesLimitsHCs } from '@/config/sqlrdsdefinitions/taxonomies';
+import { getSpeciesLimitsHCs } from '@/lib/db/definitions/taxonomies';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 // Import and re-export types from servergridhelpers to avoid duplication
 import type { FetchQueryFunction, ProcessPostPatchQueryFunction, ProcessDeletionQueryFunction } from '@/config/servergridhelpers';
 export type { FetchQueryFunction, ProcessPostPatchQueryFunction, ProcessDeletionQueryFunction };

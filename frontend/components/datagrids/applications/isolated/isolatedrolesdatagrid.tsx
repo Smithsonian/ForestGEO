@@ -2,7 +2,7 @@
 'use client';
 import React, { useState } from 'react';
 import { RolesGridColumns } from '@/components/client/datagridcolumns';
-import { RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
+import { RoleRDS } from '@/lib/db/definitions/personnel';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 
 interface IsolatedRolesDataGridProps {

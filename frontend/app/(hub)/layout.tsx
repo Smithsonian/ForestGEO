@@ -25,7 +25,7 @@ import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
-import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
+import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/lib/db/definitions/timekeeping';
 import ReactDOM from 'react-dom';
 import ailogger from '@/ailogger';
 // Eager load for maximum speed (bundle size not a concern)

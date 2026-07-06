@@ -10,7 +10,7 @@ import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmoda
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
-import { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
+import { MeasurementsSummaryRDS } from '@/lib/db/definitions/views';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
 import { useLoading } from '@/app/contexts/loadingprovider';

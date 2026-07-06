@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
+import { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
 import connectionmanager from '@/lib/db/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';

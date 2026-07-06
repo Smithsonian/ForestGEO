@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditToolbar } from './datagridelements';
 
-vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
+vi.mock('@/lib/db/definitions/core', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return actual;
 });

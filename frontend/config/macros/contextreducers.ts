@@ -1,7 +1,7 @@
 // contextreducers.ts
 import { Dispatch } from 'react';
-import { Plot, QuadratRDS, Site } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { Plot, QuadratRDS, Site } from '@/lib/db/definitions/zones';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { submitCookie } from '@/app/actions/cookiemanager';
 
 // Define a type for the enhanced dispatch function

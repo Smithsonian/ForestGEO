@@ -4,7 +4,7 @@ import React from 'react';
 import { Box, TableCell, TableRow, Typography } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
+import { PostValidationQueriesRDS } from '@/lib/db/definitions/validations';
 import { Checkbox, IconButton, Textarea, Tooltip } from '@mui/joy';
 import { Done } from '@mui/icons-material';
 import moment from 'moment/moment';

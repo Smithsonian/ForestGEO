@@ -18,7 +18,7 @@ import { refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors
 import { refreshMeasurementViewsForCoreMeasurements, refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { handleUpsert } from '@/config/utils';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
-import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
+import { CMAttributesResult } from '@/lib/db/definitions/core';
 
 export interface WriterResult {
   updatedIDs: Record<string, number>;

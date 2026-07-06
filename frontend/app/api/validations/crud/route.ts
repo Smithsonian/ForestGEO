@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
+import { ValidationProceduresRDS } from '@/lib/db/definitions/validations';
 import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
 import MapperFactory from '@/config/datamapper';

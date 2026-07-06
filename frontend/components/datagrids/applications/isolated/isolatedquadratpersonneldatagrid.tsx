@@ -6,7 +6,7 @@ import React, { useEffect, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { GridSelections } from '@/config/macros';
 import { useRouter } from 'next/navigation';
-import { QuadratPersonnelRDS } from '@/config/sqlrdsdefinitions/personnel';
+import { QuadratPersonnelRDS } from '@/lib/db/definitions/personnel';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { AssignmentOutlined, UploadFileOutlined } from '@mui/icons-material';
 import ailogger from '@/ailogger';

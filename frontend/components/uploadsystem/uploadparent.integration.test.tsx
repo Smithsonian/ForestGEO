@@ -17,7 +17,7 @@ import { FormType } from '@/config/macros/formdetails';
 import React from 'react';
 
 // Mock AttributeStatusOptions and HC functions
-vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
+vi.mock('@/lib/db/definitions/core', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
@@ -36,7 +36,7 @@ vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
 });
 
 // Mock views HC functions
-vi.mock('@/config/sqlrdsdefinitions/views', async importOriginal => {
+vi.mock('@/lib/db/definitions/views', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
@@ -71,7 +71,7 @@ vi.mock('@/config/sqlrdsdefinitions/views', async importOriginal => {
 });
 
 // Mock personnel HC functions
-vi.mock('@/config/sqlrdsdefinitions/personnel', async importOriginal => {
+vi.mock('@/lib/db/definitions/personnel', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
@@ -83,7 +83,7 @@ vi.mock('@/config/sqlrdsdefinitions/personnel', async importOriginal => {
 });
 
 // Mock zones HC functions
-vi.mock('@/config/sqlrdsdefinitions/zones', async importOriginal => {
+vi.mock('@/lib/db/definitions/zones', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
@@ -96,7 +96,7 @@ vi.mock('@/config/sqlrdsdefinitions/zones', async importOriginal => {
 });
 
 // Mock taxonomies HC functions
-vi.mock('@/config/sqlrdsdefinitions/taxonomies', async importOriginal => {
+vi.mock('@/lib/db/definitions/taxonomies', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
