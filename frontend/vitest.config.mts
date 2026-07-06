@@ -76,7 +76,7 @@ export default defineConfig(({ mode }) => ({
         'sqlscripting/**',
         'documentation/**'
       ],
-      include: ['app/**/*.{ts,tsx}', 'components/**/*.{ts,tsx}', 'config/**/*.{ts,tsx}', 'testing/**/*.ts'],
+      include: ['app/**/*.{ts,tsx}', 'components/**/*.{ts,tsx}', 'config/**/*.{ts,tsx}', 'tests/mocks/**/*.ts', 'lib/db/**/*.ts'],
       thresholds: {
         global: {
           branches: 60,

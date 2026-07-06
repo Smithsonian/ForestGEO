@@ -2,10 +2,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 1) Turn on your platform mocks
-import '@/testing/platform-mocks';
+import '@/tests/mocks/platform-mocks';
 
 // 2) Pull in the mocked helpers directly from next/headers
-import { __cookie } from '@/testing/platform-mocks';
+import { __cookie } from '@/tests/mocks/platform-mocks';
 import { cookies, headers } from 'next/headers';
 
 describe('platform-mocks wiring', () => {

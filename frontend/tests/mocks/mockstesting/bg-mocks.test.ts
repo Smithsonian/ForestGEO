@@ -1,6 +1,6 @@
 // testing/mockstesting/bg-mocks.spec.ts
 import { beforeEach, describe, expect, it } from 'vitest';
-import '@/testing/bg-mocks';
+import '@/tests/mocks/bg-mocks';
 
 describe('bg-mocks wiring', () => {
   // Pull the class that’s been mocked and the helper API
