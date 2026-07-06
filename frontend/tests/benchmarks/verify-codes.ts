@@ -16,7 +16,7 @@ async function main() {
   await conn.query(`USE \`${dbName}\``);
 
   // Load schema
-  const schema = fs.readFileSync(path.join(process.cwd(), 'sqlscripting/tablestructures.sql'), 'utf-8');
+  const schema = fs.readFileSync(path.join(process.cwd(), 'db/sql/tablestructures.sql'), 'utf-8');
   await conn.query('SET FOREIGN_KEY_CHECKS = 0');
   for (const s of schema
     .split(';')
@@ -32,7 +32,7 @@ async function main() {
 
   // Load procs
   const procContent = fs
-    .readFileSync(path.join(process.cwd(), 'sqlscripting/storedprocedures.sql'), 'utf-8')
+    .readFileSync(path.join(process.cwd(), 'db/sql/storedprocedures.sql'), 'utf-8')
     .replace(/DELIMITER\s+\$\$/gi, '')
     .replace(/DELIMITER\s+;/gi, '');
   for (const s of procContent

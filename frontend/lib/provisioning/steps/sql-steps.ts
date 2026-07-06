@@ -4,9 +4,9 @@ import type { ProvisioningStep, StepContext } from '../types';
 import { executeSqlFile } from '../sql-runner';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 
-const TABLES_FILE = () => path.join(process.cwd(), 'sqlscripting/tablestructures.sql');
-const PROCS_FILE = () => path.join(process.cwd(), 'sqlscripting/storedprocedures.sql');
-const QUERIES_FILE = () => path.join(process.cwd(), 'sqlscripting/corequeries.sql');
+const TABLES_FILE = () => path.join(process.cwd(), 'db/sql/tablestructures.sql');
+const PROCS_FILE = () => path.join(process.cwd(), 'db/sql/storedprocedures.sql');
+const QUERIES_FILE = () => path.join(process.cwd(), 'db/sql/corequeries.sql');
 
 /**
  * Schema version stamp. Bump this date when DDL, stored procedures, or seeded

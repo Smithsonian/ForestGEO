@@ -21,8 +21,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-STORED_PROCEDURES_FILE="$REPO_ROOT/sqlscripting/storedprocedures.sql"
-CATALOG_PROVISIONING_FILE="$REPO_ROOT/sqlscripting/catalog-provisioning-tables.sql"
+STORED_PROCEDURES_FILE="$REPO_ROOT/db/sql/storedprocedures.sql"
+CATALOG_PROVISIONING_FILE="$REPO_ROOT/db/sql/catalog-provisioning-tables.sql"
 MIGRATION_TRACKING_TABLE="_migration_log"
 BACKUP_DIR="$SCRIPT_DIR/backups"
 

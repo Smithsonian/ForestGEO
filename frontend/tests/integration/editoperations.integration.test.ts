@@ -18,7 +18,7 @@ const sharedState = vi.hoisted(() => ({
 const TEST_TRANSACTION_ID = 'test-transaction-id';
 const UNKNOWN_EDIT_OPERATION_ID = 9_999_999;
 
-const MIGRATION_PATH = path.join(process.cwd(), 'db-migrations', 'unified-measurements-migrations', '54_create_edit_operations.sql');
+const MIGRATION_PATH = path.join(process.cwd(), 'db/migrations', 'unified-measurements-migrations', '54_create_edit_operations.sql');
 
 // ---------------------------------------------------------------------------
 // Mock ConnectionManager — mirrors the pattern used by reingest-routes

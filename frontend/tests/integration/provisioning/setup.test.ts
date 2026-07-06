@@ -7,7 +7,7 @@ const CATALOG_SCHEMA = 'catalog';
 const PROVISIONING_RUNS_TABLE = 'provisioning_runs';
 const PROVISIONING_STEPS_TABLE = 'provisioning_steps';
 const PROVISIONING_STEPS_FK_NAME = 'fk_provisioning_steps_run';
-const DDL_FILE_PATH = path.join(process.cwd(), 'sqlscripting/catalog-provisioning-tables.sql');
+const DDL_FILE_PATH = path.join(process.cwd(), 'db/sql/catalog-provisioning-tables.sql');
 
 const EXPECTED_PROVISIONING_RUNS_COLUMNS = [
   'RunID',

@@ -379,7 +379,7 @@ async function seedValidations(conn: mysql.Connection): Promise<void> {
   }
 
   // Load from corequeries.sql
-  const coreQueriesPath = path.join(process.cwd(), 'sqlscripting', 'corequeries.sql');
+  const coreQueriesPath = path.join(process.cwd(), 'db/sql', 'corequeries.sql');
   if (!fs.existsSync(coreQueriesPath)) {
     console.log('    corequeries.sql not found. Skipping validation seeding.');
     return;

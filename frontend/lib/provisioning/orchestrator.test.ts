@@ -13,7 +13,7 @@ vi.mock('@/ailogger', () => ({
 import { startRun, retryRun, abortRun, teardownProvisionedSite, markStepFailed, reconcileStaleRun, getRunWithSteps, listRuns } from './orchestrator';
 import type { ProvisioningInput } from './types';
 
-const CATALOG_TABLES_FILE = path.join(process.cwd(), 'sqlscripting/catalog-provisioning-tables.sql');
+const CATALOG_TABLES_FILE = path.join(process.cwd(), 'db/sql/catalog-provisioning-tables.sql');
 const POLL_INTERVAL_MS = 200;
 const RUN_TIMEOUT_MS = 60000;
 const ORCH_SCHEMA_PREFIX = 'forestgeo_orch';

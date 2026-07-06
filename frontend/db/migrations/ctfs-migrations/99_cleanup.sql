@@ -12,7 +12,7 @@
 --
 -- Usage:
 --   ./run_migration.sh --cleanup --target forestgeo_mpala
---   OR manually: SOURCE frontend/db-migrations/99_cleanup.sql;
+--   OR manually: SOURCE frontend/db/migrations/99_cleanup.sql;
 -- =====================================================================================
 
 SELECT '================================================================' AS '';

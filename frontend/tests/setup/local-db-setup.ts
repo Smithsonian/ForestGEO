@@ -222,7 +222,7 @@ export async function createTestDatabase(config: TestDatabaseConfig = DEFAULT_TE
  * Loads database schema from SQL file
  */
 export async function loadSchema(connection: mysql.Connection): Promise<void> {
-  const schemaPath = path.join(process.cwd(), 'sqlscripting', 'tablestructures.sql');
+  const schemaPath = path.join(process.cwd(), 'db/sql', 'tablestructures.sql');
 
   if (!fs.existsSync(schemaPath)) {
     throw new Error(`Schema file not found: ${schemaPath}`);
@@ -277,7 +277,7 @@ export async function loadSchema(connection: mysql.Connection): Promise<void> {
  * These are the SQL definitions for post-ingestion validations executed via the API.
  */
 export async function loadValidationDefinitions(connection: mysql.Connection): Promise<void> {
-  const coreQueriesPath = path.join(process.cwd(), 'sqlscripting', 'corequeries.sql');
+  const coreQueriesPath = path.join(process.cwd(), 'db/sql', 'corequeries.sql');
 
   if (!fs.existsSync(coreQueriesPath)) {
     log.warn(`Core queries file not found: ${coreQueriesPath} - skipping validation definitions`);
@@ -391,7 +391,7 @@ export async function loadValidationDefinitions(connection: mysql.Connection): P
  * 3. Execute each procedure separately
  */
 export async function loadStoredProcedures(connection: mysql.Connection): Promise<void> {
-  const proceduresPath = path.join(process.cwd(), 'sqlscripting', 'storedprocedures.sql');
+  const proceduresPath = path.join(process.cwd(), 'db/sql', 'storedprocedures.sql');
 
   if (!fs.existsSync(proceduresPath)) {
     throw new Error(`Stored procedures file not found: ${proceduresPath}`);

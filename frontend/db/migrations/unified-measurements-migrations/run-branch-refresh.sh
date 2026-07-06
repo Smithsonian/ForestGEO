@@ -24,9 +24,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-STORED_PROCEDURES_FILE="$REPO_ROOT/sqlscripting/storedprocedures.sql"
+STORED_PROCEDURES_FILE="$REPO_ROOT/db/sql/storedprocedures.sql"
 UPLOAD_TRACKING_HELPER_FILE="$SCRIPT_DIR/branch_refresh_00_ensure_upload_tracking_tables.sql"
-CATALOG_PROVISIONING_FILE="$REPO_ROOT/sqlscripting/catalog-provisioning-tables.sql"
+CATALOG_PROVISIONING_FILE="$REPO_ROOT/db/sql/catalog-provisioning-tables.sql"
 MIGRATION_TRACKING_TABLE="_migration_log"
 BACKUP_DIR="$SCRIPT_DIR/backups"
 
@@ -230,7 +230,7 @@ assert_required_base_tables() {
         log_error "Schema $SCHEMA is missing required base tables:"
         printf '  - %s\n' "${missing[@]}"
         log_error "This branch refresh runner is for existing ForestGEO schemas, not raw legacy schemas."
-        log_error "Use frontend/db-migrations/unified-measurements-migrations/run-migrations.sh for a fuller migration path."
+        log_error "Use frontend/db/migrations/unified-measurements-migrations/run-migrations.sh for a fuller migration path."
         exit 1
     fi
 }

@@ -18,7 +18,7 @@ async function reloadValidations() {
 
   try {
     // Read corequeries.sql
-    const sqlPath = path.join(process.cwd(), 'sqlscripting', 'corequeries.sql');
+    const sqlPath = path.join(process.cwd(), 'db/sql', 'corequeries.sql');
     const sql = fs.readFileSync(sqlPath, 'utf8');
 
     console.log('📄 Read corequeries.sql');

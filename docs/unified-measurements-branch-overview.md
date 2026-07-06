@@ -273,7 +273,7 @@ graph LR
 
 ### Migration Path
 
-12 migration scripts in `frontend/db-migrations/unified-measurements/`:
+12 migration scripts in `frontend/db/migrations/unified-measurements/`:
 
 ```
 16_failed_measurements_reasons.sql        -- Add failure tracking columns (bridge step)

@@ -18,8 +18,8 @@ function extractSqlSegment(sql: string, startMarker: string, endMarker: string):
 
 describe('upload procedure regressions', () => {
   it('uses bounded hashed upload ids in bulkingestionprocess sources', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
-    const migrationSql = readSql('db-migrations/ctfs-migrations/15_deploy_bulkingestionprocess.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+    const migrationSql = readSql('db/migrations/ctfs-migrations/15_deploy_bulkingestionprocess.sql');
 
     for (const sql of [canonicalSql, migrationSql]) {
       expect(sql).toContain("SET vUploadId = LEFT( SHA2( CONCAT_WS( '#', DATABASE()");
@@ -29,7 +29,7 @@ describe('upload procedure regressions', () => {
   });
 
   it('writes complete collapser deduplication alerts', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain(
       'INSERT INTO uploadintegrityalerts (uploadId, fileID, batchID, plotID, censusID, type, message, severity, sourceRecords, processedRecords, failedRecords, missingRecords)'
@@ -40,14 +40,14 @@ describe('upload procedure regressions', () => {
   });
 
   it('cleans up stale failed sub-batches before retrying the same batch id', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain("AND status IN ('processing', 'failed')");
     expect(canonicalSql).toContain("WHERE batchID = vBatchID AND censusID = vCurrentCensusID AND status IN ('processing', 'failed');");
   });
 
   it('uses duplicate-tolerant stem inserts for within-batch stem collisions', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain(
       'INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
@@ -58,7 +58,7 @@ describe('upload procedure regressions', () => {
   });
 
   it('degrades duplicate coremeasurement candidates to row-level failures', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain('CREATE TEMPORARY TABLE source_row_insert_conflicts AS');
     expect(canonicalSql).toContain("'Measurement insert skipped: source row resolved to multiple candidate measurements'");
@@ -70,8 +70,8 @@ describe('upload procedure regressions', () => {
   });
 
   it('backfills uploaded PublishedStemID through stem resolution with conflict guards', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
-    const tableStructuresSql = readSql('sqlscripting/tablestructures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+    const tableStructuresSql = readSql('db/sql/tablestructures.sql');
 
     expect(canonicalSql).toContain('srr.UploadedPublishedStemID AS PublishedStemID');
     expect(canonicalSql).toContain("'PUBLISHED_STEMID_CONFLICT'");
@@ -81,7 +81,7 @@ describe('upload procedure regressions', () => {
   });
 
   it('builds a deduped previous-census lookup before cross-census location validation aggregation', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain('CREATE TEMPORARY TABLE current_cross_census_previous_map');
     expect(canonicalSql).toContain('INSERT INTO current_cross_census_previous_map (CurrentCensusID, PreviousCensusID)');
@@ -97,7 +97,7 @@ describe('upload procedure regressions', () => {
   });
 
   it('uses PlotCensusNumber for previous-census selection and user-facing messages', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain('DECLARE vCurrentPlotCensusNumber INT DEFAULT NULL;');
     expect(canonicalSql).toContain('DECLARE vPreviousPlotCensusNumber INT DEFAULT NULL;');
@@ -112,8 +112,8 @@ describe('upload procedure regressions', () => {
   });
 
   it('keeps invalid attribute codes as soft validation 14 instead of hard-failing them', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
-    const tableStructuresSql = readSql('sqlscripting/tablestructures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+    const tableStructuresSql = readSql('db/sql/tablestructures.sql');
 
     expect(canonicalSql).not.toContain("SELECT id, 'INVALID_ATTRIBUTE_CODE', FailureReason");
     expect(canonicalSql).toContain("ON me.ErrorSource = 'validation' AND me.ErrorCode = '14'");
@@ -123,9 +123,9 @@ describe('upload procedure regressions', () => {
   });
 
   it('rebuilds validation 14 from RawCodes during validation reruns', () => {
-    const coreQueriesSql = readSql('sqlscripting/corequeries.sql');
-    const procedureSql = readSql('sqlscripting/storedprocedures.sql');
-    const migrationSql = readSql('db-migrations/unified-measurements-migrations/53_reapply_validation14_rawcodes_replay.sql');
+    const coreQueriesSql = readSql('db/sql/corequeries.sql');
+    const procedureSql = readSql('db/sql/storedprocedures.sql');
+    const migrationSql = readSql('db/migrations/unified-measurements-migrations/53_reapply_validation14_rawcodes_replay.sql');
 
     const coreValidation14 = extractSqlSegment(
       coreQueriesSql,
@@ -147,8 +147,8 @@ describe('upload procedure regressions', () => {
   });
 
   it('ignores empty code tokens created by doubled or trailing semicolons', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
-    const ctfsMigrationSql = readSql('db-migrations/ctfs-migrations/15_deploy_bulkingestionprocess.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+    const ctfsMigrationSql = readSql('db/migrations/ctfs-migrations/15_deploy_bulkingestionprocess.sql');
 
     expect(canonicalSql).toContain("WHERE rcm.Codes IS NOT NULL AND TRIM(rcm.Codes) != '' AND TRIM(jt.code) != '';");
     expect(ctfsMigrationSql).toContain("WHERE f.Codes is not null AND trim(f.Codes) != '' AND trim(jt.code) != '';");

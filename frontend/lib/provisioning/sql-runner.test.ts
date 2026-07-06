@@ -4,9 +4,9 @@ import { readFileSync } from 'fs';
 import mysql from 'mysql2/promise';
 import { splitSqlFile, executeSqlFile, STATEMENT_PREVIEW_MAX_LENGTH } from './sql-runner';
 
-const TABLES_FILE = path.join(process.cwd(), 'sqlscripting/tablestructures.sql');
-const PROCS_FILE = path.join(process.cwd(), 'sqlscripting/storedprocedures.sql');
-const QUERIES_FILE = path.join(process.cwd(), 'sqlscripting/corequeries.sql');
+const TABLES_FILE = path.join(process.cwd(), 'db/sql/tablestructures.sql');
+const PROCS_FILE = path.join(process.cwd(), 'db/sql/storedprocedures.sql');
+const QUERIES_FILE = path.join(process.cwd(), 'db/sql/corequeries.sql');
 
 describe('splitSqlFile', () => {
   it('parses tablestructures.sql into statements with line numbers', () => {

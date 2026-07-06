@@ -8,8 +8,8 @@ import { dispatchRun, getWorkerPid, HEARTBEAT_STALE_MS, isRunOwnedByCurrentWorke
 import ailogger from '@/ailogger';
 
 // Bootstrap DDL inlined so the catalog tables can be created without any
-// dependency on the sqlscripting/ folder being present in the deploy bundle.
-// Keep this in sync with frontend/sqlscripting/catalog-provisioning-tables.sql,
+// dependency on the db/sql/ folder being present in the deploy bundle.
+// Keep this in sync with frontend/db/sql/catalog-provisioning-tables.sql,
 // which remains canonical for the run-branch-refresh.sh ops script.
 const CATALOG_BOOTSTRAP_STATEMENTS: readonly string[] = [
   `CREATE DATABASE IF NOT EXISTS catalog CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,

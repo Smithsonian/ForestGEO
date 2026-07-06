@@ -36,7 +36,7 @@ The spec and follow-up review called out the open items below. This plan resolve
 
 | Path | Responsibility |
 |---|---|
-| `frontend/db-migrations/unified-measurements-migrations/54_create_edit_operations.sql` | Schema for per-site `edit_operations` table; indexes on `targetID`, `createdAt`, `revertedByEditOperationID`. |
+| `frontend/db/migrations/unified-measurements-migrations/54_create_edit_operations.sql` | Schema for per-site `edit_operations` table; indexes on `targetID`, `createdAt`, `revertedByEditOperationID`. |
 | `frontend/config/editoperations.ts` | `ensureEditOperationsTable(connection, schema)` helper + row I/O helpers (write, read-by-id, mark-reverted). |
 | `frontend/config/editplan/types.ts` | `Severity`, `SEVERITY_RANK`, `EffectCategory`, `Effect`, `EditPlanDataType`, `EditPlan`, `BulkEditPlan`, `RowPlan`, `ApplyResult` types shared by planner, apply, endpoints, UI. |
 | `frontend/config/editplan/fieldpolicy.ts` | Editable-field allowlist per surface, raw-key-to-canonical-field mapping, clear/no-op policy per field group, normalizer used by both analyzer and apply before diffing/hashing. |
@@ -80,7 +80,7 @@ The spec and follow-up review called out the open items below. This plan resolve
 **Goal:** One new per-site table plus an ensure-helper pattern matching `ensureUploadSessionsTable`.
 
 **Files:**
-- Create: `frontend/db-migrations/unified-measurements-migrations/54_create_edit_operations.sql`
+- Create: `frontend/db/migrations/unified-measurements-migrations/54_create_edit_operations.sql`
 - Create: `frontend/config/editoperations.ts`
 - Create: `frontend/config/editoperations.test.ts`
 
@@ -98,7 +98,7 @@ The spec and follow-up review called out the open items below. This plan resolve
 - [ ] **Step 1: Write the migration**
 
 ```sql
--- frontend/db-migrations/unified-measurements-migrations/54_create_edit_operations.sql
+-- frontend/db/migrations/unified-measurements-migrations/54_create_edit_operations.sql
 CREATE TABLE IF NOT EXISTS edit_operations (
   EditOperationID INT AUTO_INCREMENT PRIMARY KEY,
   OperationType ENUM('single-row-edit', 'bulk-revision-row', 'revert') NOT NULL,
@@ -353,7 +353,7 @@ Expected: all 4 tests PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add frontend/db-migrations/unified-measurements-migrations/54_create_edit_operations.sql \
+git add frontend/db/migrations/unified-measurements-migrations/54_create_edit_operations.sql \
         frontend/config/editoperations.ts \
         frontend/config/editoperations.test.ts
 git commit -m "Add edit_operations table and ledger helpers for undo"
@@ -2248,7 +2248,7 @@ git commit -m "Convert measurement PATCH to shim over editplan apply; drop speci
 - Create: `frontend/cypress/component/editplan-preview-dialog.cy.tsx`
 - Create: `frontend/cypress/e2e/row-edit-ramification.cy.ts`
 - Create: `frontend/tests/integration/editplan-drift-and-lock.integration.test.ts`
-- Modify: `frontend/db-migrations/unified-measurements-migrations/run-migrations.sh` (only if ordering tweaks are needed — new `54_*.sql` should pick up automatically).
+- Modify: `frontend/db/migrations/unified-measurements-migrations/run-migrations.sh` (only if ordering tweaks are needed — new `54_*.sql` should pick up automatically).
 
 **Acceptance Criteria:**
 - [ ] Cypress e2e: researcher edits TreeTag on a measurement → preview dialog appears → apply → undo toast → click Undo → measurement reverts.
