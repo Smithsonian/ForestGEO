@@ -9,7 +9,7 @@ Learn more about ForestGEO [at their website](https://www.forestgeo.si.edu/).
 
 ## Setting up for Local Development
 
-This project uses NextJS v14(+), and server interactions and setup are handled through their interface. Please note
+This project uses Next.js 15 / React 19, and server interactions and setup are handled through their interface. Please note
 that for local development, you will **not** be able to use the NextJS-provided `next start` command due to the way that
 the application is packaged for Azure deployment. Instead, please use the `next dev` command to start the local
 development server to use the application.
