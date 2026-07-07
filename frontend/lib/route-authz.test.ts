@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server';
 vi.mock('@/auth', () => ({ auth: vi.fn() }));
 
 import { auth } from '@/auth';
-import { withRouteAuthz, fromQuery, fromPath, fromBody } from '@/lib/route-authz';
+import { withRouteAuthz, fromQuery, fromPath, fromPathSegment, fromBody } from '@/lib/route-authz';
 import type { RouteKey } from '@/lib/route-policy';
 
 const HTTP_OK = 200;
@@ -123,6 +123,16 @@ describe('withRouteAuthz', () => {
     const res = await wrapped(req, { params: Promise.resolve({ schema: 'forestgeo_serc', plotID: '1', censusID: '2' }) });
     expect(res.status).toBe(HTTP_FORBIDDEN);
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('resolves the schema from a catch-all path segment and allows a member session', async () => {
+    vi.mocked(auth).mockResolvedValueOnce({ user: { userStatus: NON_ADMIN_ROLE, sites: [{ schemaName: 'forestgeo_serc' }] } } as any);
+    const handler = makeHandler();
+    const wrapped = withRouteAuthz('formdownload/[dataType]/[[...slugs]]', handler, { schema: fromPathSegment('slugs', 0) });
+    const req = new NextRequest('http://localhost/api/formdownload/attributes/forestgeo_serc/1/2');
+    const res = await wrapped(req, { params: Promise.resolve({ dataType: 'attributes', slugs: ['forestgeo_serc', '1', '2'] }) });
+    expect(res.status).toBe(HTTP_OK);
+    expect(handler).toHaveBeenCalledOnce();
   });
 
   it('fails closed (500) for a site-scoped route with no schema resolver configured', async () => {

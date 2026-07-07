@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { fromQuery, withRouteAuthz } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest) {
+async function handler(request: NextRequest) {
   const cmID = parseInt(request.nextUrl.searchParams.get('cmid')!);
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('no schema variable provided!');
@@ -60,3 +61,5 @@ export async function GET(request: NextRequest) {
     await connectionManager.closeConnection();
   }
 }
+
+export const GET = withRouteAuthz('details/cmid', handler, { schema: fromQuery('schema') });

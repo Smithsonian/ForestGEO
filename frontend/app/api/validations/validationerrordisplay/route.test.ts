@@ -7,6 +7,10 @@ vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() }
 }));
 
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
 vi.mock('@/lib/db/connectionmanager', async () => {
   const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}));
 
@@ -40,6 +44,8 @@ vi.mock('@/lib/db/connectionmanager', async () => {
 });
 
 describe('GET /api/validations/validationerrordisplay', () => {
+  const emptyCtx = { params: Promise.resolve({}) };
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -57,9 +63,9 @@ describe('GET /api/validations/validationerrordisplay', () => {
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const request = {
-      nextUrl: new URL('http://localhost:3000/api/validations/validationerrordisplay?schema=myschema&plotIDParam=22&censusPCNParam=4')
+      nextUrl: new URL('http://localhost:3000/api/validations/validationerrordisplay?schema=forestgeo_testing&plotIDParam=22&censusPCNParam=4')
     };
-    const response = await GET(request as any);
+    const response = await GET(request as any, emptyCtx);
 
     expect(response.status).toBe(HTTPResponses.OK);
     await expect(response.json()).resolves.toEqual({
@@ -74,7 +80,7 @@ describe('GET /api/validations/validationerrordisplay', () => {
     });
 
     const sql = exec.mock.calls[0][0] as string;
-    expect(sql).toMatch(/LEFT JOIN\s+myschema\.sitespecificvalidations AS ve/i);
+    expect(sql).toMatch(/LEFT JOIN\s+`forestgeo_testing`\.sitespecificvalidations AS ve/i);
     expect(sql).toMatch(/COALESCE\(NULLIF\(ve\.Description, ''\), me\.ErrorMessage\)/);
     expect(sql).toMatch(/COALESCE\(NULLIF\(ve\.Criteria, ''\), CONCAT\('Validation ', me\.ErrorCode\)\)/);
     expect(close).toHaveBeenCalledTimes(1);
@@ -86,9 +92,9 @@ describe('GET /api/validations/validationerrordisplay', () => {
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const request = {
-      nextUrl: new URL('http://localhost:3000/api/validations/validationerrordisplay?schema=myschema&plotIDParam=22&censusPCNParam=4')
+      nextUrl: new URL('http://localhost:3000/api/validations/validationerrordisplay?schema=forestgeo_testing&plotIDParam=22&censusPCNParam=4')
     };
-    const response = await GET(request as any);
+    const response = await GET(request as any, emptyCtx);
 
     expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     await expect(response.json()).resolves.toEqual({ error: 'query failed' });

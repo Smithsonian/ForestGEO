@@ -7,6 +7,7 @@ const AUTH_USER_EMAIL = 'integration-runner@forestgeo.test';
 const HTTP_OK = 200;
 const HTTP_FORBIDDEN = 403;
 const HTTP_BAD_REQUEST = 400;
+const EMPTY_ROUTE_CONTEXT = { params: Promise.resolve({}) };
 
 const sharedState = vi.hoisted(() => ({
   connection: null as Connection | null
@@ -75,14 +76,14 @@ describe('GET /api/validations/validationlist authz + injection', () => {
     } as any);
     const { GET } = await import('@/app/api/validations/validationlist/route');
     const req = new NextRequest(`http://localhost/api/validations/validationlist?schema=${schema}`);
-    const res = await GET(req as any);
+    const res = await GET(req as any, EMPTY_ROUTE_CONTEXT);
     expect(res.status).toBe(HTTP_FORBIDDEN);
   });
 
   it('rejects a structurally invalid schema without hitting SQL', async () => {
     const { GET } = await import('@/app/api/validations/validationlist/route');
     const req = new NextRequest('http://localhost/api/validations/validationlist?schema=foo%3BDROP');
-    const res = await GET(req as any);
+    const res = await GET(req as any, EMPTY_ROUTE_CONTEXT);
     expect(res.status).toBe(HTTP_BAD_REQUEST);
     expect((await res.json()).code).toBe('INVALID_SCHEMA');
   });
@@ -90,7 +91,7 @@ describe('GET /api/validations/validationlist authz + injection', () => {
   it('returns the coreValidations map for an authorized (admin) request', async () => {
     const { GET } = await import('@/app/api/validations/validationlist/route');
     const req = new NextRequest(`http://localhost/api/validations/validationlist?schema=${schema}`);
-    const res = await GET(req as any);
+    const res = await GET(req as any, EMPTY_ROUTE_CONTEXT);
     expect(res.status).toBe(HTTP_OK);
     const body = await res.json();
     expect(body).toHaveProperty('coreValidations');

@@ -8,12 +8,13 @@ import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
 import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-type RouteProps = { params: Promise<{ dataType: string; slugs?: string[] }> };
+type RouteProps = RouteContext;
 
 async function parseFilterModel(request: NextRequest, slugs?: string[], body?: any) {
   if (body?.filterModel) {
@@ -43,7 +44,8 @@ async function parseFilterModel(request: NextRequest, slugs?: string[], body?: a
 
 async function handleRequest(request: NextRequest, props: RouteProps, body?: any) {
   const params = await props.params;
-  const { dataType, slugs } = params;
+  const dataType = Array.isArray(params.dataType) ? params.dataType[0] : params.dataType;
+  const slugs = Array.isArray(params.slugs) ? params.slugs : params.slugs ? [params.slugs] : undefined;
   if (!dataType || !slugs) {
     return new NextResponse(JSON.stringify({ error: 'data type or slugs not provided' }), {
       status: HTTPResponses.INVALID_REQUEST
@@ -89,10 +91,10 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
                      AND COLUMN_NAME NOT LIKE '%uuid%'
                      AND COLUMN_NAME NOT LIKE 'id%'
                      AND COLUMN_NAME NOT LIKE '%_id' `;
-    const tableForColumns = params.dataType === 'measurements' || params.dataType === 'failedmeasurements' ? 'coremeasurements' : params.dataType;
+    const tableForColumns = dataType === 'measurements' || dataType === 'failedmeasurements' ? 'coremeasurements' : dataType;
     const results = await connectionManager.executeQuery(query, [schema, tableForColumns]);
     columns = results.map((row: any) => row.COLUMN_NAME);
-    if (params.dataType === 'failedmeasurements') {
+    if (dataType === 'failedmeasurements') {
       columns = [
         'FailedMeasurementID',
         'FileID',
@@ -330,11 +332,11 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
   }
 }
 
-export async function GET(request: NextRequest, props: RouteProps) {
+async function getHandler(request: NextRequest, props: RouteProps) {
   return handleRequest(request, props);
 }
 
-export async function POST(request: NextRequest, props: RouteProps) {
+async function postHandler(request: NextRequest, props: RouteProps) {
   let body: any = undefined;
   try {
     body = await request.json();
@@ -343,3 +345,6 @@ export async function POST(request: NextRequest, props: RouteProps) {
   }
   return handleRequest(request, props, body);
 }
+
+export const GET = withRouteAuthz('formdownload/[dataType]/[[...slugs]]', getHandler, { schema: fromPathSegment('slugs', 0) });
+export const POST = withRouteAuthz('formdownload/[dataType]/[[...slugs]]', postHandler, { schema: fromPathSegment('slugs', 0) });

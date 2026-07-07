@@ -1,9 +1,8 @@
 import { HTTPResponses } from '@/config/macros';
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
-import { assertSchemaAccess } from '@/lib/authz';
-import { auth } from '@/auth';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { fromQuery, withRouteAuthz } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -19,22 +18,12 @@ interface ValidationProcedure {
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
-export async function GET(request: NextRequest): Promise<NextResponse> {
+async function handler(request: NextRequest): Promise<NextResponse> {
   const conn = ConnectionManager.getInstance();
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) {
     return NextResponse.json({ error: 'No schema variable provided' }, { status: HTTPResponses.INVALID_REQUEST });
   }
-  if (!isValidSchema(schema)) {
-    return NextResponse.json({ error: 'Invalid schema provided', code: 'INVALID_SCHEMA' }, { status: HTTPResponses.INVALID_REQUEST });
-  }
-
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated', code: 'UNAUTHENTICATED' }, { status: HTTPResponses.UNAUTHORIZED });
-  }
-  const denied = assertSchemaAccess(session, schema);
-  if (denied) return denied;
 
   try {
     const siteQuery = safeFormatQuery(
@@ -54,3 +43,5 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: error.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   }
 }
+
+export const GET = withRouteAuthz('validations/validationlist', handler, { schema: fromQuery('schema') });

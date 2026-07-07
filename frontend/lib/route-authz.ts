@@ -13,6 +13,8 @@ export interface RouteContext {
 
 export type SchemaResolver = (request: NextRequest, context: RouteContext) => Promise<string | null> | string | null;
 
+const EMPTY_ROUTE_CONTEXT: RouteContext = { params: Promise.resolve({}) };
+
 export const fromQuery =
   (param = 'schema'): SchemaResolver =>
   request =>
@@ -24,6 +26,15 @@ export const fromPath =
     const params = await context.params;
     const value = params[param];
     return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
+  };
+
+export const fromPathSegment =
+  (param: string, index: number): SchemaResolver =>
+  async (_request, context) => {
+    const params = await context.params;
+    const value = params[param];
+    if (!Array.isArray(value)) return null;
+    return value[index] ?? null;
   };
 
 /**
@@ -72,13 +83,14 @@ type Handler = (request: NextRequest, context: RouteContext) => Promise<Response
  */
 export function withRouteAuthz(routeKey: RouteKey, handler: Handler, options: AuthzOptions = {}) {
   return async (request: NextRequest, context: RouteContext): Promise<Response> => {
+    const routeContext = context ?? EMPTY_ROUTE_CONTEXT;
     const policy = ROUTE_POLICIES[routeKey];
     if (!policy) {
       ailogger.error(`[route-authz] No policy for route key '${routeKey}' — refusing request.`);
       return NextResponse.json({ error: 'route authorization misconfigured', code: 'ROUTE_MISCONFIGURED' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
     }
 
-    if (policy === 'public') return handler(request, context);
+    if (policy === 'public') return handler(request, routeContext);
 
     const session = await auth();
     const sessionError = requireSession(session);
@@ -86,12 +98,12 @@ export function withRouteAuthz(routeKey: RouteKey, handler: Handler, options: Au
     // point session is non-null; the `!session` guard narrows the type for TS.
     if (sessionError || !session) return sessionError ?? NextResponse.json({ error: 'unauthorized' }, { status: HTTPResponses.UNAUTHORIZED });
 
-    if (policy === 'authed') return handler(request, context);
+    if (policy === 'authed') return handler(request, routeContext);
 
     if (policy === 'admin') {
       const denied = requireAdmin(session);
       if (denied) return denied;
-      return handler(request, context);
+      return handler(request, routeContext);
     }
 
     // site-scoped
@@ -99,13 +111,13 @@ export function withRouteAuthz(routeKey: RouteKey, handler: Handler, options: Au
       ailogger.error(`[route-authz] site-scoped route '${routeKey}' has no schema resolver — refusing request.`);
       return NextResponse.json({ error: 'route authorization misconfigured', code: 'ROUTE_MISCONFIGURED' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
     }
-    const schema = await options.schema(request, context);
+    const schema = await options.schema(request, routeContext);
     if (!schema || !isValidSchema(schema)) {
       return NextResponse.json({ error: 'missing or invalid schema', code: 'INVALID_SCHEMA' }, { status: HTTPResponses.BAD_REQUEST });
     }
     const denied = assertSchemaAccess(session, schema);
     if (denied) return denied;
 
-    return handler(request, context);
+    return handler(request, routeContext);
   };
 }

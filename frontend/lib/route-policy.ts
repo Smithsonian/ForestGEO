@@ -168,15 +168,11 @@ export type RouteKey = keyof typeof ROUTE_POLICIES;
 export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   // Operates on schema without calling auth() or validateContextualValues
   'bulkcrud',
-  // Details endpoint uses raw schema from query string, no auth check
-  'details/cmid',
   // fixeddata GET uses isValidSchema but no auth; POST/PATCH/DELETE delegate to
   // coreapifunctions which also lack auth
   'fixeddata/[dataType]/[[...slugs]]',
   // fixeddatafilter GET and POST delegate to coreapifunctions; no auth check
   'fixeddatafilter/[dataType]/[[...slugs]]',
-  // formdownload: uses isValidSchema but no auth
-  'formdownload/[dataType]/[[...slugs]]',
   // formsearch: validates schema against isValidSchema but no auth
   'formsearch/[dataType]',
   // formvalidation: validates schema but no auth
@@ -205,8 +201,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'setupbulkprocedure/[fileID]/[batchID]',
   // setupbulkprocessor: session ownership only; no user auth
   'setupbulkprocessor/[schema]/[plotID]/[censusID]',
-  // specieslimits: raw schema string in query, no auth
-  'specieslimits/[plotID]/[plotCensusNumber]',
   // validatefailed: validateSchemaOrThrow (SQL safety only), no user auth
   'validatefailed/[schema]/[plotID]/[censusID]',
   // validations/run: uses safeFormatQuery, no auth
@@ -215,8 +209,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'validations/updatepassedvalidations',
   // validations/validate-query: raw schema from query, no auth
   'validations/validate-query',
-  // validations/validationerrordisplay: raw schema in query string, no auth
-  'validations/validationerrordisplay',
   // verifyprocessing: safeFormatQuery SQL safety, no user auth
   'verifyprocessing',
   // verifysession: safeFormatQuery SQL safety, no user auth

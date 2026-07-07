@@ -153,6 +153,30 @@ describe('POST /api/validations/procedures/[validationType] authz + server-owned
     expect(await coremeasurementsTableExists(connection, schema)).toBe(true);
   });
 
+  it('rejects a valid validationProcedureID when the path procedure name does not match the DB-owned row', async () => {
+    const [rows] = await connection.query(`SELECT ValidationID, ProcedureName FROM ${schema}.sitespecificvalidations WHERE IsEnabled = 1 LIMIT 1`);
+    const seeded = (rows as Array<{ ValidationID: number; ProcedureName: string }>)[0];
+    expect(seeded).toBeTruthy();
+
+    const mismatchedProcedureName = `${seeded.ProcedureName}_Mismatch`;
+    const { POST } = await import('@/app/api/validations/procedures/[validationType]/route');
+    const req = new NextRequest(`http://localhost/api/validations/procedures/${mismatchedProcedureName}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schema,
+        validationProcedureID: seeded.ValidationID,
+        p_CensusID: testData.census[0].censusID,
+        p_PlotID: testData.plots[0].plotID
+      })
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ validationType: mismatchedProcedureName }) });
+    expect(res.status).toBe(HTTP_BAD_REQUEST);
+    expect((await res.json()).code).toBe('VALIDATION_PROCEDURE_MISMATCH');
+    expect(await coremeasurementsTableExists(connection, schema)).toBe(true);
+  });
+
   it('ignores an injected cursorQuery even for a VALID enabled validationProcedureID (regression guard)', async () => {
     // Regression guard for the successful path: a valid, enabled ID reaches runValidation.
     // If someone rewires runValidation back to the client body, this DROP would execute.

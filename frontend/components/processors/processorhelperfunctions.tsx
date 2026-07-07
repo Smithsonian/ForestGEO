@@ -316,6 +316,11 @@ type CombinedCrossCensusLocationValidationResult = {
   error?: string;
 };
 
+export interface ValidationProcedureDefinition {
+  procedureName: string;
+  definition: string;
+}
+
 function mysqlBoolToBoolean(value: any): boolean {
   if (Buffer.isBuffer(value)) return value[0] === 1;
   return Boolean(value);
@@ -395,15 +400,15 @@ function formatValidationQuery(schema: string, cursorQuery: string, validationPr
 }
 
 /**
- * Loads the server-owned validation SQL (the Definition column) for a validation
- * by its ValidationID. Replaces trusting a client-supplied cursorQuery.
+ * Loads the server-owned validation procedure row for a validation by its
+ * ValidationID. Replaces trusting a client-supplied cursorQuery.
  * Returns null when no enabled validation matches.
  */
-export async function loadValidationDefinition(schema: string, validationProcedureID: number): Promise<string | null> {
+export async function loadValidationDefinition(schema: string, validationProcedureID: number): Promise<ValidationProcedureDefinition | null> {
   const connectionManager = ConnectionManager.getInstance();
-  const sql = safeFormatQuery(schema, 'SELECT Definition FROM ??.sitespecificvalidations WHERE ValidationID = ? AND IsEnabled = 1 LIMIT 1;');
-  const rows: Array<{ Definition: string }> = await connectionManager.executeQuery(sql, [validationProcedureID]);
-  return rows.length > 0 ? rows[0].Definition : null;
+  const sql = safeFormatQuery(schema, 'SELECT ProcedureName, Definition FROM ??.sitespecificvalidations WHERE ValidationID = ? AND IsEnabled = 1 LIMIT 1;');
+  const rows: Array<{ ProcedureName: string; Definition: string }> = await connectionManager.executeQuery(sql, [validationProcedureID]);
+  return rows.length > 0 ? { procedureName: rows[0].ProcedureName, definition: rows[0].Definition } : null;
 }
 
 // Generalized runValidation function

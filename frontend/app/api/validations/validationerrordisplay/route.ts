@@ -4,12 +4,13 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { fromQuery, withRouteAuthz } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest) {
+async function handler(request: NextRequest) {
   const conn = ConnectionManager.getInstance();
   const schema = request.nextUrl.searchParams.get('schema');
   const plotIDParam = request.nextUrl.searchParams.get('plotIDParam');
@@ -76,3 +77,5 @@ export async function GET(request: NextRequest) {
     await conn.closeConnection();
   }
 }
+
+export const GET = withRouteAuthz('validations/validationerrordisplay', handler, { schema: fromQuery('schema') });

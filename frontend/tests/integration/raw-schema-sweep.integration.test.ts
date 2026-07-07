@@ -6,6 +6,7 @@ import { HTTPResponses } from '@/config/macros';
 
 const AUTH_USER_EMAIL = 'integration-runner@forestgeo.test';
 const STRUCTURALLY_INVALID_SCHEMA = 'foo;DROP';
+const EMPTY_ROUTE_CONTEXT = { params: Promise.resolve({}) };
 
 // A single spy shared with the ConnectionManager mock so each test can assert
 // whether the route reached SQL. The raw-schema sweep converted these routes to
@@ -75,18 +76,20 @@ describe('raw-${schema} sweep: converted routes reject a structurally invalid sc
   it('details/cmid: safeFormatQuery throws on an invalid schema and no SQL is executed', async () => {
     const { GET } = await import('@/app/api/details/cmid/route');
     const req = new NextRequest(`http://localhost/api/details/cmid?cmid=1&schema=${encodeURIComponent(STRUCTURALLY_INVALID_SCHEMA)}`);
-    await expect(GET(req as any)).rejects.toThrow(/Invalid or unauthorized schema/);
+    const res = await GET(req as any, EMPTY_ROUTE_CONTEXT);
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    expect((await res.json()).code).toBe('INVALID_SCHEMA');
     expect(sharedState.executeQuerySpy).not.toHaveBeenCalled();
   });
 
-  it('validations/validationerrordisplay: invalid schema yields 500 from the caught validation error and no SQL', async () => {
+  it('validations/validationerrordisplay: invalid schema yields 400 from the route guard and no SQL', async () => {
     const { GET } = await import('@/app/api/validations/validationerrordisplay/route');
     const req = new NextRequest(
       `http://localhost/api/validations/validationerrordisplay?schema=${encodeURIComponent(STRUCTURALLY_INVALID_SCHEMA)}&plotIDParam=1&censusPCNParam=1`
     );
-    const res = await GET(req as any);
-    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
-    expect((await res.json()).error).toMatch(/Invalid or unauthorized schema/);
+    const res = await GET(req as any, EMPTY_ROUTE_CONTEXT);
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    expect((await res.json()).code).toBe('INVALID_SCHEMA');
     expect(sharedState.executeQuerySpy).not.toHaveBeenCalled();
   });
 
@@ -108,7 +111,7 @@ describe('raw-${schema} sweep: converted routes reject a structurally invalid sc
   it('positive control: a valid schema reaches SQL for details/cmid', async () => {
     const { GET } = await import('@/app/api/details/cmid/route');
     const req = new NextRequest(`http://localhost/api/details/cmid?cmid=999999&schema=${schema}`);
-    const res = await GET(req as any);
+    const res = await GET(req as any, EMPTY_ROUTE_CONTEXT);
     expect(res.status).toBe(HTTPResponses.OK);
     expect(sharedState.executeQuerySpy).toHaveBeenCalledTimes(1);
     // testData is seeded by setup; referenced to keep the fixture wired and lint happy.
