@@ -169,8 +169,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   // resettableview: uses validateContextualValues but skipSchemaAuth may apply;
   // direct schema path falls back without auth check
   'resettableview/[gridType]/[plotID]/[censusID]',
-  // setupbulkprocessor: session ownership only; no user auth
-  'setupbulkprocessor/[schema]/[plotID]/[censusID]',
   // changelog: uses validateContextualValues but skipSchemaAuth path exists via
   // URL-param fallback without auth; classify as unverified
   'changelog/overview/[changelogType]/[[...options]]',
