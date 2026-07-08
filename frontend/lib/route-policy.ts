@@ -166,8 +166,6 @@ export type RouteKey = keyof typeof ROUTE_POLICIES;
  * from this set.
  */
 export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
-  // Operates on schema without calling auth() or validateContextualValues
-  'bulkcrud',
   // resettableview: uses validateContextualValues but skipSchemaAuth may apply;
   // direct schema path falls back without auth check
   'resettableview/[gridType]/[plotID]/[censusID]',
