@@ -169,8 +169,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   // resettableview: uses validateContextualValues but skipSchemaAuth may apply;
   // direct schema path falls back without auth check
   'resettableview/[gridType]/[plotID]/[censusID]',
-  // setupbulkprocedure: session ownership only; no user auth
-  'setupbulkprocedure/[fileID]/[batchID]',
   // setupbulkprocessor: session ownership only; no user auth
   'setupbulkprocessor/[schema]/[plotID]/[censusID]',
   // changelog: uses validateContextualValues but skipSchemaAuth path exists via
