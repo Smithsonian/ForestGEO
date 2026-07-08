@@ -205,8 +205,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'validations/updatepassedvalidations',
   // validations/validate-query: raw schema from query, no auth
   'validations/validate-query',
-  // verifyprocessing: safeFormatQuery SQL safety, no user auth
-  'verifyprocessing',
   // verifysession: safeFormatQuery SQL safety, no user auth
   'verifysession',
   // verifyupload: safeFormatQuery SQL safety, no user auth
