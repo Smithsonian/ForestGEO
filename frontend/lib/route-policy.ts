@@ -178,8 +178,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'setupbulkprocedure/[fileID]/[batchID]',
   // setupbulkprocessor: session ownership only; no user auth
   'setupbulkprocessor/[schema]/[plotID]/[censusID]',
-  // validations/run: uses safeFormatQuery, no auth
-  'validations/run',
   // validations/updatepassedvalidations: raw schema from body/query, no auth
   'validations/updatepassedvalidations',
   // changelog: uses validateContextualValues but skipSchemaAuth path exists via

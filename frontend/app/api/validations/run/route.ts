@@ -4,6 +4,7 @@ import { HTTPResponses } from '@/config/macros';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
+import { fromBody, fromQuery, withRouteAuthz } from '@/lib/route-authz';
 
 export const runtime = 'nodejs';
 
@@ -19,8 +20,12 @@ const STALE_RUN_THRESHOLD_MINUTES = 15;
  * Uses SELECT ... FOR UPDATE to prevent two tabs from concurrently starting
  * validation for the same plot+census.  If a recent (< 15 min) running row
  * exists we return `{ conflict: true }` instead of creating a duplicate.
+ *
+ * Per-site authorization is enforced by `withRouteAuthz` (see the wrapped
+ * export below); it resolves the schema from the JSON body and rejects
+ * out-of-scope requests with 403 before this handler runs.
  */
-export async function POST(request: NextRequest) {
+async function postHandler(request: NextRequest) {
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
 
@@ -119,7 +124,7 @@ export async function POST(request: NextRequest) {
  * GET /api/validations/run?schema=&plotID=&censusID= — Get the latest run for
  * this plot+census.
  */
-export async function GET(request: NextRequest) {
+async function getHandler(request: NextRequest) {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
@@ -157,7 +162,7 @@ export async function GET(request: NextRequest) {
 /**
  * PATCH /api/validations/run — Update an existing validation run's progress.
  */
-export async function PATCH(request: NextRequest) {
+async function patchHandler(request: NextRequest) {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
@@ -213,3 +218,10 @@ export async function PATCH(request: NextRequest) {
     await connectionManager.closeConnection();
   }
 }
+
+// Per-method schema resolvers: POST/PATCH read the schema from the JSON body,
+// GET reads it from the query string. Each method enforces per-site authz
+// before its handler runs.
+export const POST = withRouteAuthz('validations/run', postHandler, { schema: fromBody('schema') });
+export const GET = withRouteAuthz('validations/run', getHandler, { schema: fromQuery('schema') });
+export const PATCH = withRouteAuthz('validations/run', patchHandler, { schema: fromBody('schema') });
