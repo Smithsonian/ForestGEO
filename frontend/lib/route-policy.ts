@@ -205,9 +205,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'sqlpacketload',
   // prevalidate: requireSession confirms identity but no schema-ownership check
   'prevalidate',
-  // export: requireSession confirms identity but schema access is not verified
-  // via a recognised signal (uses custom userCanExportSchema helper)
-  'export/ctfs-sql/[schema]/[plotID]/[censusID]',
   // export rebuild-view: schema-scoped via userCanExportSchema (custom helper the
   // static analyzer does not recognize), no per-row verification
   'export/ctfs-rebuild-view/[schema]'
