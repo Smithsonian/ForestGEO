@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { loggerMock } = vi.hoisted(() => ({
@@ -35,6 +36,15 @@ function createFakeConnection() {
     on: vi.fn(),
     query: vi.fn().mockResolvedValue([[]])
   };
+}
+
+// A recyclable connection: a real emitter (so listenerCount/emit work) plus the
+// release() method mysql2 exposes. Modelling recycling means getConnection() hands
+// back this SAME object on every acquire.
+function createRecyclableConnection() {
+  const connection = new EventEmitter() as EventEmitter & { release: () => void };
+  connection.release = () => connection.emit('release');
+  return connection;
 }
 
 describe('PoolMonitor', () => {
@@ -144,6 +154,52 @@ describe('PoolMonitor', () => {
     expect(pool.query).not.toHaveBeenCalledWith(expect.stringMatching(/^KILL /));
     expect(pool.end).not.toHaveBeenCalled();
     expect(monitor.isPoolClosed()).toBe(false);
+
+    await monitor.closeAllConnections();
+  });
+
+  it('attaches query/release listeners at most once per recycled physical connection', async () => {
+    const ACQUIRE_COUNT = 5;
+    const EXPECTED_LISTENER_COUNT = 1;
+    const QUERY_EVENT = 'query';
+    const RELEASE_EVENT = 'release';
+
+    const recycledConnection = createRecyclableConnection();
+    const pool = createFakePool({
+      // Simulate mysql2 recycling: the same physical object comes back every acquire.
+      getConnection: vi.fn().mockResolvedValue(recycledConnection)
+    });
+
+    const { PoolMonitor } = await vi.importActual<typeof import('./poolmonitor')>('./poolmonitor');
+    const monitor = new PoolMonitor({ connectionLimit: 2 }) as unknown as {
+      pool: ReturnType<typeof createFakePool>;
+      poolClosed: boolean;
+      resetInactivityTimer: () => void;
+      getConnection: () => Promise<unknown>;
+      closeAllConnections: () => Promise<void>;
+    };
+    monitor.pool = pool;
+    monitor.poolClosed = false;
+
+    for (let acquire = 0; acquire < ACQUIRE_COUNT; acquire += 1) {
+      await monitor.getConnection();
+    }
+
+    // The core regression assertion: without the WeakSet guard these climb to
+    // ACQUIRE_COUNT (5), tripping MaxListenersExceededWarning and leaking listeners.
+    expect(recycledConnection.listenerCount(QUERY_EVENT)).toBe(EXPECTED_LISTENER_COUNT);
+    expect(recycledConnection.listenerCount(RELEASE_EVENT)).toBe(EXPECTED_LISTENER_COUNT);
+
+    // Behavior preserved: the single surviving listener still resets the inactivity
+    // timer when the connection emits query/release. The attached arrow closures call
+    // this.resetInactivityTimer() dynamically, so a post-attach spy still observes them.
+    const resetSpy = vi.fn();
+    monitor.resetInactivityTimer = resetSpy;
+
+    recycledConnection.emit(QUERY_EVENT);
+    recycledConnection.emit(RELEASE_EVENT);
+
+    expect(resetSpy).toHaveBeenCalledTimes(2);
 
     await monitor.closeAllConnections();
   });
