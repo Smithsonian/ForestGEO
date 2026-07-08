@@ -55,11 +55,14 @@ vi.mock('@/ailogger', () => ({
   default: { error: loggerErr, info: vi.fn(), warn: vi.fn() }
 }));
 
-// Mock schema validation to accept test schemas
+// Mock schema validation to accept test schemas. safeFormatQuery/safeEscapeId back the
+// generic (whitelisted-table) branch; they mirror the real backtick-escaping behavior.
 vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     return ['myschema', 'testschema'].includes(schema);
-  })
+  }),
+  safeFormatQuery: vi.fn((schema: string, sql: string) => sql.replace(/\?\?/g, `\`${schema}\``)),
+  safeEscapeId: vi.fn((id: string) => `\`${id}\``)
 }));
 
 // Mock context validation to allow tests to control schema/plotID/censusID
@@ -303,12 +306,12 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     expect(getMapperSpy).toHaveBeenCalledWith('species');
   });
 
-  it('default branch: generic SELECT * FROM schema.table; maps results', async () => {
+  it('generic branch: a whitelisted table yields a safe SELECT * FROM schema.table; maps results', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ A: 1 }, { A: 2 }]);
+    const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ A: 1 }, { A: 2 }]);
 
     const req = makeRequest('myschema');
-    const res = await GET(req, makeProps(['randomtable', '1', '2']));
+    const res = await GET(req, makeProps(['attributes', '1', '2']));
 
     expect(res.status).toBe(HTTPResponses.OK);
     expect(await res.json()).toEqual([
@@ -316,7 +319,23 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
       { A: 2, mapped: true }
     ]);
 
-    expect(getMapperSpy).toHaveBeenCalledWith('randomtable');
+    // Schema and table are both identifier-escaped via safeFormatQuery/safeEscapeId.
+    const [sql] = exec.mock.calls[0];
+    expect(String(sql)).toContain('SELECT * FROM `myschema`.`attributes`');
+    expect(getMapperSpy).toHaveBeenCalledWith('attributes');
+  });
+
+  it('generic branch: rejects a non-whitelisted table with 400 INVALID_DATATYPE and runs no query', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery');
+
+    const req = makeRequest('myschema');
+    const res = await GET(req, makeProps(['randomtable', '1', '2']));
+
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    const body = await res.json();
+    expect(body.code).toBe('INVALID_DATATYPE');
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it('on DB error: logs via ailogger.error and returns 500 error; always closes connection', async () => {

@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { runCombinedDBHValidations } from '@/components/processors/processorhelperfunctions';
 import { streamWithHeartbeats, STREAMING_RESPONSE_HEADERS } from '@/components/processors/streamingvalidation';
+import { fromBody, withRouteAuthz } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 
 export const runtime = 'nodejs';
@@ -10,7 +11,7 @@ export const runtime = 'nodejs';
 // route's 10-minute ceiling so Azure doesn't kill the request early.
 export const maxDuration = 600;
 
-export async function POST(request: NextRequest) {
+async function handler(request: NextRequest) {
   try {
     const body = await request.json();
     const { schema, p_CensusID, p_PlotID } = body;
@@ -27,3 +28,5 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: error.message, success: false }, { status: 500 });
   }
 }
+
+export const POST = withRouteAuthz('validations/procedures/shared-dbh', handler, { schema: fromBody('schema') });

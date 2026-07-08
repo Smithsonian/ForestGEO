@@ -23,7 +23,7 @@
 
 export type RoutePolicy = 'public' | 'authed' | 'site-scoped' | 'admin';
 
-export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
+export const ROUTE_POLICIES = {
   // ── Public routes (no auth required) ─────────────────────────────────────
   // Health probe – intentionally public for Azure App Service health checks
   health: 'public',
@@ -147,7 +147,11 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   'files/[operation]': 'site-scoped',
   // Census rollover (currently a no-op stub, but operates on site data)
   'rollover/[primaryKey]/[schema]/[plotIDParam]/[censusIDParam]/[newCensusIDParam]': 'site-scoped'
-};
+} satisfies Record<string, RoutePolicy>;
+
+/** Compile-time union of every declared route key. Adoption sites use this so a
+ * typo'd or stale routeKey is a build error, not a runtime authz downgrade. */
+export type RouteKey = keyof typeof ROUTE_POLICIES;
 
 /**
  * Site-scoped routes that do NOT yet reference a recognised authz signal in
@@ -164,15 +168,11 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
 export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   // Operates on schema without calling auth() or validateContextualValues
   'bulkcrud',
-  // Details endpoint uses raw schema from query string, no auth check
-  'details/cmid',
   // fixeddata GET uses isValidSchema but no auth; POST/PATCH/DELETE delegate to
   // coreapifunctions which also lack auth
   'fixeddata/[dataType]/[[...slugs]]',
   // fixeddatafilter GET and POST delegate to coreapifunctions; no auth check
   'fixeddatafilter/[dataType]/[[...slugs]]',
-  // formdownload: uses isValidSchema but no auth
-  'formdownload/[dataType]/[[...slugs]]',
   // formsearch: validates schema against isValidSchema but no auth
   'formsearch/[dataType]',
   // formvalidation: validates schema but no auth
@@ -201,24 +201,14 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'setupbulkprocedure/[fileID]/[batchID]',
   // setupbulkprocessor: session ownership only; no user auth
   'setupbulkprocessor/[schema]/[plotID]/[censusID]',
-  // specieslimits: raw schema string in query, no auth
-  'specieslimits/[plotID]/[plotCensusNumber]',
   // validatefailed: validateSchemaOrThrow (SQL safety only), no user auth
   'validatefailed/[schema]/[plotID]/[censusID]',
-  // validations/procedures/*: accept schema from POST body, no auth check
-  'validations/procedures/[validationType]',
-  'validations/procedures/shared-cross-census-location',
-  'validations/procedures/shared-dbh',
   // validations/run: uses safeFormatQuery, no auth
   'validations/run',
   // validations/updatepassedvalidations: raw schema from body/query, no auth
   'validations/updatepassedvalidations',
   // validations/validate-query: raw schema from query, no auth
   'validations/validate-query',
-  // validations/validationerrordisplay: raw schema in query string, no auth
-  'validations/validationerrordisplay',
-  // validations/validationlist: raw schema in query string, no auth
-  'validations/validationlist',
   // verifyprocessing: safeFormatQuery SQL safety, no user auth
   'verifyprocessing',
   // verifysession: safeFormatQuery SQL safety, no user auth

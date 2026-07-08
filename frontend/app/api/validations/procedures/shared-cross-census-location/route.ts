@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { runCombinedCrossCensusLocationValidations } from '@/components/processors/processorhelperfunctions';
 import { streamWithHeartbeats, STREAMING_RESPONSE_HEADERS } from '@/components/processors/streamingvalidation';
+import { fromBody, withRouteAuthz } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 
 export const runtime = 'nodejs';
@@ -11,7 +12,7 @@ export const runtime = 'nodejs';
 // and return an error instead of the client seeing an abrupt disconnect.
 export const maxDuration = 1500;
 
-export async function POST(request: NextRequest) {
+async function handler(request: NextRequest) {
   try {
     const body = await request.json();
     const { schema, p_CensusID, p_PlotID } = body;
@@ -28,3 +29,5 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: error.message, success: false }, { status: 500 });
   }
 }
+
+export const POST = withRouteAuthz('validations/procedures/shared-cross-census-location', handler, { schema: fromBody('schema') });

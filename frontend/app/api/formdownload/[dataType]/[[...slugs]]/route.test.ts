@@ -32,6 +32,10 @@ vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() }
 }));
 
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
 // Mock ConnectionManager to preserve your shared singleton but guarantee getInstance()
 vi.mock('@/lib/db/connectionmanager', async () => {
   const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
@@ -76,17 +80,17 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
   });
 
   it('returns 400 if data type or slugs not provided', async () => {
-    const res = await GET(makeRequest(), makeProps(undefined as any, undefined as any));
+    const res = await GET(makeRequest(), makeProps(undefined as any, ['forestgeo_testing']));
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
     const body = await res.json();
     expect(body.error).toMatch(/data type or slugs not provided/i);
   });
 
-  it('returns 400 if schema missing', async () => {
+  it('returns 400 if schema missing from the route params', async () => {
     const res = await GET(makeRequest(), makeProps('attributes', [undefined as any, '1', '2', fm({})]));
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
     const body = await res.json();
-    expect(body.error).toMatch(/no schema provided/i);
+    expect(body.code).toBe('INVALID_SCHEMA');
   });
 
   it('attributes: 200 with mapped rows; uses search+filter stubs; closes connection', async () => {
@@ -100,7 +104,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
       ]);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    const props = makeProps('attributes', ['myschema', '10', '20', fm({ quickFilterValues: ['oak'], items: [{ f: 1 }] })]);
+    const props = makeProps('attributes', ['forestgeo_testing', '10', '20', fm({ quickFilterValues: ['oak'], items: [{ f: 1 }] })]);
     const res = await GET(makeRequest(), props);
 
     expect(res.status).toBe(HTTPResponses.OK);
@@ -110,7 +114,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     ]);
 
     const sql = exec.mock.calls[1][0] as string;
-    expect(sql).toMatch(/FROM myschema\.attributes a/i);
+    expect(sql).toMatch(/FROM forestgeo_testing\.attributes a/i);
     expect(sql).toMatch(/\(SEARCH_STUB OR FILTER_STUB\)/i);
 
     expect(mapperSpies.getMapperSpy).toHaveBeenCalledWith('attributes');
@@ -128,7 +132,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
       ]);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    const props = makeProps('personnel', ['myschema', '1', '2', fm({ quickFilterValues: ['gr'], items: [{ f: 2 }] })]);
+    const props = makeProps('personnel', ['forestgeo_testing', '1', '2', fm({ quickFilterValues: ['gr'], items: [{ f: 2 }] })]);
     const res = await GET(makeRequest(), props);
 
     expect(res.status).toBe(HTTPResponses.OK);
@@ -138,7 +142,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     ]);
 
     const sql = (cm.executeQuery as any).mock.calls[1][0] as string;
-    expect(sql).toMatch(/FROM myschema\.personnel p\s+JOIN myschema\.roles r/i);
+    expect(sql).toMatch(/FROM forestgeo_testing\.personnel p\s+JOIN forestgeo_testing\.roles r/i);
     expect(sql).toMatch(/\(SEARCH_STUB OR FILTER_STUB\)/);
 
     // personnel path doesn't call MapperFactory
@@ -164,7 +168,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
       ]);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    const props = makeProps('species', ['myschema', '7', '8', fm({ quickFilterValues: ['AB'], items: [{ f: 3 }] })]);
+    const props = makeProps('species', ['forestgeo_testing', '7', '8', fm({ quickFilterValues: ['AB'], items: [{ f: 3 }] })]);
     const res = await GET(makeRequest(), props);
 
     expect(res.status).toBe(HTTPResponses.OK);
@@ -182,7 +186,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     ]);
 
     const sql = (cm.executeQuery as any).mock.calls[1][0] as string;
-    expect(sql).toMatch(/FROM myschema\.species sp\s+LEFT JOIN myschema\.genus/i);
+    expect(sql).toMatch(/FROM forestgeo_testing\.species sp\s+LEFT JOIN forestgeo_testing\.genus/i);
     expect(sql).toMatch(/\(SEARCH_STUB OR FILTER_STUB\)/);
     expect(close).toHaveBeenCalledTimes(1);
   });
@@ -204,7 +208,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
       ]);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    const props = makeProps('quadrats', ['myschema', '7', '8', fm({ quickFilterValues: ['Q'], items: [{ f: 4 }] })]);
+    const props = makeProps('quadrats', ['forestgeo_testing', '7', '8', fm({ quickFilterValues: ['Q'], items: [{ f: 4 }] })]);
     const res = await GET(makeRequest(), props);
 
     expect(res.status).toBe(HTTPResponses.OK);
@@ -221,7 +225,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     ]);
 
     const sql = (cm.executeQuery as any).mock.calls[1][0] as string;
-    expect(sql).toMatch(/FROM myschema\.quadrats q/i);
+    expect(sql).toMatch(/FROM forestgeo_testing\.quadrats q/i);
     expect(sql).toMatch(/\(SEARCH_STUB OR FILTER_STUB\)/);
     expect(close).toHaveBeenCalledTimes(1);
   });
@@ -257,7 +261,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
       tss: ['multi stem']
     };
 
-    const res = await GET(makeRequest(), makeProps('measurements', ['myschema', '7', '80', fm(fmParam)]));
+    const res = await GET(makeRequest(), makeProps('measurements', ['forestgeo_testing', '7', '80', fm(fmParam)]));
 
     expect(res.status).toBe(HTTPResponses.OK);
     expect(await res.json()).toEqual([
@@ -285,7 +289,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     expect(sql).toMatch(/cm\.IsValidated = TRUE/);
     expect(sql).toMatch(/cm\.IsValidated = FALSE/);
     expect(sql).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('multi stem'\), '\$\.treestemstate'\) = 1/);
-    expect(sql).toMatch(/LEFT JOIN myschema\.sitespecificvalidations vp/i);
+    expect(sql).toMatch(/LEFT JOIN forestgeo_testing\.sitespecificvalidations vp/i);
     expect(sql).toMatch(/COALESCE\(/);
     expect(sql).toMatch(/\(SEARCH_STUB OR FILTER_STUB\)/);
     expect(close).toHaveBeenCalledTimes(1);
@@ -301,7 +305,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
 
     const res = await GET(
       makeRequest(),
-      makeProps('measurements', ['myschema', '7', '80', fm({ quickFilterValues: [], items: [], visible: [], tss: ['multi stem'] })])
+      makeProps('measurements', ['forestgeo_testing', '7', '80', fm({ quickFilterValues: [], items: [], visible: [], tss: ['multi stem'] })])
     );
 
     expect(res.status).toBe(HTTPResponses.OK);
@@ -315,7 +319,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('columns fail'));
 
-    const res = await GET(makeRequest(), makeProps('attributes', ['myschema', '1', '2', fm({})]));
+    const res = await GET(makeRequest(), makeProps('attributes', ['forestgeo_testing', '1', '2', fm({})]));
 
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const body = await res.json();
