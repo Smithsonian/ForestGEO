@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
+// A 'global' admin passes the per-site access gate.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
 const mockExecuteQuery = vi.fn();
 const mockCloseConnection = vi.fn(async () => {});
 
@@ -13,6 +19,7 @@ vi.mock('@/lib/db/connectionmanager', () => ({
 }));
 
 vi.mock('@/lib/db/sqlsecurity', () => ({
+  isValidSchema: vi.fn(() => true),
   safeFormatQuery: vi.fn((_schema: string, query: string) => query)
 }));
 
@@ -44,7 +51,9 @@ describe('verifyprocessing route', () => {
       .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }]);
 
-    const response = await GET(makeRequest('http://localhost/api/verifyprocessing?schema=myschema&plotID=1&censusID=2&fileId=file-a.csv'));
+    const response = await GET(makeRequest('http://localhost/api/verifyprocessing?schema=myschema&plotID=1&censusID=2&fileId=file-a.csv'), {
+      params: Promise.resolve({})
+    });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
@@ -71,7 +80,9 @@ describe('verifyprocessing route', () => {
       .mockResolvedValueOnce([{ count: 2 }])
       .mockResolvedValueOnce([{ count: 4 }]);
 
-    const response = await GET(makeRequest('http://localhost/api/verifyprocessing?schema=myschema&plotID=1&censusID=2&fileId=file-a.csv'));
+    const response = await GET(makeRequest('http://localhost/api/verifyprocessing?schema=myschema&plotID=1&censusID=2&fileId=file-a.csv'), {
+      params: Promise.resolve({})
+    });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
