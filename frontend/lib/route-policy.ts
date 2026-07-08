@@ -220,7 +220,5 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'export/ctfs-sql/[schema]/[plotID]/[censusID]',
   // export rebuild-view: schema-scoped via userCanExportSchema (custom helper the
   // static analyzer does not recognize), no per-row verification
-  'export/ctfs-rebuild-view/[schema]',
-  // files: requireSession confirms identity but no per-schema ownership check
-  'files/[operation]'
+  'export/ctfs-rebuild-view/[schema]'
 ]);
