@@ -98,7 +98,7 @@ plots                            family
 ### Option 1: Interactive Mode (Recommended for First-Time Users)
 
 ```bash
-cd frontend/db-migrations
+cd frontend/db/migrations
 ./run_migration.sh
 ```
 
@@ -110,7 +110,7 @@ The script will prompt you for:
 ### Option 2: Command Line (Recommended for Automation)
 
 ```bash
-cd frontend/db-migrations
+cd frontend/db/migrations
 ./run_migration.sh \
   --source stable_mpala \
   --target forestgeo_mpala \
@@ -127,15 +127,15 @@ MYSQL_PWD='<password>' mysql -h forestgeo-mysqldataserver.mysql.database.azure.c
   -u azureroot --ssl -D forestgeo_mpala
 
 # 2. Run scripts in order
-SOURCE frontend/db-migrations/00_migration_framework.sql;
-SOURCE frontend/sqlscripting/resetschema.sql;
+SOURCE frontend/db/migrations/00_migration_framework.sql;
+SOURCE frontend/db/sql/resetschema.sql;
 
 SET @source_schema = 'stable_mpala';
 SET @location_name = 'Mpala';
 SET @country_name = 'Kenya';
-SOURCE frontend/db-migrations/01_migrate_all_data.sql;
-SOURCE frontend/db-migrations/02_validate_migration.sql;
-SOURCE frontend/db-migrations/03_apply_schema_changes.sql;
+SOURCE frontend/db/migrations/01_migrate_all_data.sql;
+SOURCE frontend/db/migrations/02_validate_migration.sql;
+SOURCE frontend/db/migrations/03_apply_schema_changes.sql;
 ```
 
 ### Checking Progress
@@ -470,7 +470,7 @@ This will:
 **Option 2: Manual SQL**
 ```sql
 -- Connect to target schema
-SOURCE frontend/db-migrations/99_cleanup.sql;
+SOURCE frontend/db/migrations/99_cleanup.sql;
 ```
 
 ### Cleanup Verification
@@ -555,7 +555,7 @@ GROUP BY cm.CensusID, st.CensusID;
 
 Or manually:
 ```sql
-SOURCE frontend/sqlscripting/resetschema.sql;
+SOURCE frontend/db/sql/resetschema.sql;
 ```
 
 #### Issue: Migration takes too long (> 30 minutes)
@@ -657,7 +657,7 @@ cd frontend
 Or for a single schema:
 ```bash
 MYSQL_PWD='<password>' mysql -h <host> -u <user> --ssl \
-  -D forestgeo_mpala < sqlscripting/storedprocedures.sql
+  -D forestgeo_mpala < db/sql/storedprocedures.sql
 ```
 
 ### Schema Synchronization

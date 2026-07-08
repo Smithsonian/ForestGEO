@@ -20,8 +20,8 @@ import { Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { useAppStore } from '@/config/store/appstore';
-import type { Site, Plot } from '@/config/sqlrdsdefinitions/zones';
-import type { OrgCensusRDS } from '@/config/sqlrdsdefinitions/timekeeping';
+import type { Site, Plot } from '@/lib/db/definitions/zones';
+import type { OrgCensusRDS } from '@/lib/db/definitions/timekeeping';
 
 const isE2EHarnessEnabled = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
 

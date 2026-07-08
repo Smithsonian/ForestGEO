@@ -3,14 +3,14 @@ import { HTTPResponses } from '@/config/macros';
 import { NextRequest } from 'next/server';
 // --------- Import the handler AFTER mocks ---------
 import { POST } from './route';
-import ConnectionManager from '@/config/connectionmanager'; // --------- Helpers ---------
+import ConnectionManager from '@/lib/db/connectionmanager'; // --------- Helpers ---------
 
 // --------- Mocks (must be BEFORE importing the route) ---------
 
 // Singleton-safe ConnectionManager wrapper that respects your setup mocks.
 // Guarantees getInstance() returns an object with the needed methods.
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}));
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}));
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
@@ -47,7 +47,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 // Mock schema validation to accept test schemas
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     return ['myschema', 'testschema'].includes(schema);
   }),

@@ -29,11 +29,11 @@ vi.mock('@/lib/contextvalidation', () => ({
   validateContextualValues: validateContextualValuesMock
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   validateSchemaOrThrow: validateSchemaOrThrowMock
 }));
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({
       executeQuery: mockExecuteQuery,

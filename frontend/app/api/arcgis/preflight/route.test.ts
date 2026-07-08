@@ -23,14 +23,14 @@ vi.mock('@/config/editplan/scopeguard', () => ({
   assertCanEditMeasurementScope: mocks.assertCanEditMeasurementScope,
   ScopeAccessError: class ScopeAccessError extends Error {}
 }));
-vi.mock('@/config/utils/sqlsecurity', () => ({ isValidSchema: mocks.isValidSchema }));
+vi.mock('@/lib/db/sqlsecurity', () => ({ isValidSchema: mocks.isValidSchema }));
 vi.mock('@/lib/arcgis/workbook-reader', () => ({
   readArcgisWorkbookDetailed: mocks.readArcgisWorkbookDetailed,
   readArcgisSheetMetadata: mocks.readArcgisSheetMetadata
 }));
 vi.mock('@/lib/arcgis/transform', () => ({ transformArcgisWorkbook: mocks.transformArcgisWorkbook }));
 vi.mock('@/lib/arcgis/import-session', () => ({ createArcgisImportSession: mocks.createArcgisImportSession }));
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: { getInstance: () => ({}) }
 }));
 vi.mock('@/ailogger', () => ({ default: { error: mocks.loggerError, warn: mocks.loggerWarn } }));

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
 // ===== hoisted spies/fixtures used by mocks =====
 const { loggerInfo, loggerError, mockAuth, mockAssertSchemaAccess } = vi.hoisted(() => {
@@ -17,8 +17,8 @@ const { loggerInfo, loggerError, mockAuth, mockAssertSchemaAccess } = vi.hoisted
 // ===== Mocks (must be before importing the route) =====
 
 // Wrap ConnectionManager so getInstance() always returns a usable instance
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
@@ -49,7 +49,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 // SQL security validation
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   validateSchemaOrThrow: vi.fn((schema: string) => {
     if (!schema || schema.includes('invalid')) {
       throw new Error('Invalid schema');

@@ -41,7 +41,7 @@ Integration tests verify that the backend API calls work correctly with the SQL 
 
 ### 4. Schema Loading from SQL Files
 
-**Decision:** Load schema and stored procedures from the actual SQL files in `sqlscripting/`.
+**Decision:** Load schema and stored procedures from the actual SQL files in `db/sql/`.
 
 **Rationale:**
 - Tests always run against current schema
@@ -101,7 +101,7 @@ frontend/
 │   │   └── local-db-setup.ts      # Database setup utilities
 │   └── integration/
 │       └── validation-scenarios.integration.test.ts
-├── sqlscripting/
+├── db/sql/
 │   ├── tablestructures.sql        # Schema definitions
 │   └── storedprocedures.sql       # Validation & ingestion logic
 ├── sampledata/
@@ -317,7 +317,7 @@ export TEST_DB_PASSWORD=testpassword
 Error: Table 'forestgeo_test_xxx.coremeasurements' doesn't exist
 ```
 
-**Solution:** Ensure `sqlscripting/tablestructures.sql` exists and is valid SQL.
+**Solution:** Ensure `db/sql/tablestructures.sql` exists and is valid SQL.
 
 ### Stored Procedure Error
 
@@ -325,7 +325,7 @@ Error: Table 'forestgeo_test_xxx.coremeasurements' doesn't exist
 Error: PROCEDURE forestgeo_test_xxx.bulkingestionprocess does not exist
 ```
 
-**Solution:** Check `sqlscripting/storedprocedures.sql` for syntax errors. The file must be valid MySQL 8.0 syntax.
+**Solution:** Check `db/sql/storedprocedures.sql` for syntax errors. The file must be valid MySQL 8.0 syntax.
 
 ## CI/CD Integration
 
@@ -924,7 +924,7 @@ The integration tests call `bulkingestionprocess` directly but **do not call the
 
 ### Validation Definitions Source
 
-Validation definitions are loaded from `sqlscripting/corequeries.sql` into `sitespecificvalidations` table.
+Validation definitions are loaded from `db/sql/corequeries.sql` into `sitespecificvalidations` table.
 
 ### Validation Status Matrix
 
@@ -971,8 +971,8 @@ Validation definitions are loaded from `sqlscripting/corequeries.sql` into `site
 
 | File | Purpose |
 |------|---------|
-| `sqlscripting/corequeries.sql` | Validation SQL definitions |
-| `sqlscripting/storedprocedures.sql` | Inline validations in `bulkingestionprocess` |
+| `db/sql/corequeries.sql` | Validation SQL definitions |
+| `db/sql/storedprocedures.sql` | Inline validations in `bulkingestionprocess` |
 | `app/api/validations/procedures/[validationType]/route.ts` | API endpoint for running validations |
 | `components/processors/processorhelperfunctions.tsx` | `runValidation()` function |
 
@@ -1006,7 +1006,7 @@ Test CSV files for triggering all validations:
 
 **Root Cause:** The `loadValidationDefinitions` parser in `local-db-setup.ts` uses a simple heuristic to detect end-of-statement: `trimmed.endsWith(');')`. ValidationID 12's Definition SQL ended with `);` on its own line, which fooled the parser into thinking the INSERT statement was complete before the actual closing `', '', false);`.
 
-**Fix:** Modified `sqlscripting/corequeries.sql` to put the closing values on the same line as the Definition's final semicolon (matching the pattern used by ValidationID 13 and others).
+**Fix:** Modified `db/sql/corequeries.sql` to put the closing values on the same line as the Definition's final semicolon (matching the pattern used by ValidationID 13 and others).
 
 **Before:**
 ```sql

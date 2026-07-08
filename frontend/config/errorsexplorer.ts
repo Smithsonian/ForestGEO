@@ -1,4 +1,4 @@
-import type { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
+import type { MeasurementsSummaryRDS } from '@/lib/db/definitions/views';
 
 export type ErrorExplorerSource = 'all' | 'validation' | 'ingestion';
 export type ContradictionType = 'duplicate_tag_stem' | 'same_batch_conflict';

@@ -1,5 +1,5 @@
-import ConnectionManager from '@/config/connectionmanager';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 
 export type EditOperationType = 'single-row-edit' | 'bulk-revision-row' | 'revert';
@@ -43,7 +43,7 @@ export interface EditOperationWriteInput {
   createdBy: string;
 }
 
-// Keep in sync with the migration file: frontend/db-migrations/unified-measurements-migrations/54_create_edit_operations.sql.
+// Keep in sync with the migration file: frontend/db/migrations/unified-measurements-migrations/54_create_edit_operations.sql.
 const CREATE_EDIT_OPERATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS ??.edit_operations (
     EditOperationID INT AUTO_INCREMENT PRIMARY KEY,

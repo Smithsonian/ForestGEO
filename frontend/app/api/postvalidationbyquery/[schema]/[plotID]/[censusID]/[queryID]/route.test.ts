@@ -3,13 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ---- Import after mocks ----
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager'; // ---- Helpers ----
+import ConnectionManager from '@/lib/db/connectionmanager'; // ---- Helpers ----
 
 // ---- Mocks (must be declared before importing the route) ----
 
 // Stable, shared ConnectionManager singleton
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
@@ -56,7 +56,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 // Mock schema validation to accept test schemas
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     return ['myschema', 'testschema'].includes(schema);
   }),

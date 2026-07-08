@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import { PATCH, POST, DELETE } from './coreapifunctions';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import MapperFactory from '@/config/datamapper';
 import { applyEdit } from '@/config/editplan/apply';
 // Keep measurementerrors mocked even though no test reads the mock directly; it
@@ -10,13 +10,13 @@ import { applyEdit } from '@/config/editplan/apply';
 const PLAN_HASH = 'a'.repeat(64);
 
 // Mock dependencies
-vi.mock('@/config/connectionmanager');
+vi.mock('@/lib/db/connectionmanager');
 vi.mock('@/config/datamapper');
 vi.mock('@/components/processors/processorhelperfunctions', () => ({
   AllTaxonomiesViewQueryConfig: { mockConfig: true },
   handleUpsertForSlices: vi.fn()
 }));
-vi.mock('@/utils/errorhandler', () => ({
+vi.mock('@/lib/errorhandler', () => ({
   handleError: vi.fn(error => NextResponse.json({ error: error.message }, { status: 500 }))
 }));
 vi.mock('@/app/actions/cookiemanager', () => ({

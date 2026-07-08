@@ -1,4 +1,4 @@
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import {
   ContradictionType,
   dedupeNumbers,
@@ -12,7 +12,7 @@ import {
   ErrorExplorerRow,
   INGESTION_ERROR_FIELD_MAP
 } from '@/config/errorsexplorer';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 type ExplorerConnection = ReturnType<typeof ConnectionManager.getInstance>;
 

@@ -18,7 +18,7 @@ import {
   Stack,
   Typography
 } from '@mui/joy';
-import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { Plot } from '@/lib/db/definitions/zones';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import Grid from '@mui/joy/Grid';

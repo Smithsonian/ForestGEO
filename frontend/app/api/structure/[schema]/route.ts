@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility

@@ -25,7 +25,7 @@ import VerifiedIcon from '@mui/icons-material/Verified';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import QueryStatsIcon from '@mui/icons-material/QueryStats';
 import moment from 'moment';
-import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
+import { PostValidationQueriesRDS } from '@/lib/db/definitions/validations';
 
 // ============================================================================
 // Types

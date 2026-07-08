@@ -16,7 +16,7 @@ Add a code validation stage between Stage 1 (early validation) and Stage 2 (dedu
 
 ### Change 1: New error code in `measurement_errors` seed data
 
-**File:** `sqlscripting/tablestructures.sql`
+**File:** `db/sql/tablestructures.sql`
 
 Add to the `INSERT IGNORE INTO measurement_errors` block:
 
@@ -28,7 +28,7 @@ The existing `('validation', '14', 'Invalid attribute code')` row is left in pla
 
 ### Change 2: New Stage 1b — Code Validation
 
-**File:** `sqlscripting/storedprocedures.sql` (between Stage 1 and Stage 2)
+**File:** `db/sql/storedprocedures.sql` (between Stage 1 and Stage 2)
 
 ```sql
 -- STAGE 1b: CODE VALIDATION
@@ -63,7 +63,7 @@ Behavior:
 
 ### Change 3: Fix Stage 2 dedup exclusion
 
-**File:** `sqlscripting/storedprocedures.sql` (Stage 2 `initial_dup_filter` query)
+**File:** `db/sql/storedprocedures.sql` (Stage 2 `initial_dup_filter` query)
 
 Change:
 ```sql
@@ -78,7 +78,7 @@ This is a strict superset — `hard_failure_rows` already contains everything fr
 
 ### Change 4: Simplify Stage 9 attribute materialization
 
-**File:** `sqlscripting/storedprocedures.sql` (Stage 9)
+**File:** `db/sql/storedprocedures.sql` (Stage 9)
 
 Since all codes reaching Stage 9 are now pre-validated, remove:
 
@@ -106,14 +106,14 @@ The `INSERT IGNORE` on `cmattributes` is retained as protection against duplicat
 
 | File | Change |
 |------|--------|
-| `sqlscripting/tablestructures.sql` | Add `INVALID_ATTRIBUTE_CODE` to `measurement_errors` seed data |
-| `sqlscripting/storedprocedures.sql` | Add Stage 1b code validation between Stage 1 and Stage 2 |
-| `sqlscripting/storedprocedures.sql` | Change Stage 2 dedup exclusion to use `hard_failure_rows` |
-| `sqlscripting/storedprocedures.sql` | Remove INNER JOIN attributes guard and error '14' logging from Stage 9 |
+| `db/sql/tablestructures.sql` | Add `INVALID_ATTRIBUTE_CODE` to `measurement_errors` seed data |
+| `db/sql/storedprocedures.sql` | Add Stage 1b code validation between Stage 1 and Stage 2 |
+| `db/sql/storedprocedures.sql` | Change Stage 2 dedup exclusion to use `hard_failure_rows` |
+| `db/sql/storedprocedures.sql` | Remove INNER JOIN attributes guard and error '14' logging from Stage 9 |
 
 ### Change 5: Add `invalid_code_rows` to temp table cleanup
 
-**File:** `sqlscripting/storedprocedures.sql`
+**File:** `db/sql/storedprocedures.sql`
 
 The `invalid_code_rows` temporary table must be added to all three `DROP TEMPORARY TABLE IF EXISTS` cleanup lists (error handler ~line 1567, success path ~line 3006, and early-exit path ~line 3065).
 

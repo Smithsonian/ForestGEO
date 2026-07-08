@@ -11,7 +11,7 @@
 
 import { Select, Option, Typography, Stack, SelectOption, Box, ListItem, ListDivider } from '@mui/joy';
 import { useAppStore } from '@/config/store/appstore';
-import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { Plot } from '@/lib/db/definitions/zones';
 import React, { useMemo, useCallback, useState } from 'react';
 import { CheckCircle, Cancel } from '@mui/icons-material';
 

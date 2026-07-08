@@ -3,12 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MeasurementsSummaryViewDataGrid from './msvdatagrid';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 
-vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
+vi.mock('@/lib/db/definitions/core', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return actual;
 });
 
-vi.mock('@/config/sqlrdsdefinitions/views', async importOriginal => {
+vi.mock('@/lib/db/definitions/views', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return actual;
 });

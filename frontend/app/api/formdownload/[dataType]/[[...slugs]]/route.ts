@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import MapperFactory from '@/config/datamapper';
-import { AttributesRDS } from '@/config/sqlrdsdefinitions/core';
+import { AttributesRDS } from '@/lib/db/definitions/core';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
 import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';

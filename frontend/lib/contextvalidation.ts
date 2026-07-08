@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCookie } from '@/app/actions/cookiemanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { hasSchemaAccess, isAdminSession } from '@/lib/authz';
 

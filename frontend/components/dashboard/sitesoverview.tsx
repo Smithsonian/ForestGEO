@@ -10,7 +10,7 @@
 import React from 'react';
 import { Box, Card, CardContent, Typography, Chip, Stack, Avatar } from '@mui/joy';
 import { ContentSkeleton } from '@/components/loading';
-import { SitesRDS } from '@/config/sqlrdsdefinitions/zones';
+import { SitesRDS } from '@/lib/db/definitions/zones';
 import ForestIcon from '@mui/icons-material/Forest';
 import ParkIcon from '@mui/icons-material/Park';
 import LandscapeIcon from '@mui/icons-material/Landscape';

@@ -2,7 +2,7 @@ import { HEADER_ALIGN } from '@/config/macros';
 import { Autocomplete, Box, Chip, IconButton, Stack, Typography } from '@mui/joy';
 import { GridColDef, GridPreProcessEditCellProps, GridRenderEditCellParams } from '@mui/x-data-grid';
 import React, { Dispatch, SetStateAction, useState } from 'react';
-import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
+import { AttributeStatusOptions } from '@/lib/db/definitions/core';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { customNumericOperators } from '@/components/datagrids/filtrationsystem';
 import CloseIcon from '@mui/icons-material/Close';

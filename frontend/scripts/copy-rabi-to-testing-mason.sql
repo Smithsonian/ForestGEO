@@ -207,7 +207,7 @@ WHERE OriginalFailureReasons IS NULL
 
 
 -- Step 8c: Deploy the new refresh procedure
--- Copy and run the content from: frontend/db-migrations/16_failed_measurements_reasons.sql
+-- Copy and run the content from: frontend/db/migrations/16_failed_measurements_reasons.sql
 -- Make sure to run it against forestgeo_testing_mason schema
 
 

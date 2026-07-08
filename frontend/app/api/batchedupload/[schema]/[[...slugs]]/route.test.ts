@@ -13,11 +13,11 @@ vi.mock('@/lib/contextvalidation', () => ({
   validateContextualValues: validateContextualValuesMock
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   validatedSchema: validatedSchemaMock
 }));
 
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const executeQuery = vi.fn();
   const beginTransaction = vi.fn().mockResolvedValue('tx-test');
   const commitTransaction = vi.fn().mockResolvedValue(undefined);
@@ -47,7 +47,7 @@ vi.mock('mysql2/promise', () => {
 
 import { POST } from './route';
 import ailogger from '@/ailogger';
-import connectionmanager from '@/config/connectionmanager';
+import connectionmanager from '@/lib/db/connectionmanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 
 function makeRequest(body: unknown) {

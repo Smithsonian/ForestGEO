@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { validateContextualValues } from '@/lib/contextvalidation';
-import { validatedSchema, type SchemaName } from '@/config/utils/sqlsecurity';
+import { validatedSchema, type SchemaName } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { assertSchemaAccess } from '@/lib/authz';
 import ailogger from '@/ailogger';

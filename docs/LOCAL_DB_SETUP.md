@@ -44,11 +44,11 @@ Then run the schema setup:
 ```sql
 USE forestgeo_local;
 
--- Load table structures (SQL files are mounted at /sqlscripting in the container)
-SOURCE /sqlscripting/tablestructures.sql;
+-- Load table structures (SQL files are mounted at /db/sql in the container)
+SOURCE /db/sql/tablestructures.sql;
 
 -- Load stored procedures
-SOURCE /sqlscripting/storedprocedures.sql;
+SOURCE /db/sql/storedprocedures.sql;
 ```
 
 Or from your local machine:
@@ -62,10 +62,10 @@ export MYSQL_PASSWORD=testpassword
 export MYSQL_DATABASE=forestgeo_local
 
 # Run table structures
-mysql -h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER -p$MYSQL_PASSWORD $MYSQL_DATABASE < frontend/sqlscripting/tablestructures.sql
+mysql -h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER -p$MYSQL_PASSWORD $MYSQL_DATABASE < frontend/db/sql/tablestructures.sql
 
 # Run stored procedures
-mysql -h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER -p$MYSQL_PASSWORD $MYSQL_DATABASE < frontend/sqlscripting/storedprocedures.sql
+mysql -h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER -p$MYSQL_PASSWORD $MYSQL_DATABASE < frontend/db/sql/storedprocedures.sql
 ```
 
 ## Alternative: Use Existing Test Setup Script
@@ -120,8 +120,8 @@ export MYSQL_USER=root
 export MYSQL_PASSWORD=testpassword
 export MYSQL_DATABASE=forestgeo_local
 
-# Run migrations in order (from db-migrations directory)
-cd frontend/db-migrations
+# Run migrations in order (from db/migrations directory)
+cd frontend/db/migrations
 
 mysql -h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER -p$MYSQL_PASSWORD $MYSQL_DATABASE < 00b_ensure_table_structures.sql
 mysql -h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER -p$MYSQL_PASSWORD $MYSQL_DATABASE < 14_add_performance_indexes.sql
@@ -167,9 +167,9 @@ docker-compose down -v
 
 ## Files Reference
 
-- **Schema**: `frontend/sqlscripting/tablestructures.sql` - All table definitions
-- **Stored Procedures**: `frontend/sqlscripting/storedprocedures.sql` - All stored procedures
-- **Migrations**: `frontend/db-migrations/*.sql` - Migration scripts
+- **Schema**: `frontend/db/sql/tablestructures.sql` - All table definitions
+- **Stored Procedures**: `frontend/db/sql/storedprocedures.sql` - All stored procedures
+- **Migrations**: `frontend/db/migrations/*.sql` - Migration scripts
 - **Test Setup**: `frontend/tests/setup/local-db-setup.ts` - Automated test database setup
 
 

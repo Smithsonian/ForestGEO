@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Session } from 'next-auth';
-import type { SitesRDS } from '@/config/sqlrdsdefinitions/zones';
+import type { SitesRDS } from '@/lib/db/definitions/zones';
 import { assertSchemaAccess, hasSchemaAccess, isAdminSession } from '@/lib/authz';
 
 const AUTHORIZED_SCHEMA = 'forestgeo_testing';

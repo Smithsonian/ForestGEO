@@ -6,8 +6,8 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
-import { Plot, Quadrat, Site, PlotRDS, QuadratRDS, SitesRDS } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { Plot, Quadrat, Site, PlotRDS, QuadratRDS, SitesRDS } from '@/lib/db/definitions/zones';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { UnifiedValidityFlags } from '@/config/macros';
 
 // ============================================================================

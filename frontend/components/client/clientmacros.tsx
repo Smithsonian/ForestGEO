@@ -5,10 +5,10 @@ import React, { Dispatch, SetStateAction } from 'react';
 import { GridColDef } from '@mui/x-data-grid';
 import { CELL_ALIGN, HEADER_ALIGN } from '@/config/macros';
 import MapperFactory from '@/config/datamapper';
-import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
-import { SpeciesRDS, SpeciesResult, StemRDS, StemResult, TreeRDS, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { Plot, QuadratRDS, QuadratResult, Site } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { AttributesRDS, AttributesResult } from '@/lib/db/definitions/core';
+import { SpeciesRDS, SpeciesResult, StemRDS, StemResult, TreeRDS, TreeResult } from '@/lib/db/definitions/taxonomies';
+import { Plot, QuadratRDS, QuadratResult, Site } from '@/lib/db/definitions/zones';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { Autocomplete } from '@mui/joy';
 
 export function LinearProgressWithLabel(

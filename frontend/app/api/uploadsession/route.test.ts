@@ -54,11 +54,11 @@ vi.mock('@/config/editplan/scopeguard', () => ({
   ScopeAccessError: class ScopeAccessError extends Error {}
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: mocks.isValidSchema
 }));
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({
       withTransaction: mocks.withTransaction,

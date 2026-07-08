@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ===== import the handler AFTER mocks =====
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
 // ===== hoisted spies/fixtures used by mocks =====
 const { _listBlobsIterable, getContainerClientMock, loggerInfo, loggerError, mockAuth, mockValidateContextualValues, mockAssertSchemaAccess } = vi.hoisted(
@@ -33,8 +33,8 @@ const { _listBlobsIterable, getContainerClientMock, loggerInfo, loggerError, moc
 // ===== Mocks (must be before importing the route) =====
 
 // Wrap ConnectionManager so getInstance() always returns a usable instance
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
@@ -89,7 +89,7 @@ vi.mock('@/lib/contextvalidation', () => ({
 // SQL security — validatedSchema brands the input without re-running pattern checks,
 // which lets existing tests use non-conforming names like 'myschema'/'testschema'.
 // The security tests below verify that invalid patterns are caught by the real validator.
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   validatedSchema: vi.fn((schema: string) => {
     // Simulate a failed pattern check for obviously-malicious input
     if (!schema || /[^a-z0-9_]/.test(schema)) {

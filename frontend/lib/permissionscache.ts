@@ -16,7 +16,7 @@
 //   ForestGEO's user base that is far away.
 
 import MapperFactory from '@/config/datamapper';
-import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
+import { SitesRDS, SitesResult } from '@/lib/db/definitions/zones';
 import type { UserAuthRoles } from '@/config/macros';
 
 export interface CachedPermissions {

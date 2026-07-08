@@ -51,7 +51,7 @@ async function checkDatabase() {
     if (tables[0].count === 0) {
       console.log('✗ Table sitespecificvalidations does not exist!\n');
       console.log('💡 You need to create the schema first:');
-      console.log('   1. Run sqlscripting/tablestructures.sql');
+      console.log('   1. Run db/sql/tablestructures.sql');
       console.log('   2. Then run this script again\n');
       process.exit(1);
     }
@@ -83,7 +83,7 @@ async function checkDatabase() {
       console.log('   This will populate the sitespecificvalidations table.\n');
 
       // Check if corequeries.sql exists
-      const corequeriesPath = path.join(process.cwd(), 'sqlscripting', 'corequeries.sql');
+      const corequeriesPath = path.join(process.cwd(), 'db/sql', 'corequeries.sql');
 
       if (!fs.existsSync(corequeriesPath)) {
         console.log(`✗ corequeries.sql not found at: ${corequeriesPath}\n`);
@@ -151,7 +151,7 @@ async function checkDatabase() {
     if (missingTables.length > 0) {
       console.log('✗ Missing required tables:');
       missingTables.forEach(t => console.log(`   - ${t}`));
-      console.log('\n💡 Run sqlscripting/tablestructures.sql to create all tables\n');
+      console.log('\n💡 Run db/sql/tablestructures.sql to create all tables\n');
     } else {
       console.log('✓ All required tables exist\n');
     }

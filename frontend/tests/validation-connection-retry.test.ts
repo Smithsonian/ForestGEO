@@ -9,7 +9,7 @@ const mockConnectionManager = vi.hoisted(() => ({
 
 const ensureMeasurementErrorDefinition = vi.hoisted(() => vi.fn());
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => mockConnectionManager
   }

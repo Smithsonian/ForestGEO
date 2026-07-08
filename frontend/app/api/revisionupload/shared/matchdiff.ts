@@ -1,5 +1,5 @@
-import type ConnectionManager from '@/config/connectionmanager';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import type ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { FileRow } from '@/config/macros/formdetails';
 import { canonicalizeRowForHash, RowMode } from '@/config/editplan/canonicalrow';
 

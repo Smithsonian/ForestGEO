@@ -1,7 +1,7 @@
 'use client';
 
 import { Dispatch, SetStateAction, useEffect, useState } from 'react';
-import { SpeciesLimitsRDS, SpeciesRDS } from '@/config/sqlrdsdefinitions/taxonomies';
+import { SpeciesLimitsRDS, SpeciesRDS } from '@/lib/db/definitions/taxonomies';
 import {
   Accordion,
   AccordionDetails,

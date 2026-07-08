@@ -136,11 +136,11 @@ class MockPoolMonitor {
 // -------------------------------------------------------
 let singletonMonitor: MockPoolMonitor | null = null;
 
-vi.mock('@/config/poolmonitor', () => ({
+vi.mock('@/lib/db/poolmonitor', () => ({
   PoolMonitor: MockPoolMonitor
 }));
 
-vi.mock('@/config/poolmonitorsingleton', () => ({
+vi.mock('@/lib/db/poolmonitorsingleton', () => ({
   getPoolMonitorInstance: () => {
     if (!singletonMonitor) {
       // config isn’t used by the mock, but the real module would pass PoolOptions

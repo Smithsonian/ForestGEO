@@ -9,7 +9,7 @@
 --   - Data loss tracking and reporting
 --   - Idempotency checks to prevent duplicate processing
 --
--- IMPORTANT: This file should be kept in sync with sqlscripting/storedprocedures.sql
+-- IMPORTANT: This file should be kept in sync with db/sql/storedprocedures.sql
 --            The canonical source for this procedure is storedprocedures.sql
 --
 -- Note: Uses DATABASE() to work with any target schema - schema is selected by the caller

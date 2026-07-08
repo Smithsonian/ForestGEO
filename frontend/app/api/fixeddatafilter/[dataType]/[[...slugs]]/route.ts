@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
@@ -7,7 +7,7 @@ import { buildFilterModelStub, buildSearchStub } from '@/components/processors/p
 import { POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
 import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
 

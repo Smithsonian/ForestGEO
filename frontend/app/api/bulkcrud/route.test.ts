@@ -15,13 +15,13 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros';
 
-vi.mock('@/config/connectionmanager', async () => {
+vi.mock('@/lib/db/connectionmanager', async () => {
   // Pull whatever the environment currently exports
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}));
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}));
 
   // Decide what looks like the active singleton
   const candidate =

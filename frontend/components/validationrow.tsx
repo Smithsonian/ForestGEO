@@ -5,7 +5,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { Box, TableCell, TableRow } from '@mui/material';
 import { Cancel, Edit, Save, Download } from '@mui/icons-material';
-import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
+import { ValidationProceduresRDS } from '@/lib/db/definitions/validations';
 import { Chip, IconButton, List, ListItem, Switch, Textarea, Tooltip, CircularProgress, Snackbar } from '@mui/joy';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';

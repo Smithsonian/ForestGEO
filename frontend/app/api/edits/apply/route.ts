@@ -6,8 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { auth } from '@/auth';
-import ConnectionManager from '@/config/connectionmanager';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { HTTPResponses } from '@/config/macros';
 import { DisallowedFieldError, EditPlanUnapplicableError, RoleForbiddenFieldError, TargetNotFoundError } from '@/config/editplan/analyzer';
 import { MeasurementResolutionError } from '@/config/editplan/writers/resolvers-mutating';

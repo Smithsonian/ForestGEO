@@ -13,7 +13,7 @@ const { getPoolMonitorInstanceMock, poolMonitorMock, loggerMock } = vi.hoisted((
   }
 }));
 
-vi.mock('@/config/poolmonitorsingleton', () => ({
+vi.mock('@/lib/db/poolmonitorsingleton', () => ({
   getPoolMonitorInstance: getPoolMonitorInstanceMock
 }));
 

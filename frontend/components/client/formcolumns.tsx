@@ -5,7 +5,7 @@ import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { Box, Input, Tooltip, Typography } from '@mui/joy';
 import React, { useEffect, useRef, useState } from 'react';
 import useEnhancedEffect from '@mui/utils/useEnhancedEffect';
-import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
+import { AttributeStatusOptions } from '@/lib/db/definitions/core';
 import { styled } from '@mui/joy/styles';
 import { CheckCircleOutlined } from '@mui/icons-material';
 import { FormType, TableHeadersByFormType } from '@/config/macros/formdetails';

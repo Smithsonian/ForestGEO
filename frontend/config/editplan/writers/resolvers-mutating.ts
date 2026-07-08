@@ -8,9 +8,9 @@
 // Extracted from `config/macros/coreapifunctions.ts` so the new editplan writer
 // and the legacy PATCH handler can share the same implementation while Task 18
 // cuts the legacy handler over.
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 export class MeasurementResolutionError extends Error {
   constructor(

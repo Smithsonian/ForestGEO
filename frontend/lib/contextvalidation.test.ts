@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from 'next-auth';
-import type { SitesRDS } from '@/config/sqlrdsdefinitions/zones';
+import type { SitesRDS } from '@/lib/db/definitions/zones';
 
 const { authMock, getCookieMock } = vi.hoisted(() => ({
   authMock: vi.fn(),

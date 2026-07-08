@@ -16,7 +16,7 @@ const sharedState = vi.hoisted(() => ({
 
 const TEST_TRANSACTION_ID_PREFIX = 'test-transaction-';
 
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) {
@@ -68,7 +68,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 // Imports must follow vi.mock so the mocked ConnectionManager is wired in.
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { applyEdit } from '@/config/editplan/apply';
 import { revertEdit, EditOperationNotFoundError, AlreadyRevertedError, CannotRevertRevertError, RevertDriftError } from '@/config/editplan/revert';
 import { ScopeLockHeldError } from '@/config/editplan/apply';

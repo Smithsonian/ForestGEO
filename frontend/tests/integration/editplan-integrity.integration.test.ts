@@ -132,7 +132,7 @@ vi.mock('@/auth', () => ({
 // so the revisionupload/apply route's transaction callback runs against real
 // MySQL rather than a stub.
 // ---------------------------------------------------------------------------
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');

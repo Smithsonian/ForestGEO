@@ -55,7 +55,7 @@ vi.mock('@/auth', () => ({
 // ConnectionManager mock — routes every route-handler DB call to the shared
 // test connection and implements withTransaction against real MySQL so the
 // commit route's single transaction actually commits the staged rows.
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');

@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextResponse } from 'next/server';
 import { GET, POST } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
 // Sentinel values placed only on the first mock row so we can assert they survive the staging INSERT.
 const FIRST_ROW_RAW_CODES = 'AL';
@@ -31,7 +31,7 @@ vi.mock('@/lib/authz', () => ({
   assertSchemaAccess: assertSchemaAccessMock
 }));
 
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const executeQuery = vi.fn();
   const closeConnection = vi.fn();
   const cleanupStaleTransactions = vi.fn();

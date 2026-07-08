@@ -14,7 +14,7 @@
 -- will proceed with the DROP TABLE.
 --
 -- The canonical source for the stored procedure is:
---   frontend/sqlscripting/storedprocedures.sql
+--   frontend/db/sql/storedprocedures.sql
 --
 -- To apply: Run the full storedprocedures.sql against the target schema, which includes
 -- the rewritten bulkingestionprocess and drops the legacy procedures.
@@ -29,7 +29,7 @@ DROP PROCEDURE IF EXISTS refresh_failedmeasurements_current;
 DROP PROCEDURE IF EXISTS bulkingestionprocess;
 
 -- NOTE: The new bulkingestionprocess is deployed automatically by
--- 00_run_all_migrations.sh which sources ../sqlscripting/storedprocedures.sql
+-- 00_run_all_migrations.sh which sources ../db/sql/storedprocedures.sql
 -- immediately after this migration.
 
 SELECT 'Migration 23: Legacy failedmeasurements procedures dropped. storedprocedures.sql will be deployed next.' AS Status;

@@ -1,6 +1,6 @@
 // testing/mockstesting/bg-mocks.spec.ts
 import { beforeEach, describe, expect, it } from 'vitest';
-import '@/testing/bg-mocks';
+import '@/tests/mocks/bg-mocks';
 
 describe('bg-mocks wiring', () => {
   // Pull the class that’s been mocked and the helper API
@@ -21,7 +21,7 @@ describe('bg-mocks wiring', () => {
   };
 
   beforeEach(async () => {
-    const mod = await import('@/config/connectionmanager');
+    const mod = await import('@/lib/db/connectionmanager');
     ConnectionManager = mod.default as unknown as CM;
     __BgMocks = (mod as any).__cm as typeof __BgMocks;
     __BgMocks.clear();

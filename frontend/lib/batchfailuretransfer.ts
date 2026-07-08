@@ -1,6 +1,6 @@
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { ensureMeasurementErrorDefinition, getIngestionErrorMessage, inferIngestionErrorCode, INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 /**
  * Moves all remaining sub-batches (BatchID LIKE 'prefix%') for a given file

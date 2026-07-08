@@ -49,7 +49,7 @@ export function createTestPool(): Pool {
  */
 export async function seedCatalogTables(pool: Pool): Promise<void> {
   await pool.query(`CREATE DATABASE IF NOT EXISTS catalog`);
-  const ddlPath = join(process.cwd(), 'sqlscripting/catalog-provisioning-tables.sql');
+  const ddlPath = join(process.cwd(), 'db/sql/catalog-provisioning-tables.sql');
   const ddl = readFileSync(ddlPath, 'utf-8');
   for (const stmt of ddl
     .split(';')

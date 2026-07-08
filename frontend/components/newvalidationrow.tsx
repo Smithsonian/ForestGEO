@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { Box, TableCell, TableRow, TextField } from '@mui/material';
 import { Cancel, Save, Code } from '@mui/icons-material';
-import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
+import { ValidationProceduresRDS } from '@/lib/db/definitions/validations';
 import { IconButton, Switch, Tooltip, CircularProgress, Snackbar, Button as JoyButton } from '@mui/joy';
 import CodeEditor from '@/components/client/codeeditor';
 

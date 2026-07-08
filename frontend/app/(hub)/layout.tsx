@@ -6,8 +6,8 @@ import { redirect, usePathname } from 'next/navigation';
 import { Box, IconButton, Stack, Typography, useTheme } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
 import { useLoading } from '@/app/contexts/loadingprovider';
-import { useAsyncOperation } from '@/hooks/useAsyncOperation';
-import { useLoadState, combineLoadStates } from '@/hooks/useLoadState';
+import { useAsyncOperation } from '@/app/hooks/useAsyncOperation';
+import { useLoadState, combineLoadStates } from '@/app/hooks/useLoadState';
 import {
   useOrgCensusContext,
   useOrgCensusDispatch,
@@ -25,7 +25,7 @@ import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
-import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
+import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/lib/db/definitions/timekeeping';
 import ReactDOM from 'react-dom';
 import ailogger from '@/ailogger';
 // Eager load for maximum speed (bundle size not a concern)

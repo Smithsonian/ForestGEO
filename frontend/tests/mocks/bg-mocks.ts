@@ -3,7 +3,7 @@ import { afterEach, beforeEach, vi } from 'vitest';
 
 /**
  * If you already have a separate connectionmanager mock (e.g., '@/lib/connectionmanager'),
- * prefer consolidating on ONE path. These files import from '@/config/connectionmanager',
+ * prefer consolidating on ONE path. These files import from '@/lib/db/connectionmanager',
  * so we mock that here.
  */
 
@@ -95,7 +95,7 @@ class MockConnectionManager {
   rollbackTransaction = vi.fn(async (transactionId: string) => {});
 }
 
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   return {
     default: MockConnectionManager,
     __cm: {

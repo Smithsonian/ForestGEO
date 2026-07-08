@@ -22,10 +22,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 // 1) Turn on the mocks from your file under test
-import '@/testing/db-mocks';
+import '@/tests/mocks/db-mocks';
 
 // 2) Bring in the public test helpers from the mock module
-import { __clearDbQueues, __pushExecuteError, __pushExecuteResult, __pushQueryError, __pushQueryResult } from '@/testing/db-mocks';
+import { __clearDbQueues, __pushExecuteError, __pushExecuteResult, __pushQueryError, __pushQueryResult } from '@/tests/mocks/db-mocks';
 
 type PoolConnection = {
   query: (sql: string, params?: any[]) => Promise<[any, any]>;
@@ -44,8 +44,8 @@ describe('db-mocks wiring (PoolMonitor + mysql2 echo + queues)', () => {
     __clearDbQueues();
 
     // load mocked modules after mock import
-    ({ getPoolMonitorInstance } = await import('@/config/poolmonitorsingleton'));
-    ({ PoolMonitor: PoolMonitorClass } = await import('@/config/poolmonitor'));
+    ({ getPoolMonitorInstance } = await import('@/lib/db/poolmonitorsingleton'));
+    ({ PoolMonitor: PoolMonitorClass } = await import('@/lib/db/poolmonitor'));
   });
 
   it('returns a singleton PoolMonitor and provides a shared connection', async () => {

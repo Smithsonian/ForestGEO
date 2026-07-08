@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from '@/lib/ingestion/temporary-measurements';
 
 /**
@@ -23,7 +23,7 @@ import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from '@/lib
  */
 
 // ========== Mocks ==========
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   validateSchemaOrThrow: vi.fn(),
   safeFormatQuery: vi.fn((schema, query) => query),
   isValidSchema: vi.fn(() => true)
@@ -53,8 +53,8 @@ vi.mock('mysql2/promise', () => ({
   })
 }));
 
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||

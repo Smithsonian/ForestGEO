@@ -40,7 +40,7 @@ const E2E_SITE = {
   doubleDataEntry: 0
 } as const;
 
-const CATALOG_DDL_PATH = path.join(process.cwd(), 'sqlscripting', 'catalog-provisioning-tables.sql');
+const CATALOG_DDL_PATH = path.join(process.cwd(), 'db/sql', 'catalog-provisioning-tables.sql');
 
 /**
  * Creates the `catalog` schema (idempotent DDL) and replaces its sites with the

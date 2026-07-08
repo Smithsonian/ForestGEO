@@ -19,13 +19,13 @@ import {
   useSiteContext,
   useSiteDispatch
 } from '@/app/contexts/compat-hooks';
-import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
+import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/lib/db/definitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
-import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
-import { SitesRDS as _SitesRDS, PlotRDS as _PlotRDS } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
+import { UnifiedChangelogRDS } from '@/lib/db/definitions/core';
+import { SitesRDS as _SitesRDS, PlotRDS as _PlotRDS } from '@/lib/db/definitions/zones';
+import { OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/lib/db/definitions/timekeeping';
 import moment from 'moment';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
@@ -45,7 +45,7 @@ import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/config/store/appstore';
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
-import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { Plot } from '@/lib/db/definitions/zones';
 import { PlotWithCensusCount } from '@/components/dashboard/plotsoverview';
 import { CensusWithStats } from '@/components/dashboard/censusesoverview';
 

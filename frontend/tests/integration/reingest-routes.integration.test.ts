@@ -32,7 +32,7 @@ vi.mock('@/auth', () => ({
   }))
 }));
 
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[]) => {
       if (!sharedState.connection) {

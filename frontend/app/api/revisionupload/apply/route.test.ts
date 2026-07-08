@@ -92,7 +92,7 @@ vi.mock('@/auth', () => ({
   auth: mocks.auth
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: mocks.isValidSchema,
   safeFormatQuery: mocks.safeFormatQuery
 }));
@@ -114,7 +114,7 @@ vi.mock('@/config/utils', () => ({
   generateShortBatchID: vi.fn(() => 'batch-1')
 }));
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({
       withTransaction: mocks.withTransaction,

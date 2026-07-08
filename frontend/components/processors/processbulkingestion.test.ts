@@ -12,12 +12,12 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { processBulkIngestionCollapser, processBulkIngestionProcessor, TemporaryMeasurement } from './processbulkingestion';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 
 // Mock dependencies
-vi.mock('@/config/connectionmanager');
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/connectionmanager');
+vi.mock('@/lib/db/sqlsecurity', () => ({
   safeFormatQuery: vi.fn((schema, query) => query.replace(/\?\?/g, schema))
 }));
 vi.mock('@/config/measurementerrors', () => ({

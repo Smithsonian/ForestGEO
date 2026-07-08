@@ -720,7 +720,10 @@ class ConnectionManager {
       // shift+call it, silently consuming a slot release for a waiter that
       // has already been rejected).
       await new Promise<void>((resolve, reject) => {
-        let wrappedResolve!: () => void;
+        const wrappedResolve = () => {
+          clearTimeout(timeoutId);
+          resolve();
+        };
         const timeoutId = setTimeout(() => {
           const index = this.transactionSlotQueue.indexOf(wrappedResolve);
           if (index !== -1) {
@@ -729,10 +732,6 @@ class ConnectionManager {
           reject(new Error('Transaction slot wait timeout - too many concurrent transactions'));
         }, 60000); // 1 minute max wait
 
-        wrappedResolve = () => {
-          clearTimeout(timeoutId);
-          resolve();
-        };
         this.transactionSlotQueue.push(wrappedResolve);
       });
 

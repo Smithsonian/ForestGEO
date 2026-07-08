@@ -16,7 +16,7 @@ const {
   mockRefreshIngestionErrorsForMeasurement: vi.fn()
 }));
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({
       executeQuery: mockExecuteQuery,
@@ -28,7 +28,7 @@ vi.mock('@/config/connectionmanager', () => ({
   }
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   validateSchemaOrThrow: vi.fn()
 }));
 

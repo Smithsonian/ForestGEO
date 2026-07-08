@@ -34,7 +34,7 @@ const __dirname = path.dirname(__filename);
 // Paths
 // ---------------------------------------------------------------------------
 
-const APP_TABLES_PATH = path.resolve(__dirname, '../../sqlscripting/tablestructures.sql');
+const APP_TABLES_PATH = path.resolve(__dirname, '../../db/sql/tablestructures.sql');
 const APP_SEED_PATH = path.resolve(__dirname, '../fixtures/ctfs-export/app-db-seed.sql');
 const CTFS_DDL_PATH = path.resolve(__dirname, '../fixtures/csv-to-sql-v2/canonical-ddl.sql');
 const CTFSWEB_STUB_PATH = path.resolve(__dirname, '../fixtures/ctfs-export/install-ctfsweb-stub.sql');

@@ -54,7 +54,7 @@ import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollb
 import { useInfiniteGridRows, type UseInfiniteGridRowsResult } from '@/components/datagrids/hooks/useinfinitegridrows';
 import ContradictionComparisonPanel from './contradictioncomparisonpanel';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
-import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
+import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import { isMuiRowEditCancelled } from '@/lib/muirowedit';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast from '@/components/editplan/undotoast';

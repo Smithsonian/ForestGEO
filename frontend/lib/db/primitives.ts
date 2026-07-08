@@ -1,7 +1,7 @@
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { escape } from 'mysql2';
-import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import ailogger from '@/ailogger';
 
 async function getSqlConnection(tries: number): Promise<PoolConnection> {

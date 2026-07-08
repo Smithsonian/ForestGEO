@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
-import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
+import { AdminSiteRDS, AdminUserRDS } from '@/lib/db/definitions/admin';
 import {
   Autocomplete,
   Avatar,

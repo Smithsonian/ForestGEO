@@ -39,7 +39,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/auth', () => ({ auth: mocks.auth }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: mocks.isValidSchema,
   // The route now uses safeFormatQuery for the census probe. The mock returns
   // the query verbatim — backticks aren't relevant since conn.query is itself

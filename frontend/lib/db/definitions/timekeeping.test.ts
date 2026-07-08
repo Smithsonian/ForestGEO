@@ -4,7 +4,7 @@ import type { OrgCensusRDS } from './timekeeping';
 let reconcileCurrentCensusSelection: typeof import('./timekeeping').reconcileCurrentCensusSelection;
 
 beforeAll(async () => {
-  vi.unmock('@/config/sqlrdsdefinitions/timekeeping');
+  vi.unmock('@/lib/db/definitions/timekeeping');
   ({ reconcileCurrentCensusSelection } = await import('./timekeeping'));
 });
 

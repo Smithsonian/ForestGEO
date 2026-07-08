@@ -12,7 +12,7 @@ import {
   capitalizeAndTransformField,
   getUpdatedValues
 } from './utils';
-import type ConnectionManager from '@/config/connectionmanager';
+import type ConnectionManager from '@/lib/db/connectionmanager';
 
 describe('Sidebar Utilities', () => {
   beforeEach(() => {

@@ -3,7 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { UnifiedValidityFlags } from '@/config/macros';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from './compat-hooks';
-import { useApiWrapper } from '@/utils/apiWrapper';
+import { useApiWrapper } from '@/lib/apiWrapper';
 import ailogger from '@/ailogger';
 
 const initialValidityState: UnifiedValidityFlags = {

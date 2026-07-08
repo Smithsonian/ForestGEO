@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // Import after mocks
 import { POST } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
 // -------------------- hoisted spies (safe for vi.mock factories) --------------------
 const { mapDataSpy, singlePostSpy, filterStubSpy, searchStubSpy } = vi.hoisted(() => ({
@@ -34,7 +34,7 @@ vi.mock('@/config/macros/coreapifunctions', () => ({
 }));
 
 // Mock schema validation to accept test schemas
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     return ['myschema', 'testschema', 'schema_a', 'schema_b', 'schema_c', 'schema_d'].includes(schema);
   })
@@ -45,9 +45,9 @@ vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
 }));
 
-vi.mock('@/config/connectionmanager', async () => {
+vi.mock('@/lib/db/connectionmanager', async () => {
   // Try to reuse your test setup's singleton if present
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance?.()) ||
     (actual?.default && typeof actual.default.getInstance === 'function' && actual.default.getInstance?.()) ||

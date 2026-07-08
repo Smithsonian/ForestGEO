@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
 import { format } from 'mysql2/promise';
-import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';

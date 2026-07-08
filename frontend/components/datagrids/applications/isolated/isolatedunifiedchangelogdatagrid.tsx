@@ -5,7 +5,7 @@ import React, { ReactNode, useMemo, useState } from 'react';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import { UnifiedChangelogGridColumns } from '@/components/client/datagridcolumns';
-import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
+import { UnifiedChangelogRDS } from '@/lib/db/definitions/core';
 import { Box, Divider, Stack, Typography } from '@mui/joy';
 import { GridColDef } from '@mui/x-data-grid';
 import moment from 'moment';

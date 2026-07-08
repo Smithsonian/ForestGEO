@@ -1,9 +1,9 @@
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 
-// utils/errorHandler.ts
-export async function handleError(error: any, conn: ConnectionManager, row: any, transactionID?: string) {
-  ailogger.error('SQL Error:', error);
+export async function handleError(error: unknown, conn: ConnectionManager, row: unknown, transactionID?: string) {
+  const normalizedError = error instanceof Error ? error : new Error(String(error));
+  ailogger.error('SQL Error:', normalizedError);
 
   if (transactionID) {
     try {
@@ -13,7 +13,7 @@ export async function handleError(error: any, conn: ConnectionManager, row: any,
     }
     return new Response(
       JSON.stringify({
-        message: 'SQL Transaction Error: ' + (error.message || 'Unknown error'),
+        message: 'SQL Transaction Error: ' + (normalizedError.message || 'Unknown error'),
         row
       }),
       { status: 500 }
@@ -22,7 +22,7 @@ export async function handleError(error: any, conn: ConnectionManager, row: any,
 
   return new Response(
     JSON.stringify({
-      message: 'SQL Error: ' + (error.message || 'Unknown error'),
+      message: 'SQL Error: ' + (normalizedError.message || 'Unknown error'),
       row
     }),
     { status: 500 }

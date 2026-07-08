@@ -10,7 +10,7 @@
 import React, { useMemo } from 'react';
 import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, Divider, IconButton } from '@mui/joy';
 import { ContentSkeleton } from '@/components/loading';
-import { PlotRDS } from '@/config/sqlrdsdefinitions/zones';
+import { PlotRDS } from '@/lib/db/definitions/zones';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import CropSquareIcon from '@mui/icons-material/CropSquare';
 import LocationOnIcon from '@mui/icons-material/LocationOn';

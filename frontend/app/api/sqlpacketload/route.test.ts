@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests, TEMP_MEASUREMENT_INSERT_BATCH_SIZE } from '@/lib/ingestion/temporary-measurements';
 import { SourceFormat } from '@/config/macros/formdetails';
@@ -29,7 +29,7 @@ const { requireUploadSessionOwnershipMock, MockUploadSessionOwnershipError } = v
   };
 });
 
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const executeQuery = vi.fn();
   const beginTransaction = vi.fn().mockResolvedValue('tx-test');
   const commitTransaction = vi.fn().mockResolvedValue(undefined);
@@ -50,7 +50,7 @@ vi.mock('@/auth', () => ({
   auth: authMock
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn(() => true)
 }));
 

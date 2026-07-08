@@ -14,7 +14,7 @@ import { getColumnVisibilityModel } from '@/config/datagridhelpers';
 import { getGridTypeLabel } from '@/config/macros/siteconfigs';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
-import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
+import { AttributeStatusOptions } from '@/lib/db/definitions/core';
 
 export interface IsolatedDataGridCommonProps {
   gridType: string;

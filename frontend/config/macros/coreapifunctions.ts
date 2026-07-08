@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { AllTaxonomiesViewQueryConfig, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
 import MapperFactory from '@/config/datamapper';
 import { handleUpsert } from '@/config/utils';
 import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
-import { handleError } from '@/utils/errorhandler';
-import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
+import { handleError } from '@/lib/errorhandler';
+import { FamilyResult, GenusResult, SpeciesResult } from '@/lib/db/definitions/taxonomies';
 import { getCookie } from '@/app/actions/cookiemanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 

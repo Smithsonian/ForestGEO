@@ -150,7 +150,7 @@ async function deployValidationsToAllSchemas() {
 
     // Step 2: Read SQL files
     console.log('[Step 2] Reading SQL source files...');
-    const scriptingDir = path.join(process.cwd(), 'sqlscripting');
+    const scriptingDir = path.join(process.cwd(), 'db/sql');
 
     const corequeriesPath = path.join(scriptingDir, 'corequeries.sql');
     if (!fs.existsSync(corequeriesPath)) {

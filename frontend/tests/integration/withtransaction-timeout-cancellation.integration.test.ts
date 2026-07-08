@@ -37,7 +37,7 @@
  * regresses.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type TestDatabaseConfig } from '../setup/local-db-setup';
 import type { Connection } from 'mysql2/promise';
 

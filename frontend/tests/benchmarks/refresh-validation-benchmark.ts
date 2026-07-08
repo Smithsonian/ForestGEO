@@ -77,10 +77,10 @@ function formatDuration(ms: number): string {
 
 function getStoredProcedureContent(variant: Variant): string {
   if (variant === 'working') {
-    return fs.readFileSync(path.join(FRONTEND_ROOT, 'sqlscripting', 'storedprocedures.sql'), 'utf-8');
+    return fs.readFileSync(path.join(FRONTEND_ROOT, 'db/sql', 'storedprocedures.sql'), 'utf-8');
   }
 
-  return execSync('git show HEAD:frontend/sqlscripting/storedprocedures.sql', {
+  return execSync('git show HEAD:frontend/db/sql/storedprocedures.sql', {
     cwd: REPO_ROOT,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe']
@@ -88,7 +88,7 @@ function getStoredProcedureContent(variant: Variant): string {
 }
 
 async function loadSchema(conn: mysql.Connection): Promise<void> {
-  const schemaPath = path.join(FRONTEND_ROOT, 'sqlscripting', 'tablestructures.sql');
+  const schemaPath = path.join(FRONTEND_ROOT, 'db/sql', 'tablestructures.sql');
   const schema = fs.readFileSync(schemaPath, 'utf-8');
   await conn.query('SET FOREIGN_KEY_CHECKS = 0');
   for (const stmt of schema

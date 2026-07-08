@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { format } from 'mysql2/promise';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import type { FileRow } from '@/config/macros/formdetails';
 import type { ArcgisImportReference, TransformResult, TransformSummary, TransformWarning } from './types';

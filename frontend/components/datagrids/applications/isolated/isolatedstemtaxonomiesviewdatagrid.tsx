@@ -5,7 +5,7 @@ import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { StemTaxonomiesViewGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
-import { StemTaxonomiesViewRDS } from '@/config/sqlrdsdefinitions/views';
+import { StemTaxonomiesViewRDS } from '@/lib/db/definitions/views';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { UploadFileOutlined } from '@mui/icons-material';
 

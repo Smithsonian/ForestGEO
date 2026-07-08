@@ -1,6 +1,6 @@
 import { Effect } from '../types';
 import { RuleContext } from './context';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 export async function applyCoordinateRules(ctx: RuleContext): Promise<Effect[]> {
   if (!ctx.changedFields.has('StemLocalX') && !ctx.changedFields.has('StemLocalY')) return [];

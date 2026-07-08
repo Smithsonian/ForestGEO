@@ -1,9 +1,9 @@
 // testing/mockstesting/auth-mocks.test.ts
 import { describe, expect, it } from 'vitest';
 // Be sure this path matches your actual mock file location:
-import '@/testing/auth-mocks';
-import { __auth } from '@/testing/auth-mocks';
-import { loadRoute } from '@/testing/supportstruts';
+import '@/tests/mocks/auth-mocks';
+import { __auth } from '@/tests/mocks/auth-mocks';
+import { loadRoute } from '@/tests/mocks/supportstruts';
 
 // If you keep shared types here, fine; otherwise inline:
 type RouteHandler = (req: Request, ctx?: { params?: { nextauth?: string[] } }) => Promise<Response>;

@@ -9,7 +9,7 @@
 
 import { Select, Option, Typography, Stack, SelectOption } from '@mui/joy';
 import { useAppStore } from '@/config/store/appstore';
-import { Site } from '@/config/sqlrdsdefinitions/zones';
+import { Site } from '@/lib/db/definitions/zones';
 
 export default function SiteSelector() {
   const currentSite = useAppStore(state => state.currentSite);

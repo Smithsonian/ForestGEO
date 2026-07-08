@@ -24,7 +24,7 @@ import {
   findAbandonedSessionsNeedingCleanup,
   ensureUploadSessionsTable
 } from '@/config/uploadsessiontracker';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
 
@@ -130,7 +130,7 @@ async function findStaleTemporaryMeasurements(schema: string, _maxAgeHours: numb
 async function clearStaleTransactions(): Promise<number> {
   try {
     // Import dynamically to avoid circular dependencies
-    const { default: ConnectionManager } = await import('@/config/connectionmanager');
+    const { default: ConnectionManager } = await import('@/lib/db/connectionmanager');
     await ConnectionManager.getInstance().cleanupStaleTransactions();
     return 1; // Cleanup was attempted
   } catch (error: unknown) {

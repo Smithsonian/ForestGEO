@@ -3,8 +3,8 @@
 import React, { createContext, useContext, useReducer, useMemo } from 'react';
 import { createEnhancedDispatch, EnhancedDispatch, genericLoadContextReducer, LoadAction } from '@/config/macros/contextreducers';
 import { useOrgCensusListContext, usePlotListContext, useQuadratListContext, useSiteListContext } from '@/app/contexts/listselectionprovider';
-import { Plot, Quadrat, Site } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { Plot, Quadrat, Site } from '@/lib/db/definitions/zones';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 
 export const PlotContext = createContext<Plot>(undefined);
 export const OrgCensusContext = createContext<OrgCensus>(undefined);

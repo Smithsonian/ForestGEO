@@ -5,7 +5,7 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import React, { useCallback, useEffect, useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { Box, Button, Checkbox, Table, Typography, useTheme } from '@mui/joy';
-import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
+import { PostValidationQueriesRDS } from '@/lib/db/definitions/validations';
 import { Paper, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import { Done } from '@mui/icons-material';
 import { useLoading } from '@/app/contexts/loadingprovider';
