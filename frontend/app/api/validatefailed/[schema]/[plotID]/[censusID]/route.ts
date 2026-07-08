@@ -4,19 +4,21 @@ import { HTTPResponses } from '@/config/macros';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery, refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
+import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function GET(
-  _request: NextRequest,
-  props: {
-    params: Promise<{ schema: string; plotID: string; censusID: string }>;
-  }
-) {
-  const { schema, plotID: plotIDParam, censusID: censusIDParam } = await props.params;
+async function handler(_request: NextRequest, context: RouteContext) {
+  const params = await context.params;
+  const schema = params.schema as string;
+  const plotIDParam = params.plotID as string;
+  const censusIDParam = params.censusID as string;
 
+  // defense-in-depth: withRouteAuthz validates schema before this handler runs.
+  // buildFailedMeasurementsSelectQuery interpolates ${schema} raw, so keep this
+  // local validation as a hard guarantee for the raw-interpolated query below.
   try {
     validateSchemaOrThrow(schema);
   } catch (error: any) {
@@ -118,3 +120,5 @@ export async function GET(
     await connectionManager.closeConnection();
   }
 }
+
+export const GET = withRouteAuthz('validatefailed/[schema]/[plotID]/[censusID]', handler, { schema: fromPath('schema') });
