@@ -27,10 +27,6 @@ export type Operator =
   | 'isNotEmpty'
   | 'isAnyOf';
 
-function escapeSql(value: string): string {
-  return value.replace(/'/g, "''");
-}
-
 // Escape wildcard characters for LIKE queries (Bug #2 fix)
 function escapeLikeWildcards(value: string): string {
   return value.replace(/[%_\\]/g, '\\$&');
@@ -42,41 +38,41 @@ function buildCondition({ operator, column, value }: { operator: Operator; colum
 
   switch (operator) {
     case 'contains':
-      // Escape SQL quotes first, then escape LIKE wildcards (Bug #2 fix)
-      return `${safeColumn} LIKE '%${escapeLikeWildcards(escapeSql(value as string))}%' ESCAPE '\\\\'`;
+      // Escape LIKE wildcards on the value, then wrap the full pattern as a safe SQL literal (Bug #2 fix)
+      return `${safeColumn} LIKE ${escape(`%${escapeLikeWildcards(value as string)}%`)} ESCAPE '\\\\'`;
     case 'doesNotContain':
-      return `${safeColumn} NOT LIKE '%${escapeLikeWildcards(escapeSql(value as string))}%' ESCAPE '\\\\'`;
+      return `${safeColumn} NOT LIKE ${escape(`%${escapeLikeWildcards(value as string)}%`)} ESCAPE '\\\\'`;
     case 'equals':
     case 'is':
     case '=':
-      return `${safeColumn} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} = ${typeof value === 'number' ? value : escape(value as string)}`;
     case 'doesNotEqual':
     case 'isNot':
     case '!=':
-      return `${safeColumn} <> ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} <> ${typeof value === 'number' ? value : escape(value as string)}`;
     case 'startsWith':
-      return `${safeColumn} LIKE '${escapeLikeWildcards(escapeSql(value as string))}%' ESCAPE '\\\\'`;
+      return `${safeColumn} LIKE ${escape(`${escapeLikeWildcards(value as string)}%`)} ESCAPE '\\\\'`;
     case 'endsWith':
-      return `${safeColumn} LIKE '%${escapeLikeWildcards(escapeSql(value as string))}' ESCAPE '\\\\'`;
+      return `${safeColumn} LIKE ${escape(`%${escapeLikeWildcards(value as string)}`)} ESCAPE '\\\\'`;
     case 'isAfter':
     case '>':
-      return `${safeColumn} > ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} > ${typeof value === 'number' ? value : escape(value as string)}`;
     case 'isOnOrAfter':
     case '>=':
-      return `${safeColumn} >= ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} >= ${typeof value === 'number' ? value : escape(value as string)}`;
     case 'isBefore':
     case '<':
-      return `${safeColumn} < ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} < ${typeof value === 'number' ? value : escape(value as string)}`;
     case 'isOnOrBefore':
     case '<=':
-      return `${safeColumn} <= ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} <= ${typeof value === 'number' ? value : escape(value as string)}`;
     case 'isEmpty':
       return `(${safeColumn} = '' OR ${safeColumn} IS NULL)`;
     case 'isNotEmpty':
       return `(${safeColumn} <> '' AND ${safeColumn} IS NOT NULL)`;
     case 'isAnyOf':
       if (Array.isArray(value)) {
-        const values = value.map(val => `'${escapeSql(val)}'`).join(', ');
+        const values = value.map(val => escape(val)).join(', ');
         return `${safeColumn} IN (${values})`;
       }
       throw new Error('For "is any of", value must be an array.');
