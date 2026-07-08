@@ -3,7 +3,7 @@ import { CMError } from '@/config/macros/uploadsystemmacros';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { fromQuery, withRouteAuthz } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility

@@ -4,7 +4,7 @@ import MapperFactory from '@/config/datamapper';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
-import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime

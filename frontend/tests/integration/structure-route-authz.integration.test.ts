@@ -27,7 +27,7 @@ vi.mock('@/auth', () => ({
 
 // Route the route's ConnectionManager.executeQuery at the shared test connection
 // so authorized requests execute against a real, populated schema.
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[]) => {
       if (!sharedState.connection) {

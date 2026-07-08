@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { assertSchemaAccess } from '@/lib/authz';
 import { requireAdmin, requireSession } from '@/lib/auth-helpers';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { ROUTE_POLICIES, type RouteKey } from '@/lib/route-policy';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';

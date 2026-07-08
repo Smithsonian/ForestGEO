@@ -7,7 +7,7 @@ import { buildFilterModelStub, buildSearchStub } from '@/components/processors/p
 import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
-import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility

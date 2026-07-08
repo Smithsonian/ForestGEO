@@ -34,7 +34,7 @@ vi.mock('@/auth', () => ({
   }))
 }));
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({
       executeQuery: (query: string, params?: unknown[]) => sharedState.executeQuerySpy(query, params),

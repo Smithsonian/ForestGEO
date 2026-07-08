@@ -7,7 +7,7 @@ import { validateContextualValues } from '@/lib/contextvalidation';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { getErrorMessage, getErrorCode, errorMessageContains, toError } from '@/lib/errorhelpers';
-import { safeEscapeId, safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { FETCHALL_ALLOWED_TABLES, INVALID_DATATYPE_CODE } from './constants';
 
 // Force Node.js runtime for database and Azure SDK compatibility
