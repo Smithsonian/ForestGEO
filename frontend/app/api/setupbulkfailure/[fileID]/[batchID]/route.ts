@@ -5,6 +5,7 @@ import { safeFormatQuery, validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { moveTemporaryBatchToFailedMeasurements, moveTemporarySubBatchesToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
+import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -12,15 +13,11 @@ export const runtime = 'nodejs';
 export const maxDuration = 900;
 
 // FAILURE PROCESS -- IF A BATCH EXCEEDS ALLOWED ATTEMPTS, MOVE IT TO FAILED & MOVE ON
-export async function GET(
-  request: NextRequest,
-  props: {
-    params: Promise<{ fileID: string; batchID: string }>;
-  }
-) {
+// Phase-3: user→schema membership via guard; requireUploadSessionOwnership retains plot/census token ownership.
+async function handler(request: NextRequest, context: RouteContext) {
   const schema = request.nextUrl.searchParams.get('schema');
   const failureReason = (request.nextUrl.searchParams.get('reason') || 'Batch moved after max attempts').slice(0, 255);
-  const { fileID, batchID } = await props.params;
+  const { fileID, batchID } = (await context.params) as { fileID: string; batchID: string };
   if (!schema || !fileID || !batchID) {
     return new NextResponse(JSON.stringify({ error: 'Missing parameters' }), { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -90,3 +87,5 @@ export async function GET(
   }
   return new NextResponse(JSON.stringify({ temp: true }), { status: HTTPResponses.OK });
 }
+
+export const GET = withRouteAuthz('setupbulkfailure/[fileID]/[batchID]', handler, { schema: fromQuery('schema') });
