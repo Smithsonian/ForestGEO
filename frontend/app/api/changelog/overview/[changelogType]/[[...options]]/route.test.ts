@@ -73,7 +73,7 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
   });
 
   it('returns 400 if changelogType missing', async () => {
-    const req = makeRequest('http://localhost/api?schema=myschema');
+    const req = makeRequest('http://localhost/api?schema=forestgeo_testschema');
     const res = await GET(req, makeProps(undefined as any, ['1', '2']));
     expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
     const body = await res.json();
@@ -81,7 +81,7 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
   });
 
   it('returns 400 if options missing', async () => {
-    const req = makeRequest('http://localhost/api?schema=myschema');
+    const req = makeRequest('http://localhost/api?schema=forestgeo_testschema');
     const res = await GET(req, makeProps('unifiedchangelog', undefined as any));
     expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
     const body = await res.json();
@@ -89,7 +89,7 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
   });
 
   it('returns 400 if options length !== 2', async () => {
-    const req = makeRequest('http://localhost/api?schema=myschema');
+    const req = makeRequest('http://localhost/api?schema=forestgeo_testschema');
     const res = await GET(req, makeProps('unifiedchangelog', ['1']));
     expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
     const body = await res.json();
@@ -104,7 +104,7 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
     ]);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    const req = makeRequest('http://localhost/api?schema=myschema');
+    const req = makeRequest('http://localhost/api?schema=forestgeo_testschema');
     const res = await GET(req, makeProps('unifiedchangelog', ['42', '7']));
 
     expect(res.status).toBe(HTTPResponses.OK);
@@ -118,7 +118,7 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
     // SQL + params sanity
     expect(exec).toHaveBeenCalledTimes(1);
     const [sql, params] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/SELECT \* FROM myschema\.unifiedchangelog/i);
+    expect(String(sql)).toMatch(/SELECT \* FROM forestgeo_testschema\.unifiedchangelog/i);
     expect(String(sql)).toMatch(/WHERE \(PlotID = \? OR PlotID IS NULL\)/i);
     expect(String(sql)).toMatch(/ORDER BY ChangeTimestamp DESC\s+LIMIT 5;?/i);
     expect(params).toEqual([42, 42, 7]); // plotID, plotID, pcn
@@ -135,7 +135,7 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
     const _exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([]);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    const req = makeRequest('http://localhost/api?schema=myschema');
+    const req = makeRequest('http://localhost/api?schema=forestgeo_testschema');
     const res = await GET(req, makeProps('unifiedchangelog', ['10', '3']));
 
     expect(res.status).toBe(HTTPResponses.OK);
@@ -153,7 +153,7 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
     const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ RunID: 1 }, { RunID: 2 }]);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    const req = makeRequest('http://localhost/api?schema=myschema');
+    const req = makeRequest('http://localhost/api?schema=forestgeo_testschema');
     const res = await GET(req, makeProps('validationchangelog', ['42', '7']));
 
     expect(res.status).toBe(HTTPResponses.OK);
@@ -164,7 +164,7 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
     ]);
 
     const [sql, params] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/FROM myschema\.validationchangelog/i);
+    expect(String(sql)).toMatch(/FROM forestgeo_testschema\.validationchangelog/i);
     expect(String(sql)).toMatch(/ORDER BY RunDateTime DESC LIMIT 5;?/i);
     // The route still passes params array even if not used in the SQL
     expect(params).toEqual([42, 42, 7]);
@@ -178,7 +178,7 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
     const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('boom'));
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    const req = makeRequest('http://localhost/api?schema=myschema');
+    const req = makeRequest('http://localhost/api?schema=forestgeo_testschema');
     const res = await GET(req, makeProps('unifiedchangelog', ['1', '2']));
 
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
