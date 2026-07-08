@@ -55,6 +55,16 @@ vi.mock('@/lib/db/connectionmanager', async () => {
   };
 });
 
+// The route enforces per-site authz inline (auth() + assertSchemaAccess) before
+// touching the DB. This suite exercises the SQL/transaction logic, so it runs as
+// a global admin (assertSchemaAccess bypasses membership for admins). The 403
+// out-of-scope path is covered by the bulkcrud authz integration test.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({
+    user: { email: 'bulkcrud-test@forestgeo.test', userStatus: 'global', sites: [] }
+  }))
+}));
+
 // Mock just local helpers
 vi.mock('@/components/processors/processorhelperfunctions', () => ({
   insertOrUpdate: vi.fn()
