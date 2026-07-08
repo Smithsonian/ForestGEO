@@ -17,6 +17,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ROUTE_POLICIES, UNVERIFIED_SCHEMA_ACCESS, type RoutePolicy } from '@/lib/route-policy';
 
+const ROUTE_POLICY_BY_KEY: Record<string, RoutePolicy> = ROUTE_POLICIES;
+
 // ── Filesystem helpers ────────────────────────────────────────────────────────
 
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -121,6 +123,12 @@ function hasFallbackBypass(source: string): boolean {
 
 function routeSourceIsProtected(absolutePath: string): { protected: boolean; reason?: string } {
   const source = fs.readFileSync(absolutePath, 'utf8');
+  if (/withRouteAuthz\s*\(/.test(source)) {
+    if (!/withRouteAuthz[\s\S]{0,700}schema\s*:/.test(source)) {
+      return { protected: false, reason: 'withRouteAuthz used without a schema resolver' };
+    }
+    return { protected: true };
+  }
   const hasSignal = AUTHZ_SIGNAL_PATTERNS.some(pattern => pattern.test(source));
   if (!hasSignal) return { protected: false, reason: 'no authz signal' };
   const hasReturn = AUTHZ_RETURN_PATTERNS.some(pattern => pattern.test(source));
@@ -206,10 +214,10 @@ describe('Route authorization policy matrix', () => {
   });
 
   it('UNVERIFIED_SCHEMA_ACCESS only contains site-scoped routes', () => {
-    const nonSiteScoped = [...UNVERIFIED_SCHEMA_ACCESS].filter(key => ROUTE_POLICIES[key] !== 'site-scoped');
+    const nonSiteScoped = [...UNVERIFIED_SCHEMA_ACCESS].filter(key => ROUTE_POLICY_BY_KEY[key] !== 'site-scoped');
 
     if (nonSiteScoped.length > 0) {
-      const list = nonSiteScoped.map(k => `  - ${k} (${ROUTE_POLICIES[k] ?? 'missing'})`).join('\n');
+      const list = nonSiteScoped.map(k => `  - ${k} (${ROUTE_POLICY_BY_KEY[k] ?? 'missing'})`).join('\n');
       throw new Error(`UNVERIFIED_SCHEMA_ACCESS contains non-site-scoped routes.\n` + `Only 'site-scoped' routes should appear in this set:\n${list}`);
     }
 

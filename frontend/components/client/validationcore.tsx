@@ -198,7 +198,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
   const performValidations = useCallback(async () => {
     try {
       const runSingleValidation = async (procedureName: string): Promise<ValidationExecutionResult[]> => {
-        const { id: validationProcedureID, definition: cursorQuery } = validationMessages[procedureName];
+        const { id: validationProcedureID } = validationMessages[procedureName];
 
         try {
           const response = await fetch(`/api/validations/procedures/${procedureName}`, {
@@ -208,7 +208,6 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             body: JSON.stringify({
               schema: currentSite?.schemaName,
               validationProcedureID,
-              cursorQuery,
               p_CensusID: currentCensus?.dateRanges?.[0]?.censusID,
               p_PlotID: plotID
             })

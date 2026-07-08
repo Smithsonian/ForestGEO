@@ -7,6 +7,8 @@ import { validateContextualValues } from '@/lib/contextvalidation';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { getErrorMessage, getErrorCode, errorMessageContains, toError } from '@/lib/errorhelpers';
+import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { FETCHALL_ALLOWED_TABLES, INVALID_DATATYPE_CODE } from './constants';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -153,7 +155,13 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
         ORDER BY SpeciesCode`;
       results = await connectionManager.executeQuery(query);
     } else {
-      const query = `SELECT * FROM ${schema}.${dataType}`;
+      if (!FETCHALL_ALLOWED_TABLES.has(dataType)) {
+        return NextResponse.json(
+          { error: `Data type '${dataType}' is not available for this endpoint.`, code: INVALID_DATATYPE_CODE },
+          { status: HTTPResponses.BAD_REQUEST }
+        );
+      }
+      const query = safeFormatQuery(schema, `SELECT * FROM ??.${safeEscapeId(dataType)}`);
       results = await connectionManager.executeQuery(query);
     }
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });
