@@ -9,17 +9,19 @@ const GLOBAL_SOURCE = '/:path*';
 
 const EXPECTED_SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), browsing-topics=()',
   'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload'
 } as const;
 
+const CSP_HEADER = 'Content-Security-Policy';
 const CSP_REPORT_ONLY_HEADER = 'Content-Security-Policy-Report-Only';
 
-// Directives that carry the real defense value of the report-only CSP: these
-// block clickjacking, base-tag hijacking and plugin/object injection regardless
-// of the (intentionally permissive) script/style allowances.
-const REQUIRED_CSP_DIRECTIVES = ["frame-ancestors 'none'", "object-src 'none'", "base-uri 'self'", "default-src 'self'"];
+// Directives that carry the real defense value and must be enforced, not just
+// observed in report-only mode.
+const REQUIRED_ENFORCED_CSP_DIRECTIVES = ["frame-ancestors 'none'", "object-src 'none'", "base-uri 'self'"];
+const REQUIRED_REPORT_ONLY_CSP_DIRECTIVES = ["default-src 'self'", "connect-src 'self'"];
 
 type HeaderEntry = { key: string; value: string };
 type HeaderRule = { source: string; headers: HeaderEntry[] };
@@ -51,11 +53,20 @@ describe('next.config.js security response headers', () => {
     expect(entry!.value).toBe(value);
   });
 
-  it('ships a report-only CSP carrying the anti-clickjacking / anti-injection directives', async () => {
+  it('ships an enforcing CSP carrying the anti-clickjacking / anti-injection directives', async () => {
+    const globalRule = findGlobalRule(await loadHeaderRules());
+    const csp = globalRule.headers.find(h => h.key === CSP_HEADER);
+    expect(csp, `Expected ${CSP_HEADER} on ${GLOBAL_SOURCE}`).toBeDefined();
+    for (const directive of REQUIRED_ENFORCED_CSP_DIRECTIVES) {
+      expect(csp!.value).toContain(directive);
+    }
+  });
+
+  it('keeps the broader CSP in report-only mode for telemetry and tightening', async () => {
     const globalRule = findGlobalRule(await loadHeaderRules());
     const csp = globalRule.headers.find(h => h.key === CSP_REPORT_ONLY_HEADER);
     expect(csp, `Expected ${CSP_REPORT_ONLY_HEADER} on ${GLOBAL_SOURCE}`).toBeDefined();
-    for (const directive of REQUIRED_CSP_DIRECTIVES) {
+    for (const directive of REQUIRED_REPORT_ONLY_CSP_DIRECTIVES) {
       expect(csp!.value).toContain(directive);
     }
   });

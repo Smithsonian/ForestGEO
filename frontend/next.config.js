@@ -13,11 +13,14 @@ const withBundleAnalyzer = require('@next/bundle-analyzer')({
   enabled: process.env.ANALYZE === 'true'
 });
 
+// Enforce only the low-risk CSP directives that should not affect Next/MUI
+// runtime behavior. Keep the broader policy report-only until its violations
+// are observed and tightened.
+const SECURITY_CSP_ENFORCED = ["base-uri 'self'", "object-src 'none'", "frame-ancestors 'none'"].join('; ');
+
 // Report-Only Content-Security-Policy. `script-src`/`style-src` intentionally
 // allow 'unsafe-inline' (and 'unsafe-eval') because Next's runtime and
-// MUI/emotion inject inline scripts/styles; the value of shipping this now is
-// the restrictive object-src/base-uri/frame-ancestors directives that block
-// clickjacking and base-tag hijacking. `connect-src` whitelists the Azure
+// MUI/emotion inject inline scripts/styles. `connect-src` whitelists the Azure
 // Application Insights ingestion/live endpoints the browser telemetry beacons to.
 const SECURITY_CSP_REPORT_ONLY = [
   "default-src 'self'",
@@ -193,13 +196,14 @@ const nextConfig = withBundleAnalyzer({
         ]
       },
       {
-        // Defense-in-depth response headers for the whole app. The CSP is
-        // Report-Only for now: it observes and logs violations without breaking
-        // MUI/emotion inline styles or Next's runtime inline scripts, so the
-        // policy can be tightened to enforcing later once violations are triaged.
+        // Defense-in-depth response headers for the whole app. A narrow CSP
+        // enforces anti-framing / anti-object / anti-base-tag protections now;
+        // the broader CSP remains Report-Only so it can be tightened after
+        // telemetry shows whether any runtime sources are still missing.
         source: '/:path*',
         headers: [
           { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           {
             key: 'Permissions-Policy',
@@ -208,6 +212,10 @@ const nextConfig = withBundleAnalyzer({
           {
             key: 'Strict-Transport-Security',
             value: 'max-age=63072000; includeSubDomains; preload'
+          },
+          {
+            key: 'Content-Security-Policy',
+            value: SECURITY_CSP_ENFORCED
           },
           {
             key: 'Content-Security-Policy-Report-Only',
