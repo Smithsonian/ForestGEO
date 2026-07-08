@@ -184,7 +184,9 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager = ConnectionManager.getInstance();
     vi.mocked(insertIngestionFailureRows).mockResolvedValue([]);
     handleUpsertMock.mockResolvedValue({ id: 1, operation: 'inserted' });
-    authMock.mockResolvedValue({ user: { id: 'user-1' } });
+    // Phase-3 inline membership guard (assertSchemaAccess) now runs after auth();
+    // a 'global' admin session clears it so these behavioral tests reach the handler body.
+    authMock.mockResolvedValue({ user: { id: 'user-1', userStatus: 'global', sites: [] } });
     getCookieMock.mockResolvedValue(undefined);
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
@@ -605,7 +607,9 @@ describe('sqlpacketload fixed-data upload modes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockConnectionManager = ConnectionManager.getInstance();
-    authMock.mockResolvedValue({ user: { id: 'user-1' } });
+    // Phase-3 inline membership guard (assertSchemaAccess) now runs after auth();
+    // a 'global' admin session clears it so these behavioral tests reach the handler body.
+    authMock.mockResolvedValue({ user: { id: 'user-1', userStatus: 'global', sites: [] } });
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-fixed');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
@@ -1025,7 +1029,9 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     mockConnectionManager = ConnectionManager.getInstance();
     vi.mocked(insertIngestionFailureRows).mockResolvedValue([]);
     handleUpsertMock.mockResolvedValue({ id: 1, operation: 'inserted' });
-    authMock.mockResolvedValue({ user: { id: 'user-1' } });
+    // Phase-3 inline membership guard (assertSchemaAccess) now runs after auth();
+    // a 'global' admin session clears it so these behavioral tests reach the handler body.
+    authMock.mockResolvedValue({ user: { id: 'user-1', userStatus: 'global', sites: [] } });
     getCookieMock.mockResolvedValue(undefined);
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();

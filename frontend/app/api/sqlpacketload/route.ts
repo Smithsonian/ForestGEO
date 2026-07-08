@@ -19,6 +19,7 @@ import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
 import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
 import { RoleResult } from '@/lib/db/definitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
+import { assertSchemaAccess } from '@/lib/authz';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import { resolveMeasurementChunk } from '@/lib/column-mapping/measurement-rows';
 import {
@@ -728,6 +729,18 @@ export async function POST(request: NextRequest) {
       { status: HTTPResponses.INVALID_REQUEST }
     );
   }
+
+  // Phase-3: user→schema membership enforced INLINE rather than via `withRouteAuthz` +
+  // `fromBody('schema')`. This route accepts a potentially large upload body; `fromBody`
+  // clones and fully re-parses the whole body to read one field, doubling parse cost on
+  // the hot upload path. The handler already parsed the body and authenticated the session
+  // above, so we reuse the resolved `schema` and `session` directly. The measurements branch
+  // below retains `requireUploadSessionOwnership` for plot/census token ownership — this adds
+  // the missing user→schema check on top. The meta-test (app/api/route-policy.test.ts)
+  // recognises the `assertSchemaAccess` + `if (denied) return denied` pair as a valid signal.
+  const denied = assertSchemaAccess(session!, schema);
+  if (denied) return denied;
+
   const formType: string = body.formType;
   const sourceFormat = normalizeSourceFormat(body.sourceFormat ?? SourceFormat.csv);
   if (sourceFormat !== SourceFormat.csv) {

@@ -171,7 +171,5 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'resettableview/[gridType]/[plotID]/[censusID]',
   // changelog: uses validateContextualValues but skipSchemaAuth path exists via
   // URL-param fallback without auth; classify as unverified
-  'changelog/overview/[changelogType]/[[...options]]',
-  // sqlpacketload: requireSession confirms identity but no schema-ownership check
-  'sqlpacketload'
+  'changelog/overview/[changelogType]/[[...options]]'
 ]);
