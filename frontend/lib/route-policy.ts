@@ -184,8 +184,7 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'validations/run',
   // validations/updatepassedvalidations: raw schema from body/query, no auth
   'validations/updatepassedvalidations',
-  // errors/explorer/query and changes/explorer/*: isValidSchema only, no user auth
-  'errors/explorer/query',
+  // changes/explorer/*: isValidSchema only, no user auth
   'changes/explorer/facets',
   'changes/explorer/query',
   // changelog: uses validateContextualValues but skipSchemaAuth path exists via
