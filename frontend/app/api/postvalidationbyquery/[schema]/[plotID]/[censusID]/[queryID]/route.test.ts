@@ -7,6 +7,14 @@ import ConnectionManager from '@/lib/db/connectionmanager'; // ---- Helpers ----
 
 // ---- Mocks (must be declared before importing the route) ----
 
+// withRouteAuthz now wraps GET and calls auth(); a 'global' admin session
+// passes the per-site access gate so the handler-level assertions below run.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({
+    user: { email: 'route-test@forestgeo.test', userStatus: 'global', sites: [] }
+  }))
+}));
+
 // Stable, shared ConnectionManager singleton
 vi.mock('@/lib/db/connectionmanager', async () => {
   const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);

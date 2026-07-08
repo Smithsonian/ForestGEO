@@ -4,6 +4,7 @@ import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
+import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -36,7 +37,7 @@ function buildBatchPrefixPredicate(columnRef: string): string {
  *   scope: 'file' | 'batch' | 'all'
  * }
  */
-export async function GET(request: NextRequest) {
+async function handler(request: NextRequest, _context: RouteContext) {
   const searchParams = request.nextUrl.searchParams;
   const schema = searchParams.get('schema');
   const plotID = searchParams.get('plotID');
@@ -283,3 +284,5 @@ export async function GET(request: NextRequest) {
     await connectionManager.closeConnection();
   }
 }
+
+export const GET = withRouteAuthz('verifysession', handler, { schema: fromQuery('schema') });

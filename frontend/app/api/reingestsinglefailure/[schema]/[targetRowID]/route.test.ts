@@ -2,6 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 
+// Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
+// A 'global' admin passes the per-site access gate; 'forestgeo_testing' is a
+// structurally valid schema, so the guard's isValidSchema check passes too.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
 vi.mock('@/lib/db/connectionmanager', () => {
   const beginTransaction = vi.fn();
   const executeQuery = vi.fn();

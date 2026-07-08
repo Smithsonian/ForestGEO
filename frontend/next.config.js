@@ -13,6 +13,28 @@ const withBundleAnalyzer = require('@next/bundle-analyzer')({
   enabled: process.env.ANALYZE === 'true'
 });
 
+// Enforce only the low-risk CSP directives that should not affect Next/MUI
+// runtime behavior. Keep the broader policy report-only until its violations
+// are observed and tightened.
+const SECURITY_CSP_ENFORCED = ["base-uri 'self'", "object-src 'none'", "frame-ancestors 'none'"].join('; ');
+
+// Report-Only Content-Security-Policy. `script-src`/`style-src` intentionally
+// allow 'unsafe-inline' (and 'unsafe-eval') because Next's runtime and
+// MUI/emotion inject inline scripts/styles. `connect-src` whitelists the Azure
+// Application Insights ingestion/live endpoints the browser telemetry beacons to.
+const SECURITY_CSP_REPORT_ONLY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "style-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "connect-src 'self' https://*.applicationinsights.azure.com https://*.in.applicationinsights.azure.com https://*.monitor.azure.com",
+  "form-action 'self'"
+].join('; ');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = withBundleAnalyzer({
   experimental: {
@@ -160,7 +182,7 @@ const nextConfig = withBundleAnalyzer({
   images: {
     unoptimized: true
   },
-  // Cache headers for static assets (animations)
+  // Cache headers for static assets (animations) + baseline security headers on every response.
   async headers() {
     return [
       {
@@ -170,6 +192,34 @@ const nextConfig = withBundleAnalyzer({
           {
             key: 'Cache-Control',
             value: 'public, max-age=31536000, immutable'
+          }
+        ]
+      },
+      {
+        // Defense-in-depth response headers for the whole app. A narrow CSP
+        // enforces anti-framing / anti-object / anti-base-tag protections now;
+        // the broader CSP remains Report-Only so it can be tightened after
+        // telemetry shows whether any runtime sources are still missing.
+        source: '/:path*',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=(), browsing-topics=()'
+          },
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=63072000; includeSubDomains; preload'
+          },
+          {
+            key: 'Content-Security-Policy',
+            value: SECURITY_CSP_ENFORCED
+          },
+          {
+            key: 'Content-Security-Policy-Report-Only',
+            value: SECURITY_CSP_REPORT_ONLY
           }
         ]
       }

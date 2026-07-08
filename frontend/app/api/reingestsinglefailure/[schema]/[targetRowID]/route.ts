@@ -6,6 +6,7 @@ import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { generateShortBatchID } from '@/config/utils';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
+import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -21,13 +22,10 @@ function serializeJsonParam(value: unknown): string | null {
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-export async function GET(
-  _request: NextRequest,
-  props: {
-    params: Promise<{ schema: string; targetRowID: string }>;
-  }
-) {
-  const { schema, targetRowID } = await props.params;
+async function handler(_request: NextRequest, context: RouteContext) {
+  const params = await context.params;
+  const schema = params.schema as string;
+  const targetRowID = params.targetRowID as string;
   if (!schema || !targetRowID) {
     return new NextResponse(JSON.stringify({ error: 'Missing required parameters: schema, targetRowID' }), { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -270,3 +268,5 @@ export async function GET(
     }
   }
 }
+
+export const GET = withRouteAuthz('reingestsinglefailure/[schema]/[targetRowID]', handler, { schema: fromPath('schema') });

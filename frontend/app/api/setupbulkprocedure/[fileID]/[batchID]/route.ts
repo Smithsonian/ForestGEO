@@ -6,6 +6,7 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
+import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -402,14 +403,10 @@ async function processSubBatch(
   };
 }
 
-export async function GET(
-  request: NextRequest,
-  props: {
-    params: Promise<{ fileID: string; batchID: string }>;
-  }
-) {
+// Phase-3: user→schema membership via guard; requireUploadSessionOwnership retains plot/census token ownership.
+async function handler(request: NextRequest, context: RouteContext) {
   const schema = request.nextUrl.searchParams.get('schema');
-  const { fileID, batchID } = await props.params;
+  const { fileID, batchID } = (await context.params) as { fileID: string; batchID: string };
   if (!schema || !fileID || !batchID) {
     return new NextResponse(JSON.stringify({ error: 'Missing parameters' }), { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -586,3 +583,5 @@ export async function GET(
     { status: HTTPResponses.OK }
   );
 }
+
+export const GET = withRouteAuthz('setupbulkprocedure/[fileID]/[batchID]', handler, { schema: fromQuery('schema') });

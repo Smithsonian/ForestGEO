@@ -5,8 +5,9 @@ import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { getContainerNameWithFallback } from '@/config/macros/containernames';
 import { auth } from '@/auth';
-import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
+import { getSessionUserId } from '@/lib/auth-helpers';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
+import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import path from 'path';
 import type { Session } from 'next-auth';
 import { FormType, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
@@ -146,19 +147,20 @@ function authorizeFileScope(session: Session, params: FileOperationParams): Auth
  */
 
 // POST: Upload file
-export async function POST(request: NextRequest, props: { params: Promise<{ operation: string }> }) {
-  // Authentication check
+async function handleUpload(request: NextRequest, context: RouteContext) {
+  // withRouteAuthz already authenticated the session and enforced per-site
+  // access; re-read the session here for identity + container-scope resolution.
   const session = await auth();
-  const authError = requireSession(session);
-  if (authError) return authError;
 
-  const { operation } = await props.params;
+  const operation = (await context.params).operation as string;
 
   if (operation !== 'upload') {
     return new NextResponse(JSON.stringify({ error: 'POST method only supports upload operation' }), { status: HTTPResponses.METHOD_NOT_ALLOWED });
   }
 
   const params = extractParams(request);
+  // defense-in-depth behind guard: re-checks schema membership and validates the
+  // requested container matches the server-derived plot/census scope.
   const scope = authorizeFileScope(session!, params);
   if (scope instanceof NextResponse) return scope;
 
@@ -272,18 +274,20 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
 }
 
 // GET: Download file or list files
-export async function GET(request: NextRequest, props: { params: Promise<{ operation: string }> }) {
+async function handleGet(request: NextRequest, context: RouteContext) {
+  // withRouteAuthz already authenticated the session and enforced per-site
+  // access; re-read the session here for identity + container-scope resolution.
   const session = await auth();
-  const authError = requireSession(session);
-  if (authError) return authError;
 
-  const { operation } = await props.params;
+  const operation = (await context.params).operation as string;
 
   if (!VALID_OPERATIONS[operation] || !['download', 'list'].includes(operation)) {
     return new NextResponse(JSON.stringify({ error: 'GET method supports download and list operations only' }), { status: HTTPResponses.METHOD_NOT_ALLOWED });
   }
 
   const params = extractParams(request);
+  // defense-in-depth behind guard: re-checks schema membership and validates the
+  // requested container matches the server-derived plot/census scope.
   const scope = authorizeFileScope(session!, params);
   if (scope instanceof NextResponse) return scope;
 
@@ -297,22 +301,28 @@ export async function GET(request: NextRequest, props: { params: Promise<{ opera
 }
 
 // DELETE: Delete file
-export async function DELETE(request: NextRequest, props: { params: Promise<{ operation: string }> }) {
+async function handleDeleteRequest(request: NextRequest, context: RouteContext) {
+  // withRouteAuthz already authenticated the session and enforced per-site
+  // access; re-read the session here for identity + container-scope resolution.
   const session = await auth();
-  const authError = requireSession(session);
-  if (authError) return authError;
 
-  const { operation } = await props.params;
+  const operation = (await context.params).operation as string;
 
   if (operation !== 'delete') {
     return new NextResponse(JSON.stringify({ error: 'DELETE method only supports delete operation' }), { status: HTTPResponses.METHOD_NOT_ALLOWED });
   }
 
   const params = extractParams(request);
+  // defense-in-depth behind guard: re-checks schema membership and validates the
+  // requested container matches the server-derived plot/census scope.
   const scope = authorizeFileScope(session!, params);
   if (scope instanceof NextResponse) return scope;
   return handleDelete(params, scope);
 }
+
+export const POST = withRouteAuthz('files/[operation]', handleUpload, { schema: fromQuery('schema') });
+export const GET = withRouteAuthz('files/[operation]', handleGet, { schema: fromQuery('schema') });
+export const DELETE = withRouteAuthz('files/[operation]', handleDeleteRequest, { schema: fromQuery('schema') });
 
 // Helper function to extract parameters from request
 function extractParams(request: NextRequest): FileOperationParams & { fileName?: string } {

@@ -4,8 +4,10 @@ import MapperFactory from '@/config/datamapper';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
-import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
+import { safeFormatQuery, validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { toError } from '@/lib/errorhelpers';
+import { assertSchemaAccess } from '@/lib/authz';
+import { auth } from '@/auth';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -45,6 +47,16 @@ export async function GET(request: NextRequest, props: { params: Promise<{ chang
       if (isNaN(plotID) || isNaN(pcn)) {
         return NextResponse.json({ error: 'Invalid plot ID or census number parameters' }, { status: HTTPResponses.BAD_REQUEST });
       }
+
+      // SECURITY: the fallback uses the raw query-param schema, which
+      // validateContextualValues did NOT authorize against site membership.
+      // Gate it here before any SQL runs so the fallback cannot bypass authz.
+      const session = await auth();
+      if (!session?.user) {
+        return NextResponse.json({ error: 'Unauthenticated', code: 'UNAUTHENTICATED' }, { status: HTTPResponses.UNAUTHORIZED });
+      }
+      const denied = assertSchemaAccess(session, schema);
+      if (denied) return denied;
     } else {
       return validation.response!;
     }
@@ -70,16 +82,22 @@ export async function GET(request: NextRequest, props: { params: Promise<{ chang
     let query = ``;
     switch (params.changelogType) {
       case 'unifiedchangelog':
-        query = `SELECT * FROM ${schema}.unifiedchangelog 
-        WHERE (PlotID = ? OR PlotID IS NULL) AND 
-          (CensusID IN (SELECT CensusID FROM ${schema}.census WHERE PlotID = ? AND PlotCensusNumber = ? AND IsActive IS TRUE) OR CensusID IS NULL) 
-        ORDER BY ChangeTimestamp DESC 
-        LIMIT 5;`;
+        query = safeFormatQuery(
+          schema,
+          `SELECT * FROM ??.unifiedchangelog
+        WHERE (PlotID = ? OR PlotID IS NULL) AND
+          (CensusID IN (SELECT CensusID FROM ??.census WHERE PlotID = ? AND PlotCensusNumber = ? AND IsActive IS TRUE) OR CensusID IS NULL)
+        ORDER BY ChangeTimestamp DESC
+        LIMIT 5;`
+        );
         break;
       case 'validationchangelog':
-        query = `SELECT * 
-                 FROM ${schema}.${params.changelogType} 
-                 ORDER BY RunDateTime DESC LIMIT 5;`;
+        query = safeFormatQuery(
+          schema,
+          `SELECT *
+                 FROM ??.validationchangelog
+                 ORDER BY RunDateTime DESC LIMIT 5;`
+        );
         break;
     }
     const results = await connectionManager.executeQuery(query, [plotID, plotID, pcn]);

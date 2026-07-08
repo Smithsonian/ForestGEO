@@ -193,8 +193,10 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     const res = await GET(makeRequest(), makeProps());
 
     expect(res.status).toBe(HTTPResponses.FORBIDDEN);
+    // The out-of-scope denial now comes from withRouteAuthz (assertSchemaAccess),
+    // which short-circuits before the handler and emits its own message.
     const body = await res.json();
-    expect(body.error).toMatch(/forbidden/i);
+    expect(body.error).toMatch(/outside the authenticated user scope/i);
     expect(mocks.connQuery).not.toHaveBeenCalled();
     expect(mocks.connRelease).not.toHaveBeenCalled();
   });

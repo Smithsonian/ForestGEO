@@ -20,6 +20,14 @@ const { requireUploadSessionOwnershipMock } = vi.hoisted(() => ({
   requireUploadSessionOwnershipMock: vi.fn()
 }));
 
+// withRouteAuthz (the Phase-3 membership guard now wrapping GET) calls auth()
+// before the handler runs. A 'global' admin session clears assertSchemaAccess so
+// these behavioral tests still exercise the handler. Mocking @/auth also avoids
+// loading the real next-auth ESM module under the native resolver.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { email: 'runner@forestgeo.test', userStatus: 'global', sites: [] } }))
+}));
+
 vi.mock('@/lib/db/connectionmanager', () => {
   const instance = {
     withTransaction: vi.fn(),
@@ -35,7 +43,8 @@ vi.mock('@/lib/db/connectionmanager', () => {
 });
 
 vi.mock('@/lib/db/sqlsecurity', () => ({
-  safeFormatQuery: vi.fn((schema: string, sql: string) => sql.replace(/\?\?/g, schema))
+  safeFormatQuery: vi.fn((schema: string, sql: string) => sql.replace(/\?\?/g, schema)),
+  isValidSchema: vi.fn(() => true)
 }));
 
 vi.mock('@/config/uploadsessiontracker', () => ({

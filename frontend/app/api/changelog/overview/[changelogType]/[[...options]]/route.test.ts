@@ -5,10 +5,12 @@ import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager'; // ========== Helpers ==========
 
 // ========== Hoisted spies (used by mocks below) ==========
-const { mapDataSpy, getMapperSpy } = vi.hoisted(() => {
+// Hoisted so it is available inside the vi.mock factories, which run before the
+// module imports. Mirrors HTTPResponses.INTERNAL_SERVER_ERROR (500).
+const { mapDataSpy, getMapperSpy, INTERNAL_SERVER_ERROR_STATUS } = vi.hoisted(() => {
   const mapDataSpy = vi.fn((rows: any[]) => rows.map(r => ({ ...r, mapped: true })));
   const getMapperSpy = vi.fn(() => ({ mapData: mapDataSpy }));
-  return { mapDataSpy, getMapperSpy };
+  return { mapDataSpy, getMapperSpy, INTERNAL_SERVER_ERROR_STATUS: 500 };
 });
 
 // ========== Mocks (must come BEFORE importing the route) ==========
@@ -36,6 +38,31 @@ vi.mock('@/lib/db/connectionmanager', async () => {
     getInstance
   };
 });
+
+// These tests exercise the query-param FALLBACK branch of the route (schema via
+// ?schema=, plotID/pcn via the options path segments). In the unit environment
+// validateContextualValues fails (its getCookie server action is unavailable),
+// which is exactly what drives the route into that fallback branch — so we mock
+// it to deterministically return failure. The fallback now enforces per-site
+// authz (auth() + assertSchemaAccess), so we run as a global admin to reach the
+// SQL logic under test; the 403 path is covered by the changelog authz
+// integration test. The `response` mirrors the real 500 the route surfaces when
+// no schema can be resolved at all (the "schema missing" case below).
+vi.mock('@/lib/contextvalidation', () => ({
+  validateContextualValues: vi.fn(async () => ({
+    success: false,
+    response: new Response(JSON.stringify({ error: 'Failed to validate context' }), {
+      status: INTERNAL_SERVER_ERROR_STATUS,
+      headers: { 'content-type': 'application/json' }
+    })
+  }))
+}));
+
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({
+    user: { email: 'changelog-test@forestgeo.test', userStatus: 'global', sites: [] }
+  }))
+}));
 
 // MapperFactory mock (uses hoisted spies)
 vi.mock('@/config/datamapper', () => ({
@@ -118,7 +145,8 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
     // SQL + params sanity
     expect(exec).toHaveBeenCalledTimes(1);
     const [sql, params] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/SELECT \* FROM forestgeo_testschema\.unifiedchangelog/i);
+    // safeFormatQuery backtick-quotes the schema identifier for injection safety.
+    expect(String(sql)).toMatch(/SELECT \* FROM `forestgeo_testschema`\.unifiedchangelog/i);
     expect(String(sql)).toMatch(/WHERE \(PlotID = \? OR PlotID IS NULL\)/i);
     expect(String(sql)).toMatch(/ORDER BY ChangeTimestamp DESC\s+LIMIT 5;?/i);
     expect(params).toEqual([42, 42, 7]); // plotID, plotID, pcn
@@ -164,7 +192,8 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
     ]);
 
     const [sql, params] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/FROM forestgeo_testschema\.validationchangelog/i);
+    // safeFormatQuery backtick-quotes the schema identifier for injection safety.
+    expect(String(sql)).toMatch(/FROM `forestgeo_testschema`\.validationchangelog/i);
     expect(String(sql)).toMatch(/ORDER BY RunDateTime DESC LIMIT 5;?/i);
     // The route still passes params array even if not used in the SQL
     expect(params).toEqual([42, 42, 7]);

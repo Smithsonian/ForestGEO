@@ -11,6 +11,11 @@ export class PoolMonitor {
   private poolClosed = false;
   private reinitializePromise: Promise<void> | null = null;
   private closePromise: Promise<void> | null = null;
+  // mysql2 recycles physical PoolConnection objects across acquire/release, so guard
+  // against re-attaching the same 'query'/'release' listeners on every acquire (which
+  // would accumulate without bound -> MaxListenersExceededWarning + memory leak). A
+  // WeakSet lets GC'd/destroyed connections drop out automatically.
+  private readonly connectionsWithListeners = new WeakSet<PoolConnection>();
 
   constructor(config: PoolOptions) {
     this.config = config;
@@ -172,8 +177,11 @@ export class PoolMonitor {
 
   private async acquireConnectionFromCurrentPool(): Promise<PoolConnection> {
     const connection = await this.pool.getConnection();
-    connection.on('query', () => this.resetInactivityTimer());
-    connection.on('release', () => this.resetInactivityTimer());
+    if (!this.connectionsWithListeners.has(connection)) {
+      connection.on('query', () => this.resetInactivityTimer());
+      connection.on('release', () => this.resetInactivityTimer());
+      this.connectionsWithListeners.add(connection);
+    }
     return connection;
   }
 

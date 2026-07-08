@@ -4,6 +4,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
+import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -16,14 +17,10 @@ export const maxDuration = 300;
 // 5 minutes gives plenty of headroom while still catching genuine hangs.
 const COLLAPSER_TIMEOUT_MS = 5 * 60 * 1000;
 
-export async function GET(
-  request: NextRequest,
-  props: {
-    params: Promise<{ censusID: string }>;
-  }
-) {
+// Phase-3: user→schema membership via guard; requireUploadSessionOwnership retains plot/census token ownership.
+async function handler(request: NextRequest, context: RouteContext) {
   const schema = request.nextUrl.searchParams.get('schema');
-  const { censusID } = await props.params;
+  const { censusID } = (await context.params) as { censusID: string };
   if (!schema || !censusID) {
     return new NextResponse(JSON.stringify({ error: 'Missing parameters' }), { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -75,3 +72,5 @@ export async function GET(
     return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   }
 }
+
+export const GET = withRouteAuthz('setupbulkcollapser/[censusID]', handler, { schema: fromQuery('schema') });

@@ -4,12 +4,18 @@ import { format } from 'mysql2/promise';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
-import { POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
+import { DELETE as coreApiDelete, PATCH as coreApiPatch, POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
 import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
-import { isValidSchema } from '@/lib/db/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
+import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
+
+// Shape of the resolved catch-all params for this slug route; the re-exported
+// coreapifunctions CRUD handlers expect exactly this props shape.
+type SlugRouteProps = { params: Promise<{ dataType: string; slugs?: string[] }> };
+const ROUTE_KEY = 'fixeddatafilter/[dataType]/[[...slugs]]';
 
 const COLUMN_CACHE_TTL_MS = 5 * 60 * 1000;
 const columnCache = new Map<string, { columns: string[]; cachedAt: number }>();
@@ -58,14 +64,8 @@ function parseOptionalPositiveInt(value: string | undefined): number | undefined
   return Number.isNaN(parsed) || parsed <= 0 ? undefined : parsed;
 }
 
-export { PATCH, DELETE } from '@/config/macros/coreapifunctions';
-
-export async function POST(
-  request: NextRequest,
-  props: {
-    params: Promise<{ dataType: string; slugs?: string[] }>;
-  }
-) {
+async function postHandler(request: NextRequest, context: RouteContext) {
+  const props = context as unknown as SlugRouteProps;
   const params = await props.params;
   // trying to ensure that system correctly retains edit/add functionality -- not necessarily needed currently but better safe than sorry
   const body = await request.json();
@@ -85,7 +85,9 @@ export async function POST(
       });
     }
 
-    // SECURITY: Validate schema against whitelist to prevent SQL injection
+    // defense-in-depth: withRouteAuthz already validated schema membership before
+    // this handler ran; this whitelist check stays as a redundant guard on the
+    // schema identifiers routed through safeFormatQuery below.
     if (!isValidSchema(schema)) {
       ailogger.error(`[fixeddatafilter API] Invalid schema provided: ${schema}`);
       return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), {
@@ -187,8 +189,8 @@ export async function POST(
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
           {
             const whereClause = searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
-            paginatedQuery = `SELECT * FROM ${schema}.sitespecificvalidations ${whereClause}`;
-            countQuery = `SELECT COUNT(*) as totalRows FROM ${schema}.sitespecificvalidations ${whereClause}`;
+            paginatedQuery = `SELECT * FROM ??.sitespecificvalidations ${whereClause}`;
+            countQuery = `SELECT COUNT(*) as totalRows FROM ??.sitespecificvalidations ${whereClause}`;
           }
           queryParams.push(page * pageSize, pageSize);
           break;
@@ -199,14 +201,14 @@ export async function POST(
             const filterClause = searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
             paginatedQuery = `SELECT fm.*
             FROM (${buildFailedMeasurementsSelectQuery(schema)}) fm
-            JOIN ${schema}.census c ON fm.CensusID = c.CensusID
+            JOIN ??.census c ON fm.CensusID = c.CensusID
             WHERE fm.PlotID = ?
             AND c.PlotID = ?
             AND c.PlotCensusNumber = ?
             ${filterClause}`;
             countQuery = `SELECT COUNT(*) as totalRows
             FROM (${buildFailedMeasurementsSelectQuery(schema)}) fm
-            JOIN ${schema}.census c ON fm.CensusID = c.CensusID
+            JOIN ??.census c ON fm.CensusID = c.CensusID
             WHERE fm.PlotID = ?
             AND c.PlotID = ?
             AND c.PlotCensusNumber = ?
@@ -225,8 +227,8 @@ export async function POST(
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
           {
             const whereClause = searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
-            paginatedQuery = `SELECT * FROM ${schema}.${params.dataType} ${whereClause}`;
-            countQuery = `SELECT COUNT(*) as totalRows FROM ${schema}.${params.dataType} ${whereClause}`;
+            paginatedQuery = `SELECT * FROM ??.${params.dataType} ${whereClause}`;
+            countQuery = `SELECT COUNT(*) as totalRows FROM ??.${params.dataType} ${whereClause}`;
           }
           queryParams.push(page * pageSize, pageSize);
           break;
@@ -238,22 +240,22 @@ export async function POST(
             if (plotCensusNumber !== undefined && plotID !== undefined) {
               paginatedQuery = `
               SELECT p.*, EXISTS(
-                SELECT 1 FROM ${schema}.censusactivepersonnel cap
-                  JOIN ${schema}.census c ON cap.CensusID = c.CensusID
+                SELECT 1 FROM ??.censusactivepersonnel cap
+                  JOIN ??.census c ON cap.CensusID = c.CensusID
                   WHERE cap.PersonnelID = p.PersonnelID
                     AND c.PlotCensusNumber = ? and c.PlotID = ?
                 ) AS CensusActive
-              FROM ${schema}.${params.dataType} p
+              FROM ??.${params.dataType} p
               ${whereClause}`;
               queryParams.push(plotCensusNumber, plotID, page * pageSize, pageSize);
             } else {
               paginatedQuery = `
               SELECT p.*
-              FROM ${schema}.${params.dataType} p
+              FROM ??.${params.dataType} p
               ${whereClause}`;
               queryParams.push(page * pageSize, pageSize);
             }
-            countQuery = `SELECT COUNT(*) as totalRows FROM ${schema}.${params.dataType} p ${whereClause}`;
+            countQuery = `SELECT COUNT(*) as totalRows FROM ??.${params.dataType} p ${whereClause}`;
           }
           break;
         case 'unifiedchangelog':
@@ -262,17 +264,17 @@ export async function POST(
           {
             const filterClause = searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
             paginatedQuery = `
-            SELECT * FROM ${schema}.${params.dataType} uc
-            LEFT JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
-            LEFT JOIN ${schema}.census c ON uc.CensusID = c.CensusID AND c.IsActive IS TRUE
+            SELECT * FROM ??.${params.dataType} uc
+            LEFT JOIN ??.plots p ON uc.PlotID = p.PlotID
+            LEFT JOIN ??.census c ON uc.CensusID = c.CensusID AND c.IsActive IS TRUE
             WHERE (uc.PlotID = ? OR uc.PlotID IS NULL)
               AND (c.PlotID = ? AND c.PlotCensusNumber = ? OR uc.CensusID IS NULL)
             ${filterClause}
             ORDER BY uc.ChangeTimestamp DESC`;
             countQuery = `
-            SELECT COUNT(*) as totalRows FROM ${schema}.${params.dataType} uc
-            LEFT JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
-            LEFT JOIN ${schema}.census c ON uc.CensusID = c.CensusID AND c.IsActive IS TRUE
+            SELECT COUNT(*) as totalRows FROM ??.${params.dataType} uc
+            LEFT JOIN ??.plots p ON uc.PlotID = p.PlotID
+            LEFT JOIN ??.census c ON uc.CensusID = c.CensusID AND c.IsActive IS TRUE
             WHERE (uc.PlotID = ? OR uc.PlotID IS NULL)
               AND (c.PlotID = ? AND c.PlotCensusNumber = ? OR uc.CensusID IS NULL)
             ${filterClause}`;
@@ -287,12 +289,12 @@ export async function POST(
             const filterClause = searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
             paginatedQuery = `
             SELECT q.*
-            FROM ${schema}.quadrats q
+            FROM ??.quadrats q
             WHERE q.PlotID = ? AND q.IsActive IS TRUE
               ${filterClause}`;
             countQuery = `
             SELECT COUNT(*) as totalRows
-            FROM ${schema}.quadrats q
+            FROM ??.quadrats q
             WHERE q.PlotID = ? AND q.IsActive IS TRUE
               ${filterClause}`;
             countParams.push(plotID);
@@ -306,12 +308,12 @@ export async function POST(
             const filterClause = searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
             paginatedQuery = `
             SELECT *
-            FROM ${schema}.census
+            FROM ??.census
             WHERE PlotID = ?
             ${filterClause}`;
             countQuery = `
             SELECT COUNT(*) as totalRows
-            FROM ${schema}.census
+            FROM ??.census
             WHERE PlotID = ?
             ${filterClause}`;
             countParams.push(plotID);
@@ -343,8 +345,8 @@ export async function POST(
               ${tssClause}
               ${filterClause}`;
             const sharedFrom = `
-            FROM ${schema}.${params.dataType} vft
-              JOIN ${schema}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID`;
+            FROM ??.${params.dataType} vft
+              JOIN ??.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID`;
             paginatedQuery = `SELECT vft.* ${sharedFrom} ${sharedWhere} ORDER BY vft.MeasurementDate ASC`;
             countQuery = `SELECT COUNT(*) as totalRows ${sharedFrom} ${sharedWhere}`;
             countParams.push(plotID, plotID, plotCensusNumber);
@@ -359,12 +361,12 @@ export async function POST(
             const filterClause = searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
             paginatedQuery = `
             SELECT *
-            FROM ${schema}.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ?
+            FROM ??.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ?
               ${filterClause}
             ORDER BY CoreMeasurementID ASC `;
             countQuery = `
             SELECT COUNT(*) as totalRows
-            FROM ${schema}.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ?
+            FROM ??.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ?
               ${filterClause} `;
             countParams.push(plotID, plotCensusNumber);
           }
@@ -376,16 +378,16 @@ export async function POST(
 
           const censusQuery = `
             SELECT CensusID
-            FROM ${schema}.census
+            FROM ??.census
             WHERE PlotID = ?
               AND PlotCensusNumber = ?
             ORDER BY StartDate DESC LIMIT 30
         `;
-          const censusResults = await connectionManager.executeQuery(format(censusQuery, [plotID, plotCensusNumber]));
+          const censusResults = await connectionManager.executeQuery(format(safeFormatQuery(schema, censusQuery), [plotID, plotCensusNumber]));
           if (censusResults.length < 2) {
             {
               const filterClause = searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
-              const sharedFrom = `FROM ${schema}.${params.dataType} pdt JOIN ${schema}.census c ON pdt.CensusID = c.CensusID`;
+              const sharedFrom = `FROM ??.${params.dataType} pdt JOIN ??.census c ON pdt.CensusID = c.CensusID`;
               const sharedWhere = `WHERE c.PlotID = ? AND c.PlotCensusNumber = ? ${filterClause}`;
               paginatedQuery = `SELECT pdt.* ${sharedFrom} ${sharedWhere} ORDER BY pdt.MeasurementDate`;
               countQuery = `SELECT COUNT(*) as totalRows ${sharedFrom} ${sharedWhere}`;
@@ -399,7 +401,7 @@ export async function POST(
             pastCensusIDs = censusIDs.slice(1);
             {
               const filterClause = searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
-              const sharedFrom = `FROM ${schema}.${params.dataType} pdt JOIN ${schema}.census c ON pdt.CensusID = c.CensusID`;
+              const sharedFrom = `FROM ??.${params.dataType} pdt JOIN ??.census c ON pdt.CensusID = c.CensusID`;
               const sharedWhere = `WHERE c.PlotID = ? AND c.CensusID IN (${censusIDs.map(() => '?').join(', ')}) ${filterClause}`;
               paginatedQuery = `SELECT pdt.* ${sharedFrom} ${sharedWhere} ORDER BY pdt.MeasurementDate ASC`;
               countQuery = `SELECT COUNT(*) as totalRows ${sharedFrom} ${sharedWhere}`;
@@ -414,6 +416,12 @@ export async function POST(
           });
       }
       paginatedQuery += ` LIMIT ?, ?;`;
+
+      // Route the schema identifier (?? placeholders) through safeFormatQuery before
+      // the value-placeholder accounting below, so the remaining `?` count matches
+      // queryParams/countParams exactly.
+      paginatedQuery = safeFormatQuery(schema, paginatedQuery);
+      countQuery = safeFormatQuery(schema, countQuery);
 
       if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
         ailogger.error(
@@ -472,3 +480,17 @@ export async function POST(
     }
   }
 }
+
+// The re-exported coreapifunctions PATCH/DELETE handlers use their own narrower
+// props type; wrap them so the guard's RouteContext callback signature matches.
+async function patchHandler(request: NextRequest, context: RouteContext) {
+  return coreApiPatch(request, context as unknown as SlugRouteProps);
+}
+
+async function deleteHandler(request: NextRequest, context: RouteContext) {
+  return coreApiDelete(request, context as unknown as SlugRouteProps);
+}
+
+export const POST = withRouteAuthz(ROUTE_KEY, postHandler, { schema: fromPathSegment('slugs', 0) });
+export const PATCH = withRouteAuthz(ROUTE_KEY, patchHandler, { schema: fromPathSegment('slugs', 0) });
+export const DELETE = withRouteAuthz(ROUTE_KEY, deleteHandler, { schema: fromPathSegment('slugs', 0) });

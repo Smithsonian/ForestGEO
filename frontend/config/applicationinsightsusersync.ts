@@ -3,13 +3,13 @@
 
 import { useEffect } from 'react';
 import { useSession } from 'next-auth/react';
-import { clearUserContext, getAppInsights, initializeAppInsights, setUserContext } from '@/applicationinsights';
+import { clearUserContext, getAppInsights, getAppInsightsConnectionString, initializeAppInsights, setUserContext } from '@/applicationinsights';
 
 export function useAppInsightsUserSync() {
   const { data: session, status } = useSession();
 
   useEffect(() => {
-    const connectionString = process.env.NEXT_PUBLIC_APPINSIGHTS_CONNECTION_STRING;
+    const connectionString = getAppInsightsConnectionString();
     if (!connectionString) return;
 
     // ensure initialized

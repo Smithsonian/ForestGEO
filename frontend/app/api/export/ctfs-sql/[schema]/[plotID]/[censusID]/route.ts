@@ -3,7 +3,8 @@ import { HTTPResponses } from '@/config/macros';
 import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { getConn } from '@/lib/db/primitives';
 import { auth } from '@/auth';
-import { requireSession, getSessionUserId } from '@/lib/auth-helpers';
+import { getSessionUserId } from '@/lib/auth-helpers';
+import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 import { checkFinishedCensus, selectMeasurements, renderArtifact, type PreconditionFailure } from '@/lib/ctfs-export';
 import { userCanExportSchema, userIsAdmin } from '@/lib/ctfs-export/export-permissions';
@@ -12,8 +13,6 @@ import type { Session } from 'next-auth';
 // Force Node.js runtime — mysql2 and the ctfs-export renderer are not compatible
 // with the Edge Runtime.
 export const runtime = 'nodejs';
-
-type RouteProps = { params: Promise<{ schema: string; plotID: string; censusID: string }> };
 
 // ---------------------------------------------------------------------------
 // Permission helpers
@@ -51,20 +50,27 @@ function buildDownloadFilename(destinationPlotId: number, plotCensusNumber: stri
 // Route handler
 // ---------------------------------------------------------------------------
 
-export async function GET(request: NextRequest, props: RouteProps): Promise<NextResponse> {
-  // --- Authentication ---
+async function handler(request: NextRequest, context: RouteContext): Promise<NextResponse> {
+  const params = await context.params;
+  const schema = params.schema as string;
+  const plotID = params.plotID as string;
+  const censusID = params.censusID as string;
+
+  // withRouteAuthz already authenticated the session and enforced per-site
+  // access (schema membership); re-read the session here for identity and the
+  // additional export-role gate below.
   const session = await auth();
-  const authError = requireSession(session);
-  if (authError) return authError;
 
-  const { schema, plotID, censusID } = await props.params;
-
-  // --- Schema validation ---
+  // defense-in-depth: withRouteAuthz validates the schema before this handler
+  // runs; this local check keeps the safeFormatQuery calls below well-defined.
   if (!isValidSchema(schema)) {
     return NextResponse.json({ error: 'Invalid schema name' }, { status: HTTPResponses.BAD_REQUEST });
   }
 
-  // --- Schema-level export permission ---
+  // Additional export-role restriction beyond the guard's schema-membership
+  // check: assertSchemaAccess admits ANY member of the schema, but only admins
+  // and lead technicians may export (userCanExportSchema). A field-crew member
+  // passes the guard yet is denied here.
   if (!userCanExportSchema(session!, schema)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: HTTPResponses.FORBIDDEN });
   }
@@ -188,3 +194,5 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
     conn.release();
   }
 }
+
+export const GET = withRouteAuthz('export/ctfs-sql/[schema]/[plotID]/[censusID]', handler, { schema: fromPath('schema') });

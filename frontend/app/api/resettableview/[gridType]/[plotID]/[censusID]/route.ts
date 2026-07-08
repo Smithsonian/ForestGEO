@@ -4,6 +4,8 @@ import { HTTPResponses } from '@/config/macros';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { assertSchemaAccess } from '@/lib/authz';
+import { auth } from '@/auth';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -40,6 +42,16 @@ export async function GET(
       if (isNaN(plotID) || isNaN(censusID)) {
         return NextResponse.json({ error: 'Invalid plot ID or census ID parameters' }, { status: HTTPResponses.BAD_REQUEST });
       }
+
+      // SECURITY: the fallback uses the raw query-param schema, which
+      // validateContextualValues did NOT authorize against site membership.
+      // Gate it here before any SQL runs so the fallback cannot bypass authz.
+      const session = await auth();
+      if (!session?.user) {
+        return NextResponse.json({ error: 'Unauthenticated', code: 'UNAUTHENTICATED' }, { status: HTTPResponses.UNAUTHORIZED });
+      }
+      const denied = assertSchemaAccess(session, schema);
+      if (denied) return denied;
 
       return await processReset(gridType, schema, plotID, censusID);
     }

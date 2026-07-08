@@ -7,6 +7,12 @@ import ConnectionManager from '@/lib/db/connectionmanager'; // --------- Helpers
 
 // --------- Mocks (must be BEFORE importing the route) ---------
 
+// Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
+// A 'global' admin passes the per-site access gate.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
 // Singleton-safe ConnectionManager wrapper that respects your setup mocks.
 // Guarantees getInstance() returns an object with the needed methods.
 vi.mock('@/lib/db/connectionmanager', async () => {

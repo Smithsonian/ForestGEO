@@ -4,6 +4,7 @@ import { HTTPResponses } from '@/config/macros';
 import { DEFAULT_ERROR_EXPLORER_FILTERS, ErrorExplorerQueryRequest } from '@/config/errorsexplorer';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { buildErrorExplorerFacets } from '../_shared';
+import { fromBody, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 
 export const runtime = 'nodejs';
@@ -23,11 +24,12 @@ function parseRequest(body: Partial<ErrorExplorerQueryRequest>) {
   };
 }
 
-export async function POST(request: NextRequest) {
+async function handler(request: NextRequest, _context: RouteContext) {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
     const body = parseRequest(await request.json());
+    // defense-in-depth: withRouteAuthz already validated body.schema; retained to narrow the type.
     if (!isValidSchema(body.schema)) {
       return NextResponse.json({ error: 'Invalid schema' }, { status: HTTPResponses.INVALID_REQUEST });
     }
@@ -45,3 +47,5 @@ export async function POST(request: NextRequest) {
     await connectionManager.closeConnection();
   }
 }
+
+export const POST = withRouteAuthz('errors/explorer/facets', handler, { schema: fromBody('schema') });

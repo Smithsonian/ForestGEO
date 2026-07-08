@@ -21,16 +21,25 @@ vi.mock('@/config/datamapper', () => ({
   default: { getMapper: getMapperSpy.mockReturnValue({ mapData: mapDataSpy }) }
 }));
 
-// Mock schema validation to accept test schemas
+// Mock schema validation to accept test schemas. safeFormatQuery mirrors the real
+// implementation's ?? -> escaped-identifier substitution so finishedQuery
+// assertions reflect the backtick-wrapped schema the route now emits.
 vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     return ['myschema', 'testschema'].includes(schema);
-  })
+  }),
+  safeFormatQuery: vi.fn((schema: string, query: string) => query.replace(/\?\?/g, `\`${schema}\``))
 }));
 
 // Mock logger
 vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
+}));
+
+// withRouteAuthz calls auth(); a 'global' session clears the per-site gate so
+// these handler-behavior tests exercise the wrapped GET end-to-end.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
 }));
 
 vi.mock('@/lib/db/connectionmanager', async () => {
@@ -107,7 +116,7 @@ describe('GET /api/fixeddata/[dataType]/[[...slugs]]', () => {
     ]);
     expect(body.totalCount).toBe(42);
     expect(String(body.finishedQuery)).toMatch(/FORMATTED_SQL:/);
-    expect(String(body.finishedQuery)).toMatch(/FROM myschema\.unifiedchangelog/i);
+    expect(String(body.finishedQuery)).toMatch(/FROM `myschema`\.unifiedchangelog/i);
     expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[7,7,3,25,25\]/);
 
     expect(getMapperSpy).toHaveBeenCalledWith('unifiedchangelog');
@@ -155,7 +164,7 @@ describe('GET /api/fixeddata/[dataType]/[[...slugs]]', () => {
 
     expect(body.output).toEqual([{ PersonnelID: 1 }, { PersonnelID: 2 }]);
     expect(body.totalCount).toBe(2);
-    expect(String(body.finishedQuery)).toMatch(/FROM myschema\.personnel/i);
+    expect(String(body.finishedQuery)).toMatch(/FROM `myschema`\.personnel/i);
     expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[9,77,100,50\]/);
     expect(close).toHaveBeenCalledTimes(1);
   });
@@ -170,7 +179,7 @@ describe('GET /api/fixeddata/[dataType]/[[...slugs]]', () => {
     expect(res.status).toBe(HTTPResponses.OK);
     const body = await res.json();
 
-    expect(String(body.finishedQuery)).toMatch(/FROM myschema\.personnel p/i);
+    expect(String(body.finishedQuery)).toMatch(/FROM `myschema`\.personnel p/i);
     expect(String(body.finishedQuery)).not.toMatch(/CensusActive/);
     expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[100,50\]/);
   });
