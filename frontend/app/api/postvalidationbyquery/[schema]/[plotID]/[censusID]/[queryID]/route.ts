@@ -4,17 +4,18 @@ import moment from 'moment';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ schema: string; plotID: string; censusID: string; queryID: string }> }) {
-  const params = await props.params;
-  const { schema } = params;
-  const plotID = parseInt(params.plotID, 10);
-  const censusID = parseInt(params.censusID, 10);
-  const queryID = parseInt(params.queryID, 10);
+async function handler(_request: NextRequest, context: RouteContext) {
+  const params = await context.params;
+  const schema = params.schema as string;
+  const plotID = parseInt(params.plotID as string, 10);
+  const censusID = parseInt(params.censusID as string, 10);
+  const queryID = parseInt(params.queryID as string, 10);
   let transactionID: string | undefined = undefined;
 
   // Validate all parameters
@@ -22,7 +23,9 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ sche
     return new NextResponse(JSON.stringify({ error: 'Missing or invalid parameters' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  // SQL Injection Prevention: Validate schema against whitelist
+  // defense-in-depth: withRouteAuthz validates the schema before this handler
+  // runs, but the stored QueryDefinition below is interpolated raw (not through
+  // safeFormatQuery), so keep this local guard as a hard guarantee.
   if (!isValidSchema(schema)) {
     ailogger.warn(`Invalid schema attempted: ${schema}`);
     return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), { status: HTTPResponses.INVALID_REQUEST });
@@ -88,3 +91,5 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ sche
     await connectionManager.closeConnection();
   }
 }
+
+export const GET = withRouteAuthz('postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]', handler, { schema: fromPath('schema') });

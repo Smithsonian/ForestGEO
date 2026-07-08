@@ -177,8 +177,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'formvalidation/[dataType]/[[...slugs]]',
   // cmprevalidation: uses isValidSchema, no auth
   'cmprevalidation/[dataType]/[[...slugs]]',
-  // postvalidationbyquery: uses isValidSchema, no auth
-  'postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]',
   // resettableview: uses validateContextualValues but skipSchemaAuth may apply;
   // direct schema path falls back without auth check
   'resettableview/[gridType]/[plotID]/[censusID]',
