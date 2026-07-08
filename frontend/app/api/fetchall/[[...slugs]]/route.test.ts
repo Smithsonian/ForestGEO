@@ -325,6 +325,21 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     expect(getMapperSpy).toHaveBeenCalledWith('attributes');
   });
 
+  it('generic branch: serves stemtaxonomiesview (the stem-taxonomies grid fetchall path is whitelisted)', async () => {
+    // Regression guard for the cross-PR dependency: the stem-taxonomies datagrid loads via
+    // fetchall, so 'stemtaxonomiesview' must be in FETCHALL_ALLOWED_TABLES or the grid 400s.
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ StemGUID: 1 }]);
+
+    const req = makeRequest('myschema');
+    const res = await GET(req, makeProps(['stemtaxonomiesview', '1', '2']));
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    const [sql] = exec.mock.calls[0];
+    expect(String(sql)).toContain('SELECT * FROM `myschema`.`stemtaxonomiesview`');
+    expect(getMapperSpy).toHaveBeenCalledWith('stemtaxonomiesview');
+  });
+
   it('generic branch: rejects a non-whitelisted table with 400 INVALID_DATATYPE and runs no query', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');

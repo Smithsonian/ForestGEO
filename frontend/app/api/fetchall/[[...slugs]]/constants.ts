@@ -14,6 +14,7 @@ export const INVALID_DATATYPE_CODE = 'INVALID_DATATYPE';
 // `roles` is a per-site table (FK'd by personnel) served via the generic branch.
 export const FETCHALL_ALLOWED_TABLES: ReadonlySet<string> = new Set([
   'alltaxonomiesview',
+  'stemtaxonomiesview',
   'attributes',
   'coremeasurements',
   'coremeasurements_staging',
