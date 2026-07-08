@@ -24,6 +24,7 @@ const PRIMARY_KEY_MAP: Record<string, string> = {
   quadrats: 'QuadratID',
   species: 'SpeciesID',
   stems: 'StemGUID',
+  stemtaxonomiesview: 'StemGUID',
   trees: 'TreeID',
   rolemapping: 'RoleMappingID',
   roles: 'RoleID',

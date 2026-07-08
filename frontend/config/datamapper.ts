@@ -27,6 +27,8 @@ import {
   AllTaxonomiesViewResult,
   MeasurementsSummaryRDS,
   MeasurementsSummaryResult,
+  StemTaxonomiesViewRDS,
+  StemTaxonomiesViewResult,
   ViewFullTableRDS,
   ViewFullTableResult
 } from '@/lib/db/definitions/views';
@@ -226,6 +228,8 @@ class MapperFactory {
       // tables
       case 'alltaxonomiesview':
         return new GenericMapper<AllTaxonomiesViewRDS, AllTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'stemtaxonomiesview':
+        return new GenericMapper<StemTaxonomiesViewRDS, StemTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
       case 'attributes':
         return new GenericMapper<AttributesRDS, AttributesResult>() as unknown as IDataMapper<RDS, Result>;
       case 'census':

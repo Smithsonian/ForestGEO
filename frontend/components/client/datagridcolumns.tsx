@@ -397,13 +397,13 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumn
     flex: 1
   },
   {
-    field: 'speciesIDLevel',
+    field: 'idLevel',
     headerName: 'Species ID Level',
     renderHeader: () => formatHeader('Species', 'ID Level'),
     flex: 1
   },
   {
-    field: 'speciesFieldFamily',
+    field: 'fieldFamily',
     headerName: 'Species Field Family',
     renderHeader: () => formatHeader('Species', 'Field Family'),
     flex: 1
@@ -1391,7 +1391,7 @@ export const AllTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumns
     editable: true
   },
   {
-    field: 'speciesDescription',
+    field: 'description',
     headerName: 'Species Description',
     renderHeader: () => formatHeader('Species', 'Description'),
     flex: 1,

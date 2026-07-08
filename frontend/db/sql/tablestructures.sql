@@ -1322,3 +1322,57 @@ SELECT
 FROM uploadmetrics um
 WHERE um.status IN ('completed', 'failed')
   AND um.missingRecords > 0;
+
+-- Flattens the species/genus/family taxonomy hierarchy into one row per species.
+-- Backs the alltaxonomies datagrid (DatagridType.alltaxonomiesview) and its upload
+-- review step. Column names mirror the base tables so GenericMapper maps them
+-- directly. LEFT JOINs keep a species visible even if its genus/family is missing.
+CREATE OR REPLACE VIEW alltaxonomiesview AS
+SELECT s.SpeciesID           AS SpeciesID,
+       f.FamilyID            AS FamilyID,
+       g.GenusID             AS GenusID,
+       f.Family              AS Family,
+       g.Genus               AS Genus,
+       g.GenusAuthority      AS GenusAuthority,
+       s.SpeciesCode         AS SpeciesCode,
+       s.SpeciesName         AS SpeciesName,
+       s.SubspeciesName      AS SubspeciesName,
+       s.IDLevel             AS IDLevel,
+       s.SpeciesAuthority    AS SpeciesAuthority,
+       s.SubspeciesAuthority AS SubspeciesAuthority,
+       s.ValidCode           AS ValidCode,
+       s.FieldFamily         AS FieldFamily,
+       s.Description         AS Description
+FROM species s
+         LEFT JOIN genus g ON s.GenusID = g.GenusID AND g.IsActive IS TRUE
+         LEFT JOIN family f ON g.FamilyID = f.FamilyID AND f.IsActive IS TRUE
+WHERE s.IsActive IS TRUE;
+
+-- Resolves each active stem to its full taxonomy via its tree's species.
+-- Backs the stemtaxonomies datagrid (DatagridType.stemtaxonomiesview).
+CREATE OR REPLACE VIEW stemtaxonomiesview AS
+SELECT st.StemGUID           AS StemGUID,
+       t.TreeID              AS TreeID,
+       s.SpeciesID           AS SpeciesID,
+       g.GenusID             AS GenusID,
+       f.FamilyID            AS FamilyID,
+       st.QuadratID          AS QuadratID,
+       st.StemTag            AS StemTag,
+       t.TreeTag             AS TreeTag,
+       s.SpeciesCode         AS SpeciesCode,
+       f.Family              AS Family,
+       g.Genus               AS Genus,
+       s.SpeciesName         AS SpeciesName,
+       s.SubspeciesName      AS SubspeciesName,
+       s.ValidCode           AS ValidCode,
+       g.GenusAuthority      AS GenusAuthority,
+       s.SpeciesAuthority    AS SpeciesAuthority,
+       s.SubspeciesAuthority AS SubspeciesAuthority,
+       s.IDLevel             AS IDLevel,
+       s.FieldFamily         AS FieldFamily
+FROM stems st
+         JOIN trees t ON st.TreeID = t.TreeID AND t.IsActive IS TRUE
+         JOIN species s ON t.SpeciesID = s.SpeciesID AND s.IsActive IS TRUE
+         LEFT JOIN genus g ON s.GenusID = g.GenusID AND g.IsActive IS TRUE
+         LEFT JOIN family f ON g.FamilyID = f.FamilyID AND f.IsActive IS TRUE
+WHERE st.IsActive IS TRUE;

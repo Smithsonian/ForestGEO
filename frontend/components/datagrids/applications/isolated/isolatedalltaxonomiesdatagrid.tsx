@@ -146,7 +146,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
         clusters={{
           Family: ['family'],
           Genus: ['genus', 'genusAuthority'],
-          Species: ['speciesCode', 'speciesName', 'speciesIDLevel', 'speciesAuthority', 'fieldFamily', 'validCode', 'speciesDescription'],
+          Species: ['speciesCode', 'speciesName', 'idLevel', 'speciesAuthority', 'fieldFamily', 'validCode', 'description'],
           Subspecies: ['subspeciesName', 'subspeciesAuthority']
         }}
         dynamicButtons={[

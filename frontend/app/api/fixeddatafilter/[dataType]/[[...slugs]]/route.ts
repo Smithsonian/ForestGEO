@@ -30,6 +30,7 @@ const ALLOWED_DATA_TYPES = [
   'species',
   'stems',
   'alltaxonomiesview',
+  'stemtaxonomiesview',
   'roles',
   'personnel',
   'unifiedchangelog',
@@ -218,6 +219,7 @@ export async function POST(
         case 'species':
         case 'stems':
         case 'alltaxonomiesview':
+        case 'stemtaxonomiesview':
         case 'roles':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel);

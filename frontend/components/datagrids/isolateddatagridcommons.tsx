@@ -1259,7 +1259,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   }, [gridRows, columns, hidingEmpty]);
 
   // Grid types under "Stem & Plot Details" that don't require a census selection
-  const censusIndependentGridTypes = ['attributes', 'personnel', 'quadrats', 'alltaxonomiesview'];
+  const censusIndependentGridTypes = ['attributes', 'personnel', 'quadrats', 'alltaxonomiesview', 'stemtaxonomiesview'];
   const requiresCensus = !censusIndependentGridTypes.includes(gridType);
 
   const pageSizeOptions = useMemo(() => [paginationModel.pageSize, paginationModel.pageSize * 5, paginationModel.pageSize * 10], [paginationModel.pageSize]);
@@ -1305,8 +1305,10 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       toolbar: {
         handleAddNewRow,
         handleRefresh,
-        handleExportAll: fetchFullData,
-        handleExportCSV: exportAllCSV,
+        // stemtaxonomiesview has no formdownload endpoint, so exportAllCSV would fall through and no-op.
+        // Omit the export handlers for it so the toolbar hides the button instead of showing a dead one.
+        handleExportAll: gridType === 'stemtaxonomiesview' ? undefined : fetchFullData,
+        handleExportCSV: gridType === 'stemtaxonomiesview' ? undefined : exportAllCSV,
         handleQuickFilterChange: onQuickFilterChange,
         filterModel: gridFilterModel,
         dynamicButtons,

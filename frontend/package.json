@@ -37,6 +37,7 @@
     "stress:workshop:smoke": "node tests/stress/workshop-stress.mjs --duration=15s --vus-per-site=1 --max-sites=2 --min-sites=1 --profile=smoke",
     "db:seed:e2e": "npx tsx tests/setup/e2e-seed.ts",
     "deploy:validations": "npx tsx scripts/deploy-validations-to-all-schemas.ts",
+    "deploy:taxonomy-views": "npx tsx scripts/deploy-taxonomy-views-to-all-schemas.ts",
     "docs": "npm run dev --prefix docs",
     "docs:build": "npm run build --prefix docs",
     "docs:preview": "npm run preview --prefix docs",

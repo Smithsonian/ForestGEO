@@ -1,5 +1,5 @@
 import { getQuadratHCs, Plot, Site } from '@/lib/db/definitions/zones';
-import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs } from '@/lib/db/definitions/views';
+import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs, getStemTaxonomiesViewHCs } from '@/lib/db/definitions/views';
 import { getPersonnelHCs } from '@/lib/db/definitions/personnel';
 import { getCoreMeasurementsHCs, getFailedMeasurementsHCs } from '@/lib/db/definitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
@@ -41,6 +41,10 @@ const columnVisibilityMap: Record<string, Record<string, boolean>> = {
   alltaxonomiesview: {
     id: false,
     ...getAllTaxonomiesViewHCs()
+  },
+  stemtaxonomiesview: {
+    id: false,
+    ...getStemTaxonomiesViewHCs()
   },
   species: {
     id: false,
