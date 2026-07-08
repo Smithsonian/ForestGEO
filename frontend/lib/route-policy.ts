@@ -171,8 +171,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   // fixeddata GET uses isValidSchema but no auth; POST/PATCH/DELETE delegate to
   // coreapifunctions which also lack auth
   'fixeddata/[dataType]/[[...slugs]]',
-  // fixeddatafilter GET and POST delegate to coreapifunctions; no auth check
-  'fixeddatafilter/[dataType]/[[...slugs]]',
   // resettableview: uses validateContextualValues but skipSchemaAuth may apply;
   // direct schema path falls back without auth check
   'resettableview/[gridType]/[plotID]/[censusID]',
