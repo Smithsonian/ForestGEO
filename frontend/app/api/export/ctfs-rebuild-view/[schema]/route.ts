@@ -2,15 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
-import { requireSession, getSessionUserId } from '@/lib/auth-helpers';
+import { getSessionUserId } from '@/lib/auth-helpers';
+import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 import { renderRebuildViewFullTableArtifact } from '@/lib/ctfs-export';
 import { userCanExportSchema } from '@/lib/ctfs-export/export-permissions';
 
 // Force Node.js runtime — the ctfs-export renderer is not Edge-compatible.
 export const runtime = 'nodejs';
-
-type RouteProps = { params: Promise<{ schema: string }> };
 
 // ---------------------------------------------------------------------------
 // GET /api/export/ctfs-rebuild-view/[schema]
@@ -23,16 +22,23 @@ type RouteProps = { params: Promise<{ schema: string }> };
 // byte-identical for every caller; only the audit record varies.
 // ---------------------------------------------------------------------------
 
-export async function GET(request: NextRequest, props: RouteProps): Promise<NextResponse> {
+async function handler(request: NextRequest, context: RouteContext): Promise<NextResponse> {
+  const params = await context.params;
+  const schema = params.schema as string;
+
+  // withRouteAuthz already authenticated the session and enforced per-site
+  // access (schema membership); re-read the session here for identity and the
+  // additional export-role gate below.
   const session = await auth();
-  const authError = requireSession(session);
-  if (authError) return authError;
 
-  const { schema } = await props.params;
-
+  // defense-in-depth: withRouteAuthz validates the schema before this handler runs.
   if (!isValidSchema(schema)) {
     return NextResponse.json({ error: 'Invalid schema name' }, { status: HTTPResponses.BAD_REQUEST });
   }
+
+  // Additional export-role restriction beyond the guard's schema-membership
+  // check: assertSchemaAccess admits ANY member of the schema, but only admins
+  // and lead technicians may export (userCanExportSchema).
   if (!userCanExportSchema(session!, schema)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: HTTPResponses.FORBIDDEN });
   }
@@ -66,3 +72,5 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
     }
   });
 }
+
+export const GET = withRouteAuthz('export/ctfs-rebuild-view/[schema]', handler, { schema: fromPath('schema') });
