@@ -5,6 +5,7 @@ import ailogger from '@/ailogger';
 import moment from 'moment';
 import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { refreshMeasurementsSummaryForScope, refreshViewFullTableForScope } from '@/lib/measurementviewrefresh';
+import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -103,15 +104,16 @@ async function _executePostValidationQueries(
   return stats;
 }
 
-export async function POST(request: NextRequest, props: { params: Promise<{ view: string; schema: string }> }) {
-  const params = await props.params;
+async function handler(request: NextRequest, context: RouteContext) {
+  const params = await context.params;
   if (!params.schema || params.schema === 'undefined' || !params.view || params.view === 'undefined') {
     return new NextResponse(JSON.stringify({ error: 'Missing schema or view parameter' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const { view, schema } = params;
+  const view = params.view as string;
+  const schema = params.schema as string;
 
-  // SQL Injection Prevention: Validate schema against whitelist
+  // defense-in-depth: withRouteAuthz validates schema before this handler runs
   if (!isValidSchema(schema)) {
     ailogger.warn(`Invalid schema attempted in refreshviews: ${schema}`);
     return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), { status: HTTPResponses.INVALID_REQUEST });
@@ -199,3 +201,5 @@ export async function POST(request: NextRequest, props: { params: Promise<{ view
   // Should not be reached, but TypeScript needs a return
   throw new Error('Unexpected: retry loop exhausted without returning or throwing');
 }
+
+export const POST = withRouteAuthz('refreshviews/[view]/[schema]', handler, { schema: fromPath('schema') });
