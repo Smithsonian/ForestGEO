@@ -44,12 +44,21 @@ vi.mock('@/ailogger', () => ({
   default: { error: logErr, info: vi.fn(), warn: vi.fn() }
 }));
 
-// Mock schema validation to accept test schemas
+// withRouteAuthz calls auth(); a 'global' session clears the per-site gate so
+// these handler-behavior tests exercise the wrapped GET end-to-end.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
+// Mock schema validation to accept test schemas. safeFormatQuery mirrors the real
+// implementation's ?? -> escaped-identifier substitution so query-shape assertions
+// still reflect the backtick-wrapped schema the route emits.
 vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     // Accept test schemas used in tests
     return ['forestgeo_testing', 'myschema', 's1', 'sch', 'schema'].includes(schema);
-  })
+  }),
+  safeFormatQuery: vi.fn((schema: string, query: string) => query.replace(/\?\?/g, `\`${schema}\``))
 }));
 
 // ========== Helpers ==========
