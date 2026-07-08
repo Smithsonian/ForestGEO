@@ -1,6 +1,13 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The row-edit flow drives beginEdit/UndoToast through an async chain
+// (__triggerRowUpdate -> processRowUpdate -> flow.beginEdit). Under CI load that
+// chain can exceed waitFor's 1000ms default, causing intermittent "spy called 0
+// times" timeouts. Give async assertions in this file a wider margin; it only
+// lengthens the polling window and never affects a passing assertion.
+configure({ asyncUtilTimeout: 5000 });
 
 import { getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorsexplorer';
 import type { EditPlan } from '@/config/editplan/types';
