@@ -177,8 +177,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'formvalidation/[dataType]/[[...slugs]]',
   // cmprevalidation: uses isValidSchema, no auth
   'cmprevalidation/[dataType]/[[...slugs]]',
-  // postvalidation: uses isValidSchema, no auth
-  'postvalidation',
   // postvalidationbyquery: uses isValidSchema, no auth
   'postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]',
   // refreshviews: uses isValidSchema, no auth
