@@ -173,8 +173,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'fixeddata/[dataType]/[[...slugs]]',
   // fixeddatafilter GET and POST delegate to coreapifunctions; no auth check
   'fixeddatafilter/[dataType]/[[...slugs]]',
-  // formsearch: validates schema against isValidSchema but no auth
-  'formsearch/[dataType]',
   // formvalidation: validates schema but no auth
   'formvalidation/[dataType]/[[...slugs]]',
   // cmprevalidation: uses isValidSchema, no auth

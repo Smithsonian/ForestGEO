@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
-import { isValidSchema } from '@/lib/db/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -25,13 +25,9 @@ function isValidDataType(dataType: string): dataType is AllowedDataType {
  * - schema: Database schema name
  * - searchfor: Search string to filter results
  */
-export async function GET(
-  request: NextRequest,
-  props: {
-    params: Promise<{ dataType: string }>;
-  }
-): Promise<NextResponse<string[]>> {
-  const params = await props.params;
+async function handler(request: NextRequest, context: RouteContext): Promise<NextResponse<string[]> | NextResponse> {
+  const params = await context.params;
+  const dataType = Array.isArray(params.dataType) ? params.dataType[0] : params.dataType;
   const { searchParams } = new URL(request.url);
   const schema = searchParams.get('schema');
   const searchFor = searchParams.get('searchfor') || '';
@@ -51,9 +47,9 @@ export async function GET(
   }
 
   // SECURITY: Validate dataType against whitelist
-  if (!isValidDataType(params.dataType)) {
-    ailogger.error(`[formsearch API] Invalid dataType provided: ${params.dataType}`);
-    return new NextResponse(JSON.stringify({ error: `Unsupported dataType: ${params.dataType}` }), {
+  if (!dataType || !isValidDataType(dataType)) {
+    ailogger.error(`[formsearch API] Invalid dataType provided: ${dataType}`);
+    return new NextResponse(JSON.stringify({ error: `Unsupported dataType: ${dataType}` }), {
       status: HTTPResponses.BAD_REQUEST
     });
   }
@@ -64,72 +60,84 @@ export async function GET(
     let query = '';
     const queryParams: any[] = [];
 
-    switch (params.dataType.toLowerCase()) {
+    switch (dataType.toLowerCase()) {
       case 'personnel':
         // Return FirstName + LastName concatenated for personnel
         if (searchFor) {
-          query = `
-            SELECT DISTINCT CONCAT(FirstName, ' ', LastName) AS DisplayName
-            FROM ${schema}.personnel
+          query = safeFormatQuery(
+            schema,
+            `SELECT DISTINCT CONCAT(FirstName, ' ', LastName) AS DisplayName
+            FROM ??.personnel
             WHERE CONCAT(FirstName, ' ', LastName) LIKE ?
             ORDER BY DisplayName
-            LIMIT 100`;
+            LIMIT 100`
+          );
           queryParams.push(`%${searchFor}%`);
         } else {
-          query = `
-            SELECT DISTINCT CONCAT(FirstName, ' ', LastName) AS DisplayName
-            FROM ${schema}.personnel
+          query = safeFormatQuery(
+            schema,
+            `SELECT DISTINCT CONCAT(FirstName, ' ', LastName) AS DisplayName
+            FROM ??.personnel
             ORDER BY DisplayName
-            LIMIT 100`;
+            LIMIT 100`
+          );
         }
         break;
 
       case 'species':
         // Return species codes for species autocomplete
         if (searchFor) {
-          query = `
-            SELECT DISTINCT SpeciesCode
-            FROM ${schema}.species
+          query = safeFormatQuery(
+            schema,
+            `SELECT DISTINCT SpeciesCode
+            FROM ??.species
             WHERE SpeciesCode LIKE ?
             ORDER BY SpeciesCode
-            LIMIT 100`;
+            LIMIT 100`
+          );
           queryParams.push(`%${searchFor}%`);
         } else {
-          query = `
-            SELECT DISTINCT SpeciesCode
-            FROM ${schema}.species
+          query = safeFormatQuery(
+            schema,
+            `SELECT DISTINCT SpeciesCode
+            FROM ??.species
             ORDER BY SpeciesCode
-            LIMIT 100`;
+            LIMIT 100`
+          );
         }
         break;
 
       case 'quadrats':
         // Return quadrat names
         if (searchFor) {
-          query = `
-            SELECT DISTINCT QuadratName
-            FROM ${schema}.quadrats
+          query = safeFormatQuery(
+            schema,
+            `SELECT DISTINCT QuadratName
+            FROM ??.quadrats
             WHERE QuadratName LIKE ? AND IsActive IS TRUE
             ORDER BY QuadratName
-            LIMIT 100`;
+            LIMIT 100`
+          );
           queryParams.push(`%${searchFor}%`);
         } else {
-          query = `
-            SELECT DISTINCT QuadratName
-            FROM ${schema}.quadrats
+          query = safeFormatQuery(
+            schema,
+            `SELECT DISTINCT QuadratName
+            FROM ??.quadrats
             WHERE IsActive IS TRUE
             ORDER BY QuadratName
-            LIMIT 100`;
+            LIMIT 100`
+          );
         }
         break;
 
       default:
-        return new NextResponse(JSON.stringify({ error: `Unsupported dataType: ${params.dataType}` }), {
+        return new NextResponse(JSON.stringify({ error: `Unsupported dataType: ${dataType}` }), {
           status: HTTPResponses.BAD_REQUEST
         });
     }
 
-    const results = await connectionManager.executeQuery(format(query, queryParams));
+    const results = await connectionManager.executeQuery(query, queryParams);
 
     // Extract the values from the result objects into a simple string array
     const values = results
@@ -148,7 +156,7 @@ export async function GET(
     });
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
-    ailogger.error(`[formsearch API] Error in ${params.dataType}:`, err);
+    ailogger.error(`[formsearch API] Error in ${dataType}:`, err);
     return new NextResponse(JSON.stringify({ error: err.message || 'Internal server error' }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
@@ -156,3 +164,5 @@ export async function GET(
     await connectionManager.closeConnection();
   }
 }
+
+export const GET = withRouteAuthz('formsearch/[dataType]', handler, { schema: fromQuery('schema') });
