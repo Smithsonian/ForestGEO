@@ -60,7 +60,7 @@ export default function IsolatedStemTaxonomiesViewDataGrid() {
           Tree: ['treeTag'],
           Family: ['family'],
           Genus: ['genus', 'genusAuthority'],
-          Species: ['speciesCode', 'speciesName', 'validCode', 'speciesAuthority', 'speciesIDLevel', 'speciesFieldFamily'],
+          Species: ['speciesCode', 'speciesName', 'validCode', 'speciesAuthority', 'idLevel', 'fieldFamily'],
           Subspecies: ['subspeciesName', 'subspeciesAuthority']
         }}
         dynamicButtons={[

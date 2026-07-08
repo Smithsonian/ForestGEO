@@ -16,7 +16,8 @@ const UPDATED_TEST_SP_CODE = 'TEST_SP_CODE_B';
 vi.mock('@/lib/db/definitions/views', () => ({
   getAllTaxonomiesViewHCs: () => ({}),
   getAllViewFullTableViewsHCs: () => ({}),
-  getMeasurementsSummaryViewHCs: () => ({})
+  getMeasurementsSummaryViewHCs: () => ({}),
+  getStemTaxonomiesViewHCs: () => ({})
 }));
 
 vi.mock('@/lib/db/definitions/zones', () => ({
@@ -160,6 +161,7 @@ vi.mock('@/config/styleddatagrid', async () => {
         <div data-testid="pagination-slot-present">{String(Boolean(props.slots?.pagination))}</div>
         <div data-testid="infinite-scroll-enabled">{String(Boolean(props.slots?.pagination?.infiniteScroll?.enabled))}</div>
         <div data-testid="infinite-scroll-prop-present">{String(Boolean(props.slots?.pagination?.infiniteScroll))}</div>
+        <div data-testid="export-csv-handler-present">{String(typeof props.slotProps?.toolbar?.handleExportCSV === 'function')}</div>
         <button type="button" onClick={() => props.slots?.pagination?.infiniteScroll?.onToggle?.(true)}>
           Test Toggle Infinite On
         </button>
@@ -613,5 +615,53 @@ describe('IsolatedDataGridCommons', () => {
     await waitFor(() => {
       expect(screen.getByTestId('infinite-scroll-enabled').textContent).toBe('false');
     });
+  });
+
+  it('omits the CSV export handler for stemtaxonomiesview (no formdownload endpoint) but provides it for a grid that can export', async () => {
+    // The toolbar renders its "Export as CSV" button only when handleExportCSV is a function
+    // (datagridelements hasAnyExport). exportAllCSV has no stemtaxonomiesview case, so passing the
+    // handler would surface a button that silently no-ops. This asserts the handler is withheld.
+    const row = { id: 1, speciesID: 1, spCode: ORIGINAL_TEST_SP_CODE };
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ output: [row], totalCount: 1, finishedQuery: 'SELECT 1' })
+    } as Response);
+
+    const gridColumns = [
+      { field: 'id', editable: false },
+      { field: 'spCode', editable: true }
+    ];
+
+    // Control: alltaxonomiesview has a real export path (species formdownload), so the handler is passed.
+    const { unmount } = render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="alltaxonomiesview"
+          gridColumns={gridColumns}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={row}
+        />
+      </SWRConfig>
+    );
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+    expect(screen.getByTestId('export-csv-handler-present').textContent).toBe('true');
+    unmount();
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="stemtaxonomiesview"
+          gridColumns={gridColumns}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={row}
+        />
+      </SWRConfig>
+    );
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+    expect(screen.getByTestId('export-csv-handler-present').textContent).toBe('false');
   });
 });

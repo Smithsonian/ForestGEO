@@ -26,6 +26,7 @@ const VALID_DATA_TYPES = [
   'quadrats',
   'personnel',
   'alltaxonomiesview',
+  'stemtaxonomiesview',
   'stems',
   'roles',
   'census'
@@ -159,6 +160,11 @@ export async function GET(
       case 'alltaxonomiesview':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS atv.* FROM ${schema}.${params.dataType} atv
             ORDER BY atv.SpeciesCode ASC LIMIT ?, ?;`;
+        queryParams.push(page * pageSize, pageSize);
+        break;
+      case 'stemtaxonomiesview':
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS stv.* FROM ${schema}.${params.dataType} stv
+            ORDER BY stv.StemTag ASC LIMIT ?, ?;`;
         queryParams.push(page * pageSize, pageSize);
         break;
       case 'stems':

@@ -114,6 +114,19 @@ export interface StemTaxonomiesViewRDS {
   fieldFamily?: string;
 }
 
+export type StemTaxonomiesViewResult = ResultType<StemTaxonomiesViewRDS>;
+
+export function getStemTaxonomiesViewHCs(): ColumnStates {
+  return {
+    stemGUID: false,
+    treeID: false,
+    speciesID: false,
+    genusID: false,
+    familyID: false,
+    quadratID: false
+  };
+}
+
 export interface ViewFullTableRDS {
   id?: number;
   coreMeasurementID?: number;

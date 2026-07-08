@@ -37,6 +37,8 @@ export function getGridID(gridType: string): string {
     case 'alltaxonomiesview':
     case 'species':
       return 'speciesID';
+    case 'stemtaxonomiesview':
+      return 'stemGUID';
     case 'specieslimits':
       return 'speciesLimitID';
     case 'sitespecificvalidations':
