@@ -5,6 +5,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
+import { toError } from '@/lib/errorhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -59,9 +60,9 @@ export async function GET(request: NextRequest, props: { params: Promise<{ chang
   // schema without re-validating, so gate it here before any interpolation below.
   try {
     validateSchemaOrThrow(schema);
-  } catch (error: any) {
+  } catch (error: unknown) {
     ailogger.error(`[changelog API] Invalid schema provided: ${schema}`);
-    return NextResponse.json({ error: error.message }, { status: HTTPResponses.BAD_REQUEST });
+    return NextResponse.json({ error: toError(error).message }, { status: HTTPResponses.BAD_REQUEST });
   }
 
   const connectionManager = ConnectionManager.getInstance();

@@ -8,6 +8,7 @@ import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
+import { toError } from '@/lib/errorhelpers';
 import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -60,9 +61,9 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
   // SQL Injection Prevention: gate the raw ${schema} identifier interpolations below
   try {
     validateSchemaOrThrow(schema);
-  } catch (error: any) {
+  } catch (error: unknown) {
     ailogger.error(`[formdownload API] Invalid schema provided: ${schema}`);
-    return new NextResponse(JSON.stringify({ error: error.message }), {
+    return new NextResponse(JSON.stringify({ error: toError(error).message }), {
       status: HTTPResponses.INVALID_REQUEST
     });
   }
