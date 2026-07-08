@@ -20,7 +20,7 @@ import {
   useQuadratListDispatch,
   useSiteListDispatch
 } from '@/app/contexts/compat-hooks';
-import { useHasHydrated } from '@/config/store/appstore';
+import { markExplicitSelectionClear, useHasHydrated } from '@/config/store/appstore';
 import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
@@ -261,6 +261,14 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   // Handle manual reset logic
   useEffect(() => {
     async function clearContexts() {
+      // A manual reset deliberately empties the whole selection; without this marker
+      // the guarded persist storage would block the cascade's final all-empty write,
+      // leaving stale selections (e.g. a just-deleted census) in localStorage. Only
+      // mark when something will actually be cleared — otherwise no write consumes
+      // the marker and it would linger, disarming the guard for a later spurious wipe.
+      if (currentSite || currentPlot || currentCensus) {
+        markExplicitSelectionClear();
+      }
       if (currentSite) {
         if (siteDispatch) await siteDispatch({ site: undefined });
       }

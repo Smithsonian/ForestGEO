@@ -18,6 +18,7 @@ import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 import { LoginLogout } from '@/components/loginlogout';
 import { siteConfigNav, SiteConfigProps, validityMapping } from '@/config/macros/siteconfigs';
 import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, usePlotDispatch, useSiteContext, useSiteDispatch } from '@/app/contexts/compat-hooks';
+import { markExplicitSelectionClear } from '@/config/store/appstore';
 import { usePathname, useRouter } from 'next/navigation';
 import { Badge, IconButton, SelectOption, Stack, Tooltip } from '@mui/joy';
 import Select from '@mui/joy/Select';
@@ -123,6 +124,16 @@ interface SidebarProps {
   setManualReset: Dispatch<SetStateAction<boolean>>;
 }
 
+/**
+ * MUI Base fires a programmatic onChange(null) — its internal itemsChange action carries
+ * event: null (@mui/base useList) and its reducer prunes a controlled Select's value while
+ * async-loaded options (re)register during boot. Treating that prune as a user deselect
+ * wiped the persisted site/plot/census selection on every reload and bounced the user to
+ * /dashboard (bug F7). Real user interactions (click/keyboard) always carry an event, so
+ * only they may clear a selection.
+ */
+export const isProgrammaticSelectClear = (event: React.SyntheticEvent | null, newValue: number | string | null): boolean => event === null && newValue === null;
+
 export default function Sidebar(props: SidebarProps) {
   const { data: session } = useSession();
   const currentSite = useSiteContext();
@@ -200,6 +211,11 @@ export default function Sidebar(props: SidebarProps) {
   }, []); // Remove context dependencies - observer doesn't need to recreate
 
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
+    if (selectedSite === undefined) {
+      // A user-driven deselect empties the whole selection cascade below; without this
+      // marker the guarded persist storage would refuse to write the empty state.
+      markExplicitSelectionClear();
+    }
     if (siteDispatch) {
       await siteDispatch({ site: selectedSite });
     }
@@ -397,7 +413,8 @@ export default function Sidebar(props: SidebarProps) {
         setCensusDropdownOpen(true);
       }}
       onClose={() => setCensusDropdownOpen(false)}
-      onChange={async (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
+      onChange={async (event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
+        if (isProgrammaticSelectClear(event, selectedPlotCensusNumberStr)) return;
         if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) await handleCensusSelection(undefined);
         else {
           const selectedPlotCensusNumber = parseInt(selectedPlotCensusNumberStr, 10);
@@ -592,6 +609,7 @@ export default function Sidebar(props: SidebarProps) {
         }}
         onClose={() => setPlotDropdownOpen(false)}
         onChange={async (event: React.SyntheticEvent | null, newValue: number | null) => {
+          if (isProgrammaticSelectClear(event, newValue)) return;
           event?.preventDefault();
           const selectedPlot = plotListContext?.find(plot => plot?.plotID === newValue) || undefined;
           await handlePlotSelection(selectedPlot);
@@ -644,7 +662,8 @@ export default function Sidebar(props: SidebarProps) {
           setCensusDropdownOpen(false);
         }}
         onClose={() => setSiteDropdownOpen(false)}
-        onChange={async (_event: React.SyntheticEvent | null, newValue: number | null) => {
+        onChange={async (event: React.SyntheticEvent | null, newValue: number | null) => {
+          if (isProgrammaticSelectClear(event, newValue)) return;
           const selectedSite = newValue ? siteListContext?.find(site => site?.siteID === newValue) : undefined;
           await handleSiteSelection(selectedSite);
         }}

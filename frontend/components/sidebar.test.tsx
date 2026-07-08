@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import Sidebar from './sidebar';
+import Sidebar, { isProgrammaticSelectClear } from './sidebar';
 import { useSession } from 'next-auth/react';
 import { usePathname, useRouter } from 'next/navigation';
 
@@ -348,6 +349,31 @@ describe('Sidebar - Functional Tests', () => {
 
       const dividers = container.querySelectorAll('hr');
       expect(dividers.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('isProgrammaticSelectClear (F7 guard for site/plot/census Selects)', () => {
+    // MUI Base's internal itemsChange prune fires onChange with event === null and a
+    // null value while async-loaded options (re)register; treating it as a user
+    // deselect wiped the persisted selection on every reload (bug F7).
+    it('MUST flag the programmatic prune: null event with null value', () => {
+      expect(isProgrammaticSelectClear(null, null)).toBe(true);
+    });
+
+    it('MUST allow a user-driven deselect: real event with null value', () => {
+      const clickEvent = { type: 'click' } as unknown as React.SyntheticEvent;
+      expect(isProgrammaticSelectClear(clickEvent, null)).toBe(false);
+    });
+
+    it('MUST allow real selections regardless of event presence', () => {
+      const clickEvent = { type: 'click' } as unknown as React.SyntheticEvent;
+      expect(isProgrammaticSelectClear(clickEvent, 1)).toBe(false);
+      expect(isProgrammaticSelectClear(null, 1)).toBe(false);
+      expect(isProgrammaticSelectClear(null, '2')).toBe(false);
+    });
+
+    it('MUST treat the census Select empty-string value as a normal change, not a programmatic clear', () => {
+      expect(isProgrammaticSelectClear(null, '')).toBe(false);
     });
   });
 });
