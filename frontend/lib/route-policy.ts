@@ -165,8 +165,4 @@ export type RouteKey = keyof typeof ROUTE_POLICIES;
  * Remediation: add a proper authz signal to each route below and remove it
  * from this set.
  */
-export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
-  // changelog: uses validateContextualValues but skipSchemaAuth path exists via
-  // URL-param fallback without auth; classify as unverified
-  'changelog/overview/[changelogType]/[[...options]]'
-]);
+export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([]);
