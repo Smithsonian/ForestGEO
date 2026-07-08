@@ -219,12 +219,28 @@ class ConnectionManager {
     }
   }
 
-  // Begin a transaction with enhanced deadlock handling
+  // Begin a transaction with enhanced deadlock handling.
+  //
+  // Slot authority: beginTransaction is the SINGLE owner of transaction-slot
+  // reservation. It reserves one slot up front via acquireTransactionSlot()
+  // (which enforces MAX_CONCURRENT_TRANSACTIONS and may wait up to 60s or
+  // throw), then hands that reservation off to the transactionConnections map
+  // entry via consumeTransactionStartSlot() once BEGIN succeeds. On any failure
+  // path that never registered a map entry, the reserved slot is returned via
+  // releaseTransactionStartSlot() so a queued waiter is woken. This means EVERY
+  // path into an open transaction — withTransaction AND the ~20 direct callers —
+  // is gated by the same cap.
   public async beginTransaction(): Promise<string> {
     const startTime = Date.now();
     const transactionId = uuidv4();
     let connection: PoolConnection | null = null;
     let retryDelay = 100; // Start with 100ms delay
+    let slotHandedOff = false;
+
+    // Reserve the slot BEFORE the try/finally: if this throws (60s slot-wait
+    // timeout), startingTransactions was never incremented, so there is nothing
+    // to release and the finally below must not run.
+    await this.acquireTransactionSlot();
 
     try {
       while (Date.now() - startTime < 30000) {
@@ -237,6 +253,10 @@ class ConnectionManager {
 
           await connection.beginTransaction();
           this.transactionConnections.set(transactionId, connection);
+          // Hand the reserved slot off from the starting-counter to the map
+          // entry: net occupancy stays +1, now held by transactionConnections.
+          this.consumeTransactionStartSlot();
+          slotHandedOff = true;
 
           // Initialize transaction metadata with resource locks tracking
           const meta = {
@@ -275,6 +295,14 @@ class ConnectionManager {
       const errorObj = e instanceof Error ? e : new Error(getErrorMessage(e));
       ailogger.error(chalk.red(`Error starting transaction: ${getErrorMessage(e)}`), errorObj);
       throw e;
+    } finally {
+      // If BEGIN never registered a map entry, the reserved slot is still held
+      // by the starting-counter — return it (and wake a queued waiter) so it is
+      // not leaked. On success the slot lives on in the map entry and is
+      // released later by commit/rollback.
+      if (!slotHandedOff) {
+        this.releaseTransactionStartSlot();
+      }
     }
   }
 
@@ -426,9 +454,10 @@ class ConnectionManager {
   public async withTransaction<T>(fn: (tx: TxExecutor) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
     const timeoutMs = opts?.timeoutMs ?? this.DEFAULT_TX_TIMEOUT_MS;
 
-    await this.acquireTransactionSlot();
-    let startSlotReserved = true;
-
+    // Slot reservation is owned entirely by beginTransaction now: each attempt
+    // reserves its own slot and, on failure, releases it before throwing. So
+    // this retry loop just rethrows on exhaustion — there is no slot to unwind
+    // here.
     let transactionId: string;
     let retryCount = 0;
     const maxRetries = 3;
@@ -437,16 +466,10 @@ class ConnectionManager {
     while (retryCount < maxRetries) {
       try {
         transactionId = await this.beginTransaction();
-        this.consumeTransactionStartSlot();
-        startSlotReserved = false;
         break;
       } catch (error: unknown) {
         retryCount++;
         if (retryCount >= maxRetries) {
-          if (startSlotReserved) {
-            this.releaseTransactionStartSlot();
-            startSlotReserved = false;
-          }
           throw new Error(`Failed to start transaction after ${maxRetries} retries: ${getErrorMessage(error)}`);
         }
         ailogger.warn(`Transaction start failed (attempt ${retryCount}/${maxRetries}), retrying...`);
@@ -456,6 +479,19 @@ class ConnectionManager {
 
     const connection = this.transactionConnections.get(transactionId!);
     if (!connection) {
+      // beginTransaction succeeded, so it handed its reserved slot to the map
+      // entry — but that entry is now gone. Fully unwind so the slot is not
+      // leaked: drop any map/meta remnants (freeing the slot from occupancy),
+      // then release to wake a queued waiter. Do NOT call
+      // releaseTransactionStartSlot here — the starting-counter reservation was
+      // already consumed by beginTransaction's handoff.
+      this.transactionConnections.delete(transactionId!);
+      const orphanMeta = this.transactionMeta.get(transactionId!);
+      if (orphanMeta) {
+        if (orphanMeta.timeoutHandle) clearTimeout(orphanMeta.timeoutHandle);
+        if (orphanMeta.keepAliveHandle) clearInterval(orphanMeta.keepAliveHandle);
+        this.transactionMeta.delete(transactionId!);
+      }
       this.releaseTransactionSlot();
       throw new Error(`Connection lost immediately after transaction start for ${transactionId!}`);
     }
