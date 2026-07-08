@@ -182,8 +182,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   // resettableview: uses validateContextualValues but skipSchemaAuth may apply;
   // direct schema path falls back without auth check
   'resettableview/[gridType]/[plotID]/[censusID]',
-  // rollover: stub route (always returns 200), no auth
-  'rollover/[primaryKey]/[schema]/[plotIDParam]/[censusIDParam]/[newCensusIDParam]',
   // setupbulkcollapser: uses requireUploadSessionOwnership (session token, not
   // user identity), and safeFormatQuery; no user-auth check
   'setupbulkcollapser/[censusID]',
