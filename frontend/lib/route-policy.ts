@@ -206,7 +206,6 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   // validations/validate-query: raw schema from query, no auth
   'validations/validate-query',
   // errors/explorer/* and changes/explorer/*: isValidSchema only, no user auth
-  'errors/explorer/details/[measurementID]',
   'errors/explorer/facets',
   'errors/explorer/query',
   'changes/explorer/facets',

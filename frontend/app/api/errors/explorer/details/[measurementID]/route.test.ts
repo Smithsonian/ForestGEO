@@ -3,6 +3,12 @@ import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 
+// Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
+// A 'global' admin passes the per-site access gate.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
 vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() }
 }));
