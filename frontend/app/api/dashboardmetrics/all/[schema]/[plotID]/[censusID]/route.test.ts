@@ -129,7 +129,7 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
   });
 
   describe('first census (no previous census)', () => {
-    it('returns all stems as new recruits when no previous census exists', async () => {
+    it('computes multi-stems from the current census and reports old stems as null (not zero)', async () => {
       const cm = (ConnectionManager as any).getInstance();
       const exec = vi.spyOn(cm, 'executeQuery');
       const beginTx = vi.spyOn(cm, 'beginTransaction').mockResolvedValue('tx123');
@@ -139,25 +139,36 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
 
       // Queries 2-5: The 4 parallel queries (progressTacho, activeUsers, countTrees, countStems)
+      // Trees=100, Stems=150 => 1.5 stems/tree, which is only possible with multi-stem trees.
       exec.mockResolvedValueOnce([{ total_quadrats: 10, populated_quadrats: 5, populated_pct: 50, unpopulated_quadrats: 'Q1;Q2' }]);
       exec.mockResolvedValueOnce([{ PersonnelCount: 3 }]);
       exec.mockResolvedValueOnce([{ CountTrees: 100 }]);
       exec.mockResolvedValueOnce([{ CountStems: 150 }]);
 
-      // Query 6: Fast path count for new recruits
-      exec.mockResolvedValueOnce([{ CountNewRecruits: 150 }]);
+      // Query 6: First-census stem classification. The DB grouping identifies 40
+      // trees carrying more than one measured stem — consistent with 1.5 stems/tree.
+      exec.mockResolvedValueOnce([{ CountMultiStems: 40, CountNewRecruits: 150 }]);
 
       const res = await callGET('testschema', '1', '1');
 
       expect(res.status).toBe(HTTPResponses.OK);
       const body = await res.json();
 
-      // Verify stemTypes uses fast path (all new recruits)
+      // Multi-stems must be the real current-census value, never a hardcoded 0 that
+      // would contradict the 1.5 stems-per-tree ratio shown alongside it.
       expect(body.stemTypes).toEqual({
-        CountOldStems: 0,
-        CountMultiStems: 0,
-        CountNewRecruits: 150
+        CountOldStems: null,
+        CountMultiStems: 40,
+        CountNewRecruits: 150,
+        isFirstCensus: true
       });
+
+      // The classification query must ask the DB to derive multi-stem trees from the
+      // CURRENT census (grouping by TreeTag), not fabricate a constant.
+      const classificationCall = exec.mock.calls.find(call => String(call[0]).includes('CountMultiStems') && String(call[0]).includes('measured_stems'));
+      expect(classificationCall).toBeDefined();
+      expect(String(classificationCall![0])).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
+      expect(String(classificationCall![0])).not.toMatch(/previous_stems/i);
 
       // Verify other metrics are present
       expect(body.progressTachometer).toBeDefined();
@@ -205,7 +216,8 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       expect(body.stemTypes).toEqual({
         CountOldStems: 400,
         CountMultiStems: 200,
-        CountNewRecruits: 100
+        CountNewRecruits: 100,
+        isFirstCensus: false
       });
 
       // Verify complete response structure
@@ -222,9 +234,16 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
         stemTypes: {
           CountOldStems: 400,
           CountMultiStems: 200,
-          CountNewRecruits: 100
+          CountNewRecruits: 100,
+          isFirstCensus: false
         }
       });
+
+      // The comparison query must derive multi-stems from the CURRENT census grouping
+      // (trees with >1 distinct measured stem), not the previous-census diff formula.
+      const comparisonCall = exec.mock.calls.find(call => String(call[0]).includes('previous_stems'));
+      expect(comparisonCall).toBeDefined();
+      expect(String(comparisonCall![0])).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
     });
   });
 
@@ -253,7 +272,8 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       expect(body.stemTypes).toEqual({
         CountOldStems: 0,
         CountMultiStems: 0,
-        CountNewRecruits: 0
+        CountNewRecruits: 0,
+        isFirstCensus: false
       });
       expect(body.countTrees.CountTrees).toBe(0);
       expect(body.countStems.CountStems).toBe(0);
@@ -376,6 +396,9 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       // Verify COALESCE is used for NULL handling
       expect(String(stemTypesCall![0])).toMatch(/COALESCE\(SUM\(CASE/i);
 
+      // Verify multi-stems is derived from the current-census grouping, not the diff
+      expect(String(stemTypesCall![0])).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
+
       // Verify parameters include the previous census ID (5)
       // Parameters: censusID, censusID, previousCensusID, previousCensusID, previousCensusID
       expect(stemTypesCall![1]).toEqual([6, 6, 5, 5, 5]);
@@ -405,7 +428,7 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       expect(exec.mock.calls.every(call => call[2] === undefined)).toBe(true);
     });
 
-    it('uses fast path query for first census (no complex CTEs)', async () => {
+    it('uses the first-census classification query without the previous-census comparison CTEs', async () => {
       const cm = (ConnectionManager as any).getInstance();
       const exec = vi.spyOn(cm, 'executeQuery');
       vi.spyOn(cm, 'beginTransaction').mockResolvedValue('tx123');
@@ -420,19 +443,20 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       exec.mockResolvedValueOnce([{ CountTrees: 10 }]);
       exec.mockResolvedValueOnce([{ CountStems: 15 }]);
 
-      // Fast path count query
-      exec.mockResolvedValueOnce([{ CountNewRecruits: 15 }]);
+      // First-census classification query (multi-stems + new recruits, current census only)
+      exec.mockResolvedValueOnce([{ CountMultiStems: 5, CountNewRecruits: 15 }]);
 
       await callGET('testschema', '1', '1');
 
-      // Find the fast path query (should be a simple COUNT, not the complex CTE)
-      const fastPathCall = exec.mock.calls.find(
-        call =>
-          String(call[0]).includes('COUNT(DISTINCT s.StemGUID)') && String(call[0]).includes('CountNewRecruits') && !String(call[0]).includes('previous_stems')
+      // The first-census query derives multi-stems from the current census only and
+      // must NOT reference the previous-census comparison CTEs.
+      const firstCensusCall = exec.mock.calls.find(
+        call => String(call[0]).includes('measured_stems') && String(call[0]).includes('CountMultiStems') && !String(call[0]).includes('previous_stems')
       );
 
-      expect(fastPathCall).toBeDefined();
-      expect(String(fastPathCall![0])).not.toMatch(/WITH measured_stems AS.*previous_stems/is);
+      expect(firstCensusCall).toBeDefined();
+      expect(String(firstCensusCall![0])).not.toMatch(/previous_trees/i);
+      expect(String(firstCensusCall![0])).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
     });
   });
 

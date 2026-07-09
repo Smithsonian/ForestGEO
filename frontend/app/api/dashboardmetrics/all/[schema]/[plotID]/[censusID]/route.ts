@@ -21,6 +21,13 @@ import ailogger from '@/ailogger';
 // Force Node.js runtime for database compatibility
 export const runtime = 'nodejs';
 
+// A "multi-stem tree" is a tree carrying more than one distinct measured stem in the
+// CURRENT census. Requires a measured_stems CTE (TreeTag, StemTag) in scope. Shared by
+// the first-census and comparison branches so both always agree on the definition.
+const MULTI_STEM_TREES_SUBQUERY = `(SELECT COUNT(*) FROM (
+               SELECT TreeTag FROM measured_stems GROUP BY TreeTag HAVING COUNT(DISTINCT StemTag) > 1
+             ) multi)`;
+
 interface DashboardMetrics {
   progressTachometer: {
     TotalQuadrats: number;
@@ -38,9 +45,13 @@ interface DashboardMetrics {
     CountStems: number;
   };
   stemTypes: {
-    CountOldStems: number;
+    // Null (not zero) when there is no previous census to compare against —
+    // "old stems" is undefined in that case, whereas zero would falsely claim
+    // every stem is brand new relative to a prior census that does not exist.
+    CountOldStems: number | null;
     CountMultiStems: number;
     CountNewRecruits: number;
+    isFirstCensus: boolean;
   };
 }
 
@@ -154,25 +165,29 @@ export async function GET(
     });
     const previousCensusID = prevCensusResult[0]?.PrevCensusID;
 
-    // 5. Stem Types Query - Handle first census (no previous) as fast path
+    // 5. Stem Types Query - Handle first census (no previous) as a dedicated path.
+    // Multi-stem trees are a property of the CURRENT census alone, so we compute
+    // them for real here rather than hardcoding zero (which contradicted a
+    // stems-per-tree ratio above 1). Only "old stems" is genuinely undefined on a
+    // first census and is surfaced as null downstream.
+    const isFirstCensus = !previousCensusID;
     let stemTypesPromise: Promise<any[]>;
-    if (!previousCensusID) {
-      // First census: all measured stems are new recruits
-      stemTypesPromise = connectionManager
-        .executeQuery(
-          `SELECT COUNT(DISTINCT s.StemGUID) as CountNewRecruits
-         FROM ${schema}.coremeasurements cm
-         JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
-         WHERE cm.CensusID = ? AND s.CensusID = ?`,
-          [censusID, censusID]
-        )
-        .then(countResult => [
-          {
-            CountOldStems: 0,
-            CountMultiStems: 0,
-            CountNewRecruits: countResult[0]?.CountNewRecruits || 0
-          }
-        ]);
+    if (isFirstCensus) {
+      stemTypesPromise = connectionManager.executeQuery(
+        `
+          WITH measured_stems AS (
+            SELECT DISTINCT s.StemGUID, t.TreeTag, s.StemTag
+            FROM ${schema}.coremeasurements cm
+            JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
+            JOIN ${schema}.trees t ON s.TreeID = t.TreeID
+            WHERE cm.CensusID = ? AND s.CensusID = ?
+          )
+          SELECT
+            ${MULTI_STEM_TREES_SUBQUERY} AS CountMultiStems,
+            (SELECT COUNT(DISTINCT CONCAT(TreeTag, '|', StemTag)) FROM measured_stems) AS CountNewRecruits
+        `,
+        [censusID, censusID]
+      );
     } else {
       // Subsequent census: use optimized comparison query with explicit census ID
       stemTypesPromise = connectionManager.executeQuery(
@@ -198,7 +213,7 @@ export async function GET(
           )
           SELECT
             COALESCE(SUM(CASE WHEN ps.TreeTag IS NOT NULL THEN 1 ELSE 0 END), 0) as CountOldStems,
-            COALESCE(SUM(CASE WHEN ps.TreeTag IS NULL AND pt.TreeTag IS NOT NULL THEN 1 ELSE 0 END), 0) as CountMultiStems,
+            ${MULTI_STEM_TREES_SUBQUERY} as CountMultiStems,
             COALESCE(SUM(CASE WHEN ps.TreeTag IS NULL AND pt.TreeTag IS NULL THEN 1 ELSE 0 END), 0) as CountNewRecruits
           FROM measured_stems ms
           LEFT JOIN previous_stems ps ON ms.TreeTag = ps.TreeTag AND ms.StemTag = ps.StemTag
@@ -231,9 +246,10 @@ export async function GET(
         CountStems: countStemsResults[0]?.CountStems || 0
       },
       stemTypes: {
-        CountOldStems: stemTypesResults[0]?.CountOldStems || 0,
-        CountMultiStems: stemTypesResults[0]?.CountMultiStems || 0,
-        CountNewRecruits: stemTypesResults[0]?.CountNewRecruits || 0
+        CountOldStems: isFirstCensus ? null : (stemTypesResults[0]?.CountOldStems ?? 0),
+        CountMultiStems: stemTypesResults[0]?.CountMultiStems ?? 0,
+        CountNewRecruits: stemTypesResults[0]?.CountNewRecruits ?? 0,
+        isFirstCensus
       }
     };
 

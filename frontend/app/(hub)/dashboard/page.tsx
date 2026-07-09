@@ -57,9 +57,10 @@ interface ProgressTachoType {
 }
 
 interface StemTypesType {
-  CountOldStems: number;
+  CountOldStems: number | null;
   CountMultiStems: number;
   CountNewRecruits: number;
+  isFirstCensus: boolean;
 }
 
 export default function DashboardPage() {
@@ -97,10 +98,13 @@ export default function DashboardPage() {
   const [activeUsers, setActiveUsers] = useState(0);
   const [countStems, setCountStems] = useState(0);
   const [countTrees, setCountTrees] = useState(0);
+  // CountOldStems starts null so the tile shows the "no comparison" placeholder
+  // instead of a confident 0 until real data arrives.
   const [stemTypes, setStemTypes] = useState<StemTypesType>({
-    CountOldStems: 0,
+    CountOldStems: null,
     CountMultiStems: 0,
-    CountNewRecruits: 0
+    CountNewRecruits: 0,
+    isFirstCensus: false
   });
 
   // Plot edit modal state
@@ -190,7 +194,8 @@ export default function DashboardPage() {
       setStemTypes({
         CountOldStems: data.stemTypes.CountOldStems,
         CountMultiStems: data.stemTypes.CountMultiStems,
-        CountNewRecruits: data.stemTypes.CountNewRecruits
+        CountNewRecruits: data.stemTypes.CountNewRecruits,
+        isFirstCensus: data.stemTypes.isFirstCensus
       });
 
       ailogger.info('Dashboard metrics loaded successfully via aggregated API');
@@ -501,9 +506,10 @@ export default function DashboardPage() {
       setCountStems(0);
       setCountTrees(0);
       setStemTypes({
-        CountOldStems: 0,
+        CountOldStems: null,
         CountMultiStems: 0,
-        CountNewRecruits: 0
+        CountNewRecruits: 0,
+        isFirstCensus: false
       });
       setChangelogHistory(Array(5));
       lastLoadedKeyRef.current = ''; // Reset tracking key when contexts are cleared

@@ -29,9 +29,10 @@ interface ProgressTachoType {
 }
 
 interface StemTypesType {
-  CountOldStems: number;
+  CountOldStems: number | null;
   CountMultiStems: number;
   CountNewRecruits: number;
+  isFirstCensus: boolean;
 }
 
 const CENSUS_HUB_LINKS = [
@@ -56,7 +57,9 @@ export default function CensusOverviewPage() {
   const [countTrees, setCountTrees] = useState(0);
   const [countStems, setCountStems] = useState(0);
   const [activeUsers, setActiveUsers] = useState(0);
-  const [stemTypes, setStemTypes] = useState<StemTypesType>({ CountOldStems: 0, CountMultiStems: 0, CountNewRecruits: 0 });
+  // CountOldStems starts null so the tile shows the "no comparison" placeholder
+  // instead of a confident 0 until real data arrives.
+  const [stemTypes, setStemTypes] = useState<StemTypesType>({ CountOldStems: null, CountMultiStems: 0, CountNewRecruits: 0, isFirstCensus: false });
   const [progressTacho, setProgressTacho] = useState<ProgressTachoType>({
     TotalQuadrats: 0,
     PopulatedQuadrats: 0,
@@ -101,7 +104,8 @@ export default function CensusOverviewPage() {
       setStemTypes({
         CountOldStems: data.stemTypes.CountOldStems,
         CountMultiStems: data.stemTypes.CountMultiStems,
-        CountNewRecruits: data.stemTypes.CountNewRecruits
+        CountNewRecruits: data.stemTypes.CountNewRecruits,
+        isFirstCensus: data.stemTypes.isFirstCensus
       });
     } catch (e: any) {
       if (e.name === 'AbortError') return;
