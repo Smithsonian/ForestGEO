@@ -18,6 +18,12 @@ const MULTI_STEM_TREES_SUBQUERY = `(SELECT COUNT(*) FROM (
                SELECT TreeTag FROM measured_stems GROUP BY TreeTag HAVING COUNT(DISTINCT StemTag) > 1
              ) multi)`;
 
+function parsePositiveIntegerParam(value: string): number | undefined {
+  if (!/^\d+$/.test(value)) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export async function GET(
   request: NextRequest,
   props: {
@@ -47,10 +53,10 @@ export async function GET(
   if (!validation.success) {
     // Try to use URL parameters as fallback — must still validate schema pattern and authorize access
     if (schemaParam && plotIDParam && censusIDParam) {
-      const plotID = parseInt(plotIDParam);
-      const censusID = parseInt(censusIDParam);
+      const plotID = parsePositiveIntegerParam(plotIDParam);
+      const censusID = parsePositiveIntegerParam(censusIDParam);
 
-      if (isNaN(plotID) || isNaN(censusID)) {
+      if (!plotID || !censusID) {
         return NextResponse.json({ error: 'Invalid plot ID or census ID parameters' }, { status: HTTPResponses.BAD_REQUEST });
       }
 

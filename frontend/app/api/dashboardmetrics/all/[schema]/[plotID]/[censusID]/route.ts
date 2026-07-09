@@ -28,6 +28,12 @@ const MULTI_STEM_TREES_SUBQUERY = `(SELECT COUNT(*) FROM (
                SELECT TreeTag FROM measured_stems GROUP BY TreeTag HAVING COUNT(DISTINCT StemTag) > 1
              ) multi)`;
 
+function parsePositiveIntegerParam(value: string): number | undefined {
+  if (!/^\d+$/.test(value)) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 interface DashboardMetrics {
   progressTachometer: {
     TotalQuadrats: number;
@@ -85,10 +91,10 @@ export async function GET(
   const denied = assertSchemaAccess(session, schema);
   if (denied) return denied;
 
-  const plotID = parseInt(plotIDParam);
-  const censusID = parseInt(censusIDParam);
+  const plotID = parsePositiveIntegerParam(plotIDParam);
+  const censusID = parsePositiveIntegerParam(censusIDParam);
 
-  if (isNaN(plotID) || isNaN(censusID)) {
+  if (!plotID || !censusID) {
     return NextResponse.json({ error: 'Invalid plot ID or census ID parameters' }, { status: HTTPResponses.BAD_REQUEST });
   }
 

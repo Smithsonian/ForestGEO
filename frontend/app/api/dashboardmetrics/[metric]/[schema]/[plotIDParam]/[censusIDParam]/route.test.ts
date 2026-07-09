@@ -166,6 +166,13 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     expect(body2.error).toMatch(/Metric.*required/i);
   });
 
+  it('returns 400 when fallback numeric slugs contain trailing characters', async () => {
+    const res = await callGET('CountTrees', 'myschema', '42abc', '7', 'MyPlot');
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    const body = await res.json();
+    expect(body.error).toMatch(/Invalid plot ID or census ID/i);
+  });
+
   it('CountActiveUsers: returns 200 and proper JSON; builds expected SQL + params', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ PersonnelCount: 5 }]);

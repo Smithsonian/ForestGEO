@@ -122,6 +122,13 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       expect(body.error).toMatch(/Invalid plot ID or census ID/i);
     });
 
+    it('returns 400 when numeric parameters contain trailing characters', async () => {
+      const res = await callGET('testschema', '1abc', '2');
+      expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+      const body = await res.json();
+      expect(body.error).toMatch(/Invalid plot ID or census ID/i);
+    });
+
     it('returns error when schema validation fails', async () => {
       const res = await callGET('invalid_schema', '1', '2');
       expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
