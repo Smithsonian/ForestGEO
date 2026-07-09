@@ -5,10 +5,14 @@ const QUADRATS_TABLE = 'quadrats';
 const DEFAULT_SHAPE = 'square';
 
 function resolveRows(ctx: StepContext) {
-  if (ctx.input.quadrats.mode === 'grid') {
-    return generateGrid(ctx.input.plot, ctx.input.quadrats);
+  const quadrats = ctx.input.quadrats;
+  if (quadrats.mode === 'grid') {
+    return generateGrid(ctx.input.plot, quadrats);
   }
-  return ctx.input.quadrats.rows;
+  if (quadrats.mode === 'csv') {
+    return quadrats.rows;
+  }
+  return [];
 }
 
 export const insertQuadratsStep: ProvisioningStep = {

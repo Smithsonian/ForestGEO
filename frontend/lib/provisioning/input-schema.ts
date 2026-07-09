@@ -51,6 +51,9 @@ export const ProvisioningQuadratsSchema = z.discriminatedUnion('mode', [
       )
       .min(1)
       .max(MAX_GENERATED_QUADRATS)
+  }),
+  z.object({
+    mode: z.literal('none')
   })
 ]);
 

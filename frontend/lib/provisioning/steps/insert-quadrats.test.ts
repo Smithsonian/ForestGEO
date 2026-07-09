@@ -99,6 +99,21 @@ describe('insertQuadratsStep', () => {
     expect(await insertQuadratsStep.alreadyDone(ctx)).toBe(true);
   });
 
+  it('none mode: inserts zero rows and reports alreadyDone', async () => {
+    const noneCtx: StepContext = {
+      ...ctx,
+      input: makeInput({ mode: 'none' })
+    };
+    noneCtx.input.site.schemaName = SCHEMA_NAME;
+    noneCtx.state = { plotId: ctx.state.plotId };
+
+    await insertQuadratsStep.run(noneCtx);
+    expect(await insertQuadratsStep.alreadyDone(noneCtx)).toBe(true);
+
+    const [rows]: any = await ctx.sitePool!.query(`SELECT COUNT(*) AS c FROM \`${SCHEMA_NAME}\`.quadrats WHERE PlotID = ?`, [ctx.state.plotId]);
+    expect(Number(rows[0]?.c ?? rows[0]?.C)).toBe(0);
+  });
+
   it('csv mode: inserts exactly the supplied rows', async () => {
     const csvRows: QuadratCsvRow[] = [
       { quadratName: 'A', startX: 0, startY: 0, dimensionX: 50, dimensionY: 50 },

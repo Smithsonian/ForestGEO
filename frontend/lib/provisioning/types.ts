@@ -36,7 +36,16 @@ export interface QuadratCsvConfig {
   rows: QuadratCsvRow[];
 }
 
-export type QuadratConfig = QuadratGridConfig | QuadratCsvConfig;
+/**
+ * Create the site with no quadrats. Use when the real quadrat list will be uploaded
+ * later through the Quadrats page, so provisioning does not seed a placeholder grid
+ * that would otherwise coexist with (and duplicate) the uploaded quadrats.
+ */
+export interface QuadratNoneConfig {
+  mode: 'none';
+}
+
+export type QuadratConfig = QuadratGridConfig | QuadratCsvConfig | QuadratNoneConfig;
 
 export interface ProvisioningInput {
   site: {
