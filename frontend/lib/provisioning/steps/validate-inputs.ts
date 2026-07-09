@@ -66,7 +66,7 @@ export const validateInputsStep: ProvisioningStep = {
           { stepKey: 'validate_inputs' }
         );
       }
-    } else {
+    } else if (input.quadrats.mode === 'csv') {
       const rows = input.quadrats.rows;
       for (const row of rows) {
         if (row.startX < 0 || row.startY < 0) {

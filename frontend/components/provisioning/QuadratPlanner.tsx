@@ -181,12 +181,14 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
     });
   }
 
-  function switchMode(newMode: 'grid' | 'csv') {
+  function switchMode(newMode: 'grid' | 'csv' | 'none') {
     setCsvParseErrors([]);
     if (newMode === 'grid') {
       onChange({ mode: 'grid', quadratSizeX: 20, quadratSizeY: 20, namingPattern: NAMING_PATTERN_SEQUENTIAL });
-    } else {
+    } else if (newMode === 'csv') {
       onChange({ mode: 'csv', rows: [] });
+    } else {
+      onChange({ mode: 'none' });
     }
   }
 
@@ -212,15 +214,23 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
           id="quadrat-mode-group"
           aria-label="Quadrat Mode"
           value={value.mode}
-          onChange={e => switchMode(e.target.value as 'grid' | 'csv')}
+          onChange={e => switchMode(e.target.value as 'grid' | 'csv' | 'none')}
           orientation="horizontal"
         >
           <Radio value="grid" label="Grid (auto-generate)" aria-label="Grid mode: auto-generate quadrats" />
           <Radio value="csv" label="CSV (upload custom layout)" aria-label="CSV mode: upload custom quadrat layout" />
+          <Radio value="none" label="None (add later)" aria-label="None mode: create no quadrats now" />
         </RadioGroup>
       </FormControl>
 
       {value.mode === 'grid' && <GridModePanel value={value} onChange={onChange} plot={plot} />}
+
+      {value.mode === 'none' && (
+        <Alert color="neutral" variant="soft" size="sm" aria-label="No quadrats will be created">
+          No quadrats will be created now. Upload the real quadrat list later from the Quadrats page. This avoids seeding a placeholder grid that would coexist
+          with — and duplicate — your uploaded quadrats.
+        </Alert>
+      )}
 
       {value.mode === 'csv' && (
         <Stack spacing={2}>

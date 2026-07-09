@@ -12,6 +12,9 @@ function buildQuadratsSummary(quadrats: ProvisioningInput['quadrats']): string {
   if (quadrats.mode === 'grid') {
     return `Grid mode: ${quadrats.quadratSizeX}×${quadrats.quadratSizeY} m, naming = ${quadrats.namingPattern}`;
   }
+  if (quadrats.mode === 'none') {
+    return 'None: no quadrats created now — upload them later from the Quadrats page';
+  }
   return `CSV mode: ${quadrats.rows.length} ${quadrats.rows.length === 1 ? 'row' : 'rows'}`;
 }
 

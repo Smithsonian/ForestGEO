@@ -16,6 +16,7 @@ import crypto from 'crypto';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
+import { buildDivergentQuadratUploadError, quadratRevisionAppendsDivergentSet } from '@/lib/ingestion/quadrat-upload-guards';
 import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
 import { RoleResult } from '@/lib/db/definitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
@@ -247,6 +248,22 @@ async function upsertQuadratRows(
 
     const deleteSQL = format(`DELETE FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1`, [schema]);
     await connectionManager.executeQuery(deleteSQL, [plotID], transactionID);
+  }
+
+  if (uploadMode === UploadMode.REVISIONS) {
+    // A Revisions upload updates by QuadratName and appends every non-matching row.
+    // Refuse only a large, replacement-like file against the known generated Q#####
+    // placeholder grid. Other non-overlapping files are valid Revisions additions.
+    const existingNamesSQL = format(`SELECT QuadratName FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1 AND QuadratName IS NOT NULL`, [schema]);
+    const existingNameRows = await connectionManager.executeQuery(existingNamesSQL, [plotID], transactionID);
+    const existingActiveNames = Array.isArray(existingNameRows)
+      ? existingNameRows.map(existing => String((existing as { QuadratName?: unknown }).QuadratName ?? ''))
+      : [];
+    const incomingNames = rows.map(row => normalizeRequiredString(row.quadrat)).filter(Boolean);
+
+    if (quadratRevisionAppendsDivergentSet(existingActiveNames, incomingNames)) {
+      throw new Error(buildDivergentQuadratUploadError(plotID, existingActiveNames, incomingNames.length));
+    }
   }
 
   for (const row of rows) {

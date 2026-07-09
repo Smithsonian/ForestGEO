@@ -83,6 +83,10 @@ function quadratLayoutIsValid(input: ProvisioningInput): boolean {
     }
   }
 
+  if (input.quadrats.mode === 'none') {
+    return true;
+  }
+
   const rows = input.quadrats.rows;
   if (rows.length === 0) return false;
   for (const row of rows) {

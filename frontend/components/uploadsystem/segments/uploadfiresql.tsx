@@ -38,7 +38,7 @@ import { chooseEffectiveCsvMapping, headerBasisMatches, type CsvMappingRejection
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
 import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
-import { aliasesFor, legacyCsvHeaderKey } from '@/lib/column-mapping/fields';
+import { aliasesFor, makeLegacyCsvHeaderKey } from '@/lib/column-mapping/fields';
 import { transformMeasurementValue, validateMeasurementRow } from '@/lib/column-mapping/measurement-rows';
 import { UploadMode } from '@/config/uploadmodes';
 
@@ -867,7 +867,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
       // Non-measurements forms and revision uploads only. The measurements flow resolves headers
       // through lib/column-mapping/resolution (seeded mapping when the user confirmed none). The
-      // legacy fallback (legacyCsvHeaderKey) shares the single CSV_ALIASES source of truth.
+      // legacy fallback (makeLegacyCsvHeaderKey) scopes the CSV_ALIASES source of truth to the form:
+      // measurements (incl. revisions) alias; other forms identity-normalize so a taxonomy `species`
+      // column is not hijacked into `spcode`.
       const mappingFlowActive = mappingRequired && csvHeaders !== null && csvHeaders.length > 0;
       // When the mapping flow is active the server is the single authority over how columns are
       // keyed: the client ships raw rows and the server resolves/keys/validates them. Legacy
@@ -890,7 +892,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         : null;
       // On the server-resolved path we send raw headers + raw string values so the server is
       // authoritative over keying; Papa treats `undefined` transforms as identity.
-      const transformHeader = serverResolves ? undefined : headerPlan ? transformHeaderFromPlan(headerPlan) : legacyCsvHeaderKey;
+      const transformHeader = serverResolves ? undefined : headerPlan ? transformHeaderFromPlan(headerPlan) : makeLegacyCsvHeaderKey(uploadForm as FormType);
 
       // Per-cell transform delegates to the shared pure function. The shared function returns the
       // original string when a measurement date fails to parse; detect that here to preserve the

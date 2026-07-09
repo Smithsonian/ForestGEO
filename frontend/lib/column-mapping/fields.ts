@@ -62,6 +62,19 @@ export function legacyCsvHeaderKey(header: string): string {
   return LEGACY_CSV_FIELD_BY_ALIAS[norm] ?? norm;
 }
 
+/**
+ * Builds the papaparse `transformHeader` for the legacy (non column-mapping) upload path, scoped to
+ * the form being uploaded. CSV_ALIASES is a MEASUREMENTS alias set: it aliases `species`/`sp` to
+ * `spcode`, which is right when a measurements file names its species-code column "species" but wrong
+ * for the species-definition form, where `species` is the epithet (a distinct required field) and
+ * would be hijacked into `spcode` — colliding with the real `spcode` column and dropping SpeciesName.
+ * Non-measurements forms (species, quadrats, personnel, attributes) already ship CSV headers equal to
+ * their canonical fields, so they get identity normalization. Measurements revisions still alias.
+ */
+export function makeLegacyCsvHeaderKey(formType: FormType): (header: string) => string {
+  return formType === FormType.measurements ? legacyCsvHeaderKey : normalizeHeader;
+}
+
 function arcgisFields(): CanonicalFieldDef[] {
   return ARCGIS_SCHEMA.filter(def => def.field !== CODE_AGGREGATE_FIELD).map(def => ({
     canonicalField: def.field,

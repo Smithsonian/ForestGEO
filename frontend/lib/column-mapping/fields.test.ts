@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FormType, RequiredTableHeadersByFormType, SourceFormat, TableHeadersByFormType } from '@/config/macros/formdetails';
-import { aliasesFor, canonicalFieldsFor, legacyCsvHeaderKey, normalizeHeader } from './fields';
+import { aliasesFor, canonicalFieldsFor, legacyCsvHeaderKey, makeLegacyCsvHeaderKey, normalizeHeader } from './fields';
 
 describe('normalizeHeader', () => {
   it('lowercases, trims, and strips separators', () => {
@@ -118,5 +118,35 @@ describe('legacyCsvHeaderKey', () => {
 
   it('passes unknown headers through normalized (lowercase, no whitespace/underscore/hyphen)', () => {
     expect(legacyCsvHeaderKey('Device_ID')).toBe('deviceid');
+  });
+});
+
+describe('makeLegacyCsvHeaderKey (form-aware legacy transform)', () => {
+  // The CSV alias dictionary is measurements-specific. A measurements file that names its species-code
+  // column "species"/"sp" should still resolve to spcode, so measurements keeps the aliases.
+  it('for the measurements form, applies the CSV aliases', () => {
+    const key = makeLegacyCsvHeaderKey(FormType.measurements);
+    expect(key('species')).toBe('spcode');
+    expect(key('sp')).toBe('spcode');
+    expect(key('Notes')).toBe('comments');
+  });
+
+  // Regression: the species-definition form's `species` column is the epithet — a distinct required
+  // field, NOT the species code. Applying the measurements alias hijacked it into `spcode`, colliding
+  // with the real `spcode` column and dropping SpeciesName. It must stay its own field.
+  it('for the species form, does NOT hijack the `species` epithet into `spcode`', () => {
+    const key = makeLegacyCsvHeaderKey(FormType.species);
+    expect(key('species')).toBe('species');
+    expect(key('spcode')).toBe('spcode');
+  });
+
+  it('for the species form, passes taxonomy headers through normalized without measurements aliasing', () => {
+    const key = makeLegacyCsvHeaderKey(FormType.species);
+    expect(key('family')).toBe('family');
+    expect(key('genus')).toBe('genus');
+    expect(key('subspecies')).toBe('subspecies');
+    expect(key('idlevel')).toBe('idlevel');
+    expect(key('authority')).toBe('authority');
+    expect(key(' Sub-Species ')).toBe('subspecies');
   });
 });

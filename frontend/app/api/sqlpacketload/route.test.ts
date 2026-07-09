@@ -877,6 +877,40 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('FROM forestgeo_testing.stems');
   });
 
+  it('allows a revisions upload to add a new quadrat to a real layout', async () => {
+    mockConnectionManager.executeQuery
+      // 1: divergent-placeholder preflight sees a real layout, not Q##### placeholders
+      .mockResolvedValueOnce([{ QuadratName: 'C01' }, { QuadratName: 'D01' }])
+      // 2: the incoming quadrat does not exist yet
+      .mockResolvedValueOnce([])
+      // 3: INSERT new quadrat
+      .mockResolvedValueOnce({ insertId: 3 })
+      // 4: changelog lookup
+      .mockResolvedValueOnce([])
+      // 5: changelog insert
+      .mockResolvedValueOnce({ insertId: 4 });
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'E01', startx: 40, starty: 0, dimx: 20, dimy: 20, area: 400 }
+        },
+        { uploadMode: 'revisions' }
+      )
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({
+      uploadMode: 'revisions',
+      insertedCount: 1,
+      updatedCount: 0,
+      transactionCompleted: true
+    });
+    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('SELECT QuadratName FROM forestgeo_testing.quadrats');
+    expect(String(mockConnectionManager.executeQuery.mock.calls[2]?.[0])).toContain('INSERT INTO forestgeo_testing.quadrats');
+  });
+
   it('rejects revisions when multiple active species rows already exist for one SpeciesCode', async () => {
     mockConnectionManager.executeQuery.mockResolvedValueOnce([{ SpeciesID: 11 }, { SpeciesID: 19 }]);
 
