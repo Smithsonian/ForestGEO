@@ -17,7 +17,8 @@ import {
   usePlotContext,
   usePlotDispatch,
   useSiteContext,
-  useSiteDispatch
+  useSiteDispatch,
+  useSiteListContext
 } from '@/app/contexts/compat-hooks';
 import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/lib/db/definitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
@@ -71,6 +72,7 @@ export default function DashboardPage() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const siteListContext = useSiteListContext();
   const censusListContext = useOrgCensusListContext();
   const censusListDispatch = useOrgCensusListDispatch();
   const censusDispatch = useOrgCensusDispatch();
@@ -80,7 +82,10 @@ export default function DashboardPage() {
   const userName = session?.user?.name;
   const userEmail = session?.user?.email;
   const userRole = session?.user?.userStatus;
-  const allowedSites = session?.user?.sites;
+  // Global-role users carry no explicit per-user site grants; like the sidebar, they
+  // derive their accessible sites from the full catalog site list context instead.
+  const isGlobalUser = userRole === 'global';
+  const allowedSites = isGlobalUser ? siteListContext : session?.user?.sites;
 
   // Get plot and census lists from store
   const plotList = useAppStore(state => state.plotList);
@@ -604,7 +609,9 @@ export default function DashboardPage() {
                 doubleDataEntry: site.doubleDataEntry
               })) || []
             }
-            isLoading={false}
+            // While the catalog list is still loading, show skeletons for global users
+            // rather than the misleading "contact an administrator" empty state.
+            isLoading={isGlobalUser && (allowedSites?.length ?? 0) === 0}
             onSelectSite={selected => {
               if (siteDispatch) {
                 const fullSite = allowedSites?.find(s => s.siteID === selected.siteID);

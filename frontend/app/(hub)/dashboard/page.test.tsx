@@ -13,7 +13,7 @@ import { render, screen, waitFor, within as _within, fireEvent } from '@testing-
 import userEvent from '@testing-library/user-event';
 import DashboardPage from './page';
 import { useSession } from 'next-auth/react';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
+import { useOrgCensusContext, usePlotContext, useSiteContext, useSiteListContext } from '@/app/contexts/compat-hooks';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 
 // Mock dependencies
@@ -214,6 +214,8 @@ describe('Enhanced Dashboard Page', () => {
       triggerPulse: vi.fn(),
       isPulsing: false
     } as any);
+    // Default: empty catalog site list; individual tests override for the site-selection state.
+    vi.mocked(useSiteListContext).mockReturnValue([]);
 
     // Setup fetch mocks
     vi.mocked(global.fetch).mockImplementation((url: any) => {
@@ -666,6 +668,82 @@ describe('Enhanced Dashboard Page', () => {
       await waitFor(() => {
         expect(screen.getByText(/Welcome back/)).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('Available Sites card (no site selected)', () => {
+    // Copy that must NOT appear for users who actually have site access.
+    const NO_ACCESS_COPY = /don't have access to any sites yet/i;
+
+    // A representative catalog list the sidebar would receive via the site list context.
+    const catalogSites = Array.from({ length: 9 }, (_, index) => ({
+      siteID: index + 1,
+      siteName: `Catalog Site ${index + 1}`,
+      schemaName: `catalog_site_${index + 1}`
+    }));
+
+    beforeEach(() => {
+      // Site-selection state renders only when no site is selected.
+      vi.mocked(useSiteContext).mockReturnValue(undefined as any);
+    });
+
+    it('should render every catalog site for a global user with no explicit grants', async () => {
+      vi.mocked(useSession).mockReturnValue({
+        data: { user: { name: 'Global User', email: 'global@example.com', userStatus: 'global', sites: [] } },
+        status: 'authenticated',
+        update: vi.fn()
+      } as any);
+      vi.mocked(useSiteListContext).mockReturnValue(catalogSites as any);
+
+      render(<DashboardPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(catalogSites[0].siteName)).toBeInTheDocument();
+      });
+      catalogSites.forEach(site => {
+        expect(screen.getByText(site.siteName)).toBeInTheDocument();
+      });
+      expect(screen.queryByText(NO_ACCESS_COPY)).not.toBeInTheDocument();
+    });
+
+    it('should render only the explicit grants for a non-global user, ignoring the catalog list', async () => {
+      const grantedSites = [
+        { siteID: 3, siteName: 'Granted Site A', schemaName: 'granted_a' },
+        { siteID: 7, siteName: 'Granted Site B', schemaName: 'granted_b' }
+      ];
+      vi.mocked(useSession).mockReturnValue({
+        data: { user: { name: 'Crew User', email: 'crew@example.com', userStatus: 'field crew', sites: grantedSites } },
+        status: 'authenticated',
+        update: vi.fn()
+      } as any);
+      vi.mocked(useSiteListContext).mockReturnValue(catalogSites as any);
+
+      render(<DashboardPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Granted Site A')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Granted Site B')).toBeInTheDocument();
+      // Catalog-only sites the user was not granted must not leak into the card.
+      expect(screen.queryByText(catalogSites[0].siteName)).not.toBeInTheDocument();
+      expect(screen.queryByText(NO_ACCESS_COPY)).not.toBeInTheDocument();
+    });
+
+    it('should show the contact-administrator empty state for a non-global user with zero grants', async () => {
+      vi.mocked(useSession).mockReturnValue({
+        data: { user: { name: 'Pending User', email: 'pending@example.com', userStatus: 'pending', sites: [] } },
+        status: 'authenticated',
+        update: vi.fn()
+      } as any);
+      vi.mocked(useSiteListContext).mockReturnValue(catalogSites as any);
+
+      render(<DashboardPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(NO_ACCESS_COPY)).toBeInTheDocument();
+      });
+      // Non-global users never inherit the catalog list.
+      expect(screen.queryByText(catalogSites[0].siteName)).not.toBeInTheDocument();
     });
   });
 
