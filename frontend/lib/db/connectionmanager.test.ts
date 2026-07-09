@@ -94,6 +94,43 @@ describe('ConnectionManager.executeQuery timing', () => {
   });
 });
 
+describe('ConnectionManager.withTransaction callback failures', () => {
+  it('rolls back and releases the connection when a non-async callback throws synchronously', async () => {
+    const connection = {
+      threadId: 998,
+      query: vi.fn().mockResolvedValue([[]]),
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+      ping: vi.fn()
+    };
+    getConnMock.mockResolvedValueOnce(connection);
+
+    const { default: ConnectionManager } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const manager = ConnectionManager.getInstance();
+    const internals = manager as unknown as {
+      transactionConnections: Map<string, unknown>;
+      transactionMeta: Map<string, unknown>;
+      transactionSlotQueue: Array<() => void>;
+      startingTransactions: number;
+    };
+    internals.transactionConnections.clear();
+    internals.transactionMeta.clear();
+    internals.transactionSlotQueue.length = 0;
+    internals.startingTransactions = 0;
+
+    await expect(
+      manager.withTransaction(() => {
+        throw new Error('synchronous callback failure');
+      })
+    ).rejects.toThrow('synchronous callback failure');
+
+    expect(connection.rollback).toHaveBeenCalledOnce();
+    expect(connection.release).toHaveBeenCalledOnce();
+    expect(internals.transactionConnections.size).toBe(0);
+  });
+});
+
 describe('ConnectionManager transaction-slot accounting — beginTransaction is the single slot authority', () => {
   // Named constants (repo rule: NO MAGIC NUMBERS). These mirror the private
   // ConnectionManager values the tests reach into and the timings they drive.

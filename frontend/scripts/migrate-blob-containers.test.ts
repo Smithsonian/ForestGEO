@@ -265,6 +265,8 @@ function makeMockStorage(config: {
   source: string;
   destination: string;
   destExistingBlobs?: string[];
+  existsThrows?: boolean;
+  existsThrowsOnce?: boolean;
   copyStatus?: string;
   copyThrows?: boolean;
   deleteThrows?: boolean;
@@ -273,6 +275,7 @@ function makeMockStorage(config: {
   const factoryCalls: MockBlobStorage['factoryCalls'] = [];
   const beginCopyCalls: MockBlobStorage['beginCopyCalls'] = [];
   const deletedSourceBlobs: string[] = [];
+  let hasThrownFromExists = false;
 
   const sourceContainer = {
     getBlobClient(blobName: string) {
@@ -291,7 +294,13 @@ function makeMockStorage(config: {
   const destinationContainer = {
     getBlockBlobClient(blobName: string) {
       return {
-        exists: vi.fn(async () => destExisting.has(blobName)),
+        exists: vi.fn(async () => {
+          if (config.existsThrows && (!config.existsThrowsOnce || !hasThrownFromExists)) {
+            hasThrownFromExists = true;
+            throw new Error(`simulated destination lookup failure for ${blobName}`);
+          }
+          return destExisting.has(blobName);
+        }),
         beginCopyFromURL: vi.fn(async (sourceUrl: string) => {
           beginCopyCalls.push({ destination: config.destination, blobName, sourceUrl });
           return {
@@ -403,6 +412,54 @@ describe('executeMigration', () => {
     expect(summary).toEqual(summaryOf({ copied: 2, skipped: 1 }));
     // Only the not-yet-present blobs are copied; the existing one is left alone.
     expect(storage.beginCopyCalls.map(c => c.blobName)).toEqual(['b.csv', 'c.csv']);
+  });
+
+  it('retries source deletion on an idempotent rerun after a verified copy', async () => {
+    const storage = makeMockStorage({
+      source: LEGACY_PLOT1,
+      destination: SCHEMA_SCOPED_PLOT1,
+      destExistingBlobs: ['a.csv']
+    });
+
+    const summary = await executeMigration(copyPlan('a.csv'), { dryRun: false, deleteSource: true }, storage.factory);
+
+    expect(summary).toEqual(summaryOf({ skipped: 1 }));
+    expect(storage.deletedSourceBlobs).toEqual(['a.csv']);
+  });
+
+  it('counts a destination lookup failure and continues processing later blobs', async () => {
+    const failingStorage = makeMockStorage({
+      source: LEGACY_PLOT1,
+      destination: SCHEMA_SCOPED_PLOT1,
+      existsThrows: true,
+      existsThrowsOnce: true
+    });
+    const workingStorage = makeMockStorage({ source: LEGACY_PLOT1, destination: SCHEMA_SCOPED_PLOT1 });
+    let calls = 0;
+    const factory = vi.fn(async (name: string, options?: { createIfMissing?: boolean }) => {
+      calls++;
+      return calls <= 2 ? failingStorage.factory(name, options) : workingStorage.factory(name, options);
+    }) as unknown as ContainerClientFactory;
+
+    const summary = await executeMigration(copyPlan('a.csv', 'b.csv'), { dryRun: false, deleteSource: false }, factory);
+
+    expect(summary).toEqual(summaryOf({ copied: 1, failed: 1 }));
+  });
+
+  it('counts a container-resolution failure and continues processing later blobs', async () => {
+    const storage = makeMockStorage({ source: LEGACY_PLOT1, destination: SCHEMA_SCOPED_PLOT1 });
+    let failFirstCall = true;
+    const factory = vi.fn(async (name: string, options?: { createIfMissing?: boolean }) => {
+      if (failFirstCall) {
+        failFirstCall = false;
+        throw new Error('simulated container resolution failure');
+      }
+      return storage.factory(name, options);
+    }) as unknown as ContainerClientFactory;
+
+    const summary = await executeMigration(copyPlan('a.csv', 'b.csv'), { dryRun: false, deleteSource: false }, factory);
+
+    expect(summary).toEqual(summaryOf({ copied: 1, failed: 1 }));
   });
 
   it('counts a thrown copy poll as failed and continues with remaining blobs', async () => {

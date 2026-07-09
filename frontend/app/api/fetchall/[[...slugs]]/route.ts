@@ -9,6 +9,8 @@ import ailogger from '@/ailogger';
 import { getErrorMessage, getErrorCode, errorMessageContains, toError } from '@/lib/errorhelpers';
 import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { FETCHALL_ALLOWED_TABLES, INVALID_DATATYPE_CODE } from './constants';
+import { auth } from '@/auth';
+import { requireSession } from '@/lib/auth-helpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -27,8 +29,12 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
   const slugPlotID = parsePositiveInt(plotIDParam);
   const slugPCN = parsePositiveInt(pcnParam);
 
-  // Sites live in the catalog schema and don't require a site-specific schema
+  // Sites live in the catalog schema and don't require a site-specific schema,
+  // but the catalog must never be enumerable by an unauthenticated caller.
   if (dataType === 'sites') {
+    const sessionError = requireSession(await auth());
+    if (sessionError) return sessionError;
+
     const connectionManager = ConnectionManager.getInstance();
     try {
       const results = await connectionManager.executeQuery('SELECT * FROM catalog.sites');

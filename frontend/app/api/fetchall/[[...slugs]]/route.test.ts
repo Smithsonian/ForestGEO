@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 import { validateContextualValues } from '@/lib/contextvalidation';
+import { auth } from '@/auth';
 // ========== Import route AFTER mocks ==========
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager'; // ========== Helpers ==========
@@ -49,6 +50,8 @@ vi.mock('@/config/datamapper', () => ({
 vi.mock('@/app/actions/cookiemanager', () => ({
   getCookie: getCookieMock
 }));
+
+vi.mock('@/auth', () => ({ auth: vi.fn() }));
 
 // Logger
 vi.mock('@/ailogger', () => ({
@@ -128,6 +131,17 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     vi.clearAllMocks();
     // sensible cookie defaults for tests that rely on stored values
     primeCookies();
+  });
+
+  it('requires a session before returning the catalog site list', async () => {
+    vi.mocked(auth).mockResolvedValueOnce(null as never);
+    const cm = (ConnectionManager as any).getInstance();
+    const executeQuery = vi.spyOn(cm, 'executeQuery');
+
+    const response = await GET(makeRequest(), makeProps(['sites']));
+
+    expect(response.status).toBe(HTTPResponses.UNAUTHORIZED);
+    expect(executeQuery).not.toHaveBeenCalled();
   });
 
   it('returns 400 error when schema missing/undefined', async () => {

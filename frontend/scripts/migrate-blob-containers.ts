@@ -57,7 +57,7 @@
 
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { BlobServiceClient, ContainerClient } from '@azure/storage-blob';
+import type { BlobServiceClient, BlobClient, ContainerClient } from '@azure/storage-blob';
 import { getBlobServiceClient, getContainerClient } from '@/config/macros/azurestorage';
 import { getContainerName, isLegacyIdBasedContainerName, parseLegacyIdBasedContainerName } from '@/config/macros/containernames';
 
@@ -299,9 +299,23 @@ export async function executeMigration(
       continue;
     }
 
-    const sourceContainer = await resolveContainer(entry.sourceContainer, false);
-    const destinationContainer = await resolveContainer(destinationContainerName, true);
-    await copyOneBlob(entry.sourceBlob, entry.sourceContainer, destinationContainerName, sourceContainer, destinationContainer, options.deleteSource, summary);
+    try {
+      const sourceContainer = await resolveContainer(entry.sourceContainer, false);
+      const destinationContainer = await resolveContainer(destinationContainerName, true);
+      await copyOneBlob(
+        entry.sourceBlob,
+        entry.sourceContainer,
+        destinationContainerName,
+        sourceContainer,
+        destinationContainer,
+        options.deleteSource,
+        summary
+      );
+    } catch (error) {
+      summary.failed++;
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error(`  FAILED   ${blobKey(entry.sourceContainer, entry.sourceBlob)} -> ${blobKey(destinationContainerName, entry.sourceBlob)}: ${reason}`);
+    }
   }
 
   return summary;
@@ -317,17 +331,22 @@ async function copyOneBlob(
   summary: MigrationSummary
 ): Promise<void> {
   const destinationBlob = destinationContainer.getBlockBlobClient(blobName);
-
-  const alreadyPresent = await destinationBlob.exists();
-  if (alreadyPresent) {
-    // Idempotent re-run: never overwrite an existing destination blob.
-    summary.skipped++;
-    console.log(`  skip     ${blobKey(destinationName, blobName)} (already present)`);
-    return;
-  }
-
   const sourceBlob = sourceContainer.getBlobClient(blobName);
+
   try {
+    const alreadyPresent = await destinationBlob.exists();
+    if (alreadyPresent) {
+      // Idempotent re-run: never overwrite an existing destination blob. When
+      // source deletion failed after a verified prior copy, --delete-source
+      // must still be able to finish draining the legacy container.
+      summary.skipped++;
+      console.log(`  skip     ${blobKey(destinationName, blobName)} (already present)`);
+      if (deleteSource) {
+        await deleteSourceBlob(sourceBlob, sourceName, blobName, summary);
+      }
+      return;
+    }
+
     const poller = await destinationBlob.beginCopyFromURL(sourceBlob.url);
     const result = await poller.pollUntilDone();
 
@@ -353,13 +372,17 @@ async function copyOneBlob(
   // The copy above is verified; a delete failure must NOT be conflated with a
   // copy failure (the data is safe in both places) but still fails the run so
   // the operator knows the legacy container was not fully drained.
+  await deleteSourceBlob(sourceBlob, sourceName, blobName, summary);
+}
+
+async function deleteSourceBlob(sourceBlob: BlobClient, sourceName: string, blobName: string, summary: MigrationSummary): Promise<void> {
   try {
     await sourceBlob.delete();
     console.log(`  deleted  ${blobKey(sourceName, blobName)} (source)`);
   } catch (error) {
     summary.deleteFailed++;
     const reason = error instanceof Error ? error.message : String(error);
-    console.error(`  DELETE FAILED (copy verified; source retained)  ${blobKey(sourceName, blobName)}: ${reason}`);
+    console.error(`  DELETE FAILED (destination retained; source retained)  ${blobKey(sourceName, blobName)}: ${reason}`);
   }
 }
 

@@ -167,7 +167,7 @@ export class PoolMonitor {
   private attachPoolListeners(pool: Pool): void {
     pool.on('connection', async (conn: PoolConnection) => {
       try {
-        conn.query(`SET SESSION wait_timeout=600, interactive_timeout=600`);
+        await conn.query(`SET SESSION wait_timeout=600, interactive_timeout=600`);
       } catch (e: any) {
         ailogger.warn(chalk.yellow('Could not set session timeout on new conn'), e);
       }
