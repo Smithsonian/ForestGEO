@@ -5,22 +5,19 @@ import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
 import { Box, IconButton, Stack, Typography, useTheme } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
-import { useLoading } from '@/app/contexts/loadingprovider';
 import { useAsyncOperation } from '@/app/hooks/useAsyncOperation';
 import { useLoadState, combineLoadStates } from '@/app/hooks/useLoadState';
 import {
   useOrgCensusContext,
   useOrgCensusDispatch,
   usePlotContext,
-  usePlotDispatch,
   useSiteContext,
-  useSiteDispatch,
   useOrgCensusListDispatch,
   usePlotListDispatch,
   useQuadratListDispatch,
   useSiteListDispatch
 } from '@/app/contexts/compat-hooks';
-import { markExplicitSelectionClear, useHasHydrated } from '@/config/store/appstore';
+import { useHasHydrated } from '@/config/store/appstore';
 import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
@@ -52,8 +49,6 @@ function renderSwitch(endpoint: string) {
 }
 
 export default function HubLayout({ children }: { children: React.ReactNode }) {
-  const { setLoading } = useLoading();
-
   // Hook declarations first
   const censusListDispatch = useOrgCensusListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
@@ -64,8 +59,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const hasHydrated = useHasHydrated();
-  const siteDispatch = useSiteDispatch();
-  const plotDispatch = usePlotDispatch();
   const censusDispatch = useOrgCensusDispatch();
   const { data: session } = useSession();
   const previousSiteRef = useRef<string | undefined>(undefined);
@@ -81,7 +74,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   // Aggregate load state
   const { allLoaded: coreDataLoaded, anyError: hasLoadError } = combineLoadStates([siteListLoad, plotListLoad, censusListLoad, quadratListLoad]);
 
-  const [manualReset, setManualReset] = useState(false);
   const [isSidebarVisible, setSidebarVisible] = useState(!!session);
 
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
@@ -258,51 +250,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSite, currentPlot, currentCensus, quadratListLoad.isIdle, hasHydrated]);
 
-  // Handle manual reset logic
-  useEffect(() => {
-    async function clearContexts() {
-      // A manual reset deliberately empties the whole selection; without this marker
-      // the guarded persist storage would block the cascade's final all-empty write,
-      // leaving stale selections (e.g. a just-deleted census) in localStorage. Only
-      // mark when something will actually be cleared — otherwise no write consumes
-      // the marker and it would linger, disarming the guard for a later spurious wipe.
-      if (currentSite || currentPlot || currentCensus) {
-        markExplicitSelectionClear();
-      }
-      if (currentSite) {
-        if (siteDispatch) await siteDispatch({ site: undefined });
-      }
-      if (currentPlot) {
-        if (plotDispatch) await plotDispatch({ plot: undefined });
-      }
-      if (currentCensus) {
-        if (censusDispatch) await censusDispatch({ census: undefined });
-      }
-    }
-
-    if (manualReset) {
-      // destructive mutation — global overlay blocks UI for the duration of the API call
-      setLoading(true, 'Manual refresh beginning...');
-
-      clearContexts()
-        .then(() => {
-          // Reset all load states to idle - triggers refetch
-          siteListLoad.reset();
-          plotListLoad.reset();
-          censusListLoad.reset();
-          quadratListLoad.reset();
-        })
-        .catch(error => {
-          ailogger.error('Manual reset failed:', error);
-        })
-        .finally(() => {
-          setManualReset(false);
-          setLoading(false);
-        });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manualReset, currentSite, currentPlot, currentCensus]);
-
   // Clear lists and reload data when site, plot, or census changes
   useEffect(() => {
     const hasSiteChanged = previousSiteRef.current !== currentSite?.siteName;
@@ -409,12 +356,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           zIndex: 1000
         }}
       >
-        <Sidebar
-          setCensusListLoaded={censusListLoad.reset}
-          siteListLoaded={siteListLoad.isLoaded}
-          coreDataLoaded={coreDataLoaded}
-          setManualReset={setManualReset}
-        />
+        <Sidebar setCensusListLoaded={censusListLoad.reset} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
       </Box>
       <Header />
       <Box

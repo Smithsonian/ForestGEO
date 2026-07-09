@@ -1,6 +1,6 @@
 'use client';
 import * as React from 'react';
-import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
+import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react';
 import { preloadKey } from '@/lib/query/preload';
 import { queryKey } from '@/lib/query';
 import { createFetchQuery } from '@/config/servergridhelpers';
@@ -26,7 +26,6 @@ import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
 import { useOrgCensusListContext, usePlotListContext, useSiteListContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
-import { useLoading } from '@/app/contexts/loadingprovider';
 import { TransitionComponent } from '@/components/client/clientmacros';
 import ListDivider from '@mui/joy/ListDivider';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
@@ -35,11 +34,9 @@ import { CensusLogo, PlotLogo } from '@/components/icons';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { Plot, Site, SitesRDS } from '@/lib/db/definitions/zones';
-import { OrgCensus, OrgCensusRDS } from '@/lib/db/definitions/timekeeping';
-import { DeleteForever, CheckCircle, Cancel, Clear } from '@mui/icons-material';
-import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
+import { CheckCircle, Cancel, Clear } from '@mui/icons-material';
 import ValidationStatusBadge from '@/components/client/validationstatusbadge';
-import ailogger from '@/ailogger';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -122,7 +119,6 @@ interface SidebarProps {
   coreDataLoaded: boolean;
   /** @deprecated This prop is unused and will be removed in a future version */
   setCensusListLoaded: () => void;
-  setManualReset: Dispatch<SetStateAction<boolean>>;
 }
 
 /**
@@ -147,7 +143,6 @@ export default function Sidebar(props: SidebarProps) {
   const siteListContext = useSiteListContext();
   const plotListContext = usePlotListContext();
   const { validity } = useDataValidityContext();
-  const { setLoading } = useLoading();
   const isAllValiditiesTrue = Object.entries(validity)
     .filter(([key]) => key !== 'subquadrats')
     .every(([, value]) => value);
@@ -162,17 +157,13 @@ export default function Sidebar(props: SidebarProps) {
   const [propertiesToggle, setPropertiesToggle] = useState(true);
   const [formsToggle, setFormsToggle] = useState(true);
 
-  const { setCensusListLoaded: _setCensusListLoaded, setManualReset } = props;
+  const { setCensusListLoaded: _setCensusListLoaded } = props;
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number>(340); // Default width
   const [isSiteDropdownOpen, setSiteDropdownOpen] = useState(false);
   const [isPlotDropdownOpen, setPlotDropdownOpen] = useState(false);
   const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
-  const [isClearDropdownOpen, setIsClearDropdownOpen] = useState(false);
-  const [censusToDelete, setCensusToDelete] = useState<OrgCensusRDS | null>(null);
-  const [isDeletingCensus, setIsDeletingCensus] = useState(false);
-
   // Admin pages used to forcibly clear the user's site/plot/census selections on mount.
   // That side-effect was hostile UX (sub-paths like /admin/provision/runs would wipe state),
   // and admin pages are overlays — they don't need a clean context. Removed in 2026-05 task 13.
@@ -243,43 +234,6 @@ export default function Sidebar(props: SidebarProps) {
       await censusDispatch({ census: selectedCensus });
     }
   };
-
-  // Handler for census deletion from the shared modal
-  const handleCensusDelete = useCallback(
-    async (deleteType: 'msmts' | 'full') => {
-      const censusID = censusToDelete?.dateRanges?.[0]?.censusID;
-      if (!currentSite?.schemaName || !censusID) {
-        ailogger.error('Missing required context: schema or censusID', undefined, {
-          schema: currentSite?.schemaName || 'unknown',
-          censusID: censusID || 'unknown'
-        });
-        setIsClearDropdownOpen(false);
-        setCensusToDelete(null);
-        return;
-      }
-
-      setIsDeletingCensus(true);
-      const loadingMessage = deleteType === 'msmts' ? 'Deleting census measurements...' : 'Deleting census measurements and fixed data...';
-      // destructive mutation — global overlay blocks UI for the duration of the API call
-      setLoading(true, loadingMessage);
-      setIsClearDropdownOpen(false);
-
-      try {
-        const response = await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=${deleteType}`);
-        if (!response.ok) {
-          throw new Error(`Failed to clear census: ${response.status}`);
-        }
-        setCensusToDelete(null);
-        setManualReset(true);
-      } catch (error: any) {
-        ailogger.error(`Failed to delete census: ${error?.message ?? error}`, error instanceof Error ? error : undefined);
-      } finally {
-        setLoading(false);
-        setIsDeletingCensus(false);
-      }
-    },
-    [censusToDelete, currentSite?.schemaName, setLoading, setManualReset]
-  );
 
   const renderSiteValue = (option: SelectOption<number> | null) => {
     if (!option) {
@@ -467,23 +421,6 @@ export default function Sidebar(props: SidebarProps) {
                       </React.Fragment>
                     ))}
                 </Box>
-                <IconButton
-                  variant={'soft'}
-                  color={'danger'}
-                  onClick={e => {
-                    e.stopPropagation(); // Prevent dropdown selection
-                    if (item) setCensusToDelete(item);
-                    setIsClearDropdownOpen(true);
-                  }}
-                  disabled={
-                    (item?.plotCensusNumber ?? 0) <
-                    (Array.isArray(censusListContext)
-                      ? censusListContext.reduce((currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0), 0)
-                      : 0)
-                  }
-                >
-                  <DeleteForever />
-                </IconButton>
               </Box>
             </Option>
           ))}
@@ -672,10 +609,10 @@ export default function Sidebar(props: SidebarProps) {
         <List>
           <ListItem sticky className="sidebar-item">
             <Typography level="body-xs" textTransform="uppercase">
-              Deselect Site (will trigger app reset!):
+              Clear selection:
             </Typography>
           </ListItem>
-          <Option key="none" value={null as unknown as number} aria-label="Deselect site, will trigger application reset">
+          <Option key="none" value={null as unknown as number} aria-label="Clear site selection">
             None
           </Option>
         </List>
@@ -1305,16 +1242,6 @@ export default function Sidebar(props: SidebarProps) {
           <Divider orientation={'horizontal'} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
         </Box>
-        <CensusDeletionModal
-          open={isClearDropdownOpen}
-          onClose={() => {
-            setIsClearDropdownOpen(false);
-            setCensusToDelete(null);
-          }}
-          onDelete={handleCensusDelete}
-          census={censusToDelete}
-          isDeleting={isDeletingCensus}
-        />
       </Stack>
     </>
   );
