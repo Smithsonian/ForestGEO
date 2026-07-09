@@ -252,14 +252,13 @@ async function upsertQuadratRows(
 
   if (uploadMode === UploadMode.REVISIONS) {
     // A Revisions upload updates by QuadratName and appends every non-matching row.
-    // Refuse before writing anything if the incoming names share NO overlap with the
-    // existing quadrats — that only happens when the file uses a different naming
-    // scheme than the quadrats already in the plot (e.g. real C01… names uploaded on
-    // top of an auto-generated Q00001… placeholder grid), which silently doubles the
-    // quadrat set. The operator should use Clean Re-Upload to replace instead.
+    // Refuse only a large, replacement-like file against the known generated Q#####
+    // placeholder grid. Other non-overlapping files are valid Revisions additions.
     const existingNamesSQL = format(`SELECT QuadratName FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1 AND QuadratName IS NOT NULL`, [schema]);
     const existingNameRows = await connectionManager.executeQuery(existingNamesSQL, [plotID], transactionID);
-    const existingActiveNames = Array.isArray(existingNameRows) ? existingNameRows.map((existing: any) => String(existing.QuadratName ?? '')) : [];
+    const existingActiveNames = Array.isArray(existingNameRows)
+      ? existingNameRows.map(existing => String((existing as { QuadratName?: unknown }).QuadratName ?? ''))
+      : [];
     const incomingNames = rows.map(row => normalizeRequiredString(row.quadrat)).filter(Boolean);
 
     if (quadratRevisionAppendsDivergentSet(existingActiveNames, incomingNames)) {

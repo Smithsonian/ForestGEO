@@ -1,7 +1,10 @@
 import type { ProvisioningInput, QuadratCsvRow, QuadratGridConfig } from './types';
 
 export const MAX_GENERATED_QUADRATS = 10000;
-const SEQUENTIAL_PAD_WIDTH = String(MAX_GENERATED_QUADRATS).length;
+export const SEQUENTIAL_PAD_WIDTH = String(MAX_GENERATED_QUADRATS).length;
+// Keep consumers that need to recognize the legacy auto-generated placeholder
+// grid aligned with the names this generator emits.
+export const SEQUENTIAL_QUADRAT_NAME_PATTERN = new RegExp(`^Q\\d{${SEQUENTIAL_PAD_WIDTH}}$`, 'i');
 
 export function estimateGridQuadratCount(plot: ProvisioningInput['plot'], config: QuadratGridConfig): number {
   const cols = plot.dimensionX / config.quadratSizeX;
