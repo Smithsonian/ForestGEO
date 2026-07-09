@@ -488,6 +488,30 @@ describe('Sidebar - Functional Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 0));
       expect(useAppStore.getState().currentCensus).toBeDefined();
     });
+
+    it('MUST gate modified Post-Census Statistics clicks on the availability check', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+        const postValidationLink = screen.getByRole('link', { name: /post-census statistics/i });
+        const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
+        fireEvent(postValidationLink, clickEvent);
+
+        expect(clickEvent.defaultPrevented).toBe(true);
+        await waitFor(() => {
+          expect(fetchMock).toHaveBeenCalledWith('/api/cmprevalidation/postvalidation/testschema/1/1');
+        });
+        expect(openSpy).toHaveBeenCalledWith('/measurementshub/postvalidation', '_blank', 'noopener,noreferrer');
+        expect(mockPush).not.toHaveBeenCalledWith('/measurementshub/postvalidation');
+      } finally {
+        openSpy.mockRestore();
+        vi.unstubAllGlobals();
+      }
+    });
   });
 
   describe('F2 - census deletion moved out of the picker; softened deselect copy', () => {

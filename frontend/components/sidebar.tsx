@@ -1140,25 +1140,31 @@ export default function Sidebar(props: SidebarProps) {
                                   const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (isMeasurementsViewLink && !isAllValiditiesTrue));
 
                                   const handleSubLinkClick = (e: React.MouseEvent) => {
-                                    if (isModifiedClick(e)) return;
                                     if (link.href === '/postvalidation') {
                                       // Post-Census Statistics can't be a plain same-tab anchor: navigation
                                       // is gated on an async availability check, so it preventDefault()s
                                       // and navigates programmatically once the fetch resolves.
+                                      const isModifiedPostValidationClick = isModifiedClick(e);
                                       e.preventDefault();
                                       void (async () => {
                                         const response = await fetch(
                                           `/api/cmprevalidation/postvalidation/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}`
                                         );
                                         if (response.ok) {
-                                          router.push(item.href + link.href);
-                                          focusMainContent();
+                                          const href = item.href + link.href;
+                                          if (isModifiedPostValidationClick) {
+                                            window.open(href, '_blank', 'noopener,noreferrer');
+                                          } else {
+                                            router.push(href);
+                                            focusMainContent();
+                                          }
                                         } else {
                                           alert('No measurements found!');
                                         }
                                       })();
                                       return;
                                     }
+                                    if (isModifiedClick(e)) return;
                                     focusMainContent();
                                   };
                                   return (
