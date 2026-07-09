@@ -10,16 +10,22 @@ import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
+function parsePositiveIntegerParam(value: string | undefined): number | undefined {
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 async function handler(_request: NextRequest, context: RouteContext) {
   const params = await context.params;
   const schema = params.schema as string;
-  const plotID = parseInt(params.plotID as string, 10);
-  const censusID = parseInt(params.censusID as string, 10);
-  const queryID = parseInt(params.queryID as string, 10);
+  const plotID = parsePositiveIntegerParam(params.plotID as string | undefined);
+  const censusID = parsePositiveIntegerParam(params.censusID as string | undefined);
+  const queryID = parsePositiveIntegerParam(params.queryID as string | undefined);
   let transactionID: string | undefined = undefined;
 
   // Validate all parameters
-  if (!schema || isNaN(plotID) || isNaN(censusID) || isNaN(queryID)) {
+  if (!schema || !plotID || !censusID || !queryID) {
     return new NextResponse(JSON.stringify({ error: 'Missing or invalid parameters' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
@@ -64,8 +70,11 @@ async function handler(_request: NextRequest, context: RouteContext) {
     const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
     const successResults = JSON.stringify(queryResults);
     // Use parameterized query for UPDATE
-    const successUpdate = safeFormatQuery(schema, 'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = ? WHERE QueryID = ?');
-    await connectionManager.executeQuery(successUpdate, [currentTime, successResults, 'success', queryID]);
+    const successUpdate = safeFormatQuery(
+      schema,
+      'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = ?, LastRunPlotID = ?, LastRunCensusID = ? WHERE QueryID = ?'
+    );
+    await connectionManager.executeQuery(successUpdate, [currentTime, successResults, 'success', plotID, censusID, queryID]);
     await connectionManager.commitTransaction(transactionID ?? '');
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
@@ -73,8 +82,11 @@ async function handler(_request: NextRequest, context: RouteContext) {
     if (e.message === 'failure') {
       const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
       // Use parameterized query for UPDATE
-      const failureUpdate = safeFormatQuery(schema, 'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunStatus = ? WHERE QueryID = ?');
-      await connectionManager.executeQuery(failureUpdate, [currentTime, 'failure', queryID]);
+      const failureUpdate = safeFormatQuery(
+        schema,
+        'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunStatus = ?, LastRunPlotID = ?, LastRunCensusID = ? WHERE QueryID = ?'
+      );
+      await connectionManager.executeQuery(failureUpdate, [currentTime, 'failure', plotID, censusID, queryID]);
       return new NextResponse(null, { status: HTTPResponses.OK }); // if the query itself fails, that isn't a good enough reason to return a crash. It should just be logged.
     }
     ailogger.error('Error in postvalidation query:', e.message, {

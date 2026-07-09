@@ -19,6 +19,17 @@ function isValidView(view: string): view is ValidView {
   return VALID_VIEWS.includes(view as ValidView);
 }
 
+function parsePositiveInteger(value: unknown): number | undefined {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  }
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 /**
  * Execute all enabled post-validation queries for a given plot and census
  * Updates each query's lastRunAt, lastRunResult, and lastRunStatus
@@ -76,24 +87,27 @@ async function _executePostValidationQueries(
           const successResults = JSON.stringify(queryResults);
           const updateQuery = safeFormatQuery(
             schema,
-            'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = ? WHERE QueryID = ?'
+            'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = ?, LastRunPlotID = ?, LastRunCensusID = ? WHERE QueryID = ?'
           );
-          await connectionManager.executeQuery(updateQuery, [currentTime, successResults, 'success', queryID]);
+          await connectionManager.executeQuery(updateQuery, [currentTime, successResults, 'success', plotID, censusID, queryID]);
           stats.success++;
         } else {
           // Query succeeded but returned no results (treated as failure/no issues found)
           const updateQuery = safeFormatQuery(
             schema,
-            'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = NULL, LastRunStatus = ? WHERE QueryID = ?'
+            'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = NULL, LastRunStatus = ?, LastRunPlotID = ?, LastRunCensusID = ? WHERE QueryID = ?'
           );
-          await connectionManager.executeQuery(updateQuery, [currentTime, 'failure', queryID]);
+          await connectionManager.executeQuery(updateQuery, [currentTime, 'failure', plotID, censusID, queryID]);
           stats.failed++;
         }
       } catch (queryError) {
         // Query execution failed
         ailogger.error(`Post-validation query ${queryID} failed:`, queryError instanceof Error ? queryError : undefined);
-        const updateQuery = safeFormatQuery(schema, 'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunStatus = ? WHERE QueryID = ?');
-        await connectionManager.executeQuery(updateQuery, [currentTime, 'failure', queryID]);
+        const updateQuery = safeFormatQuery(
+          schema,
+          'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunStatus = ?, LastRunPlotID = ?, LastRunCensusID = ? WHERE QueryID = ?'
+        );
+        await connectionManager.executeQuery(updateQuery, [currentTime, 'failure', plotID, censusID, queryID]);
         stats.failed++;
       }
     }
@@ -132,12 +146,15 @@ async function handler(request: NextRequest, context: RouteContext) {
 
   try {
     const body = await request.json().catch(() => ({}));
-    const parsedPlotID = Number(body.plotID);
-    const parsedCensusID = Number(body.censusID);
-
-    _plotID = Number.isInteger(parsedPlotID) ? parsedPlotID : undefined;
-    _censusID = Number.isInteger(parsedCensusID) ? parsedCensusID : undefined;
+    const hasPlotID = body.plotID !== undefined;
+    const hasCensusID = body.censusID !== undefined;
+    _plotID = parsePositiveInteger(body.plotID);
+    _censusID = parsePositiveInteger(body.censusID);
     _runPostValidation = body.runPostValidation === true;
+
+    if (hasPlotID !== hasCensusID || ((hasPlotID || hasCensusID || _runPostValidation) && (_plotID === undefined || _censusID === undefined))) {
+      return new NextResponse(JSON.stringify({ error: 'plotID and censusID must be strict positive integers' }), { status: HTTPResponses.INVALID_REQUEST });
+    }
   } catch {
     // No body provided, that's fine
   }
@@ -166,9 +183,10 @@ async function handler(request: NextRequest, context: RouteContext) {
       }
 
       await connectionManager.commitTransaction(transactionID ?? '');
+      transactionID = undefined;
 
-      // TODO: Post-validation query execution temporarily disabled for refactoring
-      const postValidationStats = null;
+      const postValidationStats =
+        _runPostValidation && _plotID != null && _censusID != null ? await _executePostValidationQueries(connectionManager, schema, _plotID, _censusID) : null;
 
       return new NextResponse(
         JSON.stringify({
@@ -178,7 +196,9 @@ async function handler(request: NextRequest, context: RouteContext) {
         { status: HTTPResponses.OK }
       );
     } catch (e) {
-      await connectionManager.rollbackTransaction(transactionID ?? '');
+      if (transactionID) {
+        await connectionManager.rollbackTransaction(transactionID);
+      }
 
       const isLockTimeout = e instanceof Error && e.message.includes('Lock wait timeout exceeded');
       if (isLockTimeout && attempt < MAX_LOCK_RETRIES) {

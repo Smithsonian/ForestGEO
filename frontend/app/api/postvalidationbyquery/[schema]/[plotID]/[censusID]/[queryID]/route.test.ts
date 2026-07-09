@@ -101,6 +101,10 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
     res = await GET(dummyReq, makeProps('myschema', 'abc', '20', '5'));
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
 
+    // plotID malformed (parseInt would otherwise accept this as 10)
+    res = await GET(dummyReq, makeProps('myschema', '10abc', '20', '5'));
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+
     // censusID missing
     res = await GET(dummyReq, makeProps('myschema', '10', undefined as any, '5'));
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
@@ -161,7 +165,9 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
     const [updateSQL, updateParams] = exec.mock.calls[2];
     expect(String(updateSQL)).toMatch(/UPDATE `myschema`\.postvalidationqueries/i);
     expect(String(updateSQL)).toMatch(/LastRunStatus = \?/i);
-    expect(updateParams).toEqual(['2025-01-02 03:04:05', JSON.stringify([{ RowID: 1 }, { RowID: 2 }]), 'success', 5]);
+    expect(String(updateSQL)).toMatch(/LastRunPlotID = \?/i);
+    expect(String(updateSQL)).toMatch(/LastRunCensusID = \?/i);
+    expect(updateParams).toEqual(['2025-01-02 03:04:05', JSON.stringify([{ RowID: 1 }, { RowID: 2 }]), 'success', 10, 20, 5]);
 
     expect(_begin).toHaveBeenCalledWith();
     expect(commit).toHaveBeenCalledWith('tx-1');
@@ -190,7 +196,9 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
     const [failureSQL, failureParams] = exec.mock.calls[2];
     expect(String(failureSQL)).toMatch(/UPDATE `myschema`\.postvalidationqueries/i);
     expect(String(failureSQL)).toMatch(/LastRunStatus = \?/i);
-    expect(failureParams).toEqual(['2025-01-02 03:04:05', 'failure', 5]);
+    expect(String(failureSQL)).toMatch(/LastRunPlotID = \?/i);
+    expect(String(failureSQL)).toMatch(/LastRunCensusID = \?/i);
+    expect(failureParams).toEqual(['2025-01-02 03:04:05', 'failure', 10, 20, 5]);
 
     expect(begin).toHaveBeenCalledTimes(1);
     expect(rollback).toHaveBeenCalledWith('tx-2');

@@ -18,6 +18,7 @@ const TEST_SCHEMA = 'forestgeo_testing';
 const TEST_PLOT_ID = 7;
 const TEST_CENSUS_ID = 3;
 const EXPECTED_FETCH_URL = `/api/fetchall/postvalidationqueries/${TEST_PLOT_ID}/${TEST_CENSUS_ID}?schema=${TEST_SCHEMA}`;
+const CURRENT_RUN_CONTEXT = { lastRunPlotID: TEST_PLOT_ID, lastRunCensusID: TEST_CENSUS_ID };
 
 const mockFetch = vi.fn();
 
@@ -81,8 +82,8 @@ describe('DataQualityCard', () => {
 
   it('shows the real status breakdown, not "Not Run", when queries have mixed LastRunStatus values', async () => {
     mockQueriesResponse([
-      buildQuery({ queryID: 1, queryName: 'Passed query', lastRunStatus: 'success', lastRunAt: new Date('2026-07-01T10:00:00Z') }),
-      buildQuery({ queryID: 2, queryName: 'Failed query', lastRunStatus: 'failure', lastRunAt: new Date('2026-07-01T11:00:00Z') }),
+      buildQuery({ queryID: 1, queryName: 'Passed query', lastRunStatus: 'success', lastRunAt: new Date('2026-07-01T10:00:00Z'), ...CURRENT_RUN_CONTEXT }),
+      buildQuery({ queryID: 2, queryName: 'Failed query', lastRunStatus: 'failure', lastRunAt: new Date('2026-07-01T11:00:00Z'), ...CURRENT_RUN_CONTEXT }),
       buildQuery({ queryID: 3, queryName: 'Pending query', lastRunStatus: undefined })
     ]);
 
@@ -96,10 +97,41 @@ describe('DataQualityCard', () => {
     expect(screen.queryByText('Not Run')).not.toBeInTheDocument();
   });
 
+  it('treats LastRunStatus from another plot/census as pending for the active census', async () => {
+    mockQueriesResponse([
+      buildQuery({ queryID: 1, queryName: 'Stale passed query', lastRunStatus: 'success', lastRunPlotID: TEST_PLOT_ID, lastRunCensusID: TEST_CENSUS_ID + 1 }),
+      buildQuery({ queryID: 2, queryName: 'Current passed query', lastRunStatus: 'success', ...CURRENT_RUN_CONTEXT })
+    ]);
+
+    renderCard();
+
+    expect(await screen.findByText('1 passed')).toBeInTheDocument();
+    expect(screen.getByText('1 pending')).toBeInTheDocument();
+    expect(screen.queryByText('Excellent')).not.toBeInTheDocument();
+  });
+
+  it('does not show stale last-run timestamps in expanded query details', async () => {
+    mockQueriesResponse([
+      buildQuery({
+        queryID: 1,
+        queryName: 'Stale passed query',
+        lastRunStatus: 'success',
+        lastRunAt: new Date('2026-07-01T10:00:00Z'),
+        lastRunPlotID: TEST_PLOT_ID,
+        lastRunCensusID: TEST_CENSUS_ID + 1
+      })
+    ]);
+
+    render(<DataQualityCard schema={TEST_SCHEMA} plotID={TEST_PLOT_ID} censusID={TEST_CENSUS_ID} defaultExpanded />);
+
+    expect(await screen.findByText('Stale passed query')).toBeInTheDocument();
+    expect(screen.queryByText(/ago$/i)).not.toBeInTheDocument();
+  });
+
   it('shows "Excellent" when every enabled query passed', async () => {
     mockQueriesResponse([
-      buildQuery({ queryID: 1, lastRunStatus: 'success' }),
-      buildQuery({ queryID: 2, lastRunStatus: 'success' }),
+      buildQuery({ queryID: 1, lastRunStatus: 'success', ...CURRENT_RUN_CONTEXT }),
+      buildQuery({ queryID: 2, lastRunStatus: 'success', ...CURRENT_RUN_CONTEXT }),
       buildQuery({ queryID: 3, queryName: 'Disabled query', isEnabled: false, lastRunStatus: 'failure' })
     ]);
 

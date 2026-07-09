@@ -10,6 +10,8 @@ export interface PostValidationQueriesRDS {
   lastRunAt?: Date;
   lastRunResult?: string;
   lastRunStatus?: string;
+  lastRunPlotID?: number;
+  lastRunCensusID?: number;
 }
 
 export type PostValidationQueriesResult = ResultType<PostValidationQueriesRDS>;

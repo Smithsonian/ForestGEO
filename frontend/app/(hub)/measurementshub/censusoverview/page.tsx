@@ -320,7 +320,7 @@ export default function CensusOverviewPage() {
           isLoading={isLoading}
           onRefresh={async () => {
             if (currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID) {
-              await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, {
+              const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -329,6 +329,9 @@ export default function CensusOverviewPage() {
                   runPostValidation: true
                 })
               });
+              if (!response.ok) {
+                throw new Error(`Failed to refresh validations (HTTP ${response.status})`);
+              }
             }
           }}
         />

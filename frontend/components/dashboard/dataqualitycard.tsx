@@ -81,8 +81,12 @@ function buildPostValidationQueriesUrl(schema: string, plotID?: number, censusID
   return `/api/fetchall/postvalidationqueries/${plotID ?? 0}/${censusID ?? 0}?schema=${encodeURIComponent(schema)}`;
 }
 
-function parseQueryResults(query: PostValidationQueriesRDS): { count: number; status: 'success' | 'failure' | 'pending' } {
-  if (!query.lastRunStatus) {
+function hasMatchingRunContext(query: PostValidationQueriesRDS, plotID?: number, censusID?: number): boolean {
+  return plotID !== undefined && censusID !== undefined && query.lastRunPlotID === plotID && query.lastRunCensusID === censusID;
+}
+
+function parseQueryResults(query: PostValidationQueriesRDS, plotID?: number, censusID?: number): { count: number; status: 'success' | 'failure' | 'pending' } {
+  if (!query.lastRunStatus || !hasMatchingRunContext(query, plotID, censusID)) {
     return { count: 0, status: 'pending' };
   }
 
@@ -101,9 +105,9 @@ function parseQueryResults(query: PostValidationQueriesRDS): { count: number; st
 function getOverallStatus(stats: DataQualityStats): 'excellent' | 'good' | 'warning' | 'issues' | 'pending' {
   if (stats.pendingQueries === stats.totalQueries) return 'pending';
   if (stats.failedQueries > 0) return 'issues';
+  if (stats.pendingQueries === 0 && stats.passedQueries === stats.totalQueries) return 'excellent';
 
-  const passRate = stats.passedQueries / (stats.totalQueries - stats.pendingQueries);
-  if (passRate >= 1) return 'excellent';
+  const passRate = stats.passedQueries / stats.totalQueries;
   if (passRate >= 0.8) return 'good';
   return 'warning';
 }
@@ -162,8 +166,9 @@ function QueryStatusIndicator({ status, size = 'sm' }: QueryStatusIndicatorProps
   );
 }
 
-function QueryListItem({ query }: { query: PostValidationQueriesRDS }) {
-  const { count, status } = parseQueryResults(query);
+function QueryListItem({ query, plotID, censusID }: { query: PostValidationQueriesRDS; plotID?: number; censusID?: number }) {
+  const { count, status } = parseQueryResults(query, plotID, censusID);
+  const isCurrentRun = hasMatchingRunContext(query, plotID, censusID);
 
   return (
     <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 0.75 }}>
@@ -186,7 +191,7 @@ function QueryListItem({ query }: { query: PostValidationQueriesRDS }) {
           {count} results
         </Chip>
       )}
-      {query.lastRunAt && (
+      {isCurrentRun && query.lastRunAt && (
         <Typography level="body-xs" color="neutral" sx={{ fontSize: '0.6rem' }}>
           {moment(query.lastRunAt).fromNow()}
         </Typography>
@@ -232,11 +237,13 @@ export default function DataQualityCard({
       const queries: PostValidationQueriesRDS[] = await response.json();
 
       const enabledQueries = queries.filter(q => q.isEnabled);
-      const passed = enabledQueries.filter(q => q.lastRunStatus === QUERY_RUN_SUCCESS).length;
-      const failed = enabledQueries.filter(q => q.lastRunStatus === QUERY_RUN_FAILURE).length;
-      const pending = enabledQueries.filter(q => !q.lastRunStatus).length;
+      const passed = enabledQueries.filter(q => hasMatchingRunContext(q, plotID, censusID) && q.lastRunStatus === QUERY_RUN_SUCCESS).length;
+      const failed = enabledQueries.filter(q => hasMatchingRunContext(q, plotID, censusID) && q.lastRunStatus === QUERY_RUN_FAILURE).length;
+      const pending = enabledQueries.length - passed - failed;
 
-      const lastRun = enabledQueries.filter(q => q.lastRunAt).sort((a, b) => new Date(b.lastRunAt!).getTime() - new Date(a.lastRunAt!).getTime())[0];
+      const lastRun = enabledQueries
+        .filter(q => hasMatchingRunContext(q, plotID, censusID) && q.lastRunAt)
+        .sort((a, b) => new Date(b.lastRunAt!).getTime() - new Date(a.lastRunAt!).getTime())[0];
 
       setLocalStats({
         totalQueries: enabledQueries.length,
@@ -264,10 +271,13 @@ export default function DataQualityCard({
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
+      setFetchError(null);
       if (onRefresh) {
         await onRefresh();
       }
       await fetchStats();
+    } catch (error) {
+      setFetchError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsRefreshing(false);
     }
@@ -429,7 +439,7 @@ export default function DataQualityCard({
             </Typography>
             <Box sx={{ maxHeight: 200, overflowY: 'auto' }}>
               {stats.queries.map((query, index) => (
-                <QueryListItem key={query.queryID || index} query={query} />
+                <QueryListItem key={query.queryID || index} query={query} plotID={plotID} censusID={censusID} />
               ))}
             </Box>
           </Box>

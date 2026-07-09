@@ -266,7 +266,9 @@ create table if not exists postvalidationqueries
     IsEnabled       bit default b'0'            not null,
     LastRunAt       datetime                    null,
     LastRunResult   longtext                    null,
-    LastRunStatus   enum ('success', 'failure') null
+    LastRunStatus   enum ('success', 'failure') null,
+    LastRunPlotID   int                         null,
+    LastRunCensusID int                         null
 );
 
 create index idx_description
@@ -283,6 +285,9 @@ create index idx_lastrunresult
 
 create index idx_lastrunstatus
     on postvalidationqueries (LastRunStatus);
+
+create index idx_lastruncontext
+    on postvalidationqueries (LastRunPlotID, LastRunCensusID);
 
 create index idx_querydefinition
     on postvalidationqueries (QueryDefinition(255));
