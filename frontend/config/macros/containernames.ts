@@ -128,8 +128,10 @@ export function getContainerName(schema: string, plotID: number, censusNumber: n
  * Format: plot{plotID}-census{censusNumber}
  *
  * These containers are shared across every site whose plot has this ID, so they
- * MUST NOT be read from or written to by user-facing operations. The Task 6
- * migration script imports this to locate legacy blobs for re-homing.
+ * MUST NOT be read from or written to by user-facing operations. The migration
+ * script (scripts/migrate-blob-containers.ts) locates legacy containers with
+ * isLegacyIdBasedContainerName / parseLegacyIdBasedContainerName rather than
+ * generating names with this helper; it is retained for tests and reference.
  */
 export function getLegacyIdBasedContainerName(plotID: number, censusNumber: number): string {
   if (!plotID || plotID <= 0) {
@@ -153,8 +155,11 @@ export function getLegacyIdBasedContainerName(plotID: number, censusNumber: numb
  * Format: {sanitizedPlotName}-{censusNumber}
  *
  * Shared across sites reusing the same plot name; MUST NOT be used by
- * user-facing operations. The Task 6 migration script imports this to locate
- * legacy blobs for re-homing.
+ * user-facing operations. Plot-name-based containers are OUT OF SCOPE of the
+ * migration script (scripts/migrate-blob-containers.ts): their
+ * `{sanitizedPlotName}-{censusNumber}` shape has no reliable pattern to
+ * distinguish it from arbitrary container names, so they cannot be detected
+ * automatically. This helper is retained for tests and reference only.
  */
 export function getLegacyPlotNameContainerName(plotName: string, censusNumber: number): string {
   if (!plotName || plotName.trim() === '') {

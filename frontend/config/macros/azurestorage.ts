@@ -5,7 +5,7 @@ interface GetContainerClientOptions {
   createIfMissing?: boolean;
 }
 
-function getBlobServiceClient(): BlobServiceClient {
+export function getBlobServiceClient(): BlobServiceClient {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   if (!storageAccountConnectionString) {
     const errorMsg = 'AZURE_STORAGE_CONNECTION_STRING environment variable is not set';
