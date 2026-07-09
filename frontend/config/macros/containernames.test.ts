@@ -1,70 +1,139 @@
 import { describe, it, expect } from 'vitest';
 import {
   getContainerName,
-  getLegacyContainerName,
+  SchemaContainerNameError,
+  getLegacyIdBasedContainerName,
+  getLegacyPlotNameContainerName,
   validateContainerName,
   parseContainerName,
-  getContainerNameWithFallback,
-  isIdBasedContainerName
+  parseLegacyIdBasedContainerName,
+  isSchemaScopedContainerName,
+  isLegacyIdBasedContainerName
 } from './containernames';
+import { KNOWN_SCHEMAS } from '@/lib/db/sqlsecurity';
 
 describe('Container Naming Utilities', () => {
-  describe('getContainerName', () => {
-    it('should generate valid ID-based container names', () => {
-      expect(getContainerName(1, 1)).toBe('plot1-census1');
-      expect(getContainerName(42, 3)).toBe('plot42-census3');
-      expect(getContainerName(999, 10)).toBe('plot999-census10');
+  describe('getContainerName (schema-scoped, F19)', () => {
+    it('scopes container names by schema (F19)', () => {
+      expect(getContainerName('forestgeo_testing', 1, 1)).toBe('forestgeo-testing-plot1-census1');
     });
 
-    it('should throw error for invalid plotID', () => {
-      expect(() => getContainerName(0, 1)).toThrow('Invalid plotID');
-      expect(() => getContainerName(-1, 1)).toThrow('Invalid plotID');
-      expect(() => getContainerName(NaN, 1)).toThrow('Invalid plotID');
+    it('generates distinct names for different schemas sharing plot/census IDs', () => {
+      expect(getContainerName('forestgeo_alpha', 1, 1)).toBe('forestgeo-alpha-plot1-census1');
+      expect(getContainerName('forestgeo_beta', 1, 1)).toBe('forestgeo-beta-plot1-census1');
+      expect(getContainerName('forestgeo_alpha', 1, 1)).not.toBe(getContainerName('forestgeo_beta', 1, 1));
     });
 
-    it('should throw error for invalid censusNumber', () => {
-      expect(() => getContainerName(1, 0)).toThrow('Invalid censusNumber');
-      expect(() => getContainerName(1, -1)).toThrow('Invalid censusNumber');
-      expect(() => getContainerName(1, NaN)).toThrow('Invalid censusNumber');
+    it('maps underscores to hyphens injectively', () => {
+      expect(getContainerName('forestgeo_testing_mason', 42, 3)).toBe('forestgeo-testing-mason-plot42-census3');
+    });
+
+    it('rejects consecutive underscores instead of collapsing them into a colliding prefix', () => {
+      // forestgeo__x would otherwise collapse to the same prefix as forestgeo_x
+      expect(() => getContainerName('forestgeo__x', 1, 1)).toThrow(SchemaContainerNameError);
+      expect(() => getContainerName('forestgeo__x', 1, 1)).toThrow('collision-free');
+      // ...while the well-formed sibling still maps cleanly.
+      expect(getContainerName('forestgeo_x', 1, 1)).toBe('forestgeo-x-plot1-census1');
+    });
+
+    it('rejects leading/trailing underscores instead of trimming them into a colliding prefix', () => {
+      // forestgeo_x_ would otherwise trim to the same prefix as forestgeo_x
+      expect(() => getContainerName('forestgeo_x_', 1, 1)).toThrow(SchemaContainerNameError);
+      expect(() => getContainerName('_forestgeo_x', 1, 1)).toThrow(SchemaContainerNameError);
+    });
+
+    it('rejects uppercase and non-alphanumeric characters instead of lossy sanitization', () => {
+      expect(() => getContainerName('ForestGEO_Testing', 1, 1)).toThrow(SchemaContainerNameError);
+      expect(() => getContainerName('site.name@2024', 5, 2)).toThrow(SchemaContainerNameError);
+      expect(() => getContainerName('site-name', 1, 1)).toThrow(SchemaContainerNameError); // hyphen would collide with an underscore sibling
+      expect(() => getContainerName('___', 1, 1)).toThrow(SchemaContainerNameError);
+    });
+
+    it('rejects schemas whose combined name exceeds 63 chars instead of truncating (F19)', () => {
+      const sixtyCharSchema = 'a'.repeat(60);
+      expect(() => getContainerName(sixtyCharSchema, 1, 1)).toThrow(SchemaContainerNameError);
+      expect(() => getContainerName(sixtyCharSchema, 1, 1)).toThrow('refusing to truncate');
+    });
+
+    it('accepts a schema that lands exactly on the 63-char Azure limit', () => {
+      const suffix = '-plot1-census1';
+      const schema = 'a'.repeat(63 - suffix.length); // 49 chars
+      const name = getContainerName(schema, 1, 1);
+      expect(name.length).toBe(63);
+      expect(validateContainerName(name)).toBe(true);
+      // One char longer tips over the limit and is rejected.
+      expect(() => getContainerName('a'.repeat(63 - suffix.length + 1), 1, 1)).toThrow(SchemaContainerNameError);
+    });
+
+    it('rejects empty or whitespace-only schemas like every other shape failure', () => {
+      expect(() => getContainerName('', 1, 1)).toThrow(SchemaContainerNameError);
+      expect(() => getContainerName('   ', 1, 1)).toThrow(SchemaContainerNameError);
+    });
+
+    it('accepts every KNOWN_SCHEMAS entry (drift guard against VALID_SCHEMA_PATTERN)', () => {
+      // INJECTIVE_SCHEMA_PATTERN is strictly narrower than sqlsecurity's
+      // VALID_SCHEMA_PATTERN; this pins that no schema we actually ship
+      // falls into the gap where SQL access works but file operations 400.
+      for (const schema of KNOWN_SCHEMAS) {
+        const name = getContainerName(schema, 1, 1);
+        expect(validateContainerName(name), `KNOWN_SCHEMAS entry "${schema}" must map to a valid container name`).toBe(true);
+      }
+    });
+
+    it('throws for invalid plotID', () => {
+      expect(() => getContainerName('forestgeo_testing', 0, 1)).toThrow('Invalid plotID');
+      expect(() => getContainerName('forestgeo_testing', -1, 1)).toThrow('Invalid plotID');
+      expect(() => getContainerName('forestgeo_testing', NaN, 1)).toThrow('Invalid plotID');
+    });
+
+    it('throws for invalid censusNumber', () => {
+      expect(() => getContainerName('forestgeo_testing', 1, 0)).toThrow('Invalid censusNumber');
+      expect(() => getContainerName('forestgeo_testing', 1, -1)).toThrow('Invalid censusNumber');
+      expect(() => getContainerName('forestgeo_testing', 1, NaN)).toThrow('Invalid censusNumber');
     });
   });
 
-  describe('getLegacyContainerName', () => {
-    it('should generate sanitized legacy container names', () => {
-      expect(getLegacyContainerName('Test Plot', 1)).toBe('test-plot-1');
-      expect(getLegacyContainerName('Barro Colorado Island', 2)).toBe('barro-colorado-island-2');
-      expect(getLegacyContainerName('Plot #5A', 1)).toBe('plot-5a-1'); // # gets replaced with hyphen, consecutive hyphens removed
+  describe('getLegacyIdBasedContainerName (migration-only)', () => {
+    it('reproduces the pre-F19 shared ID-based names', () => {
+      expect(getLegacyIdBasedContainerName(1, 1)).toBe('plot1-census1');
+      expect(getLegacyIdBasedContainerName(42, 3)).toBe('plot42-census3');
     });
 
-    it('should handle names with special characters', () => {
-      expect(getLegacyContainerName('Plot-A/B', 1)).toBe('plot-a-b-1');
-      expect(getLegacyContainerName('Site_Name', 1)).toBe('site-name-1');
+    it('throws for invalid inputs', () => {
+      expect(() => getLegacyIdBasedContainerName(0, 1)).toThrow('Invalid plotID');
+      expect(() => getLegacyIdBasedContainerName(1, 0)).toThrow('Invalid censusNumber');
+    });
+  });
+
+  describe('getLegacyPlotNameContainerName (migration-only)', () => {
+    it('generates sanitized legacy plot-name container names', () => {
+      expect(getLegacyPlotNameContainerName('Test Plot', 1)).toBe('test-plot-1');
+      expect(getLegacyPlotNameContainerName('Barro Colorado Island', 2)).toBe('barro-colorado-island-2');
+      expect(getLegacyPlotNameContainerName('Plot #5A', 1)).toBe('plot-5a-1');
     });
 
-    it('should remove consecutive hyphens', () => {
-      expect(getLegacyContainerName('Plot  Name', 1)).toBe('plot-name-1');
-      expect(getLegacyContainerName('Plot---Name', 1)).toBe('plot-name-1');
+    it('handles names with special characters and consecutive hyphens', () => {
+      expect(getLegacyPlotNameContainerName('Plot-A/B', 1)).toBe('plot-a-b-1');
+      expect(getLegacyPlotNameContainerName('Site_Name', 1)).toBe('site-name-1');
+      expect(getLegacyPlotNameContainerName('Plot---Name', 1)).toBe('plot-name-1');
     });
 
-    it('should throw error for empty plot name', () => {
-      expect(() => getLegacyContainerName('', 1)).toThrow('Invalid plotName');
-      expect(() => getLegacyContainerName('   ', 1)).toThrow('Invalid plotName');
-    });
-
-    it('should throw error for invalid censusNumber', () => {
-      expect(() => getLegacyContainerName('Plot', 0)).toThrow('Invalid censusNumber');
+    it('throws for empty plot name or invalid census', () => {
+      expect(() => getLegacyPlotNameContainerName('', 1)).toThrow('Invalid plotName');
+      expect(() => getLegacyPlotNameContainerName('   ', 1)).toThrow('Invalid plotName');
+      expect(() => getLegacyPlotNameContainerName('Plot', 0)).toThrow('Invalid censusNumber');
     });
   });
 
   describe('validateContainerName', () => {
-    it('should validate correct container names', () => {
+    it('validates correct container names', () => {
+      expect(validateContainerName('forestgeo-testing-plot1-census1')).toBe(true);
       expect(validateContainerName('plot1-census1')).toBe(true);
-      expect(validateContainerName('test-plot-1')).toBe(true);
       expect(validateContainerName('abc')).toBe(true); // minimum length
       expect(validateContainerName('a'.repeat(63))).toBe(true); // maximum length
     });
 
-    it('should reject invalid container names', () => {
+    it('rejects invalid container names', () => {
       expect(validateContainerName('ab')).toBe(false); // too short
       expect(validateContainerName('a'.repeat(64))).toBe(false); // too long
       expect(validateContainerName('Plot-1')).toBe(false); // uppercase
@@ -75,141 +144,79 @@ describe('Container Naming Utilities', () => {
       expect(validateContainerName('')).toBe(false); // empty
     });
 
-    it('should reject non-string inputs', () => {
+    it('rejects non-string inputs', () => {
       expect(validateContainerName(null as any)).toBe(false);
       expect(validateContainerName(undefined as any)).toBe(false);
       expect(validateContainerName(123 as any)).toBe(false);
     });
   });
 
-  describe('parseContainerName', () => {
-    it('should parse valid ID-based container names', () => {
-      expect(parseContainerName('plot1-census1')).toEqual({ plotID: 1, censusNumber: 1 });
-      expect(parseContainerName('plot42-census3')).toEqual({ plotID: 42, censusNumber: 3 });
-      expect(parseContainerName('plot999-census10')).toEqual({ plotID: 999, censusNumber: 10 });
+  describe('parseContainerName (schema-scoped)', () => {
+    it('round-trips schema-scoped names produced by getContainerName', () => {
+      const name = getContainerName('forestgeo_testing', 42, 3);
+      const parsed = parseContainerName(name);
+      expect(parsed).toEqual({ schemaPrefix: 'forestgeo-testing', plotID: 42, censusNumber: 3 });
+      // The sanitized prefix reverses bijectively to the MySQL schema name.
+      expect(parsed?.schemaPrefix.replace(/-/g, '_')).toBe('forestgeo_testing');
     });
 
-    it('should return null for invalid formats', () => {
+    it('parses schema-scoped container names', () => {
+      expect(parseContainerName('luquillo-plot1-census5')).toEqual({ schemaPrefix: 'luquillo', plotID: 1, censusNumber: 5 });
+    });
+
+    it('returns null for legacy or malformed names', () => {
+      expect(parseContainerName('plot1-census1')).toBeNull(); // legacy ID-based, no schema
       expect(parseContainerName('test-plot-1')).toBeNull();
-      expect(parseContainerName('plot1-2')).toBeNull();
-      expect(parseContainerName('plot-census1')).toBeNull();
       expect(parseContainerName('invalid')).toBeNull();
     });
   });
 
-  describe('isIdBasedContainerName', () => {
-    it('should identify ID-based container names', () => {
-      expect(isIdBasedContainerName('plot1-census1')).toBe(true);
-      expect(isIdBasedContainerName('plot42-census3')).toBe(true);
-      expect(isIdBasedContainerName('plot999-census10')).toBe(true);
+  describe('parseLegacyIdBasedContainerName (migration-only)', () => {
+    it('parses pre-F19 shared ID-based names', () => {
+      expect(parseLegacyIdBasedContainerName('plot1-census1')).toEqual({ plotID: 1, censusNumber: 1 });
+      expect(parseLegacyIdBasedContainerName('plot42-census3')).toEqual({ plotID: 42, censusNumber: 3 });
     });
 
-    it('should reject legacy container names', () => {
-      expect(isIdBasedContainerName('test-plot-1')).toBe(false);
-      expect(isIdBasedContainerName('barro-colorado-island-2')).toBe(false);
-      expect(isIdBasedContainerName('invalid')).toBe(false);
+    it('returns null for schema-scoped or malformed names', () => {
+      expect(parseLegacyIdBasedContainerName('luquillo-plot1-census5')).toBeNull();
+      expect(parseLegacyIdBasedContainerName('invalid')).toBeNull();
     });
   });
 
-  describe('getContainerNameWithFallback', () => {
-    it('should prefer ID-based naming when plotID is available', () => {
-      const result = getContainerNameWithFallback(1, 'Test Plot', 1);
-      expect(result.primary).toBe('plot1-census1');
-      expect(result.legacy).toBe('test-plot-1');
-      expect(result.usesLegacy).toBe(false);
+  describe('name-kind discriminators', () => {
+    it('identifies schema-scoped names', () => {
+      expect(isSchemaScopedContainerName('forestgeo-testing-plot1-census1')).toBe(true);
+      expect(isSchemaScopedContainerName('luquillo-plot42-census3')).toBe(true);
+      expect(isSchemaScopedContainerName('plot1-census1')).toBe(false); // legacy ID-based
+      expect(isSchemaScopedContainerName('invalid')).toBe(false);
     });
 
-    it('should fall back to legacy when plotID is not available', () => {
-      const result = getContainerNameWithFallback(undefined, 'Test Plot', 1);
-      expect(result.primary).toBe('test-plot-1');
-      expect(result.usesLegacy).toBe(true);
-    });
-
-    it('should not generate legacy fallback if plot name is not available', () => {
-      const result = getContainerNameWithFallback(1, undefined, 1);
-      expect(result.primary).toBe('plot1-census1');
-      expect(result.legacy).toBeUndefined();
-      expect(result.usesLegacy).toBe(false);
-    });
-
-    it('should throw error when neither plotID nor plotName is available', () => {
-      expect(() => getContainerNameWithFallback(undefined, undefined, 1)).toThrow('Cannot generate container name');
-    });
-
-    it('should throw error when census number is invalid', () => {
-      expect(() => getContainerNameWithFallback(1, undefined, undefined)).toThrow('Cannot generate container name');
-      // When censusNumber is 0, the function catches the error and throws a more specific message
-      expect(() => getContainerNameWithFallback(1, 'Test', 0)).toThrow('Cannot generate container name');
-    });
-
-    it('should handle edge cases gracefully', () => {
-      // Empty plot name should fall back to ID-based
-      const result1 = getContainerNameWithFallback(1, '', 1);
-      expect(result1.primary).toBe('plot1-census1');
-      expect(result1.legacy).toBeUndefined();
-
-      // Whitespace-only plot name should fall back to ID-based
-      const result2 = getContainerNameWithFallback(1, '   ', 1);
-      expect(result2.primary).toBe('plot1-census1');
-      expect(result2.legacy).toBeUndefined();
+    it('identifies legacy ID-based names', () => {
+      expect(isLegacyIdBasedContainerName('plot1-census1')).toBe(true);
+      expect(isLegacyIdBasedContainerName('plot42-census3')).toBe(true);
+      expect(isLegacyIdBasedContainerName('forestgeo-testing-plot1-census1')).toBe(false);
+      expect(isLegacyIdBasedContainerName('test-plot-1')).toBe(false);
     });
   });
 
   describe('Azure Container Naming Compliance', () => {
-    it('should generate names that meet all Azure requirements', () => {
+    it('generates schema-scoped names that meet all Azure requirements', () => {
       const testCases = [
-        { plotID: 1, census: 1 },
-        { plotID: 999, census: 99 },
-        { plotID: 12345, census: 10 }
+        { schema: 'forestgeo_testing', plotID: 1, census: 1 },
+        { schema: 'forestgeo_cocoli_2024', plotID: 999, census: 99 },
+        { schema: 'a'.repeat(40), plotID: 12345, census: 10 }
       ];
 
-      testCases.forEach(({ plotID, census }) => {
-        const name = getContainerName(plotID, census);
+      testCases.forEach(({ schema, plotID, census }) => {
+        const name = getContainerName(schema, plotID, census);
 
-        // Length: 3-63 characters
         expect(name.length).toBeGreaterThanOrEqual(3);
         expect(name.length).toBeLessThanOrEqual(63);
-
-        // Only lowercase, numbers, hyphens
         expect(name).toMatch(/^[a-z0-9-]+$/);
-
-        // No consecutive hyphens
         expect(name).not.toMatch(/--/);
-
-        // Start and end with letter or number
         expect(name).toMatch(/^[a-z0-9].*[a-z0-9]$/);
+        expect(validateContainerName(name)).toBe(true);
       });
-    });
-  });
-
-  describe('Real-world Examples', () => {
-    it('should handle typical plot names from production', () => {
-      const examples = [
-        { name: 'Barro Colorado Island', expected: 'barro-colorado-island-1' },
-        { name: 'Luquillo', expected: 'luquillo-1' },
-        { name: 'SERC Plot 1', expected: 'serc-plot-1-1' },
-        { name: 'La Selva', expected: 'la-selva-1' }
-      ];
-
-      examples.forEach(({ name, expected }) => {
-        const result = getLegacyContainerName(name, 1);
-        expect(result).toBe(expected);
-        expect(validateContainerName(result)).toBe(true);
-      });
-    });
-
-    it('should handle ID-based names for all plots', () => {
-      // Test a range of realistic plot IDs
-      for (let plotID = 1; plotID <= 100; plotID++) {
-        for (let census = 1; census <= 5; census++) {
-          const name = getContainerName(plotID, census);
-          expect(validateContainerName(name)).toBe(true);
-          expect(isIdBasedContainerName(name)).toBe(true);
-
-          const parsed = parseContainerName(name);
-          expect(parsed).toEqual({ plotID, censusNumber: census });
-        }
-      }
     });
   });
 });

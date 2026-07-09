@@ -3,7 +3,7 @@ import { getContainerClient, uploadValidFileAsBuffer } from '@/config/macros/azu
 import { BlobSASPermissions, BlobServiceClient, generateBlobSASQueryParameters, StorageSharedKeyCredential } from '@azure/storage-blob';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
-import { getContainerNameWithFallback } from '@/config/macros/containernames';
+import { getContainerName, SchemaContainerNameError } from '@/config/macros/containernames';
 import { auth } from '@/auth';
 import { getSessionUserId } from '@/lib/auth-helpers';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
@@ -51,11 +51,8 @@ const VALID_OPERATIONS: Record<string, FileOperation> = {
 interface FileOperationParams {
   schema?: string;
   container?: string;
-  legacyContainer?: string;
   filename?: string;
   plotID?: string;
-  plotName?: string;
-  plot?: string;
   census?: string;
   user?: string;
   formType?: string;
@@ -64,8 +61,7 @@ interface FileOperationParams {
 
 interface AuthorizedFileScope {
   userId: string;
-  primaryContainer: string;
-  legacyContainer?: string;
+  container: string;
 }
 
 function parsePositiveInteger(value: string | undefined): number | undefined {
@@ -84,10 +80,11 @@ function normalizeContainerName(containerName: string | undefined): string | und
   return containerName?.trim().toLowerCase();
 }
 
-function requestedContainersMatchScope(params: FileOperationParams, scope: Pick<AuthorizedFileScope, 'primaryContainer' | 'legacyContainer'>): boolean {
-  const allowed = new Set([scope.primaryContainer, scope.legacyContainer].filter((name): name is string => Boolean(name)).map(name => name.toLowerCase()));
-  const requested = [params.container, params.legacyContainer].map(normalizeContainerName).filter((name): name is string => Boolean(name));
-  return requested.every(containerName => allowed.has(containerName));
+function requestedContainerMatchesScope(params: FileOperationParams, scope: Pick<AuthorizedFileScope, 'container'>): boolean {
+  const requested = normalizeContainerName(params.container);
+  // Callers no longer need to supply a container; when they do, it must match
+  // the server-derived schema-scoped container exactly.
+  return requested === undefined || requested === scope.container.toLowerCase();
 }
 
 function authorizeFileScope(session: Session, params: FileOperationParams): AuthorizedFileScope | NextResponse {
@@ -116,25 +113,25 @@ function authorizeFileScope(session: Session, params: FileOperationParams): Auth
   }
 
   const plotID = parsePositiveInteger(params.plotID);
-  const plotName = params.plotName ?? params.plot;
-  if (!plotID && !plotName) {
-    return new NextResponse(JSON.stringify({ error: 'Either plotID or plotName parameter is required' }), { status: HTTPResponses.INVALID_REQUEST });
+  if (!plotID) {
+    return new NextResponse(JSON.stringify({ error: 'plotID parameter is required' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  let containerNames: { primary: string; legacy?: string };
+  // F19: the storage container is scoped by the (already authz-validated) schema
+  // so sites that reuse a plotID/census cannot reach one another's files.
+  let container: string;
   try {
-    containerNames = getContainerNameWithFallback(plotID, plotName, censusNumber);
-  } catch (error: any) {
-    return new NextResponse(JSON.stringify({ error: error.message || 'Invalid plot or census identifier' }), { status: HTTPResponses.INVALID_REQUEST });
+    container = getContainerName(schema, plotID, censusNumber);
+  } catch (error) {
+    if (error instanceof SchemaContainerNameError) {
+      return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+    }
+    throw error;
   }
 
-  const scope = {
-    userId,
-    primaryContainer: containerNames.primary.toLowerCase(),
-    legacyContainer: containerNames.legacy?.toLowerCase()
-  };
+  const scope = { userId, container };
 
-  if (!requestedContainersMatchScope(params, scope)) {
+  if (!requestedContainerMatchesScope(params, scope)) {
     return new NextResponse(JSON.stringify({ error: 'Forbidden - container does not match authorized scope' }), { status: HTTPResponses.FORBIDDEN });
   }
 
@@ -235,7 +232,7 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
 
   try {
     // getContainerClient now throws with detailed error messages on failure
-    const containerClient = await getContainerClient(scope.primaryContainer);
+    const containerClient = await getContainerClient(scope.container);
 
     // uploadValidFileAsBuffer now always returns a response or throws
     const uploadResponse = await uploadValidFileAsBuffer(
@@ -257,7 +254,7 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
     return new NextResponse(JSON.stringify({ message: 'File uploaded successfully' }), { status: HTTPResponses.OK });
   } catch (error: any) {
     // Log the full error for debugging but don't expose details to client
-    ailogger.error(`File upload error for ${sanitizedFileName} (${scope.primaryContainer}): ${error.message}`);
+    ailogger.error(`File upload error for ${sanitizedFileName} (${scope.container}): ${error.message}`);
     return new NextResponse(
       JSON.stringify({
         error: 'Failed to upload file',
@@ -331,12 +328,9 @@ function extractParams(request: NextRequest): FileOperationParams & { fileName?:
   return {
     schema: searchParams.get('schema')?.trim() || undefined,
     container: searchParams.get('container')?.trim() || undefined,
-    legacyContainer: searchParams.get('legacyContainer')?.trim() || undefined,
     filename: searchParams.get('filename')?.trim() || undefined,
     fileName: searchParams.get('fileName')?.trim() || undefined,
     plotID: searchParams.get('plotID')?.trim() || undefined,
-    plotName: searchParams.get('plotName')?.trim() || undefined,
-    plot: searchParams.get('plot')?.trim() || undefined,
     census: searchParams.get('census')?.trim() || undefined,
     user: searchParams.get('user')?.trim() || undefined,
     formType: searchParams.get('formType')?.trim() || undefined,
@@ -357,40 +351,20 @@ async function handleDownload(params: FileOperationParams & { filename?: string 
 
   try {
     const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
-    let containerClient;
-    let actualContainerName = '';
 
-    // Try primary container first
-    if (scope.primaryContainer) {
-      containerClient = await getContainerClient(scope.primaryContainer, READ_ONLY_CONTAINER_OPTIONS);
-      actualContainerName = scope.primaryContainer;
-
-      // Check if container exists
-      const exists = await containerClient?.exists();
-      if (!exists) {
-        ailogger.info(`Primary container "${actualContainerName}" not found, trying legacy...`);
-        containerClient = null;
-      }
-    }
-
-    // Fall back to legacy container if primary doesn't exist
-    if (!containerClient && scope.legacyContainer) {
-      containerClient = await getContainerClient(scope.legacyContainer, READ_ONLY_CONTAINER_OPTIONS);
-      actualContainerName = scope.legacyContainer;
-
-      const exists = await containerClient?.exists();
-      if (!exists) {
-        return new NextResponse(JSON.stringify({ error: `Container not found: ${scope.primaryContainer}` }), {
-          status: HTTPResponses.NOT_FOUND
-        });
-      }
-
-      ailogger.warn(`Using legacy container "${actualContainerName}" for download. Consider migrating to ID-based naming.`);
-    }
-
+    // F19: only the schema-scoped container is consulted; legacy shared
+    // containers are never read from a user-facing path.
+    const containerClient = await getContainerClient(scope.container, READ_ONLY_CONTAINER_OPTIONS);
     if (!containerClient) {
       return new NextResponse(JSON.stringify({ error: 'Failed to get container client' }), {
         status: HTTPResponses.INVALID_REQUEST
+      });
+    }
+
+    const exists = await containerClient.exists();
+    if (!exists) {
+      return new NextResponse(JSON.stringify({ error: `Container not found: ${scope.container}` }), {
+        status: HTTPResponses.NOT_FOUND
       });
     }
 
@@ -398,7 +372,7 @@ async function handleDownload(params: FileOperationParams & { filename?: string 
 
     // Generate SAS token for secure download
     const sasOptions = {
-      containerName: actualContainerName,
+      containerName: scope.container,
       blobName: filename,
       startsOn: new Date(),
       expiresOn: new Date(new Date().valueOf() + 3600 * 1000), // 1 hour expiration
@@ -436,38 +410,18 @@ async function handleDelete(params: FileOperationParams & { filename?: string },
   }
 
   try {
-    let containerClient;
-    let actualContainerName = '';
-
-    // Try primary container first
-    if (scope.primaryContainer) {
-      containerClient = await getContainerClient(scope.primaryContainer, READ_ONLY_CONTAINER_OPTIONS);
-      actualContainerName = scope.primaryContainer;
-
-      const exists = await containerClient?.exists();
-      if (!exists) {
-        ailogger.info(`Primary container "${actualContainerName}" not found, trying legacy...`);
-        containerClient = null;
-      }
-    }
-
-    // Fall back to legacy container if primary doesn't exist
-    if (!containerClient && scope.legacyContainer) {
-      containerClient = await getContainerClient(scope.legacyContainer, READ_ONLY_CONTAINER_OPTIONS);
-      actualContainerName = scope.legacyContainer;
-
-      const exists = await containerClient?.exists();
-      if (!exists) {
-        return new NextResponse(JSON.stringify({ error: `Container not found: ${scope.primaryContainer}` }), {
-          status: HTTPResponses.NOT_FOUND
-        });
-      }
-
-      ailogger.warn(`Using legacy container "${actualContainerName}" for deletion. Consider migrating to ID-based naming.`);
-    }
-
+    // F19: deletion targets only the schema-scoped container; legacy shared
+    // containers are never touched from a user-facing path.
+    const containerClient = await getContainerClient(scope.container, READ_ONLY_CONTAINER_OPTIONS);
     if (!containerClient) {
       return new NextResponse(JSON.stringify({ error: 'Failed to get container client' }), { status: HTTPResponses.INVALID_REQUEST });
+    }
+
+    const exists = await containerClient.exists();
+    if (!exists) {
+      return new NextResponse(JSON.stringify({ error: `Container not found: ${scope.container}` }), {
+        status: HTTPResponses.NOT_FOUND
+      });
     }
 
     const blobClient = containerClient.getBlobClient(filename);
@@ -489,29 +443,17 @@ async function handleDelete(params: FileOperationParams & { filename?: string },
 // Handle file listing with backward compatibility
 async function handleList(scope: AuthorizedFileScope) {
   try {
-    let containerClient;
-    let actualContainerName = '';
-
-    // Try primary (ID-based) container first
-    containerClient = await getContainerClient(scope.primaryContainer, READ_ONLY_CONTAINER_OPTIONS);
-    actualContainerName = scope.primaryContainer;
-
-    let exists = await containerClient?.exists();
-    if (!exists && scope.legacyContainer) {
-      // Fall back to legacy container
-      ailogger.info(`Primary container "${actualContainerName}" not found, trying legacy "${scope.legacyContainer}"...`);
-      containerClient = await getContainerClient(scope.legacyContainer, READ_ONLY_CONTAINER_OPTIONS);
-      actualContainerName = scope.legacyContainer;
-
-      exists = await containerClient?.exists();
-      if (exists) {
-        ailogger.warn(`Using legacy container "${actualContainerName}" for listing. Consider migrating to ID-based naming.`);
-      }
+    // F19: listing reads only the schema-scoped container; legacy shared
+    // containers are never enumerated from a user-facing path.
+    const containerClient = await getContainerClient(scope.container, READ_ONLY_CONTAINER_OPTIONS);
+    if (!containerClient) {
+      return new NextResponse(JSON.stringify({ error: 'Failed to get container client' }), { status: HTTPResponses.INVALID_REQUEST });
     }
 
+    const exists = await containerClient.exists();
     if (!exists) {
       // Container doesn't exist - return empty list instead of error
-      ailogger.info(`Container "${actualContainerName}" not found. Returning empty file list.`);
+      ailogger.info(`Container "${scope.container}" not found. Returning empty file list.`);
       return new NextResponse(
         JSON.stringify({
           responseMessage: 'No container found - empty list',
@@ -519,10 +461,6 @@ async function handleList(scope: AuthorizedFileScope) {
         }),
         { status: HTTPResponses.OK }
       );
-    }
-
-    if (!containerClient) {
-      return new NextResponse(JSON.stringify({ error: 'Failed to get container client' }), { status: HTTPResponses.INVALID_REQUEST });
     }
 
     const blobData: any[] = [];
@@ -552,7 +490,7 @@ async function handleList(scope: AuthorizedFileScope) {
       JSON.stringify({
         responseMessage: 'List of files',
         blobData: blobData,
-        containerName: actualContainerName // Include for debugging
+        containerName: scope.container // Include for debugging
       }),
       { status: HTTPResponses.OK }
     );

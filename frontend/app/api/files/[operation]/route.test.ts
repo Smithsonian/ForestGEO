@@ -130,6 +130,14 @@ describe('/api/files/[operation]', () => {
     expect(mocks.getContainerClient).not.toHaveBeenCalled();
   });
 
+  it('rejects requests without a plotID since the container cannot be derived (F19)', async () => {
+    const response = await GET(makeRequest('http://localhost/api/files/list?schema=forestgeo_testing&plotName=BCI&census=2'), props('list'));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: 'plotID parameter is required' });
+    expect(mocks.getContainerClient).not.toHaveBeenCalled();
+  });
+
   it('rejects caller-supplied containers that do not match the authorized scope', async () => {
     const response = await GET(
       makeRequest('http://localhost/api/files/download?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2&container=plot99-census99&filename=data.csv'),
@@ -156,19 +164,19 @@ describe('/api/files/[operation]', () => {
     expect(mocks.getContainerClient).not.toHaveBeenCalled();
   });
 
-  it('lists files from the server-derived plot/census container', async () => {
+  it('lists files from the schema-scoped plot/census container', async () => {
     const response = await GET(makeRequest('http://localhost/api/files/list?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2'), props('list'));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       responseMessage: 'List of files',
-      containerName: 'plot1-census2',
+      containerName: 'forestgeo-testing-plot1-census2',
       blobData: [{ name: 'measurements.csv', user: 'mason@example.com' }]
     });
-    expect(mocks.getContainerClient).toHaveBeenCalledWith('plot1-census2', { createIfMissing: false });
+    expect(mocks.getContainerClient).toHaveBeenCalledWith('forestgeo-testing-plot1-census2', { createIfMissing: false });
   });
 
-  it('deletes only from the server-derived plot/census container', async () => {
+  it('deletes only from the schema-scoped plot/census container', async () => {
     const response = await DELETE(
       makeRequest('http://localhost/api/files/delete?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2&filename=data.csv'),
       props('delete')
@@ -176,32 +184,76 @@ describe('/api/files/[operation]', () => {
 
     const responseBody = await response.json();
     expect(response.status, JSON.stringify(responseBody)).toBe(200);
-    expect(mocks.getContainerClient).toHaveBeenCalledWith('plot1-census2', { createIfMissing: false });
+    expect(mocks.getContainerClient).toHaveBeenCalledWith('forestgeo-testing-plot1-census2', { createIfMissing: false });
     const containerClient = await mocks.getContainerClient.mock.results[0].value;
     expect(containerClient.getBlobClient).toHaveBeenCalledWith('data.csv');
     expect(mocks.blobDelete).toHaveBeenCalled();
   });
 
-  it('falls back to the legacy container without creating the missing primary container', async () => {
-    const primaryClient = makeContainerClient([], false);
-    const legacyClient = makeContainerClient([
-      {
-        name: 'legacy-measurements.csv',
-        metadata: { user: 'mason@example.com', FormType: 'measurements', FileErrorState: '[]' },
-        properties: { lastModified: new Date('2026-01-01T00:00:00Z') }
-      }
-    ]);
-    mocks.getContainerClient.mockImplementation(async (containerName: string) => (containerName === 'plot1-census2' ? primaryClient : legacyClient));
+  it('never consults the legacy shared container when the schema-scoped one is empty (F19)', async () => {
+    const emptyScopedClient = makeContainerClient([], true);
+    mocks.getContainerClient.mockResolvedValue(emptyScopedClient);
 
     const response = await GET(makeRequest('http://localhost/api/files/list?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2'), props('list'));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      containerName: 'bci-2',
-      blobData: [{ name: 'legacy-measurements.csv' }]
+      containerName: 'forestgeo-testing-plot1-census2',
+      blobData: []
     });
-    expect(mocks.getContainerClient).toHaveBeenNthCalledWith(1, 'plot1-census2', { createIfMissing: false });
-    expect(mocks.getContainerClient).toHaveBeenNthCalledWith(2, 'bci-2', { createIfMissing: false });
+    // Only the schema-scoped container is ever consulted.
+    expect(mocks.getContainerClient).toHaveBeenCalledTimes(1);
+    expect(mocks.getContainerClient).toHaveBeenCalledWith('forestgeo-testing-plot1-census2', { createIfMissing: false });
+    expect(mocks.getContainerClient).not.toHaveBeenCalledWith('plot1-census2', expect.anything());
+    expect(mocks.getContainerClient).not.toHaveBeenCalledWith('bci-2', expect.anything());
+  });
+
+  it('does not serve another schema’s files sharing plotID/census (F19)', async () => {
+    const containersTouched: string[] = [];
+    mocks.getContainerClient.mockImplementation(async (containerName: string) => {
+      containersTouched.push(containerName);
+      return makeContainerClient(
+        [
+          {
+            name: 'measurements.csv',
+            metadata: { user: 'crew@example.com', FormType: 'measurements', FileErrorState: '[]' },
+            properties: { lastModified: new Date('2026-01-01T00:00:00Z') }
+          }
+        ],
+        true
+      );
+    });
+
+    mocks.auth.mockResolvedValue({
+      user: { email: 'alpha@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_alpha' }], allsites: [] }
+    });
+    const alphaResponse = await GET(makeRequest('http://localhost/api/files/list?schema=forestgeo_alpha&plotID=1&plotName=Shared&census=1'), props('list'));
+    expect(alphaResponse.status).toBe(200);
+    await expect(alphaResponse.json()).resolves.toMatchObject({ containerName: 'forestgeo-alpha-plot1-census1' });
+
+    mocks.auth.mockResolvedValue({
+      user: { email: 'beta@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_beta' }], allsites: [] }
+    });
+    const betaResponse = await GET(makeRequest('http://localhost/api/files/list?schema=forestgeo_beta&plotID=1&plotName=Shared&census=1'), props('list'));
+    expect(betaResponse.status).toBe(200);
+    await expect(betaResponse.json()).resolves.toMatchObject({ containerName: 'forestgeo-beta-plot1-census1' });
+
+    // Each site resolves only its own schema-scoped container...
+    expect(containersTouched).toEqual(['forestgeo-alpha-plot1-census1', 'forestgeo-beta-plot1-census1']);
+    // ...and the legacy shared container that caused the cross-site leak is never touched.
+    expect(containersTouched).not.toContain('plot1-census1');
+  });
+
+  it('rejects a site requesting another schema’s files even with a shared plotID/census (F19)', async () => {
+    // Session scoped to forestgeo_alpha may not reach forestgeo_beta's container.
+    mocks.auth.mockResolvedValue({
+      user: { email: 'alpha@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_alpha' }], allsites: [] }
+    });
+
+    const response = await GET(makeRequest('http://localhost/api/files/list?schema=forestgeo_beta&plotID=1&plotName=Shared&census=1'), props('list'));
+
+    expect(response.status).toBe(403);
+    expect(mocks.getContainerClient).not.toHaveBeenCalled();
   });
 
   it('uses authenticated identity for upload metadata instead of query user', async () => {
@@ -219,7 +271,7 @@ describe('/api/files/[operation]', () => {
 
     const responseBody = await response.json();
     expect(response.status, JSON.stringify(responseBody)).toBe(200);
-    expect(mocks.getContainerClient).toHaveBeenCalledWith('plot1-census2');
+    expect(mocks.getContainerClient).toHaveBeenCalledWith('forestgeo-testing-plot1-census2');
     expect(mocks.uploadValidFileAsBuffer).toHaveBeenCalledWith(expect.anything(), file, 'mason@example.com', 'measurements', [], 'measurements.csv', 'csv');
   });
 

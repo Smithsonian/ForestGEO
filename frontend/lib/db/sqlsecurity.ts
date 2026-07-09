@@ -23,6 +23,11 @@ export const ALLOWED_SCHEMAS = KNOWN_SCHEMAS;
 
 // Pattern for valid ForestGEO schemas: must start with 'forestgeo_' or 'catalog', and contain only safe characters
 // This allows new site schemas (e.g., forestgeo_rabi) without requiring code changes
+// NOTE: INJECTIVE_SCHEMA_PATTERN in config/macros/containernames.ts is STRICTLY NARROWER
+// than this pattern: it additionally rejects consecutive/leading/trailing underscores
+// (e.g. `forestgeo__x` passes here but cannot be mapped to a collision-free blob container).
+// Consequence: such a schema works against SQL but its file upload/list/download/delete
+// operations return 400. Prefer naming new schemas to satisfy both patterns.
 const VALID_SCHEMA_PATTERN = /^(forestgeo(_[a-z0-9_]+)?|catalog)$/;
 
 export type AllowedSchema = (typeof KNOWN_SCHEMAS)[number] | string;

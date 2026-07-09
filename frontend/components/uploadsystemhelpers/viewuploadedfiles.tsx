@@ -12,8 +12,18 @@ import Typography from '@mui/joy/Typography';
 import { Plot } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import ailogger from '@/ailogger';
-import { getContainerNameWithFallback } from '@/config/macros/containernames';
+import { getContainerName } from '@/config/macros/containernames';
 import { useSiteContext } from '@/app/contexts/compat-hooks';
+
+const CONTAINER_NAME_UNAVAILABLE = 'none';
+
+function containerDisplayName(schemaName: string | undefined, plotID: number | undefined, censusNumber: number | undefined): string {
+  if (!schemaName || !plotID || !censusNumber) {
+    return CONTAINER_NAME_UNAVAILABLE;
+  }
+  return getContainerName(schemaName, plotID, censusNumber);
+}
+
 interface LoadingFilesProps {
   currentPlot: Plot | null;
   currentCensus: OrgCensus;
@@ -22,24 +32,15 @@ interface LoadingFilesProps {
 
 function LoadingFiles(props: Readonly<LoadingFilesProps>) {
   const { currentPlot, currentCensus, refreshFiles } = props;
+  const currentSite = useSiteContext();
   useEffect(() => {
     refreshFiles();
   }, [refreshFiles]); // on mount
 
-  // Generate container name for display
-  const getContainerDisplayName = () => {
-    try {
-      const { primary } = getContainerNameWithFallback(currentPlot?.plotID, currentPlot?.plotName, currentCensus?.plotCensusNumber);
-      return primary;
-    } catch {
-      return `${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString() ?? 'none'}`;
-    }
-  };
-
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column' }}>
       <Typography level={'title-lg'}>
-        Accessing Container: {getContainerDisplayName()}
+        Accessing Container: {containerDisplayName(currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber)}
         <br />
         <Button sx={{ width: 'fit-content' }} onClick={refreshFiles}>
           Refresh Files
@@ -93,28 +94,23 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const buildScopedParams = useCallback(
     (filename?: string) => {
-      if (!currentSite?.schemaName || !currentCensus?.plotCensusNumber || (!currentPlot?.plotID && !currentPlot?.plotName)) {
+      if (!currentSite?.schemaName || !currentCensus?.plotCensusNumber || !currentPlot?.plotID) {
         throw new Error('Missing required file scope (site, plot, or census)');
       }
 
       const params = new URLSearchParams({
         schema: currentSite.schemaName,
+        plotID: currentPlot.plotID.toString(),
         census: currentCensus.plotCensusNumber.toString()
       });
 
-      if (currentPlot?.plotID) {
-        params.append('plotID', currentPlot.plotID.toString());
-      }
-      if (currentPlot?.plotName) {
-        params.append('plotName', currentPlot.plotName.trim());
-      }
       if (filename) {
         params.append('filename', filename);
       }
 
       return params;
     },
-    [currentSite?.schemaName, currentCensus?.plotCensusNumber, currentPlot?.plotID, currentPlot?.plotName]
+    [currentSite?.schemaName, currentCensus?.plotCensusNumber, currentPlot?.plotID]
   );
 
   const handleDownload = async (filename: string) => {
@@ -239,15 +235,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', mb: 10 }}>
           <Box sx={{ display: 'flex', flexDirection: 'column' }}>
             <Typography level={'title-lg'} marginBottom={2}>
-              Accessing Container:{' '}
-              {(() => {
-                try {
-                  const { primary } = getContainerNameWithFallback(currentPlot?.plotID, currentPlot?.plotName, currentCensus?.plotCensusNumber);
-                  return primary;
-                } catch {
-                  return `${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString() ?? 'none'}`;
-                }
-              })()}
+              Accessing Container: {containerDisplayName(currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber)}
             </Typography>
             <Button variant={'contained'} sx={{ width: 'fit-content', marginBottom: 2 }} onClick={refreshFiles}>
               Refresh Files

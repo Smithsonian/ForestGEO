@@ -1,78 +1,75 @@
 /**
  * Container Naming Utilities for Azure Storage
  *
- * Provides consistent, ID-based container naming for file storage.
- * Uses plot IDs and census numbers instead of plot names to ensure:
- * - Uniqueness and stability (IDs never change)
- * - URL safety (no special characters)
- * - Azure container naming compliance
- * - Database normalization best practices
+ * Provides schema-scoped container names for uploaded-file storage.
+ *
+ * F19 (data isolation): container names are keyed by the site's MySQL schema in
+ * addition to plot ID and census number:
+ *
+ *   {sanitizedSchema}-plot{plotID}-census{censusNumber}
+ *
+ * Without the schema component, every site whose plot shares an ID collides into
+ * the same Azure container and can list/download/delete another site's files.
+ *
+ * The `getLegacy*` helpers reproduce the pre-F19 shared naming schemes. They are
+ * MIGRATION-ONLY: they exist so an operator-driven migration script can locate
+ * the old shared containers and copy their blobs into the correct schema-scoped
+ * container. They MUST NOT appear in any user-facing read/write path.
  */
 
-import ailogger from '@/ailogger';
+// Azure Storage container naming rules
+// https://learn.microsoft.com/en-us/rest/api/storageservices/naming-and-referencing-containers--blobs--and-metadata
+const AZURE_CONTAINER_NAME_MIN_LENGTH = 3;
+const AZURE_CONTAINER_NAME_MAX_LENGTH = 63;
 
 /**
- * Generate a standardized container name using plot ID and census number
- *
- * Format: plot{plotID}-census{censusNumber}
- * Example: "plot1-census1", "plot42-census3"
- *
- * @param plotID - The unique plot identifier
- * @param censusNumber - The census number
- * @returns Formatted container name
- * @throws Error if plotID or censusNumber are invalid
+ * Thrown when a schema cannot be mapped to an Azure container name without
+ * risking a collision with another schema's container. Fail-closed: schemas
+ * that would need lossy sanitization (collapsing, trimming, stripping,
+ * truncating) are rejected instead of silently colliding.
  */
-export function getContainerName(plotID: number, censusNumber: number): string {
-  if (!plotID || plotID <= 0) {
-    throw new Error(`Invalid plotID: ${plotID}. Must be a positive number.`);
+export class SchemaContainerNameError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SchemaContainerNameError';
   }
-  if (!censusNumber || censusNumber <= 0) {
-    throw new Error(`Invalid censusNumber: ${censusNumber}. Must be a positive number.`);
-  }
-
-  const containerName = `plot${plotID}-census${censusNumber}`;
-
-  // Validate Azure container naming requirements
-  if (!validateContainerName(containerName)) {
-    throw new Error(`Generated container name "${containerName}" is invalid`);
-  }
-
-  return containerName;
 }
 
 /**
- * Generate legacy container name using plot name and census number
+ * The only schema shape that maps INJECTIVELY onto an Azure container prefix:
+ * lowercase alphanumeric segments separated by single underscores. Under this
+ * shape `_` -> `-` is a bijection, so two distinct schemas can never share a
+ * container prefix. Anything else (consecutive/leading/trailing underscores,
+ * uppercase, other characters) would need lossy collapsing/trimming/stripping
+ * — the exact source of silent cross-schema container collisions — and is
+ * rejected.
  *
- * THIS IS FOR BACKWARD COMPATIBILITY ONLY
- * Used to access containers created before the ID-based migration
- *
- * @deprecated Use getContainerName() with plot IDs instead
- * @param plotName - The plot name (will be trimmed and lowercased)
- * @param censusNumber - The census number
- * @returns Legacy formatted container name
+ * NOTE: this is deliberately STRICTLY NARROWER than VALID_SCHEMA_PATTERN in
+ * lib/db/sqlsecurity.ts (which admits e.g. `forestgeo__x`). Such a schema can
+ * use the rest of the app, but its file operations are rejected with a 400.
+ * A drift-guard test in containernames.test.ts asserts every KNOWN_SCHEMAS
+ * entry passes getContainerName.
  */
-export function getLegacyContainerName(plotName: string, censusNumber: number): string {
-  if (!plotName || plotName.trim() === '') {
-    throw new Error('Invalid plotName: cannot be empty');
-  }
-  if (!censusNumber || censusNumber <= 0) {
-    throw new Error(`Invalid censusNumber: ${censusNumber}. Must be a positive number.`);
-  }
+const INJECTIVE_SCHEMA_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
 
-  // Sanitize plot name for Azure container requirements
-  const sanitized = sanitizePlotNameForContainer(plotName.trim());
-  return `${sanitized}-${censusNumber}`;
+function sanitizeSchemaForContainer(schema: string): string {
+  if (!INJECTIVE_SCHEMA_PATTERN.test(schema)) {
+    throw new SchemaContainerNameError(
+      `Schema "${schema}" cannot be mapped to a collision-free container prefix. ` +
+        'Schemas must be lowercase alphanumeric segments separated by single underscores ' +
+        '(no leading/trailing/consecutive underscores, no other characters).'
+    );
+  }
+  return schema.replace(/_/g, '-');
 }
 
 /**
- * Sanitize a plot name to meet Azure container naming requirements
+ * Sanitize a plot name to meet Azure container naming requirements.
+ * Used only by the legacy plot-name container generator.
  * - Lowercase only
  * - Replace spaces and special chars with hyphens
  * - Remove consecutive hyphens
  * - Ensure doesn't start/end with hyphen
- *
- * @param plotName - The plot name to sanitize
- * @returns Sanitized name safe for container usage
  */
 function sanitizePlotNameForContainer(plotName: string): string {
   return plotName
@@ -83,35 +80,115 @@ function sanitizePlotNameForContainer(plotName: string): string {
 }
 
 /**
- * Validate a container name meets Azure Storage requirements
+ * Generate the schema-scoped container name for a site's plot/census files.
  *
- * Azure container names must:
- * - Be 3-63 characters long
- * - Contain only lowercase letters, numbers, and hyphens
- * - Start with a letter or number
- * - Not contain consecutive hyphens
- * - Not end with a hyphen
+ * Format: {sanitizedSchema}-plot{plotID}-census{censusNumber}
+ * Example: getContainerName('forestgeo_testing', 1, 1) -> 'forestgeo-testing-plot1-census1'
  *
- * @param name - Container name to validate
- * @returns true if valid, false otherwise
+ * Fail-closed: schemas that cannot be mapped injectively (see
+ * INJECTIVE_SCHEMA_PATTERN) or whose combined name would exceed Azure's
+ * 63-character limit throw SchemaContainerNameError instead of being
+ * collapsed/trimmed/truncated into a name another schema could also produce.
+ *
+ * @param schema - The site's MySQL schema name (validated upstream by isValidSchema)
+ * @param plotID - The unique plot identifier
+ * @param censusNumber - The census number
+ * @returns Schema-scoped container name
+ * @throws SchemaContainerNameError if the schema cannot be mapped collision-free
+ * @throws Error if plotID/censusNumber are invalid
+ */
+export function getContainerName(schema: string, plotID: number, censusNumber: number): string {
+  if (!plotID || plotID <= 0) {
+    throw new Error(`Invalid plotID: ${plotID}. Must be a positive number.`);
+  }
+  if (!censusNumber || censusNumber <= 0) {
+    throw new Error(`Invalid censusNumber: ${censusNumber}. Must be a positive number.`);
+  }
+
+  const sanitizedSchema = sanitizeSchemaForContainer(schema);
+  const containerName = `${sanitizedSchema}-plot${plotID}-census${censusNumber}`;
+
+  if (containerName.length > AZURE_CONTAINER_NAME_MAX_LENGTH) {
+    throw new SchemaContainerNameError(
+      `Container name "${containerName}" exceeds the ${AZURE_CONTAINER_NAME_MAX_LENGTH}-character Azure limit; ` +
+        `refusing to truncate schema "${schema}" because truncation could collide with another schema's container.`
+    );
+  }
+
+  if (!validateContainerName(containerName)) {
+    throw new Error(`Generated container name "${containerName}" is invalid`);
+  }
+
+  return containerName;
+}
+
+/**
+ * MIGRATION-ONLY: reproduce the pre-F19 shared, ID-based container name.
+ *
+ * Format: plot{plotID}-census{censusNumber}
+ *
+ * These containers are shared across every site whose plot has this ID, so they
+ * MUST NOT be read from or written to by user-facing operations. The Task 6
+ * migration script imports this to locate legacy blobs for re-homing.
+ */
+export function getLegacyIdBasedContainerName(plotID: number, censusNumber: number): string {
+  if (!plotID || plotID <= 0) {
+    throw new Error(`Invalid plotID: ${plotID}. Must be a positive number.`);
+  }
+  if (!censusNumber || censusNumber <= 0) {
+    throw new Error(`Invalid censusNumber: ${censusNumber}. Must be a positive number.`);
+  }
+
+  const containerName = `plot${plotID}-census${censusNumber}`;
+  if (!validateContainerName(containerName)) {
+    throw new Error(`Generated container name "${containerName}" is invalid`);
+  }
+
+  return containerName;
+}
+
+/**
+ * MIGRATION-ONLY: reproduce the oldest, plot-name-based container name.
+ *
+ * Format: {sanitizedPlotName}-{censusNumber}
+ *
+ * Shared across sites reusing the same plot name; MUST NOT be used by
+ * user-facing operations. The Task 6 migration script imports this to locate
+ * legacy blobs for re-homing.
+ */
+export function getLegacyPlotNameContainerName(plotName: string, censusNumber: number): string {
+  if (!plotName || plotName.trim() === '') {
+    throw new Error('Invalid plotName: cannot be empty');
+  }
+  if (!censusNumber || censusNumber <= 0) {
+    throw new Error(`Invalid censusNumber: ${censusNumber}. Must be a positive number.`);
+  }
+
+  const sanitized = sanitizePlotNameForContainer(plotName.trim());
+  return `${sanitized}-${censusNumber}`;
+}
+
+/**
+ * Validate a container name meets Azure Storage requirements:
+ * - 3-63 characters long
+ * - only lowercase letters, numbers, and hyphens
+ * - starts and ends with a letter or number
+ * - no consecutive hyphens
  */
 export function validateContainerName(name: string): boolean {
   if (!name || typeof name !== 'string') {
     return false;
   }
 
-  // Check length
-  if (name.length < 3 || name.length > 63) {
+  if (name.length < AZURE_CONTAINER_NAME_MIN_LENGTH || name.length > AZURE_CONTAINER_NAME_MAX_LENGTH) {
     return false;
   }
 
-  // Check format
   const validPattern = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
   if (!validPattern.test(name)) {
     return false;
   }
 
-  // Check for consecutive hyphens
   if (name.includes('--')) {
     return false;
   }
@@ -120,12 +197,36 @@ export function validateContainerName(name: string): boolean {
 }
 
 /**
- * Parse a container name to extract plot ID and census number
+ * Parse a schema-scoped container name into its components.
  *
- * @param containerName - The container name to parse
- * @returns Object with plotID and censusNumber, or null if invalid
+ * `schemaPrefix` is the SANITIZED container prefix (e.g. `forestgeo-testing`),
+ * not the MySQL schema name. Because INJECTIVE_SCHEMA_PATTERN forbids hyphens
+ * in schemas, every hyphen in the prefix came from an underscore, so the
+ * MySQL schema is recoverable as `schemaPrefix.replace(/-/g, '_')`.
+ *
+ * @param containerName - Name in the form {schemaPrefix}-plot{plotID}-census{censusNumber}
+ * @returns { schemaPrefix, plotID, censusNumber } or null if it is not schema-scoped
  */
-export function parseContainerName(containerName: string): { plotID: number; censusNumber: number } | null {
+export function parseContainerName(containerName: string): { schemaPrefix: string; plotID: number; censusNumber: number } | null {
+  const match = containerName.match(/^([a-z0-9-]+)-plot(\d+)-census(\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    schemaPrefix: match[1],
+    plotID: parseInt(match[2], 10),
+    censusNumber: parseInt(match[3], 10)
+  };
+}
+
+/**
+ * MIGRATION-ONLY: parse a pre-F19 shared ID-based container name.
+ *
+ * @param containerName - Name in the form plot{plotID}-census{censusNumber}
+ * @returns { plotID, censusNumber } or null if it is not legacy ID-based
+ */
+export function parseLegacyIdBasedContainerName(containerName: string): { plotID: number; censusNumber: number } | null {
   const match = containerName.match(/^plot(\d+)-census(\d+)$/);
   if (!match) {
     return null;
@@ -138,65 +239,15 @@ export function parseContainerName(containerName: string): { plotID: number; cen
 }
 
 /**
- * Attempt to get container name with fallback to legacy naming
- *
- * This function provides backward compatibility by trying the new ID-based
- * naming first, then falling back to legacy name-based naming.
- *
- * @param plotID - The unique plot identifier
- * @param plotName - The plot name (for legacy fallback)
- * @param censusNumber - The census number
- * @returns Object with primary container name and optional legacy fallback
+ * Check whether a container name uses the schema-scoped (F19) format.
  */
-export function getContainerNameWithFallback(
-  plotID: number | undefined,
-  plotName: string | undefined,
-  censusNumber: number | undefined
-): { primary: string; legacy?: string; usesLegacy: boolean } {
-  // Try to generate new ID-based name
-  if (plotID && censusNumber && plotID > 0 && censusNumber > 0) {
-    try {
-      const primary = getContainerName(plotID, censusNumber);
-
-      // Also generate legacy name for fallback if plot name is available
-      let legacy: string | undefined;
-      if (plotName && plotName.trim() !== '') {
-        try {
-          legacy = getLegacyContainerName(plotName, censusNumber);
-        } catch (error) {
-          ailogger.warn(`Could not generate legacy container name for plot "${plotName}": ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-
-      return { primary, legacy, usesLegacy: false };
-    } catch (error) {
-      ailogger.error(`Error generating ID-based container name: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  // Fall back to legacy naming if ID-based fails
-  if (plotName && plotName.trim() !== '' && censusNumber && censusNumber > 0) {
-    try {
-      const legacy = getLegacyContainerName(plotName, censusNumber);
-      ailogger.warn(`Using legacy container naming for plot "${plotName}". Consider migrating to ID-based naming.`);
-      return { primary: legacy, usesLegacy: true };
-    } catch (error) {
-      ailogger.error(`Error generating legacy container name: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  throw new Error(
-    `Cannot generate container name. Need either (plotID: ${plotID}, censusNumber: ${censusNumber}) ` +
-      `or (plotName: "${plotName}", censusNumber: ${censusNumber})`
-  );
+export function isSchemaScopedContainerName(containerName: string): boolean {
+  return /^[a-z0-9-]+-plot\d+-census\d+$/.test(containerName) && validateContainerName(containerName);
 }
 
 /**
- * Check if a container name uses the new ID-based format
- *
- * @param containerName - The container name to check
- * @returns true if using new format, false if legacy or invalid
+ * MIGRATION-ONLY: check whether a container name is a pre-F19 shared ID-based name.
  */
-export function isIdBasedContainerName(containerName: string): boolean {
+export function isLegacyIdBasedContainerName(containerName: string): boolean {
   return /^plot\d+-census\d+$/.test(containerName);
 }
