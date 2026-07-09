@@ -16,6 +16,7 @@ import crypto from 'crypto';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
+import { buildDivergentQuadratUploadError, quadratRevisionAppendsDivergentSet } from '@/lib/ingestion/quadrat-upload-guards';
 import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
 import { RoleResult } from '@/lib/db/definitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
@@ -247,6 +248,23 @@ async function upsertQuadratRows(
 
     const deleteSQL = format(`DELETE FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1`, [schema]);
     await connectionManager.executeQuery(deleteSQL, [plotID], transactionID);
+  }
+
+  if (uploadMode === UploadMode.REVISIONS) {
+    // A Revisions upload updates by QuadratName and appends every non-matching row.
+    // Refuse before writing anything if the incoming names share NO overlap with the
+    // existing quadrats — that only happens when the file uses a different naming
+    // scheme than the quadrats already in the plot (e.g. real C01… names uploaded on
+    // top of an auto-generated Q00001… placeholder grid), which silently doubles the
+    // quadrat set. The operator should use Clean Re-Upload to replace instead.
+    const existingNamesSQL = format(`SELECT QuadratName FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1 AND QuadratName IS NOT NULL`, [schema]);
+    const existingNameRows = await connectionManager.executeQuery(existingNamesSQL, [plotID], transactionID);
+    const existingActiveNames = Array.isArray(existingNameRows) ? existingNameRows.map((existing: any) => String(existing.QuadratName ?? '')) : [];
+    const incomingNames = rows.map(row => normalizeRequiredString(row.quadrat)).filter(Boolean);
+
+    if (quadratRevisionAppendsDivergentSet(existingActiveNames, incomingNames)) {
+      throw new Error(buildDivergentQuadratUploadError(plotID, existingActiveNames, incomingNames.length));
+    }
   }
 
   for (const row of rows) {
