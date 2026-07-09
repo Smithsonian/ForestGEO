@@ -706,6 +706,20 @@ describe('Enhanced Dashboard Page', () => {
       expect(screen.queryByText(NO_ACCESS_COPY)).not.toBeInTheDocument();
     });
 
+    it('should not keep a global user in a permanent loading state when the catalog is empty', async () => {
+      vi.mocked(useSession).mockReturnValue({
+        data: { user: { name: 'Global User', email: 'global@example.com', userStatus: 'global', sites: [] } },
+        status: 'authenticated',
+        update: vi.fn()
+      } as any);
+      vi.mocked(useSiteListContext).mockReturnValue([]);
+
+      render(<DashboardPage />);
+
+      expect(screen.queryByRole('section', { name: /loading sites/i })).not.toBeInTheDocument();
+      expect(await screen.findByText('No Sites Available')).toBeInTheDocument();
+    });
+
     it('should render only the explicit grants for a non-global user, ignoring the catalog list', async () => {
       const grantedSites = [
         { siteID: 3, siteName: 'Granted Site A', schemaName: 'granted_a' },

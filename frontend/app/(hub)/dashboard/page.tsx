@@ -614,9 +614,7 @@ export default function DashboardPage() {
                 doubleDataEntry: site.doubleDataEntry
               })) || []
             }
-            // While the catalog list is still loading, show skeletons for global users
-            // rather than the misleading "contact an administrator" empty state.
-            isLoading={isGlobalUser && (allowedSites?.length ?? 0) === 0}
+            isLoading={false}
             onSelectSite={selected => {
               if (siteDispatch) {
                 const fullSite = allowedSites?.find(s => s.siteID === selected.siteID);
