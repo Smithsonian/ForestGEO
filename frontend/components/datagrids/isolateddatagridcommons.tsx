@@ -17,6 +17,8 @@ import {
 import {
   GridActionsCellItem,
   GridColDef,
+  GridColumnResizeParams,
+  GridColumnVisibilityModel,
   GridEventListener,
   GridFilterModel,
   GridPaginationModel,
@@ -93,6 +95,66 @@ export type IsolatedDataGridCommonsHandle = {
 const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
 const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
+
+// Column layout (visibility + resized widths) is persisted per grid type so a user's
+// arrangement survives reloads. Keyed by gridType because each grid exposes a different
+// column set; sharing one key would cross-contaminate unrelated grids.
+export const GRID_LAYOUT_STORAGE_PREFIX = 'forestgeo-grid-layout';
+
+// The 53-column archive grid must expose the Columns panel: with layout persistence,
+// hiding a column via the column menu would otherwise become a one-way trap with no UI
+// to restore it. Other grid types keep the selector disabled, as before.
+const COLUMN_SELECTOR_ENABLED_GRID_TYPES = new Set(['viewfulltable']);
+
+type PersistedGridLayout = {
+  visibility: GridColumnVisibilityModel;
+  widths: Record<string, number>;
+};
+
+const EMPTY_GRID_LAYOUT: PersistedGridLayout = { visibility: {}, widths: {} };
+
+export function gridLayoutStorageKey(gridType: string): string {
+  return `${GRID_LAYOUT_STORAGE_PREFIX}:${gridType}`;
+}
+
+export function readPersistedGridLayout(gridType: string): PersistedGridLayout | null {
+  if (typeof window === 'undefined') return null;
+  const key = gridLayoutStorageKey(gridType);
+  const raw = window.localStorage.getItem(key);
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<PersistedGridLayout> | null;
+    return {
+      visibility: parsed?.visibility ?? {},
+      widths: parsed?.widths ?? {}
+    };
+  } catch (error: unknown) {
+    // Corrupt/unparseable layout: discard the poisoned key and fall back to defaults.
+    // Only swallow JSON parse failures; anything else propagates.
+    if (error instanceof SyntaxError) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    throw error;
+  }
+}
+
+export function writePersistedGridLayout(gridType: string, layout: PersistedGridLayout): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(gridLayoutStorageKey(gridType), JSON.stringify(layout));
+  } catch (error: unknown) {
+    // Storage write failures (Safari private mode, QuotaExceededError) surface as
+    // DOMExceptions. Losing layout persistence is acceptable; letting the failure
+    // propagate out of the resize handler and break resizing is not. Anything that
+    // is not a storage DOMException still propagates.
+    if (error instanceof DOMException) {
+      ailogger.warn(`Failed to persist grid layout for "${gridType}": ${error.message}`);
+      return;
+    }
+    throw error;
+  }
+}
 
 const INITIAL_FILTER_MODEL: GridFilterModel = { items: [], quickFilterValues: [] };
 const AUTO_ROW_HEIGHT = () => 'auto' as const;
@@ -192,6 +254,35 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const localApiRef = apiRef === undefined ? internalApiRef : apiRef;
 
   const skipNextProcessRowUpdateRef = useRef(false);
+
+  // Persisted per-gridType column layout, read once per gridType. Held in a ref so the
+  // change handlers can merge partial updates (visibility vs. widths) without re-reading
+  // localStorage, and re-initialised when the grid switches to a different type.
+  const persistedLayoutGridTypeRef = useRef<string | null>(null);
+  const persistedLayoutRef = useRef<PersistedGridLayout>(EMPTY_GRID_LAYOUT);
+  if (persistedLayoutGridTypeRef.current !== gridType) {
+    persistedLayoutGridTypeRef.current = gridType;
+    persistedLayoutRef.current = readPersistedGridLayout(gridType) ?? { visibility: {}, widths: {} };
+  }
+
+  const handleColumnVisibilityModelChange = useCallback(
+    (model: GridColumnVisibilityModel) => {
+      persistedLayoutRef.current = { ...persistedLayoutRef.current, visibility: model };
+      writePersistedGridLayout(gridType, persistedLayoutRef.current);
+    },
+    [gridType]
+  );
+
+  const handleColumnWidthChange = useCallback(
+    (params: GridColumnResizeParams) => {
+      persistedLayoutRef.current = {
+        ...persistedLayoutRef.current,
+        widths: { ...persistedLayoutRef.current.widths, [params.colDef.field]: params.width }
+      };
+      writePersistedGridLayout(gridType, persistedLayoutRef.current);
+    },
+    [gridType]
+  );
 
   const hasFilter = hasServerFilter(filterModel);
 
@@ -1264,14 +1355,22 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const pageSizeOptions = useMemo(() => [paginationModel.pageSize, paginationModel.pageSize * 5, paginationModel.pageSize * 10], [paginationModel.pageSize]);
 
-  const gridInitialState = useMemo(
-    () => ({
+  const gridInitialState = useMemo(() => {
+    const savedLayout = persistedLayoutRef.current;
+    const savedWidthEntries = Object.entries(savedLayout.widths);
+    const dimensions = savedWidthEntries.reduce<Record<string, { width: number }>>((acc, [field, width]) => {
+      acc[field] = { width };
+      return acc;
+    }, {});
+    return {
       columns: {
-        columnVisibilityModel: getColumnVisibilityModel(gridType)
+        // Saved visibility overrides the default hidden-ID model; defaults fill any
+        // column the user never touched.
+        columnVisibilityModel: { ...getColumnVisibilityModel(gridType), ...savedLayout.visibility },
+        ...(savedWidthEntries.length > 0 ? { dimensions } : {})
       }
-    }),
-    [gridType]
-  );
+    };
+  }, [gridType]);
 
   const infiniteScrollDescriptor = useMemo(
     () =>
@@ -1360,7 +1459,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
                 columns={filteredColumns}
                 editMode="row"
                 rowModesModel={rowModesModel}
-                disableColumnSelector
+                disableColumnSelector={!COLUMN_SELECTOR_ENABLED_GRID_TYPES.has(gridType)}
                 onRowModesModelChange={handleRowModesModelChange}
                 onRowEditStop={handleRowEditStop}
                 onCellDoubleClick={handleCellDoubleClick}
@@ -1376,6 +1475,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
                 pageSizeOptions={pageSizeOptions}
                 filterModel={gridFilterModel}
                 onFilterModelChange={handleFilterModelChange}
+                onColumnVisibilityModelChange={handleColumnVisibilityModelChange}
+                onColumnWidthChange={handleColumnWidthChange}
                 ignoreDiacritics
                 initialState={gridInitialState}
                 slots={gridSlots}

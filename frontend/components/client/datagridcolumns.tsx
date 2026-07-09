@@ -842,375 +842,388 @@ export const RolesGridColumns: GridColDef[] = standardizeGridColumns([
   }
 ]);
 
+// Per-type width presets for the 53-column "All Historical Data" archive grid.
+// Replaces the former uniform `flex: 0.3`, which starved every header down to one
+// or two visible characters. minWidth guarantees each header renders legibly even
+// when flex distribution would otherwise shrink it below readability.
+export const VIEW_FULL_TABLE_COLUMN_WIDTHS = {
+  tag: { minWidth: 110, flex: 0.5 },
+  code: { minWidth: 90, flex: 0.4 },
+  measurement: { minWidth: 120, flex: 0.5 },
+  date: { minWidth: 140, flex: 0.5 },
+  name: { minWidth: 160, flex: 0.8 },
+  description: { minWidth: 220, flex: 1.2 }
+} as const;
+
 export const ViewFullTableGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
     headerName: '#',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'coreMeasurementID',
     headerName: '#',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'measuredDBH',
     headerName: 'MeasuredDBH',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'measuredHOM',
     headerName: 'MeasuredHOM',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'description',
     headerName: 'Description',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.description,
     editable: false,
     filterable: false
   },
   {
     field: 'plotID',
     headerName: '#',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'plotName',
     headerName: 'PlotName',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.name,
     editable: false,
     filterable: false
   },
   {
     field: 'locationName',
     headerName: 'LocationName',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.name,
     editable: false,
     filterable: false
   },
   {
     field: 'countryName',
     headerName: 'CountryName',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.name,
     editable: false,
     filterable: false
   },
   {
     field: 'dimensionX',
     headerName: 'DimensionX',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'dimensionY',
     headerName: 'DimensionY',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'plotArea',
     headerName: 'PlotArea',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'plotGlobalX',
     headerName: 'PlotGlobalX',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'plotGlobalY',
     headerName: 'PlotGlobalY',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'plotGlobalZ',
     headerName: 'PlotGlobalZ',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'plotShape',
     headerName: 'PlotShape',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'plotDescription',
     headerName: 'PlotDescription',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.description,
     editable: false,
     filterable: false
   },
   {
     field: 'plotDefaultDimensionUnits',
     headerName: 'PlotDefaultDimensionUnits',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'plotDefaultCoordinateUnits',
     headerName: 'PlotDefaultCoordinateUnits',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'plotDefaultAreaUnits',
     headerName: 'PlotDefaultAreaUnits',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'plotDefaultDBHUnits',
     headerName: 'PlotDefaultDBHUnits',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'plotDefaultHOMUnits',
     headerName: 'PlotDefaultHOMUnits',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'censusID',
     headerName: '#',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'censusStartDate',
     headerName: 'CensusStartDate',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.date,
     editable: false,
     filterable: false
   },
   {
     field: 'censusEndDate',
     headerName: 'CensusEndDate',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.date,
     editable: false,
     filterable: false
   },
   {
     field: 'censusDescription',
     headerName: 'CensusDescription',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.description,
     editable: false,
     filterable: false
   },
   {
     field: 'plotCensusNumber',
     headerName: 'PlotCensusNumber',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'quadratID',
     headerName: '#',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'quadratName',
     headerName: 'QuadratName',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.name,
     editable: false,
     filterable: false
   },
   {
     field: 'quadratDimensionX',
     headerName: 'QuadratDimensionX',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'quadratDimensionY',
     headerName: 'QuadratDimensionY',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'quadratArea',
     headerName: 'QuadratArea',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'quadratStartX',
     headerName: 'QuadratStartX',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'quadratStartY',
     headerName: 'QuadratStartY',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'quadratShape',
     headerName: 'QuadratShape',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'treeID',
     headerName: '#',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'treeTag',
     headerName: 'TreeTag',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.tag,
     editable: false,
     filterable: false
   },
   {
     field: 'stemGUID',
     headerName: '#',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'stemTag',
     headerName: 'StemTag',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.tag,
     editable: false,
     filterable: false
   },
   {
     field: 'stemLocalX',
     headerName: 'StemLocalX',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'stemLocalY',
     headerName: 'StemLocalY',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false
   },
   {
     field: 'speciesID',
     headerName: '#',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'speciesCode',
     headerName: 'SpeciesCode',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'speciesName',
     headerName: 'SpeciesName',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.name,
     editable: false,
     filterable: false
   },
   {
     field: 'subspeciesName',
     headerName: 'SubspeciesName',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.name,
     editable: false,
     filterable: false
   },
   {
     field: 'subspeciesAuthority',
     headerName: 'SubspeciesAuthority',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.name,
     editable: false,
     filterable: false
   },
   {
     field: 'speciesIDLevel',
     headerName: 'SpeciesIDLevel',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'genusID',
     headerName: '#',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'genus',
     headerName: 'Genus',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.name,
     editable: false,
     filterable: false
   },
   {
     field: 'genusAuthority',
     headerName: 'GenusAuthority',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.name,
     editable: false,
     filterable: false
   },
   {
     field: 'familyID',
     headerName: '#',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
     editable: false,
     filterable: false
   },
   {
     field: 'family',
     headerName: 'Family',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.name,
     editable: false,
     filterable: false
   },
   {
     field: 'attributes',
     headerName: 'Attributes',
-    flex: 0.3,
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.description,
     editable: false,
     filterable: false
   }

@@ -2,7 +2,12 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
-import IsolatedDataGridCommons, { FILTER_APPLY_DEBOUNCE_MS } from './isolateddatagridcommons';
+import IsolatedDataGridCommons, {
+  FILTER_APPLY_DEBOUNCE_MS,
+  gridLayoutStorageKey,
+  readPersistedGridLayout,
+  writePersistedGridLayout
+} from './isolateddatagridcommons';
 import { LOADING_BAR_VISIBLE_DELAY_MS } from '@/components/loading';
 
 const mockFetch = vi.fn();
@@ -157,6 +162,14 @@ vi.mock('@/config/styleddatagrid', async () => {
     return (
       <div>
         <div data-testid="filter-model-state">{JSON.stringify(props.filterModel ?? null)}</div>
+        <div data-testid="initial-state">{JSON.stringify(props.initialState ?? null)}</div>
+        <div data-testid="column-selector-disabled">{String(props.disableColumnSelector)}</div>
+        <button type="button" onClick={() => props.onColumnVisibilityModelChange?.({ plotName: false })}>
+          Hide PlotName Column
+        </button>
+        <button type="button" onClick={() => props.onColumnWidthChange?.({ colDef: { field: 'plotName' }, width: 321 })}>
+          Resize PlotName Column
+        </button>
         <div data-testid="pagination-state">{JSON.stringify(props.paginationModel ?? null)}</div>
         <div data-testid="pagination-slot-present">{String(Boolean(props.slots?.pagination))}</div>
         <div data-testid="infinite-scroll-enabled">{String(Boolean(props.slots?.pagination?.infiniteScroll?.enabled))}</div>
@@ -232,6 +245,7 @@ describe('IsolatedDataGridCommons', () => {
     observedGetRowHeightProps.length = 0;
     echoSamePaginationOnRender = false;
     global.fetch = mockFetch as any;
+    localStorage.clear();
   });
 
   afterEach(() => {
@@ -663,5 +677,137 @@ describe('IsolatedDataGridCommons', () => {
     );
     await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
     expect(screen.getByTestId('export-csv-handler-present').textContent).toBe('false');
+  });
+
+  describe('persisted column layout', () => {
+    const PERSISTED_GRID_TYPE = 'failedmeasurements';
+    const RESTORED_WIDTH = 200;
+    const RESIZED_WIDTH = 321;
+
+    const renderGrid = (gridType: string) => {
+      const row = { id: 1, failedMeasurementID: 123, spCode: ORIGINAL_TEST_SP_CODE };
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ output: [row], totalCount: 1, finishedQuery: 'SELECT 1' })
+      } as Response);
+      return render(
+        <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+          <IsolatedDataGridCommons
+            gridType={gridType}
+            gridColumns={[
+              { field: 'id', editable: false },
+              { field: 'plotName', editable: false }
+            ]}
+            refresh={false}
+            setRefresh={vi.fn()}
+            dynamicButtons={[]}
+            initialRow={row}
+          />
+        </SWRConfig>
+      );
+    };
+
+    const readInitialState = () => JSON.parse(screen.getByTestId('initial-state').textContent ?? 'null');
+
+    it('restores a saved per-gridType layout (visibility + widths) into the grid initial state', async () => {
+      writePersistedGridLayout(PERSISTED_GRID_TYPE, {
+        visibility: { plotName: false },
+        widths: { plotName: RESTORED_WIDTH }
+      });
+
+      renderGrid(PERSISTED_GRID_TYPE);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+
+      const initialState = readInitialState();
+      // Default hidden-ID model is preserved and the saved visibility is layered over it.
+      expect(initialState.columns.columnVisibilityModel).toMatchObject({ id: false, plotName: false });
+      // Saved width is applied through the v8 initialState.columns.dimensions path.
+      expect(initialState.columns.dimensions).toEqual({ plotName: { width: RESTORED_WIDTH } });
+    });
+
+    it('falls back to defaults and clears the poisoned key when the stored layout is corrupt', async () => {
+      const key = gridLayoutStorageKey(PERSISTED_GRID_TYPE);
+      localStorage.setItem(key, '{ this is not valid json');
+
+      renderGrid(PERSISTED_GRID_TYPE);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+
+      const initialState = readInitialState();
+      expect(initialState.columns.columnVisibilityModel).toEqual({ id: false });
+      expect(initialState.columns.dimensions).toBeUndefined();
+      expect(localStorage.getItem(key)).toBeNull();
+    });
+
+    it('leaves the default initial state untouched when no layout is saved', async () => {
+      renderGrid(PERSISTED_GRID_TYPE);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+
+      const initialState = readInitialState();
+      expect(initialState.columns.columnVisibilityModel).toEqual({ id: false });
+      expect(initialState.columns.dimensions).toBeUndefined();
+    });
+
+    it('persists column visibility changes under the per-gridType key', async () => {
+      renderGrid(PERSISTED_GRID_TYPE);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Hide PlotName Column' }));
+
+      const saved = readPersistedGridLayout(PERSISTED_GRID_TYPE);
+      expect(saved?.visibility).toEqual({ plotName: false });
+    });
+
+    it('persists resized column widths under the per-gridType key', async () => {
+      renderGrid(PERSISTED_GRID_TYPE);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Resize PlotName Column' }));
+
+      const saved = readPersistedGridLayout(PERSISTED_GRID_TYPE);
+      expect(saved?.widths).toEqual({ plotName: RESIZED_WIDTH });
+    });
+
+    it('swallows storage-quota DOMExceptions on write so a failed persist cannot break the resize handler', async () => {
+      renderGrid(PERSISTED_GRID_TYPE);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+
+      const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('quota exceeded', 'QuotaExceededError');
+      });
+      try {
+        expect(() => fireEvent.click(screen.getByRole('button', { name: 'Resize PlotName Column' }))).not.toThrow();
+        expect(setItemSpy).toHaveBeenCalled();
+      } finally {
+        setItemSpy.mockRestore();
+      }
+      expect(readPersistedGridLayout(PERSISTED_GRID_TYPE)).toBeNull();
+    });
+
+    it('a visibility write followed by a width write in the same session preserves both in storage', async () => {
+      renderGrid(PERSISTED_GRID_TYPE);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Hide PlotName Column' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Resize PlotName Column' }));
+
+      const saved = readPersistedGridLayout(PERSISTED_GRID_TYPE);
+      expect(saved).toEqual({
+        visibility: { plotName: false },
+        widths: { plotName: RESIZED_WIDTH }
+      });
+    });
+
+    it('enables the column selector for viewfulltable so persisted hides remain recoverable, but keeps it disabled elsewhere', async () => {
+      // With persistence, hiding a column via the column menu on a grid without the
+      // Columns panel would be a one-way trap: nothing in the UI could unhide it.
+      const { unmount } = renderGrid('viewfulltable');
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+      expect(screen.getByTestId('column-selector-disabled').textContent).toBe('false');
+      unmount();
+
+      renderGrid(PERSISTED_GRID_TYPE);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+      expect(screen.getByTestId('column-selector-disabled').textContent).toBe('true');
+    });
   });
 });
