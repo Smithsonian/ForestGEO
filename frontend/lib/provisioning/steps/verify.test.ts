@@ -110,6 +110,18 @@ describe('verifyStep', () => {
     await expect(verifyStep.run(ctx)).resolves.toBeUndefined();
   });
 
+  it('verify resolves for none mode with zero quadrats', async () => {
+    const originalInput = ctx.input;
+    try {
+      await ctx.sitePool!.query(`DELETE FROM \`${SCHEMA_NAME}\`.quadrats WHERE PlotID = ?`, [ctx.state.plotId]);
+      ctx.input = { ...originalInput, quadrats: { mode: 'none' } };
+      await expect(verifyStep.run(ctx)).resolves.toBeUndefined();
+    } finally {
+      ctx.input = originalInput;
+      await insertQuadratsStep.run(ctx);
+    }
+  });
+
   it('verify throws when catalog row missing', async () => {
     // Temporarily remove catalog row
     await catalogPool.query(`DELETE FROM catalog.sites WHERE SchemaName = ?`, [SCHEMA_NAME]);
