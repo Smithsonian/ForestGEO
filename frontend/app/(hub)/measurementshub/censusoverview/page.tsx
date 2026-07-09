@@ -31,6 +31,7 @@ import { createAndUpdateCensusList, OrgCensusRDS, reconcileCurrentCensusSelectio
 import ailogger from '@/ailogger';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { useSession } from 'next-auth/react';
+import { formatDisplayDate } from '@/config/dateformats';
 
 interface ProgressTachoType {
   TotalQuadrats: number;
@@ -249,8 +250,8 @@ export default function CensusOverviewPage() {
             </Typography>
             <Typography level="body-md" color="neutral">
               {currentPlot.plotName} &mdash; {currentSite.siteName}
-              {startDate && ` — ${new Date(startDate).toLocaleDateString()}`}
-              {endDate && ` to ${new Date(endDate).toLocaleDateString()}`}
+              {startDate && ` — ${formatDisplayDate(startDate)}`}
+              {endDate && ` to ${formatDisplayDate(endDate)}`}
             </Typography>
           </Box>
         </Stack>

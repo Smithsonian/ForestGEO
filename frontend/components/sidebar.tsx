@@ -4,6 +4,7 @@ import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react';
 import { preloadKey } from '@/lib/query/preload';
 import { queryKey } from '@/lib/query';
 import { createFetchQuery } from '@/config/servergridhelpers';
+import { formatDisplayDate } from '@/config/dateformats';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -254,7 +255,7 @@ export default function Sidebar(props: SidebarProps) {
             >{`Site: ${selectedSite?.siteName}`}</Typography>
             <Stack direction={'column'} alignItems={'start'} aria-labelledby={'site-selected'}>
               <Typography level="body-sm" color={'primary'} className="sidebar-item" data-testid={'selected-site-schema'}>
-                &mdash; Schema: {selectedSite.schemaName}
+                {' — '}Schema: {selectedSite.schemaName}
               </Typography>
             </Stack>
           </Stack>
@@ -282,7 +283,8 @@ export default function Sidebar(props: SidebarProps) {
             <Typography level="body-md" className="sidebar-item" data-testid={'selected-plot-name'}>{`Plot: ${selectedPlot?.plotName}`}</Typography>
             <Box aria-label={'selected plot information'} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
               <Typography level="body-sm" color={'primary'} data-testid={'selected-plot-quadrats'}>
-                &mdash; {selectedPlot.numQuadrats || selectedPlot.numQuadrats === 0 ? `Quadrats: ${selectedPlot.numQuadrats}` : 'No Quadrats'}
+                {' — '}
+                {selectedPlot.numQuadrats || selectedPlot.numQuadrats === 0 ? `Quadrats: ${selectedPlot.numQuadrats}` : 'No Quadrats'}
               </Typography>
             </Box>
           </Stack>
@@ -316,8 +318,8 @@ export default function Sidebar(props: SidebarProps) {
     // Ensure dates are rendered in a block layout to stack them vertically
     const dateMessage = (
       <span aria-label={'census record information'} style={{ display: 'block' }}>
-        {hasStartDate && <Typography display="block">&mdash;{` First Record: ${new Date(startDate).toDateString()}`}</Typography>}
-        {hasEndDate && <Typography display="block">&mdash;{` Last Record: ${new Date(endDate).toDateString()}`}</Typography>}
+        {hasStartDate && <Typography display="block">{`— First Record: ${formatDisplayDate(startDate)}`}</Typography>}
+        {hasEndDate && <Typography display="block">{`— Last Record: ${formatDisplayDate(endDate)}`}</Typography>}
         {!hasStartDate && !hasEndDate && <Typography display="block">No Measurements</Typography>}
       </span>
     );
@@ -383,7 +385,7 @@ export default function Sidebar(props: SidebarProps) {
           .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
           .map(item => (
             <Option
-              aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${item.dateRanges?.[0]?.startDate ? new Date(item.dateRanges?.[0]?.startDate).toDateString() : 'No measurements'}` : ''}`}
+              aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${item.dateRanges?.[0]?.startDate ? formatDisplayDate(item.dateRanges?.[0]?.startDate) : 'No measurements'}` : ''}`}
               data-testid={'census-selection-option'}
               key={item?.plotCensusNumber}
               value={item?.plotCensusNumber?.toString()}
@@ -407,15 +409,15 @@ export default function Sidebar(props: SidebarProps) {
                       <React.Fragment key={index}>
                         <Stack direction={'row'}>
                           <Typography level="body-sm" color={'neutral'}>
-                            {`${dateRange.startDate ? ` — First Msmt: ${new Date(dateRange.startDate).toDateString()}` : ' — No Measurements'}`}
+                            {`${dateRange.startDate ? `First Msmt: ${formatDisplayDate(dateRange.startDate)}` : 'No Measurements'}`}
                           </Typography>
                           {dateRange.endDate && (
-                            <Typography level="body-sm" color={'neutral'} sx={{ paddingLeft: '1em', paddingRight: '1em' }}>
-                              &lt;===&gt;
+                            <Typography level="body-sm" color={'neutral'} sx={{ whiteSpace: 'pre' }}>
+                              {' — '}
                             </Typography>
                           )}
                           <Typography level="body-sm" color={'neutral'}>
-                            {`${dateRange.endDate ? ` — Last Msmt: ${new Date(dateRange.endDate).toDateString()}` : ''}`}
+                            {`${dateRange.endDate ? `Last Msmt: ${formatDisplayDate(dateRange.endDate)}` : ''}`}
                           </Typography>
                         </Stack>
                       </React.Fragment>
@@ -475,7 +477,7 @@ export default function Sidebar(props: SidebarProps) {
                 {item?.plotName}
               </Typography>
               <Typography level="body-sm" color="success">
-                &mdash; Quadrats: {item?.numQuadrats}
+                {' — '}Quadrats: {item?.numQuadrats}
               </Typography>
             </Stack>
           </Option>
@@ -518,7 +520,7 @@ export default function Sidebar(props: SidebarProps) {
                 {item?.plotName}
               </Typography>
               <Typography level="body-sm" color="neutral">
-                &mdash; No Quadrats
+                {' — '}No Quadrats
               </Typography>
             </Stack>
           </Option>
@@ -634,30 +636,34 @@ export default function Sidebar(props: SidebarProps) {
             </Option>
           ))}
         </List>
-        <ListDivider role="none" />
-        <List sx={{ '--ListItemDecorator-size': '28px' }}>
-          <ListItem id="other-sites-group" sticky className="sidebar-item">
-            <Typography
-              level="body-xs"
-              textTransform="uppercase"
-              aria-live="polite"
-              aria-label={`Other Sites section, ${otherSites.length} sites not available to you`}
-            >
-              Other Sites ({otherSites.length})
-            </Typography>
-          </ListItem>
-          {otherSites.map(site => (
-            <Option
-              key={site.siteID}
-              value={site.siteID}
-              disabled
-              data-testid={'site-selection-option-other'}
-              aria-label={`${site.siteName} site, not accessible to current user`}
-            >
-              {site.siteName}
-            </Option>
-          ))}
-        </List>
+        {otherSites.length > 0 && (
+          <>
+            <ListDivider role="none" />
+            <List sx={{ '--ListItemDecorator-size': '28px' }}>
+              <ListItem id="other-sites-group" sticky className="sidebar-item">
+                <Typography
+                  level="body-xs"
+                  textTransform="uppercase"
+                  aria-live="polite"
+                  aria-label={`Other Sites section, ${otherSites.length} sites not available to you`}
+                >
+                  Other Sites ({otherSites.length})
+                </Typography>
+              </ListItem>
+              {otherSites.map(site => (
+                <Option
+                  key={site.siteID}
+                  value={site.siteID}
+                  disabled
+                  data-testid={'site-selection-option-other'}
+                  aria-label={`${site.siteName} site, not accessible to current user`}
+                >
+                  {site.siteName}
+                </Option>
+              ))}
+            </List>
+          </>
+        )}
       </Select>
     );
   };

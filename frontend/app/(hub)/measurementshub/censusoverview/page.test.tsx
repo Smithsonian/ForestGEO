@@ -132,6 +132,29 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
     expect(within(dialog).getByText(`Delete Census ${LATEST_CENSUS.plotCensusNumber}?`)).toBeInTheDocument();
   });
 
+  it('MUST render the header census dates using the shared display-date format (F3)', () => {
+    // Local-time constructors keep the rendered display date timezone-stable across CI runners.
+    const headerCensus = {
+      plotID: 1,
+      plotCensusNumber: 2,
+      censusIDs: [102],
+      dateRanges: [{ censusID: 102, startDate: new Date(2025, 0, 1), endDate: new Date(2025, 11, 31) }],
+      description: 'Census 2'
+    };
+    seedSelection(headerCensus as any);
+    render(<CensusOverviewPage />);
+
+    const headerLine = screen.getByText((_, el) => {
+      if (el?.tagName.toLowerCase() !== 'p') return false;
+      const text = el.textContent ?? '';
+      return text.includes('Test Plot') && text.includes('Test Site');
+    });
+
+    expect(headerLine.textContent).toContain('— Jan 1, 2025 to Dec 31, 2025');
+    // The old toLocaleDateString output ("1/1/2025") must be gone.
+    expect(headerLine.textContent).not.toMatch(/\d{1,2}\/\d{1,2}\/\d{4}/);
+  });
+
   it('MUST surface a user-visible error banner when the delete request fails', async () => {
     const user = userEvent.setup();
     seedSelection(LATEST_CENSUS);

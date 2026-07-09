@@ -550,4 +550,84 @@ describe('Sidebar - Functional Tests', () => {
       expect(within(listbox).queryByText(/deselect site/i)).not.toBeInTheDocument();
     });
   });
+
+  describe('F3 - shared display-date formatter and picker string cleanup', () => {
+    const testSite = { siteID: 1, siteName: 'Test Site', schemaName: 'testschema' };
+    const testPlot = { plotID: 1, plotName: 'Test Plot', numQuadrats: 1600 };
+    // Local-time constructors keep the rendered display date timezone-stable across CI runners.
+    const firstMeasurement = new Date(2008, 1, 2);
+    const lastMeasurement = new Date(2008, 11, 15);
+    const testCensusList = [
+      {
+        plotID: 1,
+        plotCensusNumber: 1,
+        censusIDs: [101],
+        dateRanges: [{ censusID: 101, startDate: firstMeasurement, endDate: lastMeasurement }],
+        description: 'Census 1'
+      }
+    ];
+    const OLD_TODATESTRING_PATTERN = /\b\w{3}\s\w{3}\s\d{2}\s\d{4}\b/; // e.g. "Sat Feb 02 2008"
+
+    beforeEach(() => {
+      useAppStore.getState().clearSelections();
+    });
+
+    afterEach(() => {
+      useAppStore.getState().clearSelections();
+    });
+
+    it('MUST render census options with the shared display date and a spaced em-dash separator (no <===> token, no toDateString)', async () => {
+      const user = userEvent.setup();
+      useAppStore.getState().setSite(testSite);
+      useAppStore.getState().setPlot(testPlot);
+      useAppStore.getState().setCensusList(testCensusList);
+
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      const censusSelect = screen.getByRole('combobox', { name: /select a census/i });
+      await user.click(censusSelect);
+
+      const listbox = await screen.findByRole('listbox');
+      const option = within(listbox).getByTestId('census-selection-option');
+      const text = option.textContent ?? '';
+
+      expect(text).toContain('First Msmt: Feb 2, 2008 — Last Msmt: Dec 15, 2008');
+      expect(text).not.toContain('<===>');
+      expect(text).not.toMatch(OLD_TODATESTRING_PATTERN);
+    });
+
+    it('MUST render plot options with a spaced em-dash before the quadrat count', async () => {
+      const user = userEvent.setup();
+      useAppStore.getState().setSite(testSite);
+      useAppStore.getState().setPlotList([testPlot]);
+
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      const plotSelect = screen.getByRole('combobox', { name: /select a plot/i });
+      await user.click(plotSelect);
+
+      const listbox = await screen.findByRole('listbox');
+      const option = within(listbox).getByTestId('plot-selection-option');
+
+      expect(option.textContent).toContain(' — Quadrats: 1600');
+    });
+
+    it('MUST NOT render the "Other Sites" group for a global user (otherSites is always empty)', async () => {
+      const user = userEvent.setup();
+      (useSession as any).mockReturnValue({
+        data: { user: { name: 'Global User', email: 'global@example.com', userStatus: 'global', sites: [] } },
+        status: 'authenticated'
+      });
+      useAppStore.getState().setSiteList([testSite]);
+
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
+      await user.click(siteSelect);
+
+      const listbox = await screen.findByRole('listbox');
+      expect(within(listbox).queryByText(/^Other Sites \(/)).not.toBeInTheDocument();
+      expect(within(listbox).getByText(/^Allowed Sites \(/)).toBeInTheDocument();
+    });
+  });
 });
