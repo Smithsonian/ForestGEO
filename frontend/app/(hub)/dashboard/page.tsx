@@ -327,6 +327,7 @@ export default function DashboardPage() {
     } catch (error) {
       console.error('Failed to refresh census list:', error);
       ailogger.error('Failed to refresh census list', error instanceof Error ? error : undefined);
+      throw error;
     }
   }, [
     currentSite?.schemaName,
@@ -368,7 +369,11 @@ export default function DashboardPage() {
       try {
         console.log(loadingMessage, { schema: currentSite.schemaName, censusID, type: deleteType });
 
-        const response = await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=${deleteType}`);
+        const response = await fetch('/api/clearcensus', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ schema: currentSite.schemaName, censusID, type: deleteType })
+        });
         if (!response.ok) {
           throw new Error(`Failed to clear census: ${response.status}`);
         }

@@ -23,6 +23,7 @@ import CensusOverviewPage from './page';
 const DELETE_BUTTON_TESTID = 'census-overview-delete-button';
 const DELETE_ERROR_TESTID = 'census-overview-delete-error';
 const DISABLED_TOOLTIP_MATCHER = /only the latest census can be deleted/i;
+const UNAUTHORIZED_TOOLTIP_MATCHER = /only global and database administrators can delete census measurements/i;
 const DELETE_FAILURE_MESSAGE = 'Failed to delete census. Please try again.';
 const MODAL_CONFIRM_LABEL = 'Delete Measurements';
 
@@ -117,6 +118,22 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
     // The wrapping tooltip must explain WHY it is disabled, not leave the user guessing.
     await user.hover(deleteButton.parentElement as HTMLElement);
     expect(await screen.findByText(DISABLED_TOOLTIP_MATCHER)).toBeInTheDocument();
+  });
+
+  it('MUST disable the delete action for non-admin users even when the census is latest', async () => {
+    const user = userEvent.setup();
+    (useSession as any).mockReturnValue({
+      data: { user: { name: 'Field User', email: 'field@example.com', userStatus: 'field crew' } },
+      status: 'authenticated'
+    });
+    seedSelection(LATEST_CENSUS);
+    render(<CensusOverviewPage />);
+
+    const deleteButton = screen.getByTestId(DELETE_BUTTON_TESTID);
+    expect(deleteButton).toBeDisabled();
+
+    await user.hover(deleteButton.parentElement as HTMLElement);
+    expect(await screen.findByText(UNAUTHORIZED_TOOLTIP_MATCHER)).toBeInTheDocument();
   });
 
   it('MUST open the shared CensusDeletionModal for the selected census on click', async () => {

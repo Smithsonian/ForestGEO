@@ -163,6 +163,7 @@ export default function CensusOverviewPage() {
       }
     } catch (error) {
       ailogger.error('Failed to refresh census list after deletion', error instanceof Error ? error : undefined);
+      throw error;
     }
   }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentCensusID, censusListDispatch, censusDispatch]);
 
@@ -191,7 +192,11 @@ export default function CensusOverviewPage() {
       setLoading(true, loadingMessage);
 
       try {
-        const response = await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${targetCensusID}&type=${deleteType}`);
+        const response = await fetch('/api/clearcensus', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ schema: currentSite.schemaName, censusID: targetCensusID, type: deleteType })
+        });
         if (!response.ok) {
           throw new Error(`Failed to clear census: ${response.status}`);
         }
@@ -229,6 +234,7 @@ export default function CensusOverviewPage() {
   const censusID = currentCensus.dateRanges?.[0]?.censusID;
   const userStatus = session?.user?.userStatus;
   const canReload = userStatus === 'global' || userStatus === 'db admin';
+  const canDeleteCensus = canReload;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -266,7 +272,13 @@ export default function CensusOverviewPage() {
             />
             <RebuildViewFullTableButton schema={currentSite.schemaName} />
             <Tooltip
-              title={isLatestCensus ? 'Delete all measurement data for this census' : 'Only the latest census can be deleted. Delete newer censuses first.'}
+              title={
+                !canDeleteCensus
+                  ? 'Only global and database administrators can delete census measurements.'
+                  : isLatestCensus
+                    ? 'Delete all measurement data for this census'
+                    : 'Only the latest census can be deleted. Delete newer censuses first.'
+              }
               placement="top"
             >
               <span>
@@ -274,7 +286,7 @@ export default function CensusOverviewPage() {
                   color="danger"
                   variant="outlined"
                   startDecorator={<DeleteForeverIcon />}
-                  disabled={!isLatestCensus}
+                  disabled={!canDeleteCensus || !isLatestCensus}
                   onClick={() => handleCensusDelete(currentCensus)}
                   data-testid="census-overview-delete-button"
                 >
