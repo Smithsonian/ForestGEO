@@ -20,6 +20,7 @@ import { siteConfigNav, SiteConfigProps, validityMapping } from '@/config/macros
 import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, usePlotDispatch, useSiteContext, useSiteDispatch } from '@/app/contexts/compat-hooks';
 import { markExplicitSelectionClear } from '@/config/store/appstore';
 import { usePathname, useRouter } from 'next/navigation';
+import NextLink from 'next/link';
 import { Badge, IconButton, SelectOption, Stack, Tooltip } from '@mui/joy';
 import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
@@ -869,9 +870,10 @@ export default function Sidebar(props: SidebarProps) {
                   {session?.user?.userStatus === 'global' && (
                     <>
                       <ListItemButton
+                        component={NextLink}
+                        href="/admin/provision"
                         selected={pathname === '/admin/provision'}
                         color={pathname === '/admin/provision' ? 'primary' : undefined}
-                        onClick={() => router.push('/admin/provision')}
                         sx={{ borderRadius: 'sm', mb: 0.5 }}
                         aria-label="Navigate to Provision New Site"
                       >
@@ -881,9 +883,10 @@ export default function Sidebar(props: SidebarProps) {
                         </ListItemContent>
                       </ListItemButton>
                       <ListItemButton
+                        component={NextLink}
+                        href="/admin/provision/runs"
                         selected={pathname === '/admin/provision/runs'}
                         color={pathname === '/admin/provision/runs' ? 'primary' : undefined}
-                        onClick={() => router.push('/admin/provision/runs')}
                         sx={{ borderRadius: 'sm', mb: 1 }}
                         aria-label="Navigate to Provisioning Runs"
                       >
@@ -1040,34 +1043,50 @@ export default function Sidebar(props: SidebarProps) {
                       }
                     };
 
+                    const focusMainContent = () => {
+                      setTimeout(() => {
+                        const mainContent = document.getElementById('main-content');
+                        if (mainContent) {
+                          mainContent.focus();
+                          mainContent.scrollIntoView();
+                        }
+                      }, 100);
+                    };
+
+                    // Cmd/ctrl/shift/alt-click and middle-click on a real anchor open a new
+                    // tab/window — the current tab does not navigate, so same-tab side effects
+                    // (census clear, focus move, availability gate) must not run.
+                    const isModifiedClick = (e: React.MouseEvent) => e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0;
+
+                    // Disabled nav items render as plain divs with no href (see component=/href=
+                    // below), so browser link affordances (open in new tab, middle-click) have
+                    // nothing to follow. This capture-phase handler is the runtime backstop:
+                    // MUI's useButton skips a disabled item's `onClick` WITHOUT calling
+                    // preventDefault(), so a bubble-phase onClick could never block a stray
+                    // href on a disabled item — capture-phase can.
+                    const preventNavigationIfDisabled = (isDisabled: boolean) => (e: React.MouseEvent) => {
+                      if (isDisabled) {
+                        e.preventDefault();
+                      }
+                    };
+
+                    const handleEnabledNavClick = (e: React.MouseEvent) => {
+                      if (isModifiedClick(e)) return;
+                      focusMainContent();
+                    };
+
                     if (item.expanded.length === 0) {
                       const isDashboard = item.href === '/dashboard';
                       const isLinkDisabled = isDashboard ? false : getDisabledState(item.href);
                       const isDataIncomplete = isDashboard ? false : shouldApplyTooltip(item);
+                      const isNavDisabledWithoutSelection = currentPlot === undefined || currentCensus === undefined || isLinkDisabled;
 
-                      const handleDashboardClick = async () => {
-                        await handleCensusSelection(undefined);
-                        router.push('/dashboard');
-                        setTimeout(() => {
-                          const mainContent = document.getElementById('main-content');
-                          if (mainContent) {
-                            mainContent.focus();
-                            mainContent.scrollIntoView();
-                          }
-                        }, 100);
-                      };
-
-                      const handleNavClick = () => {
-                        if (!isLinkDisabled) {
-                          router.push(item.href);
-                          setTimeout(() => {
-                            const mainContent = document.getElementById('main-content');
-                            if (mainContent) {
-                              mainContent.focus();
-                              mainContent.scrollIntoView();
-                            }
-                          }, 100);
-                        }
+                      const handleDashboardClick = (e: React.MouseEvent) => {
+                        if (isModifiedClick(e)) return;
+                        // Fire-and-forget: the census-clear dispatch doesn't gate navigation,
+                        // matching the previous router.push-based behavior.
+                        void handleCensusSelection(undefined);
+                        focusMainContent();
                       };
 
                       // Dashboard button is always visible, other non-expanding items require site+plot
@@ -1079,6 +1098,8 @@ export default function Sidebar(props: SidebarProps) {
                             {isDashboard ? (
                               <Box sx={{ display: 'flex', flex: 1 }} data-testid={'dashboard-nav-wrapper'}>
                                 <ListItemButton
+                                  component={NextLink}
+                                  href={item.href}
                                   selected={pathname === item.href && !currentCensus}
                                   data-testid={`navigate-list-item-button-nonexpanding-${item.href}`}
                                   sx={{ flex: 1, width: '100%' }}
@@ -1095,12 +1116,15 @@ export default function Sidebar(props: SidebarProps) {
                               <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : ''} arrow disableHoverListener={!isDataIncomplete}>
                                 <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-defined-box-wrapper'}>
                                   <ListItemButton
+                                    component={isLinkDisabled ? 'div' : NextLink}
+                                    href={isLinkDisabled ? undefined : item.href}
                                     selected={pathname === item.href}
                                     data-testid={`navigate-list-item-button-nonexpanding-${item.href}`}
                                     sx={{ flex: 1, width: '100%' }}
                                     disabled={isLinkDisabled}
                                     color={pathname === item.href ? 'primary' : undefined}
-                                    onClick={handleNavClick}
+                                    onClickCapture={preventNavigationIfDisabled(isLinkDisabled)}
+                                    onClick={handleEnabledNavClick}
                                   >
                                     <Badge
                                       color="danger"
@@ -1120,11 +1144,14 @@ export default function Sidebar(props: SidebarProps) {
                             ) : (
                               <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-undefined-box-wrapper'}>
                                 <ListItemButton
+                                  component={isNavDisabledWithoutSelection ? 'div' : NextLink}
+                                  href={isNavDisabledWithoutSelection ? undefined : item.href}
                                   selected={pathname === item.href}
                                   sx={{ flex: 1, width: '100%' }}
-                                  disabled={currentPlot === undefined || currentCensus === undefined || isLinkDisabled}
+                                  disabled={isNavDisabledWithoutSelection}
                                   color={pathname === item.href ? 'primary' : undefined}
-                                  onClick={handleNavClick}
+                                  onClickCapture={preventNavigationIfDisabled(isNavDisabledWithoutSelection)}
+                                  onClick={handleEnabledNavClick}
                                 >
                                   <Icon />
                                   <ListItemContent>
@@ -1165,7 +1192,32 @@ export default function Sidebar(props: SidebarProps) {
                                   const isMeasurementsViewLink = link.href === '/summary' || link.href === '/errors';
                                   const isDataIncomplete = shouldApplyTooltip(item, link.href);
                                   const isLinkDisabled = getDisabledState(link.href);
+                                  const isSubLinkDisabledWithoutSelection =
+                                    currentPlot === undefined || (item.href !== '/fixeddatainput' && currentCensus === undefined) || isLinkDisabled;
                                   const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (isMeasurementsViewLink && !isAllValiditiesTrue));
+
+                                  const handleSubLinkClick = (e: React.MouseEvent) => {
+                                    if (isModifiedClick(e)) return;
+                                    if (link.href === '/postvalidation') {
+                                      // Post-Census Statistics can't be a plain same-tab anchor: navigation
+                                      // is gated on an async availability check, so it preventDefault()s
+                                      // and navigates programmatically once the fetch resolves.
+                                      e.preventDefault();
+                                      void (async () => {
+                                        const response = await fetch(
+                                          `/api/cmprevalidation/postvalidation/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}`
+                                        );
+                                        if (response.ok) {
+                                          router.push(item.href + link.href);
+                                          focusMainContent();
+                                        } else {
+                                          alert('No measurements found!');
+                                        }
+                                      })();
+                                      return;
+                                    }
+                                    focusMainContent();
+                                  };
                                   return (
                                     <TransitionComponent key={link.href} in={!!toggle} direction="down">
                                       <ListItem data-testid={`navigate-list-item-expanded-${item.label}-${link.label}`}>
@@ -1175,6 +1227,8 @@ export default function Sidebar(props: SidebarProps) {
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
                                             <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-defined-box-wrapper'}>
                                               <ListItemButton
+                                                component={isLinkDisabled ? 'div' : NextLink}
+                                                href={isLinkDisabled ? undefined : item.href + link.href}
                                                 data-testid={`navigate-list-item-expanded-button-${item.label}-${link.label}-${link.href}`}
                                                 sx={{ flex: 1, width: '100%' }}
                                                 selected={pathname === item.href + link.href}
@@ -1182,39 +1236,8 @@ export default function Sidebar(props: SidebarProps) {
                                                 disabled={isLinkDisabled}
                                                 onMouseEnter={navPreloadHandlers[link.href]}
                                                 onFocus={navPreloadHandlers[link.href]}
-                                                onClick={async () => {
-                                                  if (link.href === '/postvalidation') {
-                                                    const response = await fetch(
-                                                      `/api/cmprevalidation/postvalidation/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}`
-                                                    );
-                                                    if (response.ok) {
-                                                      router.push(item.href + link.href);
-                                                      // Move focus to main content after navigation
-                                                      setTimeout(() => {
-                                                        const mainContent = document.getElementById('main-content');
-                                                        if (mainContent) {
-                                                          mainContent.focus();
-                                                          mainContent.scrollIntoView();
-                                                        }
-                                                      }, 100);
-                                                      return;
-                                                    } else {
-                                                      alert('No measurements found!');
-                                                      return;
-                                                    }
-                                                  } else if (!isLinkDisabled) {
-                                                    router.push(item.href + link.href);
-                                                    // Move focus to main content after navigation
-                                                    setTimeout(() => {
-                                                      const mainContent = document.getElementById('main-content');
-                                                      if (mainContent) {
-                                                        mainContent.focus();
-                                                        mainContent.scrollIntoView();
-                                                      }
-                                                    }, 100);
-                                                    return;
-                                                  }
-                                                }}
+                                                onClickCapture={preventNavigationIfDisabled(isLinkDisabled)}
+                                                onClick={handleSubLinkClick}
                                               >
                                                 <Badge
                                                   color={isMeasurementsViewLink ? 'warning' : 'danger'}
@@ -1246,27 +1269,16 @@ export default function Sidebar(props: SidebarProps) {
                                         ) : (
                                           <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-undefined-box-wrapper'}>
                                             <ListItemButton
+                                              component={isSubLinkDisabledWithoutSelection ? 'div' : NextLink}
+                                              href={isSubLinkDisabledWithoutSelection ? undefined : item.href + link.href}
                                               sx={{ flex: 1, width: '100%' }}
                                               selected={pathname == item.href + link.href}
                                               color={pathname === item.href ? 'primary' : undefined}
-                                              disabled={
-                                                currentPlot === undefined || (item.href !== '/fixeddatainput' && currentCensus === undefined) || isLinkDisabled
-                                              }
+                                              disabled={isSubLinkDisabledWithoutSelection}
                                               onMouseEnter={navPreloadHandlers[link.href]}
                                               onFocus={navPreloadHandlers[link.href]}
-                                              onClick={() => {
-                                                if (!isLinkDisabled) {
-                                                  router.push(item.href + link.href);
-                                                  // Move focus to main content after navigation
-                                                  setTimeout(() => {
-                                                    const mainContent = document.getElementById('main-content');
-                                                    if (mainContent) {
-                                                      mainContent.focus();
-                                                      mainContent.scrollIntoView();
-                                                    }
-                                                  }, 100);
-                                                }
-                                              }}
+                                              onClickCapture={preventNavigationIfDisabled(isSubLinkDisabledWithoutSelection)}
+                                              onClick={handleEnabledNavClick}
                                             >
                                               <SubIcon />
                                               <ListItemContent>

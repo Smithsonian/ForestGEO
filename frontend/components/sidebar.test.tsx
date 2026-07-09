@@ -1,14 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Sidebar, { isProgrammaticSelectClear } from './sidebar';
 import { useSession } from 'next-auth/react';
 import { usePathname, useRouter } from 'next/navigation';
+import { useAppStore } from '@/config/store/appstore';
 
 // Mock all dependencies
 vi.mock('next-auth/react');
 vi.mock('next/navigation');
+// Real server action ('use server' + next/headers cookies()) has no request scope in jsdom;
+// the F8 nav tests below exercise real site/plot/census dispatch through the Zustand store,
+// so this must be stubbed rather than the dispatch itself.
+vi.mock('@/app/actions/cookiemanager', () => ({
+  submitCookie: vi.fn().mockResolvedValue(undefined)
+}));
 vi.mock('@/app/contexts/userselectionprovider', () => ({
   useOrgCensusContext: () => null,
   useOrgCensusDispatch: () => vi.fn(),
@@ -27,13 +34,12 @@ vi.mock('@/app/contexts/loadingprovider', () => ({
     setLoading: vi.fn()
   })
 }));
+const { mockValidity } = vi.hoisted(() => ({
+  mockValidity: { attributes: true, species: true, quadrats: true }
+}));
 vi.mock('@/app/contexts/datavalidityprovider', () => ({
   useDataValidityContext: () => ({
-    validity: {
-      attributes: true,
-      species: true,
-      quadrats: true
-    },
+    validity: mockValidity,
     isDataValid: true,
     shouldAddPlot: false,
     shouldAddCensus: false
@@ -374,6 +380,113 @@ describe('Sidebar - Functional Tests', () => {
 
     it('MUST treat the census Select empty-string value as a normal change, not a programmatic clear', () => {
       expect(isProgrammaticSelectClear(null, '')).toBe(false);
+    });
+  });
+
+  describe('F8 - Sidebar navigation renders as real Next links', () => {
+    const testSite = { siteID: 1, siteName: 'Test Site', schemaName: 'testschema' };
+    const testPlot = { plotID: 1, plotName: 'Test Plot' };
+    const testCensus = {
+      plotID: 1,
+      plotCensusNumber: 1,
+      censusIDs: [101],
+      dateRanges: [{ censusID: 101, startDate: new Date('2024-01-01'), endDate: new Date('2024-12-31') }],
+      description: 'Test Census'
+    };
+
+    beforeEach(() => {
+      useAppStore.getState().clearSelections();
+      useAppStore.getState().setSite(testSite);
+      useAppStore.getState().setPlot(testPlot);
+      useAppStore.getState().setCensus(testCensus);
+    });
+
+    afterEach(() => {
+      useAppStore.getState().clearSelections();
+    });
+
+    it('MUST render the Dashboard nav item as a real anchor pointing at /dashboard', () => {
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+
+      const dashboardLink = screen.getByRole('link', { name: /dashboard/i });
+      expect(dashboardLink).toHaveAttribute('href', '/dashboard');
+    });
+
+    it('MUST render expanded sub-links as real anchors with the concatenated parent+child href', () => {
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+
+      const viewDataLink = screen.getByRole('link', { name: /view data/i });
+      expect(viewDataLink).toHaveAttribute('href', '/measurementshub/summary');
+
+      const stemCodesLink = screen.getByRole('link', { name: /stem codes/i });
+      expect(stemCodesLink).toHaveAttribute('href', '/fixeddatainput/attributes');
+    });
+
+    it('MUST preserve the Dashboard census-clearing side effect on plain click', async () => {
+      const user = userEvent.setup();
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+
+      expect(useAppStore.getState().currentCensus).toBeDefined();
+
+      const dashboardLink = screen.getByRole('link', { name: /dashboard/i });
+      await user.click(dashboardLink);
+
+      // The census-clear dispatch is fire-and-forget so real anchor navigation isn't gated
+      // behind it; wait for the async store update rather than asserting synchronously.
+      await waitFor(() => expect(useAppStore.getState().currentCensus).toBeUndefined());
+    });
+
+    it('MUST prevent default anchor navigation when clicking a disabled nav item', () => {
+      // Drive View Errors (/errors) into the disabled state: it's gated on
+      // isAllValiditiesTrue, so an incomplete attributes/species/quadrats section disables it.
+      mockValidity.attributes = false;
+      try {
+        render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+
+        const viewErrorsButton = screen.getByTestId('navigate-list-item-expanded-button-Census Hub-View Errors-/errors');
+        // No href at all: right-click "open in new tab" / middle-click must have nothing to follow.
+        expect(viewErrorsButton).not.toHaveAttribute('href');
+
+        const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+        fireEvent(viewErrorsButton, clickEvent);
+
+        expect(clickEvent.defaultPrevented).toBe(true);
+        expect(mockPush).not.toHaveBeenCalled();
+      } finally {
+        mockValidity.attributes = true;
+      }
+    });
+
+    it('MUST NOT render a sub-link as an anchor when its selection prerequisite (census) is missing', () => {
+      // Site + plot selected but NO census: Census Hub sub-links render in the
+      // selection-incomplete branch, whose composite disabled condition must strip the href.
+      useAppStore.getState().clearSelections();
+      useAppStore.getState().setSite(testSite);
+      useAppStore.getState().setPlot(testPlot);
+
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+
+      expect(screen.queryByRole('link', { name: /census overview/i })).not.toBeInTheDocument();
+
+      const censusOverviewLabel = screen.getByText('Census Overview');
+      const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+      fireEvent(censusOverviewLabel, clickEvent);
+
+      expect(clickEvent.defaultPrevented).toBe(true);
+      expect(mockPush).not.toHaveBeenCalled();
+    });
+
+    it('MUST NOT clear the census on a modified (cmd/ctrl) Dashboard click that opens a new tab', async () => {
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+
+      expect(useAppStore.getState().currentCensus).toBeDefined();
+
+      const dashboardLink = screen.getByRole('link', { name: /dashboard/i });
+      fireEvent.click(dashboardLink, { metaKey: true });
+
+      // Give any (wrongly triggered) async census-clear dispatch a chance to land before asserting.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(useAppStore.getState().currentCensus).toBeDefined();
     });
   });
 });
