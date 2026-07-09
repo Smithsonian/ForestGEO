@@ -56,6 +56,11 @@ import { Plot, Site } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { CallSplit, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore, Warning } from '@mui/icons-material';
 
+// The errors toggle filters (IsValidated = FALSE OR unresolved log entry); its tooltip breaks that
+// down into rows with unresolved logged errors vs FALSE rows with no log entry (not yet validated).
+export const INVALID_FILTER_TOOLTIP = (unresolvedLogged: number, notYetValidated: number) =>
+  notYetValidated > 0 ? `Unresolved errors: ${unresolvedLogged} · not yet validated: ${notYetValidated}` : `Unresolved errors: ${unresolvedLogged}`;
+
 export function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
   return ((...args: Parameters<T>) => {
@@ -330,7 +335,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
             />
             {gridType === 'measurements' && (
               <Stack direction={'row'} spacing={1.5} sx={{ display: 'flex', alignItems: 'center', ml: 1, flexWrap: 'nowrap', flexShrink: 0 }}>
-                <Tooltip title={`Invalid: ${errorControls.count} (rows with unresolved errors)`}>
+                <Tooltip
+                  title={INVALID_FILTER_TOOLTIP(errorControls.breakdown?.unresolvedLogged ?? errorControls.count, errorControls.breakdown?.failedNoLog ?? 0)}
+                >
                   <Badge badgeContent={errorControls.count} size={'sm'}>
                     <ToolbarButton
                       disabled={!errorControls.count}

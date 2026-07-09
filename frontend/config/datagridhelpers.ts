@@ -148,10 +148,16 @@ export interface ExtendedGridFilterModel extends GridFilterModel {
   tss: TSSFilter[];
 }
 
+export interface RowControlBreakdown {
+  unresolvedLogged: number;
+  failedNoLog: number;
+}
+
 export interface RowControl {
   show: boolean;
   toggle: (checked: boolean) => void;
   count: number;
+  breakdown?: RowControlBreakdown;
 }
 
 export interface EditToolbarCustomProps {

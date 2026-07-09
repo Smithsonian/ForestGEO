@@ -88,6 +88,68 @@ describe('EditToolbar', () => {
     expect(screen.getByTestId('filter-errors')).toHaveAttribute('aria-label', 'Hide invalid measurements (3)');
   });
 
+  it('breaks the invalid filter tooltip down into unresolved-logged vs not-yet-validated rows', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="measurements"
+        errorControls={{ show: true, toggle: vi.fn(), count: 3, breakdown: { unresolvedLogged: 2, failedNoLog: 1 } }}
+        validControls={{ show: true, toggle: vi.fn(), count: 4 }}
+        pendingControls={{ show: true, toggle: vi.fn(), count: 2 }}
+        otControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        msControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        nrControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        dynamicButtons={[]}
+      />
+    );
+
+    await user.hover(screen.getByTestId('filter-errors'));
+
+    expect(await screen.findByText('Unresolved errors: 2 · not yet validated: 1')).toBeInTheDocument();
+  });
+
+  it('shows only the unresolved-error count in the tooltip when no rows are awaiting validation', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="measurements"
+        errorControls={{ show: true, toggle: vi.fn(), count: 3, breakdown: { unresolvedLogged: 3, failedNoLog: 0 } }}
+        validControls={{ show: true, toggle: vi.fn(), count: 4 }}
+        pendingControls={{ show: true, toggle: vi.fn(), count: 2 }}
+        otControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        msControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        nrControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        dynamicButtons={[]}
+      />
+    );
+
+    await user.hover(screen.getByTestId('filter-errors'));
+
+    expect(await screen.findByText('Unresolved errors: 3')).toBeInTheDocument();
+  });
+
   it('MUST render a zero-count status filter as disabled', () => {
     render(
       <EditToolbar

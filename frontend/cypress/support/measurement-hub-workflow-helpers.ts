@@ -111,9 +111,11 @@ function buildCounts(rows: GenericRow[], validationFailures: MeasurementValidati
 
   return {
     CountValid: rows.filter(row => !failedIDs.has(Number(row.coreMeasurementID)) && row.isValidated === true).length,
-    CountInvalid: rows.filter(row => failedIDs.has(Number(row.coreMeasurementID))).length,
-    CountValidationErrors: rows.filter(row => failedIDs.has(Number(row.coreMeasurementID))).length,
+    CountUnresolvedLogged: rows.filter(row => failedIDs.has(Number(row.coreMeasurementID))).length,
+    CountFailedNoLog: rows.filter(row => !failedIDs.has(Number(row.coreMeasurementID)) && row.isValidated === false).length,
     CountPending: rows.filter(row => !failedIDs.has(Number(row.coreMeasurementID)) && row.isValidated == null).length,
+    // Mirrors the override modal predicate (IsValidated = FALSE OR IS NULL); intentionally not disjoint.
+    CountOverridable: rows.filter(row => row.isValidated === false || row.isValidated == null).length,
     CountOldTrees: rows.filter(row => normalizeText(row.userDefinedFields).includes('old tree')).length,
     CountNewRecruits: rows.filter(row => normalizeText(row.userDefinedFields).includes('new recruit')).length,
     CountMultiStems: rows.filter(row => normalizeText(row.userDefinedFields).includes('multi stem')).length
@@ -249,7 +251,7 @@ export function mockMeasurementHubWorkflowApi({
     }
 
     if (typeof body === 'string') {
-      if (body.includes('CountValid') || body.includes('CountInvalid') || body.includes('CountPending') || body.includes('CountValidationErrors')) {
+      if (body.includes('CountValid') || body.includes('CountUnresolvedLogged') || body.includes('CountPending') || body.includes('CountFailedNoLog')) {
         req.reply({
           statusCode: 200,
           body: [buildCounts(state.summaryRows, state.validationFailures)]

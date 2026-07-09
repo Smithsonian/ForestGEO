@@ -154,15 +154,19 @@ function matchesTreeStemState(row: GenericRow, tss: string[] = defaultTssFilters
 function buildCounts(rows: GenericRow[], validationFailures: MeasurementValidationFailure[]) {
   const failedIDs = new Set(validationFailures.map(failure => Number(failure.coreMeasurementID)));
 
-  const countInvalid = rows.filter(row => failedIDs.has(Number(row.coreMeasurementID))).length;
+  const countUnresolvedLogged = rows.filter(row => failedIDs.has(Number(row.coreMeasurementID))).length;
+  const countFailedNoLog = rows.filter(row => !failedIDs.has(Number(row.coreMeasurementID)) && row.isValidated === false).length;
   const countPending = rows.filter(row => !failedIDs.has(Number(row.coreMeasurementID)) && row.isValidated == null).length;
   const countValid = rows.filter(row => !failedIDs.has(Number(row.coreMeasurementID)) && row.isValidated === true).length;
+  // Mirrors the override modal predicate (IsValidated = FALSE OR IS NULL); intentionally not disjoint.
+  const countOverridable = rows.filter(row => row.isValidated === false || row.isValidated == null).length;
 
   return {
     CountValid: countValid,
-    CountInvalid: countInvalid,
-    CountValidationErrors: countInvalid,
+    CountUnresolvedLogged: countUnresolvedLogged,
+    CountFailedNoLog: countFailedNoLog,
     CountPending: countPending,
+    CountOverridable: countOverridable,
     CountOldTrees: rows.filter(row => normalizeText(row.userDefinedFields).includes('old tree')).length,
     CountNewRecruits: rows.filter(row => normalizeText(row.userDefinedFields).includes('new recruit')).length,
     CountMultiStems: rows.filter(row => normalizeText(row.userDefinedFields).includes('multi stem')).length
@@ -518,7 +522,7 @@ export function mockMeasurementsSummaryApi<Row extends GenericRow>({
     const body = normalizeRequestBody(req.body);
 
     if (typeof body === 'string') {
-      if (body.includes('CountValid') || body.includes('CountInvalid') || body.includes('CountPending') || body.includes('CountValidationErrors')) {
+      if (body.includes('CountValid') || body.includes('CountUnresolvedLogged') || body.includes('CountPending') || body.includes('CountFailedNoLog')) {
         req.reply({
           statusCode: 200,
           body: [buildCounts(state.rows, state.validationFailures)]

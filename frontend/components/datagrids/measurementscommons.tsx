@@ -21,7 +21,7 @@ import {
   GridToolbarProps,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, AlertColor, AlertPropsColorOverrides, Snackbar } from '@mui/material';
+import { Alert, Snackbar } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
@@ -56,6 +56,7 @@ import {
   getGridID,
   MeasurementsCommonsProps,
   PendingAction,
+  RowControlBreakdown,
   sortRowsByMeasurementDate,
   VisibleFilter
 } from '@/config/datagridhelpers';
@@ -78,7 +79,6 @@ import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { getGridTypeLabel } from '@/config/macros/siteconfigs';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import { formatHeader, InputChip } from '@/components/client/datagridcolumns';
-import { OverridableStringUnion } from '@mui/types';
 import ValidationOverrideModal from '@/components/client/modals/validationoverridemodal';
 import { MeasurementsSummaryResult } from '@/lib/db/definitions/views';
 import MapperFactory from '@/config/datamapper';
@@ -108,11 +108,12 @@ import {
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
+  selectMeasurementStateSnackbar,
   shouldRefreshMeasurementsAfterValidationTransition,
   shouldUseAutoMeasurementRowHeight,
   toServerMeasurementFilterModel
 } from './measurementscommonsutils';
-import { buildMeasurementVisibleConditionSql } from '@/config/measurementstatefilters';
+import { buildMeasurementStateCountsSql } from '@/config/measurementstatefilters';
 
 // Stable reference to prevent infinite resize observer loop in MUI DataGrid
 const AUTO_ROW_HEIGHT = () => 'auto' as const;
@@ -243,6 +244,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [hasLoadedGrid, setHasLoadedGrid] = useState(false);
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
   const [invalidCount, setInvalidCount] = useState<number>(0);
+  const [invalidBreakdown, setInvalidBreakdown] = useState<RowControlBreakdown>({ unresolvedLogged: 0, failedNoLog: 0 });
   const [validationErrorCount, setValidationErrorCount] = useState<number>(0);
   const [validCount, setValidCount] = useState<number>(0);
   const [pendingCount, setPendingCount] = useState<number>(0);
@@ -324,13 +326,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     if (!currentSite?.schemaName || !currentPlot || !currentCensus) return;
 
     try {
-      const validCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'valid');
-      const invalidCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'errors');
-      const pendingCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'pending');
-      const query = `SELECT SUM(CASE WHEN ${validCondition} THEN 1 ELSE 0 END) AS CountValid,
-                            SUM(CASE WHEN ${invalidCondition} THEN 1 ELSE 0 END) AS CountInvalid,
-                            SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountValidationErrors,
-                            SUM(CASE WHEN ${pendingCondition} THEN 1 ELSE 0 END) AS CountPending,
+      const stateCountsProjection = buildMeasurementStateCountsSql(currentSite.schemaName, 'vft');
+      const query = `SELECT ${stateCountsProjection},
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('old tree'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountOldTrees,
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('new recruit'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountNewRecruits,
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('multi stem'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountMultiStems
@@ -348,25 +345,33 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       const data = await response.json();
       const countsData = data[0];
 
-      setValidCount(Number(countsData.CountValid) || 0);
-      setInvalidCount(Number(countsData.CountInvalid) || 0);
-      setValidationErrorCount(Number(countsData.CountValidationErrors) || 0);
-      setPendingCount(Number(countsData.CountPending) || 0);
+      const unresolvedLoggedCount = Number(countsData.CountUnresolvedLogged) || 0;
+      const failedNoLogCount = Number(countsData.CountFailedNoLog) || 0;
+      const pendingValidationCount = Number(countsData.CountPending) || 0;
+      const validMeasurementCount = Number(countsData.CountValid) || 0;
+      const overridableCount = Number(countsData.CountOverridable) || 0;
+
+      setValidCount(validMeasurementCount);
+      // The errors toggle filters on (IsValidated = FALSE OR unresolved log entry), which is exactly
+      // CountUnresolvedLogged + CountFailedNoLog — the badge must equal the rows the toggle shows.
+      setInvalidCount(unresolvedLoggedCount + failedNoLogCount);
+      setInvalidBreakdown({ unresolvedLogged: unresolvedLoggedCount, failedNoLog: failedNoLogCount });
+      // Feeds "Force N failed row(s) to pass" — CountOverridable mirrors the override modal's
+      // UPDATE predicate (IsValidated = FALSE OR IS NULL) exactly.
+      setValidationErrorCount(overridableCount);
+      setPendingCount(pendingValidationCount);
       setOTCount(Number(countsData.CountOldTrees) || 0);
       setMSCount(Number(countsData.CountMultiStems) || 0);
       setNRCount(Number(countsData.CountNewRecruits) || 0);
 
-      const counts = [
-        { count: Number(countsData.CountInvalid) || 0, message: `${countsData.CountInvalid} row(s) with unresolved errors detected.`, severity: 'warning' },
-        { count: Number(countsData.CountPending) || 0, message: `${countsData.CountPending} row(s) pending validation.`, severity: 'info' },
-        { count: Number(countsData.CountValid) || 0, message: `${countsData.CountValid} row(s) passed validation.`, severity: 'success' }
-      ];
-      const highestCount = counts.reduce((prev, current) => (current.count > prev.count ? current : prev));
-      if (highestCount.count !== null) {
-        setSnackbar({
-          children: highestCount.message,
-          severity: highestCount.severity as OverridableStringUnion<AlertColor, AlertPropsColorOverrides> | undefined
-        });
+      const snackbarByState = selectMeasurementStateSnackbar({
+        unresolvedLogged: unresolvedLoggedCount,
+        failedNoLog: failedNoLogCount,
+        pending: pendingValidationCount,
+        valid: validMeasurementCount
+      });
+      if (snackbarByState) {
+        setSnackbar({ children: snackbarByState.message, severity: snackbarByState.severity });
       }
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
@@ -1670,7 +1675,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                         errorCount={validationErrorCount}
                       />
                     ),
-                    errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount },
+                    errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount, breakdown: invalidBreakdown },
                     validControls: { show: showValidRows, toggle: setShowValidRows, count: validCount },
                     pendingControls: { show: showPendingRows, toggle: setShowPendingRows, count: pendingCount },
                     otControls: { show: showOT, toggle: setShowOT, count: otCount },
