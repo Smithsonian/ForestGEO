@@ -5,6 +5,7 @@ import ailogger from '@/ailogger';
 import moment from 'moment';
 import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { refreshMeasurementsSummaryForScope, refreshViewFullTableForScope } from '@/lib/measurementviewrefresh';
+import { updatePostValidationLastRun } from '@/lib/postvalidationlastrun';
 import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -83,31 +84,39 @@ async function _executePostValidationQueries(
         const queryResults = await connectionManager.executeQuery(formattedQuery);
 
         if (queryResults && queryResults.length > 0) {
-          // Query succeeded with results - use parameterized query
+          // Query succeeded with results
           const successResults = JSON.stringify(queryResults);
-          const updateQuery = safeFormatQuery(
-            schema,
-            'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = ?, LastRunPlotID = ?, LastRunCensusID = ? WHERE QueryID = ?'
-          );
-          await connectionManager.executeQuery(updateQuery, [currentTime, successResults, 'success', plotID, censusID, queryID]);
+          await updatePostValidationLastRun(connectionManager, schema, {
+            queryID,
+            plotID,
+            censusID,
+            ranAt: currentTime,
+            status: 'success',
+            result: successResults
+          });
           stats.success++;
         } else {
           // Query succeeded but returned no results (treated as failure/no issues found)
-          const updateQuery = safeFormatQuery(
-            schema,
-            'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = NULL, LastRunStatus = ?, LastRunPlotID = ?, LastRunCensusID = ? WHERE QueryID = ?'
-          );
-          await connectionManager.executeQuery(updateQuery, [currentTime, 'failure', plotID, censusID, queryID]);
+          await updatePostValidationLastRun(connectionManager, schema, {
+            queryID,
+            plotID,
+            censusID,
+            ranAt: currentTime,
+            status: 'failure',
+            result: null
+          });
           stats.failed++;
         }
       } catch (queryError) {
         // Query execution failed
         ailogger.error(`Post-validation query ${queryID} failed:`, queryError instanceof Error ? queryError : undefined);
-        const updateQuery = safeFormatQuery(
-          schema,
-          'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunStatus = ?, LastRunPlotID = ?, LastRunCensusID = ? WHERE QueryID = ?'
-        );
-        await connectionManager.executeQuery(updateQuery, [currentTime, 'failure', plotID, censusID, queryID]);
+        await updatePostValidationLastRun(connectionManager, schema, {
+          queryID,
+          plotID,
+          censusID,
+          ranAt: currentTime,
+          status: 'failure'
+        });
         stats.failed++;
       }
     }

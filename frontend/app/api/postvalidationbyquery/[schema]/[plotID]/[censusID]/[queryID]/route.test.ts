@@ -205,6 +205,37 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('200 on unmigrated schema (missing LastRunPlotID column): retries with unscoped UPDATE instead of returning 500', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery');
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-3');
+    const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+    vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+
+    const unknownColumn = new Error("Unknown column 'LastRunPlotID' in 'field list'") as Error & { code?: string; errno?: number };
+    unknownColumn.code = 'ER_BAD_FIELD_ERROR';
+    unknownColumn.errno = 1054;
+
+    // 1) QueryDefinition
+    exec.mockResolvedValueOnce([{ QueryDefinition: 'SELECT * FROM ${schema}.t WHERE PlotID = ${currentPlotID} AND CensusID = ${currentCensusID}' }]);
+    // 2) formatted query -> rows
+    exec.mockResolvedValueOnce([{ RowID: 1 }]);
+    // 3) scoped UPDATE fails: schema has not had migration 61 applied
+    exec.mockRejectedValueOnce(unknownColumn);
+    // 4) legacy unscoped UPDATE succeeds
+    exec.mockResolvedValueOnce(undefined as any);
+
+    const res = await GET(dummyReq, makeProps('myschema', '10', '20', '5'));
+    expect(res.status).toBe(HTTPResponses.OK);
+
+    expect(exec).toHaveBeenCalledTimes(4);
+    const [fallbackSQL, fallbackParams] = exec.mock.calls[3];
+    expect(String(fallbackSQL)).toMatch(/UPDATE `myschema`\.postvalidationqueries/i);
+    expect(String(fallbackSQL)).not.toMatch(/LastRunPlotID|LastRunCensusID/i);
+    expect(fallbackParams).toEqual(['2025-01-02 03:04:05', JSON.stringify([{ RowID: 1 }]), 'success', 5]);
+    expect(commit).toHaveBeenCalledWith('tx-3');
+  });
+
   it('500 on unexpected error; rolls back (if tx id present) and closes', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');

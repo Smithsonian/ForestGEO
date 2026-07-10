@@ -4,6 +4,7 @@ import moment from 'moment';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { updatePostValidationLastRun } from '@/lib/postvalidationlastrun';
 import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -69,24 +70,27 @@ async function handler(_request: NextRequest, context: RouteContext) {
 
     const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
     const successResults = JSON.stringify(queryResults);
-    // Use parameterized query for UPDATE
-    const successUpdate = safeFormatQuery(
-      schema,
-      'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = ?, LastRunPlotID = ?, LastRunCensusID = ? WHERE QueryID = ?'
-    );
-    await connectionManager.executeQuery(successUpdate, [currentTime, successResults, 'success', plotID, censusID, queryID]);
+    await updatePostValidationLastRun(connectionManager, schema, {
+      queryID,
+      plotID,
+      censusID,
+      ranAt: currentTime,
+      status: 'success',
+      result: successResults
+    });
     await connectionManager.commitTransaction(transactionID ?? '');
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
     await connectionManager.rollbackTransaction(transactionID ?? '');
     if (e.message === 'failure') {
       const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-      // Use parameterized query for UPDATE
-      const failureUpdate = safeFormatQuery(
-        schema,
-        'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunStatus = ?, LastRunPlotID = ?, LastRunCensusID = ? WHERE QueryID = ?'
-      );
-      await connectionManager.executeQuery(failureUpdate, [currentTime, 'failure', plotID, censusID, queryID]);
+      await updatePostValidationLastRun(connectionManager, schema, {
+        queryID,
+        plotID,
+        censusID,
+        ranAt: currentTime,
+        status: 'failure'
+      });
       return new NextResponse(null, { status: HTTPResponses.OK }); // if the query itself fails, that isn't a good enough reason to return a crash. It should just be logged.
     }
     ailogger.error('Error in postvalidation query:', e.message, {
