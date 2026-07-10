@@ -1,4 +1,4 @@
-<title>ForestGEO Walkthrough — What We Found, What We Fixed</title>
+<title>ForestGEO Walkthrough — What I Found, What I Fixed</title>
 <style>
   :root {
     --ground: #FAFAF7;
@@ -63,7 +63,7 @@
     line-height: 1.6;
     margin: 0;
   }
-  .wrap { max-width: 860px; margin: 0 auto; padding: 48px 24px 96px; }
+  .wrap { max-width: min(1040px, 92vw); margin: 0 auto; padding: 48px 24px 96px; }
   code, .mono {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     font-size: 0.86em;
@@ -210,6 +210,7 @@
 
   figure { margin: 16px 0 4px; }
   figure img {
+    width: 100%;
     max-width: 100%;
     height: auto;
     display: block;
@@ -217,8 +218,8 @@
     border-radius: 6px;
   }
   figcaption { font-size: 13px; color: var(--muted); margin-top: 7px; max-width: 70ch; }
-  .figrow { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
-  .figrow figure { flex: 1 1 320px; min-width: 240px; margin: 0; }
+  .figrow { display: flex; flex-direction: column; gap: 28px; margin-top: 14px; }
+  .figrow figure { width: 100%; margin: 0; }
   .figrow .taglabel {
     display: inline-block;
     font-size: 11px;
@@ -246,19 +247,13 @@
 <div class="wrap">
   <header>
     <p class="eyebrow">UX walkthrough · plain-language edition</p>
-    <h1>Where ForestGEO users get lost, and what we've fixed so far</h1>
+    <h1>Where ForestGEO users get lost, and what I've fixed so far</h1>
     <p class="lede">
-      In July 2026 we walked through every major screen in ForestGEO the way a researcher actually uses it —
+      In July 2026 I walked through every major screen in ForestGEO the way a researcher actually uses it —
       signing in, choosing a site and census, browsing and editing measurements, uploading files, and checking
-      results. This page describes what we found, in plain language, and — for the items already fixed —
+      results. This page describes what I found, in plain language, and — for the items already fixed —
       shows what changed and why it should feel better to use.
     </p>
-    <p class="meta">
-      This is the non-technical companion to the original engineering audit
-      (<code>ux-walkthrough-2026-07-06.html</code>), written for researchers, site administrators, and anyone who
-      uses the app but doesn't need the implementation details. Updated 2026-07-09.
-    </p>
-
     <div class="scoreboard">
       <div class="tile fixed"><div class="n">10</div><div class="lbl">Fixed &amp; live</div></div>
       <div class="tile open"><div class="n">16</div><div class="lbl">Still on the list</div></div>
@@ -270,7 +265,7 @@
       already been changed, tested, and merged into the app you use. The screenshots under each one were taken
       directly from the running app, not mocked up.</p>
       <p>The items still on the list aren't forgotten — they're just not done yet. They're included here so you
-      know we've heard about them and can see the plain-language version of the concern.</p>
+      know I've heard about them and can see the plain-language version of the concern.</p>
     </div>
 
     <nav class="toc" aria-label="Sections">
@@ -301,7 +296,7 @@
       the sidebar, on that exact same screen, listed all nine sites you could choose from. The two parts of the
       screen were checking your access two different ways, and only one of them was right.</p>
       <div class="fixblock">
-        <div class="fixhead">✓ What we changed</div>
+        <div class="fixhead">✓ What I changed</div>
         <p>The Dashboard's site list and the sidebar's site list now come from the same place. An administrator
         who can see every site now sees every site, everywhere on the page.</p>
         <p class="why"><strong>Why it's better:</strong> being told "you have no access" to a system you're
@@ -331,7 +326,7 @@
       for clearing your site selection also read <em>"DESELECT SITE (WILL TRIGGER APP RESET!)"</em> — alarming
       wording for what is normally a routine, harmless action.</p>
       <div class="fixblock">
-        <div class="fixhead">✓ What we changed</div>
+        <div class="fixhead">✓ What I changed</div>
         <p>You can no longer delete a census from the quick picker. Deleting now happens from the Census Overview
         page, next to that census's full details, and only for the most recent census — so older, already-published
         data can't be deleted by mistake. The "DESELECT SITE" warning is now plain "Clear selection."</p>
@@ -363,7 +358,7 @@
         <li>The same date appeared written three different ways across three different pages.</li>
       </ul>
       <div class="fixblock">
-        <div class="fixhead">✓ What we changed</div>
+        <div class="fixhead">✓ What I changed</div>
         <p>Dates now display the same, plain way everywhere in the app (for example, <code>Feb 3, 2008</code>), the
         stray symbol and missing spaces are gone, and the empty group no longer shows up.</p>
         <p class="why"><strong>Why it's better:</strong> small inconsistencies like these are exactly what make a
@@ -416,9 +411,9 @@
         selected." right after you'd navigated somewhere — so bug reports lost the context that mattered most.</li>
       </ul>
       <div class="fixblock">
-        <div class="fixhead">✓ What we changed</div>
+        <div class="fixhead">✓ What I changed</div>
         <p>Your selection is now correctly restored the moment the page loads — whether that's a manual refresh, a
-        bookmark, or a link someone sent you. We also confirmed this works from a cold page load on a specific
+        bookmark, or a link someone sent you. I also confirmed this works from a cold page load on a specific
         sub-page, not just the Dashboard.</p>
         <p class="why"><strong>Why it's better:</strong> you can now refresh mid-task without fear, bookmark a
         specific census's error list, and send a colleague a direct link that actually opens where you meant it to.</p>
@@ -441,7 +436,7 @@
       or Cmd/Ctrl-click to open in a new tab, right-click to copy the link) didn't work. Combined with the reload
       problem above, it meant you couldn't keep the error list open in one tab and the data grid open in another.</p>
       <div class="fixblock">
-        <div class="fixhead">✓ What we changed</div>
+        <div class="fixhead">✓ What I changed</div>
         <p>Sidebar menu items are now real links. Middle-click, Cmd/Ctrl-click, and right-click-to-copy all work as
         you'd expect from any other website.</p>
         <p class="why"><strong>Why it's better:</strong> this is a small, mostly invisible change under the hood —
@@ -462,10 +457,10 @@
       <p>Opening the data grid greeted you with a warning: <em>"23,322 row(s) with unresolved errors detected."</em>
       Clicking straight through to the "View Errors" page — meant to be the definitive place to review exactly
       those errors — showed every counter at zero. A third summary on the same census said data quality checks
-      "have not been run yet." So, for the same census, at the same moment: 23,322 errors, 0 errors, and "we
-      haven't checked" — three contradictory answers to the same question.</p>
+      "have not been run yet." So, for the same census, at the same moment: 23,322 errors, 0 errors, and "nothing's
+      been checked yet" — three contradictory answers to the same question.</p>
       <div class="fixblock">
-        <div class="fixhead">✓ What we changed</div>
+        <div class="fixhead">✓ What I changed</div>
         <p>The data grid, its warning message, and the error page now all agree, because they now use one shared,
         consistent definition of "not yet checked," "failed a check," and "valid" — instead of each page counting
         things its own way. If a census genuinely hasn't been checked yet, the message now says exactly that,
@@ -496,7 +491,7 @@
       more than one stem). The same screen also confidently reported "0 old trees" for a first census, where that
       number genuinely can't be measured yet, instead of saying so.</p>
       <div class="fixblock">
-        <div class="fixhead">✓ What we changed</div>
+        <div class="fixhead">✓ What I changed</div>
         <p>The multi-stem count is now calculated the same way as the rest of the statistics on the page, so it
         agrees with them — this particular census actually has 4,481 trees with more than one stem. And when a
         number genuinely can't be computed yet (like "old trees" on a brand-new census), the page now shows a
@@ -534,7 +529,7 @@
       values cut off mid-number. You had to manually widen a dozen columns, every single visit, before you could
       tell what you were looking at.</p>
       <div class="fixblock">
-        <div class="fixhead">✓ What we changed</div>
+        <div class="fixhead">✓ What I changed</div>
         <p>Columns now open at sensible widths appropriate to what they hold (dates get more room than a short
         code, for instance), and the table now remembers how you've resized or hidden columns the next time you
         come back — you only have to adjust it once.</p>
@@ -609,7 +604,7 @@
       meant researchers could see (and in principle download or delete) files that weren't theirs, which is both
       confusing and a real data-privacy concern.</p>
       <div class="fixblock">
-        <div class="fixhead">✓ What we changed</div>
+        <div class="fixhead">✓ What I changed</div>
         <p>Every site's uploaded files are now filed away in their own separate, clearly labeled location, so this
         mix-up can no longer happen for anything uploaded going forward. A companion tool — used by administrators
         behind the scenes, not something you'll interact with directly — can move older files that were uploaded
@@ -713,7 +708,7 @@
 
   <section class="stage" id="stage-h">
     <h2>What already works well</h2>
-    <p class="stage-sub">Just as important as the problems: these are the things we're protecting, not changing.</p>
+    <p class="stage-sub">Just as important as the problems: these are the things I'm protecting, not changing.</p>
 
     <article class="finding good" id="f30">
       <div class="fhead"><span class="fid">F30</span><span class="chip good">Keep</span></div>
