@@ -12,16 +12,28 @@ import Typography from '@mui/joy/Typography';
 import { Plot } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import ailogger from '@/ailogger';
-import { getContainerName } from '@/config/macros/containernames';
+import { getContainerName, SchemaContainerNameError } from '@/config/macros/containernames';
 import { useSiteContext } from '@/app/contexts/compat-hooks';
 
 const CONTAINER_NAME_UNAVAILABLE = 'none';
+const CONTAINER_NAME_UNMAPPABLE = 'unavailable (schema cannot be mapped to a storage container)';
 
-function containerDisplayName(schemaName: string | undefined, plotID: number | undefined, censusNumber: number | undefined): string {
+export function containerDisplayName(schemaName: string | undefined, plotID: number | undefined, censusNumber: number | undefined): string {
   if (!schemaName || !plotID || !censusNumber) {
     return CONTAINER_NAME_UNAVAILABLE;
   }
-  return getContainerName(schemaName, plotID, censusNumber);
+  // getContainerName fails closed (throws) for schemas it cannot map
+  // injectively; this label is display-only, so degrade instead of letting the
+  // throw crash the whole page render. File operations still surface the 400.
+  try {
+    return getContainerName(schemaName, plotID, censusNumber);
+  } catch (error) {
+    if (error instanceof SchemaContainerNameError) {
+      return CONTAINER_NAME_UNMAPPABLE;
+    }
+    ailogger.warn(`Failed to derive container display name for ${schemaName}`, error instanceof Error ? error : undefined);
+    return CONTAINER_NAME_UNAVAILABLE;
+  }
 }
 
 interface LoadingFilesProps {
