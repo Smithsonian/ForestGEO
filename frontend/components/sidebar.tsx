@@ -22,6 +22,7 @@ import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, usePlotDispa
 import { markExplicitSelectionClear } from '@/config/store/appstore';
 import { usePathname, useRouter } from 'next/navigation';
 import NextLink from 'next/link';
+import ailogger from '@/ailogger';
 import { Badge, IconButton, SelectOption, Stack, Tooltip } from '@mui/joy';
 import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
@@ -1026,10 +1027,21 @@ export default function Sidebar(props: SidebarProps) {
 
                       const handleDashboardClick = (e: React.MouseEvent) => {
                         if (isModifiedClick(e)) return;
-                        // Fire-and-forget: the census-clear dispatch doesn't gate navigation,
-                        // matching the previous router.push-based behavior.
-                        void handleCensusSelection(undefined);
-                        focusMainContent();
+                        // Same-tab navigation must wait for the census-clear dispatch:
+                        // letting the NextLink navigate immediately mounts the dashboard
+                        // with the census still selected, so it fetches census-scoped
+                        // metrics that then flash and vanish when the clear lands.
+                        e.preventDefault();
+                        void (async () => {
+                          try {
+                            await handleCensusSelection(undefined);
+                          } catch (error) {
+                            ailogger.error('Failed to clear census selection before dashboard navigation', error instanceof Error ? error : undefined);
+                            return;
+                          }
+                          router.push(item.href);
+                          focusMainContent();
+                        })();
                       };
 
                       // Dashboard button is always visible, other non-expanding items require site+plot
@@ -1141,23 +1153,24 @@ export default function Sidebar(props: SidebarProps) {
 
                                   const handleSubLinkClick = (e: React.MouseEvent) => {
                                     if (link.href === '/postvalidation') {
-                                      // Post-Census Statistics can't be a plain same-tab anchor: navigation
-                                      // is gated on an async availability check, so it preventDefault()s
-                                      // and navigates programmatically once the fetch resolves.
-                                      const isModifiedPostValidationClick = isModifiedClick(e);
+                                      // Modified clicks open the anchor's href in a new tab NATIVELY:
+                                      // a window.open() issued after an awaited fetch runs outside the
+                                      // click's transient user activation and gets popup-blocked
+                                      // (Safari always; Chrome once the fetch outlives the activation
+                                      // window). The destination page handles the no-measurements case
+                                      // itself — it must, since it is directly addressable by URL.
+                                      if (isModifiedClick(e)) return;
+                                      // Same-tab navigation stays gated on the async availability
+                                      // check, so it preventDefault()s and navigates programmatically
+                                      // once the fetch resolves.
                                       e.preventDefault();
                                       void (async () => {
                                         const response = await fetch(
                                           `/api/cmprevalidation/postvalidation/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}`
                                         );
                                         if (response.ok) {
-                                          const href = item.href + link.href;
-                                          if (isModifiedPostValidationClick) {
-                                            window.open(href, '_blank', 'noopener,noreferrer');
-                                          } else {
-                                            router.push(href);
-                                            focusMainContent();
-                                          }
+                                          router.push(item.href + link.href);
+                                          focusMainContent();
                                         } else {
                                           alert('No measurements found!');
                                         }

@@ -431,9 +431,11 @@ describe('Sidebar - Functional Tests', () => {
       const dashboardLink = screen.getByRole('link', { name: /dashboard/i });
       await user.click(dashboardLink);
 
-      // The census-clear dispatch is fire-and-forget so real anchor navigation isn't gated
-      // behind it; wait for the async store update rather than asserting synchronously.
+      // Same-tab navigation waits for the census clear, THEN navigates — the
+      // dashboard must never mount with the census still selected (it would
+      // fetch census-scoped metrics that flash and vanish).
       await waitFor(() => expect(useAppStore.getState().currentCensus).toBeUndefined());
+      await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/dashboard'));
     });
 
     it('MUST prevent default anchor navigation when clicking a disabled nav item', () => {
@@ -489,7 +491,12 @@ describe('Sidebar - Functional Tests', () => {
       expect(useAppStore.getState().currentCensus).toBeDefined();
     });
 
-    it('MUST gate modified Post-Census Statistics clicks on the availability check', async () => {
+    it('MUST let a modified Post-Census Statistics click open the anchor natively (no gate, no window.open)', async () => {
+      // window.open() issued after an awaited fetch runs OUTSIDE the click's
+      // transient user activation and gets popup-blocked (Safari always, Chrome
+      // once the fetch outlives the activation window) — the user sees nothing
+      // happen. Modified clicks must therefore fall through to the browser's
+      // native new-tab handling of the real anchor href.
       const fetchMock = vi.fn().mockResolvedValue({ ok: true });
       const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
       vi.stubGlobal('fetch', fetchMock);
@@ -498,17 +505,43 @@ describe('Sidebar - Functional Tests', () => {
         render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
         const postValidationLink = screen.getByRole('link', { name: /post-census statistics/i });
+        expect(postValidationLink).toHaveAttribute('href', '/measurementshub/postvalidation');
         const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
+        fireEvent(postValidationLink, clickEvent);
+
+        expect(clickEvent.defaultPrevented).toBe(false);
+        // Give any (wrongly triggered) async gate a chance to run before asserting.
+        // The sidebar issues unrelated background fetches, so assert specifically
+        // that the availability gate never ran.
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(fetchMock).not.toHaveBeenCalledWith('/api/cmprevalidation/postvalidation/testschema/1/1');
+        expect(openSpy).not.toHaveBeenCalled();
+        expect(mockPush).not.toHaveBeenCalledWith('/measurementshub/postvalidation');
+      } finally {
+        openSpy.mockRestore();
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('MUST still gate same-tab Post-Census Statistics clicks on the availability check', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+        const postValidationLink = screen.getByRole('link', { name: /post-census statistics/i });
+        const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
         fireEvent(postValidationLink, clickEvent);
 
         expect(clickEvent.defaultPrevented).toBe(true);
         await waitFor(() => {
           expect(fetchMock).toHaveBeenCalledWith('/api/cmprevalidation/postvalidation/testschema/1/1');
         });
-        expect(openSpy).toHaveBeenCalledWith('/measurementshub/postvalidation', '_blank', 'noopener,noreferrer');
-        expect(mockPush).not.toHaveBeenCalledWith('/measurementshub/postvalidation');
+        await waitFor(() => {
+          expect(mockPush).toHaveBeenCalledWith('/measurementshub/postvalidation');
+        });
       } finally {
-        openSpy.mockRestore();
         vi.unstubAllGlobals();
       }
     });
