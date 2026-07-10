@@ -177,7 +177,11 @@ async function processMetrics(metric: string, schema: SchemaName, plotID: number
             )
             SELECT
               ${MULTI_STEM_TREES_SUBQUERY} AS CountMultiStems,
-              (SELECT COUNT(DISTINCT CONCAT(TreeTag, '|', StemTag)) FROM measured_stems) AS CountNewRecruits`;
+              -- Every measured stem is a recruit on a first census. Count rows the
+              -- same way the comparison branch does (one per distinct StemGUID):
+              -- concatenating tag pairs would yield NULL for NULL TreeTags and drop
+              -- those stems, contradicting the Stems tile.
+              (SELECT COUNT(*) FROM measured_stems) AS CountNewRecruits`;
           const firstCensusResult = await connectionManager.executeQuery(firstCensusQuery, [censusID, censusID]);
           return NextResponse.json(
             {

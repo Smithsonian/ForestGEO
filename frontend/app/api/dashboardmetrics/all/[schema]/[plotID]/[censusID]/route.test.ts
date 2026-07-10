@@ -177,6 +177,13 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       expect(String(classificationCall![0])).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
       expect(String(classificationCall![0])).not.toMatch(/previous_stems/i);
 
+      // Recruits on a first census must count EVERY measured stem, the same way
+      // the comparison branch counts measured_stems rows. Tag-pair concatenation
+      // would return NULL for NULL TreeTags (dropping those stems) and collapse
+      // duplicate tag pairs, undercounting recruits below the Stems tile.
+      expect(String(classificationCall![0])).toMatch(/SELECT COUNT\(\*\) FROM measured_stems\) AS CountNewRecruits/i);
+      expect(String(classificationCall![0])).not.toMatch(/CONCAT\(TreeTag/i);
+
       // Verify other metrics are present
       expect(body.progressTachometer).toBeDefined();
       expect(body.activeUsers).toBeDefined();
