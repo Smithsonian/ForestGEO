@@ -110,6 +110,24 @@ describe('DataQualityCard', () => {
     expect(screen.queryByText('Excellent')).not.toBeInTheDocument();
   });
 
+  it('does not degrade to "Attention Needed" when every query that ran passed and the rest are merely pending', async () => {
+    // 3 of 10 queries ran (all passed), 7 never ran. Pending queries are not
+    // failures: the pass rate is over queries that RAN, so zero failures must
+    // never render a warning badge.
+    mockQueriesResponse([
+      ...[1, 2, 3].map(queryID => buildQuery({ queryID, queryName: `Passed query ${queryID}`, lastRunStatus: 'success' as const, ...CURRENT_RUN_CONTEXT })),
+      ...[4, 5, 6, 7, 8, 9, 10].map(queryID => buildQuery({ queryID, queryName: `Pending query ${queryID}`, lastRunStatus: undefined }))
+    ]);
+
+    renderCard();
+
+    expect(await screen.findByText('3 passed')).toBeInTheDocument();
+    expect(screen.getByText('7 pending')).toBeInTheDocument();
+    expect(screen.queryByText(/failed/)).not.toBeInTheDocument();
+    expect(screen.getByText('Good')).toBeInTheDocument();
+    expect(screen.queryByText('Attention Needed')).not.toBeInTheDocument();
+  });
+
   it('does not show stale last-run timestamps in expanded query details', async () => {
     mockQueriesResponse([
       buildQuery({

@@ -107,7 +107,11 @@ function getOverallStatus(stats: DataQualityStats): 'excellent' | 'good' | 'warn
   if (stats.failedQueries > 0) return 'issues';
   if (stats.pendingQueries === 0 && stats.passedQueries === stats.totalQueries) return 'excellent';
 
-  const passRate = stats.passedQueries / stats.totalQueries;
+  // Pass rate is over queries that actually RAN: never-run (pending) queries are
+  // not failures, so a partially-run census with zero failed queries must not
+  // degrade to 'warning'.
+  const ranQueries = stats.totalQueries - stats.pendingQueries;
+  const passRate = ranQueries > 0 ? stats.passedQueries / ranQueries : 0;
   if (passRate >= 0.8) return 'good';
   return 'warning';
 }
