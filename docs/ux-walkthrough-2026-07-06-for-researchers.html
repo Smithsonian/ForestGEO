@@ -1,4 +1,4 @@
-<title>ForestGEO Walkthrough — What I Found, What I Fixed</title>
+<title>ForestGEO June Updates</title>
 <style>
   :root {
     --ground: #FAFAF7;
@@ -233,6 +233,8 @@
   .taglabel.before { color: var(--crit); background: var(--crit-soft); }
   .taglabel.after { color: var(--fixed); background: var(--fixed-soft); }
 
+  .pr-meta { font-size: 12.5px; color: var(--muted); margin: -4px 0 10px; }
+
   .method {
     margin-top: 64px;
     border-top: 1px solid var(--hair);
@@ -247,12 +249,12 @@
 <div class="wrap">
   <header>
     <p class="eyebrow">UX walkthrough · plain-language edition</p>
-    <h1>Where ForestGEO users get lost, and what I've fixed so far</h1>
+    <h1>ForestGEO June Updates</h1>
     <p class="lede">
-      In July 2026 I walked through every major screen in ForestGEO the way a researcher actually uses it —
-      signing in, choosing a site and census, browsing and editing measurements, uploading files, and checking
-      results. This page describes what I found, in plain language, and — for the items already fixed —
-      shows what changed and why it should feel better to use.
+      I walked through every major screen in ForestGEO the way a researcher actually uses it — signing in,
+      choosing a site and census, browsing and editing measurements, uploading files, and checking results. This
+      page describes what I found, in plain language, and — for the items already fixed — shows what changed and
+      why it should feel better to use.
     </p>
     <div class="scoreboard">
       <div class="tile fixed"><div class="n">10</div><div class="lbl">Fixed &amp; live</div></div>
@@ -279,6 +281,7 @@
         <li><a href="#stage-f">The admin area</a></li>
         <li><a href="#stage-g">Phones, tablets &amp; general robustness</a></li>
         <li><a href="#stage-h">What already works well</a></li>
+        <li><a href="#stage-i">Other work that landed this month</a></li>
       </ul>
     </nav>
   </header>
@@ -731,13 +734,137 @@
     </article>
   </section>
 
+  <section class="stage" id="stage-i">
+    <h2>Other work that landed this month</h2>
+    <p class="stage-sub">The walkthrough above is a specific, browser-driven audit — but it's not the only thing
+    that's shipped recently. Between June 10 and today, five other pieces of work landed in the version of
+    ForestGEO everyone uses. None of these came out of the walkthrough; they're included here so this page gives
+    an honest picture of everything that's changed lately, not just the walkthrough findings. (The codebase itself
+    was also reorganized into a clearer folder structure during this window — no behavior changed, so it isn't
+    written up below, but it's part of why recent fixes have been able to move faster.)</p>
+
+    <article class="finding fixed" id="m1">
+      <div class="fhead"><span class="fid">PR #338</span><span class="chip fixed">Shipped</span></div>
+      <p class="pr-meta">Merged 2026-06-17</p>
+      <h3>CSV uploads with mismatched or duplicate columns are now caught instead of silently accepted</h3>
+      <p>If a row in an uploaded CSV had too many or too few columns, or if two columns shared the same header
+      name, the app could sometimes accept the row anyway — occasionally filing data under the wrong column, or
+      inventing a hidden extra one. A measurement value that couldn't be fully read (like a DBH with a stray
+      letter in it) could also get silently trimmed down to just the numeric part instead of being flagged.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>Rows like these are now rejected clearly, with an explanation, instead of being guessed at and let
+        through. If any of your uploaded columns get ignored because the app doesn't recognize them, it now tells
+        you that too, instead of quietly dropping them.</p>
+        <p class="why"><strong>Why it's better:</strong> a loud rejection at upload time is far easier to fix than
+        a wrong number discovered months later in an analysis.</p>
+      </div>
+    </article>
+
+    <article class="finding fixed" id="m2">
+      <div class="fhead"><span class="fid">PR #340</span><span class="chip fixed">Shipped</span></div>
+      <p class="pr-meta">Merged 2026-07-02</p>
+      <h3>The app can now remember a stem's official Smithsonian-published ID</h3>
+      <p>Behind the scenes, ForestGEO can now capture and store the official ID number the Smithsonian publishes
+      for a stem — separate from the app's own internal tracking number — including when that data arrives through
+      the ArcGIS-based mapping workflow. It's carried forward automatically from one census to the next, and if an
+      uploaded ID can't be understood, the app now raises a clear warning instead of silently discarding it.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>This is groundwork, not a new screen — there's no new column visible in the app yet. It exists so that
+        this identifier is captured and preserved now, ahead of future work to match ForestGEO's records against
+        the Smithsonian's own published data.</p>
+        <p class="why"><strong>Why it's better:</strong> capturing this now means nothing has to be reconstructed
+        or re-matched later once that connection is built.</p>
+      </div>
+    </article>
+
+    <article class="finding fixed" id="m3">
+      <div class="fhead"><span class="fid">PR #343 · PR #345</span><span class="chip fixed">Shipped</span></div>
+      <p class="pr-meta">Merged 2026-07-08</p>
+      <h3>The same site-privacy fix behind F19 was extended to the rest of the app</h3>
+      <p>Earlier in this document, F19 described the Uploaded Files page showing files that belonged to a
+      different site, because that one page never actually checked which site a request was allowed to touch. It
+      turned out more than thirty other behind-the-scenes actions across the app had the same class of gap — a
+      signed-in user could, in principle, reach an action meant for a site they don't belong to.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>Every one of those has now been closed. Every site-specific action in the app checks that you actually
+        belong to that site before it touches any data — and each one now has an automated test proving a request
+        for a site you don't belong to gets rejected before any data is even looked at, not just after. A few
+        related stability fixes landed alongside this: extra safety headers on every response, and a correction to
+        how the app tracks database connections and locks so it stays stable when a lot of people are working at
+        once.</p>
+        <p class="why"><strong>Why it's better:</strong> this closes the same category of problem everywhere,
+        instead of one page at a time. There's no visible change on screen — this is entirely behind-the-scenes
+        plumbing — but it's one of the most important fixes in this whole document.</p>
+      </div>
+    </article>
+
+    <article class="finding fixed" id="m4">
+      <div class="fhead"><span class="fid">PR #344</span><span class="chip fixed">Shipped</span></div>
+      <p class="pr-meta">Merged 2026-07-08</p>
+      <h3>The Species List page works again on every site</h3>
+      <p>On some sites, opening "Species List" showed an "error fetching data" message and an empty grid — not
+      because the species data was actually missing, but because a technical piece the page depends on had never
+      been created for that site in the first place. Sites that were set up through the app's own site-creation
+      wizard, rather than configured by hand, were the ones missing it.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>That missing piece has now been created for every existing site, and every newly created site gets it
+        automatically going forward. The groundwork for a more detailed, stem-level version of this same view was
+        also added, for a future page.</p>
+        <p class="why"><strong>Why it's better:</strong> a core reference page — the list of species recorded at a
+        site — should never depend on how that site happened to be set up.</p>
+      </div>
+      <div class="figrow">
+        <figure>
+          <span class="taglabel after">After</span>
+          <img src="ux-walkthrough-2026-07-06-assets/after/m4-species-list.jpg" alt="Species List page now showing a populated grid of 95 species with family, genus, and species-authority columns">
+          <figcaption>Species List loading correctly, with all 95 species for this site.</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article class="finding fixed" id="m5">
+      <div class="fhead"><span class="fid">PR #346</span><span class="chip fixed">Shipped</span></div>
+      <p class="pr-meta">Merged 2026-07-09</p>
+      <h3>Two upload bugs fixed: doubled quadrat counts, and dropped species names</h3>
+      <p>Two unrelated CSV-upload problems, fixed together:</p>
+      <ul>
+        <li><strong>Doubled quadrats.</strong> When a site is first set up without a real quadrat list on hand, an
+        administrator can choose to auto-generate a placeholder grid to start from. When that site's real quadrat
+        list was later uploaded under different names, the app added the real quadrats <em>alongside</em> the
+        placeholders instead of replacing them — one site ended up with roughly twice as many quadrats as it
+        should have (1,052 instead of 527). That site's data has already been corrected.</li>
+        <li><strong>Dropped species names.</strong> Uploading a species/taxonomy CSV with a column literally named
+        "species" had its contents silently redirected into the wrong field (the species code), because of a
+        column-name shortcut list that was meant only for measurement uploads. The actual species name was lost
+        as a result.</li>
+      </ul>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>Setting up a new site now offers a third option — "add the quadrat list later" — so no placeholder grid
+        gets created at all if you don't have real data on hand yet. Separately, the app now refuses a quadrat
+        upload that looks like it doesn't overlap at all with what's already there, instead of blindly adding to
+        it, and points you to the right upload mode instead. The species-name shortcut is now scoped only to
+        measurement uploads, so a taxonomy upload keeps the species name intact.</p>
+        <p class="why"><strong>Why it's better:</strong> both bugs shared the same root cause — an upload mode
+        quietly guessing what to do with data it didn't fully recognize. Fixing that class of guessing, not just
+        the one site it was caught on, is what should stop this from resurfacing elsewhere.</p>
+      </div>
+    </article>
+  </section>
+
   <div class="method">
     <h2>About this page</h2>
     <p>
       This is a plain-language rewrite of the original engineering audit conducted on 2026-07-06, with progress
-      notes added as fixes have shipped. Every screenshot under a "Fixed" item was taken directly from the running
-      application signed in as the same kind of user described in the original audit, using the same site, plot,
-      and census (Testing Schema / serc / census 1). Nothing here has been staged or simulated.
+      notes added as fixes have shipped. Every screenshot under a "Fixed" or "Shipped" item was taken directly
+      from the running application signed in as the same kind of user described in the original audit, using the
+      same site, plot, and census (Testing Schema / serc / census 1). Nothing here has been staged or simulated.
+      "Other work that landed this month" covers everything else merged between 2026-06-10 and today that wasn't
+      part of the walkthrough audit itself.
     </p>
     <p>
       Have a question about any of the items still "on the list," or something that doesn't match what you're
