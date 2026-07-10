@@ -155,11 +155,13 @@ export function getLegacyIdBasedContainerName(plotID: number, censusNumber: numb
  * Format: {sanitizedPlotName}-{censusNumber}
  *
  * Shared across sites reusing the same plot name; MUST NOT be used by
- * user-facing operations. Plot-name-based containers are OUT OF SCOPE of the
- * migration script (scripts/migrate-blob-containers.ts): their
+ * user-facing operations. Plot-name-based containers cannot be DISCOVERED by
+ * the migration script (scripts/migrate-blob-containers.ts): their
  * `{sanitizedPlotName}-{censusNumber}` shape has no reliable pattern to
- * distinguish it from arbitrary container names, so they cannot be detected
- * automatically. This helper is retained for tests and reference only.
+ * distinguish it from arbitrary container names. They are migratable only via
+ * the script's explicit --map-named/--map-named-container flags, where the
+ * operator names the container and supplies the full destination scope. This
+ * helper is retained for tests and reference only.
  */
 export function getLegacyPlotNameContainerName(plotName: string, censusNumber: number): string {
   if (!plotName || plotName.trim() === '') {

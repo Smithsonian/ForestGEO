@@ -13,6 +13,14 @@
  * attribution is therefore IMPOSSIBLE in general: a human operator must decide
  * which schema each legacy BLOB belongs to.
  *
+ * The OLDEST containers predate even the ID-based scheme: they are named
+ * `{sanitizedPlotName}-{censusNumber}` (e.g. `cocoli-1`). That shape encodes no
+ * plot ID and cannot be distinguished from arbitrary container names, so those
+ * containers cannot be discovered automatically. They are migratable ONLY via
+ * the explicit `--map-named`/`--map-named-container` flags, where the operator
+ * names the container AND supplies the full destination scope
+ * (`<schema>/<plotID>/<censusNumber>`).
+ *
  * This script is deliberately dry-run-first and operator-mapped:
  *   - It NEVER guesses. The primary mapping unit is the individual blob:
  *     `--map <legacyContainer>/<blobName>=<schema>`.
@@ -20,6 +28,12 @@
  *     assertion: the operator states that EVERY blob in that container belongs
  *     to the given schema. A plain `--map container=schema` (no slash) is
  *     rejected so nobody gets whole-container semantics by accident.
+ *   - `--map-named <container>/<blobName>=<schema>/<plotID>/<censusNumber>` and
+ *     `--map-named-container <container>=<schema>/<plotID>/<censusNumber>`
+ *     migrate containers whose names encode no plot ID (the plot-name scheme).
+ *     The operator supplies the complete destination scope; the flags reject
+ *     ID-based (`plot{id}-census{n}`) and already-schema-scoped containers so
+ *     the explicit scope can never contradict a name-encoded one.
  *   - Without `--execute` it only prints the plan (zero writes). `--dry-run`
  *     is accepted as an explicit alias for that default.
  *   - Source blobs are deleted only with `--delete-source` AND only after the
@@ -53,13 +67,23 @@
  *   # Execute and delete source blobs after a verified copy.
  *   npx tsx scripts/migrate-blob-containers.ts --execute --delete-source \
  *     --map plot1-census1/serc.csv=forestgeo_testing
+ *
+ *   # Migrate the oldest plot-name-based containers: their names encode no
+ *   # plot ID, so the operator supplies the full destination scope.
+ *   npx tsx scripts/migrate-blob-containers.ts --execute \
+ *     --map-named cocoli-1/legacy.csv=forestgeo_panama/3/1 \
+ *     --map-named-container luquillo-2=forestgeo_luquillo/1/2
+ *
+ * Deploy ordering: destination container names are deterministic, so this
+ * script can (and should) be run BEFORE deploying the F19 app code — migrated
+ * files are then visible the moment the new code goes live.
  */
 
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { BlobServiceClient, BlobClient, ContainerClient } from '@azure/storage-blob';
 import { getBlobServiceClient, getContainerClient } from '@/config/macros/azurestorage';
-import { getContainerName, isLegacyIdBasedContainerName, parseLegacyIdBasedContainerName } from '@/config/macros/containernames';
+import { getContainerName, isLegacyIdBasedContainerName, isSchemaScopedContainerName, parseLegacyIdBasedContainerName } from '@/config/macros/containernames';
 
 // ---------------------------------------------------------------------------
 // Constants (no magic strings)
@@ -74,6 +98,8 @@ export type MigrationAction = (typeof MIGRATION_ACTION)[keyof typeof MIGRATION_A
 const CLI_FLAG = {
   MAP: '--map',
   MAP_CONTAINER: '--map-container',
+  MAP_NAMED: '--map-named',
+  MAP_NAMED_CONTAINER: '--map-named-container',
   EXECUTE: '--execute',
   DRY_RUN: '--dry-run',
   DELETE_SOURCE: '--delete-source'
@@ -81,6 +107,8 @@ const CLI_FLAG = {
 
 const MAP_SEPARATOR = '=';
 const BLOB_PATH_SEPARATOR = '/';
+const DESTINATION_SCOPE_SEPARATOR = '/';
+const DESTINATION_SCOPE_SHAPE = `<schema>${DESTINATION_SCOPE_SEPARATOR}<plotID>${DESTINATION_SCOPE_SEPARATOR}<censusNumber>`;
 
 // A successful server-side blob copy reports this copyStatus.
 const COPY_STATUS_SUCCESS = 'success';
@@ -111,9 +139,43 @@ export interface ContainerMap {
   schema: string;
 }
 
-export type MigrationMap = BlobMap | ContainerMap;
+/**
+ * Full destination scope for containers whose names encode no plot ID (the
+ * oldest, plot-name-based scheme). The operator supplies everything.
+ */
+export interface DestinationScope {
+  schema: string;
+  plotID: number;
+  censusNumber: number;
+}
+
+/** Per-blob mapping for a plot-name-based container (via --map-named). */
+export interface NamedBlobMap {
+  legacy: string;
+  blob: string;
+  destination: DestinationScope;
+}
+
+/**
+ * Whole-container homogeneity assertion for a plot-name-based container
+ * (via --map-named-container).
+ */
+export interface NamedContainerMap {
+  legacy: string;
+  destination: DestinationScope;
+}
+
+export type MigrationMap = BlobMap | ContainerMap | NamedBlobMap | NamedContainerMap;
+
+function isNamedMap(map: MigrationMap): map is NamedBlobMap | NamedContainerMap {
+  return 'destination' in map;
+}
 
 function isBlobMap(map: MigrationMap): map is BlobMap {
+  return 'blob' in map && !isNamedMap(map);
+}
+
+function isNamedBlobMap(map: NamedBlobMap | NamedContainerMap): map is NamedBlobMap {
   return 'blob' in map;
 }
 
@@ -174,28 +236,54 @@ function blobKey(container: string, blob: string): string {
 /**
  * Produce a per-blob migration plan from a blob inventory and operator maps.
  *
- * - Blobs in non-legacy (already schema-scoped or unrelated) containers are
- *   excluded from the plan entirely — they need no migration.
+ * - Blobs in containers that are neither legacy-ID-shaped nor explicitly
+ *   targeted by a named map are excluded from the plan entirely — they are
+ *   either already schema-scoped or unrelated to this migration.
  * - A blob covered by a per-blob map, or by a --map-container homogeneity
  *   assertion for its container, yields a `copy` entry whose destination is
  *   the schema-scoped name derived from the legacy container's plot/census.
- * - Any other legacy blob yields its own `report-unmapped` entry
- *   (destinationContainer null). It is reported, never guessed.
+ * - A blob covered by a named map (--map-named / --map-named-container) yields
+ *   a `copy` entry whose destination comes entirely from the operator-supplied
+ *   scope, since a plot-name-based container encodes no plot ID.
+ * - Any other blob in a legacy or named-targeted container yields its own
+ *   `report-unmapped` entry (destinationContainer null). It is reported,
+ *   never guessed.
  *
  * Throws MapConflictError for duplicate maps of one blob, duplicate container
  * maps, or a per-blob map inside a container that also has a container map
  * (the homogeneity assertion contradicts the need for per-blob attribution).
- * Propagates SchemaContainerNameError (from getContainerName) when a mapped
- * schema cannot be turned into a collision-free container name — an invalid
- * map surfaces as a planning error, not a silent skip.
+ * Throws ArgumentParseError when a named map targets an ID-based or
+ * schema-scoped container (its explicit scope could contradict the
+ * name-encoded one). Propagates SchemaContainerNameError (from
+ * getContainerName) when a mapped schema cannot be turned into a
+ * collision-free container name — an invalid map surfaces as a planning
+ * error, not a silent skip.
  */
 export function planMigration(blobRefs: BlobRef[], maps: MigrationMap[]): MigrationPlanEntry[] {
   const schemaByBlobKey = new Map<string, string>();
   const schemaByContainer = new Map<string, string>();
   const blobMappedContainers = new Set<string>();
+  const destinationByBlobKey = new Map<string, DestinationScope>();
+  const destinationByContainer = new Map<string, DestinationScope>();
+  const namedBlobMappedContainers = new Set<string>();
 
   for (const map of maps) {
-    if (isBlobMap(map)) {
+    if (isNamedMap(map)) {
+      assertNamedMapTarget(map);
+      if (isNamedBlobMap(map)) {
+        const key = blobKey(map.legacy, map.blob);
+        if (destinationByBlobKey.has(key)) {
+          throw new MapConflictError(`Duplicate ${CLI_FLAG.MAP_NAMED} for blob "${key}". Each blob may be mapped to at most one destination.`);
+        }
+        destinationByBlobKey.set(key, map.destination);
+        namedBlobMappedContainers.add(map.legacy);
+      } else {
+        if (destinationByContainer.has(map.legacy)) {
+          throw new MapConflictError(`Duplicate ${CLI_FLAG.MAP_NAMED_CONTAINER} for "${map.legacy}". Each container may be asserted homogeneous at most once.`);
+        }
+        destinationByContainer.set(map.legacy, map.destination);
+      }
+    } else if (isBlobMap(map)) {
       const key = blobKey(map.legacy, map.blob);
       if (schemaByBlobKey.has(key)) {
         throw new MapConflictError(`Duplicate ${CLI_FLAG.MAP} for blob "${key}". Each blob may be mapped to at most one schema.`);
@@ -219,33 +307,74 @@ export function planMigration(blobRefs: BlobRef[], maps: MigrationMap[]): Migrat
     }
   }
 
+  for (const container of namedBlobMappedContainers) {
+    if (destinationByContainer.has(container)) {
+      throw new MapConflictError(
+        `Container "${container}" has both a ${CLI_FLAG.MAP_NAMED_CONTAINER} homogeneity assertion and per-blob ${CLI_FLAG.MAP_NAMED} entries. ` +
+          'These contradict each other: either the container is homogeneous (use only --map-named-container) or it needs per-blob attribution (use only --map-named).'
+      );
+    }
+  }
+
   const plan: MigrationPlanEntry[] = [];
   for (const ref of blobRefs) {
-    if (!isLegacyIdBasedContainerName(ref.container)) {
+    if (isLegacyIdBasedContainerName(ref.container)) {
+      const mappedSchema = schemaByBlobKey.get(blobKey(ref.container, ref.blob)) ?? schemaByContainer.get(ref.container);
+      if (mappedSchema === undefined) {
+        plan.push({ sourceContainer: ref.container, sourceBlob: ref.blob, destinationContainer: null, action: MIGRATION_ACTION.REPORT_UNMAPPED });
+        continue;
+      }
+
+      const parsed = parseLegacyIdBasedContainerName(ref.container);
+      if (!parsed) {
+        // isLegacyIdBasedContainerName already matched, so this is unreachable;
+        // guard defensively rather than assert non-null.
+        plan.push({ sourceContainer: ref.container, sourceBlob: ref.blob, destinationContainer: null, action: MIGRATION_ACTION.REPORT_UNMAPPED });
+        continue;
+      }
+
+      // getContainerName throws SchemaContainerNameError for a non-injective
+      // schema; let it propagate so the operator fixes the map.
+      const destinationContainer = getContainerName(mappedSchema, parsed.plotID, parsed.censusNumber);
+      plan.push({ sourceContainer: ref.container, sourceBlob: ref.blob, destinationContainer, action: MIGRATION_ACTION.COPY });
       continue;
     }
 
-    const mappedSchema = schemaByBlobKey.get(blobKey(ref.container, ref.blob)) ?? schemaByContainer.get(ref.container);
-    if (mappedSchema === undefined) {
+    // Non-ID container: only participates when the operator explicitly named it.
+    if (!destinationByContainer.has(ref.container) && !namedBlobMappedContainers.has(ref.container)) {
+      continue;
+    }
+
+    const destination = destinationByBlobKey.get(blobKey(ref.container, ref.blob)) ?? destinationByContainer.get(ref.container);
+    if (destination === undefined) {
       plan.push({ sourceContainer: ref.container, sourceBlob: ref.blob, destinationContainer: null, action: MIGRATION_ACTION.REPORT_UNMAPPED });
       continue;
     }
 
-    const parsed = parseLegacyIdBasedContainerName(ref.container);
-    if (!parsed) {
-      // isLegacyIdBasedContainerName already matched, so this is unreachable;
-      // guard defensively rather than assert non-null.
-      plan.push({ sourceContainer: ref.container, sourceBlob: ref.blob, destinationContainer: null, action: MIGRATION_ACTION.REPORT_UNMAPPED });
-      continue;
-    }
-
-    // getContainerName throws SchemaContainerNameError for a non-injective
-    // schema; let it propagate so the operator fixes the map.
-    const destinationContainer = getContainerName(mappedSchema, parsed.plotID, parsed.censusNumber);
+    const destinationContainer = getContainerName(destination.schema, destination.plotID, destination.censusNumber);
     plan.push({ sourceContainer: ref.container, sourceBlob: ref.blob, destinationContainer, action: MIGRATION_ACTION.COPY });
   }
 
   return plan;
+}
+
+/**
+ * Named maps exist solely for containers whose names encode no plot/census
+ * (the plot-name scheme). Targeting an ID-based container would let the
+ * operator-supplied scope silently contradict the name-encoded one, and a
+ * schema-scoped container is a destination, not a legacy source.
+ */
+function assertNamedMapTarget(map: NamedBlobMap | NamedContainerMap): void {
+  const flag = isNamedBlobMap(map) ? CLI_FLAG.MAP_NAMED : CLI_FLAG.MAP_NAMED_CONTAINER;
+  if (isLegacyIdBasedContainerName(map.legacy)) {
+    throw new ArgumentParseError(
+      `${flag} targets "${map.legacy}", an ID-based legacy container whose name already encodes plot/census. ` +
+        `Use ${CLI_FLAG.MAP}/${CLI_FLAG.MAP_CONTAINER} for it instead.`
+    );
+  }
+  if (isSchemaScopedContainerName(map.legacy)) {
+    throw new ArgumentParseError(`${flag} targets "${map.legacy}", which is already a schema-scoped (post-F19) container, not a legacy source.`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +544,22 @@ export function parseArgs(argv: string[]): ParsedArgs {
         i++;
         break;
       }
+      case CLI_FLAG.MAP_NAMED: {
+        maps.push(
+          parseNamedBlobMapValue(
+            requireFlagValue(argv, i, CLI_FLAG.MAP_NAMED, `<legacyContainer>${BLOB_PATH_SEPARATOR}<blobName>${MAP_SEPARATOR}${DESTINATION_SCOPE_SHAPE}`)
+          )
+        );
+        i++;
+        break;
+      }
+      case CLI_FLAG.MAP_NAMED_CONTAINER: {
+        maps.push(
+          parseNamedContainerMapValue(requireFlagValue(argv, i, CLI_FLAG.MAP_NAMED_CONTAINER, `<legacyContainer>${MAP_SEPARATOR}${DESTINATION_SCOPE_SHAPE}`))
+        );
+        i++;
+        break;
+      }
       case CLI_FLAG.EXECUTE:
         execute = true;
         break;
@@ -426,7 +571,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
         break;
       default:
         throw new ArgumentParseError(
-          `Unknown argument "${arg}". Supported flags: ${CLI_FLAG.MAP}, ${CLI_FLAG.MAP_CONTAINER}, ${CLI_FLAG.DRY_RUN}, ${CLI_FLAG.EXECUTE}, ${CLI_FLAG.DELETE_SOURCE}.`
+          `Unknown argument "${arg}". Supported flags: ${CLI_FLAG.MAP}, ${CLI_FLAG.MAP_CONTAINER}, ${CLI_FLAG.MAP_NAMED}, ${CLI_FLAG.MAP_NAMED_CONTAINER}, ${CLI_FLAG.DRY_RUN}, ${CLI_FLAG.EXECUTE}, ${CLI_FLAG.DELETE_SOURCE}.`
         );
     }
   }
@@ -475,6 +620,81 @@ function parseBlobMapValue(value: string): BlobMap {
   return { legacy, blob, schema };
 }
 
+function parseDestinationScope(flag: string, raw: string): DestinationScope {
+  const parts = raw.split(DESTINATION_SCOPE_SEPARATOR);
+  if (parts.length !== 3) {
+    throw new ArgumentParseError(`${flag} destination "${raw}" must be "${DESTINATION_SCOPE_SHAPE}".`);
+  }
+  const [schema, plotIDRaw, censusNumberRaw] = parts;
+  if (schema.length === 0) {
+    throw new ArgumentParseError(`${flag} destination "${raw}" has an empty schema.`);
+  }
+  const plotID = parseStrictPositiveInteger(plotIDRaw);
+  const censusNumber = parseStrictPositiveInteger(censusNumberRaw);
+  if (plotID === undefined || censusNumber === undefined) {
+    throw new ArgumentParseError(`${flag} destination "${raw}" needs strictly positive integer plotID and censusNumber ("${DESTINATION_SCOPE_SHAPE}").`);
+  }
+  return { schema, plotID, censusNumber };
+}
+
+function parseStrictPositiveInteger(value: string): number | undefined {
+  if (!/^\d+$/.test(value)) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function parseNamedBlobMapValue(value: string): NamedBlobMap {
+  const separatorIndex = value.lastIndexOf(MAP_SEPARATOR);
+  if (separatorIndex === -1) {
+    throw new ArgumentParseError(
+      `Malformed ${CLI_FLAG.MAP_NAMED} value "${value}". Expected "<legacyContainer>${BLOB_PATH_SEPARATOR}<blobName>${MAP_SEPARATOR}${DESTINATION_SCOPE_SHAPE}".`
+    );
+  }
+
+  const target = value.slice(0, separatorIndex);
+  const destination = parseDestinationScope(CLI_FLAG.MAP_NAMED, value.slice(separatorIndex + 1));
+
+  const pathSeparatorIndex = target.indexOf(BLOB_PATH_SEPARATOR);
+  if (pathSeparatorIndex === -1) {
+    throw new ArgumentParseError(
+      `${CLI_FLAG.MAP_NAMED} value "${value}" names a whole container, but ${CLI_FLAG.MAP_NAMED} is per-blob ` +
+        `("<legacyContainer>${BLOB_PATH_SEPARATOR}<blobName>${MAP_SEPARATOR}${DESTINATION_SCOPE_SHAPE}"). ` +
+        `To assert that EVERY blob in a named container belongs to one destination, use ${CLI_FLAG.MAP_NAMED_CONTAINER} <legacyContainer>${MAP_SEPARATOR}${DESTINATION_SCOPE_SHAPE}.`
+    );
+  }
+
+  const legacy = target.slice(0, pathSeparatorIndex);
+  const blob = target.slice(pathSeparatorIndex + 1);
+  if (legacy.length === 0 || blob.length === 0) {
+    throw new ArgumentParseError(`Malformed ${CLI_FLAG.MAP_NAMED} value "${value}". Container and blob must both be non-empty.`);
+  }
+
+  return { legacy, blob, destination };
+}
+
+function parseNamedContainerMapValue(value: string): NamedContainerMap {
+  const separatorIndex = value.lastIndexOf(MAP_SEPARATOR);
+  if (separatorIndex === -1) {
+    throw new ArgumentParseError(
+      `Malformed ${CLI_FLAG.MAP_NAMED_CONTAINER} value "${value}". Expected "<legacyContainer>${MAP_SEPARATOR}${DESTINATION_SCOPE_SHAPE}".`
+    );
+  }
+
+  const legacy = value.slice(0, separatorIndex);
+  const destination = parseDestinationScope(CLI_FLAG.MAP_NAMED_CONTAINER, value.slice(separatorIndex + 1));
+  if (legacy.includes(BLOB_PATH_SEPARATOR)) {
+    throw new ArgumentParseError(
+      `${CLI_FLAG.MAP_NAMED_CONTAINER} value "${value}" contains a blob path, but ${CLI_FLAG.MAP_NAMED_CONTAINER} asserts a WHOLE container is homogeneous. ` +
+        `For a single blob use ${CLI_FLAG.MAP_NAMED} <legacyContainer>${BLOB_PATH_SEPARATOR}<blobName>${MAP_SEPARATOR}${DESTINATION_SCOPE_SHAPE}.`
+    );
+  }
+  if (legacy.length === 0) {
+    throw new ArgumentParseError(`Malformed ${CLI_FLAG.MAP_NAMED_CONTAINER} value "${value}". Container name must be non-empty.`);
+  }
+
+  return { legacy, destination };
+}
+
 function parseContainerMapValue(value: string): ContainerMap {
   const separatorIndex = value.lastIndexOf(MAP_SEPARATOR);
   if (separatorIndex === -1) {
@@ -502,12 +722,24 @@ export function exitCodeForSummary(summary: MigrationSummary): number {
 
 /**
  * Inventory pass: list every container in the account, keep the legacy-shaped
- * ones, and enumerate their blobs. Read-only (createIfMissing:false).
+ * ones plus any container the operator explicitly targeted with a named map,
+ * and enumerate their blobs. Read-only (createIfMissing:false). A named
+ * container absent from the account is warned about — a typo there would
+ * otherwise read as "nothing to migrate".
  */
-export async function collectLegacyBlobInventory(client: BlobServiceClient, getContainer: ContainerClientFactory = getContainerClient): Promise<BlobRef[]> {
+export async function collectLegacyBlobInventory(
+  client: BlobServiceClient,
+  getContainer: ContainerClientFactory = getContainerClient,
+  namedContainers: ReadonlySet<string> = new Set()
+): Promise<BlobRef[]> {
   const refs: BlobRef[] = [];
+  const namedContainersSeen = new Set<string>();
   for await (const container of client.listContainers()) {
-    if (!isLegacyIdBasedContainerName(container.name)) {
+    const isNamedTarget = namedContainers.has(container.name);
+    if (isNamedTarget) {
+      namedContainersSeen.add(container.name);
+    }
+    if (!isLegacyIdBasedContainerName(container.name) && !isNamedTarget) {
       continue;
     }
     const containerClient = await getContainer(container.name, { createIfMissing: false });
@@ -515,7 +747,23 @@ export async function collectLegacyBlobInventory(client: BlobServiceClient, getC
       refs.push({ container: container.name, blob: blob.name });
     }
   }
+  for (const name of namedContainers) {
+    if (!namedContainersSeen.has(name)) {
+      console.warn(`NAMED CONTAINER NOT FOUND  "${name}" — no container with this name exists in the storage account; check the map for typos.`);
+    }
+  }
   return refs;
+}
+
+/** Containers explicitly targeted by --map-named / --map-named-container. */
+export function namedContainersOf(maps: MigrationMap[]): Set<string> {
+  const named = new Set<string>();
+  for (const map of maps) {
+    if (isNamedMap(map)) {
+      named.add(map.legacy);
+    }
+  }
+  return named;
 }
 
 async function runCli(argv: string[]): Promise<void> {
@@ -528,7 +776,14 @@ async function runCli(argv: string[]): Promise<void> {
   console.log(`Delete source: ${args.deleteSource ? 'yes (after verified copy)' : 'no'}`);
   console.log(`Maps:${args.maps.length === 0 ? '          (none)' : ''}`);
   for (const map of args.maps) {
-    if (isBlobMap(map)) {
+    if (isNamedMap(map)) {
+      const destination = `${map.destination.schema}/plot${map.destination.plotID}/census${map.destination.censusNumber}`;
+      if (isNamedBlobMap(map)) {
+        console.log(`  named blob       ${blobKey(map.legacy, map.blob)} -> ${destination}`);
+      } else {
+        console.log(`  named container  ${map.legacy} -> ${destination} (operator asserts every blob in this container belongs to this destination)`);
+      }
+    } else if (isBlobMap(map)) {
       console.log(`  blob       ${blobKey(map.legacy, map.blob)} -> ${map.schema}`);
     } else {
       console.log(`  container  ${map.legacy} -> ${map.schema} (operator asserts every blob in this container belongs to this schema)`);
@@ -537,7 +792,7 @@ async function runCli(argv: string[]): Promise<void> {
   console.log('='.repeat(60));
 
   const client = getBlobServiceClient();
-  const inventory = await collectLegacyBlobInventory(client);
+  const inventory = await collectLegacyBlobInventory(client, getContainerClient, namedContainersOf(args.maps));
   const plan = planMigration(inventory, args.maps);
 
   console.log('\nPlan:');

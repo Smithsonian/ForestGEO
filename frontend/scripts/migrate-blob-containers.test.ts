@@ -21,6 +21,7 @@ import {
   executeMigration,
   exitCodeForSummary,
   collectLegacyBlobInventory,
+  namedContainersOf,
   MIGRATION_ACTION,
   ArgumentParseError,
   MapConflictError,
@@ -34,6 +35,10 @@ const SCHEMA_OTHER = 'forestgeo_other';
 const LEGACY_PLOT1 = 'plot1-census1';
 const LEGACY_PLOT2 = 'plot2-census1';
 const SCHEMA_SCOPED_PLOT1 = 'forestgeo-testing-plot1-census1';
+// Oldest scheme: {sanitizedPlotName}-{censusNumber} — encodes no plot ID.
+const PLOTNAME_CONTAINER = 'cocoli-1';
+const PLOTNAME_DESTINATION = { schema: SCHEMA_TESTING, plotID: 3, censusNumber: 1 };
+const SCHEMA_SCOPED_PLOTNAME_DEST = 'forestgeo-testing-plot3-census1';
 const COPY_STATUS_SUCCESS = 'success';
 const COPY_STATUS_FAILED = 'failed';
 
@@ -129,6 +134,92 @@ describe('planMigration', () => {
         ]
       )
     ).toThrow(MapConflictError);
+  });
+
+  it('copies a plot-name-container blob to the operator-supplied destination scope via a named per-blob map', () => {
+    const plan = planMigration(
+      [
+        { container: PLOTNAME_CONTAINER, blob: 'legacy.csv' },
+        { container: PLOTNAME_CONTAINER, blob: 'other-site.csv' }
+      ],
+      [{ legacy: PLOTNAME_CONTAINER, blob: 'legacy.csv', destination: PLOTNAME_DESTINATION }]
+    );
+    expect(plan).toEqual([
+      { sourceContainer: PLOTNAME_CONTAINER, sourceBlob: 'legacy.csv', destinationContainer: SCHEMA_SCOPED_PLOTNAME_DEST, action: MIGRATION_ACTION.COPY },
+      // A named per-blob map targets ONE blob; the container's other blobs are
+      // reported unmapped, never guessed along.
+      { sourceContainer: PLOTNAME_CONTAINER, sourceBlob: 'other-site.csv', destinationContainer: null, action: MIGRATION_ACTION.REPORT_UNMAPPED }
+    ]);
+  });
+
+  it('maps every blob of a plot-name container under a named whole-container assertion', () => {
+    const plan = planMigration(
+      [
+        { container: PLOTNAME_CONTAINER, blob: 'a.csv' },
+        { container: PLOTNAME_CONTAINER, blob: 'b.csv' }
+      ],
+      [{ legacy: PLOTNAME_CONTAINER, destination: PLOTNAME_DESTINATION }]
+    );
+    expect(plan).toEqual([
+      { sourceContainer: PLOTNAME_CONTAINER, sourceBlob: 'a.csv', destinationContainer: SCHEMA_SCOPED_PLOTNAME_DEST, action: MIGRATION_ACTION.COPY },
+      { sourceContainer: PLOTNAME_CONTAINER, sourceBlob: 'b.csv', destinationContainer: SCHEMA_SCOPED_PLOTNAME_DEST, action: MIGRATION_ACTION.COPY }
+    ]);
+  });
+
+  it('still excludes non-legacy containers that no named map targets', () => {
+    const plan = planMigration(
+      [{ container: 'some-unrelated-container', blob: 'noise.txt' }],
+      [{ legacy: PLOTNAME_CONTAINER, destination: PLOTNAME_DESTINATION }]
+    );
+    expect(plan).toEqual([]);
+  });
+
+  it('rejects a named map targeting an ID-based legacy container (its name already encodes plot/census)', () => {
+    expect(() => planMigration([], [{ legacy: LEGACY_PLOT1, destination: PLOTNAME_DESTINATION }])).toThrow(ArgumentParseError);
+    expect(() => planMigration([], [{ legacy: LEGACY_PLOT1, destination: PLOTNAME_DESTINATION }])).toThrow(/--map-container/);
+  });
+
+  it('rejects a named map targeting an already-schema-scoped container', () => {
+    expect(() => planMigration([], [{ legacy: SCHEMA_SCOPED_PLOT1, destination: PLOTNAME_DESTINATION }])).toThrow(ArgumentParseError);
+  });
+
+  it('rejects duplicate named maps and named blob+container contradictions', () => {
+    expect(() =>
+      planMigration(
+        [],
+        [
+          { legacy: PLOTNAME_CONTAINER, destination: PLOTNAME_DESTINATION },
+          { legacy: PLOTNAME_CONTAINER, destination: { ...PLOTNAME_DESTINATION, plotID: 4 } }
+        ]
+      )
+    ).toThrow(MapConflictError);
+    expect(() =>
+      planMigration(
+        [],
+        [
+          { legacy: PLOTNAME_CONTAINER, blob: 'a.csv', destination: PLOTNAME_DESTINATION },
+          { legacy: PLOTNAME_CONTAINER, blob: 'a.csv', destination: PLOTNAME_DESTINATION }
+        ]
+      )
+    ).toThrow(MapConflictError);
+    expect(() =>
+      planMigration(
+        [],
+        [
+          { legacy: PLOTNAME_CONTAINER, destination: PLOTNAME_DESTINATION },
+          { legacy: PLOTNAME_CONTAINER, blob: 'a.csv', destination: PLOTNAME_DESTINATION }
+        ]
+      )
+    ).toThrow(MapConflictError);
+  });
+
+  it('surfaces an invalid named-map schema as a planning error rather than silently skipping', () => {
+    expect(() =>
+      planMigration(
+        [{ container: PLOTNAME_CONTAINER, blob: 'a.csv' }],
+        [{ legacy: PLOTNAME_CONTAINER, destination: { ...PLOTNAME_DESTINATION, schema: 'forestgeo__testing' } }]
+      )
+    ).toThrow(SchemaContainerNameError);
   });
 
   it('reports each legacy blob individually as unmapped when no map covers it', () => {
@@ -227,6 +318,48 @@ describe('parseArgs', () => {
 
   it('rejects unknown flags', () => {
     expect(() => parseArgs(['--force'])).toThrow(ArgumentParseError);
+  });
+
+  it('parses --map-named into a per-blob named map with a full destination scope', () => {
+    const parsed = parseArgs(['--map-named', `${PLOTNAME_CONTAINER}/legacy.csv=${SCHEMA_TESTING}/3/1`]);
+    expect(parsed.maps).toEqual([{ legacy: PLOTNAME_CONTAINER, blob: 'legacy.csv', destination: PLOTNAME_DESTINATION }]);
+  });
+
+  it('parses --map-named-container into a whole-container named map', () => {
+    const parsed = parseArgs(['--map-named-container', `${PLOTNAME_CONTAINER}=${SCHEMA_TESTING}/3/1`]);
+    expect(parsed.maps).toEqual([{ legacy: PLOTNAME_CONTAINER, destination: PLOTNAME_DESTINATION }]);
+  });
+
+  it('rejects a whole-container --map-named (no slash in target) and points at --map-named-container', () => {
+    expect(() => parseArgs(['--map-named', `${PLOTNAME_CONTAINER}=${SCHEMA_TESTING}/3/1`])).toThrow(/--map-named-container/);
+  });
+
+  it('rejects a --map-named-container value containing a blob path', () => {
+    expect(() => parseArgs(['--map-named-container', `${PLOTNAME_CONTAINER}/legacy.csv=${SCHEMA_TESTING}/3/1`])).toThrow(ArgumentParseError);
+  });
+
+  it.each([
+    [`${PLOTNAME_CONTAINER}/a.csv=${SCHEMA_TESTING}`, 'missing plot/census'],
+    [`${PLOTNAME_CONTAINER}/a.csv=${SCHEMA_TESTING}/3`, 'missing census'],
+    [`${PLOTNAME_CONTAINER}/a.csv=${SCHEMA_TESTING}/0/1`, 'zero plotID'],
+    [`${PLOTNAME_CONTAINER}/a.csv=${SCHEMA_TESTING}/3/-1`, 'negative census'],
+    [`${PLOTNAME_CONTAINER}/a.csv=${SCHEMA_TESTING}/three/1`, 'non-numeric plotID'],
+    [`${PLOTNAME_CONTAINER}/a.csv=/3/1`, 'empty schema']
+  ])('rejects a malformed --map-named destination scope: %s (%s)', value => {
+    expect(() => parseArgs(['--map-named', value])).toThrow(ArgumentParseError);
+  });
+});
+
+describe('namedContainersOf', () => {
+  it('collects the distinct containers targeted by named maps only', () => {
+    expect(
+      namedContainersOf([
+        { legacy: LEGACY_PLOT1, blob: 'serc.csv', schema: SCHEMA_TESTING },
+        { legacy: LEGACY_PLOT2, schema: SCHEMA_OTHER },
+        { legacy: PLOTNAME_CONTAINER, blob: 'a.csv', destination: PLOTNAME_DESTINATION },
+        { legacy: PLOTNAME_CONTAINER, blob: 'b.csv', destination: PLOTNAME_DESTINATION }
+      ])
+    ).toEqual(new Set([PLOTNAME_CONTAINER]));
   });
 });
 
@@ -540,5 +673,34 @@ describe('collectLegacyBlobInventory', () => {
     ]);
     // Non-legacy containers are never even opened.
     expect(factoryCalls).toEqual([LEGACY_PLOT1, LEGACY_PLOT2]);
+  });
+
+  it('also enumerates containers explicitly targeted by named maps', async () => {
+    const { client, factory, factoryCalls } = makeMockServiceClient({
+      [LEGACY_PLOT1]: ['serc.csv'],
+      [PLOTNAME_CONTAINER]: ['legacy.csv'],
+      'untargeted-container': ['noise.txt']
+    });
+
+    const inventory = await collectLegacyBlobInventory(client, factory, new Set([PLOTNAME_CONTAINER]));
+
+    expect(inventory).toEqual([
+      { container: LEGACY_PLOT1, blob: 'serc.csv' },
+      { container: PLOTNAME_CONTAINER, blob: 'legacy.csv' }
+    ]);
+    expect(factoryCalls).toEqual([LEGACY_PLOT1, PLOTNAME_CONTAINER]);
+  });
+
+  it('warns when a named container does not exist in the storage account', async () => {
+    const { client, factory } = makeMockServiceClient({ [LEGACY_PLOT1]: [] });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const inventory = await collectLegacyBlobInventory(client, factory, new Set(['no-such-container']));
+      expect(inventory).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('no-such-container'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
