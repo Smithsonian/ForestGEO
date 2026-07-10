@@ -378,10 +378,18 @@ export default function DashboardPage() {
           throw new Error(`Failed to clear census: ${response.status}`);
         }
 
-        // Refresh the census list to reflect the deletion
+        // Refresh the census list to reflect the deletion. The deletion has
+        // already committed at this point, so a refresh failure must not be
+        // reported as a failed delete — retrying the delete would 404 and the
+        // wrong error would send the researcher chasing the wrong operation.
         setCensusToDelete(null);
-        await refreshCensusList();
-        console.log('Census deletion completed, list refreshed');
+        try {
+          await refreshCensusList();
+          console.log('Census deletion completed, list refreshed');
+        } catch (refreshError: any) {
+          ailogger.error('Census deleted but census list refresh failed', refreshError);
+          setError('Census deleted, but refreshing the census list failed. Reload the page to see the updated list.');
+        }
 
         // Ensure loading shows for at least 750ms for visual feedback
         const elapsed = Date.now() - startTime;

@@ -201,7 +201,14 @@ export default function CensusOverviewPage() {
           throw new Error(`Failed to clear census: ${response.status}`);
         }
         setCensusToDelete(null);
-        await refreshCensusList();
+        // The deletion has already committed; a refresh failure must not be
+        // reported as a failed delete (retrying the delete would 404).
+        try {
+          await refreshCensusList();
+        } catch (refreshError) {
+          ailogger.error('Census deleted but census list refresh failed', refreshError instanceof Error ? refreshError : undefined);
+          setDeleteError('Census deleted, but refreshing the census list failed. Reload the page to see the updated list.');
+        }
       } catch (error) {
         ailogger.error('Failed to delete census', error instanceof Error ? error : undefined);
         setDeleteError('Failed to delete census. Please try again.');
