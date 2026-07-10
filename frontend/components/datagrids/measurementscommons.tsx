@@ -356,8 +356,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       // CountUnresolvedLogged + CountFailedNoLog — the badge must equal the rows the toggle shows.
       setInvalidCount(unresolvedLoggedCount + failedNoLogCount);
       setInvalidBreakdown({ unresolvedLogged: unresolvedLoggedCount, failedNoLog: failedNoLogCount });
-      // Feeds "Force N failed row(s) to pass" — CountOverridable mirrors the override modal's
-      // UPDATE predicate (IsValidated = FALSE OR IS NULL) exactly.
+      // Feeds the override menu item — CountOverridable mirrors the override modal's
+      // UPDATE predicate (IsValidated = FALSE OR IS NULL) exactly, and the menu copy
+      // describes it as "failed or not-yet-validated" (never just "failed").
       setValidationErrorCount(overridableCount);
       setPendingCount(pendingValidationCount);
       setOTCount(Number(countsData.CountOldTrees) || 0);
@@ -1672,7 +1673,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                           }
                         }}
                         pendingCount={pendingCount}
-                        errorCount={validationErrorCount}
+                        overridableCount={validationErrorCount}
                       />
                     ),
                     errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount, breakdown: invalidBreakdown },
