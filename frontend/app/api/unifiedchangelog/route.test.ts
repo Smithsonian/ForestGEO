@@ -287,8 +287,11 @@ describe('Unified Changelog Tracking System', () => {
 
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-4');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+      // clearcensus flow: resolve target plot, latest-census guard, destructive CALL
       const exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ PlotID: 1 }])
         .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 1, MaxPlotCensusNumber: 1 }])
         .mockResolvedValueOnce({});
 
@@ -301,7 +304,7 @@ describe('Unified Changelog Tracking System', () => {
       expect(body).toEqual({ message: 'Census cleared successfully' });
 
       // Verify the stored procedure is called with correct parameters
-      const [sql, params] = exec.mock.calls[1];
+      const [sql, params] = exec.mock.calls[2];
       expect(String(sql)).toMatch(/CALL testschema\.clearcensusfull\((5|\?)\);?/i);
       expect(params).toEqual([]);
 
@@ -315,8 +318,11 @@ describe('Unified Changelog Tracking System', () => {
 
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-5');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+      // clearcensus flow: resolve target plot, latest-census guard, destructive CALL
       const exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ PlotID: 1 }])
         .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 1, MaxPlotCensusNumber: 1 }])
         .mockResolvedValueOnce({});
 
@@ -327,7 +333,7 @@ describe('Unified Changelog Tracking System', () => {
       expect(res.status).toBe(HTTPResponses.OK);
 
       // Verify the stored procedure is called
-      const [sql, params] = exec.mock.calls[1];
+      const [sql, params] = exec.mock.calls[2];
       expect(String(sql)).toMatch(/CALL testschema\.clearcensusmsmts\((7|\?)\);?/i);
       expect(params).toEqual([]);
 

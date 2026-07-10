@@ -15,6 +15,17 @@ export const runtime = 'nodejs';
 const VALID_CENSUS_TYPES = ['msmts', 'full', 'measurements', 'attributes', 'personnel', 'quadrats'] as const;
 type CensusType = (typeof VALID_CENSUS_TYPES)[number];
 
+// Census clear procedures manage (START/COMMIT) their own transactions. A
+// row-level lock acquired by this route would be released when the procedure
+// starts its transaction, so serialize clears with a connection-scoped MySQL
+// advisory lock instead. A second admin can retry immediately rather than
+// waiting behind a potentially long destructive operation.
+const CLEAR_CENSUS_LOCK_TIMEOUT_MS = 0;
+
+function buildClearCensusLockName(schema: string, plotID: number): string {
+  return `clear-census:${schema}:${plotID}`;
+}
+
 interface ClearCensusRequestBody {
   schema?: unknown;
   censusID?: unknown;
@@ -85,6 +96,37 @@ export async function POST(request: NextRequest) {
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
   try {
+    transactionID = await connectionManager.beginTransaction();
+
+    // Resolve the plot before taking its lock. This read is deliberately
+    // non-locking: a concurrent clear can delete the target before we acquire
+    // the advisory lock, so the authoritative latest-census check below always
+    // runs again AFTER the lock is held.
+    const targetCensusSQL = format(`SELECT PlotID FROM ??.census WHERE CensusID = ? AND IsActive IS TRUE`, [schema, censusID]);
+    const targetCensusRows = await connectionManager.executeQuery(targetCensusSQL, [], transactionID);
+    const targetCensus = targetCensusRows[0];
+    if (!targetCensus) {
+      await connectionManager.rollbackTransaction(transactionID);
+      transactionID = '';
+      return new NextResponse(JSON.stringify({ error: 'Census not found' }), { status: HTTPResponses.NOT_FOUND });
+    }
+
+    const clearLockName = buildClearCensusLockName(schema, Number(targetCensus.PlotID));
+    const clearLockAcquired = await connectionManager.acquireApplicationLock(clearLockName, transactionID, CLEAR_CENSUS_LOCK_TIMEOUT_MS);
+    if (!clearLockAcquired) {
+      await connectionManager.rollbackTransaction(transactionID);
+      transactionID = '';
+      return new NextResponse(JSON.stringify({ error: 'A census clear is already in progress for this plot. Please retry when it completes.' }), {
+        status: HTTPResponses.CONFLICT
+      });
+    }
+
+    // The procedures called below issue START TRANSACTION/COMMIT themselves,
+    // which implicitly ends this route transaction and releases any FOR UPDATE
+    // row locks. GET_LOCK is connection-scoped and survives those boundaries,
+    // so it serializes every clear for this plot through the destructive CALL.
+    // Re-check after acquiring it so a waiter observes the previous clear's
+    // committed state rather than acting on its pre-wait snapshot.
     const latestCensusSQL = format(
       `SELECT c.PlotID, c.PlotCensusNumber, latest.MaxPlotCensusNumber
        FROM ??.census c
@@ -94,15 +136,20 @@ export async function POST(request: NextRequest) {
          WHERE IsActive IS TRUE
          GROUP BY PlotID
        ) latest ON latest.PlotID = c.PlotID
-       WHERE c.CensusID = ? AND c.IsActive IS TRUE`,
+       WHERE c.CensusID = ? AND c.IsActive IS TRUE
+       FOR UPDATE`,
       [schema, schema, censusID]
     );
-    const censusRows = await connectionManager.executeQuery(latestCensusSQL);
+    const censusRows = await connectionManager.executeQuery(latestCensusSQL, [], transactionID);
     const censusRow = censusRows[0];
     if (!censusRow) {
+      await connectionManager.rollbackTransaction(transactionID);
+      transactionID = '';
       return new NextResponse(JSON.stringify({ error: 'Census not found' }), { status: HTTPResponses.NOT_FOUND });
     }
     if (Number(censusRow.PlotCensusNumber) !== Number(censusRow.MaxPlotCensusNumber)) {
+      await connectionManager.rollbackTransaction(transactionID);
+      transactionID = '';
       return new NextResponse(JSON.stringify({ error: 'Only the latest census can be cleared. Delete newer censuses first.' }), {
         status: HTTPResponses.CONFLICT
       });
@@ -112,7 +159,6 @@ export async function POST(request: NextRequest) {
     const procedureName = `clearcensus${type}`;
     const callSQL = format('CALL ??.??(?)', [schema, procedureName, censusID]);
 
-    transactionID = await connectionManager.beginTransaction();
     await connectionManager.executeQuery(callSQL, [], transactionID);
     await connectionManager.commitTransaction(transactionID);
     ailogger.info(`Census cleared successfully: ${schema}.${procedureName}(${censusID})`);
