@@ -100,9 +100,11 @@ describe('GET /api/files/[operation] authz', () => {
     expect(res.status).toBe(HTTP_OK);
     const body = await res.json();
     expect(body.responseMessage).toBe('List of files');
-    expect(body.containerName).toBe('plot1-census2');
+    // F19: containers are schema-scoped; the legacy shared 'plot1-census2' name
+    // must never be consulted from a user-facing path.
+    expect(body.containerName).toBe('forestgeo-testing-plot1-census2');
     expect(body.blobData).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'measurements.csv' })]));
     // The member request reached the (mocked) blob layer.
-    expect(mocks.getContainerClient).toHaveBeenCalledWith('plot1-census2', { createIfMissing: false });
+    expect(mocks.getContainerClient).toHaveBeenCalledWith('forestgeo-testing-plot1-census2', { createIfMissing: false });
   });
 });
