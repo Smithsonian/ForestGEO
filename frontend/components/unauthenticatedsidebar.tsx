@@ -13,7 +13,7 @@ export default function UnauthenticatedSidebar() {
    * UNAUTHENTICATED SESSION HANDLING:
    */
   return (
-    <Stack direction="row" overflow="hidden" sx={{ display: 'flex', width: 'fit-content' }}>
+    <Stack direction="row" overflow="hidden" sx={{ display: 'flex', width: '100%' }}>
       <Box
         component="aside"
         ref={containerRef}
@@ -24,7 +24,7 @@ export default function UnauthenticatedSidebar() {
         sx={{
           position: { md: 'sticky' },
           height: '100dvh',
-          width: 'calc(var(--Sidebar-width))',
+          width: '100%',
           top: 0,
           p: 2,
           flexShrink: 0,

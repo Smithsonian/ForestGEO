@@ -35,6 +35,8 @@ export const siteConfig = {
   version: 'Acacia' // needs to be updated as new versions are released
 };
 
+export const DOCUMENTATION_URL = 'https://smithsonian.github.io/ForestGEO/';
+
 type DataValidityKey = keyof UnifiedValidityFlags;
 
 // Define a mapping type that restricts keys to strings and values to keys of DataValidity

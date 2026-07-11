@@ -303,7 +303,7 @@ describe('IsolatedDataGridCommons', () => {
     );
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/api/fixeddata/failedmeasurements/testschema/0/10/1/1'), expect.any(Object));
+      expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/api/fixeddata/failedmeasurements/testschema/0/50/1/1'), expect.any(Object));
       expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE);
     });
     const initialListCallCount = mockFetch.mock.calls.filter(([, init]) => !init?.method || init.method === 'GET').length;
@@ -410,7 +410,7 @@ describe('IsolatedDataGridCommons', () => {
 
     const postCalls = mockFetch.mock.calls.filter(([, init]) => init?.method === 'POST');
     expect(postCalls).toHaveLength(1);
-    expect(String(postCalls[0][0])).toContain('/api/fixeddatafilter/failedmeasurements/testschema/0/10/1/1');
+    expect(String(postCalls[0][0])).toContain('/api/fixeddatafilter/failedmeasurements/testschema/0/50/1/1');
 
     expect(screen.getByTestId('pagination-state').textContent).toContain('"page":0');
     expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE);

@@ -121,6 +121,16 @@ const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
 const FIREFOX_FIXED_ROW_HEIGHT = 112;
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
 
+function describeMeasurementRow(row: GridRowModel | null): string {
+  if (!row) return 'this measurement';
+  const treeTag = row.treeTag ?? row.TreeTag;
+  const stemTag = row.stemTag ?? row.StemTag;
+  const measuredValue = row.measuredDBH ?? row.MeasuredDBH ?? row.dbh ?? row.DBH;
+  const identity = [treeTag && `tree ${treeTag}`, stemTag && `stem ${stemTag}`].filter(Boolean).join(', ');
+  const value = measuredValue !== undefined && measuredValue !== null && measuredValue !== '' ? ` (DBH ${measuredValue})` : '';
+  return identity ? `${identity}${value}` : `this measurement${value}`;
+}
+
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
   const [value, setValue] = useState(initialValue);
@@ -193,6 +203,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     actionId: null
   });
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [pendingDeleteRow, setPendingDeleteRow] = useState<GridRowModel | null>(null);
   const [isValidationModalOpen, setIsValidationModalOpen] = useState(false);
   const [isValidationOverrideModalOpen, setIsValidationOverrideModalOpen] = useState(false);
   const [isResetValidationModalOpen, setIsResetValidationModalOpen] = useState(false);
@@ -543,11 +554,11 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const PaginationSlot = useMemo(() => {
     if (!enablePageJump && !enableInfiniteScroll) return undefined;
-    const Slot = () => <CustomGridPagination infiniteScroll={infiniteScrollDescriptor} />;
+    const Slot = () => <CustomGridPagination gridType={gridType} infiniteScroll={infiniteScrollDescriptor} />;
     Slot.displayName = 'CustomGridPaginationSlot';
     (Slot as unknown as { infiniteScroll?: typeof infiniteScrollDescriptor }).infiniteScroll = infiniteScrollDescriptor;
     return Slot;
-  }, [enablePageJump, enableInfiniteScroll, infiniteScrollDescriptor]);
+  }, [enablePageJump, enableInfiniteScroll, gridType, infiniteScrollDescriptor]);
 
   useEffect(() => {
     if (gridError) {
@@ -895,6 +906,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       const row = rows.find(row => String(row.id) === String(actionId));
       if (row) {
         if (actionType === 'delete') {
+          setPendingDeleteRow(row);
           setIsDeleteDialogOpen(true);
         } else {
           setIsDialogOpen(true);
@@ -912,6 +924,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const handleConfirmAction = async () => {
     setIsDialogOpen(false);
     setIsDeleteDialogOpen(false);
+    setPendingDeleteRow(null);
     if (pendingAction.actionType === 'save' && pendingAction.actionId !== null && promiseArguments) {
       await performSaveAction(pendingAction.actionId);
     } else if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
@@ -924,6 +937,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const handleCancelAction = () => {
     setIsDialogOpen(false);
     setIsDeleteDialogOpen(false);
+    setPendingDeleteRow(null);
     if (promiseArguments) {
       promiseArguments.reject(new Error('Action cancelled by user'));
     }
@@ -988,22 +1002,30 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       setSnackbar({ children: 'Error: Site context not available', severity: 'error' });
       return;
     }
-    // destructive mutation — global overlay blocks UI for the duration of the API call
-    setLoading(true, 'Deleting...');
-    const deletionID = rows.find(row => String(row.id) === String(id))?.id;
-    if (!deletionID) return;
+    const deletionRow = rows.find(row => String(row.id) === String(id));
+    const deletionID = deletionRow?.id;
+    if (!deletionID) {
+      setSnackbar({ children: 'Error: The row to delete is no longer available', severity: 'error' });
+      return;
+    }
     const deleteQuery = createDeleteQuery(currentSite.schemaName, gridType, getGridID(gridType), deletionID);
-    const response = await fetch(deleteQuery, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        oldRow: undefined,
-        newRow: rows.find(row => String(row.id) === String(id))!
-      })
-    });
-    setLoading(false);
+    let response: Response;
+    setLoading(true, 'Deleting...');
+    try {
+      response = await fetch(deleteQuery, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ oldRow: undefined, newRow: deletionRow })
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Network request failed';
+      setSnackbar({ children: `Error: ${message}`, severity: 'error' });
+      return;
+    } finally {
+      setLoading(false);
+    }
     if (!response.ok) {
       const error = await response.json();
       if (response.status === HTTPResponses.FOREIGN_KEY_CONFLICT) {
@@ -1141,7 +1163,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 : type === 'Edit'
                   ? `Edit this row`
                   : type === 'Delete'
-                    ? 'Delete this row (cannot be undone!)'
+                    ? 'Delete this row'
                     : undefined
           }
           arrow
@@ -1629,7 +1651,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 paginationModel={paginationModel}
                 rowCount={gridRowCount}
                 onRowCountChange={handleRowCountChange}
-                pageSizeOptions={[10, 25, 50, 100]}
+                pageSizeOptions={[25, 50, 100]}
                 sortModel={sortModel}
                 onSortModelChange={handleSortModelChange}
                 filterModel={gridFilterModel}
@@ -1709,7 +1731,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           )}
         </Box>
         {!!snackbar && (
-          <Snackbar open anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
+          <Snackbar open anchorOrigin={{ vertical: 'top', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
             <Alert {...snackbar} onClose={handleCloseSnackbar} />
           </Snackbar>
         )}
@@ -1766,7 +1788,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             onClose={handleCancelAction}
             onConfirm={handleConfirmAction}
             title="Confirm Deletion"
-            content="Are you sure you want to delete this row? This action cannot be undone."
+            content={`Delete ${describeMeasurementRow(pendingDeleteRow)}? This action cannot be undone.`}
           />
         )}
         {isValidationModalOpen && (

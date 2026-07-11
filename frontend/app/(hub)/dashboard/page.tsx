@@ -38,6 +38,7 @@ import PlotsOverview from '@/components/dashboard/plotsoverview';
 import CensusesOverview from '@/components/dashboard/censusesoverview';
 import CensusStatsView from '@/components/dashboard/censusstatsview';
 import DataQualityCard from '@/components/dashboard/dataqualitycard';
+import { summarizeChange } from '@/components/changes/recentchangesexplorer';
 import { designTokens } from '@/config/design-tokens';
 import AddIcon from '@mui/icons-material/Add';
 import DatasetIcon from '@mui/icons-material/Dataset';
@@ -930,7 +931,13 @@ export default function DashboardPage() {
                                 </Avatar>
                                 <Box sx={{ flex: 1, minWidth: 0 }}>
                                   <Typography level="body-sm" sx={{ fontWeight: 600 }}>
-                                    {log.operation || 'Update'} on {log.tableName || 'Data'}
+                                    {summarizeChange({
+                                      operation: (log.operation || 'UPDATE') as 'INSERT' | 'UPDATE' | 'DELETE',
+                                      tableName: log.tableName || 'data',
+                                      oldRowState: log.oldRowState ?? null,
+                                      newRowState: log.newRowState ?? null,
+                                      recordID: String(log.recordID ?? '')
+                                    })}
                                   </Typography>
                                   <Typography level="body-xs" color="neutral">
                                     {moment(log.changeTimestamp).fromNow()}

@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import styles from '@/styles/styles.module.css';
-import Box from '@mui/joy/Box';
+import { Box, Card, Typography } from '@mui/joy';
 import UnauthenticatedSidebar from '@/components/unauthenticatedsidebar';
 import { redirect } from 'next/navigation';
 
@@ -24,7 +24,7 @@ export default function LoginPage() {
 
   if (status === 'unauthenticated') {
     return (
-      <Box sx={{ display: 'flex', minHeight: '100vh', minWidth: '100vh', position: 'relative' }}>
+      <Box sx={{ display: 'flex', minHeight: '100vh', width: '100%', position: 'relative', alignItems: 'center', justifyContent: 'center', p: 2 }}>
         <AnimatePresence mode="wait">
           <motion.div
             key={slides[index]}
@@ -37,7 +37,13 @@ export default function LoginPage() {
             transition={{ duration: 1.5 }}
           />
         </AnimatePresence>
-        <UnauthenticatedSidebar />
+        <Card variant="outlined" sx={{ width: '100%', maxWidth: 440, zIndex: 1, p: 4, boxShadow: 'lg', textAlign: 'center' }}>
+          <Typography level="h1">ForestGEO</Typography>
+          <Typography level="body-md" sx={{ mb: 3 }}>
+            Sign in to manage your forest inventory data.
+          </Typography>
+          <UnauthenticatedSidebar />
+        </Card>
       </Box>
     );
   } else if (status === 'authenticated') {

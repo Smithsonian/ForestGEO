@@ -50,11 +50,13 @@ import CheckIcon from '@mui/icons-material/Check';
 import CancelPresentationIcon from '@mui/icons-material/CancelPresentation';
 import VerifiedIcon from '@mui/icons-material/Verified';
 import ScheduleIcon from '@mui/icons-material/Schedule';
-import { FormType, getTableHeaders } from '@/config/macros/formdetails';
+import { DatagridType, FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { Plot, Site } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { CallSplit, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore, Warning } from '@mui/icons-material';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import RenderGridFormExplanations from '@/components/client/rendergridformexplanations';
 
 // The errors toggle filters (IsValidated = FALSE OR unresolved log entry); its tooltip breaks that
 // down into rows with unresolved logged errors vs FALSE rows with no log entry (not yet validated).
@@ -107,6 +109,62 @@ const defaultControl: RowControl = {
   count: 0
 };
 
+function headerReferenceGridType(gridType?: string): DatagridType | null {
+  if (!gridType) return null;
+  if (gridType === 'measurements' || gridType === 'measurementssummary') return DatagridType.measurementssummaryview;
+  if (gridType === 'species') return DatagridType.alltaxonomiesview;
+  return Object.values(DatagridType).includes(gridType as DatagridType) ? (gridType as DatagridType) : null;
+}
+
+interface MeasurementFilterChipProps {
+  control: RowControl;
+  label: string;
+  icon: React.ReactNode;
+  color: 'danger' | 'success' | 'primary';
+  testId: string;
+  itemLabel: string;
+  tooltip: React.ReactNode;
+}
+
+function MeasurementFilterChip({ control, label, icon, color, testId, itemLabel, tooltip }: MeasurementFilterChipProps) {
+  const enabled = control.count > 0;
+  return (
+    <ToolbarButton
+      disabled={!enabled}
+      render={
+        <Tooltip title={tooltip}>
+          <Chip
+            disabled={!enabled}
+            variant={control.show ? 'solid' : 'outlined'}
+            color={control.show ? color : 'neutral'}
+            startDecorator={icon}
+            role="button"
+            tabIndex={enabled ? 0 : -1}
+            onClick={() => control.toggle(!control.show)}
+            onKeyDown={event => {
+              if (enabled && (event.key === 'Enter' || event.key === ' ')) {
+                event.preventDefault();
+                control.toggle(!control.show);
+              }
+            }}
+            slotProps={{
+              action: {
+                'aria-label': `${control.show ? 'Hide' : 'Show'} ${itemLabel} (${control.count.toLocaleString()})`,
+                'aria-pressed': control.show,
+                'data-testid': testId,
+                disabled: !enabled
+              }
+            }}
+            sx={{ whiteSpace: 'nowrap' }}
+          >
+            {label} {control.count.toLocaleString()}
+          </Chip>
+        </Tooltip>
+      }
+    />
+  );
+}
+
 export const EditToolbar = (props: GridSlotProps['toolbar']) => {
   const {
     handleAddNewRow,
@@ -138,10 +196,12 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [openExportModal, setOpenExportModal] = useState(false);
+  const [openHeaderReference, setOpenHeaderReference] = useState(false);
   const [exportType, setExportType] = useState<'csv' | 'form'>('csv');
   const [exportVisibility, setExportVisibility] = useState<VisibleFilter[]>(filterModel?.visible || []);
   const [isExporting, setIsExporting] = useState(false);
   const apiRef = useGridApiContext();
+  const referenceGridType = headerReferenceGridType(gridType);
 
   useEffect(() => {
     if (isTyping) {
@@ -279,6 +339,13 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
         >
           {/* Left section - filters and controls */}
           <Box display={'flex'} alignItems={'center'} sx={{ gap: 0.5, flex: 1, minWidth: 'max-content' }}>
+            {referenceGridType && (
+              <Tooltip title="Open the grid-to-form header reference">
+                <IconButton aria-label="Header reference" size="sm" variant="outlined" onClick={() => setOpenHeaderReference(true)}>
+                  <HelpOutlineIcon />
+                </IconButton>
+              </Tooltip>
+            )}
             <Box display={'flex'} alignItems={'center'} sx={{ flex: 1, minWidth: 'max-content' }}>
               <ColumnsPanelTrigger
                 style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}
@@ -334,129 +401,61 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               }
             />
             {gridType === 'measurements' && (
-              <Stack direction={'row'} spacing={1.5} sx={{ display: 'flex', alignItems: 'center', ml: 1, flexWrap: 'nowrap', flexShrink: 0 }}>
-                <Tooltip
-                  title={INVALID_FILTER_TOOLTIP(errorControls.breakdown?.unresolvedLogged ?? errorControls.count, errorControls.breakdown?.failedNoLog ?? 0)}
-                >
-                  <Badge badgeContent={errorControls.count} size={'sm'}>
-                    <ToolbarButton
-                      disabled={!errorControls.count}
-                      render={
-                        <IconButton
-                          disabled={!errorControls.count}
-                          variant="soft"
-                          color={errorControls.show ? 'danger' : 'neutral'}
-                          onClick={() => errorControls.toggle(!errorControls.show)}
-                          aria-label={`${errorControls.show ? 'Hide' : 'Show'} invalid measurements (${errorControls.count})`}
-                          aria-pressed={errorControls.show}
-                          data-testid="filter-errors"
-                        >
-                          <Warning />
-                        </IconButton>
-                      }
-                    />
-                  </Badge>
-                </Tooltip>
-                <Tooltip title={`Valid: (${validControls.count})`}>
-                  <Badge badgeContent={validControls.count} size={'sm'}>
-                    <ToolbarButton
-                      disabled={!validControls.count}
-                      render={
-                        <IconButton
-                          variant="soft"
-                          disabled={!validControls.count}
-                          color={validControls.show ? 'success' : 'neutral'}
-                          onClick={() => validControls.toggle(!validControls.show)}
-                          aria-label={`${validControls.show ? 'Hide' : 'Show'} valid measurements (${validControls.count})`}
-                          aria-pressed={validControls.show}
-                          data-testid="filter-valid"
-                        >
-                          <VerifiedIcon />
-                        </IconButton>
-                      }
-                    />
-                  </Badge>
-                </Tooltip>
-                <Tooltip title={`Pending: (${pendingControls.count})`}>
-                  <Badge badgeContent={pendingControls.count} size={'sm'}>
-                    <ToolbarButton
-                      disabled={!pendingControls.count}
-                      render={
-                        <IconButton
-                          variant="soft"
-                          disabled={!pendingControls.count}
-                          color={pendingControls.show ? 'primary' : 'neutral'}
-                          onClick={() => pendingControls.toggle(!pendingControls.show)}
-                          aria-label={`${pendingControls.show ? 'Hide' : 'Show'} pending measurements (${pendingControls.count})`}
-                          aria-pressed={pendingControls.show}
-                          data-testid="filter-pending"
-                        >
-                          <ScheduleIcon />
-                        </IconButton>
-                      }
-                    />
-                  </Badge>
-                </Tooltip>
-                <Tooltip title={`Old Trees: ${otControls.count}`}>
-                  <Badge badgeContent={otControls.count} size={'sm'}>
-                    <ToolbarButton
-                      disabled={!otControls.count}
-                      render={
-                        <IconButton
-                          variant="soft"
-                          disabled={!otControls.count}
-                          color={otControls.show ? 'primary' : 'neutral'}
-                          onClick={() => otControls.toggle(!otControls.show)}
-                          aria-label={`${otControls.show ? 'Hide' : 'Show'} old trees (${otControls.count})`}
-                          aria-pressed={otControls.show}
-                          data-testid="filter-ot"
-                        >
-                          <Forest />
-                        </IconButton>
-                      }
-                    />
-                  </Badge>
-                </Tooltip>
-                <Tooltip title={`Multi-Stems: ${msControls.count}`}>
-                  <Badge badgeContent={msControls.count} size={'sm'}>
-                    <ToolbarButton
-                      disabled={!msControls.count}
-                      render={
-                        <IconButton
-                          variant="soft"
-                          disabled={!msControls.count}
-                          color={msControls.show ? 'primary' : 'neutral'}
-                          onClick={() => msControls.toggle(!msControls.show)}
-                          aria-label={`${msControls.show ? 'Hide' : 'Show'} multi-stem trees (${msControls.count})`}
-                          aria-pressed={msControls.show}
-                          data-testid="filter-ms"
-                        >
-                          <CallSplit />
-                        </IconButton>
-                      }
-                    />
-                  </Badge>
-                </Tooltip>
-                <Tooltip title={`New Recruits: ${nrControls.count}`}>
-                  <Badge badgeContent={nrControls.count} size={'sm'}>
-                    <ToolbarButton
-                      disabled={!nrControls.count}
-                      render={
-                        <IconButton
-                          variant="soft"
-                          disabled={!nrControls.count}
-                          color={nrControls.show ? 'primary' : 'neutral'}
-                          onClick={() => nrControls.toggle(!nrControls.show)}
-                          aria-label={`${nrControls.show ? 'Hide' : 'Show'} new recruits (${nrControls.count})`}
-                          aria-pressed={nrControls.show}
-                          data-testid="filter-nr"
-                        >
-                          <Grass />
-                        </IconButton>
-                      }
-                    />
-                  </Badge>
-                </Tooltip>
+              <Stack direction={'row'} spacing={0.75} sx={{ display: 'flex', alignItems: 'center', ml: 1, flexWrap: 'nowrap', flexShrink: 0 }}>
+                <MeasurementFilterChip
+                  control={errorControls}
+                  label="Errors"
+                  icon={<Warning />}
+                  color="danger"
+                  testId="filter-errors"
+                  itemLabel="invalid measurements"
+                  tooltip={INVALID_FILTER_TOOLTIP(errorControls.breakdown?.unresolvedLogged ?? errorControls.count, errorControls.breakdown?.failedNoLog ?? 0)}
+                />
+                <MeasurementFilterChip
+                  control={validControls}
+                  label="Valid"
+                  icon={<VerifiedIcon />}
+                  color="success"
+                  testId="filter-valid"
+                  itemLabel="valid measurements"
+                  tooltip={`Valid: ${validControls.count.toLocaleString()}`}
+                />
+                <MeasurementFilterChip
+                  control={pendingControls}
+                  label="Pending"
+                  icon={<ScheduleIcon />}
+                  color="primary"
+                  testId="filter-pending"
+                  itemLabel="pending measurements"
+                  tooltip={`Pending: ${pendingControls.count.toLocaleString()}`}
+                />
+                <MeasurementFilterChip
+                  control={otControls}
+                  label="Old trees"
+                  icon={<Forest />}
+                  color="primary"
+                  testId="filter-ot"
+                  itemLabel="old trees"
+                  tooltip={`Old trees: ${otControls.count.toLocaleString()}`}
+                />
+                <MeasurementFilterChip
+                  control={msControls}
+                  label="Multi-stems"
+                  icon={<CallSplit />}
+                  color="primary"
+                  testId="filter-ms"
+                  itemLabel="multi-stem trees"
+                  tooltip={`Multi-stems: ${msControls.count.toLocaleString()}`}
+                />
+                <MeasurementFilterChip
+                  control={nrControls}
+                  label="New recruits"
+                  icon={<Grass />}
+                  color="primary"
+                  testId="filter-nr"
+                  itemLabel="new recruits"
+                  tooltip={`New recruits: ${nrControls.count.toLocaleString()}`}
+                />
               </Stack>
             )}
           </Box>
@@ -465,16 +464,16 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               <Divider orientation={'vertical'} sx={{ mx: 1 }} />
               {/* Right section - action buttons */}
               <Stack direction="row" spacing={1} sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                {/* Manual Entry Form - icon only with tooltip */}
+                {/* Keep the frequent manual-entry action visible and explicitly labelled. */}
                 {dynamicButtons
                   .filter((button: any) => button.label === 'Manual Entry Form')
                   .map((button: any, index: number) => (
                     <Tooltip key={index} title={button.tooltip || 'Manual Entry Form'} placement="top" arrow>
                       <ToolbarButton
                         render={
-                          <IconButton onClick={button.onClick} variant="soft" color="primary" size="sm" aria-label="Manual Entry Form">
-                            {button.icon}
-                          </IconButton>
+                          <Button onClick={button.onClick} variant="soft" color="primary" size="sm" startDecorator={button.icon}>
+                            {gridType === 'measurements' ? 'Manual entry' : 'Add record'}
+                          </Button>
                         }
                       />
                     </Tooltip>
@@ -581,6 +580,17 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
             </>
           )}
         </Box>
+        {referenceGridType && (
+          <Modal open={openHeaderReference} onClose={() => setOpenHeaderReference(false)}>
+            <ModalDialog aria-labelledby="header-reference-dialog-title" sx={{ width: 'min(1100px, calc(100vw - 32px))', maxHeight: '90vh', overflow: 'auto' }}>
+              <DialogTitle id="header-reference-dialog-title">Header reference</DialogTitle>
+              <RenderGridFormExplanations datagridType={referenceGridType} />
+              <DialogActions>
+                <Button onClick={() => setOpenHeaderReference(false)}>Close</Button>
+              </DialogActions>
+            </ModalDialog>
+          </Modal>
+        )}
         {handleExport && (
           <Modal
             open={openExportModal}

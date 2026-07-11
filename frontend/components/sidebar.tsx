@@ -37,7 +37,7 @@ import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { Plot, Site, SitesRDS } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
-import { CheckCircle, Cancel, Clear } from '@mui/icons-material';
+import { CheckCircle, Cancel, Clear, LockOutlined } from '@mui/icons-material';
 import ValidationStatusBadge from '@/components/client/validationstatusbadge';
 
 export interface SimpleTogglerProps {
@@ -84,35 +84,35 @@ function MenuRenderToggle(
   const { plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete } = props;
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
+  const locked = plotSelectionRequired || censusSelectionRequired;
+  const missingSelection = !currentSite ? 'site' : plotSelectionRequired ? 'plot' : censusSelectionRequired ? 'census' : null;
   return (
-    <ListItemButton
-      disabled={plotSelectionRequired || censusSelectionRequired}
-      color={pathname === siteConfigProps.href ? 'primary' : undefined}
-      onClick={() => {
-        if (setMenuOpen) {
-          setMenuOpen(!menuOpen);
-        }
-      }}
-      data-testid={'menu-render-toggle'}
-      sx={{ width: '100%', padding: 0, margin: 0 }}
-    >
-      <Tooltip data-testid={'menu-render-toggle-tooltip'} title={isParentDataIncomplete ? 'Missing Core Data!' : undefined} arrow>
-        <Badge
-          data-testid={'menu-render-toggle-tooltip-badge'}
-          color="danger"
-          variant={isParentDataIncomplete ? 'solid' : 'soft'}
-          badgeContent={isParentDataIncomplete ? '!' : undefined}
-          invisible={!isParentDataIncomplete || !currentSite || !currentPlot}
-          aria-label={isParentDataIncomplete ? 'Warning: Some subsections have missing data' : undefined}
+    <Tooltip title={missingSelection ? `Choose a ${missingSelection} to unlock` : isParentDataIncomplete ? 'Missing Core Data!' : ''} arrow>
+      <span style={{ width: '100%' }}>
+        <ListItemButton
+          disabled={locked}
+          color={pathname === siteConfigProps.href ? 'primary' : undefined}
+          onClick={() => setMenuOpen?.(!menuOpen)}
+          data-testid={'menu-render-toggle'}
+          sx={{ width: '100%', padding: 0, margin: 0 }}
         >
-          <Icon />
-        </Badge>
-      </Tooltip>
-      <ListItemContent data-testid={'menu-render-toggle-content'}>
-        <Typography level={'title-sm'}>{siteConfigProps.label}</Typography>
-      </ListItemContent>
-      <KeyboardArrowDownIcon sx={{ transform: menuOpen ? 'rotate(180deg)' : 'none' }} />
-    </ListItemButton>
+          <Badge
+            data-testid={'menu-render-toggle-tooltip-badge'}
+            color="danger"
+            variant={isParentDataIncomplete ? 'solid' : 'soft'}
+            badgeContent={isParentDataIncomplete ? '!' : undefined}
+            invisible={!isParentDataIncomplete || !currentSite || !currentPlot}
+            aria-label={isParentDataIncomplete ? 'Warning: Some subsections have missing data' : undefined}
+          >
+            {locked ? <LockOutlined /> : <Icon />}
+          </Badge>
+          <ListItemContent data-testid={'menu-render-toggle-content'}>
+            <Typography level={'title-sm'}>{siteConfigProps.label}</Typography>
+          </ListItemContent>
+          <KeyboardArrowDownIcon sx={{ transform: menuOpen ? 'rotate(180deg)' : 'none' }} />
+        </ListItemButton>
+      </span>
+    </Tooltip>
   );
 }
 
@@ -132,6 +132,14 @@ interface SidebarProps {
  * only they may clear a selection.
  */
 export const isProgrammaticSelectClear = (event: React.SyntheticEvent | null, newValue: number | string | null): boolean => event === null && newValue === null;
+
+const ADMIN_NAV = [
+  { href: '/admin/users', label: 'Users', icon: <CheckCircle /> },
+  { href: '/admin/sites', label: 'Sites', icon: <TravelExploreIcon /> },
+  { href: '/admin/userstosites', label: 'Assignments', icon: <AddCircleOutlineIcon /> },
+  { href: '/admin/provision', label: 'Provisioning', icon: <AddCircleOutlineIcon /> },
+  { href: '/admin/provision/runs', label: 'Provisioning runs', icon: <FormatListBulletedIcon /> }
+];
 
 export default function Sidebar(props: SidebarProps) {
   const { data: session } = useSession();
@@ -813,30 +821,27 @@ export default function Sidebar(props: SidebarProps) {
                   )}
                   {session?.user?.userStatus === 'global' && (
                     <>
-                      <ListItemButton
-                        component={NextLink}
-                        href="/admin/provision"
-                        selected={pathname === '/admin/provision'}
-                        color={pathname === '/admin/provision' ? 'primary' : undefined}
-                        sx={{ borderRadius: 'sm', mb: 0.5 }}
-                        aria-label="Navigate to Provision New Site"
-                      >
-                        <AddCircleOutlineIcon />
+                      <Typography level="body-xs" sx={{ color: 'neutral.400', mb: 0.5, fontWeight: 600, textTransform: 'uppercase' }}>
+                        Administration
+                      </Typography>
+                      {ADMIN_NAV.map(item => (
+                        <ListItemButton
+                          key={item.href}
+                          component={NextLink}
+                          href={item.href}
+                          selected={pathname === item.href}
+                          color={pathname === item.href ? 'primary' : undefined}
+                          sx={{ borderRadius: 'sm', mb: 0.5 }}
+                        >
+                          {item.icon}
+                          <ListItemContent>
+                            <Typography level="title-sm">{item.label}</Typography>
+                          </ListItemContent>
+                        </ListItemButton>
+                      ))}
+                      <ListItemButton component={NextLink} href="/dashboard" aria-label="Back to app" sx={{ borderRadius: 'sm', mb: 1 }}>
                         <ListItemContent>
-                          <Typography level="title-sm">Provision Site</Typography>
-                        </ListItemContent>
-                      </ListItemButton>
-                      <ListItemButton
-                        component={NextLink}
-                        href="/admin/provision/runs"
-                        selected={pathname === '/admin/provision/runs'}
-                        color={pathname === '/admin/provision/runs' ? 'primary' : undefined}
-                        sx={{ borderRadius: 'sm', mb: 1 }}
-                        aria-label="Navigate to Provisioning Runs"
-                      >
-                        <FormatListBulletedIcon />
-                        <ListItemContent>
-                          <Typography level="title-sm">Provisioning Runs</Typography>
+                          <Typography level="title-sm">Back to app</Typography>
                         </ListItemContent>
                       </ListItemButton>
                     </>
@@ -1045,7 +1050,9 @@ export default function Sidebar(props: SidebarProps) {
                       };
 
                       // Dashboard button is always visible, other non-expanding items require site+plot
-                      const transitionIn = isDashboard ? true : currentSite !== undefined && currentPlot !== undefined;
+                      // Keep the information architecture visible before selection; unavailable
+                      // destinations are shown disabled instead of disappearing.
+                      const transitionIn = true;
 
                       return (
                         <TransitionComponent key={item.href} in={transitionIn} direction="down">
@@ -1097,23 +1104,25 @@ export default function Sidebar(props: SidebarProps) {
                                 </Box>
                               </Tooltip>
                             ) : (
-                              <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-undefined-box-wrapper'}>
-                                <ListItemButton
-                                  component={isNavDisabledWithoutSelection ? 'div' : NextLink}
-                                  href={isNavDisabledWithoutSelection ? undefined : item.href}
-                                  selected={pathname === item.href}
-                                  sx={{ flex: 1, width: '100%' }}
-                                  disabled={isNavDisabledWithoutSelection}
-                                  color={pathname === item.href ? 'primary' : undefined}
-                                  onClickCapture={preventNavigationIfDisabled(isNavDisabledWithoutSelection)}
-                                  onClick={handleEnabledNavClick}
-                                >
-                                  <Icon />
-                                  <ListItemContent>
-                                    <Typography level={'title-sm'}>{item.label}</Typography>
-                                  </ListItemContent>
-                                </ListItemButton>
-                              </Box>
+                              <Tooltip title={`Choose a ${currentSite === undefined ? 'site' : currentPlot === undefined ? 'plot' : 'census'} to unlock`} arrow>
+                                <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-undefined-box-wrapper'}>
+                                  <ListItemButton
+                                    component={isNavDisabledWithoutSelection ? 'div' : NextLink}
+                                    href={isNavDisabledWithoutSelection ? undefined : item.href}
+                                    selected={pathname === item.href}
+                                    sx={{ flex: 1, width: '100%' }}
+                                    disabled={isNavDisabledWithoutSelection}
+                                    color={pathname === item.href ? 'primary' : undefined}
+                                    onClickCapture={preventNavigationIfDisabled(isNavDisabledWithoutSelection)}
+                                    onClick={handleEnabledNavClick}
+                                  >
+                                    <LockOutlined />
+                                    <ListItemContent>
+                                      <Typography level={'title-sm'}>{item.label}</Typography>
+                                    </ListItemContent>
+                                  </ListItemButton>
+                                </Box>
+                              </Tooltip>
                             )}
                           </ListItem>
                         </TransitionComponent>
@@ -1125,7 +1134,7 @@ export default function Sidebar(props: SidebarProps) {
                       });
 
                       return (
-                        <TransitionComponent key={item.href} in={currentSite !== undefined && currentPlot !== undefined} direction="down">
+                        <TransitionComponent key={item.href} in={true} direction="down">
                           <ListItem nested data-testid={`navigate-list-item-expanding-${item.label}`}>
                             <SimpleToggler
                               renderToggle={MenuRenderToggle(
@@ -1229,25 +1238,30 @@ export default function Sidebar(props: SidebarProps) {
                                             </Box>
                                           </Tooltip>
                                         ) : (
-                                          <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-undefined-box-wrapper'}>
-                                            <ListItemButton
-                                              component={isSubLinkDisabledWithoutSelection ? 'div' : NextLink}
-                                              href={isSubLinkDisabledWithoutSelection ? undefined : item.href + link.href}
-                                              sx={{ flex: 1, width: '100%' }}
-                                              selected={pathname == item.href + link.href}
-                                              color={pathname === item.href ? 'primary' : undefined}
-                                              disabled={isSubLinkDisabledWithoutSelection}
-                                              onMouseEnter={navPreloadHandlers[link.href]}
-                                              onFocus={navPreloadHandlers[link.href]}
-                                              onClickCapture={preventNavigationIfDisabled(isSubLinkDisabledWithoutSelection)}
-                                              onClick={handleEnabledNavClick}
-                                            >
-                                              <SubIcon />
-                                              <ListItemContent>
-                                                <Typography level={'title-sm'}>{link.label}</Typography>
-                                              </ListItemContent>
-                                            </ListItemButton>
-                                          </Box>
+                                          <Tooltip
+                                            title={`Choose a ${currentSite === undefined ? 'site' : currentPlot === undefined ? 'plot' : 'census'} to unlock`}
+                                            arrow
+                                          >
+                                            <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-undefined-box-wrapper'}>
+                                              <ListItemButton
+                                                component={isSubLinkDisabledWithoutSelection ? 'div' : NextLink}
+                                                href={isSubLinkDisabledWithoutSelection ? undefined : item.href + link.href}
+                                                sx={{ flex: 1, width: '100%' }}
+                                                selected={pathname == item.href + link.href}
+                                                color={pathname === item.href ? 'primary' : undefined}
+                                                disabled={isSubLinkDisabledWithoutSelection}
+                                                onMouseEnter={navPreloadHandlers[link.href]}
+                                                onFocus={navPreloadHandlers[link.href]}
+                                                onClickCapture={preventNavigationIfDisabled(isSubLinkDisabledWithoutSelection)}
+                                                onClick={handleEnabledNavClick}
+                                              >
+                                                <LockOutlined />
+                                                <ListItemContent>
+                                                  <Typography level={'title-sm'}>{link.label}</Typography>
+                                                </ListItemContent>
+                                              </ListItemButton>
+                                            </Box>
+                                          </Tooltip>
                                         )}
                                       </ListItem>
                                     </TransitionComponent>

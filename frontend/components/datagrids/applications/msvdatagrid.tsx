@@ -19,6 +19,7 @@ import { AssignmentOutlined, CachedOutlined, UploadFileOutlined } from '@mui/ico
 import ailogger from '@/ailogger';
 import { useRouter } from 'next/navigation';
 import { VisibleFilter } from '@/config/datagridhelpers';
+import { getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -83,10 +84,10 @@ export default function MeasurementsSummaryViewDataGrid({
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
   const [refresh, setRefresh] = useState(false);
-  const [paginationModel, setPaginationModel] = useState({
+  const [paginationModel, setPaginationModel] = useState(() => ({
     page: 0,
-    pageSize: 10
-  });
+    pageSize: getPersistedGridPageSize(FormType.measurements)
+  }));
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const hasAutoOpenedFailedMeasurementsRef = useRef(false);

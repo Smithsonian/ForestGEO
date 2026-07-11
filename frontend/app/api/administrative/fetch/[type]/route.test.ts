@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
-  executeQuery: vi.fn(async () => []),
+  executeQuery: vi.fn(async (): Promise<any> => []),
   beginTransaction: vi.fn(async () => 'tx-1'),
   commitTransaction: vi.fn(async () => {}),
   rollbackTransaction: vi.fn(async () => {}),
@@ -69,6 +69,13 @@ describe('/api/administrative/fetch/[type] auth gate', () => {
     expect(res.status).toBe(200);
   });
 
+  it('user administration requires the global role', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'db@x', userStatus: 'db admin' } });
+    const res = await GET(makeReq('http://x/api/administrative/fetch/users'), params('users'));
+    expect(res.status).toBe(403);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
   it('GET → preserves paginated format toggle when ?email= is present', async () => {
     mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
     const res = await GET(makeReq('http://x/api/administrative/fetch/users?email=ignored'), params('users'));
@@ -92,6 +99,44 @@ describe('/api/administrative/fetch/[type] auth gate', () => {
     expect(res.status).toBe(401);
     expect(mocks.executeQuery).not.toHaveBeenCalled();
     expect(mocks.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects resource names outside the administrative allow-list', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    const res = await POST(makeReq('http://x/api/administrative/fetch/secrets', { newRow: { value: 'x' } }), params('secrets'));
+    expect(res.status).toBe(400);
+    expect(mocks.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('validates new users and returns the database user id', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    mocks.executeQuery.mockResolvedValueOnce({ insertId: 42 });
+    const res = await POST(
+      makeReq('http://x/api/administrative/fetch/users', {
+        newRow: { firstName: ' Ada ', lastName: ' Lovelace ', email: 'ADA@example.com', notifications: true, userStatus: 'field crew' }
+      }),
+      params('users')
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ userID: 42 });
+    expect(mocks.executeQuery).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO catalog.users'),
+      ['Ada', 'Lovelace', 'ada@example.com', true, 'field crew'],
+      'tx-1'
+    );
+  });
+
+  it('rejects malformed new users without executing an insert', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    const res = await POST(
+      makeReq('http://x/api/administrative/fetch/users', {
+        newRow: { firstName: '', lastName: '', email: 'not-an-email', notifications: 'yes', userStatus: 'owner' }
+      }),
+      params('users')
+    );
+    expect(res.status).toBe(400);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+    expect(mocks.rollbackTransaction).toHaveBeenCalledWith('tx-1');
   });
 
   it('PATCH → 403 when non-admin', async () => {

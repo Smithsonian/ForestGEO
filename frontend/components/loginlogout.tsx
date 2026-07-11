@@ -8,10 +8,10 @@ import IconButton from '@mui/joy/IconButton';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import LoginRoundedIcon from '@mui/icons-material/LoginRounded';
 import CircularProgress from '@mui/joy/CircularProgress';
-import { Menu, MenuItem, Skeleton } from '@mui/joy';
+import { Button, Menu, MenuItem, Skeleton } from '@mui/joy';
 import { signIn, signOut, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { GroupAdd, ManageAccountsRounded, Public, Settings } from '@mui/icons-material';
+import { AddCircleOutline, GroupAdd, ManageAccountsRounded, Public, Settings } from '@mui/icons-material';
 import ailogger from '@/ailogger';
 
 export const LoginLogout = () => {
@@ -62,17 +62,19 @@ export const LoginLogout = () => {
 
   if (status == 'unauthenticated') {
     return (
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }} data-testid={'login-logout-component'}>
-        <Avatar variant="outlined" size="sm" alt={'unknown user (unauthenticated)'}>
-          UNK
-        </Avatar>
-        <Box sx={{ minWidth: 0, flex: 1 }}>
+      <Box sx={{ display: 'flex', width: '100%' }} data-testid={'login-logout-component'}>
+        <Box sx={{ width: '100%' }}>
+          <Avatar variant="outlined" size="sm" alt="unknown user (unauthenticated)">
+            UNK
+          </Avatar>
           <Typography level="title-sm">Login to access</Typography>
-          <Typography level="body-xs">your information</Typography>
+          <Typography level="body-xs" sx={{ mb: 1 }}>
+            your information
+          </Typography>
+          <Button fullWidth aria-label="Login button" size="lg" variant="solid" startDecorator={<LoginRoundedIcon />} onClick={handleRetryLogin}>
+            Sign in with your Smithsonian account
+          </Button>
         </Box>
-        <IconButton size="sm" variant="plain" color="neutral" onClick={() => handleRetryLogin()} aria-label={'Login' + ' button'}>
-          <LoginRoundedIcon />
-        </IconButton>
       </Box>
     );
   } else {
@@ -93,6 +95,9 @@ export const LoginLogout = () => {
           }}
           size="sm"
         >
+          <Typography level="body-xs" sx={{ px: 1, color: 'neutral.500', fontWeight: 600 }}>
+            Administration
+          </Typography>
           <Avatar variant="outlined" size="sm" src="" alt={`Avatar for ${userName || 'current user'}`}>
             <Skeleton loading={status == 'loading'}>{userInitials}</Skeleton>
           </Avatar>
@@ -140,15 +145,17 @@ export const LoginLogout = () => {
           disablePortal
           sx={{ zIndex: 1500 }}
         >
-          <MenuItem
-            onClick={() => {
-              router.push('/admin/users');
-              setAnchorSettings(null);
-            }}
-          >
-            User Settings
-            <ManageAccountsRounded />
-          </MenuItem>
+          {session?.user?.userStatus === 'global' && (
+            <MenuItem
+              onClick={() => {
+                router.push('/admin/users');
+                setAnchorSettings(null);
+              }}
+            >
+              User Settings
+              <ManageAccountsRounded />
+            </MenuItem>
+          )}
           <MenuItem
             onClick={() => {
               router.push('/admin/sites');
@@ -159,15 +166,28 @@ export const LoginLogout = () => {
             <Public />
           </MenuItem>
 
-          <MenuItem
-            onClick={() => {
-              router.push('/admin/userstosites');
-              setAnchorSettings(null);
-            }}
-          >
-            User-Site Assignments
-            <GroupAdd />
-          </MenuItem>
+          {session?.user?.userStatus === 'global' && (
+            <MenuItem
+              onClick={() => {
+                router.push('/admin/userstosites');
+                setAnchorSettings(null);
+              }}
+            >
+              User-Site Assignments
+              <GroupAdd />
+            </MenuItem>
+          )}
+          {session?.user?.userStatus === 'global' && (
+            <MenuItem
+              onClick={() => {
+                router.push('/admin/provision');
+                setAnchorSettings(null);
+              }}
+            >
+              Provisioning
+              <AddCircleOutline />
+            </MenuItem>
+          )}
         </Menu>
       </Box>
     );

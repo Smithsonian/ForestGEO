@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { title } from '@/config/primitives';
 import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
-import { Box, IconButton, Stack, Typography, useTheme } from '@mui/joy';
+import { Box, Drawer, IconButton, Menu, MenuItem, Stack, Typography, useTheme } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
 import { useAsyncOperation } from '@/app/hooks/useAsyncOperation';
 import { useLoadState, combineLoadStates } from '@/app/hooks/useLoadState';
@@ -18,7 +18,7 @@ import {
   useSiteListDispatch
 } from '@/app/contexts/compat-hooks';
 import { useHasHydrated } from '@/config/store/appstore';
-import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
+import { DOCUMENTATION_URL, getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
@@ -28,6 +28,7 @@ import ailogger from '@/ailogger';
 // Eager load for maximum speed (bundle size not a concern)
 import Sidebar from '@/components/sidebar';
 import Header from '@/components/header';
+import { MOBILE_SIDEBAR_TOGGLE_EVENT } from '@/config/utils';
 
 function renderSwitch(endpoint: string) {
   const commonStyle = {
@@ -75,10 +76,22 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const { allLoaded: coreDataLoaded, anyError: hasLoadError } = combineLoadStates([siteListLoad, plotListLoad, censusListLoad, quadratListLoad]);
 
   const [isSidebarVisible, setSidebarVisible] = useState(!!session);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [helpMenuAnchor, setHelpMenuAnchor] = useState<HTMLElement | null>(null);
   const pathname = usePathname() ?? '';
   const { isPulsing } = useLockAnimation();
+
+  useEffect(() => {
+    const toggleMobileSidebar = () => setMobileSidebarOpen(open => !open);
+    window.addEventListener(MOBILE_SIDEBAR_TOGGLE_EVENT, toggleMobileSidebar);
+    return () => window.removeEventListener(MOBILE_SIDEBAR_TOGGLE_EVENT, toggleMobileSidebar);
+  }, []);
+
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [pathname]);
 
   // API path convention: /api/fetchall/{resource}/{plotID}/{censusNumber}?schema={schemaName}
   // - plotID=0 and censusNumber=0 means "no filter" (fetch all)
@@ -353,12 +366,16 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           top: 0,
           left: 0,
           height: '100vh',
-          zIndex: 1000
+          zIndex: 1000,
+          display: { xs: 'none', md: 'block' }
         }}
       >
         <Sidebar setCensusListLoaded={censusListLoad.reset} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
       </Box>
-      <Header />
+      <Drawer open={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)} size="sm" sx={{ display: { xs: 'block', md: 'none' } }}>
+        <Sidebar setCensusListLoaded={censusListLoad.reset} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
+      </Drawer>
+      <Header onOpenSidebar={() => setMobileSidebarOpen(true)} isSidebarOpen={mobileSidebarOpen} />
       <Box
         component="main"
         className="MainContent"
@@ -374,7 +391,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           flexShrink: 1,
           overflow: 'hidden',
           minHeight: 'calc(100vh - var(--Header-height) - 30px)',
-          marginLeft: isSidebarVisible ? 'calc(var(--Sidebar-width) + 5px)' : '0',
+          marginLeft: { xs: 0, md: isSidebarVisible ? 'calc(var(--Sidebar-width) + 5px)' : 0 },
           transition: 'margin-left 0.3s ease-in-out',
           '&:focus': {
             outline: 'none'
@@ -447,8 +464,10 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             </Typography>
           </Stack>
           <IconButton
-            aria-label={'Click here to open the feedback modal and create a Github issue for developer review'}
-            onClick={() => setIsFeedbackModalOpen(true)}
+            aria-label="Help"
+            aria-haspopup="menu"
+            aria-expanded={Boolean(helpMenuAnchor)}
+            onClick={event => setHelpMenuAnchor(event.currentTarget)}
             className={isPulsing ? 'animate-pulse-no-opacity' : ''}
             sx={{
               position: 'fixed',
@@ -471,6 +490,19 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           >
             <HelpOutlineOutlinedIcon fontSize="large" />
           </IconButton>
+          <Menu anchorEl={helpMenuAnchor} open={Boolean(helpMenuAnchor)} onClose={() => setHelpMenuAnchor(null)} placement="top-end">
+            <MenuItem component="a" href={DOCUMENTATION_URL} target="_blank" rel="noreferrer" onClick={() => setHelpMenuAnchor(null)}>
+              Documentation
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                setHelpMenuAnchor(null);
+                setIsFeedbackModalOpen(true);
+              }}
+            >
+              Report an issue
+            </MenuItem>
+          </Menu>
         </Box>
       </Box>
       <GithubFeedbackModal open={isFeedbackModalOpen} onClose={() => setIsFeedbackModalOpen(false)} />

@@ -240,16 +240,10 @@ export default function PostValidationPage() {
                     />
                   </TableCell>
                   <TableCell>Query Name</TableCell>
-                  <TableCell
-                    sx={{
-                      width: '45%'
-                    }}
-                  >
-                    Query Definition
-                  </TableCell>
                   <TableCell>Description</TableCell>
                   <TableCell>Last Run At</TableCell>
                   <TableCell>Last Run Result</TableCell>
+                  <TableCell sx={{ width: '30%' }}>Query details</TableCell>
                 </TableRow>
               </TableHead>
 

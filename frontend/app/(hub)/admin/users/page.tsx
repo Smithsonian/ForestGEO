@@ -1,12 +1,35 @@
 'use client';
 
-import { Alert, Box, Button, Checkbox, CircularProgress, Input, Option, Select, Stack, Table } from '@mui/joy';
+import {
+  Alert,
+  Box,
+  Button,
+  Checkbox,
+  Chip,
+  CircularProgress,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  FormLabel,
+  Input,
+  Modal,
+  ModalDialog,
+  Option,
+  Select,
+  Stack,
+  Table
+} from '@mui/joy';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { AdminSiteRDS, AdminUserRDS } from '@/lib/db/definitions/admin';
 import ailogger from '@/ailogger';
 
 type UserWithSite = Omit<AdminUserRDS, 'userSites'> & { userSites: AdminSiteRDS[] };
+type NewUserForm = Required<Pick<UserWithSite, 'firstName' | 'lastName' | 'email' | 'notifications' | 'userStatus'>>;
+
+const EMPTY_NEW_USER: NewUserForm = { firstName: '', lastName: '', email: '', notifications: false, userStatus: 'field crew' };
 
 export default function UserSettingsPage() {
   const [users, setUsers] = useState<UserWithSite[]>([]);
@@ -15,11 +38,16 @@ export default function UserSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [editingUserID, setEditingUserID] = useState<number | null>(null);
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [newUser, setNewUser] = useState<NewUserForm>(EMPTY_NEW_USER);
+  const [addingUser, setAddingUser] = useState(false);
 
   // Track mounted state to prevent state updates after unmount
   const { isMountedRef } = useIsMounted();
 
   useEffect(() => {
+    const controller = new AbortController();
     async function fetchUsers() {
       try {
         if (isMountedRef.current) {
@@ -27,7 +55,7 @@ export default function UserSettingsPage() {
           setError(null);
         }
 
-        const userResponse = await fetch(`/api/administrative/fetch/users`);
+        const userResponse = await fetch(`/api/administrative/fetch/users`, { signal: controller.signal });
         if (!isMountedRef.current) return;
 
         if (!userResponse.ok) {
@@ -37,7 +65,7 @@ export default function UserSettingsPage() {
 
         if (!isMountedRef.current) return;
 
-        const sitesResponse = await fetch(`/api/administrative/fetch/sites`);
+        const sitesResponse = await fetch(`/api/administrative/fetch/sites`, { signal: controller.signal });
         if (!isMountedRef.current) return;
 
         if (!sitesResponse.ok) {
@@ -72,6 +100,7 @@ export default function UserSettingsPage() {
         setUsers(mappedUsers);
         setBaseUsers(mappedUsers);
       } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         if (!isMountedRef.current) return;
         const errorMessage = err instanceof Error ? err.message : 'Failed to load data. Please try again.';
         setError(errorMessage);
@@ -83,7 +112,8 @@ export default function UserSettingsPage() {
       }
     }
 
-    fetchUsers();
+    void fetchUsers();
+    return () => controller.abort();
   }, []);
 
   function onTextFieldChange(e: ChangeEvent<HTMLInputElement>, uSite: UserWithSite) {
@@ -152,6 +182,15 @@ export default function UserSettingsPage() {
       {!loading && !error && (
         <>
           <Stack direction={'row'} gap={1}>
+            <Button
+              onClick={() => {
+                setSaveError(null);
+                setNewUser(EMPTY_NEW_USER);
+                setAddUserOpen(true);
+              }}
+            >
+              Add user
+            </Button>
             <Button disabled={!foundChanges} onClick={() => setUsers(baseUsers)}>
               Discard Changes
             </Button>
@@ -197,55 +236,92 @@ export default function UserSettingsPage() {
                 <th id={'email'}>Email</th>
                 <th id={'notifications'}>Notifications</th>
                 <th id={'user-status'}>User Status</th>
+                <th>Actions</th>
                 {/*<th>Sites</th>*/}
               </tr>
             </thead>
             <tbody>
               {(users as UserWithSite[]).map(u => (
-                <tr key={u.userID!}>
-                  <td aria-labelledby={'first-name'}>
-                    <Input aria-label={'first name value'} name={'firstName'} value={u.firstName} onChange={e => onTextFieldChange(e, u)} />
-                  </td>
-                  <td aria-labelledby={'last-name'}>
-                    <Input aria-label={'last name value'} name={'lastName'} value={u.lastName} onChange={e => onTextFieldChange(e, u)} />
-                  </td>
-                  <td aria-labelledby={'email'}>
-                    <Input aria-label={'email value'} name={'email'} value={u.email} onChange={e => onTextFieldChange(e, u)} />
-                  </td>
-                  <td aria-labelledby={'notifications'}>
-                    <Checkbox
-                      aria-label={'notifications value'}
-                      name="notifications"
-                      checked={u.notifications ?? false}
-                      onChange={e => onTextFieldChange(e, u)}
-                    />
-                  </td>
-                  <td aria-labelledby={'user-status'}>
-                    <Select
-                      aria-label={'user status value'}
-                      name={'userStatus'}
-                      value={u.userStatus}
-                      onChange={(_event, newValue) => {
-                        if (newValue) {
-                          setUsers(prev =>
-                            prev.map(i =>
-                              i.userID === u.userID
-                                ? {
-                                    ...i,
-                                    userStatus: newValue
-                                  }
-                                : i
-                            )
-                          );
-                        }
-                      }}
-                    >
-                      <Option value={'global'}>Global</Option>
-                      <Option value={'db admin'}>DB Admin</Option>
-                      <Option value={'lead technician'}>Lead Technician</Option>
-                      <Option value={'field crew'}>Field Crew</Option>
-                    </Select>
-                  </td>
+                <tr
+                  key={u.userID!}
+                  data-dirty={isUserChanged(u, baseUsersMap.get(u.userID)) || undefined}
+                  style={{ background: isUserChanged(u, baseUsersMap.get(u.userID)) ? 'var(--joy-palette-warning-softBg)' : undefined }}
+                >
+                  {(() => {
+                    const editing = editingUserID === u.userID;
+                    return (
+                      <>
+                        <td aria-labelledby={'first-name'}>
+                          {editing ? (
+                            <Input aria-label={'first name value'} name={'firstName'} value={u.firstName} onChange={e => onTextFieldChange(e, u)} />
+                          ) : (
+                            u.firstName
+                          )}
+                        </td>
+                        <td aria-labelledby={'last-name'}>
+                          {editing ? (
+                            <Input aria-label={'last name value'} name={'lastName'} value={u.lastName} onChange={e => onTextFieldChange(e, u)} />
+                          ) : (
+                            u.lastName
+                          )}
+                        </td>
+                        <td aria-labelledby={'email'}>
+                          {editing ? <Input aria-label={'email value'} name={'email'} value={u.email} onChange={e => onTextFieldChange(e, u)} /> : u.email}
+                        </td>
+                        <td aria-labelledby={'notifications'}>
+                          <Checkbox
+                            aria-label={'notifications value'}
+                            name="notifications"
+                            checked={u.notifications ?? false}
+                            onChange={e => onTextFieldChange(e, u)}
+                            disabled={!editing}
+                          />
+                        </td>
+                        <td aria-labelledby={'user-status'}>
+                          <Select
+                            aria-label={'user status value'}
+                            name={'userStatus'}
+                            value={u.userStatus}
+                            disabled={!editing}
+                            onChange={(_event, newValue) => {
+                              if (newValue) {
+                                setUsers(prev =>
+                                  prev.map(i =>
+                                    i.userID === u.userID
+                                      ? {
+                                          ...i,
+                                          userStatus: newValue
+                                        }
+                                      : i
+                                  )
+                                );
+                              }
+                            }}
+                          >
+                            <Option value={'global'}>Global</Option>
+                            <Option value={'db admin'}>DB Admin</Option>
+                            <Option value={'lead technician'}>Lead Technician</Option>
+                            <Option value={'field crew'}>Field Crew</Option>
+                          </Select>
+                        </td>
+                        <td>
+                          {isUserChanged(u, baseUsersMap.get(u.userID)) && (
+                            <Chip size="sm" color="warning" sx={{ mr: 1 }}>
+                              Unsaved
+                            </Chip>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="plain"
+                            startDecorator={<EditOutlinedIcon />}
+                            onClick={() => setEditingUserID(editing ? null : (u.userID ?? null))}
+                          >
+                            {editing ? 'Done' : 'Edit'}
+                          </Button>
+                        </td>
+                      </>
+                    );
+                  })()}
                   {/*<td>*/}
                   {/*  <Select*/}
                   {/*    name={'userSites'}*/}
@@ -276,6 +352,99 @@ export default function UserSettingsPage() {
               ))}
             </tbody>
           </Table>
+          <Modal open={addUserOpen} onClose={() => (addingUser ? undefined : setAddUserOpen(false))}>
+            <ModalDialog aria-labelledby="add-user-title" sx={{ width: 'min(480px, calc(100vw - 32px))' }}>
+              <DialogTitle id="add-user-title">Add user</DialogTitle>
+              <DialogContent>Enter the user’s directory details and initial application role.</DialogContent>
+              <Stack spacing={1.5}>
+                <FormControl required>
+                  <FormLabel htmlFor="new-user-first-name">First name</FormLabel>
+                  <Input
+                    id="new-user-first-name"
+                    aria-label="First name"
+                    value={newUser.firstName}
+                    onChange={event => setNewUser(user => ({ ...user, firstName: event.target.value }))}
+                  />
+                </FormControl>
+                <FormControl required>
+                  <FormLabel htmlFor="new-user-last-name">Last name</FormLabel>
+                  <Input
+                    id="new-user-last-name"
+                    aria-label="Last name"
+                    value={newUser.lastName}
+                    onChange={event => setNewUser(user => ({ ...user, lastName: event.target.value }))}
+                  />
+                </FormControl>
+                <FormControl required>
+                  <FormLabel htmlFor="new-user-email">Email</FormLabel>
+                  <Input
+                    id="new-user-email"
+                    aria-label="Email"
+                    type="email"
+                    value={newUser.email}
+                    onChange={event => setNewUser(user => ({ ...user, email: event.target.value }))}
+                  />
+                </FormControl>
+                <FormControl required>
+                  <FormLabel htmlFor="new-user-role">Role</FormLabel>
+                  <Select
+                    id="new-user-role"
+                    aria-label="Role"
+                    value={newUser.userStatus}
+                    onChange={(_event, value) => value && setNewUser(user => ({ ...user, userStatus: value }))}
+                  >
+                    <Option value="global">Global</Option>
+                    <Option value="db admin">DB Admin</Option>
+                    <Option value="lead technician">Lead Technician</Option>
+                    <Option value="field crew">Field Crew</Option>
+                  </Select>
+                </FormControl>
+                <Checkbox
+                  aria-label="Receive notifications"
+                  label="Receive notifications"
+                  checked={newUser.notifications}
+                  onChange={event => setNewUser(user => ({ ...user, notifications: event.target.checked }))}
+                />
+              </Stack>
+              <DialogActions>
+                <Button
+                  loading={addingUser}
+                  disabled={!newUser.firstName.trim() || !newUser.lastName.trim() || !newUser.email.trim()}
+                  onClick={async () => {
+                    setAddingUser(true);
+                    setSaveError(null);
+                    try {
+                      const response = await fetch('/api/administrative/fetch/users', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ newRow: newUser })
+                      });
+                      const body = (await response.json().catch(() => ({}))) as { message?: string; userID?: number };
+                      if (!response.ok || !Number.isInteger(body.userID) || Number(body.userID) <= 0) {
+                        throw new Error(body.message || 'Failed to add user');
+                      }
+                      const created: UserWithSite = { ...newUser, userID: body.userID, userSites: [] };
+                      setUsers(previous => [...previous, created]);
+                      setBaseUsers(previous => [...previous, created]);
+                      setEditingUserID(created.userID ?? null);
+                      setAddUserOpen(false);
+                    } catch (err) {
+                      const message = err instanceof Error ? err.message : 'Failed to add user';
+                      setSaveError(message);
+                      ailogger.error('Failed to add user', err instanceof Error ? err : new Error(String(err)));
+                    } finally {
+                      setAddingUser(false);
+                    }
+                  }}
+                >
+                  Add user
+                </Button>
+                <Button variant="plain" disabled={addingUser} onClick={() => setAddUserOpen(false)}>
+                  Cancel
+                </Button>
+              </DialogActions>
+            </ModalDialog>
+          </Modal>
         </>
       )}
     </Box>

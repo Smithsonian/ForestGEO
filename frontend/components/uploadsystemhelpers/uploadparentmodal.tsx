@@ -5,8 +5,9 @@ import CloseIcon from '@mui/icons-material/Close';
 import { useEffect, useState } from 'react';
 
 import UploadParent from '../uploadsystem/uploadparent';
-import { FormType, SourceFormat } from '@/config/macros/formdetails';
+import { FormType, SourceFormat, getDataGridForForm } from '@/config/macros/formdetails';
 import { UploadMode, UploadModeLabels } from '@/config/uploadmodes';
+import RenderGridFormExplanations from '@/components/client/rendergridformexplanations';
 
 interface UPMProps {
   isUploadModalOpen: boolean;
@@ -40,6 +41,7 @@ export default function UploadParentModal(props: UPMProps) {
   const overrideUploadForm = isArcgisMode ? FormType.measurements : formType;
   const requiresModeSelection = !skipToProcessing;
   const revisionMatchLabel = getRevisionMatchLabel(formType);
+  const referenceGridType = getDataGridForForm(overrideUploadForm);
   const [uploadMode, setUploadMode] = useState<UploadMode | undefined>(requiresModeSelection ? undefined : UploadMode.CLEAN_REUPLOAD);
 
   useEffect(() => {
@@ -91,6 +93,7 @@ export default function UploadParentModal(props: UPMProps) {
               ? 'Upload an ArcGIS Field Maps .xlsx workbook to the ForestGEO database system. Navigate using Tab key, activate buttons with Enter or Space.'
               : `Upload ${formType} data files to the ForestGEO database system. Navigate using Tab key, activate buttons with Enter or Space.`}
           </div>
+          {referenceGridType && <RenderGridFormExplanations datagridType={referenceGridType} />}
           {uploadMode ? (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {requiresModeSelection && (

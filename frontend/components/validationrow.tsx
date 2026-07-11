@@ -6,7 +6,7 @@ import { useIsMounted } from '@/app/hooks/useismounted';
 import { Box, TableCell, TableRow } from '@mui/material';
 import { Cancel, Edit, Save, Download } from '@mui/icons-material';
 import { ValidationProceduresRDS } from '@/lib/db/definitions/validations';
-import { Chip, IconButton, List, ListItem, Switch, Textarea, Tooltip, CircularProgress, Snackbar } from '@mui/joy';
+import { Button, Chip, IconButton, List, ListItem, Switch, Tooltip, CircularProgress, Snackbar } from '@mui/joy';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CodeEditor from '@/components/client/codeeditor';
@@ -292,20 +292,9 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
                 />
               </Box>
             ) : (
-              <Textarea
-                minRows={1}
-                maxRows={3}
-                value={(validation.definition || '').replace(/\${(.*?)}/g, (_match, p1: string) => String(replacements[p1 as keyof typeof replacements] ?? ''))}
-                disabled
-                aria-label="Validation definition"
-                sx={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  width: '100%',
-                  resize: 'none'
-                }}
-              />
+              <Button size="sm" variant="outlined" onClick={() => handleExpandClick(validation.validationID!)}>
+                View query
+              </Button>
             )}
           </Box>
 

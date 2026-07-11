@@ -60,7 +60,7 @@ import { LoadingBar, ContentSkeleton } from '@/components/loading';
 import { areGridFilterModelsEqual, hasServerFilter, toServerFilterModel } from '@/lib/datagrid/filterModel';
 import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel';
 import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
-import CustomGridPagination from '@/components/datagrids/customgridpagination';
+import CustomGridPagination, { getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
@@ -85,6 +85,26 @@ const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
   }
   return safeValue;
 };
+
+function describeFixedDataRow(row: GridRowModel | null): string {
+  if (!row) return 'this row';
+  const labelKeys = [
+    'siteName',
+    'plotName',
+    'quadratName',
+    'speciesName',
+    'personName',
+    'attributeName',
+    'name',
+    'code',
+    'SiteName',
+    'PlotName',
+    'Name',
+    'Code'
+  ];
+  const label = labelKeys.map(key => row[key]).find(value => value !== undefined && value !== null && String(value).trim() !== '');
+  return label === undefined ? 'this row' : `“${String(label)}”`;
+}
 
 export type IsolatedDataGridCommonsHandle = {
   updateRow: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<GridRowModel>;
@@ -197,19 +217,22 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     enableInfiniteScroll = false
   } = props;
 
-  const [rows, setRows] = useState([initialRow] as GridRowsProp);
+  // A template is only a template for the Add action; showing it before a fetch makes an
+  // empty catalog look like it has a real, editable record.
+  const [rows, setRows] = useState([] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
-  const [paginationModel, setPaginationModel] = useState({
+  const [paginationModel, setPaginationModel] = useState(() => ({
     page: 0,
-    pageSize: 10
-  });
+    pageSize: getPersistedGridPageSize(gridType)
+  }));
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [_shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [_newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [pendingDeleteRow, setPendingDeleteRow] = useState<GridRowModel | null>(null);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
   const [hidingEmpty, setHidingEmpty] = useState(defaultHideEmpty);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
@@ -287,8 +310,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const hasFilter = hasServerFilter(filterModel);
 
   const fetchUrl = React.useMemo(() => {
-    if (!currentSite?.schemaName) return null;
     if (adminEmail) return `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
+    if (!currentSite?.schemaName) return null;
     const buildQuery = hasFilter ? createQFFetchQuery : createFetchQuery;
     return buildQuery(
       currentSite.schemaName,
@@ -726,6 +749,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       const row = gridRows.find(row => String(row.id) === String(actionId));
       if (row) {
         if (actionType === 'delete') {
+          setPendingDeleteRow(row);
           setIsDeleteDialogOpen(true);
         } else {
           setIsDialogOpen(true);
@@ -923,6 +947,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     async (confirmedRow?: GridRowModel) => {
       setIsDialogOpen(false);
       setIsDeleteDialogOpen(false);
+      setPendingDeleteRow(null);
 
       if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
         await performDeleteAction(pendingAction.actionId);
@@ -946,6 +971,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const handleCancelAction = useCallback(() => {
     setIsDialogOpen(false);
     setIsDeleteDialogOpen(false);
+    setPendingDeleteRow(null);
     if (promiseArguments) {
       promiseArguments.reject(new Error('Action cancelled by user'));
     }
@@ -1303,7 +1329,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
                 : type === 'Edit'
                   ? `Edit this row`
                   : type === 'Delete'
-                    ? 'Delete this row (cannot be undone!)'
+                    ? 'Delete this row'
                     : type === 'Limits'
                       ? 'View limits for this row'
                       : undefined
@@ -1353,7 +1379,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const censusIndependentGridTypes = ['attributes', 'personnel', 'quadrats', 'alltaxonomiesview', 'stemtaxonomiesview'];
   const requiresCensus = !censusIndependentGridTypes.includes(gridType);
 
-  const pageSizeOptions = useMemo(() => [paginationModel.pageSize, paginationModel.pageSize * 5, paginationModel.pageSize * 10], [paginationModel.pageSize]);
+  const pageSizeOptions = [25, 50, 100];
 
   const gridInitialState = useMemo(() => {
     const savedLayout = persistedLayoutRef.current;
@@ -1392,12 +1418,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const PaginationSlot = useMemo(() => {
     if (!enablePageJump && !enableInfiniteScroll) return undefined;
-    const Slot = () => <CustomGridPagination infiniteScroll={infiniteScrollDescriptor} />;
+    const Slot = () => <CustomGridPagination gridType={gridType} infiniteScroll={infiniteScrollDescriptor} />;
     Slot.displayName = 'CustomGridPaginationSlot';
     // Test seam: expose the closure-bound descriptor so unit tests can inspect / drive the toggle.
     (Slot as unknown as { infiniteScroll?: typeof infiniteScrollDescriptor }).infiniteScroll = infiniteScrollDescriptor;
     return Slot;
-  }, [enablePageJump, enableInfiniteScroll, infiniteScrollDescriptor]);
+  }, [enablePageJump, enableInfiniteScroll, gridType, infiniteScrollDescriptor]);
 
   const slotProps = useMemo(
     () => ({
@@ -1493,7 +1519,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           )}
         </Box>
         {!!snackbar && (
-          <Snackbar open anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
+          <Snackbar open anchorOrigin={{ vertical: 'top', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
             <Alert {...snackbar} onClose={handleCloseSnackbar} />
           </Snackbar>
         )}
@@ -1506,7 +1532,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             onClose={handleCancelAction}
             onConfirm={handleConfirmAction}
             title="Confirm Deletion"
-            content="Are you sure you want to delete this row? This action cannot be undone."
+            content={`Delete ${describeFixedDataRow(pendingDeleteRow)}? This action cannot be undone.`}
           />
         )}
         {isResetDialogOpen && <ResetViewModal open={isResetDialogOpen} setOpen={setIsResetDialogOpen} triggerResetView={async () => {}} />}
