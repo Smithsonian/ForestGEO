@@ -14,6 +14,7 @@ function parseRequest(body: Partial<ErrorExplorerQueryRequest>): ErrorExplorerQu
     schema: body.schema ?? '',
     plotID: Number(body.plotID ?? 0),
     censusID: Number(body.censusID ?? 0),
+    censusIDs: Array.from(new Set((body.censusIDs ?? []).map(Number).filter(censusID => Number.isInteger(censusID) && censusID > 0))),
     page: Math.max(0, Number(body.page ?? 0)),
     pageSize: Math.min(100, Math.max(10, Number(body.pageSize ?? 25))),
     filters: {

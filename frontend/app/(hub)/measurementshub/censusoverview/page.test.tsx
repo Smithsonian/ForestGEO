@@ -25,7 +25,7 @@ const DELETE_ERROR_TESTID = 'census-overview-delete-error';
 const DISABLED_TOOLTIP_MATCHER = /only the latest census can be deleted/i;
 const UNAUTHORIZED_TOOLTIP_MATCHER = /only global and database administrators can delete census measurements/i;
 const DELETE_FAILURE_MESSAGE = 'Failed to delete census. Please try again.';
-const MODAL_CONFIRM_LABEL = 'Delete Measurements';
+const MODAL_CONFIRM_LABEL = 'Delete Census';
 
 vi.mock('next/navigation');
 vi.mock('next-auth/react');

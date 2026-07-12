@@ -4,6 +4,7 @@ import { title } from '@/config/primitives';
 import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
 import { Box, Drawer, IconButton, Menu, MenuItem, Stack, Typography, useTheme } from '@mui/joy';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import Divider from '@mui/joy/Divider';
 import { useAsyncOperation } from '@/app/hooks/useAsyncOperation';
 import { useLoadState, combineLoadStates } from '@/app/hooks/useLoadState';
@@ -195,24 +196,28 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const { execute: executeFetchSiteList } = useAsyncOperation(fetchSiteListFn, {
     loadingMessage: 'Loading Sites...',
     category: 'api',
+    suppressGlobalLoading: true,
     preventDuplicates: true
   });
 
   const { execute: executeLoadPlotData } = useAsyncOperation(fetchPlotDataFn, {
     loadingMessage: 'Loading plot data...',
     category: 'api',
+    suppressGlobalLoading: true,
     preventDuplicates: true
   });
 
   const { execute: executeLoadCensusData } = useAsyncOperation(fetchCensusDataFn, {
     loadingMessage: 'Loading census data...',
     category: 'api',
+    suppressGlobalLoading: true,
     preventDuplicates: true
   });
 
   const { execute: executeLoadQuadratData } = useAsyncOperation(fetchQuadratDataFn, {
     loadingMessage: 'Loading quadrat data...',
     category: 'api',
+    suppressGlobalLoading: true,
     preventDuplicates: true
   });
 
@@ -339,6 +344,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   }, [session]);
 
   const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up('md'), { noSsr: true });
 
   // Detect if on admin page
   const isAdminPage = pathname?.includes('/admin') ?? false;
@@ -356,25 +362,27 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       <a href="#main-content" className="skip-to-main">
         Skip to main content
       </a>
-      <Box
-        component="nav"
-        role="navigation"
-        aria-label="Site navigation"
-        className={`sidebar ${isSidebarVisible ? 'visible' : 'hidden'} ${isPulsing ? `animate-fade-blur-in` : ``}`}
-        sx={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          height: '100vh',
-          zIndex: 1000,
-          display: { xs: 'none', md: 'block' }
-        }}
-      >
-        <Sidebar setCensusListLoaded={censusListLoad.reset} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
-      </Box>
-      <Drawer open={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)} size="sm" sx={{ display: { xs: 'block', md: 'none' } }}>
-        <Sidebar setCensusListLoaded={censusListLoad.reset} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
-      </Drawer>
+      {hasHydrated &&
+        (isDesktop ? (
+          <Box
+            component="nav"
+            role="navigation"
+            aria-label="Site navigation"
+            className={`sidebar ${isSidebarVisible ? 'visible' : 'hidden'} ${isPulsing ? `animate-fade-blur-in` : ``}`}
+            sx={{ position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 1000 }}
+          >
+            <Sidebar setCensusListLoaded={censusListLoad.reset} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
+          </Box>
+        ) : (
+          <Drawer
+            open={mobileSidebarOpen}
+            onClose={() => setMobileSidebarOpen(false)}
+            size="sm"
+            slotProps={{ content: { sx: { width: 'min(92vw, 360px)', maxWidth: '100vw', overflowX: 'hidden' } } }}
+          >
+            <Sidebar setCensusListLoaded={censusListLoad.reset} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
+          </Drawer>
+        ))}
       <Header onOpenSidebar={() => setMobileSidebarOpen(true)} isSidebarOpen={mobileSidebarOpen} />
       <Box
         component="main"
@@ -451,7 +459,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             className={isPulsing ? 'animate-fade-blur-in' : ''}
           >
             <Typography
-              level="h1"
+              level="title-lg"
+              component="div"
               sx={{
                 color: 'plum',
                 display: 'inline-block',

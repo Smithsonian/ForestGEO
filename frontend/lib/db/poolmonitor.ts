@@ -165,12 +165,16 @@ export class PoolMonitor {
   }
 
   private attachPoolListeners(pool: Pool): void {
-    pool.on('connection', async (conn: PoolConnection) => {
-      try {
-        await conn.query(`SET SESSION wait_timeout=600, interactive_timeout=600`);
-      } catch (e: any) {
-        ailogger.warn(chalk.yellow('Could not set session timeout on new conn'), e);
-      }
+    // mysql2's PromisePool forwards the underlying callback-style connection
+    // to this event. Awaiting conn.query() here calls .then() on a Query object
+    // and emits mysql2's "use promise wrapper" warning on every new session.
+    pool.on('connection', (conn: PoolConnection) => {
+      const callbackConnection = conn as unknown as {
+        query: (sql: string, callback: (error?: Error | null) => void) => void;
+      };
+      callbackConnection.query(`SET SESSION wait_timeout=600, interactive_timeout=600`, error => {
+        if (error) ailogger.warn(chalk.yellow('Could not set session timeout on new conn'), error);
+      });
       this.resetInactivityTimer();
     });
   }

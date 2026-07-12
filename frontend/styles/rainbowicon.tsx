@@ -35,7 +35,7 @@ const RainbowIconWrapper = styled.div`
 
 export const RainbowIcon: React.FC = () => {
   return (
-    <RainbowIconWrapper>
+    <RainbowIconWrapper aria-hidden="true">
       <svg width="0" height="0">
         <mask id="logo-mask">
           <Logo fill="white" /> {/* Mask uses white to indicate visible areas */}

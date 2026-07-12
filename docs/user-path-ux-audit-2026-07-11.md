@@ -15,6 +15,24 @@ The main data-browsing surfaces are usable once a site, plot, and census are ful
 
 These are high-trust workflows: users are deciding whether data exists, whether it is valid, and whether a destructive upload is safe. Contradictory counts and one-click creation are likely to produce support requests or accidental records.
 
+## Remediation status
+
+All findings in this report were remediated on `ux/walkthrough-remediation` after the original working tree was preserved in baseline commit `4c8fff7e`. Browser verification on 2026-07-11 confirmed:
+
+- Plot creation and editing stay on the dashboard and use an explicit form.
+- Census creation requires dates/description review and an explicit Create action; deletion accurately describes census-wide effects.
+- Logout/account changes clear persisted selection state, and the displayed role matches the signed-in role.
+- View Data and View Errors now share the same census scope and both report 23,322 failed rows in the test census.
+- Uploaded Files distinguishes retained source files from Recent Changes audit history and provides a useful empty state.
+- Exactly one site/plot/census selector is rendered at each breakpoint.
+- CSV mode advertises CSV/TSV/TXT only; ArcGIS accepts one `.xlsx` workbook and has dedicated preflight guidance.
+- Manual entry focuses the first editable cell, explains the save flow, validates required fields, and disables Finalize until rows are valid.
+- Audited routes expose one non-empty page `h1`; branding uses subordinate or non-heading semantics.
+- Add User and Provision New Site expose immediate accessible validation feedback.
+- Routine context/validity requests no longer invoke the global blocking overlay, and transient counts/empty states use loading UI.
+- At 390 × 844, the mobile drawer has one selector set, wrapped context labels, and no horizontal document overflow.
+- A clean diagnostic reload produced no new browser warnings/errors; the conditional link-root, fragment-prop, and mysql2 promise warnings were removed.
+
 ## Scope and method
 
 - Tested checkout: branch `ux/walkthrough-remediation`, HEAD `410f442d377690755b562e98c86afc9c0277a6da`.

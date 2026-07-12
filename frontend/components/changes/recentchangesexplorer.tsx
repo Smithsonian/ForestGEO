@@ -62,11 +62,21 @@ function formatDiffValue(value: unknown): string {
 
 export function summarizeChange(entry: Pick<ChangelogEntry, 'operation' | 'tableName' | 'oldRowState' | 'newRowState' | 'recordID'>): string {
   const filename = entry.newRowState?.filename ?? entry.newRowState?.fileName ?? entry.newRowState?.name;
+  const tableLabel = entry.tableName.replace(/_/g, ' ');
+  const singularTableLabel: Record<string, string> = {
+    attributes: 'attribute',
+    measurements: 'measurement',
+    quadrats: 'quadrat',
+    stems: 'stem',
+    trees: 'tree',
+    users: 'user'
+  };
+  const objectLabel = singularTableLabel[tableLabel] ?? tableLabel;
   if (entry.operation === 'INSERT' && entry.tableName === 'file_upload') return filename ? `Uploaded ${filename}` : 'Uploaded a file';
   if (entry.operation === 'UPDATE' && /measurement/i.test(entry.tableName)) return 'Updated a measurement record';
-  if (entry.operation === 'DELETE') return `Deleted a ${entry.tableName.replace(/_/g, ' ')}`;
-  if (entry.operation === 'INSERT') return `Added a ${entry.tableName.replace(/_/g, ' ')}`;
-  return `Changed ${entry.tableName.replace(/_/g, ' ')}`;
+  if (entry.operation === 'DELETE') return `Deleted a ${objectLabel}`;
+  if (entry.operation === 'INSERT') return `Added a ${objectLabel}`;
+  return `Changed ${tableLabel}`;
 }
 
 function displayName(value: string): string {
@@ -418,7 +428,6 @@ export default function RecentChangesExplorer() {
   if (!currentSite?.schemaName || !currentPlot?.plotID) {
     return (
       <Stack spacing={2} sx={{ width: '100%' }}>
-        <Typography level="h2">Recent Changes</Typography>
         <Alert color="warning">Please select a site and plot to view recent changes.</Alert>
       </Stack>
     );
@@ -427,7 +436,6 @@ export default function RecentChangesExplorer() {
   return (
     <Stack spacing={2} sx={{ width: '100%' }}>
       <Stack spacing={1}>
-        <Typography level="h2">Recent Changes</Typography>
         <Typography level="body-sm">Review all changes made to data within this plot, filter by operation type, user, or table.</Typography>
       </Stack>
 

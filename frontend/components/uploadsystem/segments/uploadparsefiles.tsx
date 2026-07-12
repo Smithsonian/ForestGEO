@@ -284,7 +284,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
             }}
           >
             <Stack spacing={3} sx={{ height: '100%' }}>
-              <DropzoneCompact onChange={handleFileChange} hasFiles={acceptedFiles.length > 0} />
+              <DropzoneCompact onChange={handleFileChange} hasFiles={acceptedFiles.length > 0} sourceFormat={sourceFormat} />
               {acceptedFiles.length > 0 && (
                 <Stack spacing={2}>
                   {/* Validation Error Alert */}
@@ -310,7 +310,21 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                     </Alert>
                   )}
 
-                  <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      gap: 2,
+                      justifyContent: 'center',
+                      flexWrap: 'wrap',
+                      position: 'sticky',
+                      bottom: 0,
+                      zIndex: 2,
+                      py: 1,
+                      bgcolor: 'background.surface',
+                      borderTop: '1px solid',
+                      borderColor: 'divider'
+                    }}
+                  >
                     {mappingEnabled &&
                       (() => {
                         const firstFileNeedingMapping =
@@ -372,7 +386,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                       </>
                     ) : (
                       <>
-                        <Typography level="body-xs">• CSV, TSV, TXT, and Excel files supported</Typography>
+                        <Typography level="body-xs">• CSV, TSV, and TXT files supported</Typography>
                         <Typography level="body-xs">• Delimiter detection happens automatically</Typography>
                         <Typography level="body-xs">• Preview your data before uploading</Typography>
                       </>

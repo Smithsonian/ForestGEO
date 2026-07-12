@@ -13,6 +13,9 @@ import { signIn, signOut, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { AddCircleOutline, GroupAdd, ManageAccountsRounded, Public, Settings } from '@mui/icons-material';
 import ailogger from '@/ailogger';
+import { useAppStore } from '@/config/store/appstore';
+
+const LAST_USER_STORAGE_KEY = 'forestgeo-last-user';
 
 export const LoginLogout = () => {
   const { data: session, status } = useSession();
@@ -32,6 +35,19 @@ export const LoginLogout = () => {
       firstItem?.focus();
     }
   }, [isMenuOpen]);
+
+  useEffect(() => {
+    const email = session?.user?.email;
+    if (status !== 'authenticated' || !email) return;
+
+    if (typeof localStorage.getItem !== 'function' || typeof localStorage.setItem !== 'function') return;
+    const previousEmail = localStorage.getItem(LAST_USER_STORAGE_KEY);
+    if (previousEmail && previousEmail !== email) {
+      useAppStore.getState().clearSelections();
+      sessionStorage.clear();
+    }
+    localStorage.setItem(LAST_USER_STORAGE_KEY, email);
+  }, [session?.user?.email, status]);
 
   const closeMenu = () => {
     // anchorSettings holds the trigger DOM node (set from event.currentTarget); it stays
@@ -55,10 +71,30 @@ export const LoginLogout = () => {
     signIn('microsoft-entra-id', { redirectTo: '/dashboard' }).catch((error: any) => {
       ailogger.error('Login error:', error);
       signOut({ redirectTo: `/loginfailed?reason=${error.message}` })
-        .then(() => localStorage.clear())
-        .then(() => sessionStorage.clear());
+        .then(() => {
+          if (typeof localStorage.clear === 'function') localStorage.clear();
+        })
+        .then(() => {
+          if (typeof sessionStorage.clear === 'function') sessionStorage.clear();
+        });
     });
   };
+
+  const handleLogout = async () => {
+    useAppStore.getState().clearSelections();
+    if (typeof localStorage.removeItem === 'function') localStorage.removeItem(LAST_USER_STORAGE_KEY);
+    if (typeof sessionStorage.clear === 'function') sessionStorage.clear();
+    await signOut({ redirectTo: '/login' });
+  };
+
+  const roleLabel =
+    session?.user?.userStatus === 'global'
+      ? 'Administration'
+      : session?.user?.userStatus === 'db admin'
+        ? 'Database administration'
+        : session?.user?.userStatus
+          ? session.user.userStatus.replace(/\b\w/g, character => character.toUpperCase())
+          : '';
 
   if (status == 'unauthenticated') {
     return (
@@ -95,9 +131,11 @@ export const LoginLogout = () => {
           }}
           size="sm"
         >
-          <Typography level="body-xs" sx={{ px: 1, color: 'neutral.500', fontWeight: 600 }}>
-            Administration
-          </Typography>
+          {roleLabel && (
+            <Typography level="body-xs" sx={{ px: 1, color: 'neutral.500', fontWeight: 600 }}>
+              {roleLabel}
+            </Typography>
+          )}
           <Avatar variant="outlined" size="sm" src="" alt={`Avatar for ${userName || 'current user'}`}>
             <Skeleton loading={status == 'loading'}>{userInitials}</Skeleton>
           </Avatar>
@@ -132,7 +170,7 @@ export const LoginLogout = () => {
             <Settings />
           </Skeleton>
         </IconButton>
-        <IconButton size="sm" variant="plain" color="neutral" onClick={() => void signOut({ redirectTo: '/login' })} aria-label={'Logout button'}>
+        <IconButton size="sm" variant="plain" color="neutral" onClick={() => void handleLogout()} aria-label={'Logout button'}>
           {status == 'loading' ? <CircularProgress size={'lg'} aria-label="Loading user session" /> : <LogoutRoundedIcon />}
         </IconButton>
         <Menu

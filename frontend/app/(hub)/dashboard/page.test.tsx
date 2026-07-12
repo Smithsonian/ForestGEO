@@ -453,8 +453,8 @@ describe('Enhanced Dashboard Page', () => {
       render(<DashboardPage />);
 
       await waitFor(() => {
-        expect(screen.getByText(/INSERT on stems/)).toBeInTheDocument();
-        expect(screen.getByText(/UPDATE on measurements/)).toBeInTheDocument();
+        expect(screen.getByText(/Added a stem/)).toBeInTheDocument();
+        expect(screen.getByText(/Updated a measurement record/)).toBeInTheDocument();
       });
     });
 
@@ -464,13 +464,13 @@ describe('Enhanced Dashboard Page', () => {
       // Wait for changelog entries to load
       await waitFor(
         () => {
-          expect(screen.getByText(/INSERT on stems/)).toBeInTheDocument();
+          expect(screen.getByText(/Added a stem/)).toBeInTheDocument();
         },
         { timeout: 3000 }
       );
 
       // Verify the accordion structure exists
-      expect(screen.getByText(/UPDATE on measurements/)).toBeInTheDocument();
+      expect(screen.getByText(/Updated a measurement record/)).toBeInTheDocument();
     });
 
     it('should display changelog operation details', async () => {
@@ -480,8 +480,8 @@ describe('Enhanced Dashboard Page', () => {
       await waitFor(
         () => {
           // Check that changelog data is displayed
-          expect(screen.getByText(/INSERT on stems/)).toBeInTheDocument();
-          expect(screen.getByText(/UPDATE on measurements/)).toBeInTheDocument();
+          expect(screen.getByText(/Added a stem/)).toBeInTheDocument();
+          expect(screen.getByText(/Updated a measurement record/)).toBeInTheDocument();
         },
         { timeout: 3000 }
       );

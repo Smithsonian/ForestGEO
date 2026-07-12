@@ -326,8 +326,8 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
             justifyContent: 'flex-start',
             alignItems: 'center',
             gap: 0.5,
-            flexWrap: 'nowrap',
-            overflowX: 'auto',
+            flexWrap: 'wrap',
+            overflowX: 'hidden',
             '&::-webkit-scrollbar': {
               height: 4
             },
@@ -338,7 +338,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
           }}
         >
           {/* Left section - filters and controls */}
-          <Box display={'flex'} alignItems={'center'} sx={{ gap: 0.5, flex: 1, minWidth: 'max-content' }}>
+          <Box display={'flex'} alignItems={'center'} sx={{ gap: 0.5, flex: '1 1 100%', minWidth: 0, width: '100%', overflowX: 'auto', pb: 0.5 }}>
             {referenceGridType && (
               <Tooltip title="Open the grid-to-form header reference">
                 <IconButton aria-label="Header reference" size="sm" variant="outlined" onClick={() => setOpenHeaderReference(true)}>
@@ -461,9 +461,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
           </Box>
           {showToolbarActions && (
             <>
-              <Divider orientation={'vertical'} sx={{ mx: 1 }} />
+              <Divider orientation={'horizontal'} sx={{ width: '100%' }} />
               {/* Right section - action buttons */}
-              <Stack direction="row" spacing={1} sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+              <Stack direction="row" spacing={1} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', width: '100%' }}>
                 {/* Keep the frequent manual-entry action visible and explicitly labelled. */}
                 {dynamicButtons
                   .filter((button: any) => button.label === 'Manual Entry Form')

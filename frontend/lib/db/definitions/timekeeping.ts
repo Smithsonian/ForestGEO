@@ -68,14 +68,19 @@ export class OrgCensusToCensusResultMapper {
     return Array.from(uniqueCensusMap.values()).sort((a, b) => b.plotCensusNumber - a.plotCensusNumber);
   }
 
-  async startNewCensus(schema: string, plotID: number, plotCensusNumber: number, description?: string): Promise<number | undefined> {
+  async startNewCensus(
+    schema: string,
+    plotID: number,
+    plotCensusNumber: number,
+    details?: { description?: string; startDate?: Date; endDate?: Date }
+  ): Promise<number | undefined> {
     const newCensusRDS: CensusRDS = {
       censusID: 0, // This will be replaced with the actual ID after the POST request
       plotID,
       plotCensusNumber,
-      startDate: undefined,
-      endDate: undefined,
-      description
+      startDate: details?.startDate,
+      endDate: details?.endDate,
+      description: details?.description
     };
 
     const response = await fetch(`/api/fixeddata/census/${schema}/censusID`, {

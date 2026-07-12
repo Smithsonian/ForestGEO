@@ -45,7 +45,7 @@ export default function NewSidebar() {
         {/* Header Section */}
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
           <Stack direction="column" sx={{ marginRight: '1em', width: '100%' }}>
-            <Typography level="h1">
+            <Typography level="h2">
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 <Box sx={{ marginRight: 1.5 }}>
                   <RainbowIcon />

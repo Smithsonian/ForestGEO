@@ -2,7 +2,7 @@
 
 import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DataGridProps, GridActionsCellItem, gridClasses, GridColDef, GridRowId, GridRowsProp, GridValidRowModel, useGridApiRef } from '@mui/x-data-grid';
-import { Box, Button } from '@mui/joy';
+import { Alert, Box, Button, Stack, Typography } from '@mui/joy';
 import SaveIcon from '@mui/icons-material/Save';
 import RestoreIcon from '@mui/icons-material/Restore';
 import { randomId } from '@mui/x-data-grid-generator';
@@ -13,7 +13,7 @@ import { Add } from '@mui/icons-material';
 import { getColumnVisibilityModel } from '@/config/datagridhelpers';
 import { getGridTypeLabel } from '@/config/macros/siteconfigs';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import { FileRow, FileRowSet } from '@/config/macros/formdetails';
+import { FileRow, FileRowSet, FormType, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { AttributeStatusOptions } from '@/lib/db/definitions/core';
 
 export interface IsolatedDataGridCommonProps {
@@ -34,6 +34,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
   const [rows, setRows] = useState<GridRowsProp>([]);
   const [hasUnsavedRows, setHasUnsavedRows] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [formMessage, setFormMessage] = useState('');
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
@@ -108,6 +109,12 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
 
   const discardChanges = useCallback(() => {
     setHasUnsavedRows(false);
+    const newRowIds = new Set(
+      Object.values(unsavedChangesRef.current.unsavedRows)
+        .filter(row => row.isNew)
+        .map(row => row.id)
+    );
+    setRows(previousRows => previousRows.filter(row => !newRowIds.has(row.id)));
     Object.values(unsavedChangesRef.current.rowsBeforeChange).forEach(row => {
       apiRef.current?.updateRows([row]);
     });
@@ -124,26 +131,28 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
       const rowsToDelete = Object.values(unsavedChangesRef.current.unsavedRows).filter(row => row._action === 'delete');
       const rowsToSave = Object.values(unsavedChangesRef.current.unsavedRows).filter(row => row._action !== 'delete');
 
-      // Remove rows that were marked for deletion
-      setRows(prevRows => {
-        const filteredRows = prevRows.filter(row => !rowsToDelete.some(deletedRow => deletedRow.id === row.id));
-
-        // Update rows that were edited
-        return filteredRows.map(row => {
-          const updatedRow = rowsToSave.find(editedRow => editedRow.id === row.id);
-          return updatedRow ? { ...row, ...updatedRow } : row;
-        });
+      const filteredRows = rows.filter(row => !rowsToDelete.some(deletedRow => deletedRow.id === row.id));
+      const savedRows = filteredRows.map(row => {
+        const updatedRow = rowsToSave.find(editedRow => editedRow.id === row.id);
+        const nextRow = updatedRow ? { ...row, ...updatedRow } : row;
+        return { ...nextRow, _error: !validateRow(nextRow, gridType) };
       });
+      setRows(savedRows);
 
       unsavedChangesRef.current.unsavedRows = {};
       unsavedChangesRef.current.rowsBeforeChange = {};
 
       setHasUnsavedRows(false);
+      setFormMessage(
+        savedRows.some(row => row._error)
+          ? 'Some rows are missing required values. Complete the red rows before finalizing.'
+          : 'Rows saved and ready to finalize.'
+      );
       setIsSaving(false);
     } catch {
       setIsSaving(false);
     }
-  }, []);
+  }, [gridType, rows]);
 
   const getRowClassName = useCallback<NonNullable<DataGridProps['getRowClassName']>>(({ id, row }) => {
     const unsavedRow = unsavedChangesRef.current.unsavedRows[id];
@@ -167,11 +176,25 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
 
   const handleAddNewRow = useCallback(() => {
     const newId = randomId();
+    const firstEditableField = gridColumns.find(column => column.field !== 'actions' && column.editable !== false)?.field;
+    const newRow = { ...initialRow, id: newId, isNew: true };
+
+    unsavedChangesRef.current.unsavedRows[newId] = newRow;
+    setHasUnsavedRows(true);
 
     setRows(prevRows => {
-      return [...prevRows, { ...initialRow, id: newId, isNew: true }];
+      const rowIndex = prevRows.length;
+      requestAnimationFrame(() => {
+        apiRef.current?.scrollToIndexes({ rowIndex, colIndex: firstEditableField ? 1 : 0 });
+        if (firstEditableField) {
+          apiRef.current?.setCellFocus(newId, firstEditableField);
+          apiRef.current?.startCellEditMode({ id: newId, field: firstEditableField });
+        }
+      });
+      return [...prevRows, newRow];
     });
-  }, [initialRow]);
+    setFormMessage('New row added. Enter data in the highlighted first cell, then use Save before finalizing.');
+  }, [apiRef, gridColumns, initialRow]);
 
   // Removed problematic refresh effect that caused infinite rerender
   // The refresh pattern should be handled by parent component if needed
@@ -209,6 +232,13 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
   }
 
   const validateRow = (row: GridValidRowModel, gridType: string): boolean => {
+    const requiredFields = RequiredTableHeadersByFormType[gridType as FormType]?.map(header => header.label) ?? [];
+    const hasRequiredValues = requiredFields.every(field => {
+      const value = row[field];
+      return value !== undefined && value !== null && (typeof value !== 'string' || value.trim().length > 0);
+    });
+    if (!hasRequiredValues) return false;
+
     switch (gridType) {
       case 'attributes':
         return AttributeStatusOptions.includes(row.status);
@@ -216,32 +246,34 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     return true;
   };
 
+  const canFinalize = rows.length > 0 && !hasUnsavedRows && rows.every(row => validateRow(row, gridType));
+
   async function submitChanges() {
     if (hasUnsavedRows) {
-      alert('Please save your changes before proceeding.');
+      setFormMessage('Save your row edits before finalizing.');
       return;
     }
-    await new Promise(resolve => setTimeout(resolve, 250));
-    await saveChanges();
-    await new Promise(resolve => setTimeout(resolve, 750));
-
+    if (rows.length === 0) {
+      setFormMessage('Add at least one row before finalizing.');
+      return;
+    }
     let hasErrors = false;
 
     setRows(
       rows.map(row => {
         row._error = !validateRow(row, gridType);
-        hasErrors = row._error;
+        hasErrors = hasErrors || row._error;
         return row;
       })
     );
 
     if (hasErrors) {
-      alert('Some rows have validation errors. Please fix them before submitting.');
+      setFormMessage('Some rows are missing required values. Complete the red rows before finalizing.');
       return;
     }
 
     const fileRowSet: FileRowSet = convertRowsToFileRowSet(rows);
-    const _response = await fetch(`/api/bulkcrud`, {
+    const response = await fetch(`/api/bulkcrud`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -254,11 +286,24 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
         fileRowSet: fileRowSet
       })
     });
+    if (!response.ok) {
+      const responseBody = await response.json().catch(() => null);
+      setFormMessage(responseBody?.error ?? 'The rows could not be submitted. No completion was recorded.');
+      return;
+    }
     setChangesSubmitted(true);
   }
 
   return (
     <Box style={{ width: '100%' }}>
+      <Stack spacing={1} sx={{ mb: 2 }}>
+        <Typography level="body-sm">Add a row, edit its cells, choose Save, and then finalize the completed rows.</Typography>
+        {formMessage && (
+          <Alert color={formMessage.startsWith('New row') ? 'primary' : 'warning'} aria-live="polite">
+            {formMessage}
+          </Alert>
+        )}
+      </Stack>
       <Box style={{ marginBottom: 8 }}>
         <Button sx={{ marginX: 2 }} disabled={!hasUnsavedRows} loading={isSaving} onClick={saveChanges} startDecorator={<SaveIcon />} loadingPosition={'start'}>
           Save
@@ -300,7 +345,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
           getRowHeight={() => 'auto'}
         />
       </Box>
-      <Button sx={{ marginTop: 8 }} onClick={submitChanges} color={'primary'} size={'lg'}>
+      <Button sx={{ marginTop: 8 }} onClick={submitChanges} color={'primary'} size={'lg'} disabled={!canFinalize || isSaving}>
         Finalize Changes
       </Button>
     </Box>

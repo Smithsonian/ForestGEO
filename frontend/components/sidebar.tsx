@@ -142,6 +142,7 @@ const ADMIN_NAV = [
 ];
 
 export default function Sidebar(props: SidebarProps) {
+  const { coreDataLoaded } = props;
   const { data: session } = useSession();
   const currentSite = useSiteContext();
   const siteDispatch = useSiteDispatch();
@@ -152,10 +153,13 @@ export default function Sidebar(props: SidebarProps) {
   const censusListContext = useOrgCensusListContext();
   const siteListContext = useSiteListContext();
   const plotListContext = usePlotListContext();
-  const { validity } = useDataValidityContext();
-  const isAllValiditiesTrue = Object.entries(validity)
-    .filter(([key]) => key !== 'subquadrats')
-    .every(([, value]) => value);
+  const { validity, isChecking } = useDataValidityContext();
+  const validityReady = coreDataLoaded && !isChecking;
+  const isAllValiditiesTrue =
+    !validityReady ||
+    Object.entries(validity)
+      .filter(([key]) => key !== 'subquadrats')
+      .every(([, value]) => value);
 
   const router = useRouter();
   const pathname = usePathname();
@@ -255,15 +259,22 @@ export default function Sidebar(props: SidebarProps) {
     return (
       <>
         {selectedSite ? (
-          <Stack direction={'column'} alignItems={'start'} aria-label={'site value render stack'}>
+          <Stack direction={'column'} alignItems={'start'} aria-label={'site value render stack'} sx={{ maxWidth: '100%', minWidth: 0 }}>
             <Typography
               id={'site-selected'}
               level="body-lg"
               className="sidebar-item"
               data-testid={'selected-site-name'}
+              sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}
             >{`Site: ${selectedSite?.siteName}`}</Typography>
             <Stack direction={'column'} alignItems={'start'} aria-labelledby={'site-selected'}>
-              <Typography level="body-sm" color={'primary'} className="sidebar-item" data-testid={'selected-site-schema'}>
+              <Typography
+                level="body-sm"
+                color={'primary'}
+                className="sidebar-item"
+                data-testid={'selected-site-schema'}
+                sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}
+              >
                 {' — '}Schema: {selectedSite.schemaName}
               </Typography>
             </Stack>
@@ -288,7 +299,7 @@ export default function Sidebar(props: SidebarProps) {
     return (
       <>
         {selectedPlot ? (
-          <Stack direction="column" alignItems="start" aria-label={'plot value render stack'}>
+          <Stack direction="column" alignItems="start" aria-label={'plot value render stack'} sx={{ maxWidth: '100%', minWidth: 0 }}>
             <Typography level="body-md" className="sidebar-item" data-testid={'selected-plot-name'}>{`Plot: ${selectedPlot?.plotName}`}</Typography>
             <Box aria-label={'selected plot information'} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
               <Typography level="body-sm" color={'primary'} data-testid={'selected-plot-quadrats'}>
@@ -334,7 +345,7 @@ export default function Sidebar(props: SidebarProps) {
     );
 
     return (
-      <Stack direction={'column'} alignItems={'start'} id={'selected-census-stack'}>
+      <Stack direction={'column'} alignItems={'start'} id={'selected-census-stack'} sx={{ maxWidth: '100%', minWidth: 0 }}>
         <Typography level="body-md" className="sidebar-item" data-testid={'selected-census-plotcensusnumber'}>
           {`Census: ${selectedCensus?.plotCensusNumber}`}
         </Typography>
@@ -363,7 +374,7 @@ export default function Sidebar(props: SidebarProps) {
   const renderCensusOptions = () => (
     <Select
       suppressHydrationWarning
-      placeholder="Select a Census. Required"
+      placeholder="Select a Census"
       className="census-select sidebar-item"
       name="None"
       required
@@ -371,6 +382,7 @@ export default function Sidebar(props: SidebarProps) {
       value={currentCensus?.plotCensusNumber?.toString() || ''}
       renderValue={renderCensusValue}
       data-testid={'census-select-component'}
+      sx={{ width: '100%', minWidth: 0 }}
       aria-label="Select a Census. Required field for accessing measurement tools"
       listboxOpen={isCensusDropdownOpen}
       onListboxOpenChange={() => {
@@ -415,21 +427,19 @@ export default function Sidebar(props: SidebarProps) {
                   </Typography>
                   {Array.isArray(item?.dateRanges) &&
                     item.dateRanges.map((dateRange, index) => (
-                      <React.Fragment key={index}>
-                        <Stack direction={'row'}>
-                          <Typography level="body-sm" color={'neutral'}>
-                            {`${dateRange.startDate ? `First Msmt: ${formatDisplayDate(dateRange.startDate)}` : 'No Measurements'}`}
+                      <Stack key={index} direction={'row'}>
+                        <Typography level="body-sm" color={'neutral'}>
+                          {`${dateRange.startDate ? `First Msmt: ${formatDisplayDate(dateRange.startDate)}` : 'No Measurements'}`}
+                        </Typography>
+                        {dateRange.endDate && (
+                          <Typography level="body-sm" color={'neutral'} sx={{ whiteSpace: 'pre' }}>
+                            {' — '}
                           </Typography>
-                          {dateRange.endDate && (
-                            <Typography level="body-sm" color={'neutral'} sx={{ whiteSpace: 'pre' }}>
-                              {' — '}
-                            </Typography>
-                          )}
-                          <Typography level="body-sm" color={'neutral'}>
-                            {`${dateRange.endDate ? `Last Msmt: ${formatDisplayDate(dateRange.endDate)}` : ''}`}
-                          </Typography>
-                        </Stack>
-                      </React.Fragment>
+                        )}
+                        <Typography level="body-sm" color={'neutral'}>
+                          {`${dateRange.endDate ? `Last Msmt: ${formatDisplayDate(dateRange.endDate)}` : ''}`}
+                        </Typography>
+                      </Stack>
                     ))}
                 </Box>
               </Box>
@@ -545,6 +555,7 @@ export default function Sidebar(props: SidebarProps) {
         required
         size="md"
         data-testid="plot-select-component"
+        sx={{ width: '100%', minWidth: 0 }}
         aria-label="Select a Plot"
         renderValue={renderPlotValue}
         value={currentPlot?.plotID ?? null}
@@ -599,7 +610,7 @@ export default function Sidebar(props: SidebarProps) {
         placeholder="Select a Site"
         name="None"
         required
-        sx={{ marginRight: '1em' }}
+        sx={{ width: '100%', minWidth: 0 }}
         size={'md'}
         renderValue={renderSiteValue}
         data-testid={'site-select-component'}
@@ -645,34 +656,32 @@ export default function Sidebar(props: SidebarProps) {
             </Option>
           ))}
         </List>
-        {otherSites.length > 0 && (
-          <>
-            <ListDivider role="none" />
-            <List sx={{ '--ListItemDecorator-size': '28px' }}>
-              <ListItem id="other-sites-group" sticky className="sidebar-item">
-                <Typography
-                  level="body-xs"
-                  textTransform="uppercase"
-                  aria-live="polite"
-                  aria-label={`Other Sites section, ${otherSites.length} sites not available to you`}
-                >
-                  Other Sites ({otherSites.length})
-                </Typography>
-              </ListItem>
-              {otherSites.map(site => (
-                <Option
-                  key={site.siteID}
-                  value={site.siteID}
-                  disabled
-                  data-testid={'site-selection-option-other'}
-                  aria-label={`${site.siteName} site, not accessible to current user`}
-                >
-                  {site.siteName}
-                </Option>
-              ))}
-            </List>
-          </>
-        )}
+        {otherSites.length > 0 && [
+          <ListDivider key="other-sites-divider" role="none" />,
+          <List key="other-sites-list" sx={{ '--ListItemDecorator-size': '28px' }}>
+            <ListItem id="other-sites-group" sticky className="sidebar-item">
+              <Typography
+                level="body-xs"
+                textTransform="uppercase"
+                aria-live="polite"
+                aria-label={`Other Sites section, ${otherSites.length} sites not available to you`}
+              >
+                Other Sites ({otherSites.length})
+              </Typography>
+            </ListItem>
+            {otherSites.map(site => (
+              <Option
+                key={site.siteID}
+                value={site.siteID}
+                disabled
+                data-testid={'site-selection-option-other'}
+                aria-label={`${site.siteName} site, not accessible to current user`}
+              >
+                {site.siteName}
+              </Option>
+            ))}
+          </List>
+        ]}
       </Select>
     );
   };
@@ -707,12 +716,12 @@ export default function Sidebar(props: SidebarProps) {
         case '/errors':
           return !isAllValiditiesTrue;
         case '/subquadrats':
-          return !validity['quadrats'];
+          return validityReady && !validity['quadrats'];
         case '/quadratpersonnel':
-          return !validity['quadrats'];
+          return validityReady && !validity['quadrats'];
         default:
           const dataKey = validityMapping[linkHref];
-          return dataKey !== undefined && !validity[dataKey];
+          return validityReady && dataKey !== undefined && !validity[dataKey];
       }
     } else {
       // Check for main links
@@ -720,9 +729,9 @@ export default function Sidebar(props: SidebarProps) {
         case '/summary':
           return !isAllValiditiesTrue;
         case '/subquadrats':
-          return !validity['quadrats'];
+          return validityReady && !validity['quadrats'];
         case '/quadratpersonnel':
-          return !validity['quadrats'];
+          return validityReady && !validity['quadrats'];
         default:
           return false;
       }
@@ -731,7 +740,7 @@ export default function Sidebar(props: SidebarProps) {
 
   return (
     <>
-      <Stack direction={'row'} sx={{ display: 'flex', width: 'fit-content' }}>
+      <Stack direction={'row'} sx={{ display: 'flex', width: '100%', maxWidth: '100vw', minWidth: 0 }}>
         <Box
           component="nav"
           ref={sidebarRef}
@@ -743,7 +752,9 @@ export default function Sidebar(props: SidebarProps) {
             top: 0,
             left: 0,
             height: '100vh',
-            width: `${sidebarWidth}px`,
+            width: { xs: '100%', md: `${sidebarWidth}px` },
+            maxWidth: '100vw',
+            boxSizing: 'border-box',
             p: 2,
             flexShrink: 0,
             display: 'flex',
@@ -772,7 +783,7 @@ export default function Sidebar(props: SidebarProps) {
           <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
               <Stack direction={'column'} sx={{ marginRight: '1em' }}>
-                <Typography level="h1">
+                <Typography level="h2">
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <Box sx={{ marginRight: 1.5 }}>
                       <RainbowIcon />
@@ -984,9 +995,9 @@ export default function Sidebar(props: SidebarProps) {
                         case '/errors':
                           return !isAllValiditiesTrue;
                         case '/subquadrats':
-                          return !validity['quadrats'];
+                          return validityReady && !validity['quadrats'];
                         case '/quadratpersonnel':
-                          return !validity['quadrats'];
+                          return validityReady && !validity['quadrats'];
                         default:
                           return false;
                       }
@@ -1078,8 +1089,9 @@ export default function Sidebar(props: SidebarProps) {
                               <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : ''} arrow disableHoverListener={!isDataIncomplete}>
                                 <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-defined-box-wrapper'}>
                                   <ListItemButton
-                                    component={isLinkDisabled ? 'div' : NextLink}
-                                    href={isLinkDisabled ? undefined : item.href}
+                                    key={`${item.href}-${isNavDisabledWithoutSelection ? 'locked' : 'link'}`}
+                                    component={isNavDisabledWithoutSelection ? 'div' : NextLink}
+                                    href={isNavDisabledWithoutSelection ? undefined : item.href}
                                     selected={pathname === item.href}
                                     data-testid={`navigate-list-item-button-nonexpanding-${item.href}`}
                                     sx={{ flex: 1, width: '100%' }}
@@ -1107,8 +1119,7 @@ export default function Sidebar(props: SidebarProps) {
                               <Tooltip title={`Choose a ${currentSite === undefined ? 'site' : currentPlot === undefined ? 'plot' : 'census'} to unlock`} arrow>
                                 <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-undefined-box-wrapper'}>
                                   <ListItemButton
-                                    component={isNavDisabledWithoutSelection ? 'div' : NextLink}
-                                    href={isNavDisabledWithoutSelection ? undefined : item.href}
+                                    component="div"
                                     selected={pathname === item.href}
                                     sx={{ flex: 1, width: '100%' }}
                                     disabled={isNavDisabledWithoutSelection}
@@ -1130,7 +1141,7 @@ export default function Sidebar(props: SidebarProps) {
                     } else {
                       const isParentDataIncomplete = item.expanded.some(subItem => {
                         const dataKey = validityMapping[subItem.href];
-                        return dataKey !== undefined && !validity[dataKey];
+                        return validityReady && dataKey !== undefined && !validity[dataKey];
                       });
 
                       return (
@@ -1198,6 +1209,7 @@ export default function Sidebar(props: SidebarProps) {
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
                                             <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-defined-box-wrapper'}>
                                               <ListItemButton
+                                                key={`${item.href}${link.href}-${isLinkDisabled ? 'locked' : 'link'}`}
                                                 component={isLinkDisabled ? 'div' : NextLink}
                                                 href={isLinkDisabled ? undefined : item.href + link.href}
                                                 data-testid={`navigate-list-item-expanded-button-${item.label}-${link.label}-${link.href}`}
@@ -1244,8 +1256,7 @@ export default function Sidebar(props: SidebarProps) {
                                           >
                                             <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-undefined-box-wrapper'}>
                                               <ListItemButton
-                                                component={isSubLinkDisabledWithoutSelection ? 'div' : NextLink}
-                                                href={isSubLinkDisabledWithoutSelection ? undefined : item.href + link.href}
+                                                component="div"
                                                 sx={{ flex: 1, width: '100%' }}
                                                 selected={pathname == item.href + link.href}
                                                 color={pathname === item.href ? 'primary' : undefined}

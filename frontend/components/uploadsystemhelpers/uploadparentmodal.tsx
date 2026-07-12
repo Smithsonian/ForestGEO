@@ -93,7 +93,13 @@ export default function UploadParentModal(props: UPMProps) {
               ? 'Upload an ArcGIS Field Maps .xlsx workbook to the ForestGEO database system. Navigate using Tab key, activate buttons with Enter or Space.'
               : `Upload ${formType} data files to the ForestGEO database system. Navigate using Tab key, activate buttons with Enter or Space.`}
           </div>
-          {referenceGridType && <RenderGridFormExplanations datagridType={referenceGridType} />}
+          {!isArcgisMode && referenceGridType && <RenderGridFormExplanations datagridType={referenceGridType} />}
+          {isArcgisMode && (
+            <Typography level="body-sm" sx={{ pr: 5 }}>
+              Select one ArcGIS Field Maps <strong>.xlsx</strong> workbook. The workbook preflight will inspect its sheets and map ArcGIS columns before any
+              data is changed.
+            </Typography>
+          )}
           {uploadMode ? (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {requiresModeSelection && (

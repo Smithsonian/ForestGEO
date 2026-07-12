@@ -11,6 +11,7 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  FormHelperText,
   FormLabel,
   Input,
   Modal,
@@ -30,6 +31,7 @@ type UserWithSite = Omit<AdminUserRDS, 'userSites'> & { userSites: AdminSiteRDS[
 type NewUserForm = Required<Pick<UserWithSite, 'firstName' | 'lastName' | 'email' | 'notifications' | 'userStatus'>>;
 
 const EMPTY_NEW_USER: NewUserForm = { firstName: '', lastName: '', email: '', notifications: false, userStatus: 'field crew' };
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function UserSettingsPage() {
   const [users, setUsers] = useState<UserWithSite[]>([]);
@@ -42,6 +44,7 @@ export default function UserSettingsPage() {
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [newUser, setNewUser] = useState<NewUserForm>(EMPTY_NEW_USER);
   const [addingUser, setAddingUser] = useState(false);
+  const newUserEmailValid = EMAIL_PATTERN.test(newUser.email.trim());
 
   // Track mounted state to prevent state updates after unmount
   const { isMountedRef } = useIsMounted();
@@ -357,7 +360,7 @@ export default function UserSettingsPage() {
               <DialogTitle id="add-user-title">Add user</DialogTitle>
               <DialogContent>Enter the user’s directory details and initial application role.</DialogContent>
               <Stack spacing={1.5}>
-                <FormControl required>
+                <FormControl required error={Boolean(newUser.email) && !newUserEmailValid}>
                   <FormLabel htmlFor="new-user-first-name">First name</FormLabel>
                   <Input
                     id="new-user-first-name"
@@ -384,6 +387,7 @@ export default function UserSettingsPage() {
                     value={newUser.email}
                     onChange={event => setNewUser(user => ({ ...user, email: event.target.value }))}
                   />
+                  {newUser.email && !newUserEmailValid && <FormHelperText>Enter a complete email address, such as name@example.org.</FormHelperText>}
                 </FormControl>
                 <FormControl required>
                   <FormLabel htmlFor="new-user-role">Role</FormLabel>
@@ -409,7 +413,7 @@ export default function UserSettingsPage() {
               <DialogActions>
                 <Button
                   loading={addingUser}
-                  disabled={!newUser.firstName.trim() || !newUser.lastName.trim() || !newUser.email.trim()}
+                  disabled={!newUser.firstName.trim() || !newUser.lastName.trim() || !newUserEmailValid}
                   onClick={async () => {
                     setAddingUser(true);
                     setSaveError(null);

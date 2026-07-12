@@ -32,6 +32,8 @@ export interface ErrorExplorerQueryRequest {
   schema: string;
   plotID: number;
   censusID: number;
+  /** All physical census rows represented by the selected plot census. */
+  censusIDs?: number[];
   page: number;
   pageSize: number;
   filters: ErrorExplorerFilters;

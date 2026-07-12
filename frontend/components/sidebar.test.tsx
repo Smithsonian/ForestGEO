@@ -88,7 +88,7 @@ describe('Sidebar - Functional Tests', () => {
     it('MUST have heading for branding', () => {
       render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
-      const heading = screen.getByRole('heading', { level: 1 });
+      const heading = screen.getByRole('heading', { level: 2 });
       expect(heading).toHaveTextContent('ForestGEO');
     });
 
@@ -213,11 +213,11 @@ describe('Sidebar - Functional Tests', () => {
     it('MUST handle different route contexts', () => {
       (usePathname as any).mockReturnValue('/dashboard');
       const { rerender } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
-      expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument();
 
       (usePathname as any).mockReturnValue('/measurementshub');
       rerender(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
-      expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument();
     });
   });
 
@@ -271,7 +271,7 @@ describe('Sidebar - Functional Tests', () => {
     it('MUST have logical heading structure', () => {
       render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
-      const heading = screen.getByRole('heading', { level: 1 });
+      const heading = screen.getByRole('heading', { level: 2 });
       expect(heading).toHaveTextContent('ForestGEO');
     });
 
@@ -443,7 +443,7 @@ describe('Sidebar - Functional Tests', () => {
       // isAllValiditiesTrue, so an incomplete attributes/species/quadrats section disables it.
       mockValidity.attributes = false;
       try {
-        render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+        render(<Sidebar siteListLoaded={false} coreDataLoaded={true} setCensusListLoaded={vi.fn()} />);
 
         const viewErrorsButton = screen.getByTestId('navigate-list-item-expanded-button-Census Hub-View Errors-/errors');
         // No href at all: right-click "open in new tab" / middle-click must have nothing to follow.

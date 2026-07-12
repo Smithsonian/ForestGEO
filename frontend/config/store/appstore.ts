@@ -189,6 +189,14 @@ const traceBlockedSelectionWipe = () => {
  * /dashboard on every reload (bug F7).
  */
 const createGuardedSelectionStorage = (): PersistStorage<PersistedSelections> | undefined => {
+  if (
+    typeof window === 'undefined' ||
+    typeof localStorage.getItem !== 'function' ||
+    typeof localStorage.setItem !== 'function' ||
+    typeof localStorage.removeItem !== 'function'
+  ) {
+    return undefined;
+  }
   const baseStorage = createJSONStorage<PersistedSelections>(() => localStorage);
   if (!baseStorage) return undefined;
 

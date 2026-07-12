@@ -9,6 +9,7 @@ import Divider from '@mui/joy/Divider';
 import CircularProgress from '@mui/joy/CircularProgress';
 import Box from '@mui/joy/Box';
 import Typography from '@mui/joy/Typography';
+import Alert from '@mui/joy/Alert';
 import { Plot } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import ailogger from '@/ailogger';
@@ -58,7 +59,7 @@ function LoadingFiles(props: Readonly<LoadingFilesProps>) {
           Refresh Files
         </Button>
         <br />
-        Uploaded CSV Files
+        Stored source files
       </Typography>
       <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
         <CardHeader>
@@ -98,7 +99,6 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   const currentSite = useSiteContext();
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
-  const [_openSnackbar, setOpenSnackbar] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const listAbortRef = useRef<AbortController | null>(null);
 
@@ -144,7 +144,6 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
       ailogger.error('Download error:', error);
       if (isMountedRef.current) {
         setErrorMessage(error.message);
-        setOpenSnackbar(true);
       }
     }
   };
@@ -167,7 +166,6 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
       ailogger.error('Delete error:', error);
       if (isMountedRef.current) {
         setErrorMessage(error.message);
-        setOpenSnackbar(true);
       }
     }
   };
@@ -190,6 +188,8 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         const jsonOutput = await response.json();
         ailogger.error('response.statusText', jsonOutput.statusText);
         setErrorMessage(`API response: ${jsonOutput.statusText}`);
+        setFileRows([]);
+        setIsLoaded(true);
       } else {
         const data = await response.json();
         setFileRows(data.blobData);
@@ -199,7 +199,8 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
       if (isMountedRef.current) {
         setErrorMessage(error.message);
-        setOpenSnackbar(true);
+        setFileRows([]);
+        setIsLoaded(true);
       }
     }
   }, [buildScopedParams, isMountedRef]);
@@ -221,10 +222,6 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   const refreshFiles = useCallback(() => {
     getListOfFiles().then();
   }, [getListOfFiles]);
-
-  const _handleCloseSnackbar = () => {
-    setOpenSnackbar(false);
-  };
 
   // Clear the visible error after the user has had time to read it.
   useEffect(() => {
@@ -257,10 +254,19 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
             <Typography level={'title-lg'} marginBottom={2}>
               Files uploaded to {currentPlot?.plotName ?? 'this plot'}, census {currentCensus?.plotCensusNumber ?? '—'}
             </Typography>
+            <Typography level="body-sm" sx={{ mb: 2, maxWidth: 760 }}>
+              This page lists source files still available in storage. A completed upload can remain in Recent Changes after its source file has been deleted or
+              expired.
+            </Typography>
             <Button variant={'contained'} sx={{ width: 'fit-content', marginBottom: 2 }} onClick={refreshFiles}>
               Refresh Files
             </Button>
-            <Typography level={'title-lg'}>Uploaded CSV Files</Typography>
+            <Typography level={'title-lg'}>Stored source files</Typography>
+            {errorMessage && (
+              <Alert color="danger" sx={{ mt: 1 }}>
+                Could not load stored files: {errorMessage}
+              </Alert>
+            )}
           </Box>
           <Box sx={{ display: 'flex', flexDirection: 'column', marginTop: 1 }}>
             <TableContainer component={Paper}>
@@ -280,7 +286,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                   {sortedFileTextCSV.length === 0 && sortedFileArcGIS.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={fileColumns.length + 2} align="center">
-                        No data available
+                        No source files are currently available in storage. Check Recent Changes for completed upload history.
                       </TableCell>
                     </TableRow>
                   ) : (

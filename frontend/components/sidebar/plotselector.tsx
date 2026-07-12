@@ -198,7 +198,7 @@ export default function PlotSelector() {
       }}
       onClose={() => setIsDropdownOpen(false)}
       onChange={handlePlotChange}
-      data-testid="plot-select-component"
+      data-testid="plot-select-component-modern"
       aria-label="Select a Plot. Required field for accessing measurement tools"
       slotProps={{
         listbox: {
