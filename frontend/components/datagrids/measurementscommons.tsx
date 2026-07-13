@@ -87,7 +87,7 @@ import ValidationCore from '@/components/client/validationcore';
 import { ArrowRightAlt, CallSplit, Forest, Grass } from '@mui/icons-material';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { EditToolbar } from '../client/datagridelements';
-import CustomGridPagination from '@/components/datagrids/customgridpagination';
+import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
 import { getSelectableOptionsForField, loadSelectableOptions } from '@/components/client/clientmacros';
@@ -1651,7 +1651,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 paginationModel={paginationModel}
                 rowCount={gridRowCount}
                 onRowCountChange={handleRowCountChange}
-                pageSizeOptions={[25, 50, 100]}
+                pageSizeOptions={DEFAULT_PAGE_SIZE_OPTIONS}
                 sortModel={sortModel}
                 onSortModelChange={handleSortModelChange}
                 filterModel={gridFilterModel}

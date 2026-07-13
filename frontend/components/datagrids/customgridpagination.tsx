@@ -17,7 +17,7 @@ import LastPageIcon from '@mui/icons-material/LastPage';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 
-const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [25, 50, 100];
+export const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [25, 50, 100];
 export const DEFAULT_GRID_PAGE_SIZE = 50;
 const PAGE_SIZE_STORAGE_PREFIX = 'forestgeo-grid-page-size:';
 const INFINITE_VALUE = 'infinite' as const;
@@ -72,7 +72,9 @@ export function getPersistedGridPageSize(gridType: string | undefined, fallback 
   if (!gridType || typeof window === 'undefined') return fallback;
   try {
     const saved = Number(window.localStorage.getItem(`${PAGE_SIZE_STORAGE_PREFIX}${gridType}`));
-    return Number.isInteger(saved) && saved > 0 ? saved : fallback;
+    // A stale or hand-edited value outside the selector's options would render a
+    // blank rows-per-page control and could drive an oversized first fetch.
+    return DEFAULT_PAGE_SIZE_OPTIONS.includes(saved) ? saved : fallback;
   } catch {
     return fallback;
   }

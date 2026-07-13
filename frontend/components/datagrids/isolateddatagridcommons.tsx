@@ -60,7 +60,7 @@ import { LoadingBar, ContentSkeleton } from '@/components/loading';
 import { areGridFilterModelsEqual, hasServerFilter, toServerFilterModel } from '@/lib/datagrid/filterModel';
 import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel';
 import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
-import CustomGridPagination, { getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
+import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS, getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
@@ -1379,7 +1379,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const censusIndependentGridTypes = ['attributes', 'personnel', 'quadrats', 'alltaxonomiesview', 'stemtaxonomiesview'];
   const requiresCensus = !censusIndependentGridTypes.includes(gridType);
 
-  const pageSizeOptions = [25, 50, 100];
+  const pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS;
 
   const gridInitialState = useMemo(() => {
     const savedLayout = persistedLayoutRef.current;
