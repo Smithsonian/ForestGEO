@@ -87,6 +87,8 @@ export const LoginLogout = () => {
     await signOut({ redirectTo: '/login' });
   };
 
+  const canManageUsers = ['global', 'db admin'].includes(session?.user?.userStatus ?? '');
+
   const roleLabel =
     session?.user?.userStatus === 'global'
       ? 'Administration'
@@ -131,11 +133,6 @@ export const LoginLogout = () => {
           }}
           size="sm"
         >
-          {roleLabel && (
-            <Typography level="body-xs" sx={{ px: 1, color: 'neutral.500', fontWeight: 600 }}>
-              {roleLabel}
-            </Typography>
-          )}
           <Avatar variant="outlined" size="sm" src="" alt={`Avatar for ${userName || 'current user'}`}>
             <Skeleton loading={status == 'loading'}>{userInitials}</Skeleton>
           </Avatar>
@@ -154,6 +151,11 @@ export const LoginLogout = () => {
           >
             <Skeleton loading={status == 'loading'}>{session?.user?.email ? session?.user?.email : ''}</Skeleton>
           </Typography>
+          {roleLabel && (
+            <Typography level="body-xs" sx={{ color: 'neutral.500', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {roleLabel}
+            </Typography>
+          )}
         </Box>
         <IconButton
           ref={settingsButtonRef}
@@ -183,7 +185,7 @@ export const LoginLogout = () => {
           disablePortal
           sx={{ zIndex: 1500 }}
         >
-          {session?.user?.userStatus === 'global' && (
+          {canManageUsers && (
             <MenuItem
               onClick={() => {
                 router.push('/admin/users');
@@ -204,7 +206,7 @@ export const LoginLogout = () => {
             <Public />
           </MenuItem>
 
-          {session?.user?.userStatus === 'global' && (
+          {canManageUsers && (
             <MenuItem
               onClick={() => {
                 router.push('/admin/userstosites');
