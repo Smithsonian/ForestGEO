@@ -69,11 +69,11 @@ describe('/api/administrative/fetch/[type] auth gate', () => {
     expect(res.status).toBe(200);
   });
 
-  it('user administration requires the global role', async () => {
+  it('user administration admits db admins as well as global admins', async () => {
     mocks.auth.mockResolvedValue({ user: { email: 'db@x', userStatus: 'db admin' } });
     const res = await GET(makeReq('http://x/api/administrative/fetch/users'), params('users'));
-    expect(res.status).toBe(403);
-    expect(mocks.executeQuery).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(mocks.executeQuery).toHaveBeenCalled();
   });
 
   it('GET → preserves paginated format toggle when ?email= is present', async () => {
@@ -136,7 +136,35 @@ describe('/api/administrative/fetch/[type] auth gate', () => {
     );
     expect(res.status).toBe(400);
     expect(mocks.executeQuery).not.toHaveBeenCalled();
-    expect(mocks.rollbackTransaction).toHaveBeenCalledWith('tx-1');
+    expect(mocks.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('DELETE → accepts the camelCase identifier the mapped grid rows send', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    const res = await DELETE(makeReq('http://x/api/administrative/fetch/users', { newRow: { id: 3, userID: 5, firstName: 'Ada' } }), params('users'));
+    expect(res.status).toBe(200);
+    expect(mocks.executeQuery).toHaveBeenCalledWith(expect.stringMatching(/DELETE FROM.*WHERE.*UserID.* = 5/s), undefined, 'tx-1');
+  });
+
+  it('DELETE → 400 when the row carries no usable identifier', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    const res = await DELETE(makeReq('http://x/api/administrative/fetch/users', { newRow: { firstName: 'Ada' } }), params('users'));
+    expect(res.status).toBe(400);
+    expect(mocks.beginTransaction).not.toHaveBeenCalled();
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('POST → strips grid scaffold fields and demaps the row before inserting a site', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    const res = await POST(
+      makeReq('http://x/api/administrative/fetch/sites', { newRow: { id: 'uuid-1', isNew: true, siteName: 'BCI', schemaName: 'forestgeo_bci' } }),
+      params('sites')
+    );
+    expect(res.status).toBe(200);
+    expect(mocks.demapData).toHaveBeenCalledWith([{ siteName: 'BCI', schemaName: 'forestgeo_bci', id: 'uuid-1' }]);
+    const insertQuery = mocks.executeQuery.mock.calls[0][0] as unknown as string;
+    expect(insertQuery).toContain('INSERT INTO');
+    expect(insertQuery).not.toContain('isNew');
   });
 
   it('PATCH → 403 when non-admin', async () => {

@@ -21,12 +21,6 @@ function invalidResourceType(type: string): NextResponse | null {
     : NextResponse.json({ message: 'Unsupported administrative resource' }, { status: HTTPResponses.INVALID_REQUEST });
 }
 
-function requireGlobalForUserAdministration(type: string, userStatus: string | undefined): NextResponse | null {
-  return (type === 'users' || type === 'usersiterelations') && userStatus !== 'global'
-    ? NextResponse.json({ error: 'forbidden — global role required' }, { status: 403 })
-    : null;
-}
-
 function parseNewUser(value: unknown): { firstName: string; lastName: string; email: string; notifications: boolean; userStatus: string } | null {
   if (!value || typeof value !== 'object') return null;
   const row = value as Record<string, unknown>;
@@ -82,8 +76,6 @@ export async function GET(request: NextRequest, props: { params: Promise<{ type:
   const { type } = await props.params;
   const typeError = invalidResourceType(type);
   if (typeError) return typeError;
-  const roleError = requireGlobalForUserAdministration(type, session?.user?.userStatus);
-  if (roleError) return roleError;
   const connectionManager = ConnectionManager.getInstance();
 
   // The ?email= query param is a UI/format flag, not auth. When present,
@@ -137,8 +129,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ type
   const { type } = await props.params;
   const typeError = invalidResourceType(type);
   if (typeError) return typeError;
-  const roleError = requireGlobalForUserAdministration(type, session?.user?.userStatus);
-  if (roleError) return roleError;
   const connectionManager = ConnectionManager.getInstance();
 
   let newRow: unknown;
@@ -147,15 +137,19 @@ export async function POST(request: NextRequest, props: { params: Promise<{ type
   } catch {
     return NextResponse.json({ message: 'Request body must be valid JSON' }, { status: HTTPResponses.INVALID_REQUEST });
   }
+  let user: ReturnType<typeof parseNewUser> = null;
+  if (type === 'users') {
+    user = parseNewUser(newRow);
+    if (!user) {
+      return NextResponse.json({ message: 'First name, last name, a valid email, and a valid role are required' }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+  } else if (!newRow || typeof newRow !== 'object' || Array.isArray(newRow)) {
+    return NextResponse.json({ message: 'A row object is required' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
   let transactionID: string | undefined;
   try {
     transactionID = await connectionManager.beginTransaction();
-    if (type === 'users') {
-      const user = parseNewUser(newRow);
-      if (!user) {
-        await connectionManager.rollbackTransaction(transactionID);
-        return NextResponse.json({ message: 'First name, last name, a valid email, and a valid role are required' }, { status: HTTPResponses.INVALID_REQUEST });
-      }
+    if (user) {
       const result = await connectionManager.executeQuery(
         'INSERT INTO catalog.users (FirstName, LastName, Email, Notifications, UserStatus) VALUES (?, ?, ?, ?, ?)',
         [user.firstName, user.lastName, user.email, user.notifications, user.userStatus],
@@ -167,11 +161,11 @@ export async function POST(request: NextRequest, props: { params: Promise<{ type
       invalidateAdminPermissionsChange(type, undefined, user);
       return NextResponse.json({ message: 'Successfully inserted', userID }, { status: HTTPResponses.OK });
     }
-    if (!newRow || typeof newRow !== 'object' || Array.isArray(newRow)) {
-      await connectionManager.rollbackTransaction(transactionID);
-      return NextResponse.json({ message: 'A row object is required' }, { status: HTTPResponses.INVALID_REQUEST });
-    }
-    const insertQuery = format(`INSERT INTO ?? SET ?`, [`catalog.${type}`, newRow]);
+    // Grid rows arrive camelCase with grid-only scaffold fields; demap to the
+    // PascalCase column names (demapData drops `id`; `isNew` is grid state).
+    const { isNew: _isNew, ...rowFields } = newRow as Record<string, unknown>;
+    const mappedRow = MapperFactory.getMapper<any, any>(type).demapData([rowFields])[0];
+    const insertQuery = format(`INSERT INTO ?? SET ?`, [`catalog.${type}`, mappedRow]);
     await connectionManager.executeQuery(insertQuery, undefined, transactionID);
     await connectionManager.commitTransaction(transactionID);
     invalidateAdminPermissionsChange(type, undefined, newRow);
@@ -191,8 +185,6 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ typ
   const { type } = await props.params;
   const typeError = invalidResourceType(type);
   if (typeError) return typeError;
-  const roleError = requireGlobalForUserAdministration(type, session?.user?.userStatus);
-  if (roleError) return roleError;
   const connectionManager = ConnectionManager.getInstance();
 
   const gridID = type === 'sites' ? 'SiteID' : 'UserID';
@@ -251,8 +243,6 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ ty
   const { type } = await props.params;
   const typeError = invalidResourceType(type);
   if (typeError) return typeError;
-  const roleError = requireGlobalForUserAdministration(type, session?.user?.userStatus);
-  if (roleError) return roleError;
   const connectionManager = ConnectionManager.getInstance();
 
   const gridID = type === 'sites' ? 'SiteID' : type == 'users' ? 'UserID' : 'UserSiteRelationID';
@@ -265,13 +255,17 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ ty
   } catch {
     return NextResponse.json({ message: 'newRow object is required' }, { status: HTTPResponses.INVALID_REQUEST });
   }
-  if (!Number.isInteger(Number(newRow[gridID])) || Number(newRow[gridID]) <= 0) {
+  // Grid rows are MapperFactory-mapped, so the identifier arrives camelCase
+  // (userID / userSiteRelationID); accept the raw column name too.
+  const camelGridID = gridID.charAt(0).toLowerCase() + gridID.slice(1);
+  const rowID = Number(newRow[gridID] ?? newRow[camelGridID]);
+  if (!Number.isInteger(rowID) || rowID <= 0) {
     return NextResponse.json({ message: `${gridID} must be a positive integer` }, { status: HTTPResponses.INVALID_REQUEST });
   }
   let transactionID: string | undefined;
   try {
     transactionID = await connectionManager.beginTransaction();
-    const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`catalog.${type}`, gridID, newRow[gridID]]);
+    const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`catalog.${type}`, gridID, rowID]);
     await connectionManager.executeQuery(deleteQuery, undefined, transactionID);
     await connectionManager.commitTransaction(transactionID);
     invalidateAdminPermissionsChange(type, newRow, undefined);
