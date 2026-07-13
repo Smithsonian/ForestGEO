@@ -556,7 +556,10 @@ class ConnectionManager {
     // Without this, the orphaned fn promise produces an unhandled rejection that
     // can crash the Node.js process when it eventually fails (e.g. "No connection
     // found for transaction" after the connection was released by rollback).
-    const fnPromise = fn(tx);
+    // Defer invocation into a promise so a non-async callback that throws
+    // before returning a promise follows the same rollback/cleanup path as an
+    // asynchronously rejected callback.
+    const fnPromise = Promise.resolve().then(() => fn(tx));
 
     try {
       const result = (await Promise.race([fnPromise, timeoutPromise])) as T;

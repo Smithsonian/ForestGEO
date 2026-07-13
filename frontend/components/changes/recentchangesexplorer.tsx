@@ -60,6 +60,29 @@ function formatDiffValue(value: unknown): string {
   return String(value);
 }
 
+export function summarizeChange(entry: Pick<ChangelogEntry, 'operation' | 'tableName' | 'oldRowState' | 'newRowState' | 'recordID'>): string {
+  const filename = entry.newRowState?.filename ?? entry.newRowState?.fileName ?? entry.newRowState?.name;
+  const tableLabel = entry.tableName.replace(/_/g, ' ');
+  const singularTableLabel: Record<string, string> = {
+    attributes: 'attribute',
+    measurements: 'measurement',
+    quadrats: 'quadrat',
+    stems: 'stem',
+    trees: 'tree',
+    users: 'user'
+  };
+  const objectLabel = singularTableLabel[tableLabel] ?? tableLabel;
+  if (entry.operation === 'INSERT' && entry.tableName === 'file_upload') return filename ? `Uploaded ${filename}` : 'Uploaded a file';
+  if (entry.operation === 'UPDATE' && /measurement/i.test(entry.tableName)) return 'Updated a measurement record';
+  if (entry.operation === 'DELETE') return `Deleted a ${objectLabel}`;
+  if (entry.operation === 'INSERT') return `Added a ${objectLabel}`;
+  return `Changed ${tableLabel}`;
+}
+
+function displayName(value: string): string {
+  return value.replace(/\s*\[[^\]]*\]\s*$/, '').trim();
+}
+
 function DiffBlock({ diffs }: { diffs: DiffEntry[] }) {
   if (diffs.length === 0) {
     return (
@@ -70,49 +93,52 @@ function DiffBlock({ diffs }: { diffs: DiffEntry[] }) {
   }
 
   return (
-    <Box
-      sx={{
-        backgroundColor: 'neutral.900',
-        borderRadius: '6px',
-        p: 1.5,
-        fontFamily: 'monospace',
-        fontSize: '12px'
-      }}
-    >
-      {diffs.map(diff => (
-        <Stack key={diff.field} direction="row" spacing={1.5} sx={{ mb: 0.5, alignItems: 'center' }}>
-          <Typography sx={{ color: 'neutral.500', minWidth: 130, fontFamily: 'inherit', fontSize: 'inherit' }}>{diff.field}</Typography>
-          <Box
-            component="span"
-            sx={{
-              backgroundColor: 'rgba(248, 113, 113, 0.15)',
-              color: '#f87171',
-              px: 0.75,
-              borderRadius: '3px',
-              textDecoration: 'line-through',
-              fontFamily: 'inherit',
-              fontSize: 'inherit'
-            }}
-          >
-            {formatDiffValue(diff.oldValue)}
-          </Box>
-          <Typography sx={{ color: 'neutral.600', fontFamily: 'inherit', fontSize: 'inherit' }}>→</Typography>
-          <Box
-            component="span"
-            sx={{
-              backgroundColor: 'rgba(110, 231, 122, 0.15)',
-              color: '#6ee77a',
-              px: 0.75,
-              borderRadius: '3px',
-              fontFamily: 'inherit',
-              fontSize: 'inherit'
-            }}
-          >
-            {formatDiffValue(diff.newValue)}
-          </Box>
-        </Stack>
-      ))}
-    </Box>
+    <details>
+      <summary>Details</summary>
+      <Box
+        sx={{
+          backgroundColor: 'neutral.900',
+          borderRadius: '6px',
+          p: 1.5,
+          fontFamily: 'monospace',
+          fontSize: '12px'
+        }}
+      >
+        {diffs.map(diff => (
+          <Stack key={diff.field} direction="row" spacing={1.5} sx={{ mb: 0.5, alignItems: 'center' }}>
+            <Typography sx={{ color: 'neutral.500', minWidth: 130, fontFamily: 'inherit', fontSize: 'inherit' }}>{diff.field}</Typography>
+            <Box
+              component="span"
+              sx={{
+                backgroundColor: 'rgba(248, 113, 113, 0.15)',
+                color: '#f87171',
+                px: 0.75,
+                borderRadius: '3px',
+                textDecoration: 'line-through',
+                fontFamily: 'inherit',
+                fontSize: 'inherit'
+              }}
+            >
+              {formatDiffValue(diff.oldValue)}
+            </Box>
+            <Typography sx={{ color: 'neutral.600', fontFamily: 'inherit', fontSize: 'inherit' }}>→</Typography>
+            <Box
+              component="span"
+              sx={{
+                backgroundColor: 'rgba(110, 231, 122, 0.15)',
+                color: '#6ee77a',
+                px: 0.75,
+                borderRadius: '3px',
+                fontFamily: 'inherit',
+                fontSize: 'inherit'
+              }}
+            >
+              {formatDiffValue(diff.newValue)}
+            </Box>
+          </Stack>
+        ))}
+      </Box>
+    </details>
   );
 }
 
@@ -138,39 +164,22 @@ function DeleteSummary({ entry }: { entry: ChangelogEntry }) {
   );
 }
 
-function CardHeader({
-  operation,
-  tableName,
-  recordID,
-  changedBy,
-  timestamp
-}: {
-  operation: 'INSERT' | 'UPDATE' | 'DELETE';
-  tableName: string;
-  recordID?: string;
-  changedBy: string;
-  timestamp: string;
-}) {
-  const time = formatRelativeTime(timestamp);
+function CardHeader({ entry }: { entry: ChangelogEntry }) {
+  const time = formatRelativeTime(entry.changeTimestamp);
 
   return (
     <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ flexWrap: 'wrap', gap: 1 }}>
       <Stack direction="row" alignItems="center" spacing={1}>
-        <Chip size="sm" variant="soft" color={OPERATION_COLORS[operation]}>
-          {operation}
+        <Chip size="sm" variant="soft" color={OPERATION_COLORS[entry.operation]}>
+          {entry.operation}
         </Chip>
-        <Typography level="title-sm">{tableName}</Typography>
-        {recordID && (
-          <>
-            <Typography sx={{ color: 'neutral.600' }}>·</Typography>
-            <Typography level="body-xs" sx={{ color: 'neutral.500' }}>
-              Record #{recordID}
-            </Typography>
-          </>
-        )}
+        <Typography level="title-sm">{summarizeChange(entry)}</Typography>
+        <Typography level="body-xs" sx={{ color: 'neutral.500' }}>
+          {entry.tableName}
+        </Typography>
       </Stack>
       <Typography level="body-xs" sx={{ color: 'neutral.500' }} title={time.full}>
-        {changedBy} · {time.relative}
+        {displayName(entry.changedBy)} · {time.relative}
       </Typography>
     </Stack>
   );
@@ -182,7 +191,7 @@ function UpdateCard({ entry }: { entry: ChangelogEntry }) {
   return (
     <Sheet variant="outlined" sx={{ p: 1.75, borderRadius: 'md', borderLeft: '3px solid', borderLeftColor: 'primary.500' }}>
       <Stack spacing={1.25}>
-        <CardHeader operation="UPDATE" tableName={entry.tableName} recordID={entry.recordID} changedBy={entry.changedBy} timestamp={entry.changeTimestamp} />
+        <CardHeader entry={entry} />
         <DiffBlock diffs={diffs} />
       </Stack>
     </Sheet>
@@ -193,7 +202,7 @@ function SingleInsertCard({ entry }: { entry: ChangelogEntry }) {
   return (
     <Sheet variant="outlined" sx={{ p: 1.75, borderRadius: 'md', borderLeft: '3px solid', borderLeftColor: 'success.500' }}>
       <Stack spacing={1.25}>
-        <CardHeader operation="INSERT" tableName={entry.tableName} recordID={entry.recordID} changedBy={entry.changedBy} timestamp={entry.changeTimestamp} />
+        <CardHeader entry={entry} />
         <InsertSummary entry={entry} />
       </Stack>
     </Sheet>
@@ -218,7 +227,7 @@ function BatchInsertCard({ batch }: { batch: BatchInsertGroup }) {
             </Typography>
           </Stack>
           <Typography level="body-xs" sx={{ color: 'neutral.500' }} title={formatRelativeTime(batch.timestamp).full}>
-            {batch.changedBy} · {formatRelativeTime(batch.timestamp).relative}
+            {displayName(batch.changedBy)} · {formatRelativeTime(batch.timestamp).relative}
           </Typography>
         </Stack>
 
@@ -254,7 +263,7 @@ function DeleteCard({ entry }: { entry: ChangelogEntry }) {
   return (
     <Sheet variant="outlined" sx={{ p: 1.75, borderRadius: 'md', borderLeft: '3px solid', borderLeftColor: 'danger.500' }}>
       <Stack spacing={1.25}>
-        <CardHeader operation="DELETE" tableName={entry.tableName} recordID={entry.recordID} changedBy={entry.changedBy} timestamp={entry.changeTimestamp} />
+        <CardHeader entry={entry} />
         <DeleteSummary entry={entry} />
       </Stack>
     </Sheet>
@@ -419,7 +428,6 @@ export default function RecentChangesExplorer() {
   if (!currentSite?.schemaName || !currentPlot?.plotID) {
     return (
       <Stack spacing={2} sx={{ width: '100%' }}>
-        <Typography level="h2">Recent Changes</Typography>
         <Alert color="warning">Please select a site and plot to view recent changes.</Alert>
       </Stack>
     );
@@ -428,7 +436,6 @@ export default function RecentChangesExplorer() {
   return (
     <Stack spacing={2} sx={{ width: '100%' }}>
       <Stack spacing={1}>
-        <Typography level="h2">Recent Changes</Typography>
         <Typography level="body-sm">Review all changes made to data within this plot, filter by operation type, user, or table.</Typography>
       </Stack>
 

@@ -3,13 +3,16 @@ import React, { useCallback } from 'react';
 import { FileRejection, FileWithPath, useDropzone } from 'react-dropzone';
 import { Box, Chip, Stack, Typography } from '@mui/joy';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import { SourceFormat } from '@/config/macros/formdetails';
 
 interface DropzoneCompactProps {
   onChange: (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => void;
   hasFiles?: boolean;
+  sourceFormat?: SourceFormat;
 }
 
-export function DropzoneCompact({ onChange, hasFiles = false }: DropzoneCompactProps) {
+export function DropzoneCompact({ onChange, hasFiles = false, sourceFormat = SourceFormat.csv }: DropzoneCompactProps) {
+  const isArcgisWorkbook = sourceFormat === SourceFormat.arcgis_xlsx;
   const onDrop = useCallback(
     (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => {
       onChange(acceptedFiles, rejectedFiles);
@@ -23,13 +26,13 @@ export function DropzoneCompact({ onChange, hasFiles = false }: DropzoneCompactP
 
   const { getRootProps, getInputProps, isDragActive, isDragAccept, isDragReject } = useDropzone({
     onDrop,
-    accept: {
-      'text/csv': ['.csv'],
-      'text/plain': ['.txt', '.tsv'],
-      'application/vnd.ms-excel': ['.xls'],
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']
-    },
-    multiple: true
+    accept: isArcgisWorkbook
+      ? { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }
+      : {
+          'text/csv': ['.csv'],
+          'text/plain': ['.txt', '.tsv']
+        },
+    multiple: !isArcgisWorkbook
   });
 
   const getBorderColor = () => {
@@ -100,21 +103,30 @@ export function DropzoneCompact({ onChange, hasFiles = false }: DropzoneCompactP
         ) : (
           <Stack spacing={0.5} alignItems="center">
             <Typography level={hasFiles ? 'body-sm' : 'body-md'} sx={{ fontWeight: 'bold', color: getTextColor() }}>
-              {hasFiles ? 'Add more files' : 'Choose files or drag them here'}
+              {hasFiles
+                ? 'Choose a replacement file'
+                : isArcgisWorkbook
+                  ? 'Choose one ArcGIS .xlsx workbook or drag it here'
+                  : 'Choose files or drag them here'}
             </Typography>
             <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', justifyContent: 'center' }}>
-              <Chip size="sm" variant="soft">
-                CSV
-              </Chip>
-              <Chip size="sm" variant="soft">
-                TXT
-              </Chip>
-              <Chip size="sm" variant="soft">
-                TSV
-              </Chip>
-              <Chip size="sm" variant="soft">
-                Excel
-              </Chip>
+              {isArcgisWorkbook ? (
+                <Chip size="sm" variant="soft">
+                  ArcGIS XLSX only
+                </Chip>
+              ) : (
+                <>
+                  <Chip size="sm" variant="soft">
+                    CSV
+                  </Chip>
+                  <Chip size="sm" variant="soft">
+                    TXT
+                  </Chip>
+                  <Chip size="sm" variant="soft">
+                    TSV
+                  </Chip>
+                </>
+              )}
             </Stack>
           </Stack>
         )}

@@ -18,11 +18,13 @@ const ALL_VALIDITY_TYPES: (keyof UnifiedValidityFlags)[] = CENSUS_INDEPENDENT_VA
 
 const DataValidityContext = createContext<{
   validity: UnifiedValidityFlags;
+  isChecking: boolean;
   setValidity: (type: keyof UnifiedValidityFlags, value: boolean) => void;
   triggerRefresh: (types?: (keyof UnifiedValidityFlags)[]) => void;
   recheckValidityIfNeeded: () => Promise<void>;
 }>({
   validity: initialValidityState,
+  isChecking: false,
   setValidity: () => {},
   triggerRefresh: () => {},
   recheckValidityIfNeeded: async () => {}
@@ -30,6 +32,7 @@ const DataValidityContext = createContext<{
 
 export const DataValidityProvider = ({ children }: { children: React.ReactNode }) => {
   const [validity, setValidityState] = useState<UnifiedValidityFlags>(initialValidityState);
+  const [isChecking, setIsChecking] = useState(false);
 
   const ApiWrapper = useApiWrapper();
 
@@ -68,6 +71,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
             const response = await ApiWrapper.get(url, {
               loadingMessage: `Validating ${type}...`,
               category: 'api',
+              suppressGlobalLoading: true,
               showErrorAlert: false,
               acceptedStatuses: [412]
             });
@@ -94,14 +98,20 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   // Primary effect: run validation when context primitives change or refresh is requested.
   // Uses only primitive deps + counter so it cannot be starved by unstable object references.
   useEffect(() => {
-    if (!schemaName || !plotID) return;
+    if (!schemaName || !plotID) {
+      setIsChecking(false);
+      return;
+    }
 
     // Reset validity before re-checking
     setValidityState(initialValidityState);
+    setIsChecking(true);
 
     const abortController = new AbortController();
     const timer = setTimeout(() => {
-      runValidationRef.current?.(ALL_VALIDITY_TYPES, abortController.signal);
+      runValidationRef.current?.(ALL_VALIDITY_TYPES, abortController.signal).finally(() => {
+        if (!abortController.signal.aborted) setIsChecking(false);
+      });
     }, 300);
 
     return () => {
@@ -146,8 +156,8 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   }, []);
 
   const contextValue = useMemo(
-    () => ({ validity, setValidity, triggerRefresh, recheckValidityIfNeeded }),
-    [validity, setValidity, triggerRefresh, recheckValidityIfNeeded]
+    () => ({ validity, isChecking, setValidity, triggerRefresh, recheckValidityIfNeeded }),
+    [validity, isChecking, setValidity, triggerRefresh, recheckValidityIfNeeded]
   );
 
   return <DataValidityContext.Provider value={contextValue}>{children}</DataValidityContext.Provider>;

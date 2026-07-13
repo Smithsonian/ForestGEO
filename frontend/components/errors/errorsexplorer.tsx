@@ -120,6 +120,7 @@ interface ExplorerScope {
   schema: string;
   plotID: number;
   censusID: number;
+  censusIDs: number[];
 }
 
 function getFilterStorageKey(schema?: string, plotID?: number, censusID?: number) {
@@ -238,6 +239,15 @@ export default function ErrorsExplorer() {
   const currentCensus = useOrgCensusContext();
   const { data: session } = useSession();
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+  const activeCensusIDsKey = Array.from(new Set((currentCensus?.dateRanges ?? []).map(range => range.censusID).filter(censusID => censusID > 0))).join(',');
+  const activeCensusIDs = useMemo(
+    () =>
+      activeCensusIDsKey
+        .split(',')
+        .map(Number)
+        .filter(censusID => censusID > 0),
+    [activeCensusIDsKey]
+  );
   // Keep the grid affordances aligned with editplan authorization: pending
   // users cannot edit, and species-code edits stay admin-only.
   const userStatus = session?.user?.userStatus;
@@ -254,16 +264,17 @@ export default function ErrorsExplorer() {
       const fallbackPlotID = typeof fallbackRow?.plotID === 'number' && fallbackRow.plotID > 0 ? fallbackRow.plotID : null;
       const fallbackCensusID = typeof fallbackRow?.censusID === 'number' && fallbackRow.censusID > 0 ? fallbackRow.censusID : null;
       const plotID = currentPlot?.plotID ?? fallbackPlotID;
-      const censusID = activeCensusID ?? fallbackCensusID;
+      const censusID = fallbackCensusID ?? activeCensusID;
       if (!plotID || !censusID) return null;
 
       return {
         schema: currentSite.schemaName,
         plotID,
-        censusID
+        censusID,
+        censusIDs: fallbackCensusID ? [fallbackCensusID] : activeCensusIDs.length > 0 ? activeCensusIDs : [censusID]
       };
     },
-    [activeCensusID, currentPlot?.plotID, currentSite?.schemaName]
+    [activeCensusID, activeCensusIDs, currentPlot?.plotID, currentSite?.schemaName]
   );
 
   const [filters, setFilters] = useState<ErrorExplorerFilters>(DEFAULT_ERROR_EXPLORER_FILTERS);
@@ -273,6 +284,7 @@ export default function ErrorsExplorer() {
   const [details, setDetails] = useState<ErrorExplorerDetailsResponse | null>(null);
   const [selectedMeasurementID, setSelectedMeasurementID] = useState<number | null>(null);
   const [loadingRows, setLoadingRows] = useState(false);
+  const [hasLoadedRows, setHasLoadedRows] = useState(false);
   const [loadingFacets, setLoadingFacets] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -319,6 +331,7 @@ export default function ErrorsExplorer() {
       const scope = scopeOverride ?? resolveExplorerScope();
       if (!scope) return;
       setLoadingRows(true);
+      setHasLoadedRows(false);
       setErrorMessage(null);
       try {
         const response = await fetch('/api/errors/explorer/query', {
@@ -329,6 +342,7 @@ export default function ErrorsExplorer() {
             schema: scope.schema,
             plotID: scope.plotID,
             censusID: scope.censusID,
+            censusIDs: scope.censusIDs,
             page: paginationModel.page,
             pageSize: paginationModel.pageSize,
             filters
@@ -339,6 +353,7 @@ export default function ErrorsExplorer() {
           throw new Error('error' in data ? data.error : 'Failed to load errors');
         }
         setResults(data);
+        setHasLoadedRows(true);
         if (selectedMeasurementID && !data.rows.some(row => row.coreMeasurementID === selectedMeasurementID)) {
           setDetails(current => (current?.row?.coreMeasurementID === selectedMeasurementID ? null : current));
         }
@@ -367,6 +382,7 @@ export default function ErrorsExplorer() {
             schema: scope.schema,
             plotID: scope.plotID,
             censusID: scope.censusID,
+            censusIDs: scope.censusIDs,
             filters
           })
         });
@@ -500,9 +516,10 @@ export default function ErrorsExplorer() {
       return;
     }
     const controller = new AbortController();
-    fetchDetails(selectedMeasurementID, undefined, controller.signal).catch(() => undefined);
+    const selectedRow = results.rows.find(row => row.coreMeasurementID === selectedMeasurementID);
+    fetchDetails(selectedMeasurementID, resolveExplorerScope(selectedRow), controller.signal).catch(() => undefined);
     return () => controller.abort();
-  }, [fetchDetails, selectedMeasurementID]);
+  }, [fetchDetails, resolveExplorerScope, results.rows, selectedMeasurementID]);
 
   useEffect(() => {
     if (!currentSite?.schemaName) return;
@@ -614,6 +631,7 @@ export default function ErrorsExplorer() {
           schema: scope.schema,
           plotID: scope.plotID,
           censusID: scope.censusID,
+          censusIDs: scope.censusIDs,
           page: p,
           pageSize: ps,
           filters
@@ -630,7 +648,7 @@ export default function ErrorsExplorer() {
 
   const infiniteResetKey = useMemo(() => {
     const scope = resolveExplorerScope();
-    return JSON.stringify({ filters, schema: scope?.schema, plotID: scope?.plotID, censusID: scope?.censusID });
+    return JSON.stringify({ filters, schema: scope?.schema, plotID: scope?.plotID, censusIDs: scope?.censusIDs });
   }, [filters, resolveExplorerScope]);
 
   const infinite = useInfiniteGridRows<GridRowModel>({
@@ -920,6 +938,15 @@ export default function ErrorsExplorer() {
     [canEditRows, canEditSpeciesCode, rowModesModel, selectableOpts]
   );
 
+  const showEmptySuccess = results.summary.total === 0 && hasLoadedRows && !loadingRows;
+  const hasNarrowingFilters =
+    filters.source !== 'all' ||
+    filters.exactMessages.length > 0 ||
+    filters.affectedFields.length > 0 ||
+    filters.contradictionOnly ||
+    filters.contradictionTypes.length > 0 ||
+    filters.quickSearch.trim().length > 0;
+
   return (
     <Stack spacing={2} sx={{ width: '100%' }}>
       <Stack spacing={1}>
@@ -944,19 +971,35 @@ export default function ErrorsExplorer() {
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
         <Card variant="soft" sx={{ minWidth: 140 }}>
           <Typography level="body-xs">Matching rows</Typography>
-          <Typography level="h3">{results.summary.total}</Typography>
+          {loadingRows && !hasLoadedRows ? (
+            <CircularProgress size="sm" aria-label="Loading matching rows" />
+          ) : (
+            <Typography level="h3">{results.summary.total}</Typography>
+          )}
         </Card>
         <Card variant="soft" color="primary" sx={{ minWidth: 140 }}>
           <Typography level="body-xs">Validation</Typography>
-          <Typography level="h3">{results.summary.validation}</Typography>
+          {loadingRows && !hasLoadedRows ? (
+            <CircularProgress size="sm" aria-label="Loading validation count" />
+          ) : (
+            <Typography level="h3">{results.summary.validation}</Typography>
+          )}
         </Card>
         <Card variant="soft" color="warning" sx={{ minWidth: 140 }}>
           <Typography level="body-xs">Ingestion</Typography>
-          <Typography level="h3">{results.summary.ingestion}</Typography>
+          {loadingRows && !hasLoadedRows ? (
+            <CircularProgress size="sm" aria-label="Loading ingestion count" />
+          ) : (
+            <Typography level="h3">{results.summary.ingestion}</Typography>
+          )}
         </Card>
         <Card variant="soft" color="danger" sx={{ minWidth: 160 }}>
           <Typography level="body-xs">Contradictions</Typography>
-          <Typography level="h3">{results.summary.contradictions}</Typography>
+          {loadingRows && !hasLoadedRows ? (
+            <CircularProgress size="sm" aria-label="Loading contradiction count" />
+          ) : (
+            <Typography level="h3">{results.summary.contradictions}</Typography>
+          )}
         </Card>
       </Stack>
 
@@ -1158,51 +1201,69 @@ export default function ErrorsExplorer() {
         }}
       >
         <Sheet variant="outlined" sx={{ flex: 1, minWidth: 0, borderRadius: 'md', p: 1 }}>
-          <StyledDataGrid
-            aria-label="Measurement Errors"
-            apiRef={explorerApiRef}
-            autoHeight={false}
-            rows={(isInfiniteOn ? infinite.rows : results.rows) as any[]}
-            columns={columns}
-            loading={isInfiniteOn ? infinite.isLoading : loadingRows}
-            rowCount={isInfiniteOn ? infinite.rows.length : results.totalRows}
-            paginationMode="server"
-            paginationModel={paginationModel}
-            onPaginationModelChange={setPaginationModel}
-            pageSizeOptions={[25, 50, 100]}
-            editMode="row"
-            rowModesModel={rowModesModel}
-            onRowModesModelChange={setRowModesModel}
-            processRowUpdate={wrappedProcessRowUpdate}
-            onProcessRowUpdateError={handleProcessRowUpdateError}
-            onRowEditStop={handleRowEditStop}
-            onRowClick={params => setSelectedMeasurementID(Number(params.row.coreMeasurementID))}
-            slots={explorerGridSlots}
-            rowHeight={68}
-            sx={{
-              minHeight: 640,
-              '& .MuiDataGrid-cell': {
-                alignItems: 'center',
-                py: 0.75,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden'
-              },
-              '& .MuiDataGrid-columnHeaderTitle': {
-                fontWeight: 700
-              },
-              '& .MuiDataGrid-row.Mui-selected': {
-                outline: '1px solid',
-                outlineColor: 'var(--joy-palette-primary-outlinedBorder)',
-                backgroundColor: 'rgba(59, 130, 246, 0.08)'
-              }
-            }}
-          />
-          <InfiniteGridScrollBridge
-            apiRef={explorerApiRef}
-            enabled={isInfiniteOn}
-            onLoadMore={infinite.loadMore}
-            observeKey={`${infinite.rows.length}:${infinite.totalRows}:${infinite.isLoadingMore}`}
-          />
+          {showEmptySuccess ? (
+            <Stack
+              data-testid="errors-explorer-empty-success"
+              alignItems="center"
+              justifyContent="center"
+              spacing={1}
+              sx={{ minHeight: 300, textAlign: 'center', p: 3 }}
+            >
+              <Typography level="h3" color="success">
+                {hasNarrowingFilters ? 'No unresolved errors match the current filters' : 'No unresolved errors in this census ✓'}
+              </Typography>
+              <Typography level="body-sm">{hasNarrowingFilters ? 'Adjust or clear the filters to review other errors.' : 'This census is clear.'}</Typography>
+              <Typography level="body-xs">Page 1 of 1</Typography>
+            </Stack>
+          ) : (
+            <StyledDataGrid
+              aria-label="Measurement Errors"
+              apiRef={explorerApiRef}
+              autoHeight={false}
+              rows={(isInfiniteOn ? infinite.rows : results.rows) as any[]}
+              columns={columns}
+              loading={isInfiniteOn ? infinite.isLoading : loadingRows}
+              rowCount={isInfiniteOn ? infinite.rows.length : results.totalRows}
+              paginationMode="server"
+              paginationModel={paginationModel}
+              onPaginationModelChange={setPaginationModel}
+              pageSizeOptions={[25, 50, 100]}
+              editMode="row"
+              rowModesModel={rowModesModel}
+              onRowModesModelChange={setRowModesModel}
+              processRowUpdate={wrappedProcessRowUpdate}
+              onProcessRowUpdateError={handleProcessRowUpdateError}
+              onRowEditStop={handleRowEditStop}
+              onRowClick={params => setSelectedMeasurementID(Number(params.row.coreMeasurementID))}
+              slots={explorerGridSlots}
+              rowHeight={68}
+              sx={{
+                minHeight: 640,
+                '& .MuiDataGrid-cell': {
+                  alignItems: 'center',
+                  py: 0.75,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden'
+                },
+                '& .MuiDataGrid-columnHeaderTitle': {
+                  fontWeight: 700
+                },
+                '& .MuiDataGrid-row.Mui-selected': {
+                  outline: '1px solid',
+                  outlineColor: 'var(--joy-palette-primary-outlinedBorder)',
+                  backgroundColor: 'rgba(59, 130, 246, 0.08)'
+                }
+              }}
+            />
+          )}
+          {!showEmptySuccess && (
+            <InfiniteGridScrollBridge
+              apiRef={explorerApiRef}
+              enabled={isInfiniteOn}
+              onLoadMore={infinite.loadMore}
+              observeKey={`${infinite.rows.length}:${infinite.totalRows}:${infinite.isLoadingMore}`}
+            />
+          )}
         </Sheet>
 
         <Sheet

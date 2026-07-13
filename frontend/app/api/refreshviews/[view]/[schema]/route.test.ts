@@ -152,6 +152,67 @@ describe('POST /api/refreshviews/[view]/[schema]', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('returns 400 when scoped refresh IDs are malformed', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const begin = vi.spyOn(cm, 'beginTransaction');
+
+    const request = new NextRequest('http://localhost', {
+      method: 'POST',
+      body: JSON.stringify({ plotID: '17abc', censusID: 42, runPostValidation: true })
+    });
+
+    const res = await POST(request, makeProps('measurementssummary', 'myschema'));
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(begin).not.toHaveBeenCalled();
+  });
+
+  it('measurementssummary with runPostValidation executes and scopes post-validation last-run status', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-pv');
+    const exec = vi.spyOn(cm, 'executeQuery');
+    const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+    const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
+    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+
+    exec
+      // scoped measurementssummary refresh
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      // fetch enabled postvalidation query definitions
+      .mockResolvedValueOnce([
+        { QueryID: 9, QueryDefinition: 'SELECT * FROM ${schema}.issues WHERE PlotID = ${currentPlotID} AND CensusID = ${currentCensusID}' }
+      ])
+      // run postvalidation query
+      .mockResolvedValueOnce([{ IssueID: 1 }])
+      // update last-run status with context
+      .mockResolvedValueOnce(undefined);
+
+    const request = new NextRequest('http://localhost', {
+      method: 'POST',
+      body: JSON.stringify({ plotID: 17, censusID: 42, runPostValidation: true })
+    });
+
+    const res = await POST(request, makeProps('measurementssummary', 'myschema'));
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    const body = await res.json();
+    expect(body.postValidation).toEqual({ executed: 1, success: 1, failed: 0 });
+    expect(begin).toHaveBeenCalledTimes(1);
+    expect(commit).toHaveBeenCalledWith('tx-pv');
+    expect(rollback).not.toHaveBeenCalled();
+
+    const formattedValidationSql = String(exec.mock.calls[3]?.[0]);
+    expect(formattedValidationSql).toContain('PlotID = 17');
+    expect(formattedValidationSql).toContain('CensusID = 42');
+
+    const [updateSql, updateParams] = exec.mock.calls[4];
+    expect(String(updateSql)).toMatch(/LastRunPlotID = \?/i);
+    expect(String(updateSql)).toMatch(/LastRunCensusID = \?/i);
+    expect(updateParams).toEqual([expect.any(String), JSON.stringify([{ IssueID: 1 }]), 'success', 17, 42, 9]);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it('unknown view: returns 400 for invalid view name', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const begin = vi.spyOn(cm, 'beginTransaction');

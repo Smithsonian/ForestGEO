@@ -12,18 +12,21 @@ import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { useSiteContext } from '@/app/contexts/compat-hooks';
 import UploadValidation from '@/components/uploadsystem/segments/uploadvalidation';
 import UploadUpdateValidations from '@/components/uploadsystem/segments/uploadupdatevalidations';
+import RenderGridFormExplanations from '@/components/client/rendergridformexplanations';
+import { FormType, getDataGridForForm } from '@/config/macros/formdetails';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import Divider from '@mui/joy/Divider';
 
 interface MultilineModalProps {
   isManualEntryFormOpen: boolean;
   handleCloseManualEntryForm: () => void;
-  formType: string;
+  formType: FormType | `${FormType}`;
   onSubmitComplete?: () => void;
 }
 
 export default function MultilineModal(props: MultilineModalProps) {
   const { isManualEntryFormOpen, handleCloseManualEntryForm, formType, onSubmitComplete } = props;
+  const referenceGridType = getDataGridForForm(formType as FormType);
 
   const [changesSubmitted, setChangesSubmitted] = useState(false);
   const [openValidations, setOpenValidations] = useState(false);
@@ -85,6 +88,7 @@ export default function MultilineModal(props: MultilineModalProps) {
         <DialogTitle sx={{ alignSelf: 'center', justifyContent: 'center' }} level={'h3'} color={'primary'}>
           Manual Input Form - {formType.charAt(0).toUpperCase() + formType.slice(1)}
         </DialogTitle>
+        {referenceGridType && <RenderGridFormExplanations datagridType={referenceGridType} />}
         <Divider orientation={'horizontal'} sx={{ my: 2 }} />
         {openValidations && !openUpdateValidations && <UploadValidation schema={currentSite?.schemaName ?? ''} setReviewState={setTempReviewState} />}
         {openUpdateValidations && !openValidations && <UploadUpdateValidations schema={currentSite?.schemaName ?? ''} setReviewState={setTempReviewState} />}

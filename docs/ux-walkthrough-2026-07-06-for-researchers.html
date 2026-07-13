@@ -1,0 +1,843 @@
+<title>ForestGEO June Updates</title>
+<style>
+  :root {
+    --ground: #FAFAF7;
+    --card: #FFFFFF;
+    --ink: #1C2420;
+    --muted: #5A6660;
+    --hair: #E3E7E2;
+    --accent: #2E6E4E;
+    --accent-soft: #EAF2ED;
+    --crit: #B3402F;
+    --crit-soft: #F7ECE9;
+    --major: #A06B15;
+    --major-soft: #F7F0E2;
+    --polish: #4A6B8A;
+    --polish-soft: #EBF0F5;
+    --good: #2E6E4E;
+    --good-soft: #EAF2ED;
+    --fixed: #2E6E4E;
+    --fixed-soft: #DCEFE3;
+    --code-bg: #F0F2EF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #141816;
+      --card: #1B211E;
+      --ink: #E8ECE8;
+      --muted: #98A39C;
+      --hair: #2A322D;
+      --accent: #6FBF95;
+      --accent-soft: #203028;
+      --crit: #E07B5F;
+      --crit-soft: #33231E;
+      --major: #D9A84E;
+      --major-soft: #322A1B;
+      --polish: #85A8C4;
+      --polish-soft: #1F2830;
+      --good: #6FBF95;
+      --good-soft: #203028;
+      --fixed: #6FBF95;
+      --fixed-soft: #1C2E24;
+      --code-bg: #232A26;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #141816; --card: #1B211E; --ink: #E8ECE8; --muted: #98A39C; --hair: #2A322D;
+    --accent: #6FBF95; --accent-soft: #203028; --crit: #E07B5F; --crit-soft: #33231E;
+    --major: #D9A84E; --major-soft: #322A1B; --polish: #85A8C4; --polish-soft: #1F2830;
+    --good: #6FBF95; --good-soft: #203028; --fixed: #6FBF95; --fixed-soft: #1C2E24; --code-bg: #232A26;
+  }
+  :root[data-theme="light"] {
+    --ground: #FAFAF7; --card: #FFFFFF; --ink: #1C2420; --muted: #5A6660; --hair: #E3E7E2;
+    --accent: #2E6E4E; --accent-soft: #EAF2ED; --crit: #B3402F; --crit-soft: #F7ECE9;
+    --major: #A06B15; --major-soft: #F7F0E2; --polish: #4A6B8A; --polish-soft: #EBF0F5;
+    --good: #2E6E4E; --good-soft: #EAF2ED; --fixed: #2E6E4E; --fixed-soft: #DCEFE3; --code-bg: #F0F2EF;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Avenir Next", "Seravek", system-ui, -apple-system, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 0;
+  }
+  .wrap { max-width: min(1040px, 92vw); margin: 0 auto; padding: 48px 24px 96px; }
+  code, .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.86em;
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-size: 34px;
+    line-height: 1.15;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  .lede { font-size: 17.5px; color: var(--muted); max-width: 66ch; margin: 0 0 8px; }
+  .meta { font-size: 13px; color: var(--muted); margin: 18px 0 0; }
+  .meta code { font-size: 12px; }
+
+  .scoreboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin: 32px 0 0;
+  }
+  .tile {
+    background: var(--card);
+    border: 1px solid var(--hair);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .tile .n {
+    font-size: 30px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .tile .lbl {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .tile.fixed .n { color: var(--fixed); }
+  .tile.open .n { color: var(--muted); }
+
+  .callout {
+    background: var(--accent-soft);
+    border: 1px solid var(--hair);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin: 28px 0 0;
+  }
+  .callout p { margin: 0; max-width: 68ch; }
+  .callout p + p { margin-top: 10px; }
+
+  nav.toc { margin: 40px 0 0; font-size: 14.5px; }
+  nav.toc ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 18px; }
+  nav.toc a { text-decoration: none; border-bottom: 1px solid var(--hair); padding-bottom: 1px; }
+  nav.toc .toc-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 600; color: var(--muted); }
+
+  section.stage { margin-top: 56px; }
+  section.stage > h2 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 4px;
+    text-wrap: balance;
+  }
+  section.stage > .stage-sub { color: var(--muted); font-size: 14.5px; margin: 0 0 20px; max-width: 68ch; }
+
+  article.finding {
+    background: var(--card);
+    border: 1px solid var(--hair);
+    border-left-width: 4px;
+    border-radius: 8px;
+    padding: 18px 22px 20px;
+    margin: 14px 0;
+  }
+  article.finding.crit { border-left-color: var(--crit); }
+  article.finding.major { border-left-color: var(--major); }
+  article.finding.polish { border-left-color: var(--polish); }
+  article.finding.good { border-left-color: var(--good); }
+  article.finding.fixed { border-left-color: var(--fixed); }
+
+  .fhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .fid {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+  .chip {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    border-radius: 999px;
+    padding: 2px 10px;
+  }
+  .chip.crit { color: var(--crit); background: var(--crit-soft); }
+  .chip.major { color: var(--major); background: var(--major-soft); }
+  .chip.polish { color: var(--polish); background: var(--polish-soft); }
+  .chip.good { color: var(--good); background: var(--good-soft); }
+  .chip.fixed { color: var(--fixed); background: var(--fixed-soft); }
+  article.finding h3 { font-size: 17px; font-weight: 600; margin: 6px 0 10px; text-wrap: balance; }
+  article.finding p { margin: 8px 0; max-width: 70ch; }
+  article.finding ul { margin: 8px 0; padding-left: 20px; max-width: 68ch; }
+  article.finding li { margin: 4px 0; }
+
+  .fixblock {
+    margin-top: 16px;
+    padding: 16px 18px;
+    background: var(--fixed-soft);
+    border: 1px solid var(--hair);
+    border-radius: 8px;
+  }
+  .fixblock .fixhead {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+    color: var(--fixed);
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 0 0 10px;
+  }
+  .fixblock p { margin: 8px 0; max-width: 70ch; }
+  .fixblock .why { color: var(--muted); }
+
+  figure { margin: 16px 0 4px; }
+  figure img {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border: 1px solid var(--hair);
+    border-radius: 6px;
+  }
+  figcaption { font-size: 13px; color: var(--muted); margin-top: 7px; max-width: 70ch; }
+  .figrow { display: flex; flex-direction: column; gap: 28px; margin-top: 14px; }
+  .figrow figure { width: 100%; margin: 0; }
+  .figrow .taglabel {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border-radius: 4px;
+    padding: 2px 8px;
+    margin-bottom: 7px;
+  }
+  .taglabel.before { color: var(--crit); background: var(--crit-soft); }
+  .taglabel.after { color: var(--fixed); background: var(--fixed-soft); }
+
+  .pr-meta { font-size: 12.5px; color: var(--muted); margin: -4px 0 10px; }
+
+  .method {
+    margin-top: 64px;
+    border-top: 1px solid var(--hair);
+    padding-top: 24px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .method h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink); margin: 0 0 10px; }
+  .method p { max-width: 72ch; }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">UX walkthrough · plain-language edition</p>
+    <h1>ForestGEO June Updates</h1>
+    <p class="lede">
+      I walked through every major screen in ForestGEO: signing in, choosing a site and census, browsing and
+      editing measurements, uploading files, checking results. This page describes what I found in plain
+      language. For items already fixed, it shows what changed and why.
+    </p>
+    <div class="scoreboard">
+      <div class="tile fixed"><div class="n">10</div><div class="lbl">Fixed &amp; live</div></div>
+      <div class="tile open"><div class="n">16</div><div class="lbl">Still on the list</div></div>
+    </div>
+
+    <div class="callout">
+      <p><strong>What "fixed" means here:</strong> every item marked <span class="chip fixed">Fixed</span> below
+      has already been changed, tested, and merged into the app you use. Screenshots come straight from the
+      running app.</p>
+      <p>Items still on the list aren't forgotten, just not done yet. They're here so you know I've heard about
+      them, described in plain language.</p>
+    </div>
+
+    <nav class="toc" aria-label="Sections">
+      <span class="toc-label">Jump to</span>
+      <ul>
+        <li><a href="#stage-a">Signing in &amp; getting oriented</a></li>
+        <li><a href="#stage-b">Losing your place</a></li>
+        <li><a href="#stage-c">Trusting the numbers</a></li>
+        <li><a href="#stage-d">Working in the data grids</a></li>
+        <li><a href="#stage-e">History, files &amp; behind-the-scenes details</a></li>
+        <li><a href="#stage-f">The admin area</a></li>
+        <li><a href="#stage-g">Phones, tablets &amp; general robustness</a></li>
+        <li><a href="#stage-i">Other work that landed this month</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <section class="stage" id="stage-a">
+    <h2>Signing in &amp; getting oriented</h2>
+    <p class="stage-sub">The first ten minutes: sign in, then pick a site, a plot, and a census. The three-step
+    picker is the right idea. The problems were in the details.</p>
+
+    <article class="finding fixed" id="f1">
+      <div class="fhead"><span class="fid">F1</span><span class="chip fixed">Fixed</span></div>
+      <h3>The dashboard said "no sites available." The menu right next to it listed nine</h3>
+      <p>If you signed in as an administrator with access to every site, the Dashboard's welcome screen told you
+      <em>"You don't have access to any sites yet. Please contact an administrator."</em> The site picker in the
+      sidebar, on the same screen, listed all nine sites you could choose from. The two parts of the screen
+      checked your access two different ways, and only one was right.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>The Dashboard's site list and the sidebar's site list now come from the same place. An administrator
+        who can see every site sees every site, everywhere on the page.</p>
+        <p class="why"><strong>Why it's better:</strong> being told you have no access to a system you're meant
+        to manage is a bad first impression. It makes people doubt the tool before they've started.</p>
+      </div>
+      <div class="figrow">
+        <figure>
+          <span class="taglabel before">Before</span>
+          <img src="ux-walkthrough-2026-07-06-assets/before/f1-no-sites.jpg" alt="Dashboard reading No Sites Available while the sidebar dropdown lists nine sites">
+          <figcaption>Nine sites in the dropdown; "No Sites Available" on the same screen.</figcaption>
+        </figure>
+        <figure>
+          <span class="taglabel after">After</span>
+          <img src="ux-walkthrough-2026-07-06-assets/after/f1-all-sites.jpg" alt="Dashboard now showing all nine site cards under Available Sites">
+          <figcaption>Same login, same access level. All nine sites now show up correctly.</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article class="finding fixed" id="f2">
+      <div class="fhead"><span class="fid">F2</span><span class="chip fixed">Fixed</span></div>
+      <h3>A delete button sat right inside the picker you use dozens of times a day</h3>
+      <p>Every census, in both the quick picker in the sidebar and the option list you open to switch between
+      measurement periods, had a small trash-can icon sitting right where you'd naturally click. That's a
+      destructive action placed inside the control people use most, just to get their work done. The label for
+      clearing your site selection also read <em>"DESELECT SITE (WILL TRIGGER APP RESET!)"</em>, alarming wording
+      for a routine, harmless action.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>You can no longer delete a census from the quick picker. Deleting now happens from the Census Overview
+        page, next to that census's full details, and only for the most recent census, so older, already-published
+        data can't be deleted by mistake. The "DESELECT SITE" warning now reads plain "Clear selection."</p>
+        <p class="why"><strong>Why it's better:</strong> a destructive action should live somewhere deliberate,
+        away from routine clicks. Everyday actions shouldn't sound like warnings.</p>
+      </div>
+      <div class="figrow">
+        <figure>
+          <span class="taglabel before">Before</span>
+          <img src="ux-walkthrough-2026-07-06-assets/before/f2-delete-in-picker.jpg" alt="Census dropdown showing a red delete icon directly inside the picker option">
+          <figcaption>A red delete button inside the everyday census picker.</figcaption>
+        </figure>
+        <figure>
+          <span class="taglabel after">After</span>
+          <img src="ux-walkthrough-2026-07-06-assets/after/f2-f3-f10-census-overview.jpg" alt="Census Overview page with a clearly labeled Delete Census button near the top, separate from the quick picker">
+          <figcaption>"Delete Census" now lives on the Census Overview page, a deliberate spot instead of a click
+          you pass on the way to normal work.</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article class="finding fixed" id="f3">
+      <div class="fhead"><span class="fid">F3</span><span class="chip fixed">Fixed</span></div>
+      <h3>Odd formatting leftovers in the pickers</h3>
+      <ul>
+        <li>Census dates showed a stray symbol: <code>First Msmt: Sat Feb 02 2008&lt;===&gt; — Last Msmt: …</code></li>
+        <li>Plot details ran words together: <code>serc— Quadrats: 1600</code></li>
+        <li>An empty "Other Sites (0)" group appeared for administrators, with nothing inside it.</li>
+        <li>The same date appeared written three different ways across three different pages.</li>
+      </ul>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>Dates now display the same, plain way everywhere in the app (for example, <code>Feb 3, 2008</code>).
+        The stray symbol and missing spaces are gone, and the empty group no longer shows up.</p>
+        <p class="why"><strong>Why it's better:</strong> small inconsistencies like these are what make a data
+        tool feel untrustworthy, even when the underlying numbers are correct.</p>
+      </div>
+      <div class="figrow">
+        <figure>
+          <span class="taglabel before">Before</span>
+          <img src="ux-walkthrough-2026-07-06-assets/before/f2-delete-in-picker.jpg" alt="Census dropdown showing the raw <===> separator and glued-together text">
+          <figcaption>The raw "&lt;===&gt;" symbol and glued-together plot text.</figcaption>
+        </figure>
+        <figure>
+          <span class="taglabel after">After</span>
+          <img src="ux-walkthrough-2026-07-06-assets/after/f3-clean-plot-dropdown.jpg" alt="Plot dropdown now showing 'serc — Quadrats: 1600' with a properly spaced dash">
+          <figcaption>Clean spacing, no stray symbols. Same information, easier to read.</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article class="finding polish" id="f4">
+      <div class="fhead"><span class="fid">F4</span><span class="chip polish">On the list</span></div>
+      <h3>The sign-in button is easy to miss</h3>
+      <p>The sign-in page is a full-screen forest photo with just a small, dark strip in the bottom-left corner to
+      actually click. On a large monitor, a first-time visitor can spend a moment looking for what to click.</p>
+    </article>
+
+    <article class="finding polish" id="f5">
+      <div class="fhead"><span class="fid">F5</span><span class="chip polish">On the list</span></div>
+      <h3>The rest of the menu appears silently once you've finished picking</h3>
+      <p>Until you've chosen a site, a plot, <em>and</em> a census, the sidebar shows only "Dashboard." The rest
+      of the menu isn't there yet, and nothing tells you more is coming.</p>
+    </article>
+  </section>
+
+  <section class="stage" id="stage-b">
+    <h2>Losing your place</h2>
+    <p class="stage-sub">This was the single biggest source of frustration in the app. It wasn't any one screen.
+    It was what happened between screens.</p>
+
+    <article class="finding fixed" id="f7">
+      <div class="fhead"><span class="fid">F7</span><span class="chip fixed">Fixed</span></div>
+      <h3>Refreshing the page, or opening a direct link, wiped your site, plot, and census selection</h3>
+      <p>Hitting refresh, or opening a bookmarked or shared link straight to a specific page, threw away your
+      current site/plot/census selection and sent you back to the Dashboard to start over. In practice that meant:</p>
+      <ul>
+        <li>Refreshing anywhere in the app meant re-selecting site → plot → census from scratch, every time.</li>
+        <li>A link to a specific page couldn't be bookmarked, shared with a colleague, or opened in a new tab. It
+        always landed back on the Dashboard.</li>
+        <li>Even the built-in "report a bug" form captured "No site selected. No plot selected. No census
+        selected." right after you'd navigated somewhere, so bug reports lost the context that mattered most.</li>
+      </ul>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>Your selection is now restored the moment the page loads: a manual refresh, a bookmark, or a link
+        someone sent you. I confirmed this on a cold load of a specific sub-page too, not just the Dashboard.</p>
+        <p class="why"><strong>Why it's better:</strong> you can refresh mid-task without fear, bookmark a
+        specific census's error list, and send a colleague a direct link that opens where you meant it to.</p>
+      </div>
+      <div class="figrow">
+        <figure>
+          <span class="taglabel after">After</span>
+          <img src="ux-walkthrough-2026-07-06-assets/after/f7-survives-reload.jpg" alt="View Data page after a hard refresh, still showing Site: Testing Schema, Plot: serc, Census: 1 in the sidebar">
+          <figcaption>A hard refresh on the "View Data" page. The site, plot, and census are still selected, and
+          you're still on the same page. (No useful "before" screenshot exists: the old behavior simply landed
+          back on the Dashboard with everything cleared.)</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article class="finding fixed" id="f8">
+      <div class="fhead"><span class="fid">F8</span><span class="chip fixed">Fixed</span></div>
+      <h3>Sidebar menu items didn't behave like normal web links</h3>
+      <p>The items in the sidebar menu looked like links but acted like buttons, so the usual tricks (middle-click
+      or Cmd/Ctrl-click to open in a new tab, right-click to copy the link) didn't work. Combined with the reload
+      problem above, you couldn't keep the error list open in one tab and the data grid open in another.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>Sidebar menu items are now real links. Middle-click, Cmd/Ctrl-click, and right-click-to-copy all work
+        as you'd expect from any other website.</p>
+        <p class="why"><strong>Why it's better:</strong> this is a small, mostly invisible change under the hood.
+        The menu looks the same, but it unblocks working across multiple tabs, which many researchers rely on for
+        cross-checking data.</p>
+      </div>
+    </article>
+  </section>
+
+  <section class="stage" id="stage-c">
+    <h2>Trusting the numbers</h2>
+    <p class="stage-sub">Researchers calibrate how much they trust a data tool very quickly. Three pages were
+    telling three different stories about the same census, exactly the kind of thing that erodes trust fast.</p>
+
+    <article class="finding fixed" id="f9">
+      <div class="fhead"><span class="fid">F9 · F11</span><span class="chip fixed">Fixed</span></div>
+      <h3>One page said 23,322 unresolved errors; the dedicated error page said zero</h3>
+      <p>Opening the data grid greeted you with a warning: <em>"23,322 row(s) with unresolved errors detected."</em>
+      Clicking through to the "View Errors" page, meant to be the definitive place to review exactly those errors,
+      showed every counter at zero. A third summary on the same census said data quality checks "have not been
+      run yet." Same census, same moment: 23,322 errors, 0 errors, and "nothing's been checked yet." Three
+      contradictory answers to one question.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>The data grid, its warning message, and the error page now all agree. They share one definition of
+        "not yet checked," "failed a check," and "valid," instead of each page counting things its own way. If a
+        census genuinely hasn't been checked yet, the message now says exactly that instead of implying something
+        is broken.</p>
+        <p class="why"><strong>Why it's better:</strong> when the numbers agree across the app, you can act on
+        them with confidence instead of wondering which page to believe.</p>
+      </div>
+      <div class="figrow">
+        <figure>
+          <span class="taglabel before">Before</span>
+          <img src="ux-walkthrough-2026-07-06-assets/before/f9-viewerrors-zero.jpg" alt="Errors Explorer showing zero for every counter, contradicting the data grid's warning">
+          <figcaption>Same census, moments after the grid's warning: the error page said zero, everywhere.</figcaption>
+        </figure>
+        <figure>
+          <span class="taglabel after">After</span>
+          <img src="ux-walkthrough-2026-07-06-assets/after/f9-matching-counts.jpg" alt="Errors Explorer now showing Matching rows 23322 and Validation 23322, matching the data grid's warning count">
+          <figcaption>Same census, now: the error page's count (23,322) matches what the data grid reported. One
+          number, one story.</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article class="finding fixed" id="f10">
+      <div class="fhead"><span class="fid">F10</span><span class="chip fixed">Fixed</span></div>
+      <h3>The census summary contradicted itself in the same glance</h3>
+      <p>The Census Overview page showed "1.4 stems per tree" in one box, and "Multi-stems: 0" in the box right
+      next to it: numbers that can't both be true (if stems average more than one per tree, some trees must have
+      more than one). The same screen also reported "0 old trees" for a first census, where that number genuinely
+      can't be measured yet, instead of saying so.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>The multi-stem count is now calculated the same way as the rest of the statistics on the page, so it
+        agrees with them. This census actually has 4,481 trees with more than one stem. When a number genuinely
+        can't be computed yet, like "old trees" on a brand-new census, the page shows a dash with a short
+        explanation instead of a confident-looking zero.</p>
+        <p class="why"><strong>Why it's better:</strong> a forest ecologist will notice "1.4 stems/tree" next to
+        "0 multi-stem trees" in seconds. Once one number looks wrong, every other number on the page becomes
+        suspect too.</p>
+      </div>
+      <div class="figrow">
+        <figure>
+          <span class="taglabel before">Before</span>
+          <img src="ux-walkthrough-2026-07-06-assets/before/f10-contradictory-stats.jpg" alt="Dashboard showing 1.4 stems per tree next to Multi-Stems: 0, and Old Trees: 0">
+          <figcaption>"1.4 stems per tree" and "Multi-stems: 0," a few hundred pixels apart.</figcaption>
+        </figure>
+        <figure>
+          <span class="taglabel after">After</span>
+          <img src="ux-walkthrough-2026-07-06-assets/after/f2-f3-f10-census-overview.jpg" alt="Census Overview now showing Multi-Stems: 4,481 and Old Trees: em-dash with explanatory subtitle">
+          <figcaption>Multi-Stems now reads 4,481, consistent with 1.4 stems/tree. Old Trees shows "—" with a
+          plain explanation instead of a misleading 0.</figcaption>
+        </figure>
+      </div>
+    </article>
+  </section>
+
+  <section class="stage" id="stage-d">
+    <h2>Working in the data grids</h2>
+    <p class="stage-sub">This is where researchers spend most of their time. Filtering, editing, and exporting
+    all work, but density and labeling problems slowed down every visit.</p>
+
+    <article class="finding fixed" id="f12">
+      <div class="fhead"><span class="fid">F12</span><span class="chip fixed">Fixed</span></div>
+      <h3>The full historical data table opened unreadable</h3>
+      <p>The archive table, more than fifty columns of historical measurement data, opened with almost every
+      column header chopped down to one or two letters (<code>M…</code>, <code>Pl…</code>, <code>D…</code>) and
+      values cut off mid-number. You had to manually widen a dozen columns, every visit, before you could tell
+      what you were looking at.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>Columns now open at sensible widths for what they hold (dates get more room than a short code), and
+        the table remembers how you've resized or hidden columns the next time you come back. You only have to
+        adjust it once.</p>
+        <p class="why"><strong>Why it's better:</strong> this table exists specifically so researchers can review
+        historical data; a table you can't read on arrival defeats its own purpose.</p>
+      </div>
+      <div class="figrow">
+        <figure>
+          <span class="taglabel before">Before</span>
+          <img src="ux-walkthrough-2026-07-06-assets/before/f12-truncated-headers.jpg" alt="All Historical Data grid with column headers truncated to one or two letters and clipped values">
+          <figcaption>Headers reduced to initials; values clipped mid-number.</figcaption>
+        </figure>
+        <figure>
+          <span class="taglabel after">After</span>
+          <img src="ux-walkthrough-2026-07-06-assets/after/f12-readable-headers.jpg" alt="All Historical Data grid now showing full readable column headers like PlotName, LocationName, CountryName">
+          <figcaption>Full, readable headers and un-clipped values on first load.</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article class="finding major" id="f13">
+      <div class="fhead"><span class="fid">F13</span><span class="chip major">On the list</span></div>
+      <h3>Six unlabeled icons control what the data grid shows you</h3>
+      <p>The filter row above the data grid uses six icons with no visible labels, a red triangle, a green
+      shield, a clock, and more, to control which rows are shown. Their meaning is only available if you hover
+      over each one, and the small count badges cap out at "99+," so you can't actually see how many rows are
+      affected.</p>
+    </article>
+
+    <article class="finding major" id="f14">
+      <div class="fhead"><span class="fid">F14</span><span class="chip major">On the list</span></div>
+      <h3>The warning message can cover the page controls, and pages default to just 10 rows</h3>
+      <p>The unresolved-errors warning can render directly on top of the page-number controls at the bottom of the
+      grid, hiding them until you dismiss it. The grid also defaults to showing only 10 rows per page, which turns
+      a 33,000-row census into more than 3,000 pages to click through.</p>
+    </article>
+
+    <article class="finding polish" id="f15">
+      <div class="fhead"><span class="fid">F15</span><span class="chip polish">On the list</span></div>
+      <h3>Adding one record by hand hides behind an unlabeled icon</h3>
+      <p>You can add a single measurement without a full CSV upload. The form for it is well built, but the
+      button that opens it is an unlabeled clipboard icon sitting next to the clearly labeled "Upload" button.</p>
+    </article>
+
+    <article class="finding polish" id="f16">
+      <div class="fhead"><span class="fid">F16</span><span class="chip polish">On the list</span></div>
+      <h3>A large explainer banner sits permanently at the top of every data page</h3>
+      <p>"Understanding Grid and Upload Form Headers" is genuinely useful the first time you see it, but it's
+      pinned above all seven data-grid pages permanently, taking up space every visit after that.</p>
+    </article>
+
+    <article class="finding polish" id="f17">
+      <div class="fhead"><span class="fid">F17</span><span class="chip polish">On the list</span></div>
+      <h3>Every row has a delete button whose tooltip says "cannot be undone"</h3>
+      <p>A confirmation step does exist before a row is actually deleted, but the tooltip on the delete button
+      itself reads as a warning about irreversibility rather than a reassurance of safety.</p>
+    </article>
+  </section>
+
+  <section class="stage" id="stage-e">
+    <h2>History, files &amp; behind-the-scenes details</h2>
+    <p class="stage-sub">Pages that answer "what happened to my data," plus one real problem where a page showed
+    data it shouldn't have.</p>
+
+    <article class="finding fixed" id="f19">
+      <div class="fhead"><span class="fid">F19</span><span class="chip fixed">Fixed</span></div>
+      <h3>The Uploaded Files page was showing other sites' files</h3>
+      <p>Under one site's plot and census, the Uploaded Files page listed files clearly uploaded by a
+      <em>different</em> site entirely, including files named after a different forest plot. This happened
+      because uploaded files were filed away by plot number and census number only, with nothing recording which
+      site they belonged to, and two different sites can both have a "plot 1, census 1." Researchers could see
+      (and in principle download or delete) files that weren't theirs: confusing, and a real data-privacy concern.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>Every site's uploaded files are now filed away in their own separate, clearly labeled location, so
+        this mix-up can't happen again for anything uploaded going forward. A companion tool, run by
+        administrators behind the scenes, can move older files uploaded before this fix into the correct
+        site-specific location. That cleanup step reviews and confirms the mapping for each site before anything
+        moves.</p>
+        <p class="why"><strong>Why it's better:</strong> your Uploaded Files page should show your files. This
+        also closes a real gap where one site's data could be visible to people who work on a different site.</p>
+      </div>
+      <div class="figrow">
+        <figure>
+          <span class="taglabel before">Before</span>
+          <img src="ux-walkthrough-2026-07-06-assets/before/f19-other-sites-files.jpg" alt="Uploaded Files page under one site showing CBFDP and Cooks Branch files belonging to a different site">
+          <figcaption>Files from a different site and plot, listed under this site's Uploaded Files page.</figcaption>
+        </figure>
+        <figure>
+          <span class="taglabel after">After</span>
+          <img src="ux-walkthrough-2026-07-06-assets/after/f19-scoped-container.jpg" alt="Uploaded Files page now scoped to this site only, with the storage location name including the site's schema">
+          <figcaption>The file list is now scoped to this site only. The storage location itself identifies which
+          site it belongs to.</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article class="finding polish" id="f20">
+      <div class="fhead"><span class="fid">F20</span><span class="chip polish">On the list</span></div>
+      <h3>Uploaded Files reads like a systems log, not a researcher's file list</h3>
+      <p>Beyond the cross-site mix-up above, dates on this page spill across three lines
+      (<code>Tue Jun 09 2026 15:22:14 GMT-0700 (Pacific Daylight Time)</code>), the "Errors in File" column shows
+      up blank instead of a clear 0 or "—", and the download/delete actions are unlabeled icons. The delete icon
+      in particular looks like a backspace key.</p>
+    </article>
+
+    <article class="finding polish" id="f21">
+      <div class="fhead"><span class="fid">F21</span><span class="chip polish">On the list</span></div>
+      <h3>The change history reads like a technical log</h3>
+      <p>Entries in Recent Changes read like raw database output: field-by-field differences and a person's full
+      internal job title in brackets, instead of a plain sentence like "Mason uploaded 33,430 measurement rows."</p>
+    </article>
+
+    <article class="finding polish" id="f22">
+      <div class="fhead"><span class="fid">F22</span><span class="chip polish">On the list</span></div>
+      <h3>The statistics and validation pages lead with database queries</h3>
+      <p>Post-Census Statistics and the Validations Hub both show the underlying database query, in a wide
+      column, before any plain-language name or description of what the check actually does.</p>
+    </article>
+
+    <article class="finding polish" id="f23">
+      <div class="fhead"><span class="fid">F23</span><span class="chip polish">On the list</span></div>
+      <h3>A clean census looks like a broken page</h3>
+      <p>When a census genuinely has zero unresolved errors, the error page shows a grey loading skeleton and
+      "Page&nbsp;&nbsp;of&nbsp;0," which reads like something failed to load rather than a clean result.</p>
+    </article>
+  </section>
+
+  <section class="stage" id="stage-f">
+    <h2>The admin area</h2>
+    <p class="stage-sub">Reachable only if you already know the web address, and it swaps the whole navigation
+    model once you're inside.</p>
+
+    <article class="finding major" id="f24">
+      <div class="fhead"><span class="fid">F24</span><span class="chip major">On the list</span></div>
+      <h3>Getting into, and back out of, the admin area is confusing</h3>
+      <p>There's no menu item anywhere in the normal app that links to the admin area; you have to know the exact
+      web address. Once inside, the sidebar changes completely, and the only way to leave is to pick a site again.</p>
+    </article>
+
+    <article class="finding major" id="f25">
+      <div class="fhead"><span class="fid">F25</span><span class="chip major">On the list</span></div>
+      <h3>Site Management shows "0 sites" to an administrator who manages nine</h3>
+      <p>The same administrator who sees nine sites everywhere else in the app sees "0 of 0" on the Site
+      Management page, along with one unexplained, half-filled blank row.</p>
+    </article>
+
+    <article class="finding polish" id="f26">
+      <div class="fhead"><span class="fid">F26</span><span class="chip polish">On the list</span></div>
+      <h3>User Management is always in "edit everything" mode</h3>
+      <p>Every cell is editable all the time, Save and Discard are always active whether or not anything actually
+      changed, there's no way to tell which rows you've edited, and there's no visible way to add a new user.</p>
+    </article>
+  </section>
+
+  <section class="stage" id="stage-g">
+    <h2>Phones, tablets &amp; general robustness</h2>
+    <p class="stage-sub">Field crews are tablet and phone users by definition, so this matters more than it might
+    for an office-only tool.</p>
+
+    <article class="finding major" id="f28">
+      <div class="fhead"><span class="fid">F28</span><span class="chip major">On the list</span></div>
+      <h3>On a phone screen, the app is only a navigation menu</h3>
+      <p>At phone width, the sidebar takes over the entire screen and the actual page content isn't reachable;
+      the ForestGEO logo also gets cut off behind the menu button.</p>
+    </article>
+
+    <article class="finding polish" id="f29">
+      <div class="fhead"><span class="fid">F29</span><span class="chip polish">On the list</span></div>
+      <h3>The "?" help button opens a bug report, not help</h3>
+      <p>The floating "?" button, the universal symbol for help, opens the feedback/bug-report form. There's no
+      link anywhere in the app to the actual user documentation, even though it exists.</p>
+    </article>
+  </section>
+
+  <section class="stage" id="stage-i">
+    <h2>Other work that landed this month</h2>
+    <p class="stage-sub">The walkthrough above is a specific, browser-driven audit, but it's not the only thing
+    that's shipped recently. Between June 10 and today, five other pieces of work landed in the version of
+    ForestGEO everyone uses. None of these came out of the walkthrough. They're included here so this page gives
+    an honest picture of everything that's changed lately. (The codebase was also reorganized into a clearer
+    folder structure during this window. No behavior changed, so it isn't written up below, but it's part of why
+    recent fixes have moved faster.)</p>
+
+    <article class="finding fixed" id="m1">
+      <div class="fhead"><span class="fid">PR #338</span><span class="chip fixed">Shipped</span></div>
+      <p class="pr-meta">Merged 2026-06-17</p>
+      <h3>CSV uploads with mismatched or duplicate columns are now caught instead of silently accepted</h3>
+      <p>If a row in an uploaded CSV had too many or too few columns, or two columns shared the same header name,
+      the app could sometimes accept the row anyway, occasionally filing data under the wrong column or inventing
+      a hidden extra one. A measurement value that couldn't be fully read, like a DBH with a stray letter in it,
+      could also get silently trimmed to just the numeric part instead of flagged.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>Rows like these are now rejected clearly, with an explanation, instead of being guessed at and let
+        through. If any of your uploaded columns get ignored because the app doesn't recognize them, it now tells
+        you that too, instead of quietly dropping them.</p>
+        <p class="why"><strong>Why it's better:</strong> a loud rejection at upload time is far easier to fix than
+        a wrong number discovered months later in an analysis.</p>
+      </div>
+    </article>
+
+    <article class="finding fixed" id="m2">
+      <div class="fhead"><span class="fid">PR #340</span><span class="chip fixed">Shipped</span></div>
+      <p class="pr-meta">Merged 2026-07-02</p>
+      <h3>The app can now remember a stem's official Smithsonian-published ID</h3>
+      <p>Behind the scenes, ForestGEO can now capture and store the official ID number the Smithsonian publishes
+      for a stem, separate from the app's own internal tracking number, including when that data arrives through
+      the ArcGIS-based mapping workflow. It carries forward automatically from one census to the next. If an
+      uploaded ID can't be understood, the app raises a clear warning instead of silently discarding it.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>This is groundwork rather than a new screen; there's no new column visible in the app yet. It exists
+        so this identifier gets captured and preserved now, ahead of future work to match ForestGEO's records
+        against the Smithsonian's own published data.</p>
+        <p class="why"><strong>Why it's better:</strong> capturing this now means nothing has to be reconstructed
+        or re-matched later once that connection is built.</p>
+      </div>
+    </article>
+
+    <article class="finding fixed" id="m3">
+      <div class="fhead"><span class="fid">PR #343 · PR #345</span><span class="chip fixed">Shipped</span></div>
+      <p class="pr-meta">Merged 2026-07-08</p>
+      <h3>The same site-privacy fix behind F19 was extended to the rest of the app</h3>
+      <p>Earlier in this document, F19 described the Uploaded Files page showing files that belonged to a
+      different site, because that page never checked which site a request was allowed to touch. More than
+      thirty other behind-the-scenes actions across the app had the same class of gap: a signed-in user could, in
+      principle, reach an action meant for a site they don't belong to.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>Every one of those is now closed. Every site-specific action checks that you belong to that site
+        before it touches any data, and each has an automated test proving a request for a site you don't belong
+        to gets rejected before any data is even looked at. A few related stability fixes landed alongside this:
+        extra safety headers on every response, and a correction to how the app tracks database connections and
+        locks so it stays stable when many people work at once.</p>
+        <p class="why"><strong>Why it's better:</strong> this closes the same category of problem everywhere, not
+        just one page at a time. There's no visible change on screen. This is behind-the-scenes plumbing, and one
+        of the most important fixes in this document.</p>
+      </div>
+    </article>
+
+    <article class="finding fixed" id="m4">
+      <div class="fhead"><span class="fid">PR #344</span><span class="chip fixed">Shipped</span></div>
+      <p class="pr-meta">Merged 2026-07-08</p>
+      <h3>The Species List page works again on every site</h3>
+      <p>On some sites, opening "Species List" showed an "error fetching data" message and an empty grid. The
+      species data wasn't actually missing; a technical piece the page depends on had never been created for that
+      site. Sites set up through the app's own site-creation wizard, rather than configured by hand, were the
+      ones missing it.</p>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>That missing piece has now been created for every existing site, and every newly created site gets it
+        automatically going forward. The groundwork for a more detailed, stem-level version of this same view was
+        also added, for a future page.</p>
+        <p class="why"><strong>Why it's better:</strong> a core reference page, the list of species recorded at a
+        site, shouldn't depend on how that site happened to be set up.</p>
+      </div>
+      <div class="figrow">
+        <figure>
+          <span class="taglabel after">After</span>
+          <img src="ux-walkthrough-2026-07-06-assets/after/m4-species-list.jpg" alt="Species List page now showing a populated grid of 95 species with family, genus, and species-authority columns">
+          <figcaption>Species List loading correctly, with all 95 species for this site.</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article class="finding fixed" id="m5">
+      <div class="fhead"><span class="fid">PR #346</span><span class="chip fixed">Shipped</span></div>
+      <p class="pr-meta">Merged 2026-07-09</p>
+      <h3>Two upload bugs fixed: doubled quadrat counts, and dropped species names</h3>
+      <p>Two unrelated CSV-upload problems, fixed together:</p>
+      <ul>
+        <li><strong>Doubled quadrats.</strong> When a site is first set up without a real quadrat list on hand, an
+        administrator can choose to auto-generate a placeholder grid to start from. When the site's real quadrat
+        list was later uploaded under different names, the app added the real quadrats <em>alongside</em> the
+        placeholders instead of replacing them. One site ended up with roughly twice as many quadrats as it
+        should have (1,052 instead of 527). That site's data has already been corrected.</li>
+        <li><strong>Dropped species names.</strong> Uploading a species/taxonomy CSV with a column literally
+        named "species" had its contents silently redirected into the wrong field (the species code), because of
+        a column-name shortcut list meant only for measurement uploads. The actual species name was lost as a
+        result.</li>
+      </ul>
+      <div class="fixblock">
+        <div class="fixhead">✓ What I changed</div>
+        <p>Setting up a new site now offers a third option, "add the quadrat list later," so no placeholder grid
+        gets created if you don't have real data on hand. Separately, the app now refuses a quadrat upload that
+        doesn't overlap at all with what's already there, and points you to the right upload mode instead of
+        blindly adding to it. The species-name shortcut is now scoped only to measurement uploads, so a taxonomy
+        upload keeps the species name intact.</p>
+        <p class="why"><strong>Why it's better:</strong> both bugs shared the same root cause: an upload mode
+        quietly guessing what to do with data it didn't fully recognize. Fixing that class of guessing is what
+        should stop this from resurfacing elsewhere.</p>
+      </div>
+    </article>
+  </section>
+
+  <div class="method">
+    <h2>About this page</h2>
+    <p>
+      This is a plain-language rewrite of the original engineering audit conducted on 2026-07-06, with progress
+      notes added as fixes have shipped. Every screenshot under a "Fixed" or "Shipped" item was taken directly
+      from the running application signed in as the same kind of user described in the original audit, using the
+      same site, plot, and census (Testing Schema / serc / census 1). Nothing here has been staged or simulated.
+      "Other work that landed this month" covers everything else merged between 2026-06-10 and today that wasn't
+      part of the walkthrough audit itself.
+    </p>
+    <p>
+      Have a question about any of the items still "on the list," or something that doesn't match what you're
+      seeing in the app? Use the "Report an issue" option from the "?" menu in the app, or reach out to the
+      engineering team directly.
+    </p>
+  </div>
+</div>

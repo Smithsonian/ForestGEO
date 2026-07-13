@@ -1,29 +1,14 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
 // import ailogger from '@/ailogger';
 
-export const openSidebar = () => {
-  if (typeof document !== 'undefined') {
-    document.body.style.overflow = 'hidden';
-    document.documentElement.style.setProperty('--SideNavigation-slideIn', '1');
-  }
-};
+export const MOBILE_SIDEBAR_TOGGLE_EVENT = 'forestgeo:toggle-mobile-sidebar';
 
-export const closeSidebar = () => {
-  if (typeof document !== 'undefined') {
-    document.documentElement.style.removeProperty('--SideNavigation-slideIn');
-    document.body.style.removeProperty('overflow');
-  }
-};
-
+/**
+ * Backward-compatible event entry point for standalone Header renders.
+ * HubLayout owns the actual Drawer state; no document styles are mutated.
+ */
 export const toggleSidebar = () => {
-  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-    const slideIn = window.getComputedStyle(document.documentElement).getPropertyValue('--SideNavigation-slideIn');
-    if (slideIn) {
-      closeSidebar();
-    } else {
-      openSidebar();
-    }
-  }
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(MOBILE_SIDEBAR_TOGGLE_EVENT));
 };
 
 // Utility type to capitalize the first letter of each key

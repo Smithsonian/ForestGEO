@@ -226,10 +226,6 @@ export default function ProvisionWizardPage() {
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 800, mx: 'auto', width: '100%' }}>
-      <Typography level="h2" sx={{ mb: 3 }}>
-        Provision New Site
-      </Typography>
-
       <Stepper sx={{ mb: 4 }} aria-label="Provisioning wizard steps">
         {STEPS.map((label, index) => (
           <Step
@@ -250,7 +246,14 @@ export default function ProvisionWizardPage() {
         ))}
       </Stepper>
 
-      <Box sx={{ mb: 4 }}>{renderStepContent()}</Box>
+      <Box sx={{ mb: 4 }}>
+        {showStepErrors && !canAdvance && (
+          <Alert color="warning" variant="soft" sx={{ mb: 2 }} aria-live="polite">
+            Complete the highlighted required fields before continuing to the next step.
+          </Alert>
+        )}
+        {renderStepContent()}
+      </Box>
 
       <Divider sx={{ mb: 2 }} />
 

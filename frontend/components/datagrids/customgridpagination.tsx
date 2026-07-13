@@ -17,7 +17,9 @@ import LastPageIcon from '@mui/icons-material/LastPage';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 
-const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [10, 25, 50];
+export const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [25, 50, 100];
+export const DEFAULT_GRID_PAGE_SIZE = 50;
+const PAGE_SIZE_STORAGE_PREFIX = 'forestgeo-grid-page-size:';
 const INFINITE_VALUE = 'infinite' as const;
 const INFINITY_GLYPH = '∞';
 type PageSizeOption = number | { value: number; label: string };
@@ -46,6 +48,8 @@ export interface InfiniteScrollPaginationProps {
 export interface CustomGridPaginationProps extends NonNullable<GridSlotProps['pagination']> {
   disabled?: boolean;
   infiniteScroll?: InfiniteScrollPaginationProps;
+  /** Stable grid identity used to remember a rows-per-page preference. */
+  gridType?: string;
 }
 
 declare module '@mui/x-data-grid' {
@@ -62,6 +66,27 @@ function describeInfiniteStatus(p: InfiniteScrollPaginationProps): string {
   if (p.isLoadingMore) return `Loaded ${loaded} of ${total} · Loading more…`;
   if (!p.hasMore) return `All ${total} rows loaded`;
   return `Loaded ${loaded} of ${total}`;
+}
+
+export function getPersistedGridPageSize(gridType: string | undefined, fallback = DEFAULT_GRID_PAGE_SIZE): number {
+  if (!gridType || typeof window === 'undefined') return fallback;
+  try {
+    const saved = Number(window.localStorage.getItem(`${PAGE_SIZE_STORAGE_PREFIX}${gridType}`));
+    // A stale or hand-edited value outside the selector's options would render a
+    // blank rows-per-page control and could drive an oversized first fetch.
+    return DEFAULT_PAGE_SIZE_OPTIONS.includes(saved) ? saved : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function persistGridPageSize(gridType: string | undefined, pageSize: number) {
+  if (!gridType || typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(`${PAGE_SIZE_STORAGE_PREFIX}${gridType}`, String(pageSize));
+  } catch {
+    // Private browsing or an exhausted storage quota should not block pagination.
+  }
 }
 
 export default function CustomGridPagination(props: CustomGridPaginationProps) {
@@ -106,10 +131,11 @@ export default function CustomGridPagination(props: CustomGridPaginationProps) {
       const numericValue = typeof next === 'number' ? next : Number(next);
       if (!Number.isFinite(numericValue)) return;
       if (isInfinite) infiniteScroll?.onToggle(false);
+      persistGridPageSize(props.gridType, numericValue);
       apiRef.current.setPageSize(numericValue);
       apiRef.current.setPage(0);
     },
-    [apiRef, infiniteScroll, isInfinite]
+    [apiRef, infiniteScroll, isInfinite, props.gridType]
   );
 
   const navDisabled = disabled || isInfinite;

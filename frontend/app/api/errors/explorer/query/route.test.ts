@@ -3,6 +3,8 @@ import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 
+const ROUTE_CONTEXT = { params: Promise.resolve({}) };
+
 // Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
 // A 'global' admin passes the per-site access gate.
 vi.mock('@/auth', () => ({
@@ -170,7 +172,8 @@ describe('POST /api/errors/explorer/query', () => {
             quickSearch: ''
           }
         })
-      }) as any
+      }) as any,
+      ROUTE_CONTEXT
     );
 
     expect(response.status).toBe(HTTPResponses.OK);
@@ -295,7 +298,8 @@ describe('POST /api/errors/explorer/query', () => {
             quickSearch: ''
           }
         })
-      }) as any
+      }) as any,
+      ROUTE_CONTEXT
     );
 
     expect(response.status).toBe(HTTPResponses.OK);
@@ -407,7 +411,8 @@ describe('POST /api/errors/explorer/query', () => {
             quickSearch: ''
           }
         })
-      }) as any
+      }) as any,
+      ROUTE_CONTEXT
     );
 
     expect(response.status).toBe(HTTPResponses.OK);

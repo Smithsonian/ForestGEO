@@ -19,6 +19,11 @@ import { AssignmentOutlined, CachedOutlined, UploadFileOutlined } from '@mui/ico
 import ailogger from '@/ailogger';
 import { useRouter } from 'next/navigation';
 import { VisibleFilter } from '@/config/datagridhelpers';
+import { getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
+
+// Identity under which CustomGridPagination persists the rows-per-page choice;
+// the initializer below must read the same key.
+const MEASUREMENTS_SUMMARY_GRID_TYPE = 'measurementssummary';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -83,10 +88,10 @@ export default function MeasurementsSummaryViewDataGrid({
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
   const [refresh, setRefresh] = useState(false);
-  const [paginationModel, setPaginationModel] = useState({
+  const [paginationModel, setPaginationModel] = useState(() => ({
     page: 0,
-    pageSize: 10
-  });
+    pageSize: getPersistedGridPageSize(MEASUREMENTS_SUMMARY_GRID_TYPE)
+  }));
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const hasAutoOpenedFailedMeasurementsRef = useRef(false);
@@ -237,7 +242,7 @@ export default function MeasurementsSummaryViewDataGrid({
         autoCloseWhenEmpty={!autoOpenFailedMeasurements}
       />
       <MeasurementsCommons
-        gridType={'measurementssummary'}
+        gridType={MEASUREMENTS_SUMMARY_GRID_TYPE}
         gridColumns={MeasurementsSummaryViewGridColumns}
         initialVisibleFilters={initialVisibleFilters}
         showToolbarActions={showToolbarActions}

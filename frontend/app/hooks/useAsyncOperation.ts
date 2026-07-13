@@ -9,6 +9,7 @@ interface UseAsyncOperationOptions<R> {
   onSuccess?: (result: R) => void;
   onError?: (error: Error) => void;
   preventDuplicates?: boolean;
+  suppressGlobalLoading?: boolean;
 }
 
 /**
@@ -16,7 +17,7 @@ interface UseAsyncOperationOptions<R> {
  * Provides operation deduplication, error handling, and loading state management
  */
 export function useAsyncOperation<T extends unknown[], R>(asyncFunction: (...args: T) => Promise<R>, options: UseAsyncOperationOptions<R> = {}) {
-  const { loadingMessage = 'Processing...', category = 'general', onSuccess, onError, preventDuplicates = true } = options;
+  const { loadingMessage = 'Processing...', category = 'general', onSuccess, onError, preventDuplicates = true, suppressGlobalLoading = false } = options;
 
   const { startOperation, endOperation, isOperationActive } = useLoading();
   const activeOperationRef = useRef<string | null>(null);
@@ -71,8 +72,8 @@ export function useAsyncOperation<T extends unknown[], R>(asyncFunction: (...arg
         }
 
         // Start loading operation
-        const operationId = startOperation(loadingMessage, category);
-        activeOperationRef.current = operationId;
+        const operationId = suppressGlobalLoading ? undefined : startOperation(loadingMessage, category);
+        activeOperationRef.current = operationId ?? `pending:${loadingMessage}`;
 
         try {
           // Execute the async function
@@ -99,7 +100,7 @@ export function useAsyncOperation<T extends unknown[], R>(asyncFunction: (...arg
           throw errorObj;
         } finally {
           // Always end the operation
-          endOperation(operationId);
+          if (operationId) endOperation(operationId);
           activeOperationRef.current = null;
 
           // Clear args cache after a delay to allow for legitimate re-runs
@@ -124,10 +125,10 @@ export function useAsyncOperation<T extends unknown[], R>(asyncFunction: (...arg
         throw error;
       }
     },
-    [asyncFunction, loadingMessage, category, onSuccess, onError, preventDuplicates, startOperation, endOperation, isOperationActive]
+    [asyncFunction, loadingMessage, category, onSuccess, onError, preventDuplicates, suppressGlobalLoading, startOperation, endOperation, isOperationActive]
   );
 
-  const isActive = activeOperationRef.current ? isOperationActive(activeOperationRef.current) : false;
+  const isActive = activeOperationRef.current ? activeOperationRef.current.startsWith('pending:') || isOperationActive(activeOperationRef.current) : false;
 
   return {
     execute,

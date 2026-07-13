@@ -7,6 +7,7 @@ import {
   DialogActions,
   DialogContent,
   FormControl,
+  FormHelperText,
   FormLabel,
   Input,
   Modal,
@@ -18,7 +19,7 @@ import {
   Stack,
   Typography
 } from '@mui/joy';
-import { Plot } from '@/lib/db/definitions/zones';
+import { PlotRDS } from '@/lib/db/definitions/zones';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import Grid from '@mui/joy/Grid';
@@ -33,63 +34,77 @@ import Filter2Icon from '@mui/icons-material/Filter2';
 import Filter1Icon from '@mui/icons-material/Filter1';
 
 export default function PlotCardModal(props: {
-  plot: Plot;
+  plot?: PlotRDS;
   openPlotCardModal: boolean;
   setOpenPlotCardModal: (isOpen: boolean) => void;
   setManualReset: Dispatch<SetStateAction<boolean>>;
 }) {
   const { plot, openPlotCardModal, setOpenPlotCardModal, setManualReset } = props;
-  const [isEditing, setIsEditing] = useState(false);
+  const isCreating = !plot?.plotID;
+  const emptyPlot: PlotRDS = {
+    defaultDimensionUnits: 'm',
+    defaultCoordinateUnits: 'm',
+    defaultAreaUnits: 'm2',
+    defaultDBHUnits: 'mm',
+    defaultHOMUnits: 'm'
+  };
+  const [isEditing, setIsEditing] = useState(isCreating);
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [editablePlot, setEditablePlot] = useState<Plot>({ ...plot });
+  const [editablePlot, setEditablePlot] = useState<PlotRDS>({ ...emptyPlot, ...plot });
+  const [validationError, setValidationError] = useState('');
+  const [saveSucceeded, setSaveSucceeded] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const currentSite = useSiteContext();
 
   // Sync editablePlot state when plot prop changes
   useEffect(() => {
-    setEditablePlot({ ...plot });
-  }, [plot]);
+    setEditablePlot({ ...emptyPlot, ...plot });
+    setIsEditing(!plot?.plotID);
+    setValidationError('');
+    setSaveSucceeded(false);
+    // The defaults are stable primitives; plot identity is the intended reset trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plot, openPlotCardModal]);
 
   const handleEditToggle = () => {
     setIsEditing(!isEditing);
     if (!isEditing) {
-      setEditablePlot({ ...plot });
+      setEditablePlot({ ...emptyPlot, ...plot });
     }
   };
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    if (editablePlot) {
-      setEditablePlot({ ...editablePlot, [name]: value });
-    }
+    setEditablePlot({ ...editablePlot, [name]: value });
+    if (name === 'plotName' && value.trim()) setValidationError('');
   };
 
   const handleSave = async () => {
-    setSubmitting(true);
-    if (!editablePlot) {
-      setSnackbarMessage('Error: No plot data to save.');
-      setOpenSnackbar(true);
-      setCountdown(5);
+    if (!editablePlot.plotName?.trim()) {
+      setValidationError('Plot name is required.');
       return;
     }
+    setSubmitting(true);
+    setSaveSucceeded(false);
 
     try {
       const { numQuadrats, usesSubquadrats, ...filteredPlot } = editablePlot;
       const fetchProcessQuery = createPostPatchQuery(currentSite?.schemaName ?? '', 'plots', 'plotID');
 
       const response = await fetch(fetchProcessQuery, {
-        method: 'PATCH',
+        method: isCreating ? 'POST' : 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ oldRow: plot, newRow: filteredPlot })
+        body: JSON.stringify(isCreating ? { newRow: filteredPlot } : { oldRow: plot, newRow: filteredPlot })
       });
 
       if (response.ok) {
-        setSnackbarMessage('Update successful! System will now reload. Please wait...');
+        setSaveSucceeded(true);
+        setSnackbarMessage(isCreating ? 'Plot created successfully. Refreshing plot list…' : 'Plot updated successfully. Refreshing plot list…');
       } else {
-        // if response fails, then reset should not occur.
-        setSnackbarMessage('Update failed. Please try again.');
+        const responseBody = await response.json().catch(() => null);
+        setSnackbarMessage(responseBody?.error ?? `${isCreating ? 'Creation' : 'Update'} failed. Please try again.`);
       }
     } catch (error) {
       console.error('Failed to save plot:', error);
@@ -142,11 +157,11 @@ export default function PlotCardModal(props: {
                 <Grid container spacing={1} sx={{ flexGrow: 1 }}>
                   <Grid xs={12}>
                     <Typography level={'title-lg'} color={'primary'} sx={{ alignSelf: 'flex-start' }}>
-                      Plot Name & Details
+                      {isCreating ? 'Create Plot' : 'Plot Name & Details'}
                     </Typography>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl id={'plot-name-input'}>
+                    <FormControl id={'plot-name-input'} error={Boolean(validationError)} required>
                       <FormLabel htmlFor={'plot-name-input'}>Name</FormLabel>
                       <Input
                         aria-labelledby={'plot-name-input'}
@@ -156,6 +171,7 @@ export default function PlotCardModal(props: {
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />
+                      {validationError && <FormHelperText>{validationError}</FormHelperText>}
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
@@ -312,7 +328,7 @@ export default function PlotCardModal(props: {
                         value={editablePlot?.defaultDimensionUnits ?? ''}
                         onChange={(_event, newValue: string | null) => {
                           if (newValue) {
-                            setEditablePlot(prev => (prev ? { ...prev, defaultDimensionUnits: newValue ?? undefined } : undefined));
+                            setEditablePlot(prev => ({ ...prev, defaultDimensionUnits: newValue ?? undefined }));
                           }
                         }}
                         disabled={!isEditing}
@@ -333,7 +349,7 @@ export default function PlotCardModal(props: {
                         value={editablePlot?.defaultCoordinateUnits ?? ''}
                         onChange={(_event, newValue: string | null) => {
                           if (newValue) {
-                            setEditablePlot(prev => (prev ? { ...prev, defaultCoordinateUnits: newValue || undefined } : undefined));
+                            setEditablePlot(prev => ({ ...prev, defaultCoordinateUnits: newValue || undefined }));
                           }
                         }}
                         disabled={!isEditing}
@@ -354,7 +370,7 @@ export default function PlotCardModal(props: {
                         value={editablePlot?.defaultAreaUnits ?? ''}
                         onChange={(_event, newValue: string | null) => {
                           if (newValue) {
-                            setEditablePlot(prev => (prev ? { ...prev, defaultAreaUnits: newValue } : undefined));
+                            setEditablePlot(prev => ({ ...prev, defaultAreaUnits: newValue }));
                           }
                         }}
                         disabled={!isEditing}
@@ -375,7 +391,7 @@ export default function PlotCardModal(props: {
                         value={editablePlot?.defaultDBHUnits ?? ''}
                         onChange={(_event, newValue: string | null) => {
                           if (newValue) {
-                            setEditablePlot(prev => (prev ? { ...prev, defaultDBHUnits: newValue } : undefined));
+                            setEditablePlot(prev => ({ ...prev, defaultDBHUnits: newValue }));
                           }
                         }}
                         disabled={!isEditing}
@@ -396,7 +412,7 @@ export default function PlotCardModal(props: {
                         value={editablePlot?.defaultHOMUnits ?? ''}
                         onChange={(_event, newValue: string | null) => {
                           if (newValue) {
-                            setEditablePlot(prev => (prev ? { ...prev, defaultHOMUnits: newValue } : undefined));
+                            setEditablePlot(prev => ({ ...prev, defaultHOMUnits: newValue }));
                           }
                         }}
                         disabled={!isEditing}
@@ -417,9 +433,9 @@ export default function PlotCardModal(props: {
             {isEditing ? (
               <>
                 <Button onClick={handleSave} loading={submitting} loadingIndicator={<CircularProgress />} loadingPosition={'start'}>
-                  Save Changes
+                  {isCreating ? 'Create Plot' : 'Save Changes'}
                 </Button>
-                <Button onClick={handleEditToggle}>Cancel</Button>
+                <Button onClick={isCreating ? () => setOpenPlotCardModal(false) : handleEditToggle}>Cancel</Button>
               </>
             ) : (
               <Button onClick={handleEditToggle}>Edit</Button>
@@ -431,14 +447,14 @@ export default function PlotCardModal(props: {
         <Snackbar
           autoHideDuration={5000}
           variant="soft"
-          color={snackbarMessage.includes('failed') ? 'danger' : 'success'}
+          color={saveSucceeded ? 'success' : 'danger'}
           size="lg"
           invertedColors
           open={openSnackbar}
           onClose={() => {
             setOpenSnackbar(false);
             setOpenPlotCardModal(false);
-            if (snackbarMessage.includes('successful')) {
+            if (saveSucceeded) {
               setManualReset(true); // reset only triggers if the patch command worked && the snackbar is closed
             }
             setIsEditing(false);

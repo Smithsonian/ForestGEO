@@ -17,6 +17,8 @@ import {
 import {
   GridActionsCellItem,
   GridColDef,
+  GridColumnResizeParams,
+  GridColumnVisibilityModel,
   GridEventListener,
   GridFilterModel,
   GridPaginationModel,
@@ -58,7 +60,7 @@ import { LoadingBar, ContentSkeleton } from '@/components/loading';
 import { areGridFilterModelsEqual, hasServerFilter, toServerFilterModel } from '@/lib/datagrid/filterModel';
 import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel';
 import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
-import CustomGridPagination from '@/components/datagrids/customgridpagination';
+import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS, getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
@@ -84,15 +86,102 @@ const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
   return safeValue;
 };
 
+function describeFixedDataRow(row: GridRowModel | null): string {
+  if (!row) return 'this row';
+  const labelKeys = [
+    'siteName',
+    'plotName',
+    'quadratName',
+    'speciesName',
+    'personName',
+    'attributeName',
+    'name',
+    'code',
+    'SiteName',
+    'PlotName',
+    'Name',
+    'Code'
+  ];
+  const label = labelKeys.map(key => row[key]).find(value => value !== undefined && value !== null && String(value).trim() !== '');
+  return label === undefined ? 'this row' : `“${String(label)}”`;
+}
+
 export type IsolatedDataGridCommonsHandle = {
   updateRow: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<GridRowModel>;
   fetchPaginatedData: () => Promise<void>;
   showSnackbar: (message: string, severity: 'success' | 'error') => void;
 };
 
+// Wide grids (the 53-column viewfulltable archive) column-virtualize off-screen cells
+// out of the DOM, so Cypress assertions against unscrolled columns can never observe
+// them. Rendering the full column set under the e2e harness (per MUI's own testing
+// guidance) keeps assertions deterministic; production behavior is unchanged, and the
+// build guard refuses production builds with this flag set.
+const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
+
 const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
 const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
+
+// Column layout (visibility + resized widths) is persisted per grid type so a user's
+// arrangement survives reloads. Keyed by gridType because each grid exposes a different
+// column set; sharing one key would cross-contaminate unrelated grids.
+export const GRID_LAYOUT_STORAGE_PREFIX = 'forestgeo-grid-layout';
+
+// The 53-column archive grid must expose the Columns panel: with layout persistence,
+// hiding a column via the column menu would otherwise become a one-way trap with no UI
+// to restore it. Other grid types keep the selector disabled, as before.
+const COLUMN_SELECTOR_ENABLED_GRID_TYPES = new Set(['viewfulltable']);
+
+type PersistedGridLayout = {
+  visibility: GridColumnVisibilityModel;
+  widths: Record<string, number>;
+};
+
+const EMPTY_GRID_LAYOUT: PersistedGridLayout = { visibility: {}, widths: {} };
+
+export function gridLayoutStorageKey(gridType: string): string {
+  return `${GRID_LAYOUT_STORAGE_PREFIX}:${gridType}`;
+}
+
+export function readPersistedGridLayout(gridType: string): PersistedGridLayout | null {
+  if (typeof window === 'undefined') return null;
+  const key = gridLayoutStorageKey(gridType);
+  const raw = window.localStorage.getItem(key);
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<PersistedGridLayout> | null;
+    return {
+      visibility: parsed?.visibility ?? {},
+      widths: parsed?.widths ?? {}
+    };
+  } catch (error: unknown) {
+    // Corrupt/unparseable layout: discard the poisoned key and fall back to defaults.
+    // Only swallow JSON parse failures; anything else propagates.
+    if (error instanceof SyntaxError) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    throw error;
+  }
+}
+
+export function writePersistedGridLayout(gridType: string, layout: PersistedGridLayout): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(gridLayoutStorageKey(gridType), JSON.stringify(layout));
+  } catch (error: unknown) {
+    // Storage write failures (Safari private mode, QuotaExceededError) surface as
+    // DOMExceptions. Losing layout persistence is acceptable; letting the failure
+    // propagate out of the resize handler and break resizing is not. Anything that
+    // is not a storage DOMException still propagates.
+    if (error instanceof DOMException) {
+      ailogger.warn(`Failed to persist grid layout for "${gridType}": ${error.message}`);
+      return;
+    }
+    throw error;
+  }
+}
 
 const INITIAL_FILTER_MODEL: GridFilterModel = { items: [], quickFilterValues: [] };
 const AUTO_ROW_HEIGHT = () => 'auto' as const;
@@ -135,19 +224,22 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     enableInfiniteScroll = false
   } = props;
 
-  const [rows, setRows] = useState([initialRow] as GridRowsProp);
+  // A template is only a template for the Add action; showing it before a fetch makes an
+  // empty catalog look like it has a real, editable record.
+  const [rows, setRows] = useState([] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
-  const [paginationModel, setPaginationModel] = useState({
+  const [paginationModel, setPaginationModel] = useState(() => ({
     page: 0,
-    pageSize: 10
-  });
+    pageSize: getPersistedGridPageSize(gridType)
+  }));
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [_shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [_newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [pendingDeleteRow, setPendingDeleteRow] = useState<GridRowModel | null>(null);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
   const [hidingEmpty, setHidingEmpty] = useState(defaultHideEmpty);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
@@ -193,11 +285,40 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const skipNextProcessRowUpdateRef = useRef(false);
 
+  // Persisted per-gridType column layout, read once per gridType. Held in a ref so the
+  // change handlers can merge partial updates (visibility vs. widths) without re-reading
+  // localStorage, and re-initialised when the grid switches to a different type.
+  const persistedLayoutGridTypeRef = useRef<string | null>(null);
+  const persistedLayoutRef = useRef<PersistedGridLayout>(EMPTY_GRID_LAYOUT);
+  if (persistedLayoutGridTypeRef.current !== gridType) {
+    persistedLayoutGridTypeRef.current = gridType;
+    persistedLayoutRef.current = readPersistedGridLayout(gridType) ?? { visibility: {}, widths: {} };
+  }
+
+  const handleColumnVisibilityModelChange = useCallback(
+    (model: GridColumnVisibilityModel) => {
+      persistedLayoutRef.current = { ...persistedLayoutRef.current, visibility: model };
+      writePersistedGridLayout(gridType, persistedLayoutRef.current);
+    },
+    [gridType]
+  );
+
+  const handleColumnWidthChange = useCallback(
+    (params: GridColumnResizeParams) => {
+      persistedLayoutRef.current = {
+        ...persistedLayoutRef.current,
+        widths: { ...persistedLayoutRef.current.widths, [params.colDef.field]: params.width }
+      };
+      writePersistedGridLayout(gridType, persistedLayoutRef.current);
+    },
+    [gridType]
+  );
+
   const hasFilter = hasServerFilter(filterModel);
 
   const fetchUrl = React.useMemo(() => {
-    if (!currentSite?.schemaName) return null;
     if (adminEmail) return `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
+    if (!currentSite?.schemaName) return null;
     const buildQuery = hasFilter ? createQFFetchQuery : createFetchQuery;
     return buildQuery(
       currentSite.schemaName,
@@ -635,6 +756,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       const row = gridRows.find(row => String(row.id) === String(actionId));
       if (row) {
         if (actionType === 'delete') {
+          setPendingDeleteRow(row);
           setIsDeleteDialogOpen(true);
         } else {
           setIsDialogOpen(true);
@@ -832,6 +954,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     async (confirmedRow?: GridRowModel) => {
       setIsDialogOpen(false);
       setIsDeleteDialogOpen(false);
+      setPendingDeleteRow(null);
 
       if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
         await performDeleteAction(pendingAction.actionId);
@@ -855,6 +978,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const handleCancelAction = useCallback(() => {
     setIsDialogOpen(false);
     setIsDeleteDialogOpen(false);
+    setPendingDeleteRow(null);
     if (promiseArguments) {
       promiseArguments.reject(new Error('Action cancelled by user'));
     }
@@ -1212,7 +1336,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
                 : type === 'Edit'
                   ? `Edit this row`
                   : type === 'Delete'
-                    ? 'Delete this row (cannot be undone!)'
+                    ? 'Delete this row'
                     : type === 'Limits'
                       ? 'View limits for this row'
                       : undefined
@@ -1262,16 +1386,24 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const censusIndependentGridTypes = ['attributes', 'personnel', 'quadrats', 'alltaxonomiesview', 'stemtaxonomiesview'];
   const requiresCensus = !censusIndependentGridTypes.includes(gridType);
 
-  const pageSizeOptions = useMemo(() => [paginationModel.pageSize, paginationModel.pageSize * 5, paginationModel.pageSize * 10], [paginationModel.pageSize]);
+  const pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS;
 
-  const gridInitialState = useMemo(
-    () => ({
+  const gridInitialState = useMemo(() => {
+    const savedLayout = persistedLayoutRef.current;
+    const savedWidthEntries = Object.entries(savedLayout.widths);
+    const dimensions = savedWidthEntries.reduce<Record<string, { width: number }>>((acc, [field, width]) => {
+      acc[field] = { width };
+      return acc;
+    }, {});
+    return {
       columns: {
-        columnVisibilityModel: getColumnVisibilityModel(gridType)
+        // Saved visibility overrides the default hidden-ID model; defaults fill any
+        // column the user never touched.
+        columnVisibilityModel: { ...getColumnVisibilityModel(gridType), ...savedLayout.visibility },
+        ...(savedWidthEntries.length > 0 ? { dimensions } : {})
       }
-    }),
-    [gridType]
-  );
+    };
+  }, [gridType]);
 
   const infiniteScrollDescriptor = useMemo(
     () =>
@@ -1293,12 +1425,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const PaginationSlot = useMemo(() => {
     if (!enablePageJump && !enableInfiniteScroll) return undefined;
-    const Slot = () => <CustomGridPagination infiniteScroll={infiniteScrollDescriptor} />;
+    const Slot = () => <CustomGridPagination gridType={gridType} infiniteScroll={infiniteScrollDescriptor} />;
     Slot.displayName = 'CustomGridPaginationSlot';
     // Test seam: expose the closure-bound descriptor so unit tests can inspect / drive the toggle.
     (Slot as unknown as { infiniteScroll?: typeof infiniteScrollDescriptor }).infiniteScroll = infiniteScrollDescriptor;
     return Slot;
-  }, [enablePageJump, enableInfiniteScroll, infiniteScrollDescriptor]);
+  }, [enablePageJump, enableInfiniteScroll, gridType, infiniteScrollDescriptor]);
 
   const slotProps = useMemo(
     () => ({
@@ -1360,7 +1492,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
                 columns={filteredColumns}
                 editMode="row"
                 rowModesModel={rowModesModel}
-                disableColumnSelector
+                disableColumnSelector={!COLUMN_SELECTOR_ENABLED_GRID_TYPES.has(gridType)}
+                disableVirtualization={E2E_DISABLE_VIRTUALIZATION}
                 onRowModesModelChange={handleRowModesModelChange}
                 onRowEditStop={handleRowEditStop}
                 onCellDoubleClick={handleCellDoubleClick}
@@ -1376,6 +1509,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
                 pageSizeOptions={pageSizeOptions}
                 filterModel={gridFilterModel}
                 onFilterModelChange={handleFilterModelChange}
+                onColumnVisibilityModelChange={handleColumnVisibilityModelChange}
+                onColumnWidthChange={handleColumnWidthChange}
                 ignoreDiacritics
                 initialState={gridInitialState}
                 slots={gridSlots}
@@ -1392,7 +1527,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           )}
         </Box>
         {!!snackbar && (
-          <Snackbar open anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
+          <Snackbar open anchorOrigin={{ vertical: 'top', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
             <Alert {...snackbar} onClose={handleCloseSnackbar} />
           </Snackbar>
         )}
@@ -1405,7 +1540,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             onClose={handleCancelAction}
             onConfirm={handleConfirmAction}
             title="Confirm Deletion"
-            content="Are you sure you want to delete this row? This action cannot be undone."
+            content={`Delete ${describeFixedDataRow(pendingDeleteRow)}? This action cannot be undone.`}
           />
         )}
         {isResetDialogOpen && <ResetViewModal open={isResetDialogOpen} setOpen={setIsResetDialogOpen} triggerResetView={async () => {}} />}

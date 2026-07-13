@@ -10,6 +10,7 @@
 /.idea/*
 /.idea
 /cypress/screenshots
+/cypress/downloads
 
 # testing
 /coverage

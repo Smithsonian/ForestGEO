@@ -11,6 +11,19 @@ import ailogger from '@/ailogger';
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
+// A "multi-stem tree" is a tree carrying more than one distinct measured stem in the
+// CURRENT census. Requires a measured_stems CTE (TreeTag, StemTag) in scope. Shared by
+// the first-census and comparison branches so both always agree on the definition.
+const MULTI_STEM_TREES_SUBQUERY = `(SELECT COUNT(*) FROM (
+               SELECT TreeTag FROM measured_stems GROUP BY TreeTag HAVING COUNT(DISTINCT StemTag) > 1
+             ) multi)`;
+
+function parsePositiveIntegerParam(value: string): number | undefined {
+  if (!/^\d+$/.test(value)) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export async function GET(
   request: NextRequest,
   props: {
@@ -40,10 +53,10 @@ export async function GET(
   if (!validation.success) {
     // Try to use URL parameters as fallback — must still validate schema pattern and authorize access
     if (schemaParam && plotIDParam && censusIDParam) {
-      const plotID = parseInt(plotIDParam);
-      const censusID = parseInt(censusIDParam);
+      const plotID = parsePositiveIntegerParam(plotIDParam);
+      const censusID = parsePositiveIntegerParam(censusIDParam);
 
-      if (isNaN(plotID) || isNaN(censusID)) {
+      if (!plotID || !censusID) {
         return NextResponse.json({ error: 'Invalid plot ID or census ID parameters' }, { status: HTTPResponses.BAD_REQUEST });
       }
 
@@ -151,14 +164,32 @@ async function processMetrics(metric: string, schema: SchemaName, plotID: number
         const previousCensusID = prevCensusResult[0]?.PrevCensusID;
 
         if (!previousCensusID) {
-          // First census: all measured stems are new recruits
-          const countQuery = `SELECT COUNT(DISTINCT s.StemGUID) as CountNewRecruits
-            FROM ${schema}.coremeasurements cm
-            JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
-            WHERE cm.CensusID = ? AND s.CensusID = ?`;
-          const countResult = await connectionManager.executeQuery(countQuery, [censusID, censusID]);
+          // First census: there is no previous census, so "old stems" is undefined
+          // (null), not zero. Multi-stem trees and new recruits are real properties
+          // of the CURRENT census and must be computed here, not hardcoded.
+          const firstCensusQuery = `
+            WITH measured_stems AS (
+              SELECT DISTINCT s.StemGUID, t.TreeTag, s.StemTag
+              FROM ${schema}.coremeasurements cm
+              JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
+              JOIN ${schema}.trees t ON s.TreeID = t.TreeID
+              WHERE cm.CensusID = ? AND s.CensusID = ?
+            )
+            SELECT
+              ${MULTI_STEM_TREES_SUBQUERY} AS CountMultiStems,
+              -- Every measured stem is a recruit on a first census. Count rows the
+              -- same way the comparison branch does (one per distinct StemGUID):
+              -- concatenating tag pairs would yield NULL for NULL TreeTags and drop
+              -- those stems, contradicting the Stems tile.
+              (SELECT COUNT(*) FROM measured_stems) AS CountNewRecruits`;
+          const firstCensusResult = await connectionManager.executeQuery(firstCensusQuery, [censusID, censusID]);
           return NextResponse.json(
-            { CountOldStems: 0, CountMultiStems: 0, CountNewRecruits: countResult[0]?.CountNewRecruits || 0 },
+            {
+              CountOldStems: null,
+              CountMultiStems: firstCensusResult[0]?.CountMultiStems ?? 0,
+              CountNewRecruits: firstCensusResult[0]?.CountNewRecruits ?? 0,
+              isFirstCensus: true
+            },
             { status: HTTPResponses.OK }
           );
         }
@@ -186,7 +217,7 @@ async function processMetrics(metric: string, schema: SchemaName, plotID: number
           )
           SELECT
             COALESCE(SUM(CASE WHEN ps.TreeTag IS NOT NULL THEN 1 ELSE 0 END), 0) as CountOldStems,
-            COALESCE(SUM(CASE WHEN ps.TreeTag IS NULL AND pt.TreeTag IS NOT NULL THEN 1 ELSE 0 END), 0) as CountMultiStems,
+            ${MULTI_STEM_TREES_SUBQUERY} as CountMultiStems,
             COALESCE(SUM(CASE WHEN ps.TreeTag IS NULL AND pt.TreeTag IS NULL THEN 1 ELSE 0 END), 0) as CountNewRecruits
           FROM measured_stems ms
           LEFT JOIN previous_stems ps ON ms.TreeTag = ps.TreeTag AND ms.StemTag = ps.StemTag
@@ -197,7 +228,8 @@ async function processMetrics(metric: string, schema: SchemaName, plotID: number
           {
             CountOldStems: stResults[0]?.CountOldStems ?? 0,
             CountMultiStems: stResults[0]?.CountMultiStems ?? 0,
-            CountNewRecruits: stResults[0]?.CountNewRecruits ?? 0
+            CountNewRecruits: stResults[0]?.CountNewRecruits ?? 0,
+            isFirstCensus: false
           },
           { status: HTTPResponses.OK }
         );

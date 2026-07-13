@@ -17,7 +17,8 @@ import {
   usePlotContext,
   usePlotDispatch,
   useSiteContext,
-  useSiteDispatch
+  useSiteDispatch,
+  useSiteListContext
 } from '@/app/contexts/compat-hooks';
 import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/lib/db/definitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
@@ -37,6 +38,7 @@ import PlotsOverview from '@/components/dashboard/plotsoverview';
 import CensusesOverview from '@/components/dashboard/censusesoverview';
 import CensusStatsView from '@/components/dashboard/censusstatsview';
 import DataQualityCard from '@/components/dashboard/dataqualitycard';
+import { summarizeChange } from '@/components/changes/recentchangesexplorer';
 import { designTokens } from '@/config/design-tokens';
 import AddIcon from '@mui/icons-material/Add';
 import DatasetIcon from '@mui/icons-material/Dataset';
@@ -45,6 +47,7 @@ import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/config/store/appstore';
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
+import CensusCreationModal, { CensusCreationDetails } from '@/components/client/modals/censuscreationmodal';
 import { Plot } from '@/lib/db/definitions/zones';
 import { PlotWithCensusCount } from '@/components/dashboard/plotsoverview';
 import { CensusWithStats } from '@/components/dashboard/censusesoverview';
@@ -57,9 +60,10 @@ interface ProgressTachoType {
 }
 
 interface StemTypesType {
-  CountOldStems: number;
+  CountOldStems: number | null;
   CountMultiStems: number;
   CountNewRecruits: number;
+  isFirstCensus: boolean;
 }
 
 export default function DashboardPage() {
@@ -70,6 +74,7 @@ export default function DashboardPage() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const siteListContext = useSiteListContext();
   const censusListContext = useOrgCensusListContext();
   const censusListDispatch = useOrgCensusListDispatch();
   const censusDispatch = useOrgCensusDispatch();
@@ -79,7 +84,10 @@ export default function DashboardPage() {
   const userName = session?.user?.name;
   const userEmail = session?.user?.email;
   const userRole = session?.user?.userStatus;
-  const allowedSites = session?.user?.sites;
+  // Global-role users carry no explicit per-user site grants; like the sidebar, they
+  // derive their accessible sites from the full catalog site list context instead.
+  const isGlobalUser = userRole === 'global';
+  const allowedSites = isGlobalUser ? siteListContext : session?.user?.sites;
 
   // Get plot and census lists from store
   const plotList = useAppStore(state => state.plotList);
@@ -97,10 +105,13 @@ export default function DashboardPage() {
   const [activeUsers, setActiveUsers] = useState(0);
   const [countStems, setCountStems] = useState(0);
   const [countTrees, setCountTrees] = useState(0);
+  // CountOldStems starts null so the tile shows the "no comparison" placeholder
+  // instead of a confident 0 until real data arrives.
   const [stemTypes, setStemTypes] = useState<StemTypesType>({
-    CountOldStems: 0,
+    CountOldStems: null,
     CountMultiStems: 0,
-    CountNewRecruits: 0
+    CountNewRecruits: 0,
+    isFirstCensus: false
   });
 
   // Plot edit modal state
@@ -115,6 +126,9 @@ export default function DashboardPage() {
 
   // Census creation state
   const isCreatingCensusRef = useRef(false);
+  const [openCreateCensusModal, setOpenCreateCensusModal] = useState(false);
+  const [isCreatingCensus, setIsCreatingCensus] = useState(false);
+  const nextCensusNumber = Math.max(0, ...(censusListContext ?? []).map(census => census?.plotCensusNumber ?? 0)) + 1;
 
   // Track loading state and last loaded key to prevent duplicate requests
   const loadingRef = useRef<boolean>(false);
@@ -190,7 +204,8 @@ export default function DashboardPage() {
       setStemTypes({
         CountOldStems: data.stemTypes.CountOldStems,
         CountMultiStems: data.stemTypes.CountMultiStems,
-        CountNewRecruits: data.stemTypes.CountNewRecruits
+        CountNewRecruits: data.stemTypes.CountNewRecruits,
+        isFirstCensus: data.stemTypes.isFirstCensus
       });
 
       ailogger.info('Dashboard metrics loaded successfully via aggregated API');
@@ -286,9 +301,9 @@ export default function DashboardPage() {
   }, []);
 
   const handleAddPlot = useCallback(() => {
-    // Navigate to the plots data input page for adding new plots
-    router.push('/fixeddatainput/plots');
-  }, [router]);
+    setPlotToEdit(null);
+    setOpenPlotModal(true);
+  }, []);
 
   // Census list refresh function
   const refreshCensusList = useCallback(async () => {
@@ -317,6 +332,7 @@ export default function DashboardPage() {
     } catch (error) {
       console.error('Failed to refresh census list:', error);
       ailogger.error('Failed to refresh census list', error instanceof Error ? error : undefined);
+      throw error;
     }
   }, [
     currentSite?.schemaName,
@@ -358,15 +374,27 @@ export default function DashboardPage() {
       try {
         console.log(loadingMessage, { schema: currentSite.schemaName, censusID, type: deleteType });
 
-        const response = await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=${deleteType}`);
+        const response = await fetch('/api/clearcensus', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ schema: currentSite.schemaName, censusID, type: deleteType })
+        });
         if (!response.ok) {
           throw new Error(`Failed to clear census: ${response.status}`);
         }
 
-        // Refresh the census list to reflect the deletion
+        // Refresh the census list to reflect the deletion. The deletion has
+        // already committed at this point, so a refresh failure must not be
+        // reported as a failed delete — retrying the delete would 404 and the
+        // wrong error would send the researcher chasing the wrong operation.
         setCensusToDelete(null);
-        await refreshCensusList();
-        console.log('Census deletion completed, list refreshed');
+        try {
+          await refreshCensusList();
+          console.log('Census deletion completed, list refreshed');
+        } catch (refreshError: any) {
+          ailogger.error('Census deleted but census list refresh failed', refreshError);
+          setError('Census deleted, but refreshing the census list failed. Reload the page to see the updated list.');
+        }
 
         // Ensure loading shows for at least 750ms for visual feedback
         const elapsed = Date.now() - startTime;
@@ -385,11 +413,8 @@ export default function DashboardPage() {
     [censusToDelete, currentSite?.schemaName, refreshCensusList, setLoading]
   );
 
-  const handleAddCensus = useCallback(async () => {
-    console.log('handleAddCensus called');
-
+  const handleAddCensus = useCallback(() => {
     if (isCreatingCensusRef.current) {
-      console.log('Census creation already in progress, ignoring click');
       return;
     }
 
@@ -413,68 +438,70 @@ export default function DashboardPage() {
       return;
     }
 
-    isCreatingCensusRef.current = true;
     setError(null);
-    // destructive mutation — global overlay blocks UI for the duration of the API call
-    setLoading(true, 'Creating new census...', undefined, 'processing');
-    const startTime = Date.now();
+    setOpenCreateCensusModal(true);
+  }, [currentCensus, censusListContext]);
 
-    try {
-      const highestPlotCensusNumber =
-        censusListContext && censusListContext.length > 0
-          ? censusListContext.reduce(
-              (max, census) => ((census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max),
-              censusListContext[0]?.plotCensusNumber ?? 0
-            )
-          : 0;
+  const handleConfirmCreateCensus = useCallback(
+    async (details: CensusCreationDetails) => {
+      if (isCreatingCensusRef.current || !currentSite?.schemaName || !currentPlot?.plotID) return;
 
-      const mapper = new OrgCensusToCensusResultMapper();
-      console.log('Creating new census with plotCensusNumber:', highestPlotCensusNumber + 1);
-      const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
-      if (!newCensusID) {
-        const errorMsg = 'Failed to create new census - census creation returned invalid ID. Please ensure site and plot are properly selected.';
-        console.error(errorMsg);
-        setError(errorMsg);
-        return;
+      isCreatingCensusRef.current = true;
+      setIsCreatingCensus(true);
+      setError(null);
+      setLoading(true, 'Creating new census...', undefined, 'processing');
+      const startTime = Date.now();
+
+      try {
+        const mapper = new OrgCensusToCensusResultMapper();
+        const newCensusID = await mapper.startNewCensus(currentSite.schemaName, currentPlot.plotID, nextCensusNumber, details);
+        if (!newCensusID) {
+          const errorMsg = 'Failed to create new census - census creation returned invalid ID. Please ensure site and plot are properly selected.';
+          console.error(errorMsg);
+          setError(errorMsg);
+          return;
+        }
+        console.log('New census created with ID:', newCensusID);
+
+        // Rollover data from current census to new census (only if we have a valid source census)
+        const sourceCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+        if (sourceCensusID !== undefined && sourceCensusID !== null) {
+          await Promise.all(
+            ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
+              const rolloverResponse = await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${sourceCensusID}/${newCensusID}`);
+              if (!rolloverResponse.ok) {
+                throw new Error(`Failed to rollover ${key}: ${rolloverResponse.status}`);
+              }
+            })
+          );
+        } else {
+          ailogger.info('Skipping rollover - no valid source census ID available (this is expected for the first census)');
+        }
+
+        // Refresh the census list to show the new census
+        await refreshCensusList();
+        setOpenCreateCensusModal(false);
+
+        // Ensure loading shows for at least 750ms for visual feedback
+        const elapsed = Date.now() - startTime;
+        if (elapsed < 750) {
+          await new Promise(resolve => setTimeout(resolve, 750 - elapsed));
+        }
+      } catch (error) {
+        console.error('Error creating census:', error);
+        ailogger.error('Error creating census:', error instanceof Error ? error : undefined);
+        setError('Failed to create census. Please try again.');
+      } finally {
+        setLoading(false);
+        setIsCreatingCensus(false);
+        // Debounce: prevent rapid successive clicks
+        censusCreationTimerRef.current = setTimeout(() => {
+          isCreatingCensusRef.current = false;
+        }, 1000);
       }
-      console.log('New census created with ID:', newCensusID);
-
-      // Rollover data from current census to new census (only if we have a valid source census)
-      const sourceCensusID = currentCensus?.dateRanges?.[0]?.censusID;
-      if (sourceCensusID !== undefined && sourceCensusID !== null) {
-        await Promise.all(
-          ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
-            const rolloverResponse = await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${sourceCensusID}/${newCensusID}`);
-            if (!rolloverResponse.ok) {
-              throw new Error(`Failed to rollover ${key}: ${rolloverResponse.status}`);
-            }
-          })
-        );
-      } else {
-        ailogger.info('Skipping rollover - no valid source census ID available (this is expected for the first census)');
-      }
-
-      // Refresh the census list to show the new census
-      console.log('Census creation successful, refreshing census list');
-      await refreshCensusList();
-
-      // Ensure loading shows for at least 750ms for visual feedback
-      const elapsed = Date.now() - startTime;
-      if (elapsed < 750) {
-        await new Promise(resolve => setTimeout(resolve, 750 - elapsed));
-      }
-    } catch (error) {
-      console.error('Error creating census:', error);
-      ailogger.error('Error creating census:', error instanceof Error ? error : undefined);
-      setError('Failed to create census. Please try again.');
-    } finally {
-      setLoading(false);
-      // Debounce: prevent rapid successive clicks
-      censusCreationTimerRef.current = setTimeout(() => {
-        isCreatingCensusRef.current = false;
-      }, 1000);
-    }
-  }, [currentCensus, censusListContext, currentSite, currentPlot, refreshCensusList, setLoading]);
+    },
+    [currentCensus, currentSite, currentPlot, nextCensusNumber, refreshCensusList, setLoading]
+  );
 
   // Handle manual reset after successful plot edit
   useEffect(() => {
@@ -491,6 +518,7 @@ export default function DashboardPage() {
   // Reset all dashboard data when contexts are cleared
   useEffect(() => {
     if (!currentSite || !currentPlot || !currentCensus) {
+      setIsLoading(false);
       setProgressTacho({
         TotalQuadrats: 0,
         PopulatedPercent: 0,
@@ -501,9 +529,10 @@ export default function DashboardPage() {
       setCountStems(0);
       setCountTrees(0);
       setStemTypes({
-        CountOldStems: 0,
+        CountOldStems: null,
         CountMultiStems: 0,
-        CountNewRecruits: 0
+        CountNewRecruits: 0,
+        isFirstCensus: false
       });
       setChangelogHistory(Array(5));
       lastLoadedKeyRef.current = ''; // Reset tracking key when contexts are cleared
@@ -521,6 +550,7 @@ export default function DashboardPage() {
       }
 
       loadingRef.current = true;
+      setIsLoading(true);
       lastLoadedKeyRef.current = loadKey;
 
       // Load all dashboard metrics with single aggregated API call (3-4x faster)
@@ -528,6 +558,7 @@ export default function DashboardPage() {
         .catch(ailogger.error)
         .finally(() => {
           loadingRef.current = false;
+          setIsLoading(false);
         });
     }
   }, [currentSite, currentPlot, currentCensus, loadAllDashboardMetrics, loadChangelogHistory]);
@@ -736,7 +767,7 @@ export default function DashboardPage() {
               onRefresh={async () => {
                 // Trigger measurements summary refresh with post-validation execution
                 if (currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID) {
-                  await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, {
+                  const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -745,6 +776,9 @@ export default function DashboardPage() {
                       runPostValidation: true
                     })
                   });
+                  if (!response.ok) {
+                    throw new Error(`Failed to refresh validations (HTTP ${response.status})`);
+                  }
                 }
               }}
             />
@@ -903,7 +937,13 @@ export default function DashboardPage() {
                                 </Avatar>
                                 <Box sx={{ flex: 1, minWidth: 0 }}>
                                   <Typography level="body-sm" sx={{ fontWeight: 600 }}>
-                                    {log.operation || 'Update'} on {log.tableName || 'Data'}
+                                    {summarizeChange({
+                                      operation: (log.operation || 'UPDATE') as 'INSERT' | 'UPDATE' | 'DELETE',
+                                      tableName: log.tableName || 'data',
+                                      oldRowState: log.oldRowState ?? null,
+                                      newRowState: log.newRowState ?? null,
+                                      recordID: String(log.recordID ?? '')
+                                    })}
                                   </Typography>
                                   <Typography level="body-xs" color="neutral">
                                     {moment(log.changeTimestamp).fromNow()}
@@ -977,10 +1017,22 @@ export default function DashboardPage() {
         </>
       )}
 
-      {/* Plot Edit Modal */}
-      {plotToEdit && (
-        <PlotCardModal plot={plotToEdit} openPlotCardModal={openPlotModal} setOpenPlotCardModal={handleClosePlotModal} setManualReset={setManualReset} />
-      )}
+      {/* Plot create/edit modal */}
+      <PlotCardModal
+        plot={plotToEdit ?? undefined}
+        openPlotCardModal={openPlotModal}
+        setOpenPlotCardModal={handleClosePlotModal}
+        setManualReset={setManualReset}
+      />
+
+      <CensusCreationModal
+        open={openCreateCensusModal}
+        censusNumber={nextCensusNumber}
+        plotName={currentPlot?.plotName}
+        isCreating={isCreatingCensus}
+        onClose={() => setOpenCreateCensusModal(false)}
+        onCreate={handleConfirmCreateCensus}
+      />
 
       {/* Census Delete Confirmation Modal */}
       <CensusDeletionModal

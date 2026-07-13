@@ -27,7 +27,8 @@ describe('MeasurementsCommons - Validation Count Refresh', () => {
   it('should fetch fresh counts from database, not cached data', async () => {
     const mockCountsResponse = {
       CountValid: 10,
-      CountErrors: 2,
+      CountFailedNoLog: 2,
+      CountUnresolvedLogged: 2,
       CountPending: 0,
       CountOldTrees: 5,
       CountNewRecruits: 3,
@@ -48,7 +49,7 @@ describe('MeasurementsCommons - Validation Count Refresh', () => {
 
       const refreshCounts = useCallback(async () => {
         const query = `SELECT SUM(CASE WHEN vft.IsValidated = TRUE THEN 1 ELSE 0 END) AS CountValid,
-                              SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountErrors,
+                              SUM(CASE WHEN vft.IsValidated = FALSE AND NOT (EXISTS (SELECT 1)) THEN 1 ELSE 0 END) AS CountFailedNoLog,
                               SUM(CASE WHEN vft.IsValidated IS NULL THEN 1 ELSE 0 END) AS CountPending
                        FROM testschema.measurementssummary vft
                        WHERE vft.PlotID = 1`;
@@ -62,7 +63,7 @@ describe('MeasurementsCommons - Validation Count Refresh', () => {
         const data = await response.json();
         setCounts({
           valid: data[0].CountValid,
-          errors: data[0].CountErrors,
+          errors: data[0].CountUnresolvedLogged,
           pending: data[0].CountPending
         });
       }, []);
@@ -93,7 +94,8 @@ describe('MeasurementsCommons - Validation Count Refresh', () => {
     // Initial state: 3 pending records
     const initialCounts = {
       CountValid: 5,
-      CountErrors: 0,
+      CountFailedNoLog: 0,
+      CountUnresolvedLogged: 0,
       CountPending: 3,
       CountOldTrees: 3,
       CountNewRecruits: 1,
@@ -103,7 +105,8 @@ describe('MeasurementsCommons - Validation Count Refresh', () => {
     // After validation: pending records become valid
     const updatedCounts = {
       CountValid: 8, // 5 + 3
-      CountErrors: 0,
+      CountFailedNoLog: 0,
+      CountUnresolvedLogged: 0,
       CountPending: 0, // 3 -> 0
       CountOldTrees: 3,
       CountNewRecruits: 1,
@@ -157,7 +160,8 @@ describe('MeasurementsCommons - Validation Count Refresh', () => {
   it('should refresh counts when filter buttons are toggled', async () => {
     const mockCounts = {
       CountValid: 10,
-      CountErrors: 2,
+      CountFailedNoLog: 2,
+      CountUnresolvedLogged: 2,
       CountPending: 3,
       CountOldTrees: 5,
       CountNewRecruits: 3,
@@ -268,7 +272,8 @@ describe('MeasurementsCommons - Validation Count Refresh', () => {
   it('should update both measurement counts and failed measurement counts', async () => {
     const mockCountsResponse = {
       CountValid: 10,
-      CountErrors: 2,
+      CountFailedNoLog: 2,
+      CountUnresolvedLogged: 2,
       CountPending: 3,
       CountOldTrees: 5,
       CountNewRecruits: 3,

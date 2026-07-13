@@ -192,7 +192,7 @@ export default function ValidationsPage() {
               <TableCell sx={{ width: '12%' }}>Validation</TableCell>
               <TableCell sx={{ width: '18%' }}>Description</TableCell>
               <TableCell sx={{ width: '12%' }}>Affecting Criteria</TableCell>
-              <TableCell sx={{ width: '44%' }}>Query</TableCell>
+              <TableCell sx={{ width: '44%' }}>Query details</TableCell>
               <TableCell sx={{ width: '8%' }}>Actions</TableCell>
             </TableRow>
           </TableHead>

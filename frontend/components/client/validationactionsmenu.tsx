@@ -20,7 +20,12 @@ interface ValidationActionsMenuProps {
   onResetValidations: () => void;
   onRefreshView: () => Promise<void>;
   pendingCount?: number;
-  errorCount?: number;
+  /**
+   * Rows the override action will flip to valid (IsValidated FALSE OR NULL):
+   * genuinely failed rows PLUS never-validated ones. The copy must not call
+   * these all "failed" — that misreports pending rows as failures.
+   */
+  overridableCount?: number;
   disabled?: boolean;
 }
 
@@ -30,7 +35,7 @@ export default function ValidationActionsMenu({
   onResetValidations,
   onRefreshView,
   pendingCount = 0,
-  errorCount = 0
+  overridableCount = 0
 }: ValidationActionsMenuProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -55,12 +60,12 @@ export default function ValidationActionsMenu({
     },
     {
       id: 'override-validations',
-      label: 'Override Failed Validations',
-      description: errorCount > 0 ? `Force ${errorCount} failed row(s) to pass` : 'No failed rows to override',
+      label: 'Override Validations',
+      description: overridableCount > 0 ? `Force ${overridableCount} failed or not-yet-validated row(s) to pass` : 'No rows to override',
       icon: <GppGoodOutlined />,
       onClick: onOverrideValidations,
       color: 'warning',
-      disabled: errorCount === 0
+      disabled: overridableCount === 0
     },
     {
       id: 'reset-validations',

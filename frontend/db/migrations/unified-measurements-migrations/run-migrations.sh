@@ -71,6 +71,7 @@ ORDERED_MIGRATIONS=(
     "57_backfill_measurementssummary_stemguid.sql"
     "58_refresh_rawcodes_empty_token_handling.sql"
     "60_add_published_stemid.sql"
+    "61_scope_postvalidation_last_run.sql"
 )
 
 # ---------------------------------------------------------------------------

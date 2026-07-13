@@ -7,6 +7,7 @@ type LoadingCategory = 'api' | 'upload' | 'processing' | 'general';
 interface ApiWrapperOptions {
   loadingMessage?: string;
   category?: LoadingCategory;
+  suppressGlobalLoading?: boolean;
   showErrorAlert?: boolean;
   retryAttempts?: number;
   retryDelay?: number;
@@ -46,6 +47,7 @@ export class ApiWrapper {
     const {
       loadingMessage = 'Loading...',
       category = 'api',
+      suppressGlobalLoading = false,
       showErrorAlert = true,
       retryAttempts = 1,
       retryDelay = 1000,
@@ -59,7 +61,7 @@ export class ApiWrapper {
     }
 
     const { startOperation, endOperation } = ApiWrapper.loadingContext;
-    const operationId = startOperation(loadingMessage, category);
+    const operationId = suppressGlobalLoading ? undefined : startOperation(loadingMessage, category);
 
     let lastError: Error | null = null;
 
@@ -82,7 +84,7 @@ export class ApiWrapper {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
-        endOperation(operationId);
+        if (operationId) endOperation(operationId);
         return response;
       } catch (error) {
         clearTimeout(timeoutId);
@@ -108,7 +110,7 @@ export class ApiWrapper {
     }
 
     // All attempts failed
-    endOperation(operationId);
+    if (operationId) endOperation(operationId);
 
     if (showErrorAlert && lastError) {
       alert(`Request failed: ${lastError.message}`);

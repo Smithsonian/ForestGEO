@@ -16,6 +16,21 @@ describe('LoginLogout - Functional Tests', () => {
   const mockSignIn = vi.fn();
   const mockSignOut = vi.fn();
 
+  // User Settings / User-Site Assignments / Provisioning menu items are gated to the
+  // global role; tests asserting them must authenticate as a global admin.
+  const mockGlobalAdminSession = () => {
+    (useSession as any).mockReturnValue({
+      data: {
+        user: {
+          name: 'John Doe',
+          email: 'john.doe@example.com',
+          userStatus: 'global'
+        }
+      },
+      status: 'authenticated'
+    });
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     (useRouter as any).mockReturnValue({ push: mockPush });
@@ -178,6 +193,7 @@ describe('LoginLogout - Functional Tests', () => {
     });
 
     it('MUST open settings menu when avatar clicked', async () => {
+      mockGlobalAdminSession();
       const user = userEvent.setup();
 
       render(<LoginLogout />);
@@ -193,6 +209,7 @@ describe('LoginLogout - Functional Tests', () => {
     });
 
     it('MUST close settings menu when avatar clicked again', async () => {
+      mockGlobalAdminSession();
       const user = userEvent.setup();
 
       render(<LoginLogout />);
@@ -213,6 +230,7 @@ describe('LoginLogout - Functional Tests', () => {
     });
 
     it('MUST be keyboard accessible - avatar button with Enter', async () => {
+      mockGlobalAdminSession();
       const user = userEvent.setup();
 
       render(<LoginLogout />);
@@ -228,6 +246,7 @@ describe('LoginLogout - Functional Tests', () => {
     });
 
     it('MUST be keyboard accessible - avatar button with Space', async () => {
+      mockGlobalAdminSession();
       render(<LoginLogout />);
 
       const avatarButton = screen.getByRole('button', { name: /open user menu/i });
@@ -258,6 +277,7 @@ describe('LoginLogout - Functional Tests', () => {
     });
 
     it('MUST move focus to the first menu item when the menu opens', async () => {
+      mockGlobalAdminSession();
       const user = userEvent.setup();
       render(<LoginLogout />);
       await user.click(screen.getByRole('button', { name: /open user menu/i }));
@@ -290,11 +310,57 @@ describe('LoginLogout - Functional Tests', () => {
           user: {
             name: 'Jane Admin',
             email: 'jane@example.com',
+            userStatus: 'global'
+          }
+        },
+        status: 'authenticated'
+      });
+    });
+
+    it('MUST show user management to db admins while keeping Provisioning global-only', async () => {
+      (useSession as any).mockReturnValue({
+        data: {
+          user: {
+            name: 'Dana DbAdmin',
+            email: 'dana@example.com',
             userStatus: 'db admin'
           }
         },
         status: 'authenticated'
       });
+      const user = userEvent.setup();
+
+      render(<LoginLogout />);
+
+      await user.click(screen.getByRole('button', { name: /open user menu/i }));
+
+      expect(await screen.findByText('User Settings')).toBeInTheDocument();
+      expect(screen.getByText('User-Site Assignments')).toBeInTheDocument();
+      expect(screen.getByText('Site Settings')).toBeInTheDocument();
+      expect(screen.queryByText('Provisioning')).not.toBeInTheDocument();
+    });
+
+    it('MUST hide user-administration items from non-admin roles', async () => {
+      (useSession as any).mockReturnValue({
+        data: {
+          user: {
+            name: 'Fred Fieldcrew',
+            email: 'fred@example.com',
+            userStatus: 'field crew'
+          }
+        },
+        status: 'authenticated'
+      });
+      const user = userEvent.setup();
+
+      render(<LoginLogout />);
+
+      await user.click(screen.getByRole('button', { name: /open user menu/i }));
+
+      expect(await screen.findByText('Site Settings')).toBeInTheDocument();
+      expect(screen.queryByText('User Settings')).not.toBeInTheDocument();
+      expect(screen.queryByText('User-Site Assignments')).not.toBeInTheDocument();
+      expect(screen.queryByText('Provisioning')).not.toBeInTheDocument();
     });
 
     it('MUST navigate to /admin/users when User Settings clicked', async () => {

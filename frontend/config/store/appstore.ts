@@ -4,7 +4,7 @@
  */
 
 import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
+import { createJSONStorage, devtools, persist, PersistStorage, StorageValue } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
 import { Plot, Quadrat, Site, PlotRDS, QuadratRDS, SitesRDS } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
@@ -141,6 +141,90 @@ const initialState = {
 
   // Hydration State
   hasHydrated: false
+};
+
+// ============================================================================
+// Persisted Selection Storage (guarded)
+// ============================================================================
+
+const SELECTION_STORAGE_KEY = 'forestgeo-storage';
+
+const SELECTION_KEYS = ['currentSite', 'currentPlot', 'currentCensus', 'currentQuadrat'] as const;
+
+type PersistedSelections = Partial<Pick<AppState, (typeof SELECTION_KEYS)[number]>>;
+
+const hasAnySelection = (state: PersistedSelections | undefined): boolean => SELECTION_KEYS.some(key => state?.[key] !== undefined && state?.[key] !== null);
+
+let explicitSelectionClear = false;
+
+/**
+ * Signals that the next empty-selection persist write is an intentional clear
+ * (user deselection, error-boundary reset) and must be allowed through the
+ * guarded storage below.
+ */
+export const markExplicitSelectionClear = () => {
+  explicitSelectionClear = true;
+};
+
+const MAX_RETAINED_WIPE_TRACES = 5;
+
+const traceBlockedSelectionWipe = () => {
+  if (process.env.NODE_ENV !== 'production') {
+    // Regression alarm: some writer tried to clobber a persisted selection
+    // with an empty one without going through clearSelections()/reset().
+    console.trace(`[${SELECTION_STORAGE_KEY}] BLOCKED: empty selection state attempted to overwrite a persisted selection`);
+    const diagnosticWindow = window as typeof window & { __selectionWipeTraces?: string[] };
+    diagnosticWindow.__selectionWipeTraces = [...(diagnosticWindow.__selectionWipeTraces ?? []), new Error().stack ?? 'no stack available'].slice(
+      -MAX_RETAINED_WIPE_TRACES
+    );
+  }
+};
+
+/**
+ * Wraps the default JSON localStorage so that an all-empty selection state can
+ * never silently overwrite a persisted non-empty one. zustand's persist
+ * middleware rewrites the whole partialized state on ANY set(), so a single
+ * misbehaving writer (e.g. a UI control firing a spurious deselect during
+ * boot) used to wipe the user's site/plot/census and bounce them to
+ * /dashboard on every reload (bug F7).
+ */
+const createGuardedSelectionStorage = (): PersistStorage<PersistedSelections> | undefined => {
+  if (
+    typeof window === 'undefined' ||
+    typeof localStorage.getItem !== 'function' ||
+    typeof localStorage.setItem !== 'function' ||
+    typeof localStorage.removeItem !== 'function'
+  ) {
+    return undefined;
+  }
+  const baseStorage = createJSONStorage<PersistedSelections>(() => localStorage);
+  if (!baseStorage) return undefined;
+
+  const readPersistedSelections = (name: string): PersistedSelections | undefined => {
+    const raw = localStorage.getItem(name);
+    if (!raw) return undefined;
+    try {
+      return (JSON.parse(raw) as StorageValue<PersistedSelections>).state;
+    } catch (error) {
+      if (error instanceof SyntaxError) return undefined;
+      throw error;
+    }
+  };
+
+  return {
+    getItem: name => baseStorage.getItem(name),
+    setItem: (name, value) => {
+      if (!hasAnySelection(value.state)) {
+        if (!explicitSelectionClear && hasAnySelection(readPersistedSelections(name))) {
+          traceBlockedSelectionWipe();
+          return;
+        }
+        explicitSelectionClear = false;
+      }
+      baseStorage.setItem(name, value);
+    },
+    removeItem: name => baseStorage.removeItem(name)
+  };
 };
 
 // ============================================================================
@@ -345,9 +429,13 @@ export const useAppStore = create<AppState>()(
         },
 
         // ===== Reset Actions =====
-        reset: () => set(initialState, false, 'reset'),
+        reset: () => {
+          markExplicitSelectionClear();
+          set(initialState, false, 'reset');
+        },
 
-        clearSelections: () =>
+        clearSelections: () => {
+          markExplicitSelectionClear();
           set(
             {
               currentSite: undefined,
@@ -357,13 +445,15 @@ export const useAppStore = create<AppState>()(
             },
             false,
             'clearSelections'
-          ),
+          );
+        },
 
         // ===== Hydration Actions =====
         setHasHydrated: (state: boolean) => set({ hasHydrated: state }, false, 'setHasHydrated')
       }),
       {
-        name: 'forestgeo-storage', // localStorage key
+        name: SELECTION_STORAGE_KEY, // localStorage key
+        storage: createGuardedSelectionStorage(),
         partialize: state => ({
           // Only persist user selections
           currentSite: state.currentSite,

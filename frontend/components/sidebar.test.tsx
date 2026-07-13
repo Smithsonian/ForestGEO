@@ -1,13 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type React from 'react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import Sidebar from './sidebar';
+import Sidebar, { isProgrammaticSelectClear } from './sidebar';
 import { useSession } from 'next-auth/react';
 import { usePathname, useRouter } from 'next/navigation';
+import { useAppStore } from '@/config/store/appstore';
 
 // Mock all dependencies
 vi.mock('next-auth/react');
 vi.mock('next/navigation');
+// Real server action ('use server' + next/headers cookies()) has no request scope in jsdom;
+// the F8 nav tests below exercise real site/plot/census dispatch through the Zustand store,
+// so this must be stubbed rather than the dispatch itself.
+vi.mock('@/app/actions/cookiemanager', () => ({
+  submitCookie: vi.fn().mockResolvedValue(undefined)
+}));
 vi.mock('@/app/contexts/userselectionprovider', () => ({
   useOrgCensusContext: () => null,
   useOrgCensusDispatch: () => vi.fn(),
@@ -26,13 +34,12 @@ vi.mock('@/app/contexts/loadingprovider', () => ({
     setLoading: vi.fn()
   })
 }));
+const { mockValidity } = vi.hoisted(() => ({
+  mockValidity: { attributes: true, species: true, quadrats: true }
+}));
 vi.mock('@/app/contexts/datavalidityprovider', () => ({
   useDataValidityContext: () => ({
-    validity: {
-      attributes: true,
-      species: true,
-      quadrats: true
-    },
+    validity: mockValidity,
     isDataValid: true,
     shouldAddPlot: false,
     shouldAddCensus: false
@@ -71,7 +78,7 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('Accessibility - Semantic HTML', () => {
     it('MUST render sidebar container', () => {
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       // Sidebar renders as Stack without aside wrapper (multiple ForestGEO texts exist)
       const forestgeoElements = screen.getAllByText('ForestGEO');
@@ -79,14 +86,14 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST have heading for branding', () => {
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
-      const heading = screen.getByRole('heading', { level: 1 });
+      const heading = screen.getByRole('heading', { level: 2 });
       expect(heading).toHaveTextContent('ForestGEO');
     });
 
     it('MUST have accessible site selection dropdown', () => {
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
       expect(siteSelect).toBeInTheDocument();
@@ -97,7 +104,7 @@ describe('Sidebar - Functional Tests', () => {
       // Census dropdown only renders when a plot is selected
       // This test documents the expected behavior when plot context is available
       // Without a plot context, the census dropdown is not rendered by design
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       // When no plot is selected, census dropdown should not be visible
       const censusSelect = screen.queryByRole('combobox', { name: /select a census/i });
@@ -108,21 +115,21 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('Branding and Layout', () => {
     it('MUST render ForestGEO branding', () => {
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const forestgeoElements = screen.getAllByText('ForestGEO');
       expect(forestgeoElements.length).toBeGreaterThan(0);
     });
 
     it('MUST render site selection component', () => {
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const siteSelect = screen.getByTestId('site-select-component');
       expect(siteSelect).toBeInTheDocument();
     });
 
     it('MUST include dividers to separate sections', () => {
-      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const dividers = container.querySelectorAll('hr');
       expect(dividers.length).toBeGreaterThan(0);
@@ -131,7 +138,7 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('LoginLogout Integration', () => {
     it('MUST render LoginLogout component', () => {
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       // LoginLogout should show user info when authenticated
       expect(screen.getByText('Test User')).toBeInTheDocument();
@@ -144,7 +151,7 @@ describe('Sidebar - Functional Tests', () => {
         status: 'unauthenticated'
       });
 
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       expect(screen.getByText('Login to access')).toBeInTheDocument();
     });
@@ -152,7 +159,7 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('Selection Dropdowns', () => {
     it('MUST render site selection dropdown', () => {
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
       expect(siteSelect).toBeInTheDocument();
@@ -160,7 +167,7 @@ describe('Sidebar - Functional Tests', () => {
 
     it('MUST render census selection dropdown only when plot is selected', () => {
       // Census dropdown only renders when a plot is selected
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       // Without a plot selected, the census dropdown should not be present
       const censusSelect = screen.queryByRole('combobox', { name: /select a census/i });
@@ -168,7 +175,7 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST mark required fields with aria-required', () => {
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
       expect(siteSelect).toHaveAttribute('aria-required', 'true');
@@ -177,21 +184,21 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('Component Integrity', () => {
     it('MUST render without crashing', () => {
-      expect(() => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />)).not.toThrow();
+      expect(() => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />)).not.toThrow();
     });
 
     it('MUST render consistently across multiple renders', () => {
-      const { rerender } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      const { rerender } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
       const firstRender = screen.getAllByText('ForestGEO')[0].outerHTML;
 
-      rerender(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      rerender(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
       const secondRender = screen.getAllByText('ForestGEO')[0].outerHTML;
 
       expect(firstRender).toBe(secondRender);
     });
 
     it('MUST handle different authentication states', () => {
-      const { rerender } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      const { rerender } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
       expect(screen.getByText('Test User')).toBeInTheDocument();
 
       (useSession as any).mockReturnValue({
@@ -199,24 +206,24 @@ describe('Sidebar - Functional Tests', () => {
         status: 'unauthenticated'
       });
 
-      rerender(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      rerender(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
       expect(screen.getByText('Login to access')).toBeInTheDocument();
     });
 
     it('MUST handle different route contexts', () => {
       (usePathname as any).mockReturnValue('/dashboard');
-      const { rerender } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
-      expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
+      const { rerender } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+      expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument();
 
       (usePathname as any).mockReturnValue('/measurementshub');
-      rerender(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
-      expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
+      rerender(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+      expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument();
     });
   });
 
   describe('Responsive Layout', () => {
     it('MUST render with proper layout structure', () => {
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const forestgeoElements = screen.getAllByText('ForestGEO');
       expect(forestgeoElements.length).toBeGreaterThan(0);
@@ -224,7 +231,7 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST organize selections vertically', () => {
-      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const selectionComponents = container.querySelectorAll('[data-testid*="select"]');
       expect(selectionComponents.length).toBeGreaterThanOrEqual(1);
@@ -233,7 +240,7 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('SimpleToggler Component', () => {
     it('MUST render toggler with children when open', () => {
-      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       // SimpleToggler is used for expanding/collapsing sections
       const togglers = container.querySelectorAll('[data-testid="simple-toggler"]');
@@ -241,7 +248,7 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST apply transition animation', () => {
-      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const togglers = container.querySelectorAll('[data-testid="simple-toggler"]');
       togglers.forEach(toggler => {
@@ -253,7 +260,7 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('Screen Reader Experience', () => {
     it('MUST have accessible labels for all interactive elements', () => {
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const comboboxes = screen.getAllByRole('combobox');
       comboboxes.forEach(combobox => {
@@ -262,14 +269,14 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST have logical heading structure', () => {
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
-      const heading = screen.getByRole('heading', { level: 1 });
+      const heading = screen.getByRole('heading', { level: 2 });
       expect(heading).toHaveTextContent('ForestGEO');
     });
 
     it('MUST use semantic dividers for visual separation', () => {
-      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const dividers = container.querySelectorAll('hr[role="separator"]');
       expect(dividers.length).toBeGreaterThanOrEqual(0);
@@ -283,25 +290,25 @@ describe('Sidebar - Functional Tests', () => {
         status: 'loading'
       });
 
-      expect(() => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />)).not.toThrow();
+      expect(() => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />)).not.toThrow();
     });
 
     it('MUST handle missing pathname gracefully', () => {
       (usePathname as any).mockReturnValue(null);
 
-      expect(() => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />)).not.toThrow();
+      expect(() => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />)).not.toThrow();
     });
 
     it('MUST handle missing router gracefully', () => {
       (useRouter as any).mockReturnValue(null);
 
-      expect(() => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />)).not.toThrow();
+      expect(() => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />)).not.toThrow();
     });
   });
 
   describe('CSS and Theming', () => {
     it('MUST render with proper styling classes', () => {
-      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       // MUI classes should be applied
       const muiElements = container.querySelectorAll('[class*="Mui"]');
@@ -309,7 +316,7 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST apply styles to selection components', () => {
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const siteSelect = screen.getByTestId('site-select-component');
       expect(siteSelect).toHaveClass(/MuiSelect/);
@@ -319,7 +326,7 @@ describe('Sidebar - Functional Tests', () => {
   describe('User Interaction', () => {
     it('MUST allow interaction with selection dropdowns', async () => {
       const _user = userEvent.setup();
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
       expect(siteSelect).toBeInTheDocument();
@@ -328,7 +335,7 @@ describe('Sidebar - Functional Tests', () => {
 
     it('MUST support keyboard navigation', async () => {
       const _user = userEvent.setup();
-      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
       siteSelect.focus();
@@ -338,16 +345,346 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('Visual Structure', () => {
     it('MUST organize content with proper spacing', () => {
-      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       expect(container.querySelector('hr')).toBeInTheDocument();
     });
 
     it('MUST use dividers to separate sections', () => {
-      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
 
       const dividers = container.querySelectorAll('hr');
       expect(dividers.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('isProgrammaticSelectClear (F7 guard for site/plot/census Selects)', () => {
+    // MUI Base's internal itemsChange prune fires onChange with event === null and a
+    // null value while async-loaded options (re)register; treating it as a user
+    // deselect wiped the persisted selection on every reload (bug F7).
+    it('MUST flag the programmatic prune: null event with null value', () => {
+      expect(isProgrammaticSelectClear(null, null)).toBe(true);
+    });
+
+    it('MUST allow a user-driven deselect: real event with null value', () => {
+      const clickEvent = { type: 'click' } as unknown as React.SyntheticEvent;
+      expect(isProgrammaticSelectClear(clickEvent, null)).toBe(false);
+    });
+
+    it('MUST allow real selections regardless of event presence', () => {
+      const clickEvent = { type: 'click' } as unknown as React.SyntheticEvent;
+      expect(isProgrammaticSelectClear(clickEvent, 1)).toBe(false);
+      expect(isProgrammaticSelectClear(null, 1)).toBe(false);
+      expect(isProgrammaticSelectClear(null, '2')).toBe(false);
+    });
+
+    it('MUST treat the census Select empty-string value as a normal change, not a programmatic clear', () => {
+      expect(isProgrammaticSelectClear(null, '')).toBe(false);
+    });
+  });
+
+  describe('F8 - Sidebar navigation renders as real Next links', () => {
+    const testSite = { siteID: 1, siteName: 'Test Site', schemaName: 'testschema' };
+    const testPlot = { plotID: 1, plotName: 'Test Plot' };
+    const testCensus = {
+      plotID: 1,
+      plotCensusNumber: 1,
+      censusIDs: [101],
+      dateRanges: [{ censusID: 101, startDate: new Date('2024-01-01'), endDate: new Date('2024-12-31') }],
+      description: 'Test Census'
+    };
+
+    beforeEach(() => {
+      useAppStore.getState().clearSelections();
+      useAppStore.getState().setSite(testSite);
+      useAppStore.getState().setPlot(testPlot);
+      useAppStore.getState().setCensus(testCensus);
+    });
+
+    afterEach(() => {
+      useAppStore.getState().clearSelections();
+    });
+
+    it('MUST render the Dashboard nav item as a real anchor pointing at /dashboard', () => {
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      const dashboardLink = screen.getByRole('link', { name: /dashboard/i });
+      expect(dashboardLink).toHaveAttribute('href', '/dashboard');
+    });
+
+    it('MUST render expanded sub-links as real anchors with the concatenated parent+child href', () => {
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      const viewDataLink = screen.getByRole('link', { name: /view data/i });
+      expect(viewDataLink).toHaveAttribute('href', '/measurementshub/summary');
+
+      const stemCodesLink = screen.getByRole('link', { name: /stem codes/i });
+      expect(stemCodesLink).toHaveAttribute('href', '/fixeddatainput/attributes');
+    });
+
+    it('MUST preserve the Dashboard census-clearing side effect on plain click', async () => {
+      const user = userEvent.setup();
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      expect(useAppStore.getState().currentCensus).toBeDefined();
+
+      const dashboardLink = screen.getByRole('link', { name: /dashboard/i });
+      await user.click(dashboardLink);
+
+      // Same-tab navigation waits for the census clear, THEN navigates — the
+      // dashboard must never mount with the census still selected (it would
+      // fetch census-scoped metrics that flash and vanish).
+      await waitFor(() => expect(useAppStore.getState().currentCensus).toBeUndefined());
+      await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/dashboard'));
+    });
+
+    it('MUST prevent default anchor navigation when clicking a disabled nav item', () => {
+      // Drive View Errors (/errors) into the disabled state: it's gated on
+      // isAllValiditiesTrue, so an incomplete attributes/species/quadrats section disables it.
+      mockValidity.attributes = false;
+      try {
+        render(<Sidebar siteListLoaded={false} coreDataLoaded={true} setCensusListLoaded={vi.fn()} />);
+
+        const viewErrorsButton = screen.getByTestId('navigate-list-item-expanded-button-Census Hub-View Errors-/errors');
+        // No href at all: right-click "open in new tab" / middle-click must have nothing to follow.
+        expect(viewErrorsButton).not.toHaveAttribute('href');
+
+        const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+        fireEvent(viewErrorsButton, clickEvent);
+
+        expect(clickEvent.defaultPrevented).toBe(true);
+        expect(mockPush).not.toHaveBeenCalled();
+      } finally {
+        mockValidity.attributes = true;
+      }
+    });
+
+    it('MUST NOT render a sub-link as an anchor when its selection prerequisite (census) is missing', () => {
+      // Site + plot selected but NO census: Census Hub sub-links render in the
+      // selection-incomplete branch, whose composite disabled condition must strip the href.
+      useAppStore.getState().clearSelections();
+      useAppStore.getState().setSite(testSite);
+      useAppStore.getState().setPlot(testPlot);
+
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      expect(screen.queryByRole('link', { name: /census overview/i })).not.toBeInTheDocument();
+
+      const censusOverviewLabel = screen.getByText('Census Overview');
+      const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+      fireEvent(censusOverviewLabel, clickEvent);
+
+      expect(clickEvent.defaultPrevented).toBe(true);
+      expect(mockPush).not.toHaveBeenCalled();
+    });
+
+    it('MUST NOT clear the census on a modified (cmd/ctrl) Dashboard click that opens a new tab', async () => {
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      expect(useAppStore.getState().currentCensus).toBeDefined();
+
+      const dashboardLink = screen.getByRole('link', { name: /dashboard/i });
+      fireEvent.click(dashboardLink, { metaKey: true });
+
+      // Give any (wrongly triggered) async census-clear dispatch a chance to land before asserting.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(useAppStore.getState().currentCensus).toBeDefined();
+    });
+
+    it('MUST let a modified Post-Census Statistics click open the anchor natively (no gate, no window.open)', async () => {
+      // window.open() issued after an awaited fetch runs OUTSIDE the click's
+      // transient user activation and gets popup-blocked (Safari always, Chrome
+      // once the fetch outlives the activation window) — the user sees nothing
+      // happen. Modified clicks must therefore fall through to the browser's
+      // native new-tab handling of the real anchor href.
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+        const postValidationLink = screen.getByRole('link', { name: /post-census statistics/i });
+        expect(postValidationLink).toHaveAttribute('href', '/measurementshub/postvalidation');
+        const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
+        fireEvent(postValidationLink, clickEvent);
+
+        expect(clickEvent.defaultPrevented).toBe(false);
+        // Give any (wrongly triggered) async gate a chance to run before asserting.
+        // The sidebar issues unrelated background fetches, so assert specifically
+        // that the availability gate never ran.
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(fetchMock).not.toHaveBeenCalledWith('/api/cmprevalidation/postvalidation/testschema/1/1');
+        expect(openSpy).not.toHaveBeenCalled();
+        expect(mockPush).not.toHaveBeenCalledWith('/measurementshub/postvalidation');
+      } finally {
+        openSpy.mockRestore();
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('MUST still gate same-tab Post-Census Statistics clicks on the availability check', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+        const postValidationLink = screen.getByRole('link', { name: /post-census statistics/i });
+        const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+        fireEvent(postValidationLink, clickEvent);
+
+        expect(clickEvent.defaultPrevented).toBe(true);
+        await waitFor(() => {
+          expect(fetchMock).toHaveBeenCalledWith('/api/cmprevalidation/postvalidation/testschema/1/1');
+        });
+        await waitFor(() => {
+          expect(mockPush).toHaveBeenCalledWith('/measurementshub/postvalidation');
+        });
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+  });
+
+  describe('F2 - census deletion moved out of the picker; softened deselect copy', () => {
+    const testSite = { siteID: 1, siteName: 'Test Site', schemaName: 'testschema' };
+    const testPlot = { plotID: 1, plotName: 'Test Plot' };
+    const testCensusList = [
+      {
+        plotID: 1,
+        plotCensusNumber: 1,
+        censusIDs: [101],
+        dateRanges: [{ censusID: 101, startDate: new Date('2024-01-01'), endDate: new Date('2024-12-31') }],
+        description: 'Census 1'
+      },
+      {
+        plotID: 1,
+        plotCensusNumber: 2,
+        censusIDs: [102],
+        dateRanges: [{ censusID: 102, startDate: new Date('2025-01-01'), endDate: new Date('2025-12-31') }],
+        description: 'Census 2'
+      }
+    ];
+
+    beforeEach(() => {
+      useAppStore.getState().clearSelections();
+    });
+
+    afterEach(() => {
+      useAppStore.getState().clearSelections();
+    });
+
+    it('MUST NOT render any delete/danger button inside the census dropdown options', async () => {
+      const user = userEvent.setup();
+      useAppStore.getState().setSite(testSite);
+      useAppStore.getState().setPlot(testPlot);
+      useAppStore.getState().setCensusList(testCensusList);
+
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      const censusSelect = screen.getByRole('combobox', { name: /select a census/i });
+      await user.click(censusSelect);
+
+      // Options render into the opened listbox; the census picker must expose no destructive action.
+      const listbox = await screen.findByRole('listbox');
+      const options = within(listbox).getAllByTestId('census-selection-option');
+      expect(options.length).toBe(testCensusList.length);
+      expect(within(listbox).queryAllByRole('button')).toHaveLength(0);
+      expect(listbox.querySelector('[data-testid="DeleteForeverIcon"]')).toBeNull();
+    });
+
+    it('MUST label the site deselect group "Clear selection:" (not the old app-reset shout)', async () => {
+      const user = userEvent.setup();
+      // The deselect group header renders unconditionally; no site list needed to assert its copy.
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
+      await user.click(siteSelect);
+
+      const listbox = await screen.findByRole('listbox');
+      expect(within(listbox).getByText('Clear selection:')).toBeInTheDocument();
+      expect(within(listbox).queryByText(/deselect site/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('F3 - shared display-date formatter and picker string cleanup', () => {
+    const testSite = { siteID: 1, siteName: 'Test Site', schemaName: 'testschema' };
+    const testPlot = { plotID: 1, plotName: 'Test Plot', numQuadrats: 1600 };
+    // Local-time constructors keep the rendered display date timezone-stable across CI runners.
+    const firstMeasurement = new Date(2008, 1, 2);
+    const lastMeasurement = new Date(2008, 11, 15);
+    const testCensusList = [
+      {
+        plotID: 1,
+        plotCensusNumber: 1,
+        censusIDs: [101],
+        dateRanges: [{ censusID: 101, startDate: firstMeasurement, endDate: lastMeasurement }],
+        description: 'Census 1'
+      }
+    ];
+    const OLD_TODATESTRING_PATTERN = /\b\w{3}\s\w{3}\s\d{2}\s\d{4}\b/; // e.g. "Sat Feb 02 2008"
+
+    beforeEach(() => {
+      useAppStore.getState().clearSelections();
+    });
+
+    afterEach(() => {
+      useAppStore.getState().clearSelections();
+    });
+
+    it('MUST render census options with the shared display date and a spaced em-dash separator (no <===> token, no toDateString)', async () => {
+      const user = userEvent.setup();
+      useAppStore.getState().setSite(testSite);
+      useAppStore.getState().setPlot(testPlot);
+      useAppStore.getState().setCensusList(testCensusList);
+
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      const censusSelect = screen.getByRole('combobox', { name: /select a census/i });
+      await user.click(censusSelect);
+
+      const listbox = await screen.findByRole('listbox');
+      const option = within(listbox).getByTestId('census-selection-option');
+      const text = option.textContent ?? '';
+
+      expect(text).toContain('First Msmt: Feb 2, 2008 — Last Msmt: Dec 15, 2008');
+      expect(text).not.toContain('<===>');
+      expect(text).not.toMatch(OLD_TODATESTRING_PATTERN);
+    });
+
+    it('MUST render plot options with a spaced em-dash before the quadrat count', async () => {
+      const user = userEvent.setup();
+      useAppStore.getState().setSite(testSite);
+      useAppStore.getState().setPlotList([testPlot]);
+
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      const plotSelect = screen.getByRole('combobox', { name: /select a plot/i });
+      await user.click(plotSelect);
+
+      const listbox = await screen.findByRole('listbox');
+      const option = within(listbox).getByTestId('plot-selection-option');
+
+      expect(option.textContent).toContain(' — Quadrats: 1600');
+    });
+
+    it('MUST NOT render the "Other Sites" group for a global user (otherSites is always empty)', async () => {
+      const user = userEvent.setup();
+      (useSession as any).mockReturnValue({
+        data: { user: { name: 'Global User', email: 'global@example.com', userStatus: 'global', sites: [] } },
+        status: 'authenticated'
+      });
+      useAppStore.getState().setSiteList([testSite]);
+
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);
+
+      const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
+      await user.click(siteSelect);
+
+      const listbox = await screen.findByRole('listbox');
+      expect(within(listbox).queryByText(/^Other Sites \(/)).not.toBeInTheDocument();
+      expect(within(listbox).getByText(/^Allowed Sites \(/)).toBeInTheDocument();
     });
   });
 });

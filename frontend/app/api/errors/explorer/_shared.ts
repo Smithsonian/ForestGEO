@@ -169,22 +169,28 @@ function buildRawErrorsQuery(schema: string): string {
             ms.UserDefinedFields,
             cm.UploadFileID,
             cm.UploadBatchID,
-            me.ErrorSource,
-            me.ErrorCode,
-            COALESCE(NULLIF(ve.Description, ''), me.ErrorMessage) AS DisplayMessage,
+            COALESCE(me.ErrorSource, 'ingestion') AS ErrorSource,
+            COALESCE(me.ErrorCode, 'failed_no_log') AS ErrorCode,
+            COALESCE(
+              NULLIF(ve.Description, ''),
+              me.ErrorMessage,
+              'Measurement is marked invalid but has no unresolved error log entry.'
+            ) AS DisplayMessage,
             COALESCE(NULLIF(ve.Criteria, ''), '') AS ValidationCriteria,
             COALESCE(NULLIF(ve.ProcedureName, ''), '') AS ProcedureName
-     FROM ??.measurement_error_log mel
-     JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
-     JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
+     FROM ??.coremeasurements cm
      JOIN ??.measurementssummary ms ON ms.CoreMeasurementID = cm.CoreMeasurementID
+     LEFT JOIN ??.measurement_error_log mel
+       ON mel.MeasurementID = cm.CoreMeasurementID
+      AND COALESCE(mel.IsResolved, FALSE) = FALSE
+     LEFT JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
      LEFT JOIN ??.sitespecificvalidations ve
        ON me.ErrorSource = 'validation'
       AND me.ErrorCode = CAST(ve.ValidationID AS CHAR)
      WHERE ms.PlotID = ?
        AND ms.CensusID = ?
-       AND COALESCE(mel.IsResolved, FALSE) = FALSE
        AND COALESCE(cm.IsActive, TRUE) = TRUE
+       AND (mel.MeasurementID IS NOT NULL OR ms.IsValidated = FALSE)
      ORDER BY ms.CoreMeasurementID ASC, me.ErrorSource ASC, me.ErrorCode ASC`
   );
 }
@@ -447,17 +453,31 @@ function buildSummary(rows: GroupedErrorRow[], filters: ErrorExplorerFilters): E
   };
 }
 
-export async function fetchGroupedErrorRows(connectionManager: ExplorerConnection, schema: string, plotID: number, censusID: number) {
-  const [rawRows, contradictionMap] = await Promise.all([
-    connectionManager.executeQuery(buildRawErrorsQuery(schema), [plotID, censusID]) as Promise<RawErrorOccurrenceRow[]>,
-    buildContradictionMap(connectionManager, schema, plotID, censusID)
-  ]);
+export async function fetchGroupedErrorRows(connectionManager: ExplorerConnection, schema: string, plotID: number, censusIDs: number | number[]) {
+  const uniqueCensusIDs = Array.from(new Set((Array.isArray(censusIDs) ? censusIDs : [censusIDs]).filter(censusID => censusID > 0)));
+  const groupedByCensus = await Promise.all(
+    uniqueCensusIDs.map(async censusID => {
+      const [rawRows, contradictionMap] = await Promise.all([
+        connectionManager.executeQuery(buildRawErrorsQuery(schema), [plotID, censusID]) as Promise<RawErrorOccurrenceRow[]>,
+        buildContradictionMap(connectionManager, schema, plotID, censusID)
+      ]);
+      return groupErrorRows(rawRows, contradictionMap);
+    })
+  );
 
-  return groupErrorRows(rawRows, contradictionMap);
+  return groupedByCensus.reduce((combined, groupedRows) => {
+    groupedRows.forEach((row, measurementID) => combined.set(measurementID, row));
+    return combined;
+  }, new Map<number, GroupedErrorRow>());
 }
 
 export async function queryErrorExplorer(connectionManager: ExplorerConnection, request: ErrorExplorerQueryRequest): Promise<ErrorExplorerQueryResponse> {
-  const groupedRows = await fetchGroupedErrorRows(connectionManager, request.schema, request.plotID, request.censusID);
+  const groupedRows = await fetchGroupedErrorRows(
+    connectionManager,
+    request.schema,
+    request.plotID,
+    request.censusIDs?.length ? request.censusIDs : request.censusID
+  );
   const filteredRows = buildFilteredRows(groupedRows, request.filters).sort(sortRows);
   const start = request.page * request.pageSize;
   const paginatedRows = filteredRows.slice(start, start + request.pageSize).map(row => toDisplayRow(row, request.filters));
@@ -471,9 +491,14 @@ export async function queryErrorExplorer(connectionManager: ExplorerConnection, 
 
 export async function buildErrorExplorerFacets(
   connectionManager: ExplorerConnection,
-  request: Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'filters'>
+  request: Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'censusIDs' | 'filters'>
 ): Promise<ErrorExplorerFacetsResponse> {
-  const groupedRows = await fetchGroupedErrorRows(connectionManager, request.schema, request.plotID, request.censusID);
+  const groupedRows = await fetchGroupedErrorRows(
+    connectionManager,
+    request.schema,
+    request.plotID,
+    request.censusIDs?.length ? request.censusIDs : request.censusID
+  );
   const scopedRows = Array.from(groupedRows.values()).filter(row => {
     if (request.filters.source !== 'all' && !row.allErrors.some(error => error.source === request.filters.source)) {
       return false;

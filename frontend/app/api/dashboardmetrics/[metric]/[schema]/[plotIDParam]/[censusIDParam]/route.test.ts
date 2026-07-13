@@ -166,6 +166,13 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     expect(body2.error).toMatch(/Metric.*required/i);
   });
 
+  it('returns 400 when fallback numeric slugs contain trailing characters', async () => {
+    const res = await callGET('CountTrees', 'myschema', '42abc', '7', 'MyPlot');
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    const body = await res.json();
+    expect(body.error).toMatch(/Invalid plot ID or census ID/i);
+  });
+
   it('CountActiveUsers: returns 200 and proper JSON; builds expected SQL + params', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ PersonnelCount: 5 }]);
@@ -312,34 +319,42 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
 
   // ===== StemTypes Tests =====
   describe('StemTypes metric', () => {
-    it('first census (no previous census): returns all stems as new recruits', async () => {
+    it('first census (no previous census): computes multi-stems from the current census, old stems null', async () => {
       const cm = (ConnectionManager as any).getInstance();
       const exec = vi.spyOn(cm, 'executeQuery');
 
       // First query: check for previous census - returns NULL (no previous)
       exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
-      // Second query: count new recruits
-      exec.mockResolvedValueOnce([{ CountNewRecruits: 100 }]);
+      // Second query: first-census classification (one tree with two measured stems => 30 multi)
+      exec.mockResolvedValueOnce([{ CountMultiStems: 30, CountNewRecruits: 100 }]);
 
       const res = await callGET('StemTypes', 'testschema', '1', '1', 'TestPlot');
 
       expect(res.status).toBe(HTTPResponses.OK);
       const body = await res.json();
 
-      // All stems should be new recruits for first census
+      // Multi-stems is the real current-census value; old stems is null (no census to
+      // compare against), never a misleading zero.
       expect(body).toEqual({
-        CountOldStems: 0,
-        CountMultiStems: 0,
-        CountNewRecruits: 100
+        CountOldStems: null,
+        CountMultiStems: 30,
+        CountNewRecruits: 100,
+        isFirstCensus: true
       });
 
-      // Verify the fast path was taken (only 2 queries instead of 1 complex query)
+      // Verify only 2 queries ran (previous-census probe + first-census classification)
       expect(exec).toHaveBeenCalledTimes(2);
 
       // First query checks for previous census
       const [sql1, params1] = exec.mock.calls[0];
       expect(String(sql1)).toMatch(/SELECT MAX\(c\.CensusID\) as PrevCensusID/i);
       expect(params1).toEqual([1, 1]); // plotID, censusID
+
+      // Second query derives multi-stem trees from the current census (grouping by TreeTag)
+      const [sql2, params2] = exec.mock.calls[1];
+      expect(String(sql2)).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
+      expect(String(sql2)).not.toMatch(/previous_stems/i);
+      expect(params2).toEqual([1, 1]); // censusID, censusID
     });
 
     it('subsequent census: correctly classifies old stems, multi-stems, and new recruits', async () => {
@@ -365,7 +380,8 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       expect(body).toEqual({
         CountOldStems: 500,
         CountMultiStems: 150,
-        CountNewRecruits: 50
+        CountNewRecruits: 50,
+        isFirstCensus: false
       });
 
       // Verify both queries were called
@@ -377,6 +393,8 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       expect(String(sql2)).toMatch(/LEFT JOIN previous_stems/i);
       expect(String(sql2)).toMatch(/LEFT JOIN previous_trees/i);
       expect(String(sql2)).toMatch(/COALESCE\(SUM\(CASE/i);
+      // Multi-stems must come from the current-census grouping, not the previous-census diff
+      expect(String(sql2)).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
       // Parameters: censusID, censusID, previousCensusID, previousCensusID, previousCensusID
       expect(params2).toEqual([2, 2, 1, 1, 1]);
     });
@@ -404,7 +422,8 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       expect(body).toEqual({
         CountOldStems: 0,
         CountMultiStems: 0,
-        CountNewRecruits: 0
+        CountNewRecruits: 0,
+        isFirstCensus: false
       });
     });
 
@@ -432,7 +451,8 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       expect(body).toEqual({
         CountOldStems: 0,
         CountMultiStems: 0,
-        CountNewRecruits: 0
+        CountNewRecruits: 0,
+        isFirstCensus: false
       });
     });
 
@@ -454,18 +474,19 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       expect(body).toEqual({
         CountOldStems: 0,
         CountMultiStems: 0,
-        CountNewRecruits: 0
+        CountNewRecruits: 0,
+        isFirstCensus: false
       });
     });
 
-    it('first census with zero measurements: returns 0 new recruits', async () => {
+    it('first census with zero measurements: multi-stems 0, old stems null', async () => {
       const cm = (ConnectionManager as any).getInstance();
       const exec = vi.spyOn(cm, 'executeQuery');
 
       // First query: no previous census
       exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
-      // Second query: count returns 0
-      exec.mockResolvedValueOnce([{ CountNewRecruits: 0 }]);
+      // Second query: classification returns 0 for an empty first census
+      exec.mockResolvedValueOnce([{ CountMultiStems: 0, CountNewRecruits: 0 }]);
 
       const res = await callGET('StemTypes', 'testschema', '1', '1', 'EmptyFirstCensus');
 
@@ -473,9 +494,10 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       const body = await res.json();
 
       expect(body).toEqual({
-        CountOldStems: 0,
+        CountOldStems: null,
         CountMultiStems: 0,
-        CountNewRecruits: 0
+        CountNewRecruits: 0,
+        isFirstCensus: true
       });
     });
   });

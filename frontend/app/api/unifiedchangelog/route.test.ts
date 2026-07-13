@@ -136,7 +136,7 @@ vi.mock('@/config/uploadsessiontracker', () => ({
 
 // Import handlers AFTER mocks
 import { PATCH, DELETE } from '@/config/macros/coreapifunctions';
-import { GET as CLEARCENSUS_GET } from '../clearcensus/route';
+import { POST as CLEARCENSUS_POST } from '../clearcensus/route';
 import { POST as SQLPACKETLOAD_POST } from '../sqlpacketload/route';
 
 // ========== Helpers ==========
@@ -287,18 +287,24 @@ describe('Unified Changelog Tracking System', () => {
 
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-4');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-      const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({});
+      vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+      // clearcensus flow: resolve target plot, latest-census guard, destructive CALL
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ PlotID: 1 }])
+        .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 1, MaxPlotCensusNumber: 1 }])
+        .mockResolvedValueOnce({});
 
-      const req = makeRequest('http://localhost/api/clearcensus?schema=testschema&censusID=5&type=full');
+      const req = makeRequest('http://localhost/api/clearcensus', 'POST', { schema: 'testschema', censusID: 5, type: 'full' });
 
-      const res = await CLEARCENSUS_GET(req);
+      const res = await CLEARCENSUS_POST(req);
 
       expect(res.status).toBe(HTTPResponses.OK);
       const body = await res.json();
       expect(body).toEqual({ message: 'Census cleared successfully' });
 
       // Verify the stored procedure is called with correct parameters
-      const [sql, params] = exec.mock.calls[0];
+      const [sql, params] = exec.mock.calls[2];
       expect(String(sql)).toMatch(/CALL testschema\.clearcensusfull\((5|\?)\);?/i);
       expect(params).toEqual([]);
 
@@ -312,16 +318,22 @@ describe('Unified Changelog Tracking System', () => {
 
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-5');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-      const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({});
+      vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+      // clearcensus flow: resolve target plot, latest-census guard, destructive CALL
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ PlotID: 1 }])
+        .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 1, MaxPlotCensusNumber: 1 }])
+        .mockResolvedValueOnce({});
 
-      const req = makeRequest('http://localhost/api/clearcensus?schema=testschema&censusID=7&type=msmts');
+      const req = makeRequest('http://localhost/api/clearcensus', 'POST', { schema: 'testschema', censusID: 7, type: 'msmts' });
 
-      const res = await CLEARCENSUS_GET(req);
+      const res = await CLEARCENSUS_POST(req);
 
       expect(res.status).toBe(HTTPResponses.OK);
 
       // Verify the stored procedure is called
-      const [sql, params] = exec.mock.calls[0];
+      const [sql, params] = exec.mock.calls[2];
       expect(String(sql)).toMatch(/CALL testschema\.clearcensusmsmts\((7|\?)\);?/i);
       expect(params).toEqual([]);
 

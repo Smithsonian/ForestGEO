@@ -24,16 +24,22 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PendingIcon from '@mui/icons-material/Pending';
 import MetricCard from './metriccard';
 
+export const INCOMPARABLE_METRIC_PLACEHOLDER = '—';
+export const INCOMPARABLE_METRIC_TOOLTIP = 'No previous census to compare against';
+export const FIRST_CENSUS_RECRUITS_SUBTITLE = 'first census — every stem is newly recorded';
+
 export interface CensusStatsViewProps {
   // Core counts
   countTrees: number;
   countStems: number;
 
-  // Stem type breakdown
+  // Stem type breakdown. CountOldStems is null when there is no previous census
+  // to compare against (first census); isFirstCensus signals that state to the UI.
   stemTypes: {
-    CountOldStems: number;
+    CountOldStems: number | null;
     CountMultiStems: number;
     CountNewRecruits: number;
+    isFirstCensus: boolean;
   };
 
   // Quadrat coverage
@@ -56,13 +62,20 @@ export interface CensusStatsViewProps {
  */
 interface StatCardProps {
   title: string;
-  value: number;
+  value: number | null;
   icon: React.ReactNode;
   color: 'success' | 'primary' | 'warning' | 'neutral' | 'danger';
   subtitle?: string;
 }
 
 function StatCard({ title, value, icon, color, subtitle }: StatCardProps) {
+  const isIncomparable = value === null;
+  const valueDisplay = (
+    <Typography level="h3" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
+      {isIncomparable ? INCOMPARABLE_METRIC_PLACEHOLDER : value.toLocaleString()}
+    </Typography>
+  );
+
   return (
     <Card
       variant="soft"
@@ -86,9 +99,7 @@ function StatCard({ title, value, icon, color, subtitle }: StatCardProps) {
             <Typography level="body-xs" color="neutral" sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>
               {title}
             </Typography>
-            <Typography level="h3" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
-              {value.toLocaleString()}
-            </Typography>
+            {isIncomparable ? <Tooltip title={INCOMPARABLE_METRIC_TOOLTIP}>{valueDisplay}</Tooltip> : valueDisplay}
             {subtitle && (
               <Typography level="body-xs" color="neutral">
                 {subtitle}
@@ -340,7 +351,7 @@ export default function CensusStatsView({ countTrees, countStems, stemTypes, pro
             value={stemTypes.CountNewRecruits}
             icon={<FiberNewIcon sx={{ fontSize: 18 }} />}
             color="success"
-            subtitle="First-time measurements"
+            subtitle={stemTypes.isFirstCensus ? FIRST_CENSUS_RECRUITS_SUBTITLE : 'First-time measurements'}
           />
           <StatCard
             title="Multi-Stems"

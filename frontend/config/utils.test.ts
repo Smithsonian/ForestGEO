@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  openSidebar,
-  closeSidebar,
+  MOBILE_SIDEBAR_TOGGLE_EVENT,
   toggleSidebar,
   createInsertOrUpdateQuery,
   buildBulkUpsertQuery,
@@ -15,63 +14,16 @@ import {
 import type ConnectionManager from '@/lib/db/connectionmanager';
 
 describe('Sidebar Utilities', () => {
-  beforeEach(() => {
-    // Reset document state before each test
-    if (typeof document !== 'undefined') {
-      document.body.style.overflow = '';
-      document.documentElement.style.removeProperty('--SideNavigation-slideIn');
-    }
-  });
-
-  describe('openSidebar', () => {
-    it('should set overflow hidden and slideIn property', () => {
-      openSidebar();
-      expect(document.body.style.overflow).toBe('hidden');
-      expect(document.documentElement.style.getPropertyValue('--SideNavigation-slideIn')).toBe('1');
-    });
-
-    it('should handle case when document is undefined', () => {
-      const originalDocument = global.document;
-      // @ts-ignore
-      global.document = undefined;
-      expect(() => openSidebar()).not.toThrow();
-      global.document = originalDocument;
-    });
-  });
-
-  describe('closeSidebar', () => {
-    it('should remove overflow and slideIn properties', () => {
-      // First open to set properties
-      openSidebar();
-      // Then close
-      closeSidebar();
-      expect(document.body.style.overflow).toBe('');
-      expect(document.documentElement.style.getPropertyValue('--SideNavigation-slideIn')).toBe('');
-    });
-
-    it('should handle case when document is undefined', () => {
-      const originalDocument = global.document;
-      // @ts-ignore
-      global.document = undefined;
-      expect(() => closeSidebar()).not.toThrow();
-      global.document = originalDocument;
-    });
-  });
-
   describe('toggleSidebar', () => {
-    it('should open sidebar when closed', () => {
-      closeSidebar();
+    it('dispatches the React-owned mobile drawer event', () => {
+      const listener = vi.fn();
+      window.addEventListener(MOBILE_SIDEBAR_TOGGLE_EVENT, listener);
       toggleSidebar();
-      expect(document.documentElement.style.getPropertyValue('--SideNavigation-slideIn')).toBe('1');
+      expect(listener).toHaveBeenCalledTimes(1);
+      window.removeEventListener(MOBILE_SIDEBAR_TOGGLE_EVENT, listener);
     });
 
-    it('should close sidebar when open', () => {
-      openSidebar();
-      toggleSidebar();
-      expect(document.documentElement.style.getPropertyValue('--SideNavigation-slideIn')).toBe('');
-    });
-
-    it('should handle case when window or document is undefined', () => {
+    it('should handle case when window is undefined', () => {
       const originalWindow = global.window;
       // @ts-ignore
       global.window = undefined;
