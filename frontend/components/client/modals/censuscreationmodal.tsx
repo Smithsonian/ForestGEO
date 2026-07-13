@@ -82,23 +82,44 @@ export default function CensusCreationModal({ open, censusNumber, plotName, isCr
               confirm.
             </Typography>
             <FormControl required error={Boolean(dateError)}>
-              <FormLabel>Start date</FormLabel>
-              <Input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} disabled={isCreating} />
+              <FormLabel id="census-start-date-label" htmlFor="census-start-date-input">
+                Start date
+              </FormLabel>
+              <Input
+                type="date"
+                aria-labelledby="census-start-date-label"
+                value={startDate}
+                onChange={event => setStartDate(event.target.value)}
+                disabled={isCreating}
+                slotProps={{ input: { id: 'census-start-date-input' } }}
+              />
               {dateError && <FormHelperText>{dateError}</FormHelperText>}
             </FormControl>
             <FormControl>
-              <FormLabel>End date (optional)</FormLabel>
+              <FormLabel id="census-end-date-label" htmlFor="census-end-date-input">
+                End date (optional)
+              </FormLabel>
               <Input
                 type="date"
+                aria-labelledby="census-end-date-label"
                 value={endDate}
                 onChange={event => setEndDate(event.target.value)}
                 disabled={isCreating}
-                slotProps={{ input: { min: startDate } }}
+                slotProps={{ input: { id: 'census-end-date-input', min: startDate } }}
               />
             </FormControl>
             <FormControl>
-              <FormLabel>Description (optional)</FormLabel>
-              <Textarea minRows={3} value={description} onChange={event => setDescription(event.target.value)} disabled={isCreating} />
+              <FormLabel id="census-description-label" htmlFor="census-description-input">
+                Description (optional)
+              </FormLabel>
+              <Textarea
+                minRows={3}
+                aria-labelledby="census-description-label"
+                value={description}
+                onChange={event => setDescription(event.target.value)}
+                disabled={isCreating}
+                slotProps={{ textarea: { id: 'census-description-input' } }}
+              />
             </FormControl>
           </Stack>
         </DialogContent>
