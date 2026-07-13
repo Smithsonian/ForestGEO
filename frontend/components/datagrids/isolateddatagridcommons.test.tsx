@@ -308,7 +308,9 @@ describe('IsolatedDataGridCommons', () => {
     });
     const initialListCallCount = mockFetch.mock.calls.filter(([, init]) => !init?.method || init.method === 'GET').length;
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    // The row's action buttons render asynchronously after the fetched rows land;
+    // a non-retrying query here races the grid's render under CI load.
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
