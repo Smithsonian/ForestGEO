@@ -112,6 +112,13 @@ export type IsolatedDataGridCommonsHandle = {
   showSnackbar: (message: string, severity: 'success' | 'error') => void;
 };
 
+// Wide grids (the 53-column viewfulltable archive) column-virtualize off-screen cells
+// out of the DOM, so Cypress assertions against unscrolled columns can never observe
+// them. Rendering the full column set under the e2e harness (per MUI's own testing
+// guidance) keeps assertions deterministic; production behavior is unchanged, and the
+// build guard refuses production builds with this flag set.
+const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
+
 const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
 const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
@@ -1486,6 +1493,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
                 editMode="row"
                 rowModesModel={rowModesModel}
                 disableColumnSelector={!COLUMN_SELECTOR_ENABLED_GRID_TYPES.has(gridType)}
+                disableVirtualization={E2E_DISABLE_VIRTUALIZATION}
                 onRowModesModelChange={handleRowModesModelChange}
                 onRowEditStop={handleRowEditStop}
                 onCellDoubleClick={handleCellDoubleClick}

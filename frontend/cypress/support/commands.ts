@@ -205,21 +205,18 @@ Cypress.Commands.add('loginViaCredentials', (email = 'e2e-admin@forestgeo.si.edu
  * `cellText` is given, that the row also contains `cellText`).
  *
  * Wide grids (e.g. View All Historical Data has 53 columns; treeTag is column
- * #37, speciesCode #43) column-virtualize their far-right cells out of the DOM,
- * so a plain `cy.contains('[role="row"]', 'TREE101')` finds nothing even though
- * the grid is correctly populated. This command scrolls the visible grid fully
- * right first so those identity columns render, then asserts.
- *
- * Use this ONLY for the wide grids where the asserted column is off-screen. For
- * grids whose target column is visible by default (e.g. the measurements summary
- * grid, treeTag #12), assert directly — scrolling right would virtualize it out.
+ * #37, speciesCode #43) would column-virtualize their off-screen cells out of
+ * the DOM — with legible per-column minWidths no single scroll position renders
+ * both identity columns at once. IsolatedDataGridCommons therefore disables
+ * virtualization under the e2e harness (NEXT_PUBLIC_E2E_TESTING), so every cell
+ * is in the DOM and content can be asserted directly; `exist` rather than
+ * `be.visible` because a cell scrolled out of the pane is still legitimate.
  */
 Cypress.Commands.add('gridRowShouldContain', (rowText: string, cellText?: string) => {
-  cy.get('.MuiDataGrid-virtualScroller:visible').first().scrollTo('right', { ensureScrollable: false });
   if (cellText !== undefined) {
     cy.contains('[role="row"]', rowText).should('contain', cellText);
   } else {
-    cy.contains('[role="row"]', rowText).should('be.visible');
+    cy.contains('[role="row"]', rowText).should('exist');
   }
 });
 
