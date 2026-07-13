@@ -126,42 +126,35 @@ interface MeasurementFilterChipProps {
   tooltip: React.ReactNode;
 }
 
+// Deliberately NOT wrapped in ToolbarButton: it clones its render element with a ref
+// and roving-tabindex props, which a Joy Tooltip routes to its popper instead of the
+// Chip, dropping the chip out of keyboard reach. The Chip's own action <button> is the
+// single focusable, announceable control (a plain Tab stop rather than an arrow-key
+// toolbar item).
 function MeasurementFilterChip({ control, label, icon, color, testId, itemLabel, tooltip }: MeasurementFilterChipProps) {
   const enabled = control.count > 0;
   return (
-    <ToolbarButton
-      disabled={!enabled}
-      render={
-        <Tooltip title={tooltip}>
-          <Chip
-            disabled={!enabled}
-            variant={control.show ? 'solid' : 'outlined'}
-            color={control.show ? color : 'neutral'}
-            startDecorator={icon}
-            role="button"
-            tabIndex={enabled ? 0 : -1}
-            onClick={() => control.toggle(!control.show)}
-            onKeyDown={event => {
-              if (enabled && (event.key === 'Enter' || event.key === ' ')) {
-                event.preventDefault();
-                control.toggle(!control.show);
-              }
-            }}
-            slotProps={{
-              action: {
-                'aria-label': `${control.show ? 'Hide' : 'Show'} ${itemLabel} (${control.count.toLocaleString()})`,
-                'aria-pressed': control.show,
-                'data-testid': testId,
-                disabled: !enabled
-              }
-            }}
-            sx={{ whiteSpace: 'nowrap' }}
-          >
-            {label} {control.count.toLocaleString()}
-          </Chip>
-        </Tooltip>
-      }
-    />
+    <Tooltip title={tooltip}>
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Joy Chip routes a top-level onClick to its internal action <button>, which supplies native keyboard activation; slotProps.action.onClick is overridden by Joy and never fires. */}
+      <Chip
+        disabled={!enabled}
+        variant={control.show ? 'solid' : 'outlined'}
+        color={control.show ? color : 'neutral'}
+        startDecorator={icon}
+        onClick={() => control.toggle(!control.show)}
+        slotProps={{
+          action: {
+            'aria-label': `${control.show ? 'Hide' : 'Show'} ${itemLabel} (${control.count.toLocaleString()})`,
+            'aria-pressed': control.show,
+            'data-testid': testId,
+            disabled: !enabled
+          }
+        }}
+        sx={{ whiteSpace: 'nowrap' }}
+      >
+        {label} {control.count.toLocaleString()}
+      </Chip>
+    </Tooltip>
   );
 }
 
