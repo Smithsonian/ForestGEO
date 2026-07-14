@@ -7,18 +7,29 @@
  * and, when non-zero, emits a RECONCILIATION_MISMATCH row into uploadintegrityalerts
  * (severity 'critical' when rows were lost) plus uploadmetrics.missingRecords = ABS(gap).
  *
- * This suite drives bulkingestionprocess twice on a throwaway schema:
- *   1. CONTROL — a healthy batch reconciles: no mismatch alert, missingRecords = 0.
- *   2. FAULT-INJECTED — one already-inserted successful row is dropped BEFORE the
- *      reconciliation count via the @forceUnaccountedDrop hook (the honest, controllable
- *      way to "delete one successful row before reconciliation" from OUTSIDE an atomic
- *      CALL). The procedure must then surface a critical RECONCILIATION_MISMATCH with
- *      missingRecords = 1, and the client verdict (evaluateUploadReconciliation) over the
- *      same real counts must agree it is NOT reconciled.
+ * Fault-injection strategy (NO test hook ships in production SQL): the throwaway test
+ * schema gets a VARIANT procedure, bulkingestionprocess_faultinjected, built by reading
+ * the REAL bulkingestionprocess text from db/sql/storedprocedures.sql and splicing a
+ * single-row DELETE in immediately before the (unmodified) FINAL RECONCILIATION CHECK.
+ * The variant therefore exercises the procedure's own, real reconciliation math while the
+ * deployed db/sql/storedprocedures.sql stays pristine. The variant lives ONLY in the
+ * throwaway schema and is never called by the deployed pipeline.
+ *
+ * This suite drives ingestion three ways on that schema:
+ *   1. CONTROL — the canonical bulkingestionprocess reconciles a healthy batch: no
+ *      mismatch alert, missingRecords = 0.
+ *   2. FAULT-INJECTED — the variant drops one already-inserted successful row before the
+ *      reconciliation count, so the real reconciliation observes input != success + failed
+ *      and surfaces a critical RECONCILIATION_MISMATCH with missingRecords = 1; the client
+ *      verdict (evaluateUploadReconciliation) over the same real counts must agree.
+ *   3. NO-BLEED — after the variant runs, the canonical procedure still reconciles a fresh
+ *      batch cleanly, proving the fault is confined to the variant, not the real procedure.
  *
  * SAFETY: the beforeAll REFUSING TO RUN guard hard-fails before any write if the host is
  * not local, so this can never touch a real database.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import {
@@ -50,8 +61,97 @@ function assertLocalHostOrRefuse(): void {
 
 const MEASUREMENT_DATE = '2024-06-15';
 const HEALTHY_BATCH_SIZE = 3;
-const FORCED_DROP_COUNT = 1;
+const EXPECTED_MISSING_COUNT = 1;
 const RECONCILIATION_CRITICAL_SEVERITY = 'critical';
+const CANONICAL_PROCEDURE = 'bulkingestionprocess';
+const FAULT_INJECTED_PROCEDURE = 'bulkingestionprocess_faultinjected';
+
+/**
+ * Stable comment anchor that opens the FINAL RECONCILIATION CHECK block in
+ * db/sql/storedprocedures.sql. The DELETE is spliced immediately BEFORE this so the
+ * reconciliation math itself is left byte-for-byte identical.
+ */
+const RECONCILIATION_ANCHOR = [
+  '    -- =====================================================',
+  '    -- FINAL RECONCILIATION CHECK',
+  '    -- Verify: input_rows = success + failed + deduplicated',
+  '    -- ====================================================='
+].join('\n');
+
+/**
+ * One-row DELETE that removes a single already-inserted successful measurement for the
+ * batch, so the (unmodified) reconciliation block downstream sees success short by one.
+ */
+const FAULT_INJECTION_DELETE = `    -- TEST-ONLY fault injection (throwaway-schema variant procedure only): drop exactly one
+    -- already-inserted successful measurement for this batch immediately before the
+    -- reconciliation count, so the REAL reconciliation block below observes a genuine
+    -- unaccounted-row gap.
+    DELETE FROM coremeasurements
+    WHERE CoreMeasurementID = (
+        SELECT victim.CoreMeasurementID FROM (
+            SELECT cm.CoreMeasurementID
+            FROM coremeasurements cm
+            WHERE cm.CensusID = vCurrentCensusID
+              AND cm.StemGUID IS NOT NULL
+              AND cm.UploadFileID = vFileID
+              AND cm.UploadBatchID = vBatchID
+            ORDER BY cm.CoreMeasurementID DESC
+            LIMIT 1
+        ) AS victim
+    );
+
+`;
+
+/**
+ * Reads the canonical bulkingestionprocess out of db/sql/storedprocedures.sql, strips the
+ * DELIMITER/DEFINER noise the same way tests/setup/local-db-setup.ts does, renames it, and
+ * splices the fault-injection DELETE in before the FINAL RECONCILIATION CHECK. Returns the
+ * ready-to-CREATE variant body. Throws loudly if the procedure or the anchor cannot be
+ * found so a future SQL refactor can never degrade this into a silent no-op.
+ */
+function buildFaultInjectedProcedureSql(): string {
+  const proceduresPath = join(process.cwd(), 'db/sql', 'storedprocedures.sql');
+  const fileContent = readFileSync(proceduresPath, 'utf-8');
+
+  const withoutDelimiters = fileContent.replace(/DELIMITER\s+\$\$/gi, '').replace(/DELIMITER\s+;/gi, '');
+  const statements = withoutDelimiters.split('$$');
+
+  // The chunk that declares the parameter list. It also carries the leading
+  // `DROP PROCEDURE IF EXISTS bulkingestionprocess;` (that DROP lives between the same $$
+  // delimiters), so slice from the CREATE keyword — otherwise creating the variant would
+  // also drop the canonical procedure this schema still needs.
+  const createChunk = statements.find(s => s.includes(`PROCEDURE ${CANONICAL_PROCEDURE}(`));
+  if (!createChunk) {
+    throw new Error(`Could not locate the CREATE for ${CANONICAL_PROCEDURE} in ${proceduresPath}`);
+  }
+  const createIndex = createChunk.indexOf('CREATE');
+  if (createIndex === -1) {
+    throw new Error(`Could not find the CREATE keyword for ${CANONICAL_PROCEDURE} in ${proceduresPath}`);
+  }
+  const createOnly = createChunk.slice(createIndex);
+
+  const definerStripped = createOnly.trim().replace(/definer\s*=\s*`?[^`\s]+`?@`?[^`\s]+`?\s*/gi, '');
+  const renamed = definerStripped.replace(`PROCEDURE ${CANONICAL_PROCEDURE}(`, `PROCEDURE ${FAULT_INJECTED_PROCEDURE}(`);
+
+  if (!renamed.includes(RECONCILIATION_ANCHOR)) {
+    throw new Error(
+      `FINAL RECONCILIATION CHECK anchor not found in ${CANONICAL_PROCEDURE}; the splice would be a no-op. ` +
+        `The reconciliation block in db/sql/storedprocedures.sql may have been reformatted — update RECONCILIATION_ANCHOR.`
+    );
+  }
+
+  const spliced = renamed.replace(RECONCILIATION_ANCHOR, `${FAULT_INJECTION_DELETE}${RECONCILIATION_ANCHOR}`);
+  // Exactly one DELETE was inserted, and the reconciliation math is untouched.
+  if ((spliced.match(/-- TEST-ONLY fault injection/g) || []).length !== 1) {
+    throw new Error('Fault-injection splice did not insert exactly one DELETE block.');
+  }
+  return spliced;
+}
+
+async function createFaultInjectedProcedure(connection: Connection): Promise<void> {
+  await connection.query(`DROP PROCEDURE IF EXISTS ${FAULT_INJECTED_PROCEDURE}`);
+  await connection.query(buildFaultInjectedProcedureSql());
+}
 
 function buildValidRows(testData: TestData, count: number) {
   const speciesCode = testData.species[0].SpeciesCode;
@@ -90,6 +190,8 @@ describe('Reconciliation enforcement (bulkingestionprocess FINAL RECONCILIATION 
     connection = setup.connection;
     testData = setup.testData;
     config = setup.config;
+    // Provision the fault-injecting variant INTO the throwaway schema only.
+    await createFaultInjectedProcedure(connection);
   }, 90000);
 
   afterAll(async () => {
@@ -97,12 +199,10 @@ describe('Reconciliation enforcement (bulkingestionprocess FINAL RECONCILIATION 
   });
 
   beforeEach(async () => {
-    // Guarantee a clean session flag between tests so a leaked value can never taint a run.
-    await connection.query('SET @forceUnaccountedDrop = NULL');
     await cleanupTestMeasurements(connection, testData);
   });
 
-  it('CONTROL: a healthy batch reconciles with no mismatch alert and zero missing records', async () => {
+  it('CONTROL: the canonical procedure reconciles a healthy batch with no mismatch alert and zero missing records', async () => {
     const rows = buildValidRows(testData, HEALTHY_BATCH_SIZE);
     const censusID = testData.census[0].censusID;
     const { fileID, batchID } = await insertTestMeasurements(connection, testData, rows, { censusID });
@@ -134,16 +234,15 @@ describe('Reconciliation enforcement (bulkingestionprocess FINAL RECONCILIATION 
     const censusID = testData.census[0].censusID;
     const { fileID, batchID } = await insertTestMeasurements(connection, testData, rows, { censusID });
 
-    // Induce exactly one unaccounted row: the hook deletes one already-inserted successful
-    // measurement immediately before the reconciliation count, so input (3) != success (2) + failed (0).
-    await connection.query('SET @forceUnaccountedDrop = ?', [FORCED_DROP_COUNT]);
-    const result = await runBulkIngestion(connection, fileID, batchID);
+    // The variant deletes one already-inserted successful measurement before the real
+    // reconciliation count, so input (3) != success (2) + failed (0). The reconciliation
+    // block that evaluates and reports the gap is the UNMODIFIED procedure logic.
+    await connection.query(`CALL ${FAULT_INJECTED_PROCEDURE}(?, ?)`, [fileID, batchID]);
 
     const scope: IngestionScope = { fileID, batchID, censusID };
     const outcome = await readIngestionOutcome(connection, scope);
 
-    // One successful row was removed before reconciliation, so success is short by exactly one.
-    expect(outcome.successfulRows, 'one successful row should have been dropped pre-reconciliation').toBe(HEALTHY_BATCH_SIZE - FORCED_DROP_COUNT);
+    expect(outcome.successfulRows, 'one successful row should have been dropped pre-reconciliation').toBe(HEALTHY_BATCH_SIZE - EXPECTED_MISSING_COUNT);
     expect(outcome.failedRows, 'the lost row is NOT a surfaced failure — that is the whole point').toBe(0);
 
     // The gap is a CRITICAL, diagnosable signal — a real alert row, not merely a log line.
@@ -151,12 +250,12 @@ describe('Reconciliation enforcement (bulkingestionprocess FINAL RECONCILIATION 
     expect(alert, 'a RECONCILIATION_MISMATCH alert row MUST be emitted for the unaccounted row').toBeDefined();
     expect(alert!.type).toBe(RECONCILIATION_MISMATCH_CODE);
     expect(alert!.severity, 'a lost row (positive @unaccounted) is critical, not a warning').toBe(RECONCILIATION_CRITICAL_SEVERITY);
-    expect(Number(alert!.missingRecords), 'exactly one row is missing').toBe(FORCED_DROP_COUNT);
+    expect(Number(alert!.missingRecords), 'exactly one row is missing').toBe(EXPECTED_MISSING_COUNT);
     expect(Number(alert!.sourceRecords)).toBe(HEALTHY_BATCH_SIZE);
-    expect(Number(alert!.processedRecords)).toBe(HEALTHY_BATCH_SIZE - FORCED_DROP_COUNT);
+    expect(Number(alert!.processedRecords)).toBe(HEALTHY_BATCH_SIZE - EXPECTED_MISSING_COUNT);
 
     // uploadmetrics carries the same diagnosable counters.
-    expect(outcome.metricMissingRecords, 'uploadmetrics.missingRecords must equal the gap').toBe(FORCED_DROP_COUNT);
+    expect(outcome.metricMissingRecords, 'uploadmetrics.missingRecords must equal the gap').toBe(EXPECTED_MISSING_COUNT);
     expect(outcome.alertTypes).toContain(INGESTION_ALERT_TYPE.RECONCILIATION_MISMATCH);
 
     // The production client verdict over the SAME real counts must independently flag the
@@ -169,27 +268,26 @@ describe('Reconciliation enforcement (bulkingestionprocess FINAL RECONCILIATION 
     expect(verdict.reconciled, 'client reconciliation must NOT report clean when a row is unaccounted').toBe(false);
     expect(verdict.code).toBe(RECONCILIATION_MISMATCH_CODE);
     expect(verdict.severity).toBe(ReconciliationSeverity.CRITICAL);
-    expect(verdict.missingRecords).toBe(FORCED_DROP_COUNT);
+    expect(verdict.missingRecords).toBe(EXPECTED_MISSING_COUNT);
   });
 
-  it('the fault-injection flag is one-shot: a subsequent batch on the same connection reconciles cleanly', async () => {
-    // Prove the hook cleared itself so it cannot silently corrupt later batches.
-    const rows = buildValidRows(testData, HEALTHY_BATCH_SIZE);
+  it('NO-BLEED: the canonical procedure still reconciles a fresh batch cleanly after the variant ran', async () => {
     const censusID = testData.census[0].censusID;
 
-    await connection.query('SET @forceUnaccountedDrop = ?', [FORCED_DROP_COUNT]);
-    const first = await insertTestMeasurements(connection, testData, rows, { censusID });
-    await runBulkIngestion(connection, first.fileID, first.batchID);
+    // Run the fault-injecting variant first (produces a mismatch on its own batch).
+    const injected = await insertTestMeasurements(connection, testData, buildValidRows(testData, HEALTHY_BATCH_SIZE), { censusID });
+    await connection.query(`CALL ${FAULT_INJECTED_PROCEDURE}(?, ?)`, [injected.fileID, injected.batchID]);
 
     await cleanupTestMeasurements(connection, testData);
 
-    const second = await insertTestMeasurements(connection, testData, buildValidRows(testData, HEALTHY_BATCH_SIZE), { censusID });
-    const secondResult = await runBulkIngestion(connection, second.fileID, second.batchID);
-    expect(secondResult.batch_failed).toBe(false);
+    // The deployed procedure must be untouched by the variant.
+    const clean = await insertTestMeasurements(connection, testData, buildValidRows(testData, HEALTHY_BATCH_SIZE), { censusID });
+    const cleanResult = await runBulkIngestion(connection, clean.fileID, clean.batchID);
+    expect(cleanResult.batch_failed).toBe(false);
 
-    const secondOutcome = await readIngestionOutcome(connection, { fileID: second.fileID, batchID: second.batchID, censusID });
-    expect(secondOutcome.successfulRows, 'the second batch must be unaffected by the one-shot flag').toBe(HEALTHY_BATCH_SIZE);
-    expect(secondOutcome.metricMissingRecords).toBe(0);
-    expect(secondOutcome.alertTypes).not.toContain(INGESTION_ALERT_TYPE.RECONCILIATION_MISMATCH);
+    const cleanOutcome = await readIngestionOutcome(connection, { fileID: clean.fileID, batchID: clean.batchID, censusID });
+    expect(cleanOutcome.successfulRows, 'the canonical procedure must reconcile every row').toBe(HEALTHY_BATCH_SIZE);
+    expect(cleanOutcome.metricMissingRecords).toBe(0);
+    expect(cleanOutcome.alertTypes).not.toContain(INGESTION_ALERT_TYPE.RECONCILIATION_MISMATCH);
   });
 });
