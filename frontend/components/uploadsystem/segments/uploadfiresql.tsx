@@ -41,6 +41,7 @@ import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, resolveHeaders, transformHead
 import { aliasesFor, makeLegacyCsvHeaderKey } from '@/lib/column-mapping/fields';
 import { transformMeasurementValue, validateMeasurementRow } from '@/lib/column-mapping/measurement-rows';
 import { UploadMode } from '@/config/uploadmodes';
+import { evaluateUploadReconciliation, type UploadReconciliationVerdict } from '@/lib/ingestion/reconciliation';
 
 const CSV_MAPPING_REJECTION_SENTENCE: Record<CsvMappingRejectionCode, string> = {
   stale: 'the saved column mapping was built from different headers',
@@ -1973,67 +1974,90 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             let totalSessionProcessed = 0;
             let totalSessionFailed = 0;
             let totalExpectedRows = 0;
-            let dataIntegrityIssuesFound = false;
+            // Reconciliation mirrors bulkingestionprocess's own FINAL RECONCILIATION CHECK:
+            // for each file's consolidated batch, staged input rows must equal succeeded +
+            // surfaced-failure rows. A non-zero gap means at least one row was silently
+            // swallowed (or duplicated) and the upload is NOT clean — collect every such
+            // mismatch and block completion after the loop rather than logging it away.
+            const reconciliationMismatches: { fileID: string; verdict: UploadReconciliationVerdict }[] = [];
+            const unverifiableFiles: string[] = [];
 
             for (let fileIndex = 0; fileIndex < acceptedFiles.length; fileIndex++) {
               const file = acceptedFiles[fileIndex];
               const fileID = file.name;
 
-              // Get expected row count from parsing phase
-              const expectedForFile = expectedRowCounts.current.get(fileID) || 0;
-              totalExpectedRows += expectedForFile;
+              // Reconcile against the rows that actually reached temporarymeasurements under
+              // this batch (== the procedure's vBatchRowCount), NOT the raw parsed row count:
+              // rows the server rejected pre-stage never entered the batch and are tracked
+              // under a different batchID, so including them would create false mismatches.
+              const stagedRowsForFile = expectedTemporaryRowCounts.current.get(fileID) || 0;
+              const fileBatchID = measurementBatchIDs.current.get(fileID) || null;
+              totalExpectedRows += stagedRowsForFile;
 
               try {
+                // Batch-scoped verification: pass batchID so the counts are for THIS upload's
+                // batch, not a cumulative plot/census total.
+                const batchScopeParam = fileBatchID ? `&batchID=${encodeURIComponent(fileBatchID)}` : '';
                 const sessionVerifyResponse = await fetch(
-                  `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}&fileID=${encodeURIComponent(fileID)}`
+                  `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}&fileID=${encodeURIComponent(fileID)}${batchScopeParam}`
                 );
 
                 if (sessionVerifyResponse.ok) {
                   const sessionData = await sessionVerifyResponse.json();
-                  totalSessionProcessed += sessionData.processedCount;
-                  totalSessionFailed += sessionData.failedCount;
+                  const processedCount = Number(sessionData.processedCount || 0);
+                  const failedCount = Number(sessionData.failedCount || 0);
+                  totalSessionProcessed += processedCount;
+                  totalSessionFailed += failedCount;
 
-                  const actualTotal = sessionData.processedCount + sessionData.failedCount;
-                  const discrepancy = expectedForFile - actualTotal;
+                  const verdict = evaluateUploadReconciliation({
+                    sourceRecords: stagedRowsForFile,
+                    successfulRecords: processedCount,
+                    failedRecords: failedCount
+                  });
 
-                  if (discrepancy !== 0) {
-                    dataIntegrityIssuesFound = true;
-                    ailogger.warn(
-                      `Data verification note for ${fileID}: Expected ${expectedForFile} rows from file, actual ${actualTotal} in database (${sessionData.processedCount} in coremeasurements + ${sessionData.failedCount} in failedmeasurements). Difference: ${discrepancy} row(s). This may be normal if rows were deduplicated or merged during processing.`
+                  if (!verdict.reconciled) {
+                    reconciliationMismatches.push({ fileID, verdict });
+                    ailogger.error(`Reconciliation mismatch for ${fileID}${fileBatchID ? ` (batch ${fileBatchID})` : ''}: ${verdict.detail}`);
+                  } else {
+                    ailogger.info(
+                      `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): reconciled — ${processedCount} succeeded + ${failedCount} failed = ${verdict.accountedRecords} of ${stagedRowsForFile} staged ✓`
                     );
                   }
-
-                  ailogger.info(
-                    `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): Expected ${expectedForFile}, Actual ${actualTotal} (${sessionData.processedCount} succeeded, ${sessionData.failedCount} failed)${discrepancy !== 0 ? ` - Difference: ${discrepancy} rows` : ' ✓'}`
-                  );
                 } else {
-                  ailogger.warn(`Session verification request failed for file ${fileID}`);
+                  // A verification we could not complete is not proof of a clean upload; record
+                  // it so completion is blocked rather than optimistically reported as success.
+                  unverifiableFiles.push(fileID);
+                  ailogger.error(`Session verification request failed for file ${fileID}: HTTP ${sessionVerifyResponse.status}`);
                 }
               } catch (sessionError: unknown) {
                 const message = sessionError instanceof Error ? sessionError.message : String(sessionError);
-                ailogger.warn(`Error during session verification for ${fileID}: ${message}`);
+                unverifiableFiles.push(fileID);
+                ailogger.error(`Error during session verification for ${fileID}: ${message}`);
               }
             }
 
             const totalSessionAccounted = totalSessionProcessed + totalSessionFailed;
-            const totalDiscrepancy = totalExpectedRows - totalSessionAccounted;
 
-            // Log verification results - note that discrepancies may be normal due to deduplication
-            if (dataIntegrityIssuesFound || totalDiscrepancy !== 0) {
-              setVerificationStatus(
-                `Verification complete: ${totalSessionAccounted} rows in database (${totalSessionProcessed} succeeded, ${totalSessionFailed} failed). Note: ${Math.abs(totalDiscrepancy)} row difference from expected ${totalExpectedRows} - this may be due to deduplication or data merging.`
-              );
-              ailogger.info(
-                `Upload verification summary: Expected ${totalExpectedRows} rows from input files, ${totalSessionAccounted} rows in database. Difference of ${totalDiscrepancy} rows may be due to deduplication, merged stems, or data consolidation during processing.`
-              );
-            } else {
-              setVerificationStatus(
-                `✓ Verification complete: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed (${totalSessionAccounted} total - matches expected ${totalExpectedRows})`
-              );
-              ailogger.info(
-                `Upload verification summary: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed. Total: ${totalSessionAccounted} rows. Expected: ${totalExpectedRows} rows. ✓ Perfect match.`
+            if (reconciliationMismatches.length > 0 || unverifiableFiles.length > 0) {
+              const mismatchSummary = reconciliationMismatches.map(m => `${m.fileID}: ${m.verdict.detail}`).join(' | ');
+              const unverifiableSummary = unverifiableFiles.length > 0 ? ` Could not verify: ${unverifiableFiles.join(', ')}.` : '';
+              setVerificationStatus(`Upload blocked — data integrity check failed. ${mismatchSummary}${unverifiableSummary}`.trim());
+              // Throwing here routes into the collapser catch below, which rethrows to
+              // runProcessBatches().catch → ERRORS state, so the upload can NEVER be reported
+              // as a clean completion while rows are unaccounted for.
+              throw new Error(
+                `Upload reconciliation failed: ${reconciliationMismatches.length} file(s) with unaccounted rows` +
+                  `${unverifiableFiles.length > 0 ? ` and ${unverifiableFiles.length} unverifiable file(s)` : ''}. ` +
+                  `${mismatchSummary}${unverifiableSummary}`.trim()
               );
             }
+
+            setVerificationStatus(
+              `✓ Verification complete: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed (${totalSessionAccounted} total - matches ${totalExpectedRows} staged)`
+            );
+            ailogger.info(
+              `Upload verification summary: ${totalSessionProcessed} succeeded, ${totalSessionFailed} failed, ${totalSessionAccounted} accounted of ${totalExpectedRows} staged. ✓ Every staged row accounted for.`
+            );
           }
 
           if (isMountedRef.current) {
