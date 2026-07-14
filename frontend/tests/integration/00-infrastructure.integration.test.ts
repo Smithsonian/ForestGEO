@@ -115,33 +115,9 @@ describe('Infrastructure Validation', () => {
       expect(tableNames.length).toBeGreaterThanOrEqual(EXPECTED_TABLES.length);
     });
 
-    it('should have correct table structure for coremeasurements', async () => {
-      const [columns] = await connection.query<RowDataPacket[]>('SHOW COLUMNS FROM coremeasurements');
-      const columnNames = columns.map(c => c.Field);
-
-      const requiredColumns = [
-        'CoreMeasurementID',
-        'StemGUID',
-        'CensusID',
-        'MeasuredDBH',
-        'MeasurementDate',
-        'UploadFileID',
-        'UploadBatchID',
-        'RawTreeTag',
-        'RawStemTag',
-        'RawSpCode',
-        'RawQuadrat',
-        'RawX',
-        'RawY',
-        'RawCodes',
-        'RawComments',
-        'SourceRowIndex'
-      ];
-
-      for (const col of requiredColumns) {
-        expect(columnNames).toContain(col);
-      }
-    });
+    // Per-column structure for coremeasurements and temporarymeasurements (and the other
+    // critical tables) is now asserted in full by schema-contract.integration.test.ts against
+    // the canonical DDL. This file no longer maintains a second, partial hardcoded column list.
 
     it('should not include legacy failed-row tables removed by the unified schema', async () => {
       const [tables] = await connection.query<RowDataPacket[]>('SHOW TABLES');
@@ -149,17 +125,6 @@ describe('Infrastructure Validation', () => {
 
       expect(tableNames).not.toContain('failedmeasurements');
       expect(tableNames).not.toContain('cmverrors');
-    });
-
-    it('should have correct table structure for temporarymeasurements', async () => {
-      const [columns] = await connection.query<RowDataPacket[]>('SHOW COLUMNS FROM temporarymeasurements');
-      const columnNames = columns.map(c => c.Field);
-
-      const requiredColumns = ['FileID', 'BatchID', 'PlotID', 'CensusID', 'TreeTag', 'StemTag', 'DBH'];
-
-      for (const col of requiredColumns) {
-        expect(columnNames).toContain(col);
-      }
     });
   });
 
