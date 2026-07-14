@@ -77,6 +77,25 @@ jobs:
       - name: Install Cypress binary
         run: cd frontend && npx cypress install
 
+      # Fail-closed guard for the accessibility gate. The spec list above referenced
+      # `a11y-responsive.cy.ts` — a filename that never existed — so the a11y audit was
+      # silently absent from the gate. This step fails the job if the REAL spec is gone
+      # from disk (a rename must update the list) OR is no longer named in this workflow's
+      # spec list, so a11y cannot be dropped from the gate again without a loud failure.
+      - name: Assert accessibility spec is present and gated
+        run: |
+          A11Y_SPEC="cypress/e2e/accessibility-audit.cy.ts"
+          WORKFLOW=".github/workflows/e2e-tests.yml"
+          if [ ! -f "frontend/$A11Y_SPEC" ]; then
+            echo "::error::Accessibility gate spec 'frontend/$A11Y_SPEC' not found on disk. If it was renamed, update the spec list in $WORKFLOW so the a11y audit stays gated."
+            exit 1
+          fi
+          if ! grep -qF "$A11Y_SPEC" "$WORKFLOW"; then
+            echo "::error::Accessibility spec '$A11Y_SPEC' is not referenced in $WORKFLOW's spec list. Re-add it so the a11y audit stays in the PR gate."
+            exit 1
+          fi
+          echo "Accessibility gate spec present and gated: $A11Y_SPEC"
+
       - name: Run E2E tests
         uses: cypress-io/github-action@v6
         with:
@@ -96,7 +115,7 @@ jobs:
           # (sqlpacketload/setup*) with cy.intercept. The Tier B realdb anchor
           # (cypress/e2e/column-mapping-realdb/**) is intentionally NOT gated here
           # — it needs Docker MySQL and runs via `npm run test:e2e:realdb`.
-          spec: cypress/e2e/census-creation.cy.ts,cypress/e2e/selection-persistence.cy.ts,cypress/e2e/validation-invalid-codes.cy.ts,cypress/e2e/data-viewing-comprehensive.cy.ts,cypress/e2e/cross-feature-integration.cy.ts,cypress/e2e/errors-explorer.cy.ts,cypress/e2e/a11y-responsive.cy.ts,cypress/e2e/column-mapping/csv-mapping-dialog.cy.ts,cypress/e2e/column-mapping/arcgis-preflight-mapping.cy.ts,cypress/e2e/column-mapping/mapping-signature-persistence.cy.ts,cypress/e2e/column-mapping/mapping-negative-paths.cy.ts
+          spec: cypress/e2e/census-creation.cy.ts,cypress/e2e/selection-persistence.cy.ts,cypress/e2e/validation-invalid-codes.cy.ts,cypress/e2e/data-viewing-comprehensive.cy.ts,cypress/e2e/cross-feature-integration.cy.ts,cypress/e2e/errors-explorer.cy.ts,cypress/e2e/accessibility-audit.cy.ts,cypress/e2e/column-mapping/csv-mapping-dialog.cy.ts,cypress/e2e/column-mapping/arcgis-preflight-mapping.cy.ts,cypress/e2e/column-mapping/mapping-signature-persistence.cy.ts,cypress/e2e/column-mapping/mapping-negative-paths.cy.ts
         env:
           NEXT_PUBLIC_E2E_TESTING: "true"
 
