@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyAttributeRules } from './attributes';
+import { applyAttributeRules, parseAttributeCodes, ATTRIBUTE_CODE_DELIMITER } from './attributes';
 
 function makeCtx(overrides: Partial<Parameters<typeof applyAttributeRules>[0]> = {}) {
   return {
@@ -104,12 +104,21 @@ describe('applyAttributeRules', () => {
     expect(effects[0].affectedRowCount).toBe(1);
   });
 
-  it('treats comma and semicolon delimiters interchangeably', async () => {
+  it('treats a comma as part of the code, NOT a delimiter (matches bulkingestionprocess STAGE 9)', async () => {
+    // ";" is the only attribute-code delimiter. "A,B" is a SINGLE code containing a
+    // comma — distinct from the two-code set {A, B}. Changing "A;B" -> "A,B" therefore
+    // drops A and B and adds the single code "A,B", so the analyzer must flag a change,
+    // not treat the two forms as equal. This is the comma-vs-semicolon regression the
+    // ingestion incidents surfaced.
     const ctx = makeCtx({
       oldRow: { Attributes: 'A;B' },
       newRow: { Attributes: 'A,B' }
     });
-    expect(await applyAttributeRules(ctx)).toEqual([]);
+    const effects = await applyAttributeRules(ctx);
+    expect(effects).toHaveLength(1);
+    expect(effects[0].severity).toBe('destructive');
+    expect(effects[0].title).toMatch(/A/);
+    expect(effects[0].title).toMatch(/B/);
   });
 
   it('trims whitespace around codes', async () => {
@@ -118,5 +127,27 @@ describe('applyAttributeRules', () => {
       newRow: { Attributes: 'A ;B' }
     });
     expect(await applyAttributeRules(ctx)).toEqual([]);
+  });
+});
+
+describe('parseAttributeCodes (shared production tokenizer)', () => {
+  it('exposes ";" as the sole delimiter', () => {
+    expect(ATTRIBUTE_CODE_DELIMITER).toBe(';');
+  });
+
+  it('splits on semicolons, trims, and drops empty segments', () => {
+    expect(parseAttributeCodes(' A ; B ;; C ')).toEqual(['A', 'B', 'C']);
+  });
+
+  it('keeps a comma inside a code (a comma list is ONE code, not many)', () => {
+    expect(parseAttributeCodes('A,B')).toEqual(['A,B']);
+  });
+
+  it('returns [] for null, undefined, and empty/whitespace input', () => {
+    expect(parseAttributeCodes(null)).toEqual([]);
+    expect(parseAttributeCodes(undefined)).toEqual([]);
+    expect(parseAttributeCodes('')).toEqual([]);
+    expect(parseAttributeCodes('   ')).toEqual([]);
+    expect(parseAttributeCodes(' ; ; ')).toEqual([]);
   });
 });
