@@ -184,17 +184,23 @@ export function normalizeDefaultValue(raw: string | null | undefined): string | 
 }
 
 /**
- * Reduces raw EXTRA metadata (DDL fragment or information_schema.EXTRA) to the
- * load-bearing flags: auto_increment, generated (stored/virtual), and on-update.
- * Noise such as DEFAULT_GENERATED and INVISIBLE is intentionally dropped so the
- * two sides remain comparable.
+ * Reduces raw EXTRA metadata to the load-bearing flags: auto_increment,
+ * generated (stored/virtual), and on-update. Noise such as DEFAULT_GENERATED and
+ * INVISIBLE is intentionally dropped so the two sides remain comparable.
+ *
+ * Generation is detected ONLY via the explicit `stored generated` / `virtual
+ * generated` phrases — information_schema.EXTRA emits these verbatim, and the DDL
+ * parser injects the matching phrase after precisely detecting `AS (...)`. There
+ * is deliberately no bare-`as` fallback: a plain column whose remainder happens
+ * to contain the word "as" (e.g. `COMMENT 'measured as diameter'` or a default
+ * string) must not be mistagged as generated.
  */
 export function normalizeExtraMetadata(raw: string | null | undefined): string {
   const value = (raw ?? '').toLowerCase();
   const flags: string[] = [];
   if (value.includes('auto_increment')) flags.push('auto_increment');
-  if (value.includes('stored generated') || /\bas\b[\s\S]*\bstored\b/.test(value)) flags.push('stored_generated');
-  else if (value.includes('virtual generated') || /\bas\b/.test(value)) flags.push('virtual_generated');
+  if (value.includes('stored generated')) flags.push('stored_generated');
+  else if (value.includes('virtual generated')) flags.push('virtual_generated');
   if (value.includes('on update current_timestamp')) flags.push('on_update_current_timestamp');
   return flags.sort().join(',');
 }
@@ -332,8 +338,11 @@ function parseColumnDefinition(item: string, defaultCollation: string | null): C
     defaultValue = defaultMatch ? normalizeDefaultValue(defaultMatch[1]) : null;
   }
 
-  const extraSource = `${remainder}${isGenerated ? ' stored generated' : ''}`;
-  const extra = normalizeExtraMetadata(extraSource);
+  // A generated column is VIRTUAL unless it explicitly declares STORED/PERSISTENT.
+  // Inject the explicit phrase normalizeExtraMetadata keys on, so generation is
+  // driven by the precise `AS (...)` detection above rather than a loose scan.
+  const generatedMarker = isGenerated ? (/\b(stored|persistent)\b/i.test(remainder) ? ' stored generated' : ' virtual generated') : '';
+  const extra = normalizeExtraMetadata(`${remainder}${generatedMarker}`);
 
   const isText = isTextDataType(dataType);
   const collateMatch = remainder.match(/\bcollate\s+([A-Za-z0-9_]+)/i);
@@ -405,6 +414,24 @@ export function parseCanonicalSchemaContract(ddl: string): SchemaContract {
           columns: parseIndexColumns(indexMatch[4])
         };
       }
+    }
+  }
+
+  // Text-column collation is inherited from the schema default. If the canonical
+  // DDL never declared one (no `ALTER DATABASE ... COLLATE`), every text column
+  // would carry a null expected collation and then diff against a live
+  // utf8mb4_0900_ai_ci — mass false failures across every audited schema. Fail
+  // loudly here instead so the DDL, not the audit, is fixed.
+  if (defaultCollation === null) {
+    const firstTextColumn = Object.values(tables)
+      .flatMap(table => Object.values(table.columns).map(column => ({ table: table.name, column })))
+      .find(entry => entry.column.isText);
+    if (firstTextColumn) {
+      throw new Error(
+        `Canonical DDL declares text column(s) (e.g. ${firstTextColumn.table}.${firstTextColumn.column.name}) ` +
+          `but has no schema default collation: an "ALTER DATABASE ... COLLATE <collation>" clause is required so ` +
+          `text-column collation can be compared against the live schema.`
+      );
     }
   }
 
