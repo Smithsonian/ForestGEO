@@ -101,6 +101,9 @@ export async function readIngestionOutcome(connection: Connection, scope: Ingest
     [fileID, batchID, censusID]
   );
 
+  // CensusID scoping assumes bulkingestionprocess populates CensusID on surfaced-failure
+  // rows — it does today (the catch-all failure path in storedprocedures.sql sets CensusID
+  // from the batch), so a future NULL-CensusID failure path would undercount failedRows here.
   const failedRows = await scalarCount(
     connection,
     `SELECT COUNT(*) AS total FROM coremeasurements

@@ -44,7 +44,7 @@ export interface IngestionScenario {
   build(testData: TestData): ScenarioBatch;
 }
 
-const MEASUREMENT_DATE = '2024-06-15';
+export const MEASUREMENT_DATE = '2024-06-15';
 const UNKNOWN_SPECIES_CODE = 'NOSUCHSP';
 const UNKNOWN_QUADRAT_NAME = 'NOSUCHQ';
 

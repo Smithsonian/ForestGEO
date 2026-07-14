@@ -13,7 +13,7 @@
  * not local, so this can never touch a real database.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { Connection, RowDataPacket } from 'mysql2/promise';
+import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import {
   setupTestDatabase,
   teardownTestDatabase,
@@ -24,11 +24,17 @@ import {
   type TestData,
   type TestDatabaseConfig
 } from '../setup/local-db-setup';
-import { readIngestionOutcome, assertIngestionOutcome, INGESTION_ERROR_CODE, INGESTION_ALERT_TYPE, type IngestionScope } from '../setup/ingestion-outcome';
-import { INGESTION_SCENARIOS, type ScenarioMeasurement } from '../setup/ingestion-scenarios';
+import {
+  readIngestionOutcome,
+  assertIngestionOutcome,
+  INGESTION_ERROR_CODE,
+  INGESTION_ALERT_TYPE,
+  type IngestionOutcome,
+  type IngestionScope
+} from '../setup/ingestion-outcome';
+import { INGESTION_SCENARIOS, MEASUREMENT_DATE, type ScenarioMeasurement } from '../setup/ingestion-scenarios';
 
 const LOCAL_HOSTS = ['127.0.0.1', 'localhost'] as const;
-const MEASUREMENT_DATE = '2024-06-15';
 
 function assertLocalHostOrRefuse(): void {
   // Copied verbatim (intent + message) from coreapifunctions-patch-atomicity.integration.test.ts.
@@ -43,11 +49,35 @@ function assertLocalHostOrRefuse(): void {
   }
 }
 
-async function ingestScenarioRows(connection: Connection, testData: TestData, rows: ScenarioMeasurement[]): Promise<IngestionScope> {
+type BulkIngestionResult = Awaited<ReturnType<typeof runBulkIngestion>>;
+
+async function ingestScenarioRows(
+  connection: Connection,
+  testData: TestData,
+  rows: ScenarioMeasurement[]
+): Promise<{ scope: IngestionScope; result: BulkIngestionResult }> {
   const censusID = testData.census[0].censusID;
   const { fileID, batchID } = await insertTestMeasurements(connection, testData, rows, { censusID });
-  await runBulkIngestion(connection, fileID, batchID);
-  return { fileID, batchID, censusID };
+  const result = await runBulkIngestion(connection, fileID, batchID);
+  return { scope: { fileID, batchID, censusID }, result };
+}
+
+/**
+ * Asserts an outcome, but first surfaces a swallowed procedure crash. runBulkIngestion
+ * turns a hard bulkingestionprocess SQL error into {success:false, batch_failed:true},
+ * which would otherwise degrade into a confusing "expected N got 0" outcome mismatch.
+ * When rows were submitted yet NOTHING materialized (no success and no surfaced failure),
+ * throw the procedure's own message so the real cause is diagnosable. Surfaced-failure
+ * scenarios (failed rows > 0) are legitimate and pass straight through.
+ */
+function assertOutcome(outcome: IngestionOutcome, expected: Partial<IngestionOutcome>, result: BulkIngestionResult, submittedRowCount: number): void {
+  if (submittedRowCount > 0 && outcome.successfulRows + outcome.failedRows === 0) {
+    throw new Error(
+      `bulkingestionprocess materialized no rows for ${submittedRowCount} submitted row(s) — likely a procedure error. ` +
+        `runBulkIngestion reported: success=${result.success}, batch_failed=${result.batch_failed}, message="${result.message}"`
+    );
+  }
+  assertIngestionOutcome(outcome, expected);
 }
 
 describe('Ingestion invariants (bulkingestionprocess)', () => {
@@ -74,11 +104,11 @@ describe('Ingestion invariants (bulkingestionprocess)', () => {
   describe('Table-driven outcome scenarios', () => {
     it.each(INGESTION_SCENARIOS)('$name', async scenario => {
       const { rows, expected } = scenario.build(testData);
-      const scope = await ingestScenarioRows(connection, testData, rows);
+      const { scope, result } = await ingestScenarioRows(connection, testData, rows);
       const outcome = await readIngestionOutcome(connection, scope);
       // Name the scenario in the failure context for debuggability.
       try {
-        assertIngestionOutcome(outcome, expected);
+        assertOutcome(outcome, expected, result, rows.length);
       } catch (err) {
         throw new Error(`Scenario "${scenario.name}" failed:\n${(err as Error).message}`);
       }
@@ -102,19 +132,24 @@ describe('Ingestion invariants (bulkingestionprocess)', () => {
         date: MEASUREMENT_DATE
       }));
 
-      const scope = await ingestScenarioRows(connection, testData, rows);
+      const { scope, result } = await ingestScenarioRows(connection, testData, rows);
       const outcome = await readIngestionOutcome(connection, scope);
 
-      assertIngestionOutcome(outcome, {
-        sourceRecords: stemCount,
-        successfulRows: stemCount,
-        failedRows: 0,
-        remainingTemporaryRows: 0,
-        metricProcessedRecords: stemCount,
-        metricFailedRecords: 0,
-        errorCodes: [],
-        alertTypes: []
-      });
+      assertOutcome(
+        outcome,
+        {
+          sourceRecords: stemCount,
+          successfulRows: stemCount,
+          failedRows: 0,
+          remainingTemporaryRows: 0,
+          metricProcessedRecords: stemCount,
+          metricFailedRecords: 0,
+          errorCodes: [],
+          alertTypes: []
+        },
+        result,
+        rows.length
+      );
 
       const [stemRows] = await connection.query<RowDataPacket[]>(
         `SELECT COUNT(*) AS total FROM stems s JOIN trees t ON t.TreeID = s.TreeID
@@ -148,19 +183,24 @@ describe('Ingestion invariants (bulkingestionprocess)', () => {
         const rows: ScenarioMeasurement[] = [
           { treeTag: 'ACTIVEONLY', stemTag: '1', speciesCode, quadratName, x: 3, y: 3, dbh: 10, hom: 1.3, date: MEASUREMENT_DATE }
         ];
-        const scope = await ingestScenarioRows(connection, testData, rows);
+        const { scope, result } = await ingestScenarioRows(connection, testData, rows);
         const outcome = await readIngestionOutcome(connection, scope);
 
-        assertIngestionOutcome(outcome, {
-          sourceRecords: 1,
-          successfulRows: 1,
-          failedRows: 0,
-          remainingTemporaryRows: 0,
-          metricProcessedRecords: 1,
-          metricFailedRecords: 0,
-          errorCodes: [],
-          alertTypes: []
-        });
+        assertOutcome(
+          outcome,
+          {
+            sourceRecords: 1,
+            successfulRows: 1,
+            failedRows: 0,
+            remainingTemporaryRows: 0,
+            metricProcessedRecords: 1,
+            metricFailedRecords: 0,
+            errorCodes: [],
+            alertTypes: []
+          },
+          result,
+          rows.length
+        );
         // No ambiguity code leaked in — the inactive rows were ignored, not counted.
         expect(outcome.errorCodes).not.toContain(INGESTION_ERROR_CODE.AMBIGUOUS_SPECIES);
         expect(outcome.errorCodes).not.toContain(INGESTION_ERROR_CODE.AMBIGUOUS_QUADRAT);
@@ -199,11 +239,11 @@ describe('Ingestion invariants (bulkingestionprocess)', () => {
 
     it('ALLOWS the same active quadrat name in a DIFFERENT plot', async () => {
       const quadratName = testData.quadrats[0].QuadratName;
-      const [plotResult] = await connection.query<RowDataPacket[]>(
+      const [plotResult] = await connection.query<ResultSetHeader>(
         `INSERT INTO plots (PlotName, LocationName, CountryName, DimensionX, DimensionY, Area, GlobalX, GlobalY, GlobalZ, PlotShape, PlotDescription)
          VALUES ('Constraint Plot 2', 'Loc', 'Panama', 500, 500, 250000, 0, 0, 0, 'square', 'second plot')`
       );
-      const plot2ID = (plotResult as unknown as { insertId: number }).insertId;
+      const plot2ID = plotResult.insertId;
       try {
         // Geometry differs from the seed Q01 so the (non-plot-scoped) uq_quadrats_full sig
         // passes; the plot-scoped uq_quadrats_active_name is the constraint under test and
@@ -333,20 +373,25 @@ describe('Ambiguity (constraint-dropped throwaway schema)', () => {
       ],
       { censusID }
     );
-    await runBulkIngestion(connection, fileID, batchID);
+    const result = await runBulkIngestion(connection, fileID, batchID);
     const scope: IngestionScope = { fileID, batchID, censusID };
     const outcome = await readIngestionOutcome(connection, scope);
 
-    assertIngestionOutcome(outcome, {
-      sourceRecords: 1,
-      successfulRows: 0,
-      failedRows: 1,
-      remainingTemporaryRows: 0,
-      metricProcessedRecords: 0,
-      metricFailedRecords: 1,
-      errorCodes: [INGESTION_ERROR_CODE.AMBIGUOUS_SPECIES],
-      alertTypes: [INGESTION_ALERT_TYPE.INVALID_REFERENCE_DATA]
-    });
+    assertOutcome(
+      outcome,
+      {
+        sourceRecords: 1,
+        successfulRows: 0,
+        failedRows: 1,
+        remainingTemporaryRows: 0,
+        metricProcessedRecords: 0,
+        metricFailedRecords: 1,
+        errorCodes: [INGESTION_ERROR_CODE.AMBIGUOUS_SPECIES],
+        alertTypes: [INGESTION_ALERT_TYPE.INVALID_REFERENCE_DATA]
+      },
+      result,
+      1
+    );
     // MatchCount > 1 is recorded verbatim in the failure reason.
     expect(await failedDescription(scope)).toMatch(/Ambiguous species code.*matches 2 active/);
   });
@@ -371,20 +416,25 @@ describe('Ambiguity (constraint-dropped throwaway schema)', () => {
       ],
       { censusID }
     );
-    await runBulkIngestion(connection, fileID, batchID);
+    const result = await runBulkIngestion(connection, fileID, batchID);
     const scope: IngestionScope = { fileID, batchID, censusID };
     const outcome = await readIngestionOutcome(connection, scope);
 
-    assertIngestionOutcome(outcome, {
-      sourceRecords: 1,
-      successfulRows: 0,
-      failedRows: 1,
-      remainingTemporaryRows: 0,
-      metricProcessedRecords: 0,
-      metricFailedRecords: 1,
-      errorCodes: [INGESTION_ERROR_CODE.AMBIGUOUS_QUADRAT],
-      alertTypes: [INGESTION_ALERT_TYPE.INVALID_REFERENCE_DATA]
-    });
+    assertOutcome(
+      outcome,
+      {
+        sourceRecords: 1,
+        successfulRows: 0,
+        failedRows: 1,
+        remainingTemporaryRows: 0,
+        metricProcessedRecords: 0,
+        metricFailedRecords: 1,
+        errorCodes: [INGESTION_ERROR_CODE.AMBIGUOUS_QUADRAT],
+        alertTypes: [INGESTION_ALERT_TYPE.INVALID_REFERENCE_DATA]
+      },
+      result,
+      1
+    );
     expect(await failedDescription(scope)).toMatch(/Ambiguous quadrat name.*matches 2 active/);
   });
 });
