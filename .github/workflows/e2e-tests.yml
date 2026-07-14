@@ -135,3 +135,146 @@ jobs:
           path: frontend/cypress/videos
           retention-days: 7
           if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Real-DB smoke gate.
+  #
+  # Drives the Tier B column-mapping realdb anchor through the GENUINE server
+  # pipeline (browser Papa parse -> /api/sqlpacketload -> bulkingestionprocess ->
+  # collapser) into coremeasurements, against the SAME throwaway MySQL service the
+  # e2e-tests job uses — NO Azure secrets, no firewall allow-list, no shared state.
+  # The realdb config (cypress.realdb.config.cjs) self-seeds `forestgeo_testing`
+  # via its before() task (setupTestDatabase), so no db:seed:e2e step is needed.
+  #
+  # SPEC ASSIGNMENT (PR-smoke vs nightly vs blocked) — decided by REACHABILITY, and
+  # for the reachable spec, by runtime budget:
+  #   * csv-mapping-to-coremeasurements.cy.ts  -> PR SMOKE (this job).
+  #       Upload-only: needs server-side auth() (satisfied by a real e2e JWT cookie +
+  #       AUTH_SECRET + NEXT_PUBLIC_E2E_TESTING) plus local MySQL. No edit-apply, so it
+  #       never touches AUTH_FUNCTIONS_POLL_URL. Runtime is bounded by its own DB polling
+  #       budget (2 tests, POLL_RETRIES=60 * POLL_INTERVAL=2s worst case, but ingestion
+  #       normally completes in a few polls) — comfortably inside this job's 20-min cap.
+  #   * resolve-and-remove.cy.ts               -> NOT GATED (neither PR nor nightly yet).
+  #       Its edit-APPLY step calls fetchAuthoritativeAuthorization
+  #       (config/editplan/authorization.ts), which REQUIRES AUTH_FUNCTIONS_POLL_URL,
+  #       has NO e2e bypass, and has no in-repo stub endpoint that returns the poll
+  #       shape ({ userStatus, allowedSites }). /api/edits/apply therefore 401s here, so
+  #       gating it (PR or nightly) would be a guaranteed-red job. Gating it needs a
+  #       test-only auth-poll stub — a Phase 2 / Task 10 follow-up. Until then it runs
+  #       only via `npm run test:e2e:realdb` locally against a real poll URL.
+  # (Nightly's `test:e2e:ci` uses the default cypress.config.cjs, whose
+  #  excludeSpecPattern drops column-mapping-realdb/**, so nightly does not cover these
+  #  specs either; a nightly realdb job is the natural home for resolve-and-remove once
+  #  the auth-poll stub exists.)
+  # ---------------------------------------------------------------------------
+  realdb-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      mysql:
+        image: mysql:8.0.36
+        env:
+          MYSQL_ROOT_PASSWORD: testpassword
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root -ptestpassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      # AZURE_SQL_* point the Next dev server at the LOCAL MySQL service (127.0.0.1) —
+      # never Azure — so the realdb spec runs fully hermetically. AUTH_SECRET is a
+      # throwaway CI value (NextAuth refuses to start without it, MissingSecret);
+      # NEXT_PUBLIC_E2E_TESTING enables the e2e session bypass in auth.ts so a real JWT
+      # cookie satisfies auth() without an external auth API.
+      - name: Create .env for real-DB smoke
+        run: |
+          cat > frontend/.env <<'ENVEOF'
+          AUTH_SECRET=e2e-ci-secret
+          AUTH_URL=http://localhost:3000
+          AZURE_SQL_USER=root
+          AZURE_SQL_PASSWORD=testpassword
+          AZURE_SQL_SERVER=127.0.0.1
+          AZURE_SQL_PORT=3306
+          AZURE_SQL_CATALOG_SCHEMA=catalog
+          NEXT_PUBLIC_E2E_TESTING=true
+          NODE_ENV=development
+          PORT=3000
+          ENVEOF
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Install Cypress binary
+        run: cd frontend && npx cypress install
+
+      # Fail-closed guard: a move/rename could leave the realdb glob matching nothing,
+      # in which case cypress would exit 0 having run ZERO specs and the gate would pass
+      # vacuously. Assert the directory holds specs AND the spec we gate exists first.
+      - name: Assert real-DB specs are discoverable
+        run: |
+          REALDB_DIR="frontend/cypress/e2e/column-mapping-realdb"
+          GATED_SPEC="$REALDB_DIR/csv-mapping-to-coremeasurements.cy.ts"
+          count=$(find "$REALDB_DIR" -maxdepth 1 -name '*.cy.ts' 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No real-DB specs found under $REALDB_DIR — the smoke gate would run zero specs. Refusing to pass vacuously."
+            exit 1
+          fi
+          if [ ! -f "$GATED_SPEC" ]; then
+            echo "::error::Gated real-DB spec '$GATED_SPEC' not found (renamed?). Update the spec input on this job."
+            exit 1
+          fi
+          echo "Discovered $count real-DB spec file(s); gating $GATED_SPEC"
+
+      # The mysql service health-cmd gates this step until MySQL is reachable; the realdb
+      # config's before() task then self-seeds forestgeo_testing via setupTestDatabase.
+      # TEST_DB_* reach the cypress-side DB tasks (seed/reset/query); AZURE_SQL_* reach the
+      # dev server via frontend/.env. electron matches the local `npm run test:e2e:realdb`
+      # invocation this job mirrors.
+      - name: Run real-DB smoke (upload -> coremeasurements)
+        uses: cypress-io/github-action@v6
+        with:
+          working-directory: frontend
+          start: npx next dev --turbo
+          wait-on: "http://localhost:3000"
+          wait-on-timeout: 120
+          browser: electron
+          headed: false
+          config-file: cypress.realdb.config.cjs
+          # ONLY the upload-only anchor — resolve-and-remove.cy.ts is excluded (auth-poll
+          # has no e2e bypass); see the job-level comment for the full rationale.
+          spec: cypress/e2e/column-mapping-realdb/csv-mapping-to-coremeasurements.cy.ts
+        env:
+          NEXT_PUBLIC_E2E_TESTING: "true"
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_PORT: "3306"
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: testpassword
+
+      - name: Upload real-DB smoke screenshots on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: realdb-smoke-screenshots
+          path: frontend/cypress/screenshots
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload real-DB smoke videos
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: realdb-smoke-videos
+          path: frontend/cypress/videos
+          retention-days: 7
+          if-no-files-found: ignore
