@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTemporaryMeasurementInsertParams, parseUnsignedIntField } from '@/lib/ingestion/temporary-measurements';
+import { buildTemporaryMeasurementInsertRecord, parseUnsignedIntField } from '@/lib/ingestion/temporary-measurements';
 import { SourceFormat } from '@/config/macros/formdetails';
 
 const FILE = 'f.csv',
@@ -7,12 +7,12 @@ const FILE = 'f.csv',
   SESSION = null,
   PLOT = 1,
   CENSUS = 2;
-const lastParam = (row: any) => buildTemporaryMeasurementInsertParams(row, FILE, BATCH, SESSION, SourceFormat.csv, PLOT, CENSUS).at(-1);
+const publishedStemIDOf = (row: any) => buildTemporaryMeasurementInsertRecord(row, FILE, BATCH, SESSION, SourceFormat.csv, PLOT, CENSUS).PublishedStemID;
 
-describe('buildTemporaryMeasurementInsertParams publishedstemid wiring', () => {
-  it('appends the parsed PublishedStemID as the final param', () => {
+describe('buildTemporaryMeasurementInsertRecord publishedstemid wiring', () => {
+  it('maps the parsed PublishedStemID onto the keyed record', () => {
     expect(
-      lastParam({
+      publishedStemIDOf({
         tag: 'T1',
         stemtag: '1',
         spcode: 'sp',
@@ -29,7 +29,7 @@ describe('buildTemporaryMeasurementInsertParams publishedstemid wiring', () => {
     ).toBe(5001);
   });
   it('yields null when publishedstemid is absent', () => {
-    expect(lastParam({ tag: 'T1', spcode: 'sp', quadrat: 'q1', lx: '1', ly: '2', date: '2026-01-01' })).toBeNull();
+    expect(publishedStemIDOf({ tag: 'T1', spcode: 'sp', quadrat: 'q1', lx: '1', ly: '2', date: '2026-01-01' })).toBeNull();
   });
 });
 
