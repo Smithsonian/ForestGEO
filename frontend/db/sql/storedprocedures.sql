@@ -3233,31 +3233,6 @@ BEGIN
 
     DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
 
-    -- Fault-injection hook (test/diagnostic only; strict no-op in production, where the
-    -- session variable is never set). When @forceUnaccountedDrop is a positive integer,
-    -- delete one already-inserted successful measurement for THIS batch immediately before
-    -- the reconciliation count, simulating a silently lost row so the FINAL RECONCILIATION
-    -- CHECK below observes a real, diagnosable gap (@unaccounted != 0) and emits the
-    -- critical RECONCILIATION_MISMATCH alert. Follows the same session-variable gating
-    -- pattern as @disable_triggers used elsewhere in this procedure; the flag is cleared
-    -- after firing so it affects at most one batch.
-    IF @forceUnaccountedDrop IS NOT NULL AND @forceUnaccountedDrop > 0 THEN
-        DELETE FROM coremeasurements
-        WHERE CoreMeasurementID = (
-            SELECT victim.CoreMeasurementID FROM (
-                SELECT cm.CoreMeasurementID
-                FROM coremeasurements cm
-                WHERE cm.CensusID = vCurrentCensusID
-                  AND cm.StemGUID IS NOT NULL
-                  AND cm.UploadFileID = vFileID
-                  AND cm.UploadBatchID = vBatchID
-                ORDER BY cm.CoreMeasurementID DESC
-                LIMIT 1
-            ) AS victim
-        );
-        SET @forceUnaccountedDrop = NULL;
-    END IF;
-
     -- =====================================================
     -- FINAL RECONCILIATION CHECK
     -- Verify: input_rows = success + failed + deduplicated
