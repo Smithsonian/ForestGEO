@@ -238,3 +238,73 @@ describe('formatContractFailures', () => {
     expect(rendered).toContain('varchar(25)');
   });
 });
+
+// Regression guards for two false-failure sources that would only surface when
+// schema-contract.ts runs as a LIVE production audit across many schemas.
+describe('robustness regressions', () => {
+  it('does not mistag a plain column as generated when its remainder contains the word "as"', () => {
+    const ddl = `
+      ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+      create table if not exists notes
+      (
+          NoteID   int auto_increment primary key,
+          Body     varchar(64)  null comment 'measured as diameter',
+          Label    varchar(32)  not null default 'flagged as bad'
+      );
+    `;
+    const contract = parseCanonicalSchemaContract(ddl);
+    const columns = contract.tables['notes'].columns;
+
+    // The word "as" in a comment/default must not trip generated-column detection.
+    expect(columns['body'].extra).toBe('');
+    expect(columns['label'].extra).toBe('');
+    // And the surrounding metadata must still parse correctly.
+    expect(columns['label'].defaultValue).toBe('flagged as bad');
+    expect(columns['body'].collation).toBe(TARGET_COLLATION);
+
+    // A self-comparison must therefore produce no spurious diff.
+    const { failures } = compareSchemaContracts(contract, JSON.parse(JSON.stringify(contract)), {
+      tables: ['notes'],
+      requiredIndexesByTable: { notes: [] }
+    });
+    expect(failures).toEqual([]);
+  });
+
+  it('still detects a genuine stored generated column via the explicit AS (...) marker', () => {
+    const ddl = `
+      ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+      create table if not exists sums
+      (
+          A     int null,
+          B     int null,
+          Total int as (A + B) stored
+      );
+    `;
+    const contract = parseCanonicalSchemaContract(ddl);
+    expect(contract.tables['sums'].columns['total'].extra).toBe('stored_generated');
+  });
+
+  it('throws a descriptive error when a DDL has text columns but no ALTER DATABASE COLLATE clause', () => {
+    const ddl = `
+      create table if not exists people
+      (
+          PersonID int auto_increment primary key,
+          Name     varchar(64) not null
+      );
+    `;
+    expect(() => parseCanonicalSchemaContract(ddl)).toThrowError(/people\.Name[\s\S]*ALTER DATABASE[\s\S]*COLLATE/i);
+  });
+
+  it('does not throw for a DDL with no text columns and no ALTER DATABASE COLLATE clause', () => {
+    const ddl = `
+      create table if not exists counters
+      (
+          CounterID int auto_increment primary key,
+          Value     int not null default 0
+      );
+    `;
+    const contract = parseCanonicalSchemaContract(ddl);
+    expect(contract.defaultCollation).toBeNull();
+    expect(contract.tables['counters'].columns['value'].collation).toBeNull();
+  });
+});
