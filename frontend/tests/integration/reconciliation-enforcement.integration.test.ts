@@ -62,7 +62,6 @@ function assertLocalHostOrRefuse(): void {
 const MEASUREMENT_DATE = '2024-06-15';
 const HEALTHY_BATCH_SIZE = 3;
 const EXPECTED_MISSING_COUNT = 1;
-const RECONCILIATION_CRITICAL_SEVERITY = 'critical';
 const CANONICAL_PROCEDURE = 'bulkingestionprocess';
 const FAULT_INJECTED_PROCEDURE = 'bulkingestionprocess_faultinjected';
 
@@ -124,9 +123,13 @@ function buildFaultInjectedProcedureSql(): string {
   if (!createChunk) {
     throw new Error(`Could not locate the CREATE for ${CANONICAL_PROCEDURE} in ${proceduresPath}`);
   }
-  const createIndex = createChunk.indexOf('CREATE');
+  // Anchor to the CREATE that immediately precedes `PROCEDURE <name>(` rather than the first
+  // CREATE token in the chunk, so a stray "CREATE" inside a comment before the DROP can't make
+  // the slice start early.
+  const procedureIndex = createChunk.indexOf(`PROCEDURE ${CANONICAL_PROCEDURE}(`);
+  const createIndex = createChunk.lastIndexOf('CREATE', procedureIndex);
   if (createIndex === -1) {
-    throw new Error(`Could not find the CREATE keyword for ${CANONICAL_PROCEDURE} in ${proceduresPath}`);
+    throw new Error(`Could not find the CREATE keyword preceding PROCEDURE ${CANONICAL_PROCEDURE}( in ${proceduresPath}`);
   }
   const createOnly = createChunk.slice(createIndex);
 
@@ -249,7 +252,7 @@ describe('Reconciliation enforcement (bulkingestionprocess FINAL RECONCILIATION 
     const alert = await readMismatchAlert(connection, scope);
     expect(alert, 'a RECONCILIATION_MISMATCH alert row MUST be emitted for the unaccounted row').toBeDefined();
     expect(alert!.type).toBe(RECONCILIATION_MISMATCH_CODE);
-    expect(alert!.severity, 'a lost row (positive @unaccounted) is critical, not a warning').toBe(RECONCILIATION_CRITICAL_SEVERITY);
+    expect(alert!.severity, 'a lost row (positive @unaccounted) is critical, not a warning').toBe(ReconciliationSeverity.CRITICAL);
     expect(Number(alert!.missingRecords), 'exactly one row is missing').toBe(EXPECTED_MISSING_COUNT);
     expect(Number(alert!.sourceRecords)).toBe(HEALTHY_BATCH_SIZE);
     expect(Number(alert!.processedRecords)).toBe(HEALTHY_BATCH_SIZE - EXPECTED_MISSING_COUNT);
