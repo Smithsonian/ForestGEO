@@ -243,8 +243,11 @@ describe('Tier B: error correction removes the validation link, materializes the
 
     // The real /api/errors/explorer/query surfaces the bad row (it has an unresolved error);
     // the valid row 201 has none and never appears. Anchor on the tag cell, then the row.
-    cy.contains('[data-field="treeTag"]', BAD_ROW_TAG, { timeout: 30000 }).should('be.visible');
-    cy.contains('[data-field="treeTag"]', BAD_ROW_TAG).closest('.MuiDataGrid-row').as('badRow');
+    // Exact-match the tag (as applyColumnMapping does for option labels): a substring match
+    // would let a future in-scope tag like "2020" also hit "202".
+    const badRowTagMatch = new RegExp(`^${BAD_ROW_TAG}$`);
+    cy.contains('[data-field="treeTag"]', badRowTagMatch, { timeout: 30000 }).should('be.visible');
+    cy.contains('[data-field="treeTag"]', badRowTagMatch).closest('.MuiDataGrid-row').as('badRow');
 
     // Enter row edit mode, then rewrite the codes cell. The edit cell pre-fills from the
     // uploaded RawCodes "A,D", which the grid renders as two chips (it splits display on
