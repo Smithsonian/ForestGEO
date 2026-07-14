@@ -6,9 +6,8 @@ import { RuleContext } from './context';
  * stored procedure: db/sql/storedprocedures.sql STAGE 9 splits RawCodes on ';' only
  * (REPLACE(TRIM(rcm.Codes), ';', '","') into a JSON array). Comma is NOT a delimiter —
  * a comma inside a code stays part of that single code, so "A,B" is ONE (invalid) code,
- * not two. Keeping the edit path on this same delimiter is why the analyzer's preview,
- * the writer's DB write, and a fresh bulk ingestion can never disagree about how a code
- * list splits.
+ * not two. Keeping the edit path on this same delimiter aligns the analyzer's preview,
+ * the writer's DB write, and a fresh bulk ingestion on how a code list splits.
  */
 export const ATTRIBUTE_CODE_DELIMITER = ';';
 
@@ -16,8 +15,11 @@ export const ATTRIBUTE_CODE_DELIMITER = ';';
  * The single production tokenizer for a stored attribute-code list. Both edit consumers
  * import it — the ANALYZER (applyAttributeRules, this file) and the WRITER
  * (writeMeasurementsSummary, ../writers/measurementssummary) — so an edit's warning
- * preview and its actual cmattributes rebuild always agree, and both agree with how
- * bulkingestionprocess materializes cmattributes from RawCodes.
+ * preview and its actual cmattributes rebuild share the same ';'-split + trim +
+ * drop-empties semantics that bulkingestionprocess uses to materialize cmattributes
+ * from RawCodes. The DB additionally truncates each split code to varchar(10)
+ * (json_table); harmless for the ≤10-char attribute-code domain, so it is not repeated
+ * here.
  */
 export function parseAttributeCodes(raw: unknown): string[] {
   if (raw === null || raw === undefined) return [];
