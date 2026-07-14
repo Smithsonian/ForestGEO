@@ -184,8 +184,55 @@ jobs:
           name: app-build
           path: frontend/build/standalone
 
-  deploy-app-production:
+  # Schema migrate + verify + stored-procedure/validation deploy.
+  # This runs BEFORE the app deploy and the app deploy `needs:` it, so a failed
+  # migration or a failed contract verify PREVENTS incompatible app code from
+  # going live. The stored procedures reference the new columns, so they are
+  # deployed only after the migration has added those columns.
+  migrate-and-verify-production:
     needs: build-app-production
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js version
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - name: Install dependencies
+        run: |
+          cd frontend/
+          npm install --production=false
+
+      - name: Apply schema migrations to all schemas
+        env:
+          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+        run: |
+          cd frontend/
+          npx tsx scripts/apply-schema-migrations.ts --all-sites --apply
+        continue-on-error: false
+
+      - name: Verify schema contract across all schemas
+        env:
+          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+        run: |
+          cd frontend/
+          npx tsx scripts/check-schema-contract.ts --all-sites
+        continue-on-error: false
+
+      - name: Deploy validation queries and stored procedures to all schemas
+        env:
+          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+        run: |
+          cd frontend/
+          npx tsx scripts/deploy-validations-to-all-schemas.ts
+        continue-on-error: false
+
+  deploy-app-production:
+    needs: [build-app-production, migrate-and-verify-production]
     runs-on: ubuntu-latest
     environment: production
 
@@ -213,25 +260,6 @@ jobs:
           echo "Deployment submitted to Azure App Service"
           # Note: External health checks are not performed because Azure Easy Auth
           # requires authentication. Build integrity was verified in the build job.
-
-      - name: Setup Node.js for validation deployment
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24.x'
-
-      - name: Checkout code for validation deployment
-        uses: actions/checkout@v4
-        with:
-          path: repo
-
-      - name: Deploy validation queries and stored procedures to all schemas
-        env:
-          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
-        run: |
-          cd repo/frontend
-          npm install --production=false
-          npx tsx scripts/deploy-validations-to-all-schemas.ts
-        continue-on-error: false
 
   # Rollback job - creates a GitHub issue on deploy failure for manual intervention.
   # An app restart is attempted but will not fix code-level issues.
