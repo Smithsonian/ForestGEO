@@ -29,6 +29,7 @@ import {
   assertIngestionOutcome,
   INGESTION_ERROR_CODE,
   INGESTION_ALERT_TYPE,
+  ATTRIBUTE_CODE_VALIDATION_ERROR,
   type IngestionOutcome,
   type IngestionScope
 } from '../setup/ingestion-outcome';
@@ -283,6 +284,203 @@ describe('Ingestion invariants (bulkingestionprocess)', () => {
         await connection.query(`DELETE FROM species WHERE SpeciesCode = ? AND IsActive = 0`, [speciesCode]);
         await connection.query(`DELETE FROM quadrats WHERE QuadratName = ? AND PlotID = ? AND IsActive = 0`, [quadratName, plotID]);
       }
+    });
+  });
+
+  /**
+   * STAGE 9 attribute materialization: the production tokenizer (semicolon-split) is the
+   * SQL itself. These prove valid codes land in cmattributes, an unknown code surfaces the
+   * real validation/14 error into measurement_error_log without failing the row, and — the
+   * exact ingestion incident — a comma list is treated as ONE (invalid) code, never split.
+   */
+  describe('Attribute-code materialization (STAGE 9)', () => {
+    const VALID_CODE_A = 'A'; // seeded active attribute (Alive)
+    const VALID_CODE_D = 'D'; // seeded active attribute (Dead)
+    const UNKNOWN_CODE = 'ZZ'; // absent from the seeded attributes catalog
+
+    // cmattributes rows for the batch, grouped by the measurement's resolved tree tag, so a
+    // scenario can assert EXACTLY which codes each successful row materialized.
+    async function materializedCodesByTreeTag(scope: IngestionScope): Promise<Map<string, string[]>> {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT t.TreeTag AS tag, cma.Code AS code
+         FROM coremeasurements cm
+         JOIN stems s ON s.StemGUID = cm.StemGUID
+         JOIN trees t ON t.TreeID = s.TreeID
+         JOIN cmattributes cma ON cma.CoreMeasurementID = cm.CoreMeasurementID
+         WHERE cm.UploadFileID = ? AND cm.UploadBatchID = ? AND cm.CensusID = ?
+         ORDER BY t.TreeTag, cma.Code`,
+        [scope.fileID, scope.batchID, scope.censusID]
+      );
+      const byTag = new Map<string, string[]>();
+      for (const row of rows) {
+        const tag = String(row.tag);
+        const list = byTag.get(tag) ?? [];
+        list.push(String(row.code));
+        byTag.set(tag, list);
+      }
+      return byTag;
+    }
+
+    // Count of invalid-attribute-code validation errors (validation/14) linked to each
+    // successful measurement in the batch, grouped by tree tag.
+    async function attributeErrorsByTreeTag(scope: IngestionScope): Promise<Map<string, number>> {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT t.TreeTag AS tag, COUNT(*) AS n
+         FROM coremeasurements cm
+         JOIN stems s ON s.StemGUID = cm.StemGUID
+         JOIN trees t ON t.TreeID = s.TreeID
+         JOIN measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+         JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE cm.UploadFileID = ? AND cm.UploadBatchID = ? AND cm.CensusID = ?
+           AND me.ErrorSource = ? AND me.ErrorCode = ?
+         GROUP BY t.TreeTag`,
+        [scope.fileID, scope.batchID, scope.censusID, ATTRIBUTE_CODE_VALIDATION_ERROR.source, ATTRIBUTE_CODE_VALIDATION_ERROR.code]
+      );
+      const byTag = new Map<string, number>();
+      for (const row of rows) byTag.set(String(row.tag), Number(row.n));
+      return byTag;
+    }
+
+    it('materializes one cmattributes row per valid semicolon-delimited code, with no attribute error', async () => {
+      const tag = 'ATTR_VALID';
+      const rows: ScenarioMeasurement[] = [
+        {
+          treeTag: tag,
+          stemTag: '1',
+          speciesCode: testData.species[0].SpeciesCode,
+          quadratName: testData.quadrats[0].QuadratName,
+          x: 1,
+          y: 1,
+          dbh: 10,
+          hom: 1.3,
+          date: MEASUREMENT_DATE,
+          codes: `${VALID_CODE_A};${VALID_CODE_D}`
+        }
+      ];
+      const { scope, result } = await ingestScenarioRows(connection, testData, rows);
+      const outcome = await readIngestionOutcome(connection, scope);
+      assertOutcome(
+        outcome,
+        {
+          sourceRecords: 1,
+          successfulRows: 1,
+          failedRows: 0,
+          remainingTemporaryRows: 0,
+          metricProcessedRecords: 1,
+          metricFailedRecords: 0,
+          errorCodes: [],
+          alertTypes: []
+        },
+        result,
+        rows.length
+      );
+
+      const codes = await materializedCodesByTreeTag(scope);
+      expect(codes.get(tag), `cmattributes codes for ${tag}`).toEqual([VALID_CODE_A, VALID_CODE_D]);
+      const errors = await attributeErrorsByTreeTag(scope);
+      expect(errors.get(tag) ?? 0, `attribute-code errors for ${tag}`).toBe(0);
+    });
+
+    it('surfaces an unknown code into measurement_error_log (validation/14) while still materializing the valid code and ingesting the row', async () => {
+      const tag = 'ATTR_BADCODE';
+      const rows: ScenarioMeasurement[] = [
+        {
+          treeTag: tag,
+          stemTag: '1',
+          speciesCode: testData.species[0].SpeciesCode,
+          quadratName: testData.quadrats[0].QuadratName,
+          x: 2,
+          y: 2,
+          dbh: 11,
+          hom: 1.3,
+          date: MEASUREMENT_DATE,
+          codes: `${VALID_CODE_A};${UNKNOWN_CODE}`
+        }
+      ];
+      const { scope, result } = await ingestScenarioRows(connection, testData, rows);
+      const outcome = await readIngestionOutcome(connection, scope);
+      // The row still SUCCEEDS — an invalid attribute code is a soft validation (STAGE 9),
+      // logged against the resolved measurement, not a hard ingestion failure.
+      assertOutcome(
+        outcome,
+        {
+          sourceRecords: 1,
+          successfulRows: 1,
+          failedRows: 0,
+          remainingTemporaryRows: 0,
+          metricProcessedRecords: 1,
+          metricFailedRecords: 0,
+          errorCodes: [],
+          alertTypes: []
+        },
+        result,
+        rows.length
+      );
+
+      const codes = await materializedCodesByTreeTag(scope);
+      expect(codes.get(tag), `only the valid code materializes for ${tag}`).toEqual([VALID_CODE_A]);
+      const errors = await attributeErrorsByTreeTag(scope);
+      expect(errors.get(tag) ?? 0, `exactly one validation/14 error for the unknown code on ${tag}`).toBe(1);
+    });
+
+    it('distinguishes a semicolon list (many codes) from a comma list (one invalid code) — the exact ingestion incident', async () => {
+      const semiTag = 'ATTR_SEMI';
+      const commaTag = 'ATTR_COMMA';
+      const rows: ScenarioMeasurement[] = [
+        {
+          treeTag: semiTag,
+          stemTag: '1',
+          speciesCode: testData.species[0].SpeciesCode,
+          quadratName: testData.quadrats[0].QuadratName,
+          x: 3,
+          y: 3,
+          dbh: 12,
+          hom: 1.3,
+          date: MEASUREMENT_DATE,
+          codes: `${VALID_CODE_A};${VALID_CODE_D}`
+        },
+        {
+          treeTag: commaTag,
+          stemTag: '1',
+          speciesCode: testData.species[1].SpeciesCode,
+          quadratName: testData.quadrats[0].QuadratName,
+          x: 4,
+          y: 4,
+          dbh: 13,
+          hom: 1.3,
+          date: MEASUREMENT_DATE,
+          codes: `${VALID_CODE_A},${VALID_CODE_D}`
+        }
+      ];
+      const { scope, result } = await ingestScenarioRows(connection, testData, rows);
+      const outcome = await readIngestionOutcome(connection, scope);
+      assertOutcome(
+        outcome,
+        {
+          sourceRecords: 2,
+          successfulRows: 2,
+          failedRows: 0,
+          remainingTemporaryRows: 0,
+          metricProcessedRecords: 2,
+          metricFailedRecords: 0,
+          errorCodes: [],
+          alertTypes: []
+        },
+        result,
+        rows.length
+      );
+
+      const codes = await materializedCodesByTreeTag(scope);
+      const errors = await attributeErrorsByTreeTag(scope);
+
+      // Semicolon list -> two valid codes, no error.
+      expect(codes.get(semiTag), `semicolon list materializes both codes for ${semiTag}`).toEqual([VALID_CODE_A, VALID_CODE_D]);
+      expect(errors.get(semiTag) ?? 0, `no attribute-code error for the semicolon list ${semiTag}`).toBe(0);
+
+      // Comma list -> the whole "A,D" string is ONE code that matches no attribute, so
+      // nothing materializes and it surfaces exactly one validation/14 error.
+      expect(codes.get(commaTag), `comma list materializes NO cmattributes rows for ${commaTag}`).toBeUndefined();
+      expect(errors.get(commaTag) ?? 0, `exactly one validation/14 error for the comma list ${commaTag}`).toBe(1);
     });
   });
 });

@@ -54,6 +54,23 @@ export const INGESTION_ALERT_TYPE = {
   RECONCILIATION_MISMATCH: 'RECONCILIATION_MISMATCH'
 } as const;
 
+/**
+ * Attribute-code validation error surfaced by bulkingestionprocess STAGE 9
+ * (db/sql/storedprocedures.sql): after cmattributes are materialized from the
+ * semicolon-split RawCodes, any split code with no matching active attributes.Code is
+ * logged into measurement_error_log against the ALREADY-SUCCESSFUL measurement.
+ *
+ * Distinct from INGESTION_ERROR_CODE: the source is 'validation' (not 'ingestion') and
+ * the code is the numeric sitespecificvalidations.ValidationID 14 =
+ * 'ValidateFindInvalidAttributeCodes' (db/sql/corequeries.sql line 273), joined in
+ * STAGE 9 as `me.ErrorSource = 'validation' AND me.ErrorCode = '14'`. Read verbatim
+ * from the SQL, not invented.
+ */
+export const ATTRIBUTE_CODE_VALIDATION_ERROR = {
+  source: 'validation',
+  code: '14'
+} as const;
+
 export interface IngestionScope {
   fileID: string;
   batchID: string;
