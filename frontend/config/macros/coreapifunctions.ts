@@ -152,9 +152,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
     return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
     // A zero-row UPDATE must not report success: surface the NOT_FOUND status the
-    // error carries instead of the generic 500 handleError would produce.
+    // error carries instead of the generic 500 handleError would produce. Use the
+    // `message` key so the grid consumer (isolateddatagridcommons reads
+    // responseJSON.message) shows the specific not-found reason, consistent with
+    // this handler's success and handleError responses.
     if (error instanceof RowNotFoundError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json({ message: error.message }, { status: error.status });
     }
     // withTransaction has already rolled back on throw; pass no transactionID so
     // handleError only formats the response and does not attempt a second
