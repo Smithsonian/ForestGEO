@@ -90,8 +90,13 @@ jobs:
             echo "::error::Accessibility gate spec 'frontend/$A11Y_SPEC' not found on disk. If it was renamed, update the spec list in $WORKFLOW so the a11y audit stays gated."
             exit 1
           fi
-          if ! grep -qF "$A11Y_SPEC" "$WORKFLOW"; then
-            echo "::error::Accessibility spec '$A11Y_SPEC' is not referenced in $WORKFLOW's spec list. Re-add it so the a11y audit stays in the PR gate."
+          # Scope the reference check to the actual `spec:` list line, NOT the whole file:
+          # $A11Y_SPEC also appears in this guard's own A11Y_SPEC= assignment above, so a
+          # whole-file grep would stay green even if the spec were deleted from the gate's
+          # spec: list — the exact regression this guard exists to catch. Keying off the
+          # `spec:` line makes removal-from-list fail loudly.
+          if ! grep -E '^[[:space:]]*spec:' "$WORKFLOW" | grep -qF "$A11Y_SPEC"; then
+            echo "::error::Accessibility spec '$A11Y_SPEC' is not in the e2e 'spec:' list in $WORKFLOW. Re-add it so the a11y audit stays in the PR gate."
             exit 1
           fi
           echo "Accessibility gate spec present and gated: $A11Y_SPEC"
