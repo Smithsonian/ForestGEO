@@ -48,6 +48,13 @@ const CSV_MAPPING_REJECTION_SENTENCE: Record<CsvMappingRejectionCode, string> = 
   invalid: 'the saved column mapping is no longer valid for this file'
 };
 
+class UploadReconciliationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UploadReconciliationError';
+  }
+}
+
 function createAbortError(message: string): Error {
   const error = new Error(message);
   error.name = 'AbortError';
@@ -175,6 +182,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   // Track expected row counts per file for end-to-end verification
   const expectedRowCounts = useRef<Map<string, number>>(new Map());
   const expectedTemporaryRowCounts = useRef<Map<string, number>>(new Map());
+  const persistedRejectedRowCounts = useRef<Map<string, number>>(new Map());
   const measurementBatchIDs = useRef<Map<string, string>>(new Map());
 
   const getRequiredUploadSessionId = useCallback((): string => {
@@ -394,47 +402,49 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   );
 
   const pushErrorRowsToFailedMeasurements = useCallback(
-    async (errorRows: FileRow[], fileName: string) => {
-      if (errorRows.length === 0) return;
+    async (errorRows: FileRow[], fileName: string): Promise<number> => {
+      if (errorRows.length === 0) return 0;
 
-      try {
-        const failedMeasurementsData = errorRows.map(row => ({
-          plotID: currentPlot?.plotID ?? -1,
-          censusID: currentCensus?.dateRanges?.[0]?.censusID ?? -1,
-          tag: row.tag || null,
-          stemTag: row.stemtag || null,
-          spCode: row.spcode || null,
-          quadrat: row.quadrat || null,
-          x: row.lx || null,
-          y: row.ly || null,
-          dbh: row.dbh || null,
-          hom: row.hom || null,
-          date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
-          codes: row.codes || null,
-          comments: row.comments || null,
-          failureReasons: row.failureReason || 'Unknown error'
-        }));
+      const failedMeasurementsData = errorRows.map(row => ({
+        plotID: currentPlot?.plotID ?? -1,
+        censusID: currentCensus?.dateRanges?.[0]?.censusID ?? -1,
+        tag: row.tag || null,
+        stemTag: row.stemtag || null,
+        spCode: row.spcode || null,
+        quadrat: row.quadrat || null,
+        x: row.lx || null,
+        y: row.ly || null,
+        dbh: row.dbh || null,
+        hom: row.hom || null,
+        date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
+        codes: row.codes || null,
+        comments: row.comments || null,
+        failureReasons: row.failureReason || 'Unknown error'
+      }));
 
-        const response = await fetchWithTimeout(
-          `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges?.[0]?.censusID}?fileID=${encodeURIComponent(fileName)}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(failedMeasurementsData)
-          },
-          30000
-        );
+      const response = await fetchWithTimeout(
+        `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges?.[0]?.censusID}?fileID=${encodeURIComponent(fileName)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(failedMeasurementsData)
+        },
+        30000
+      );
 
-        if (!response.ok) {
-          throw new Error(`Failed to push error rows to failedmeasurements: ${response.status}`);
-        }
-
-        ailogger.info(`Successfully pushed ${errorRows.length} error rows from ${fileName} to failedmeasurements table`);
-      } catch (error: unknown) {
-        const errorObj = error instanceof Error ? error : new Error(String(error));
-        ailogger.error(`Failed to push error rows from ${fileName} to failedmeasurements:`, errorObj);
-        // Don't throw - we don't want to stop the upload process because of error row insertion failures
+      if (!response.ok) {
+        throw new Error(`Failed to persist ${errorRows.length} rejected row(s) for ${fileName}: HTTP ${response.status}`);
       }
+
+      const payload = (await response.json()) as { rowCount?: unknown };
+      const persistedCount = Number(payload.rowCount);
+      if (!Number.isInteger(persistedCount) || persistedCount !== errorRows.length) {
+        throw new Error(`Rejected-row persistence mismatch for ${fileName}: sent ${errorRows.length}, API confirmed ${String(payload.rowCount)}.`);
+      }
+
+      persistedRejectedRowCounts.current.set(fileName, (persistedRejectedRowCounts.current.get(fileName) ?? 0) + persistedCount);
+      ailogger.info(`Persisted ${persistedCount} rejected row(s) from ${fileName} for final reconciliation`);
+      return persistedCount;
     },
     [currentPlot?.plotID, currentCensus?.dateRanges, schema, fetchWithTimeout]
   );
@@ -1249,6 +1259,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       uploadStartedRef.current = false;
       batchProcessingStartedRef.current = false;
       fatalUploadErrorRef.current = null;
+      persistedRejectedRowCounts.current.clear();
       measurementBatchIDs.current.clear();
       return;
     }
@@ -1260,6 +1271,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       fatalUploadErrorRef.current = null;
       expectedRowCounts.current.clear();
       expectedTemporaryRowCounts.current.clear();
+      persistedRejectedRowCounts.current.clear();
       measurementBatchIDs.current.clear();
       setTotalOperations(0);
       setCompletedOperations(0);
@@ -1297,6 +1309,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Clear expected row counts from any previous upload
         expectedRowCounts.current.clear();
         expectedTemporaryRowCounts.current.clear();
+        persistedRejectedRowCounts.current.clear();
 
         if (fatalUploadErrorRef.current) {
           throw fatalUploadErrorRef.current;
@@ -1974,11 +1987,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             let totalSessionProcessed = 0;
             let totalSessionFailed = 0;
             let totalExpectedRows = 0;
-            // Reconciliation mirrors bulkingestionprocess's own FINAL RECONCILIATION CHECK:
-            // for each file's consolidated batch, staged input rows must equal succeeded +
-            // surfaced-failure rows. A non-zero gap means at least one row was silently
-            // swallowed (or duplicated) and the upload is NOT clean — collect every such
-            // mismatch and block completion after the loop rather than logging it away.
+            // Reconciliation extends bulkingestionprocess's batch check to the original
+            // source file: staged successes + staged failures + durably persisted
+            // pre-stage rejections must equal the parsed source-row total.
             const reconciliationMismatches: { fileID: string; verdict: UploadReconciliationVerdict }[] = [];
             const unverifiableFiles: string[] = [];
 
@@ -1986,13 +1997,22 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               const file = acceptedFiles[fileIndex];
               const fileID = file.name;
 
-              // Reconcile against the rows that actually reached temporarymeasurements under
-              // this batch (== the procedure's vBatchRowCount), NOT the raw parsed row count:
-              // rows the server rejected pre-stage never entered the batch and are tracked
-              // under a different batchID, so including them would create false mismatches.
+              // Reconcile the original source total. Rows rejected before staging are
+              // included only after /api/batchedupload confirms their durable row count.
               const stagedRowsForFile = expectedTemporaryRowCounts.current.get(fileID) || 0;
+              const sourceRowsForFile = expectedRowCounts.current.get(fileID) || 0;
+              const persistedRejectedRows = persistedRejectedRowCounts.current.get(fileID) || 0;
+              const expectedRejectedRows = sourceRowsForFile - stagedRowsForFile;
               const fileBatchID = measurementBatchIDs.current.get(fileID) || null;
-              totalExpectedRows += stagedRowsForFile;
+              totalExpectedRows += sourceRowsForFile;
+
+              if (expectedRejectedRows < 0 || persistedRejectedRows !== expectedRejectedRows) {
+                unverifiableFiles.push(fileID);
+                ailogger.error(
+                  `Rejected-row reconciliation mismatch for ${fileID}: ${sourceRowsForFile} source - ${stagedRowsForFile} staged = ` +
+                    `${expectedRejectedRows} expected rejected, but ${persistedRejectedRows} were confirmed persisted.`
+                );
+              }
 
               try {
                 // Batch-scoped verification: pass batchID so the counts are for THIS upload's
@@ -2007,12 +2027,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   const processedCount = Number(sessionData.processedCount || 0);
                   const failedCount = Number(sessionData.failedCount || 0);
                   totalSessionProcessed += processedCount;
-                  totalSessionFailed += failedCount;
+                  totalSessionFailed += failedCount + persistedRejectedRows;
 
                   const verdict = evaluateUploadReconciliation({
-                    sourceRecords: stagedRowsForFile,
+                    sourceRecords: sourceRowsForFile,
                     successfulRecords: processedCount,
-                    failedRecords: failedCount
+                    failedRecords: failedCount + persistedRejectedRows
                   });
 
                   if (!verdict.reconciled) {
@@ -2020,7 +2040,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                     ailogger.error(`Reconciliation mismatch for ${fileID}${fileBatchID ? ` (batch ${fileBatchID})` : ''}: ${verdict.detail}`);
                   } else {
                     ailogger.info(
-                      `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): reconciled — ${processedCount} succeeded + ${failedCount} failed = ${verdict.accountedRecords} of ${stagedRowsForFile} staged ✓`
+                      `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): reconciled — ${processedCount} succeeded + ${failedCount} staged failures + ` +
+                        `${persistedRejectedRows} pre-stage rejections = ${verdict.accountedRecords} of ${sourceRowsForFile} source rows ✓`
                     );
                   }
                 } else {
@@ -2045,7 +2066,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               // Throwing here routes into the collapser catch below, which rethrows to
               // runProcessBatches().catch → ERRORS state, so the upload can NEVER be reported
               // as a clean completion while rows are unaccounted for.
-              throw new Error(
+              throw new UploadReconciliationError(
                 `Upload reconciliation failed: ${reconciliationMismatches.length} file(s) with unaccounted rows` +
                   `${unverifiableFiles.length > 0 ? ` and ${unverifiableFiles.length} unverifiable file(s)` : ''}. ` +
                   `${mismatchSummary}${unverifiableSummary}`.trim()
@@ -2053,10 +2074,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             }
 
             setVerificationStatus(
-              `✓ Verification complete: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed (${totalSessionAccounted} total - matches ${totalExpectedRows} staged)`
+              `✓ Verification complete: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed (${totalSessionAccounted} total - matches ${totalExpectedRows} source rows)`
             );
             ailogger.info(
-              `Upload verification summary: ${totalSessionProcessed} succeeded, ${totalSessionFailed} failed, ${totalSessionAccounted} accounted of ${totalExpectedRows} staged. ✓ Every staged row accounted for.`
+              `Upload verification summary: ${totalSessionProcessed} succeeded, ${totalSessionFailed} failed, ${totalSessionAccounted} accounted of ${totalExpectedRows} source rows. ✓ Every source row accounted for.`
             );
           }
 
@@ -2065,6 +2086,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
         } catch (collapserError: unknown) {
           const message = collapserError instanceof Error ? collapserError.message : String(collapserError);
+          if (collapserError instanceof UploadReconciliationError) {
+            ailogger.error(`Upload reconciliation error: ${message}`);
+            throw collapserError;
+          }
           if (isMountedRef.current) {
             setVerificationStatus(`Data consolidation error: ${message}`);
           }

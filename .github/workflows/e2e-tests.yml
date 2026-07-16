@@ -151,26 +151,16 @@ jobs:
   # The realdb config (cypress.realdb.config.cjs) self-seeds `forestgeo_testing`
   # via its before() task (setupTestDatabase), so no db:seed:e2e step is needed.
   #
-  # SPEC ASSIGNMENT (PR-smoke vs nightly vs blocked) — decided by REACHABILITY, and
-  # for the reachable spec, by runtime budget:
+  # SPEC ASSIGNMENT — the upload-only real-DB anchor runs in PR smoke because its
+  # dependencies are hermetic and its runtime is bounded:
   #   * csv-mapping-to-coremeasurements.cy.ts  -> PR SMOKE (this job).
   #       Upload-only: needs server-side auth() (satisfied by a real e2e JWT cookie +
   #       AUTH_SECRET + NEXT_PUBLIC_E2E_TESTING) plus local MySQL. No edit-apply, so it
   #       never touches AUTH_FUNCTIONS_POLL_URL. Runtime is bounded by its own DB polling
   #       budget (2 tests, POLL_RETRIES=60 * POLL_INTERVAL=2s worst case, but ingestion
   #       normally completes in a few polls) — comfortably inside this job's 20-min cap.
-  #   * resolve-and-remove.cy.ts               -> NOT GATED (neither PR nor nightly yet).
-  #       Its edit-APPLY step calls fetchAuthoritativeAuthorization
-  #       (config/editplan/authorization.ts), which REQUIRES AUTH_FUNCTIONS_POLL_URL,
-  #       has NO e2e bypass, and has no in-repo stub endpoint that returns the poll
-  #       shape ({ userStatus, allowedSites }). /api/edits/apply therefore 401s here, so
-  #       gating it (PR or nightly) would be a guaranteed-red job. Gating it needs a
-  #       test-only auth-poll stub — a Phase 2 / Task 10 follow-up. Until then it runs
-  #       only via `npm run test:e2e:realdb` locally against a real poll URL.
-  # (Nightly's `test:e2e:ci` uses the default cypress.config.cjs, whose
-  #  excludeSpecPattern drops column-mapping-realdb/**, so nightly does not cover these
-  #  specs either; a nightly realdb job is the natural home for resolve-and-remove once
-  #  the auth-poll stub exists.)
+  # Nightly's default config excludes column-mapping-realdb/**, so this dedicated
+  # job is the authoritative CI coverage for the real server/database path.
   # ---------------------------------------------------------------------------
   realdb-smoke:
     runs-on: ubuntu-latest
@@ -256,8 +246,6 @@ jobs:
           browser: electron
           headed: false
           config-file: cypress.realdb.config.cjs
-          # ONLY the upload-only anchor — resolve-and-remove.cy.ts is excluded (auth-poll
-          # has no e2e bypass); see the job-level comment for the full rationale.
           spec: cypress/e2e/column-mapping-realdb/csv-mapping-to-coremeasurements.cy.ts
         env:
           NEXT_PUBLIC_E2E_TESTING: "true"

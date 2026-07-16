@@ -41,6 +41,34 @@ describe('evaluateUploadReconciliation', () => {
       expect(verdict.reconciled).toBe(true);
       expect(verdict.missingRecords).toBe(0);
     });
+
+    it('accounts for durably persisted pre-stage rejections in the original source total', () => {
+      const sourceRecords = CHUNK_BOUNDARY;
+      const stagedSuccesses = 900;
+      const stagedFailures = 75;
+      const persistedPreStageRejections = 25;
+
+      const verdict = evaluateUploadReconciliation({
+        sourceRecords,
+        successfulRecords: stagedSuccesses,
+        failedRecords: stagedFailures + persistedPreStageRejections
+      });
+
+      expect(verdict.reconciled).toBe(true);
+      expect(verdict.accountedRecords).toBe(sourceRecords);
+    });
+
+    it('blocks completion when a pre-stage rejection was not confirmed persisted', () => {
+      const verdict = evaluateUploadReconciliation({
+        sourceRecords: CHUNK_BOUNDARY,
+        successfulRecords: 900,
+        failedRecords: 99
+      });
+
+      expect(verdict.reconciled).toBe(false);
+      expect(verdict.unaccountedRecords).toBe(1);
+      expect(verdict.severity).toBe(ReconciliationSeverity.CRITICAL);
+    });
   });
 
   describe('a single lost row across the chunk boundary is a CRITICAL blocking mismatch', () => {

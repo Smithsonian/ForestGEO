@@ -231,6 +231,7 @@ describe('Ingestion invariants (bulkingestionprocess)', () => {
       );
 
       await connection.query('CALL bulkingestioncollapser(?)', [censusID]);
+      await connection.query('CALL bulkingestioncollapser(?)', [censusID]);
 
       const [afterCollapse] = await connection.query<RowDataPacket[]>(
         `SELECT MeasuredDBH
@@ -248,8 +249,8 @@ describe('Ingestion invariants (bulkingestionprocess)', () => {
          ORDER BY id`,
         [censusID]
       );
-      expect(alerts.length).toBeGreaterThan(0);
-      expect(alerts.every(row => row.type === 'COLLAPSER_DUPLICATE_CONFLICT')).toBe(true);
+      expect(alerts).toHaveLength(2);
+      expect(alerts.map(row => row.type).sort()).toEqual(['COLLAPSER_STEM_DATE_CONFLICT', 'COLLAPSER_TREE_STEM_TAG_CONFLICT']);
       expect(alerts.every(row => row.severity === 'warning')).toBe(true);
       expect(alerts.some(row => String(row.message).includes('preserved for user review'))).toBe(true);
     });

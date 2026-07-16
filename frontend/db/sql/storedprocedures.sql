@@ -313,18 +313,35 @@ begin
         HAVING COUNT(*) > 1
     ) stem_date_duplicates;
 
-    -- Log persisted StemGUID+Date conflicts without mutating their source data.
+    -- Keep one active alert per census/conflict category. Re-running the
+    -- collapser refreshes that alert instead of appending identical warnings.
     IF vStemDateDupCount > 0 THEN
-        INSERT INTO uploadintegrityalerts
-            (uploadId, fileID, batchID, plotID, censusID,
-             type, message, severity,
-             sourceRecords, processedRecords, failedRecords, missingRecords)
-        VALUES
-            (vUploadId, vAlertFileID, vAlertBatchID, vPlotID, vCensusID,
-             'COLLAPSER_DUPLICATE_CONFLICT',
-             CONCAT('Detected ', vStemDateDupCount, ' additional row(s) with the same StemGUID+MeasurementDate; preserved for user review'),
-             'warning',
-             vStemDateDupCount, vStemDateDupCount, 0, 0);
+        IF EXISTS (
+            SELECT 1 FROM uploadintegrityalerts
+            WHERE uploadId = vUploadId
+              AND type = 'COLLAPSER_STEM_DATE_CONFLICT'
+              AND resolved = 0
+        ) THEN
+            UPDATE uploadintegrityalerts
+            SET message = CONCAT('Detected ', vStemDateDupCount, ' additional row(s) with the same StemGUID+MeasurementDate; preserved for user review'),
+                severity = 'warning', sourceRecords = vStemDateDupCount,
+                processedRecords = vStemDateDupCount, failedRecords = 0,
+                missingRecords = 0, createdAt = CURRENT_TIMESTAMP
+            WHERE uploadId = vUploadId
+              AND type = 'COLLAPSER_STEM_DATE_CONFLICT'
+              AND resolved = 0;
+        ELSE
+            INSERT INTO uploadintegrityalerts
+                (uploadId, fileID, batchID, plotID, censusID,
+                 type, message, severity,
+                 sourceRecords, processedRecords, failedRecords, missingRecords)
+            VALUES
+                (vUploadId, vAlertFileID, vAlertBatchID, vPlotID, vCensusID,
+                 'COLLAPSER_STEM_DATE_CONFLICT',
+                 CONCAT('Detected ', vStemDateDupCount, ' additional row(s) with the same StemGUID+MeasurementDate; preserved for user review'),
+                 'warning',
+                 vStemDateDupCount, vStemDateDupCount, 0, 0);
+        END IF;
     END IF;
 
     SELECT COALESCE(SUM(duplicate_count - 1), 0)
@@ -346,18 +363,34 @@ begin
         HAVING COUNT(*) > 1
     ) tree_stem_tag_duplicates;
 
-    -- Log persisted TreeTag+StemTag conflicts without choosing the oldest row.
+    -- Same active-alert policy for TreeTag+StemTag conflicts.
     IF vTreeStemTagDupCount > 0 THEN
-        INSERT INTO uploadintegrityalerts
-            (uploadId, fileID, batchID, plotID, censusID,
-             type, message, severity,
-             sourceRecords, processedRecords, failedRecords, missingRecords)
-        VALUES
-            (vUploadId, vAlertFileID, vAlertBatchID, vPlotID, vCensusID,
-             'COLLAPSER_DUPLICATE_CONFLICT',
-             CONCAT('Detected ', vTreeStemTagDupCount, ' additional row(s) with the same TreeTag+StemTag in the census; preserved for user review'),
-             'warning',
-             vTreeStemTagDupCount, vTreeStemTagDupCount, 0, 0);
+        IF EXISTS (
+            SELECT 1 FROM uploadintegrityalerts
+            WHERE uploadId = vUploadId
+              AND type = 'COLLAPSER_TREE_STEM_TAG_CONFLICT'
+              AND resolved = 0
+        ) THEN
+            UPDATE uploadintegrityalerts
+            SET message = CONCAT('Detected ', vTreeStemTagDupCount, ' additional row(s) with the same TreeTag+StemTag in the census; preserved for user review'),
+                severity = 'warning', sourceRecords = vTreeStemTagDupCount,
+                processedRecords = vTreeStemTagDupCount, failedRecords = 0,
+                missingRecords = 0, createdAt = CURRENT_TIMESTAMP
+            WHERE uploadId = vUploadId
+              AND type = 'COLLAPSER_TREE_STEM_TAG_CONFLICT'
+              AND resolved = 0;
+        ELSE
+            INSERT INTO uploadintegrityalerts
+                (uploadId, fileID, batchID, plotID, censusID,
+                 type, message, severity,
+                 sourceRecords, processedRecords, failedRecords, missingRecords)
+            VALUES
+                (vUploadId, vAlertFileID, vAlertBatchID, vPlotID, vCensusID,
+                 'COLLAPSER_TREE_STEM_TAG_CONFLICT',
+                 CONCAT('Detected ', vTreeStemTagDupCount, ' additional row(s) with the same TreeTag+StemTag in the census; preserved for user review'),
+                 'warning',
+                 vTreeStemTagDupCount, vTreeStemTagDupCount, 0, 0);
+        END IF;
     END IF;
 
     -- Commit all changes atomically

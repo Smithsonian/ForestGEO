@@ -38,7 +38,11 @@ describe('upload procedure regressions', () => {
     expect(canonicalSql).not.toContain('INSERT INTO uploadintegrityalerts (plotID, censusID, type, message, severity, failedRecords)');
     expect(canonicalSql).toContain("DECLARE vAlertFileID VARCHAR(50) DEFAULT '__collapser__';");
     expect(canonicalSql).toContain("SET vAlertBatchID = CONCAT('census-', vCensusID);");
-    expect(collapserSql).toContain("'COLLAPSER_DUPLICATE_CONFLICT'");
+    expect(collapserSql).toContain("'COLLAPSER_STEM_DATE_CONFLICT'");
+    expect(collapserSql).toContain("'COLLAPSER_TREE_STEM_TAG_CONFLICT'");
+    expect(collapserSql).toContain('AND resolved = 0');
+    expect(collapserSql).toContain('IF EXISTS ( SELECT 1 FROM uploadintegrityalerts');
+    expect(collapserSql).toContain('ELSE INSERT INTO uploadintegrityalerts');
     expect(collapserSql).toContain('preserved for user review');
     expect(collapserSql).not.toContain('DELETE cm FROM coremeasurements');
     expect(collapserSql).not.toContain('ROW_NUMBER() OVER');
