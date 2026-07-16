@@ -14,6 +14,7 @@
 // ***********************************************************
 
 // Import commands.js using ES2015 syntax:
+import 'cypress-axe';
 import './commands';
 import './demo-commands';
 import './test-data-helpers';
