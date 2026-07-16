@@ -116,6 +116,145 @@ describe('Ingestion invariants (bulkingestionprocess)', () => {
     });
   });
 
+  describe('Cross-batch duplicate preservation', () => {
+    it('preserves an incoming correction as a surfaced failure when the tag pair already exists', async () => {
+      const censusID = testData.census[0].censusID;
+      const speciesCode = testData.species[0].SpeciesCode;
+      const correctedSpeciesCode = testData.species[1].SpeciesCode;
+      const quadratName = testData.quadrats[0].QuadratName;
+      const original: ScenarioMeasurement = {
+        treeTag: 'CROSS_BATCH_DUP',
+        stemTag: '1',
+        speciesCode,
+        quadratName,
+        x: 4,
+        y: 4,
+        dbh: 10,
+        hom: 1.3,
+        date: MEASUREMENT_DATE
+      };
+
+      const first = await insertTestMeasurements(connection, testData, [original], {
+        censusID,
+        fileID: 'cross_batch_original.csv',
+        batchID: 'cross_batch_original'
+      });
+      const firstResult = await runBulkIngestion(connection, first.fileID, first.batchID);
+      expect(firstResult.batch_failed, firstResult.message).toBe(false);
+
+      const correction = await insertTestMeasurements(
+        connection,
+        testData,
+        [{ ...original, speciesCode: correctedSpeciesCode, dbh: 22, comments: 'corrected measurement and species' }],
+        {
+          censusID,
+          fileID: 'cross_batch_correction.csv',
+          batchID: 'cross_batch_correction'
+        }
+      );
+      const correctionResult = await runBulkIngestion(connection, correction.fileID, correction.batchID);
+      expect(correctionResult.batch_failed, correctionResult.message).toBe(false);
+
+      const correctionScope: IngestionScope = { ...correction, censusID };
+      const correctionOutcome = await readIngestionOutcome(connection, correctionScope);
+      assertOutcome(
+        correctionOutcome,
+        {
+          sourceRecords: 1,
+          successfulRows: 0,
+          failedRows: 1,
+          remainingTemporaryRows: 0,
+          metricProcessedRecords: 0,
+          metricFailedRecords: 1,
+          metricMissingRecords: 0,
+          errorCodes: [INGESTION_ERROR_CODE.DUPLICATE_TAG_CONFLICT_EXISTING],
+          alertTypes: [INGESTION_ALERT_TYPE.DUPLICATE_TAG_CONFLICT_EXISTING]
+        },
+        correctionResult,
+        1
+      );
+
+      const [preservedRows] = await connection.query<RowDataPacket[]>(
+        `SELECT StemGUID, MeasuredDBH, RawTreeTag, RawStemTag, RawSpCode, RawComments, Description
+         FROM coremeasurements
+         WHERE CensusID = ? AND UploadFileID IN (?, ?)
+         ORDER BY CoreMeasurementID`,
+        [censusID, first.fileID, correction.fileID]
+      );
+      expect(preservedRows).toHaveLength(2);
+      expect(Number(preservedRows[0].MeasuredDBH)).toBe(10);
+      expect(preservedRows[0].StemGUID).not.toBeNull();
+      expect(preservedRows[1].StemGUID).toBeNull();
+      expect(Number(preservedRows[1].MeasuredDBH)).toBe(22);
+      expect(preservedRows[1].RawTreeTag).toBe(original.treeTag);
+      expect(preservedRows[1].RawStemTag).toBe(original.stemTag);
+      expect(preservedRows[1].RawSpCode).toBe(correctedSpeciesCode);
+      expect(preservedRows[1].RawComments).toBe('corrected measurement and species');
+      expect(String(preservedRows[1].Description)).toContain('incoming row preserved for review');
+    });
+
+    it('does not delete historical successful conflicts during the collapser pass', async () => {
+      const censusID = testData.census[0].censusID;
+      const original: ScenarioMeasurement = {
+        treeTag: 'HISTORICAL_DUP',
+        stemTag: '1',
+        speciesCode: testData.species[0].SpeciesCode,
+        quadratName: testData.quadrats[0].QuadratName,
+        x: 5,
+        y: 5,
+        dbh: 10,
+        hom: 1.3,
+        date: MEASUREMENT_DATE
+      };
+      const first = await insertTestMeasurements(connection, testData, [original], {
+        censusID,
+        fileID: 'historical_original.csv',
+        batchID: 'historical_original'
+      });
+      const firstResult = await runBulkIngestion(connection, first.fileID, first.batchID);
+      expect(firstResult.batch_failed, firstResult.message).toBe(false);
+
+      const [existing] = await connection.query<RowDataPacket[]>(
+        `SELECT StemGUID, MeasurementDate, MeasuredHOM
+         FROM coremeasurements
+         WHERE CensusID = ? AND UploadFileID = ? AND UploadBatchID = ? AND StemGUID IS NOT NULL`,
+        [censusID, first.fileID, first.batchID]
+      );
+      expect(existing).toHaveLength(1);
+
+      await connection.query(
+        `INSERT INTO coremeasurements
+           (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+            UploadFileID, UploadBatchID, SourceRowIndex, IsActive)
+         VALUES (?, ?, FALSE, ?, 33, ?, 'historical_conflict.csv', 'historical_conflict', 1, 1)`,
+        [censusID, existing[0].StemGUID, existing[0].MeasurementDate, existing[0].MeasuredHOM]
+      );
+
+      await connection.query('CALL bulkingestioncollapser(?)', [censusID]);
+
+      const [afterCollapse] = await connection.query<RowDataPacket[]>(
+        `SELECT MeasuredDBH
+         FROM coremeasurements
+         WHERE CensusID = ? AND StemGUID = ?
+         ORDER BY MeasuredDBH`,
+        [censusID, existing[0].StemGUID]
+      );
+      expect(afterCollapse.map(row => Number(row.MeasuredDBH))).toEqual([10, 33]);
+
+      const [alerts] = await connection.query<RowDataPacket[]>(
+        `SELECT type, severity, message
+         FROM uploadintegrityalerts
+         WHERE censusID = ? AND fileID = '__collapser__'
+         ORDER BY id`,
+        [censusID]
+      );
+      expect(alerts.length).toBeGreaterThan(0);
+      expect(alerts.every(row => row.type === 'COLLAPSER_DUPLICATE_CONFLICT')).toBe(true);
+      expect(alerts.every(row => row.severity === 'warning')).toBe(true);
+      expect(alerts.some(row => String(row.message).includes('preserved for user review'))).toBe(true);
+    });
+  });
+
   describe('Multi-stem cardinality', () => {
     // The 5-stem case is required in the matrix: a tree with N distinct stem tags must
     // materialize exactly N stem rows (one tree, N stems, N measurements).
