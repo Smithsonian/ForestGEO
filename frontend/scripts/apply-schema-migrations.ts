@@ -58,6 +58,7 @@ export type { SqlExecutor } from './lib/schema-cli';
 // ---------------------------------------------------------------------------
 
 export const LEDGER_TABLE = 'schema_migrations';
+export const MIGRATION_LOCK_TIMEOUT_SECONDS = 30;
 
 export const MIGRATION_STATUS = {
   APPLIED: 'applied',
@@ -109,6 +110,7 @@ export interface ApplyResult {
 export interface ContractAudit {
   schema: string;
   contractFailures: SchemaDifference[];
+  contractExtras: SchemaDifference[];
   collationViolations: string[];
   missingProcedures: string[];
   pendingMigrationIds: string[];
@@ -133,6 +135,13 @@ export class MigrationFileMissingError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'MigrationFileMissingError';
+  }
+}
+
+export class MigrationLockUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MigrationLockUnavailableError';
   }
 }
 
@@ -254,6 +263,26 @@ export async function recordLedgerEntry(exec: SqlExecutor, id: string, checksum:
   );
 }
 
+export function migrationLockName(schema: string): string {
+  return `fg:migrate:${sha256Hex(schema).slice(0, 40)}`;
+}
+
+export async function acquireMigrationLock(exec: SqlExecutor, schema: string): Promise<string> {
+  const lockName = migrationLockName(schema);
+  const rows = await exec(`SELECT GET_LOCK(?, ?) AS acquired`, [lockName, MIGRATION_LOCK_TIMEOUT_SECONDS]);
+  if (Number(rows[0]?.acquired ?? 0) !== 1) {
+    throw new MigrationLockUnavailableError(`Could not acquire migration lock for schema "${schema}" within ${MIGRATION_LOCK_TIMEOUT_SECONDS} seconds.`);
+  }
+  return lockName;
+}
+
+export async function releaseMigrationLock(exec: SqlExecutor, lockName: string): Promise<void> {
+  const rows = await exec(`SELECT RELEASE_LOCK(?) AS released`, [lockName]);
+  if (Number(rows[0]?.released ?? 0) !== 1) {
+    throw new MigrationLockUnavailableError(`Migration lock "${lockName}" was not owned when release was attempted.`);
+  }
+}
+
 /**
  * Applies every pending migration for one schema, in order, recording each in the
  * ledger. Stops at the first failing migration (recording it `failed`) so a broken
@@ -265,26 +294,31 @@ export async function recordLedgerEntry(exec: SqlExecutor, id: string, checksum:
  * own information_schema guards, and the ledger record is a single atomic upsert.
  */
 export async function applyPendingMigrations(exec: SqlExecutor, schema: string, sources: MigrationSource[]): Promise<ApplyResult> {
-  await ensureLedgerTable(exec);
-  const ledger = await readLedger(exec, schema);
-  const pending = selectPendingMigrations(sources, ledger);
-  const pendingBefore = pending.map(source => source.id);
-  const appliedNow: string[] = [];
+  const lockName = await acquireMigrationLock(exec, schema);
+  try {
+    await ensureLedgerTable(exec);
+    const ledger = await readLedger(exec, schema);
+    const pending = selectPendingMigrations(sources, ledger);
+    const pendingBefore = pending.map(source => source.id);
+    const appliedNow: string[] = [];
 
-  for (const source of pending) {
-    try {
-      await exec(source.contents);
-      await recordLedgerEntry(exec, source.id, source.checksum, MIGRATION_STATUS.APPLIED, null);
-      appliedNow.push(source.id);
-    } catch (error) {
-      const summary = errorMessage(error).slice(0, ERROR_SUMMARY_MAX_LENGTH);
-      // Best-effort failure record; never mask the original error with a logging failure.
-      await recordLedgerEntry(exec, source.id, source.checksum, MIGRATION_STATUS.FAILED, summary).catch(() => undefined);
-      return { schema, pendingBefore, appliedNow, failed: { id: source.id, error: errorMessage(error) } };
+    for (const source of pending) {
+      try {
+        await exec(source.contents);
+        await recordLedgerEntry(exec, source.id, source.checksum, MIGRATION_STATUS.APPLIED, null);
+        appliedNow.push(source.id);
+      } catch (error) {
+        const summary = errorMessage(error).slice(0, ERROR_SUMMARY_MAX_LENGTH);
+        // Best-effort failure record; never mask the original migration error.
+        await recordLedgerEntry(exec, source.id, source.checksum, MIGRATION_STATUS.FAILED, summary).catch(() => undefined);
+        return { schema, pendingBefore, appliedNow, failed: { id: source.id, error: errorMessage(error) } };
+      }
     }
-  }
 
-  return { schema, pendingBefore, appliedNow, failed: null };
+    return { schema, pendingBefore, appliedNow, failed: null };
+  } finally {
+    await releaseMigrationLock(exec, lockName);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -299,7 +333,10 @@ export async function applyPendingMigrations(exec: SqlExecutor, schema: string, 
 export async function auditSchemaContract(exec: SqlExecutor, schema: string, pendingMigrationIds: string[]): Promise<ContractAudit> {
   const canonical = loadCanonicalSchemaContract();
   const live = await readLiveSchemaContract(exec, schema, CRITICAL_TABLES);
-  const contractFailures = compareSchemaContracts(canonical, live).failures;
+  const comparison = compareSchemaContracts(canonical, live);
+  // Collation drift remains visible below, but it is not an app-compatibility
+  // failure and must not trigger table-wide rewrites during a deploy.
+  const contractFailures = comparison.failures.filter(failure => failure.kind !== 'collation');
 
   const collationViolations: string[] = [];
   if (live.defaultCollation !== TARGET_TEXT_COLLATION) {
@@ -324,16 +361,17 @@ export async function auditSchemaContract(exec: SqlExecutor, schema: string, pen
   const presentProcedures = new Set(procedureRows.map(row => String(row.name).toLowerCase()));
   const missingProcedures = REQUIRED_INGESTION_PROCEDURES.filter(name => !presentProcedures.has(name.toLowerCase()));
 
-  const ok = contractFailures.length === 0 && collationViolations.length === 0 && missingProcedures.length === 0 && pendingMigrationIds.length === 0;
+  const ok = contractFailures.length === 0 && missingProcedures.length === 0 && pendingMigrationIds.length === 0;
 
-  return { schema, contractFailures, collationViolations, missingProcedures, pendingMigrationIds, ok };
+  return { schema, contractFailures, contractExtras: comparison.extras, collationViolations, missingProcedures, pendingMigrationIds, ok };
 }
 
 /**
- * Whether an audited schema must fail its gate: any contract drift, collation
- * drift, missing procedure, or pending migration. `ContractAudit.ok` already
- * folds in pending migrations, so `--check` cannot read as success while work is
- * still outstanding.
+ * Whether an audited schema must fail its gate: incompatible structural drift,
+ * missing procedures, or pending migrations. Collation drift is reported as a
+ * maintenance warning rather than repaired inside an application deploy.
+ * `ContractAudit.ok` already folds in pending migrations, so `--check` cannot
+ * read as success while work is still outstanding.
  */
 export function contractGateFailed(audit: ContractAudit): boolean {
   return !audit.ok;
@@ -393,15 +431,17 @@ export function parseRunnerArgs(argv: string[]): RunnerArgs {
 function printAudit(audit: ContractAudit): void {
   if (audit.ok) {
     console.log(`  contract OK`);
-    return;
   }
   for (const failure of audit.contractFailures) {
     console.log(
       `  DRIFT   [${failure.table}] ${failure.category} "${failure.object}" ${failure.kind}: expected=${JSON.stringify(failure.expected)} actual=${JSON.stringify(failure.actual)}`
     );
   }
+  for (const extra of audit.contractExtras) {
+    console.log(`  EXTRA   [${extra.table}] ${extra.category} "${extra.object}" actual=${JSON.stringify(extra.actual)}`);
+  }
   for (const violation of audit.collationViolations) {
-    console.log(`  COLLATION  ${violation}`);
+    console.log(`  COLLATION WARNING  ${violation}`);
   }
   for (const proc of audit.missingProcedures) {
     console.log(`  MISSING PROCEDURE  ${proc}`);
@@ -474,10 +514,20 @@ async function runCli(argv: string[]): Promise<number> {
         // A per-schema connection or processing failure fails the run (exitCode=1)
         // but must not abort the remaining schemas — mirrors deploy-validations.
         const passed = await processSchema(settings, schema, args.mode, sources);
-        if (!passed) exitCode = 1;
+        if (!passed) {
+          exitCode = 1;
+          if (args.mode === 'apply') {
+            console.error(`  ABORTING remaining schemas after apply failure to limit partial rollout.`);
+            break;
+          }
+        }
       } catch (error) {
         console.error(`  SCHEMA FAILED  ${schema}: ${errorMessage(error)}`);
         exitCode = 1;
+        if (args.mode === 'apply') {
+          console.error(`  ABORTING remaining schemas after apply failure to limit partial rollout.`);
+          break;
+        }
       }
       console.log();
     }

@@ -3,15 +3,16 @@
  *
  * Provisions a throwaway schema from the canonical DDL, intentionally regresses it
  * to the known live-schema drift (drops temporarymeasurements.PublishedStemID and
- * SourceFormat; downgrades a representative text column to a legacy collation; no
- * migration ledger), then proves the migrate + verify pipeline repairs it end to
- * end and is idempotent:
+ * SourceFormat; downgrades representative VARCHAR/TEXT columns to utf8mb3; no
+ * migration ledger), then proves the migrate + verify pipeline repairs the
+ * application write contract end to end without rebuilding unrelated tables and
+ * remains idempotent:
  *
  *   (1) the read-only contract audit FAILS, naming both the missing columns and
- *       the legacy-collation column;
+ *       the legacy-collation columns as maintenance warnings;
  *   (2) applying the manifest migrations SUCCEEDS;
  *   (3) a second apply is a no-op (nothing pending, no rows re-applied);
- *   (4) the read-only contract audit PASSES;
+ *   (4) the read-only compatibility gate PASSES while retaining the warnings;
  *   (5) a real temporarymeasurements insert built from the production keyed
  *       builder (SourceFormat + PublishedStemID included) plus a one-row
  *       bulkingestionprocess both succeed against the repaired schema.
@@ -24,7 +25,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { setupTestDatabase, teardownTestDatabase, runBulkIngestion, type TestData } from '../setup/local-db-setup';
-import { formatContractFailures, TARGET_TEXT_COLLATION, type SchemaQueryRow } from '@/lib/db/schema-contract';
+import { formatContractFailures, type SchemaQueryRow } from '@/lib/db/schema-contract';
 import {
   loadMigrationSources,
   selectPendingMigrations,
@@ -45,7 +46,8 @@ import {
 import { SourceFormat, type FileRow } from '@/config/macros/formdetails';
 
 const REPRESENTATIVE_TEXT_COLUMN = 'Comments';
-const LEGACY_COLLATION = 'utf8mb4_general_ci';
+const LEGACY_CHARSET = 'utf8mb3';
+const LEGACY_COLLATION = 'utf8mb3_general_ci';
 
 describe('Stale-schema migrate + verify pipeline', () => {
   let connection: Connection;
@@ -73,12 +75,12 @@ describe('Stale-schema migrate + verify pipeline', () => {
     await connection.query('ALTER TABLE temporarymeasurements DROP COLUMN PublishedStemID');
     await connection.query('ALTER TABLE temporarymeasurements DROP COLUMN SourceFormat');
     await connection.query(
-      `ALTER TABLE temporarymeasurements MODIFY COLUMN ${REPRESENTATIVE_TEXT_COLUMN} varchar(255) CHARACTER SET utf8mb4 COLLATE ${LEGACY_COLLATION} NULL`
+      `ALTER TABLE temporarymeasurements MODIFY COLUMN ${REPRESENTATIVE_TEXT_COLUMN} varchar(255) CHARACTER SET ${LEGACY_CHARSET} COLLATE ${LEGACY_COLLATION} NULL`
     );
-    // Downgrade a NON-generated text column on a table that carries a STORED
-    // generated column (species.unique_sig), so the migration's per-table
-    // CONVERT TO branch is exercised against a generated-column table.
-    await connection.query(`ALTER TABLE species MODIFY COLUMN SpeciesName varchar(64) CHARACTER SET utf8mb4 COLLATE ${LEGACY_COLLATION} NULL`);
+    // Exercise a generated unique signature and a TEXT-family column. The
+    // additive migration must leave both definitions untouched.
+    await connection.query(`ALTER TABLE species MODIFY COLUMN SpeciesName varchar(64) CHARACTER SET ${LEGACY_CHARSET} COLLATE ${LEGACY_COLLATION} NULL`);
+    await connection.query(`ALTER TABLE uploadintegrityalerts MODIFY COLUMN message text CHARACTER SET ${LEGACY_CHARSET} COLLATE ${LEGACY_COLLATION} NOT NULL`);
   }, 90000);
 
   afterAll(async () => {
@@ -105,6 +107,7 @@ describe('Stale-schema migrate + verify pipeline', () => {
     expect(audit.collationViolations.some(v => v.startsWith(`temporarymeasurements.${REPRESENTATIVE_TEXT_COLUMN}`))).toBe(true);
     // The generated-column table's non-generated text column is flagged too.
     expect(audit.collationViolations.some(v => v.startsWith('species.SpeciesName'))).toBe(true);
+    expect(audit.collationViolations.some(v => v.startsWith('uploadintegrityalerts.message'))).toBe(true);
   });
 
   it('(2) applying the manifest migrations succeeds', async () => {
@@ -138,7 +141,7 @@ describe('Stale-schema migrate + verify pipeline', () => {
     expect(after).toEqual(before);
   });
 
-  it('(4) read-only contract audit passes after repair', async () => {
+  it('(4) compatibility gate passes after repair while legacy collations remain visible', async () => {
     const ledger = await readLedger(exec, schema);
     const pending = selectPendingMigrations(sources, ledger);
     expect(pending).toEqual([]);
@@ -151,6 +154,7 @@ describe('Stale-schema migrate + verify pipeline', () => {
       );
     }
     expect(audit.ok).toBe(true);
+    expect(audit.collationViolations.some(v => v.includes(LEGACY_COLLATION))).toBe(true);
   });
 
   it('(5) a production keyed insert + one-row bulkingestionprocess succeed against the repaired schema', async () => {
@@ -196,8 +200,7 @@ describe('Stale-schema migrate + verify pipeline', () => {
     expect(ingested[0].PublishedStemID).toBe(7001);
   });
 
-  it('(6) the CONVERT of a generated-column table preserved species.unique_sig and left species writable + on-target', async () => {
-    // (b) the STORED generated column survived the CONVERT TO rebuild.
+  it('(6) additive repair leaves utf8mb3 TEXT and generated unique-key definitions untouched', async () => {
     const [generated] = await connection.query<RowDataPacket[]>(
       `SELECT EXTRA, GENERATION_EXPRESSION
        FROM information_schema.COLUMNS
@@ -208,21 +211,30 @@ describe('Stale-schema migrate + verify pipeline', () => {
     expect(String(generated[0].EXTRA).toUpperCase()).toContain('STORED GENERATED');
     expect(String(generated[0].GENERATION_EXPRESSION).length).toBeGreaterThan(0);
 
-    // (c) the non-generated text column is now on-target and the table is writable.
-    const [speciesNameCollation] = await connection.query<RowDataPacket[]>(
-      `SELECT COLLATION_NAME
+    const [speciesNameMetadata] = await connection.query<RowDataPacket[]>(
+      `SELECT COLUMN_TYPE, COLLATION_NAME
        FROM information_schema.COLUMNS
        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'species' AND COLUMN_NAME = 'SpeciesName'`,
       [schema]
     );
-    expect(speciesNameCollation[0].COLLATION_NAME).toBe(TARGET_TEXT_COLLATION);
+    expect(speciesNameMetadata[0].COLUMN_TYPE).toBe('varchar(64)');
+    expect(speciesNameMetadata[0].COLLATION_NAME).toBe(LEGACY_COLLATION);
+
+    const [messageMetadata] = await connection.query<RowDataPacket[]>(
+      `SELECT COLUMN_TYPE, COLLATION_NAME
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'uploadintegrityalerts' AND COLUMN_NAME = 'message'`,
+      [schema]
+    );
+    expect(messageMetadata[0].COLUMN_TYPE).toBe('text');
+    expect(messageMetadata[0].COLLATION_NAME).toBe(LEGACY_COLLATION);
 
     const insertedCode = 'REPAIRSP1';
     await connection.query(`INSERT INTO species (SpeciesCode, SpeciesName, IDLevel, IsActive) VALUES (?, ?, 'species', 1)`, [insertedCode, 'Repairus testus']);
     const [roundTrip] = await connection.query<RowDataPacket[]>(`SELECT SpeciesName, unique_sig FROM species WHERE SpeciesCode = ?`, [insertedCode]);
     expect(roundTrip.length).toBe(1);
     expect(roundTrip[0].SpeciesName).toBe('Repairus testus');
-    // The STORED generated signature recomputed on insert (proves it is live).
+    // The STORED unique signature still recomputes on insert.
     expect(String(roundTrip[0].unique_sig)).toContain(insertedCode);
   });
 });

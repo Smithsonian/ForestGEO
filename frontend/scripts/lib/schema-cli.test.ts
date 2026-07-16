@@ -1,5 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { assertExpectedHost, resolveConnectionSettings, UnexpectedHostError, AZURE_HOST, AZURE_USER, AZURE_PORT, LOCAL_HOSTS } from './schema-cli';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import mysql from 'mysql2/promise';
+import {
+  assertExpectedHost,
+  resolveConnectionSettings,
+  createSchemaCliConnection,
+  discoverSiteSchemas,
+  UnexpectedHostError,
+  AZURE_HOST,
+  AZURE_USER,
+  AZURE_PORT,
+  LOCAL_HOSTS,
+  SITE_SCHEMA_LIKE
+} from './schema-cli';
 
 describe('assertExpectedHost', () => {
   it('throws when the host is missing', () => {
@@ -14,6 +26,39 @@ describe('assertExpectedHost', () => {
   it('passes for an allowed host', () => {
     expect(() => assertExpectedHost(AZURE_HOST, [AZURE_HOST])).not.toThrow();
     expect(() => assertExpectedHost('127.0.0.1', LOCAL_HOSTS)).not.toThrow();
+  });
+});
+
+describe('discoverSiteSchemas', () => {
+  it('escapes the literal prefix underscore and rejects names outside the site convention', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValue([
+        [
+          { schema_name: 'forestgeo_panama' },
+          { schema_name: 'forestgeo_testing_mason' },
+          { schema_name: 'forestgeoXnot_a_site' },
+          { schema_name: 'forestgeo_bad-name' }
+        ],
+        []
+      ]);
+    const connection = { query } as unknown as mysql.Connection;
+
+    await expect(discoverSiteSchemas(connection)).resolves.toEqual(['forestgeo_panama', 'forestgeo_testing_mason']);
+    expect(SITE_SCHEMA_LIKE).toBe('forestgeo\\_%');
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("LIKE ? ESCAPE '\\\\'"), [SITE_SCHEMA_LIKE]);
+  });
+});
+
+describe('createSchemaCliConnection', () => {
+  it('requires normal certificate verification for Azure connections', async () => {
+    const createConnection = vi.spyOn(mysql, 'createConnection').mockResolvedValue({} as mysql.Connection);
+    const settings = { host: AZURE_HOST, user: AZURE_USER, password: 'secret', port: AZURE_PORT, allowedHosts: [AZURE_HOST] };
+
+    await createSchemaCliConnection(settings);
+
+    expect(createConnection).toHaveBeenCalledWith(expect.objectContaining({ ssl: { rejectUnauthorized: true } }));
+    createConnection.mockRestore();
   });
 });
 

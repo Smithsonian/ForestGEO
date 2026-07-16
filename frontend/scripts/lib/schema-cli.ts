@@ -17,7 +17,8 @@ export const AZURE_PORT = 3306;
 
 export const LOCAL_HOSTS = ['localhost', '127.0.0.1'] as const;
 
-export const SITE_SCHEMA_LIKE = 'forestgeo_%';
+export const SITE_SCHEMA_LIKE = 'forestgeo\\_%';
+export const SITE_SCHEMA_NAME = /^forestgeo_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*$/;
 
 /** Executes SQL and returns result rows (empty for writes/DDL). */
 export type SqlExecutor = (sql: string, params?: unknown[]) => Promise<SchemaQueryRow[]>;
@@ -82,7 +83,7 @@ export async function createSchemaCliConnection(settings: ConnectionSettings, op
     port: settings.port,
     multipleStatements: options.multipleStatements ?? false,
     ...(options.database !== undefined && { database: options.database }),
-    ...(settings.host === AZURE_HOST && { ssl: { rejectUnauthorized: false } })
+    ...(settings.host === AZURE_HOST && { ssl: { rejectUnauthorized: true } })
   });
 }
 
@@ -95,8 +96,8 @@ export function executorFor(connection: mysql.Connection): SqlExecutor {
 
 export async function discoverSiteSchemas(connection: mysql.Connection): Promise<string[]> {
   const [rows] = await connection.query<mysql.RowDataPacket[]>(
-    `SELECT SCHEMA_NAME AS schema_name FROM information_schema.SCHEMATA WHERE SCHEMA_NAME LIKE ? ORDER BY SCHEMA_NAME`,
+    `SELECT SCHEMA_NAME AS schema_name FROM information_schema.SCHEMATA WHERE SCHEMA_NAME LIKE ? ESCAPE '\\\\' ORDER BY SCHEMA_NAME`,
     [SITE_SCHEMA_LIKE]
   );
-  return rows.map(row => String(row.schema_name));
+  return rows.map(row => String(row.schema_name)).filter(schema => SITE_SCHEMA_NAME.test(schema));
 }

@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import crypto from 'crypto';
+import type { SchemaQueryRow } from '@/lib/db/schema-contract';
 import {
   sha256Hex,
   selectPendingMigrations,
   assertSiteSchemasDiscovered,
   applyPendingMigrations,
+  migrationLockName,
   contractGateFailed,
   parseRunnerArgs,
   TamperedMigrationError,
@@ -32,8 +34,19 @@ class FakeSchemaDb {
   appliedBodies: string[] = [];
   ledgerExists = false;
   failOnBodyIncluding: string | null = null;
+  lockHeld = false;
 
   exec: SqlExecutor = async (sql, params) => {
+    if (sql.includes('GET_LOCK')) {
+      if (this.lockHeld) return [{ acquired: 0 }];
+      this.lockHeld = true;
+      return [{ acquired: 1 }];
+    }
+    if (sql.includes('RELEASE_LOCK')) {
+      const released = this.lockHeld ? 1 : 0;
+      this.lockHeld = false;
+      return [{ released }];
+    }
     if (sql.includes('CREATE TABLE IF NOT EXISTS') && sql.includes(LEDGER_TABLE)) {
       this.ledgerExists = true;
       return [];
@@ -42,7 +55,7 @@ class FakeSchemaDb {
       return [{ present: this.ledgerExists ? 1 : 0 }];
     }
     if (sql.includes(`SELECT MigrationID`) && sql.includes(LEDGER_TABLE)) {
-      return [...this.ledger.values()];
+      return [...this.ledger.values()] as unknown as SchemaQueryRow[];
     }
     if (sql.includes('INSERT INTO') && sql.includes(LEDGER_TABLE)) {
       const [id, checksum, status] = params as [string, string, string];
@@ -106,7 +119,7 @@ describe('assertSiteSchemasDiscovered', () => {
 
 describe('contractGateFailed', () => {
   function audit(ok: boolean, pendingMigrationIds: string[] = []): ContractAudit {
-    return { schema: 's', contractFailures: [], collationViolations: [], missingProcedures: [], pendingMigrationIds, ok };
+    return { schema: 's', contractFailures: [], contractExtras: [], collationViolations: [], missingProcedures: [], pendingMigrationIds, ok };
   }
 
   it('fails the gate (drives --check exit 1) when the audit is not ok', () => {
@@ -135,6 +148,7 @@ describe('applyPendingMigrations', () => {
     expect(db.appliedBodies).toEqual([m1.contents, m2.contents]);
     expect(db.ledger.get(m1.id)?.Status).toBe(MIGRATION_STATUS.APPLIED);
     expect(db.ledger.get(m2.id)?.Status).toBe(MIGRATION_STATUS.APPLIED);
+    expect(db.lockHeld).toBe(false);
   });
 
   it('is a no-op when every migration is already applied (idempotent re-run)', async () => {
@@ -160,6 +174,22 @@ describe('applyPendingMigrations', () => {
     expect(db.appliedBodies).toEqual([]); // m2 never attempted
     expect(db.ledger.get(m1.id)?.Status).toBe(MIGRATION_STATUS.FAILED);
     expect(db.ledger.has(m2.id)).toBe(false);
+    expect(db.lockHeld).toBe(false);
+  });
+
+  it('refuses a concurrent migration runner before reading or writing the ledger', async () => {
+    const db = new FakeSchemaDb();
+    db.lockHeld = true;
+
+    await expect(applyPendingMigrations(db.exec, 'forestgeo_test', [m1])).rejects.toThrow(/Could not acquire migration lock/);
+    expect(db.ledgerExists).toBe(false);
+    expect(db.appliedBodies).toEqual([]);
+  });
+
+  it('uses a deterministic lock name within the MySQL 64-character limit', () => {
+    expect(migrationLockName('forestgeo_test')).toBe(migrationLockName('forestgeo_test'));
+    expect(migrationLockName('forestgeo_test')).not.toBe(migrationLockName('forestgeo_other'));
+    expect(migrationLockName('x'.repeat(64)).length).toBeLessThanOrEqual(64);
   });
 });
 

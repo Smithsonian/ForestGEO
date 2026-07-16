@@ -99,8 +99,11 @@ function printAuditDetail(audit: ContractAudit): void {
       `  DRIFT   [${failure.table}] ${failure.category} "${failure.object}" ${failure.kind}: expected=${JSON.stringify(failure.expected)} actual=${JSON.stringify(failure.actual)}`
     );
   }
+  for (const extra of audit.contractExtras) {
+    console.log(`  EXTRA   [${extra.table}] ${extra.category} "${extra.object}" actual=${JSON.stringify(extra.actual)}`);
+  }
   for (const violation of audit.collationViolations) {
-    console.log(`  COLLATION  ${violation}`);
+    console.log(`  COLLATION WARNING  ${violation}`);
   }
   for (const proc of audit.missingProcedures) {
     console.log(`  MISSING PROCEDURE  ${proc}`);

@@ -8,6 +8,7 @@ function audit(schema: string, ok: boolean): ContractAudit {
     contractFailures: ok
       ? []
       : [{ table: 'temporarymeasurements', object: 'PublishedStemID', category: 'column', kind: 'missing', expected: 'int unsigned', actual: null }],
+    contractExtras: [],
     collationViolations: ok ? [] : ['temporarymeasurements.Comments => utf8mb4_general_ci'],
     missingProcedures: [],
     pendingMigrationIds: ok ? [] : ['2026-07-13-01-add-published-stemid-and-source-format'],
