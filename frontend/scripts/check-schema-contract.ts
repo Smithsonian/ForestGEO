@@ -119,7 +119,10 @@ async function auditOneSchema(settings: ReturnType<typeof resolveConnectionSetti
     const exec = executorFor(schemaConnection);
     const ledger = await readLedger(exec, schema);
     const pending = selectPendingMigrations(sources, ledger);
-    return auditSchemaContract(
+    // `return await`, not `return`: the finally below closes the connection, and a bare
+    // `return` would run it before the audit's queries finish — killing the connection
+    // mid-audit on every real run.
+    return await auditSchemaContract(
       exec,
       schema,
       pending.map(source => source.id)
@@ -169,13 +172,19 @@ const invokedDirectly = (() => {
 })();
 
 if (invokedDirectly) {
+  // process.exitCode, NOT process.exit(): exit() terminates before piped stdout is
+  // flushed, discarding every per-schema audit line CI needs to diagnose a failure.
+  // All connections are closed in finally blocks, so the process exits on its own.
   runCli(process.argv.slice(2))
     .then(code => {
-      process.exit(code);
+      process.exitCode = code;
     })
     .catch((error: unknown) => {
       const reason = error instanceof Error ? error.message : String(error);
       console.error(`\nschema-contract FAILED: ${reason}`);
-      process.exit(1);
+      if (error instanceof Error && error.stack) {
+        console.error(error.stack);
+      }
+      process.exitCode = 1;
     });
 }
