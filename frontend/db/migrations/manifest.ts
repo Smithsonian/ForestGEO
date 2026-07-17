@@ -22,5 +22,13 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-07-13-01-add-published-stemid-and-source-format',
     file: 'schema-contract-repair/2026-07-13-01-add-published-stemid-and-source-format.sql'
+  },
+  {
+    id: '2026-07-16-01-add-cm-uploadbatch-census-index',
+    file: 'schema-contract-repair/2026-07-16-01-add-cm-uploadbatch-census-index.sql'
+  },
+  {
+    id: '2026-07-16-02-normalize-temporarymeasurements-ids',
+    file: 'schema-contract-repair/2026-07-16-02-normalize-temporarymeasurements-ids.sql'
   }
 ] as const;
