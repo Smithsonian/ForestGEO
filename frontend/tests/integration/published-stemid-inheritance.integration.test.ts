@@ -8,6 +8,7 @@ import {
   createAdditionalCensus,
   type TestData
 } from '@/tests/setup/local-db-setup';
+import { readIngestionOutcome, assertIngestionOutcome, INGESTION_ERROR_CODE } from '@/tests/setup/ingestion-outcome';
 
 describe('PublishedStemID cross-census inheritance', () => {
   let connection: mysql.Connection;
@@ -235,6 +236,15 @@ describe('PublishedStemID cross-census inheritance', () => {
     );
     await runBulkIngestion(connection, 'f_batchid', 'b_batchid');
 
+    // Both rows are surfaced failures carrying PUBLISHED_STEMID_CONFLICT (shared outcome mechanism).
+    const outcome = await readIngestionOutcome(connection, { fileID: 'f_batchid', batchID: 'b_batchid', censusID: census1 });
+    assertIngestionOutcome(outcome, {
+      successfulRows: 0,
+      failedRows: 2,
+      errorCodes: [INGESTION_ERROR_CODE.PUBLISHED_STEMID_CONFLICT]
+    });
+
+    // Specificity the outcome counts can't express: the two failed rows are exactly PUBBATCHID_A/B.
     const [failures] = await connection.query<any[]>(
       `SELECT cm.RawTreeTag, cm.StemGUID
        FROM coremeasurements cm
@@ -246,7 +256,6 @@ describe('PublishedStemID cross-census inheritance', () => {
     const failedTags = new Set(failures.map(r => r.RawTreeTag));
     expect(failedTags.has('PUBBATCHID_A')).toBe(true);
     expect(failedTags.has('PUBBATCHID_B')).toBe(true);
-    expect(failures.every(r => r.StemGUID === null)).toBe(true);
 
     // Neither stem should have been assigned the contested id.
     const [stemRows] = await connection.query<any[]>(
@@ -280,13 +289,14 @@ describe('PublishedStemID cross-census inheritance', () => {
     );
     await runBulkIngestion(connection, 'f_batchgrp', 'b_batchgrp');
 
-    // Both rows failed (no successful ingestion => StemGUID NULL on every batch row).
-    const [batchRows] = await connection.query<any[]>(
-      `SELECT cm.StemGUID FROM coremeasurements cm
-       WHERE cm.UploadFileID = 'f_batchgrp' AND cm.UploadBatchID = 'b_batchgrp'`
-    );
-    expect(batchRows.length).toBeGreaterThan(0);
-    expect(batchRows.every(r => r.StemGUID === null)).toBe(true);
+    // Both rows failed as a tag/stemtag collision before stem resolution — no row ingests
+    // and the dedicated same-group PublishedStemID guard never fires (shared outcome mechanism).
+    const outcome = await readIngestionOutcome(connection, { fileID: 'f_batchgrp', batchID: 'b_batchgrp', censusID: census1 });
+    assertIngestionOutcome(outcome, {
+      successfulRows: 0,
+      failedRows: 2,
+      errorCodes: [INGESTION_ERROR_CODE.DUPLICATE_TAG_STEMTAG]
+    });
 
     // Neither contested id was adopted by any stem in the plot.
     const [adopted] = await connection.query<any[]>(
@@ -375,26 +385,15 @@ describe('PublishedStemID cross-census inheritance', () => {
     );
     await runBulkIngestion(connection, 'f_dup', 'b_dup');
 
-    const [batchRows] = await connection.query<any[]>(
-      `SELECT cm.CoreMeasurementID, cm.StemGUID
-       FROM coremeasurements cm
-       WHERE cm.UploadFileID = 'f_dup' AND cm.UploadBatchID = 'b_dup'`
-    );
-    // Exactly one row ingests successfully; the duplicate does not silently multiply into a second stem.
-    expect(batchRows.filter(r => r.StemGUID !== null)).toHaveLength(1);
-
-    const [errorRows] = await connection.query<any[]>(
-      `SELECT me.ErrorCode
-       FROM coremeasurements cm
-       JOIN measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
-       JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
-       WHERE cm.UploadFileID = 'f_dup' AND cm.UploadBatchID = 'b_dup' AND cm.StemGUID IS NULL`
-    );
-    const errorCodes = errorRows.map(r => r.ErrorCode);
-    // The collapsed-away duplicate is reported as a duplicate, never as the confusing insert-skip that
-    // the pre-fix (PublishedStemID-in-dedup-key) behavior produced.
-    expect(errorCodes).toContain('DUPLICATE_ENTRY');
-    expect(errorCodes).not.toContain('MEASUREMENT_INSERT_SKIPPED');
+    // Exactly one row ingests; the duplicate is surfaced as DUPLICATE_ENTRY (never the confusing
+    // MEASUREMENT_INSERT_SKIPPED that the pre-fix PublishedStemID-in-dedup-key behavior produced).
+    // The exact errorCodes set = [DUPLICATE_ENTRY] proves MEASUREMENT_INSERT_SKIPPED is absent.
+    const outcome = await readIngestionOutcome(connection, { fileID: 'f_dup', batchID: 'b_dup', censusID: census1 });
+    assertIngestionOutcome(outcome, {
+      successfulRows: 1,
+      failedRows: 1,
+      errorCodes: [INGESTION_ERROR_CODE.DUPLICATE_ENTRY]
+    });
 
     const [stemRows] = await connection.query<any[]>(
       `SELECT s.PublishedStemID FROM stems s JOIN trees t ON t.TreeID = s.TreeID

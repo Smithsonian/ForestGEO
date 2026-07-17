@@ -6,10 +6,9 @@
 import { FileRejection, FileWithPath } from 'react-dropzone';
 import '@/styles/customtablesettings.css';
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { FileRow, FileRowSet } from '@/config/macros/formdetails';
+import { FileRow } from '@/config/macros/formdetails';
 import { processPersonnel } from '@/components/processors/processpersonnel';
 import { processSpecies } from '@/components/processors/processspecies';
-import { processBulkIngestion } from '@/components/processors/processbulkingestion';
 import { Plot } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 
@@ -126,16 +125,6 @@ export interface SpecialProcessingProps {
   fullName?: string;
 }
 
-export interface SpecialBulkProcessingProps {
-  connectionManager: ConnectionManager;
-  rowDataSet: FileRowSet;
-  schema: string;
-  plot?: Plot;
-  census?: OrgCensus;
-  quadratID?: number;
-  fullName?: string;
-}
-
 export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
   formType: string;
 }
@@ -144,7 +133,6 @@ export interface FileMapping {
   tableName: string;
   columnMappings: Record<string, string>;
   specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<void>;
-  bulkProcessing?: (props: Readonly<SpecialBulkProcessingProps>) => Promise<void>;
 }
 
 // Define the mappings for each file type
@@ -198,8 +186,9 @@ export const fileMappings: Record<string, FileMapping> = {
   measurements: {
     tableName: '', // Multiple tables involved
     columnMappings: {},
-    specialProcessing: undefined, // Individual record processing removed - using bulk processing only
-    bulkProcessing: processBulkIngestion
+    // Measurements are ingested exclusively by the bulkingestionprocess stored
+    // procedure (app/api/setupbulkprocessor) — there is no client-side processor.
+    specialProcessing: undefined
   }
 };
 

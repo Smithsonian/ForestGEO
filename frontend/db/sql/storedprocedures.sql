@@ -269,9 +269,6 @@ begin
 
         -- Clean up temporary tables
         DROP TEMPORARY TABLE IF EXISTS missing_trees;
-        DROP TEMPORARY TABLE IF EXISTS stem_date_duplicate_ids;
-        DROP TEMPORARY TABLE IF EXISTS tree_stem_tag_duplicate_ids;
-
         -- Re-signal the error for the application layer to handle
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = vErrorMessage;
     END;
@@ -299,92 +296,110 @@ begin
     update coremeasurements set MeasuredDBH = null where MeasuredDBH = 0 AND CensusID = vCensusID;
     update coremeasurements set MeasuredHOM = null where MeasuredHOM = 0 AND CensusID = vCensusID;
 
-    -- Materialize duplicate IDs once, then delete by ID to avoid repeated self-joins.
-    DROP TEMPORARY TABLE IF EXISTS stem_date_duplicate_ids;
-    CREATE TEMPORARY TABLE stem_date_duplicate_ids AS
-    SELECT ranked.CoreMeasurementID
+    -- Detection only: never choose a winner between persisted measurements here.
+    -- Incoming cross-batch conflicts are surfaced by bulkingestionprocess as
+    -- unresolved failure rows. Historical conflicts must remain available for
+    -- user review instead of being silently deleted by this census-wide pass.
+    SELECT COALESCE(SUM(duplicate_count - 1), 0)
+    INTO vStemDateDupCount
     FROM (
-        SELECT cm.CoreMeasurementID,
-               ROW_NUMBER() OVER (
-                   PARTITION BY cm.StemGUID, cm.MeasurementDate
-                   ORDER BY cm.CoreMeasurementID
-               ) AS row_num
+        SELECT COUNT(*) AS duplicate_count
         FROM coremeasurements cm
         WHERE cm.CensusID = vCensusID
           AND cm.StemGUID IS NOT NULL
           AND cm.MeasurementDate IS NOT NULL
-    ) AS ranked
-    WHERE ranked.row_num > 1;
+          AND cm.IsActive = 1
+        GROUP BY cm.StemGUID, cm.MeasurementDate
+        HAVING COUNT(*) > 1
+    ) stem_date_duplicates;
 
-    DELETE cm
-    FROM coremeasurements cm
-             INNER JOIN stem_date_duplicate_ids dup
-                        ON dup.CoreMeasurementID = cm.CoreMeasurementID;
-    SET vStemDateDupCount = ROW_COUNT();
-    DROP TEMPORARY TABLE IF EXISTS stem_date_duplicate_ids;
-
-    -- Log StemGUID+Date deduplication if any rows were removed
+    -- Keep one active alert per census/conflict category. Re-running the
+    -- collapser refreshes that alert instead of appending identical warnings.
     IF vStemDateDupCount > 0 THEN
-        INSERT INTO uploadintegrityalerts
-            (uploadId, fileID, batchID, plotID, censusID,
-             type, message, severity,
-             sourceRecords, processedRecords, failedRecords, missingRecords)
-        VALUES
-            (vUploadId, vAlertFileID, vAlertBatchID, vPlotID, vCensusID,
-             'COLLAPSER_DEDUPLICATION',
-             CONCAT('Removed ', vStemDateDupCount, ' duplicate rows (same StemGUID+MeasurementDate)'),
-             'info',
-             0, 0, vStemDateDupCount, 0);
+        IF EXISTS (
+            SELECT 1 FROM uploadintegrityalerts
+            WHERE uploadId = vUploadId
+              AND type = 'COLLAPSER_STEM_DATE_CONFLICT'
+              AND resolved = 0
+        ) THEN
+            UPDATE uploadintegrityalerts
+            SET message = CONCAT('Detected ', vStemDateDupCount, ' additional row(s) with the same StemGUID+MeasurementDate; preserved for user review'),
+                severity = 'warning', sourceRecords = vStemDateDupCount,
+                processedRecords = vStemDateDupCount, failedRecords = 0,
+                missingRecords = 0, createdAt = CURRENT_TIMESTAMP
+            WHERE uploadId = vUploadId
+              AND type = 'COLLAPSER_STEM_DATE_CONFLICT'
+              AND resolved = 0;
+        ELSE
+            INSERT INTO uploadintegrityalerts
+                (uploadId, fileID, batchID, plotID, censusID,
+                 type, message, severity,
+                 sourceRecords, processedRecords, failedRecords, missingRecords)
+            VALUES
+                (vUploadId, vAlertFileID, vAlertBatchID, vPlotID, vCensusID,
+                 'COLLAPSER_STEM_DATE_CONFLICT',
+                 CONCAT('Detected ', vStemDateDupCount, ' additional row(s) with the same StemGUID+MeasurementDate; preserved for user review'),
+                 'warning',
+                 vStemDateDupCount, vStemDateDupCount, 0, 0);
+        END IF;
     END IF;
 
-    DROP TEMPORARY TABLE IF EXISTS tree_stem_tag_duplicate_ids;
-    CREATE TEMPORARY TABLE tree_stem_tag_duplicate_ids AS
-    SELECT ranked.CoreMeasurementID
+    SELECT COALESCE(SUM(duplicate_count - 1), 0)
+    INTO vTreeStemTagDupCount
     FROM (
-        SELECT cm.CoreMeasurementID,
-               ROW_NUMBER() OVER (
-                   PARTITION BY t.TreeTag, s.StemTag
-                   ORDER BY cm.CoreMeasurementID
-               ) AS row_num
+        SELECT COUNT(*) AS duplicate_count
         FROM coremeasurements cm
                  INNER JOIN stems s ON cm.StemGUID = s.StemGUID
                  INNER JOIN trees t ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
         WHERE cm.CensusID = vCensusID
+          AND cm.IsActive = 1
           AND t.CensusID = vCensusID
+          AND t.IsActive = 1
           AND s.CensusID = vCensusID
+          AND s.IsActive = 1
           AND t.TreeTag IS NOT NULL
           AND s.StemTag IS NOT NULL
-    ) AS ranked
-    WHERE ranked.row_num > 1;
+        GROUP BY t.TreeTag, s.StemTag
+        HAVING COUNT(*) > 1
+    ) tree_stem_tag_duplicates;
 
-    DELETE cm
-    FROM coremeasurements cm
-             INNER JOIN tree_stem_tag_duplicate_ids dup
-                        ON dup.CoreMeasurementID = cm.CoreMeasurementID;
-    SET vTreeStemTagDupCount = ROW_COUNT();
-    DROP TEMPORARY TABLE IF EXISTS tree_stem_tag_duplicate_ids;
-
-    -- Log TreeTag+StemTag deduplication if any rows were removed
+    -- Same active-alert policy for TreeTag+StemTag conflicts.
     IF vTreeStemTagDupCount > 0 THEN
-        INSERT INTO uploadintegrityalerts
-            (uploadId, fileID, batchID, plotID, censusID,
-             type, message, severity,
-             sourceRecords, processedRecords, failedRecords, missingRecords)
-        VALUES
-            (vUploadId, vAlertFileID, vAlertBatchID, vPlotID, vCensusID,
-             'COLLAPSER_DEDUPLICATION',
-             CONCAT('Removed ', vTreeStemTagDupCount, ' duplicate rows (same TreeTag+StemTag in census)'),
-             'info',
-             0, 0, vTreeStemTagDupCount, 0);
+        IF EXISTS (
+            SELECT 1 FROM uploadintegrityalerts
+            WHERE uploadId = vUploadId
+              AND type = 'COLLAPSER_TREE_STEM_TAG_CONFLICT'
+              AND resolved = 0
+        ) THEN
+            UPDATE uploadintegrityalerts
+            SET message = CONCAT('Detected ', vTreeStemTagDupCount, ' additional row(s) with the same TreeTag+StemTag in the census; preserved for user review'),
+                severity = 'warning', sourceRecords = vTreeStemTagDupCount,
+                processedRecords = vTreeStemTagDupCount, failedRecords = 0,
+                missingRecords = 0, createdAt = CURRENT_TIMESTAMP
+            WHERE uploadId = vUploadId
+              AND type = 'COLLAPSER_TREE_STEM_TAG_CONFLICT'
+              AND resolved = 0;
+        ELSE
+            INSERT INTO uploadintegrityalerts
+                (uploadId, fileID, batchID, plotID, censusID,
+                 type, message, severity,
+                 sourceRecords, processedRecords, failedRecords, missingRecords)
+            VALUES
+                (vUploadId, vAlertFileID, vAlertBatchID, vPlotID, vCensusID,
+                 'COLLAPSER_TREE_STEM_TAG_CONFLICT',
+                 CONCAT('Detected ', vTreeStemTagDupCount, ' additional row(s) with the same TreeTag+StemTag in the census; preserved for user review'),
+                 'warning',
+                 vTreeStemTagDupCount, vTreeStemTagDupCount, 0, 0);
+        END IF;
     END IF;
 
     -- Commit all changes atomically
     COMMIT;
 
-    -- Return success message with deduplication counts
-    SELECT CONCAT('Census ', vCensusID, ' collapsed successfully. Deduplication: ',
-                  vStemDateDupCount, ' StemGUID+Date duplicates, ',
-                  vTreeStemTagDupCount, ' TreeTag+StemTag duplicates removed.') as message;
+    -- Return success with non-destructive conflict counts for observability.
+    SELECT CONCAT('Census ', vCensusID, ' collapsed successfully. Preserved conflicts: ',
+                  vStemDateDupCount, ' StemGUID+Date additional rows, ',
+                  vTreeStemTagDupCount, ' TreeTag+StemTag additional rows.') as message;
 end $$
 
 create
@@ -1633,6 +1648,7 @@ BEGIN
             DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
 
             DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
+                prior_core_insert_failure_rows, existing_tag_stemtag_collision_failures,
                 quadrat_resolution, species_resolution,
                 filter_validity, filtered,
                 classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
@@ -1861,6 +1877,7 @@ BEGIN
     );
 
     DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
+        prior_core_insert_failure_rows, existing_tag_stemtag_collision_failures,
         quadrat_resolution, species_resolution,
         filter_validity, filtered,
         classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
@@ -2939,6 +2956,88 @@ BEGIN
     WHERE cm_existing_row.CoreMeasurementID IS NOT NULL
        OR cm_existing_measure.CoreMeasurementID IS NOT NULL;
 
+    -- Cross-batch/census TreeTag+StemTag conflict detection belongs at the
+    -- measurement insertion boundary, after stem identity/PublishedStemID
+    -- maintenance and its more-specific conflict checks have run. A clean
+    -- re-upload removes prior census measurements before this point. Revision
+    -- and multi-file uploads can encounter an earlier successful measurement
+    -- for the resolved stem; preserve the incoming raw values as an unresolved
+    -- failure instead of inserting a second success for the collapser to delete.
+    -- Scope the conflict to the collapser's own key (StemGUID + MeasurementDate):
+    -- a same-stem measurement on a DIFFERENT date is a legitimate remeasurement
+    -- (and the reingestion flow depends on it), not a duplicate.
+    CREATE TEMPORARY TABLE prior_core_insert_failure_rows
+    (
+        SourceRowIndex BIGINT UNSIGNED NOT NULL PRIMARY KEY
+    );
+
+    INSERT INTO prior_core_insert_failure_rows (SourceRowIndex)
+    SELECT DISTINCT SourceRowIndex
+    FROM core_insert_failures;
+
+    CREATE TEMPORARY TABLE existing_tag_stemtag_collision_failures
+    (
+        SourceRowIndex BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+        FailureReason  VARCHAR(255)    NOT NULL
+    );
+
+    INSERT IGNORE INTO existing_tag_stemtag_collision_failures (SourceRowIndex, FailureReason)
+    SELECT DISTINCT rbr.id,
+           LEFT(CONCAT('TreeTag/StemTag "', rbr.TreeTag, '"/"', rbr.StemTag,
+                       '" already has a successful measurement for this date in this census; incoming row preserved for review.'),
+                255)
+    FROM resolved_batch_rows rbr
+    INNER JOIN trees t_existing
+        ON t_existing.CensusID = rbr.CensusID
+       AND t_existing.TreeTag = rbr.TreeTag
+       AND t_existing.IsActive = 1
+    INNER JOIN stems s_existing
+        ON s_existing.TreeID = t_existing.TreeID
+       AND s_existing.CensusID = t_existing.CensusID
+       AND s_existing.StemTag = rbr.StemTag
+       AND s_existing.IsActive = 1
+    INNER JOIN coremeasurements cm_existing_stem
+        ON cm_existing_stem.StemGUID = s_existing.StemGUID
+       AND cm_existing_stem.CensusID = rbr.CensusID
+       AND cm_existing_stem.StemGUID IS NOT NULL
+       AND cm_existing_stem.IsActive = 1
+       AND cm_existing_stem.MeasurementDate <=> rbr.MeasurementDate
+       AND NOT (cm_existing_stem.UploadFileID <=> vFileID
+                AND cm_existing_stem.UploadBatchID <=> vBatchID)
+    LEFT JOIN prior_core_insert_failure_rows prior_failure
+        ON prior_failure.SourceRowIndex = rbr.id
+    WHERE prior_failure.SourceRowIndex IS NULL;
+
+    DROP TEMPORARY TABLE IF EXISTS prior_core_insert_failure_rows;
+
+    INSERT IGNORE INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT SourceRowIndex, 'DUPLICATE_TAG_CONFLICT_EXISTING', FailureReason
+    FROM existing_tag_stemtag_collision_failures;
+
+    SET @existing_tag_stemtag_collision_count =
+        (SELECT COUNT(*) FROM existing_tag_stemtag_collision_failures);
+
+    IF @existing_tag_stemtag_collision_count > 0 THEN
+        INSERT IGNORE INTO uploadintegrityalerts (
+            uploadId, fileID, batchID, plotID, censusID,
+            type, message, severity,
+            sourceRecords, processedRecords, failedRecords, missingRecords
+        ) VALUES (
+            vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
+            'DUPLICATE_TAG_CONFLICT_EXISTING',
+            CONCAT(@existing_tag_stemtag_collision_count,
+                   ' incoming record(s) conflict with an existing TreeTag/StemTag and were preserved as unresolved failures'),
+            'warning',
+            vBatchRowCount, 0, @existing_tag_stemtag_collision_count, 0
+        );
+
+        UPDATE uploadmetrics
+        SET duplicatesDetected = 1
+        WHERE uploadId = vUploadId;
+    END IF;
+
+    DROP TEMPORARY TABLE IF EXISTS existing_tag_stemtag_collision_failures;
+
     CREATE TEMPORARY TABLE core_insert_candidates AS
     SELECT rbr.*
     FROM resolved_batch_rows rbr
@@ -3043,23 +3142,23 @@ BEGIN
     SELECT id, 'MEASUREMENT_INSERT_SKIPPED', LEFT(FailureReason, 255)
     FROM orphaned_rows;
 
-    IF EXISTS(SELECT 1 FROM core_insert_failures) OR EXISTS(SELECT 1 FROM orphaned_rows) THEN
-        SET @orphaned_filtered = (
-            SELECT COUNT(*) FROM (
-                SELECT SourceRowIndex FROM core_insert_failures
-                UNION
-                SELECT id FROM orphaned_rows
-            ) unresolved_measurements
-        );
+    -- Intentional row-level failures in core_insert_failures are already
+    -- classified and surfaced; they are not orphaned measurements. Emit the
+    -- critical orphan alert only when an eligible insert candidate genuinely
+    -- failed to materialize without a prior failure classification.
+    IF EXISTS(SELECT 1 FROM orphaned_rows) THEN
+        SET @orphaned_filtered = (SELECT COUNT(*) FROM orphaned_rows);
 
         INSERT IGNORE INTO uploadintegrityalerts (
             uploadId, fileID, batchID, plotID, censusID,
-            type, message, severity, failedRecords
+            type, message, severity,
+            sourceRecords, processedRecords, failedRecords, missingRecords
         ) VALUES (
             vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
             'ORPHANED_MEASUREMENT',
             CONCAT(@orphaned_filtered, ' measurement(s) passed validation but no batch measurement row could be created'),
-            'critical', @orphaned_filtered
+            'critical',
+            vBatchRowCount, vProcessedCount, @orphaned_filtered, 0
         );
     END IF;
 
@@ -3219,6 +3318,7 @@ BEGIN
     -- They can be recomputed later from persisted coremeasurements if needed.
 
     DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
+        prior_core_insert_failure_rows, existing_tag_stemtag_collision_failures,
         quadrat_resolution, species_resolution,
         filter_validity, filtered,
         classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
@@ -3279,6 +3379,7 @@ BEGIN
         WHERE uploadId = vUploadId;
 
         DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
+            prior_core_insert_failure_rows, existing_tag_stemtag_collision_failures,
             quadrat_resolution, species_resolution,
             filter_validity, filtered,
             classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,

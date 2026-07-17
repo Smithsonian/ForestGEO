@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
+import { HTTPResponses } from '@/config/macros';
 import { PATCH, POST, DELETE } from './coreapifunctions';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import MapperFactory from '@/config/datamapper';
@@ -137,7 +138,10 @@ describe('CoreAPIFunctions', () => {
         })
       });
 
-      mockConnectionManager.executeQuery.mockResolvedValue([]);
+      // The PATCH UPDATE is guarded against zero-row writes: mysql2 returns a
+      // ResultSetHeader whose affectedRows counts matched rows, so a real matched
+      // update reports affectedRows >= 1. Model that here so the guard sees a hit.
+      mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
 
       const mockParams = {
         dataType: 'plots',
@@ -233,6 +237,8 @@ describe('CoreAPIFunctions', () => {
       });
 
       mockMapper.demapData.mockImplementation((data: any[]) => data);
+      // The UPDATE must report a matched row so the zero-row guard resolves to a 200.
+      mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
 
       const mockParams = {
         dataType: 'personnel',
@@ -272,6 +278,38 @@ describe('CoreAPIFunctions', () => {
       expect(applyEditMock).not.toHaveBeenCalled();
       expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
       expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    });
+
+    it('returns NOT_FOUND and rolls back when the UPDATE matches zero rows (stale-key edit)', async () => {
+      // A zero-row UPDATE means the target row does not exist (the pool keeps
+      // mysql2 FOUND_ROWS on, so affectedRows counts matched rows). The handler
+      // must surface HTTPResponses.NOT_FOUND instead of reporting a false success,
+      // and the transaction must roll back. This pins the guard at the unit level;
+      // the real-DB proof lives in coreapifunctions-patch-atomicity.
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          newRow: { Code: 'GHOST', Description: 'Edited' },
+          oldRow: { Code: 'GHOST', Description: 'Original' }
+        })
+      });
+
+      mockMapper.demapData.mockReturnValue([{ Code: 'GHOST', Description: 'Edited' }]);
+      // mysql2 reports affectedRows === 0 when no row matched the WHERE clause.
+      mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 0 });
+
+      const mockParams = {
+        dataType: 'attributes',
+        slugs: ['testSchema', 'code']
+      };
+
+      const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
+
+      expect(response.status).toBe(HTTPResponses.NOT_FOUND);
+      // The zero-row guard throws inside withTransaction, so the transaction the
+      // handler opened must be rolled back, not committed.
+      expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('transaction-123');
+      expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
     });
   });
 
@@ -606,7 +644,7 @@ describe('CoreAPIFunctions', () => {
           })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue([]);
+        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
         mockMapper.demapData.mockReturnValue([{ CoreMeasurementID: 42, MeasuredDBH: 15.5 }]);
 
         const mockParams = {
@@ -631,7 +669,7 @@ describe('CoreAPIFunctions', () => {
           })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue([]);
+        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
         mockMapper.demapData.mockReturnValue([{ Code: 'TEST', Description: 'Updated' }]);
 
         const mockParams = {
@@ -656,7 +694,7 @@ describe('CoreAPIFunctions', () => {
           })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue([]);
+        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
 
         const mockParams = {
           dataType: 'attributes',
@@ -682,7 +720,7 @@ describe('CoreAPIFunctions', () => {
           })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue([]);
+        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
         mockMapper.demapData.mockReturnValue([{ CustomID: 99, Name: 'Updated' }]);
 
         const mockParams = {

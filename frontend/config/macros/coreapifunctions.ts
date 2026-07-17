@@ -33,6 +33,21 @@ const PRIMARY_KEY_MAP: Record<string, string> = {
 
 const MEASUREMENT_PATCH_BLOCKED_DATATYPES = new Set(['measurementssummary', 'failedmeasurements']);
 
+/**
+ * Raised when a PATCH UPDATE matches/changes no row, so the mutation cannot be
+ * reported as a success. Carries the HTTP status the route should surface,
+ * mirroring the ArcgisImportSessionError pattern in lib/arcgis/import-session.ts.
+ */
+class RowNotFoundError extends Error {
+  readonly status: HTTPResponses;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'RowNotFoundError';
+    this.status = HTTPResponses.NOT_FOUND;
+  }
+}
+
 export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const { dataType, slugs } = await props.params;
   const [schema, gridID] = slugs ?? [];
@@ -115,13 +130,35 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
       // reads the session variable this statement sets — hence tx.query, not a
       // fresh pool connection.
       await tx.query(`SET @CURRENT_CENSUS_ID = ?`, [censusID]);
-      await tx.query(updateQuery);
+      const updateResult = await tx.query(updateQuery);
+
+      // A zero-row UPDATE must never be reported as success. The pool uses mysql2's
+      // default connection flags, which include FOUND_ROWS (connection_config.js
+      // getDefaultFlags) and are not overridden in poolmonitorsingleton, so
+      // affectedRows counts MATCHED rows: a matched-but-unchanged re-save reports
+      // affectedRows >= 1, and affectedRows === 0 uniquely means the target row
+      // does not exist. Throwing here rolls the transaction back (undoing any
+      // earlier write in this handler, e.g. the personnel censusactivepersonnel
+      // row) and surfaces NOT_FOUND, so a stale-key edit can never be reported as
+      // a successful persist.
+      const affectedRows = (updateResult as { affectedRows?: number })?.affectedRows ?? 0;
+      if (affectedRows === 0) {
+        throw new RowNotFoundError(`No ${dataType} row found for ${demappedGridID}=${previousGridIDKey}`);
+      }
 
       return { [dataType]: updatedGridIDKey };
     });
 
     return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
+    // A zero-row UPDATE must not report success: surface the NOT_FOUND status the
+    // error carries instead of the generic 500 handleError would produce. Use the
+    // `message` key so the grid consumer (isolateddatagridcommons reads
+    // responseJSON.message) shows the specific not-found reason, consistent with
+    // this handler's success and handleError responses.
+    if (error instanceof RowNotFoundError) {
+      return NextResponse.json({ message: error.message }, { status: error.status });
+    }
     // withTransaction has already rolled back on throw; pass no transactionID so
     // handleError only formats the response and does not attempt a second
     // rollback (which would log against an already-released connection).

@@ -19,6 +19,7 @@ import { refreshMeasurementViewsForCoreMeasurements, refreshMeasurementViewsForS
 import { handleUpsert } from '@/config/utils';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { CMAttributesResult } from '@/lib/db/definitions/core';
+import { parseAttributeCodes } from '../rules/attributes';
 
 export interface WriterResult {
   updatedIDs: Record<string, number>;
@@ -573,12 +574,7 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
   // --- Attributes change — rebuild cmattributes rows (DELETE + re-INSERT)
   if (changedFields.has('Attributes')) {
     changesFound = true;
-    const attrsValue = newValues.Attributes;
-    const rawAttrsString = attrsValue === null || attrsValue === undefined ? '' : String(attrsValue);
-    const parsedCodes = rawAttrsString
-      .split(';')
-      .map(code => code.trim())
-      .filter(Boolean);
+    const parsedCodes = parseAttributeCodes(newValues.Attributes);
     await cm.executeQuery(safeFormatQuery(schema, `DELETE FROM ??.cmattributes WHERE CoreMeasurementID = ?`), [coreMeasurementID], txID);
     for (const code of parsedCodes) {
       await handleUpsert<CMAttributesResult>(

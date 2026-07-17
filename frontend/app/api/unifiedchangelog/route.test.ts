@@ -201,7 +201,8 @@ describe('Unified Changelog Tracking System', () => {
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query
+        .mockResolvedValueOnce({}) // SET @CURRENT_CENSUS_ID session var (issued before the UPDATE)
+        .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query (matched one row -> passes the zero-row guard)
         .mockResolvedValueOnce([{ Count: 1 }]); // COUNT query
 
       const oldRow = { code: 'A', description: 'Old Description', status: 'alive' };
@@ -233,7 +234,8 @@ describe('Unified Changelog Tracking System', () => {
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query
+        .mockResolvedValueOnce({}) // SET @CURRENT_CENSUS_ID session var (issued before the UPDATE)
+        .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query (matched one row -> passes the zero-row guard)
         .mockResolvedValueOnce([{ Count: 1 }]); // COUNT query
 
       const oldRow = { personnelID: 1, firstName: 'John', lastName: 'Doe', role: 'researcher' };
@@ -607,12 +609,14 @@ describe('Unified Changelog Tracking System', () => {
 
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-10a').mockResolvedValueOnce('tx-10b');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
-      const exec = vi
-        .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce({ affectedRows: 1 })
-        .mockResolvedValueOnce([{ Count: 1 }])
-        .mockResolvedValueOnce({ affectedRows: 1 })
-        .mockResolvedValueOnce([{ Count: 1 }]);
+      // Both PATCHes run under Promise.all, so their SET/UPDATE statements interleave
+      // in a non-deterministic order. Branch on the SQL text instead of a fixed call
+      // sequence so every UPDATE reports a matched row (affectedRows: 1) and neither
+      // request trips the zero-row NOT_FOUND guard.
+      const exec = vi.spyOn(cm, 'executeQuery').mockImplementation(async (sql: string) => {
+        if (String(sql).includes('UPDATE')) return { affectedRows: 1 };
+        return [{ Count: 1 }];
+      });
 
       // User 1 edits row A
       const req1 = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {

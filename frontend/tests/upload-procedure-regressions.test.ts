@@ -28,8 +28,9 @@ describe('upload procedure regressions', () => {
     }
   });
 
-  it('writes complete collapser deduplication alerts', () => {
+  it('preserves collapser duplicate conflicts and writes complete alerts', () => {
     const canonicalSql = readSql('db/sql/storedprocedures.sql');
+    const collapserSql = extractSqlSegment(canonicalSql, 'procedure bulkingestioncollapser', 'procedure clearcensusfull');
 
     expect(canonicalSql).toContain(
       'INSERT INTO uploadintegrityalerts (uploadId, fileID, batchID, plotID, censusID, type, message, severity, sourceRecords, processedRecords, failedRecords, missingRecords)'
@@ -37,6 +38,28 @@ describe('upload procedure regressions', () => {
     expect(canonicalSql).not.toContain('INSERT INTO uploadintegrityalerts (plotID, censusID, type, message, severity, failedRecords)');
     expect(canonicalSql).toContain("DECLARE vAlertFileID VARCHAR(50) DEFAULT '__collapser__';");
     expect(canonicalSql).toContain("SET vAlertBatchID = CONCAT('census-', vCensusID);");
+    expect(collapserSql).toContain("'COLLAPSER_STEM_DATE_CONFLICT'");
+    expect(collapserSql).toContain("'COLLAPSER_TREE_STEM_TAG_CONFLICT'");
+    expect(collapserSql).toContain('AND resolved = 0');
+    expect(collapserSql).toContain('IF EXISTS ( SELECT 1 FROM uploadintegrityalerts');
+    expect(collapserSql).toContain('ELSE INSERT INTO uploadintegrityalerts');
+    expect(collapserSql).toContain('preserved for user review');
+    expect(collapserSql).not.toContain('DELETE cm FROM coremeasurements');
+    expect(collapserSql).not.toContain('ROW_NUMBER() OVER');
+  });
+
+  it('surfaces cross-batch TreeTag/StemTag conflicts instead of inserting a second success', () => {
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+
+    expect(canonicalSql).toContain("'DUPLICATE_TAG_CONFLICT_EXISTING'");
+    expect(canonicalSql).toContain('INNER JOIN trees t_existing');
+    expect(canonicalSql).toContain('INNER JOIN stems s_existing');
+    expect(canonicalSql).toContain('INNER JOIN coremeasurements cm_existing_stem');
+    expect(canonicalSql).toContain('CREATE TEMPORARY TABLE prior_core_insert_failure_rows');
+    expect(canonicalSql).toContain('LEFT JOIN prior_core_insert_failure_rows prior_failure');
+    expect(canonicalSql).toContain('CREATE TEMPORARY TABLE existing_tag_stemtag_collision_failures');
+    expect(canonicalSql).toContain('incoming row preserved for review');
+    expect(canonicalSql).toContain('SELECT COUNT(*) FROM existing_tag_stemtag_collision_failures');
   });
 
   it('cleans up stale failed sub-batches before retrying the same batch id', () => {
@@ -67,6 +90,14 @@ describe('upload procedure regressions', () => {
     );
     expect(canonicalSql).toContain('FROM core_insert_candidates cic ORDER BY cic.id;');
     expect(canonicalSql).toContain('core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements');
+  });
+
+  it('does not mislabel classified core insert failures as orphaned measurements', () => {
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+
+    expect(canonicalSql).toContain('IF EXISTS(SELECT 1 FROM orphaned_rows) THEN');
+    expect(canonicalSql).not.toContain('IF EXISTS(SELECT 1 FROM core_insert_failures) OR EXISTS(SELECT 1 FROM orphaned_rows) THEN');
+    expect(canonicalSql).toContain('SET @orphaned_filtered = (SELECT COUNT(*) FROM orphaned_rows)');
   });
 
   it('backfills uploaded PublishedStemID through stem resolution with conflict guards', () => {

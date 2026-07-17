@@ -41,11 +41,19 @@ import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, resolveHeaders, transformHead
 import { aliasesFor, makeLegacyCsvHeaderKey } from '@/lib/column-mapping/fields';
 import { transformMeasurementValue, validateMeasurementRow } from '@/lib/column-mapping/measurement-rows';
 import { UploadMode } from '@/config/uploadmodes';
+import { evaluateUploadReconciliation, type UploadReconciliationVerdict } from '@/lib/ingestion/reconciliation';
 
 const CSV_MAPPING_REJECTION_SENTENCE: Record<CsvMappingRejectionCode, string> = {
   stale: 'the saved column mapping was built from different headers',
   invalid: 'the saved column mapping is no longer valid for this file'
 };
+
+class UploadReconciliationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UploadReconciliationError';
+  }
+}
 
 function createAbortError(message: string): Error {
   const error = new Error(message);
@@ -174,6 +182,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   // Track expected row counts per file for end-to-end verification
   const expectedRowCounts = useRef<Map<string, number>>(new Map());
   const expectedTemporaryRowCounts = useRef<Map<string, number>>(new Map());
+  const persistedRejectedRowCounts = useRef<Map<string, number>>(new Map());
+  // Pre-stage rejections the SERVER persisted inside its own commit transaction (ArcGIS
+  // dropped-duplicate rows). These land under the file's real batchID, so verifysession
+  // already counts them in failedCount — they satisfy the rejected-row accounting check
+  // but must NOT be added to the reconciliation's failedRecords a second time.
+  const serverAccountedRejectedRowCounts = useRef<Map<string, number>>(new Map());
   const measurementBatchIDs = useRef<Map<string, string>>(new Map());
 
   const getRequiredUploadSessionId = useCallback((): string => {
@@ -393,47 +407,49 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   );
 
   const pushErrorRowsToFailedMeasurements = useCallback(
-    async (errorRows: FileRow[], fileName: string) => {
-      if (errorRows.length === 0) return;
+    async (errorRows: FileRow[], fileName: string): Promise<number> => {
+      if (errorRows.length === 0) return 0;
 
-      try {
-        const failedMeasurementsData = errorRows.map(row => ({
-          plotID: currentPlot?.plotID ?? -1,
-          censusID: currentCensus?.dateRanges?.[0]?.censusID ?? -1,
-          tag: row.tag || null,
-          stemTag: row.stemtag || null,
-          spCode: row.spcode || null,
-          quadrat: row.quadrat || null,
-          x: row.lx || null,
-          y: row.ly || null,
-          dbh: row.dbh || null,
-          hom: row.hom || null,
-          date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
-          codes: row.codes || null,
-          comments: row.comments || null,
-          failureReasons: row.failureReason || 'Unknown error'
-        }));
+      const failedMeasurementsData = errorRows.map(row => ({
+        plotID: currentPlot?.plotID ?? -1,
+        censusID: currentCensus?.dateRanges?.[0]?.censusID ?? -1,
+        tag: row.tag || null,
+        stemTag: row.stemtag || null,
+        spCode: row.spcode || null,
+        quadrat: row.quadrat || null,
+        x: row.lx || null,
+        y: row.ly || null,
+        dbh: row.dbh || null,
+        hom: row.hom || null,
+        date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
+        codes: row.codes || null,
+        comments: row.comments || null,
+        failureReasons: row.failureReason || 'Unknown error'
+      }));
 
-        const response = await fetchWithTimeout(
-          `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges?.[0]?.censusID}?fileID=${encodeURIComponent(fileName)}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(failedMeasurementsData)
-          },
-          30000
-        );
+      const response = await fetchWithTimeout(
+        `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges?.[0]?.censusID}?fileID=${encodeURIComponent(fileName)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(failedMeasurementsData)
+        },
+        30000
+      );
 
-        if (!response.ok) {
-          throw new Error(`Failed to push error rows to failedmeasurements: ${response.status}`);
-        }
-
-        ailogger.info(`Successfully pushed ${errorRows.length} error rows from ${fileName} to failedmeasurements table`);
-      } catch (error: unknown) {
-        const errorObj = error instanceof Error ? error : new Error(String(error));
-        ailogger.error(`Failed to push error rows from ${fileName} to failedmeasurements:`, errorObj);
-        // Don't throw - we don't want to stop the upload process because of error row insertion failures
+      if (!response.ok) {
+        throw new Error(`Failed to persist ${errorRows.length} rejected row(s) for ${fileName}: HTTP ${response.status}`);
       }
+
+      const payload = (await response.json()) as { rowCount?: unknown };
+      const persistedCount = Number(payload.rowCount);
+      if (!Number.isInteger(persistedCount) || persistedCount !== errorRows.length) {
+        throw new Error(`Rejected-row persistence mismatch for ${fileName}: sent ${errorRows.length}, API confirmed ${String(payload.rowCount)}.`);
+      }
+
+      persistedRejectedRowCounts.current.set(fileName, (persistedRejectedRowCounts.current.get(fileName) ?? 0) + persistedCount);
+      ailogger.info(`Persisted ${persistedCount} rejected row(s) from ${fileName} for final reconciliation`);
+      return persistedCount;
     },
     [currentPlot?.plotID, currentCensus?.dateRanges, schema, fetchWithTimeout]
   );
@@ -748,6 +764,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       const payload = (await response.json()) as { rowCount?: number; alreadyCommitted?: boolean };
       const committedTemporaryRows = Number.isFinite(Number(payload.rowCount)) ? Number(payload.rowCount) : stagedRowCount;
       expectedTemporaryRowCounts.current.set(file.name, committedTemporaryRows);
+      // Rows the commit dropped (INSERT IGNORE duplicates) were persisted by the server as
+      // unresolved failure rows inside the same transaction — a successful commit means they
+      // are durably accounted for, and the final reconciliation verdict still checks the
+      // actual DB counts. Record them so the rejected-row accounting check accepts the file.
+      const serverAccountedRejections = stagedRowCount - committedTemporaryRows;
+      if (serverAccountedRejections > 0) {
+        serverAccountedRejectedRowCounts.current.set(file.name, serverAccountedRejections);
+        ailogger.info(`ArcGIS commit for ${file.name}: ${serverAccountedRejections} dropped row(s) persisted server-side as unresolved failures.`);
+      }
       if (payload.alreadyCommitted) {
         ailogger.info(`ArcGIS import session ${arcgisImportSession.importSessionId} was already committed; continuing idempotently.`);
       }
@@ -1152,8 +1177,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             ailogger.info(`All database operations completed for ${file.name}`);
             if (parsingInvalidRows.length > 0) {
               ailogger.warn(`Found ${parsingInvalidRows.length} invalid rows from ${file.name}, pushing directly to failedmeasurements table`);
-              // Push error rows directly to failedmeasurements table instead of storing in component state
-              await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
+              // Push error rows directly to failedmeasurements table instead of storing in component state.
+              // Papa discards this async callback's promise, so a throw here would leave the wrapping
+              // Promise unsettled and hang the upload forever — route the failure into reject instead.
+              try {
+                await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
+              } catch (persistError: unknown) {
+                const persistErrObj = persistError instanceof Error ? persistError : new Error(String(persistError));
+                ailogger.error(`Rejected-row persistence failed for ${file.name}:`, persistErrObj);
+                reject(persistErrObj);
+                return;
+              }
             }
 
             if (parsingDiagnostics.extraColumnRows > 0) {
@@ -1248,6 +1282,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       uploadStartedRef.current = false;
       batchProcessingStartedRef.current = false;
       fatalUploadErrorRef.current = null;
+      persistedRejectedRowCounts.current.clear();
+      serverAccountedRejectedRowCounts.current.clear();
       measurementBatchIDs.current.clear();
       return;
     }
@@ -1259,6 +1295,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       fatalUploadErrorRef.current = null;
       expectedRowCounts.current.clear();
       expectedTemporaryRowCounts.current.clear();
+      persistedRejectedRowCounts.current.clear();
+      serverAccountedRejectedRowCounts.current.clear();
       measurementBatchIDs.current.clear();
       setTotalOperations(0);
       setCompletedOperations(0);
@@ -1296,6 +1334,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Clear expected row counts from any previous upload
         expectedRowCounts.current.clear();
         expectedTemporaryRowCounts.current.clear();
+        persistedRejectedRowCounts.current.clear();
+        serverAccountedRejectedRowCounts.current.clear();
 
         if (fatalUploadErrorRef.current) {
           throw fatalUploadErrorRef.current;
@@ -1973,67 +2013,125 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             let totalSessionProcessed = 0;
             let totalSessionFailed = 0;
             let totalExpectedRows = 0;
-            let dataIntegrityIssuesFound = false;
+            // Reconciliation extends bulkingestionprocess's batch check to the original
+            // source file: staged successes + staged failures + durably persisted
+            // pre-stage rejections must equal the parsed source-row total.
+            const reconciliationMismatches: { fileID: string; verdict: UploadReconciliationVerdict }[] = [];
+            const unverifiableFiles: string[] = [];
 
             for (let fileIndex = 0; fileIndex < acceptedFiles.length; fileIndex++) {
               const file = acceptedFiles[fileIndex];
               const fileID = file.name;
 
-              // Get expected row count from parsing phase
-              const expectedForFile = expectedRowCounts.current.get(fileID) || 0;
-              totalExpectedRows += expectedForFile;
+              // Reconcile the original source total. Rows rejected before staging count only
+              // when their persistence is confirmed: client-persisted rejections via
+              // /api/batchedupload's durable row count, server-persisted rejections (ArcGIS
+              // dropped duplicates) via the commit transaction that wrote them.
+              const stagedRowsForFile = expectedTemporaryRowCounts.current.get(fileID) || 0;
+              const sourceRowsForFile = expectedRowCounts.current.get(fileID) || 0;
+              const persistedRejectedRows = persistedRejectedRowCounts.current.get(fileID) || 0;
+              const serverAccountedRejectedRows = serverAccountedRejectedRowCounts.current.get(fileID) || 0;
+              const expectedRejectedRows = sourceRowsForFile - stagedRowsForFile;
+              const fileBatchID = measurementBatchIDs.current.get(fileID) || null;
+              totalExpectedRows += sourceRowsForFile;
+
+              if (expectedRejectedRows < 0 || persistedRejectedRows + serverAccountedRejectedRows !== expectedRejectedRows) {
+                unverifiableFiles.push(fileID);
+                ailogger.error(
+                  `Rejected-row reconciliation mismatch for ${fileID}: ${sourceRowsForFile} source - ${stagedRowsForFile} staged = ` +
+                    `${expectedRejectedRows} expected rejected, but ${persistedRejectedRows} client-persisted + ` +
+                    `${serverAccountedRejectedRows} server-persisted were confirmed.`
+                );
+              }
 
               try {
-                const sessionVerifyResponse = await fetch(
-                  `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}&fileID=${encodeURIComponent(fileID)}`
-                );
+                // Batch-scoped verification: pass batchID so the counts are for THIS upload's
+                // batch, not a cumulative plot/census total.
+                const batchScopeParam = fileBatchID ? `&batchID=${encodeURIComponent(fileBatchID)}` : '';
+                const sessionVerifyUrl = `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}&fileID=${encodeURIComponent(fileID)}${batchScopeParam}`;
 
-                if (sessionVerifyResponse.ok) {
+                // The verify GET is read-only, so retrying cannot double-apply anything.
+                // Without a retry, one transient blip here fails an upload whose ingestion
+                // has already committed — and re-uploading the same file would then surface
+                // every row as a DUPLICATE_TAG_CONFLICT_EXISTING failure.
+                const maxVerifyRetries = 2;
+                const verifyRetryDelayMs = 2000;
+                let sessionVerifyResponse: Response | null = null;
+                for (let verifyAttempt = 0; verifyAttempt <= maxVerifyRetries; verifyAttempt++) {
+                  const attemptResponse = await fetch(sessionVerifyUrl).catch((fetchError: unknown) => {
+                    const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
+                    ailogger.warn(`Session verification attempt ${verifyAttempt + 1}/${maxVerifyRetries + 1} threw for ${fileID}: ${message}`);
+                    return null;
+                  });
+                  if (attemptResponse?.ok) {
+                    sessionVerifyResponse = attemptResponse;
+                    break;
+                  }
+                  if (attemptResponse) {
+                    ailogger.warn(`Session verification attempt ${verifyAttempt + 1}/${maxVerifyRetries + 1} for ${fileID}: HTTP ${attemptResponse.status}`);
+                  }
+                  if (verifyAttempt < maxVerifyRetries) {
+                    await new Promise(resolveDelay => setTimeout(resolveDelay, verifyRetryDelayMs));
+                  }
+                }
+
+                if (sessionVerifyResponse) {
                   const sessionData = await sessionVerifyResponse.json();
-                  totalSessionProcessed += sessionData.processedCount;
-                  totalSessionFailed += sessionData.failedCount;
+                  const processedCount = Number(sessionData.processedCount || 0);
+                  const failedCount = Number(sessionData.failedCount || 0);
+                  totalSessionProcessed += processedCount;
+                  totalSessionFailed += failedCount + persistedRejectedRows;
 
-                  const actualTotal = sessionData.processedCount + sessionData.failedCount;
-                  const discrepancy = expectedForFile - actualTotal;
+                  const verdict = evaluateUploadReconciliation({
+                    sourceRecords: sourceRowsForFile,
+                    successfulRecords: processedCount,
+                    failedRecords: failedCount + persistedRejectedRows
+                  });
 
-                  if (discrepancy !== 0) {
-                    dataIntegrityIssuesFound = true;
-                    ailogger.warn(
-                      `Data verification note for ${fileID}: Expected ${expectedForFile} rows from file, actual ${actualTotal} in database (${sessionData.processedCount} in coremeasurements + ${sessionData.failedCount} in failedmeasurements). Difference: ${discrepancy} row(s). This may be normal if rows were deduplicated or merged during processing.`
+                  if (!verdict.reconciled) {
+                    reconciliationMismatches.push({ fileID, verdict });
+                    ailogger.error(`Reconciliation mismatch for ${fileID}${fileBatchID ? ` (batch ${fileBatchID})` : ''}: ${verdict.detail}`);
+                  } else {
+                    ailogger.info(
+                      `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): reconciled — ${processedCount} succeeded + ${failedCount} staged failures + ` +
+                        `${persistedRejectedRows} pre-stage rejections = ${verdict.accountedRecords} of ${sourceRowsForFile} source rows ✓`
                     );
                   }
-
-                  ailogger.info(
-                    `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): Expected ${expectedForFile}, Actual ${actualTotal} (${sessionData.processedCount} succeeded, ${sessionData.failedCount} failed)${discrepancy !== 0 ? ` - Difference: ${discrepancy} rows` : ' ✓'}`
-                  );
                 } else {
-                  ailogger.warn(`Session verification request failed for file ${fileID}`);
+                  // A verification we could not complete is not proof of a clean upload; record
+                  // it so completion is blocked rather than optimistically reported as success.
+                  unverifiableFiles.push(fileID);
+                  ailogger.error(`Session verification failed for file ${fileID} after ${maxVerifyRetries + 1} attempts`);
                 }
               } catch (sessionError: unknown) {
                 const message = sessionError instanceof Error ? sessionError.message : String(sessionError);
-                ailogger.warn(`Error during session verification for ${fileID}: ${message}`);
+                unverifiableFiles.push(fileID);
+                ailogger.error(`Error during session verification for ${fileID}: ${message}`);
               }
             }
 
             const totalSessionAccounted = totalSessionProcessed + totalSessionFailed;
-            const totalDiscrepancy = totalExpectedRows - totalSessionAccounted;
 
-            // Log verification results - note that discrepancies may be normal due to deduplication
-            if (dataIntegrityIssuesFound || totalDiscrepancy !== 0) {
-              setVerificationStatus(
-                `Verification complete: ${totalSessionAccounted} rows in database (${totalSessionProcessed} succeeded, ${totalSessionFailed} failed). Note: ${Math.abs(totalDiscrepancy)} row difference from expected ${totalExpectedRows} - this may be due to deduplication or data merging.`
-              );
-              ailogger.info(
-                `Upload verification summary: Expected ${totalExpectedRows} rows from input files, ${totalSessionAccounted} rows in database. Difference of ${totalDiscrepancy} rows may be due to deduplication, merged stems, or data consolidation during processing.`
-              );
-            } else {
-              setVerificationStatus(
-                `✓ Verification complete: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed (${totalSessionAccounted} total - matches expected ${totalExpectedRows})`
-              );
-              ailogger.info(
-                `Upload verification summary: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed. Total: ${totalSessionAccounted} rows. Expected: ${totalExpectedRows} rows. ✓ Perfect match.`
+            if (reconciliationMismatches.length > 0 || unverifiableFiles.length > 0) {
+              const mismatchSummary = reconciliationMismatches.map(m => `${m.fileID}: ${m.verdict.detail}`).join(' | ');
+              const unverifiableSummary = unverifiableFiles.length > 0 ? ` Could not verify: ${unverifiableFiles.join(', ')}.` : '';
+              setVerificationStatus(`Upload blocked — data integrity check failed. ${mismatchSummary}${unverifiableSummary}`.trim());
+              // Throwing here routes into the collapser catch below, which rethrows to
+              // runProcessBatches().catch → ERRORS state, so the upload can NEVER be reported
+              // as a clean completion while rows are unaccounted for.
+              throw new UploadReconciliationError(
+                `Upload reconciliation failed: ${reconciliationMismatches.length} file(s) with unaccounted rows` +
+                  `${unverifiableFiles.length > 0 ? ` and ${unverifiableFiles.length} unverifiable file(s)` : ''}. ` +
+                  `${mismatchSummary}${unverifiableSummary}`.trim()
               );
             }
+
+            setVerificationStatus(
+              `✓ Verification complete: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed (${totalSessionAccounted} total - matches ${totalExpectedRows} source rows)`
+            );
+            ailogger.info(
+              `Upload verification summary: ${totalSessionProcessed} succeeded, ${totalSessionFailed} failed, ${totalSessionAccounted} accounted of ${totalExpectedRows} source rows. ✓ Every source row accounted for.`
+            );
           }
 
           if (isMountedRef.current) {
@@ -2041,6 +2139,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
         } catch (collapserError: unknown) {
           const message = collapserError instanceof Error ? collapserError.message : String(collapserError);
+          if (collapserError instanceof UploadReconciliationError) {
+            ailogger.error(`Upload reconciliation error: ${message}`);
+            throw collapserError;
+          }
           if (isMountedRef.current) {
             setVerificationStatus(`Data consolidation error: ${message}`);
           }

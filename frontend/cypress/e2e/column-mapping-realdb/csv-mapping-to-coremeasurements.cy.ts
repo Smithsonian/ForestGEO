@@ -68,6 +68,21 @@ const EXPECTED_ROW_COUNT = 2;
 const POLL_RETRIES = 60;
 const POLL_INTERVAL_MS = 2000;
 
+// Attribute-code anchor. Standard canonical headers (tag/stemtag/spcode/quadrat/lx/ly/dbh/
+// codes/date) resolve via passthrough, so no mapping dialog is needed. The fixture is
+// authored with NO trailing newline and QUOTED code cells so the REAL Papa parser must
+// handle both edge cases. Row 201's codes cell is the quoted semicolon list "A;D" (two
+// valid codes); row 202's is the quoted comma list "A,D" — ONE code the DB cannot match,
+// proving the production tokenizer (bulkingestionprocess STAGE 9) never splits on commas.
+const ATTRIBUTE_FIXTURE = 'measurements-attribute-codes.csv';
+const SEMI_TAG = '201';
+const COMMA_TAG = '202';
+const SEMI_EXPECTED_CODES = ['A', 'D'];
+// ValidateFindInvalidAttributeCodes — db/sql/corequeries.sql line 273, linked in
+// db/sql/storedprocedures.sql STAGE 9 as ErrorSource='validation' AND ErrorCode='14'.
+const ATTRIBUTE_CODE_VALIDATION_ERRORCODE = '14';
+const ATTRIBUTE_ROW_COUNT = 2;
+
 /** Inter-poll backoff that does not use cy.wait(ms); the assertion gate is the DB condition. */
 function backoff(ms: number): Cypress.Chainable {
   return cy.wrap(null, { log: false }).then(() => new Cypress.Promise(resolve => setTimeout(resolve, ms)));
@@ -148,6 +163,82 @@ describe('Tier B: mapped CSV reaches coremeasurements through the real pipeline'
 
       const treeTags = ingested.map(r => String(r.TreeTag)).sort();
       expect(treeTags, 'both fixture tree tags ingested').to.deep.equal(['101', '102']);
+    });
+  });
+
+  it('materializes quoted semicolon codes into cmattributes and surfaces a quoted comma list as one invalid code (no trailing newline)', () => {
+    cy.enterUploadParseStep(ATTRIBUTE_FIXTURE);
+
+    // Standard canonical headers resolve via passthrough — no mapping dialog required.
+    // Continue Upload enables once the real Papa parse completes over the no-trailing-newline
+    // file; firing it drives the genuine sqlpacketload -> bulkingestionprocess pipeline.
+    cy.contains('button', CONTINUE_UPLOAD_LABEL, { timeout: 15000 }).should('not.be.disabled').click();
+
+    // Poll until BOTH rows ingest as successful (StemGUID NOT NULL). Row 202 still succeeds —
+    // an invalid attribute code is a soft validation, not a hard failure — which also proves
+    // the final row survived a file with no trailing newline (the real parser kept it).
+    const bothRowsQuery = () =>
+      `SELECT t.TreeTag AS tag
+       FROM \`${schema}\`.coremeasurements cm
+       INNER JOIN \`${schema}\`.stems s ON s.StemGUID = cm.StemGUID
+       INNER JOIN \`${schema}\`.trees t ON t.TreeID = s.TreeID
+       WHERE cm.StemGUID IS NOT NULL AND t.TreeTag IN ('${SEMI_TAG}', '${COMMA_TAG}')`;
+
+    function waitForBothRows(attempt: number): Cypress.Chainable {
+      return cy.task('queryCoremeasurements', { query: bothRowsQuery() }).then((rows: any) => {
+        const ingested = Array.isArray(rows) ? rows : [];
+        if (ingested.length >= ATTRIBUTE_ROW_COUNT) {
+          return cy.wrap(ingested);
+        }
+        if (attempt >= POLL_RETRIES) {
+          throw new Error(`both attribute-code rows never ingested after ${POLL_RETRIES} polls (saw ${ingested.length})`);
+        }
+        return backoff(POLL_INTERVAL_MS).then(() => waitForBothRows(attempt + 1));
+      });
+    }
+
+    const codesForTag = (tag: string) =>
+      `SELECT cma.Code AS code
+       FROM \`${schema}\`.coremeasurements cm
+       INNER JOIN \`${schema}\`.stems s ON s.StemGUID = cm.StemGUID
+       INNER JOIN \`${schema}\`.trees t ON t.TreeID = s.TreeID
+       INNER JOIN \`${schema}\`.cmattributes cma ON cma.CoreMeasurementID = cm.CoreMeasurementID
+       WHERE t.TreeTag = '${tag}'
+       ORDER BY cma.Code`;
+
+    const attributeErrorCountForTag = (tag: string) =>
+      `SELECT COUNT(*) AS n
+       FROM \`${schema}\`.coremeasurements cm
+       INNER JOIN \`${schema}\`.stems s ON s.StemGUID = cm.StemGUID
+       INNER JOIN \`${schema}\`.trees t ON t.TreeID = s.TreeID
+       INNER JOIN \`${schema}\`.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+       INNER JOIN \`${schema}\`.measurement_errors me ON me.ErrorID = mel.ErrorID
+       WHERE t.TreeTag = '${tag}' AND me.ErrorSource = 'validation' AND me.ErrorCode = '${ATTRIBUTE_CODE_VALIDATION_ERRORCODE}'`;
+
+    waitForBothRows(0).then(() => {
+      // Semicolon list -> exactly two cmattributes rows (A and D).
+      cy.task('queryCoremeasurements', { query: codesForTag(SEMI_TAG) }).then((rows: any) => {
+        const codes = (Array.isArray(rows) ? rows : []).map((r: any) => String(r.code));
+        expect(codes, `quoted "A;D" splits into two cmattributes rows for tag ${SEMI_TAG}`).to.deep.equal(SEMI_EXPECTED_CODES);
+      });
+
+      // Comma list -> the whole "A,D" is ONE code that matches no attribute, so nothing materializes.
+      cy.task('queryCoremeasurements', { query: codesForTag(COMMA_TAG) }).then((rows: any) => {
+        const codes = (Array.isArray(rows) ? rows : []).map((r: any) => String(r.code));
+        expect(codes, `quoted "A,D" materializes NO cmattributes rows for tag ${COMMA_TAG}`).to.deep.equal([]);
+      });
+
+      // ...and the comma row surfaces exactly one validation/14 attribute-code error.
+      cy.task('queryCoremeasurements', { query: attributeErrorCountForTag(COMMA_TAG) }).then((rows: any) => {
+        const count = Number((Array.isArray(rows) ? rows : [])[0]?.n ?? -1);
+        expect(count, `comma list surfaces exactly one validation/14 error for tag ${COMMA_TAG}`).to.equal(1);
+      });
+
+      // The valid semicolon row carries no attribute-code error.
+      cy.task('queryCoremeasurements', { query: attributeErrorCountForTag(SEMI_TAG) }).then((rows: any) => {
+        const count = Number((Array.isArray(rows) ? rows : [])[0]?.n ?? -1);
+        expect(count, `semicolon list carries no attribute-code error for tag ${SEMI_TAG}`).to.equal(0);
+      });
     });
   });
 });
