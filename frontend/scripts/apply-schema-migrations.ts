@@ -60,6 +60,16 @@ export type { SqlExecutor } from './lib/schema-cli';
 export const LEDGER_TABLE = 'schema_migrations';
 export const MIGRATION_LOCK_TIMEOUT_SECONDS = 30;
 
+/**
+ * Patience limit for DDL against live tables. MySQL's default lock_wait_timeout is
+ * one year, so an ALTER queued behind a long-running ingestion transaction's
+ * metadata lock would wait indefinitely — and every NEW app query on that table
+ * queues behind the pending ALTER, freezing production ingestion until the CI job
+ * is killed. With this limit the migration fails fast instead (the deploy re-runs
+ * at a quieter moment); 60s still tolerates normal brief locks.
+ */
+export const DDL_LOCK_WAIT_TIMEOUT_SECONDS = 60;
+
 export const MIGRATION_STATUS = {
   APPLIED: 'applied',
   FAILED: 'failed'
@@ -296,6 +306,10 @@ export async function releaseMigrationLock(exec: SqlExecutor, lockName: string):
 export async function applyPendingMigrations(exec: SqlExecutor, schema: string, sources: MigrationSource[]): Promise<ApplyResult> {
   const lockName = await acquireMigrationLock(exec, schema);
   try {
+    // Fail fast if live traffic holds a metadata or row lock on a target table —
+    // see DDL_LOCK_WAIT_TIMEOUT_SECONDS for why the server default must not stand.
+    await exec(`SET SESSION lock_wait_timeout = ${DDL_LOCK_WAIT_TIMEOUT_SECONDS}`);
+    await exec(`SET SESSION innodb_lock_wait_timeout = ${DDL_LOCK_WAIT_TIMEOUT_SECONDS}`);
     await ensureLedgerTable(exec);
     const ledger = await readLedger(exec, schema);
     const pending = selectPendingMigrations(sources, ledger);
@@ -548,12 +562,15 @@ const invokedDirectly = (() => {
 })();
 
 if (invokedDirectly) {
+  // process.exitCode, NOT process.exit(): exit() terminates before piped stdout is
+  // flushed, discarding the per-schema apply log CI needs to diagnose a failure.
+  // All connections are closed in finally blocks, so the process exits on its own.
   runCli(process.argv.slice(2))
     .then(code => {
-      process.exit(code);
+      process.exitCode = code;
     })
     .catch((error: unknown) => {
       console.error(`\nFatal: ${errorMessage(error)}`);
-      process.exit(1);
+      process.exitCode = 1;
     });
 }

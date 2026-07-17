@@ -13,6 +13,7 @@ import {
   NoSiteSchemasError,
   MIGRATION_STATUS,
   LEDGER_TABLE,
+  DDL_LOCK_WAIT_TIMEOUT_SECONDS,
   type ContractAudit,
   type MigrationSource,
   type LedgerRow,
@@ -32,11 +33,16 @@ function source(id: string, contents: string): MigrationSource {
 class FakeSchemaDb {
   ledger = new Map<string, LedgerRow>();
   appliedBodies: string[] = [];
+  sessionTimeoutStatements: string[] = [];
   ledgerExists = false;
   failOnBodyIncluding: string | null = null;
   lockHeld = false;
 
   exec: SqlExecutor = async (sql, params) => {
+    if (sql.startsWith('SET SESSION') && sql.includes('lock_wait_timeout')) {
+      this.sessionTimeoutStatements.push(sql);
+      return [];
+    }
     if (sql.includes('GET_LOCK')) {
       if (this.lockHeld) return [{ acquired: 0 }];
       this.lockHeld = true;
@@ -146,6 +152,12 @@ describe('applyPendingMigrations', () => {
     expect(result.appliedNow).toEqual([m1.id, m2.id]);
     expect(result.failed).toBeNull();
     expect(db.appliedBodies).toEqual([m1.contents, m2.contents]);
+    // The DDL patience limit must be set on the session BEFORE any migration body runs,
+    // so an ALTER queued behind live traffic fails fast instead of freezing the table.
+    expect(db.sessionTimeoutStatements).toEqual([
+      `SET SESSION lock_wait_timeout = ${DDL_LOCK_WAIT_TIMEOUT_SECONDS}`,
+      `SET SESSION innodb_lock_wait_timeout = ${DDL_LOCK_WAIT_TIMEOUT_SECONDS}`
+    ]);
     expect(db.ledger.get(m1.id)?.Status).toBe(MIGRATION_STATUS.APPLIED);
     expect(db.ledger.get(m2.id)?.Status).toBe(MIGRATION_STATUS.APPLIED);
     expect(db.lockHeld).toBe(false);
