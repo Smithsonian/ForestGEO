@@ -183,6 +183,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const expectedRowCounts = useRef<Map<string, number>>(new Map());
   const expectedTemporaryRowCounts = useRef<Map<string, number>>(new Map());
   const persistedRejectedRowCounts = useRef<Map<string, number>>(new Map());
+  // Pre-stage rejections the SERVER persisted inside its own commit transaction (ArcGIS
+  // dropped-duplicate rows). These land under the file's real batchID, so verifysession
+  // already counts them in failedCount — they satisfy the rejected-row accounting check
+  // but must NOT be added to the reconciliation's failedRecords a second time.
+  const serverAccountedRejectedRowCounts = useRef<Map<string, number>>(new Map());
   const measurementBatchIDs = useRef<Map<string, string>>(new Map());
 
   const getRequiredUploadSessionId = useCallback((): string => {
@@ -759,6 +764,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       const payload = (await response.json()) as { rowCount?: number; alreadyCommitted?: boolean };
       const committedTemporaryRows = Number.isFinite(Number(payload.rowCount)) ? Number(payload.rowCount) : stagedRowCount;
       expectedTemporaryRowCounts.current.set(file.name, committedTemporaryRows);
+      // Rows the commit dropped (INSERT IGNORE duplicates) were persisted by the server as
+      // unresolved failure rows inside the same transaction — a successful commit means they
+      // are durably accounted for, and the final reconciliation verdict still checks the
+      // actual DB counts. Record them so the rejected-row accounting check accepts the file.
+      const serverAccountedRejections = stagedRowCount - committedTemporaryRows;
+      if (serverAccountedRejections > 0) {
+        serverAccountedRejectedRowCounts.current.set(file.name, serverAccountedRejections);
+        ailogger.info(`ArcGIS commit for ${file.name}: ${serverAccountedRejections} dropped row(s) persisted server-side as unresolved failures.`);
+      }
       if (payload.alreadyCommitted) {
         ailogger.info(`ArcGIS import session ${arcgisImportSession.importSessionId} was already committed; continuing idempotently.`);
       }
@@ -1163,8 +1177,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             ailogger.info(`All database operations completed for ${file.name}`);
             if (parsingInvalidRows.length > 0) {
               ailogger.warn(`Found ${parsingInvalidRows.length} invalid rows from ${file.name}, pushing directly to failedmeasurements table`);
-              // Push error rows directly to failedmeasurements table instead of storing in component state
-              await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
+              // Push error rows directly to failedmeasurements table instead of storing in component state.
+              // Papa discards this async callback's promise, so a throw here would leave the wrapping
+              // Promise unsettled and hang the upload forever — route the failure into reject instead.
+              try {
+                await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
+              } catch (persistError: unknown) {
+                const persistErrObj = persistError instanceof Error ? persistError : new Error(String(persistError));
+                ailogger.error(`Rejected-row persistence failed for ${file.name}:`, persistErrObj);
+                reject(persistErrObj);
+                return;
+              }
             }
 
             if (parsingDiagnostics.extraColumnRows > 0) {
@@ -1260,6 +1283,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       batchProcessingStartedRef.current = false;
       fatalUploadErrorRef.current = null;
       persistedRejectedRowCounts.current.clear();
+      serverAccountedRejectedRowCounts.current.clear();
       measurementBatchIDs.current.clear();
       return;
     }
@@ -1272,6 +1296,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       expectedRowCounts.current.clear();
       expectedTemporaryRowCounts.current.clear();
       persistedRejectedRowCounts.current.clear();
+      serverAccountedRejectedRowCounts.current.clear();
       measurementBatchIDs.current.clear();
       setTotalOperations(0);
       setCompletedOperations(0);
@@ -1310,6 +1335,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         expectedRowCounts.current.clear();
         expectedTemporaryRowCounts.current.clear();
         persistedRejectedRowCounts.current.clear();
+        serverAccountedRejectedRowCounts.current.clear();
 
         if (fatalUploadErrorRef.current) {
           throw fatalUploadErrorRef.current;
@@ -1997,20 +2023,24 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               const file = acceptedFiles[fileIndex];
               const fileID = file.name;
 
-              // Reconcile the original source total. Rows rejected before staging are
-              // included only after /api/batchedupload confirms their durable row count.
+              // Reconcile the original source total. Rows rejected before staging count only
+              // when their persistence is confirmed: client-persisted rejections via
+              // /api/batchedupload's durable row count, server-persisted rejections (ArcGIS
+              // dropped duplicates) via the commit transaction that wrote them.
               const stagedRowsForFile = expectedTemporaryRowCounts.current.get(fileID) || 0;
               const sourceRowsForFile = expectedRowCounts.current.get(fileID) || 0;
               const persistedRejectedRows = persistedRejectedRowCounts.current.get(fileID) || 0;
+              const serverAccountedRejectedRows = serverAccountedRejectedRowCounts.current.get(fileID) || 0;
               const expectedRejectedRows = sourceRowsForFile - stagedRowsForFile;
               const fileBatchID = measurementBatchIDs.current.get(fileID) || null;
               totalExpectedRows += sourceRowsForFile;
 
-              if (expectedRejectedRows < 0 || persistedRejectedRows !== expectedRejectedRows) {
+              if (expectedRejectedRows < 0 || persistedRejectedRows + serverAccountedRejectedRows !== expectedRejectedRows) {
                 unverifiableFiles.push(fileID);
                 ailogger.error(
                   `Rejected-row reconciliation mismatch for ${fileID}: ${sourceRowsForFile} source - ${stagedRowsForFile} staged = ` +
-                    `${expectedRejectedRows} expected rejected, but ${persistedRejectedRows} were confirmed persisted.`
+                    `${expectedRejectedRows} expected rejected, but ${persistedRejectedRows} client-persisted + ` +
+                    `${serverAccountedRejectedRows} server-persisted were confirmed.`
                 );
               }
 
@@ -2018,11 +2048,34 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 // Batch-scoped verification: pass batchID so the counts are for THIS upload's
                 // batch, not a cumulative plot/census total.
                 const batchScopeParam = fileBatchID ? `&batchID=${encodeURIComponent(fileBatchID)}` : '';
-                const sessionVerifyResponse = await fetch(
-                  `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}&fileID=${encodeURIComponent(fileID)}${batchScopeParam}`
-                );
+                const sessionVerifyUrl = `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}&fileID=${encodeURIComponent(fileID)}${batchScopeParam}`;
 
-                if (sessionVerifyResponse.ok) {
+                // The verify GET is read-only, so retrying cannot double-apply anything.
+                // Without a retry, one transient blip here fails an upload whose ingestion
+                // has already committed — and re-uploading the same file would then surface
+                // every row as a DUPLICATE_TAG_CONFLICT_EXISTING failure.
+                const maxVerifyRetries = 2;
+                const verifyRetryDelayMs = 2000;
+                let sessionVerifyResponse: Response | null = null;
+                for (let verifyAttempt = 0; verifyAttempt <= maxVerifyRetries; verifyAttempt++) {
+                  const attemptResponse = await fetch(sessionVerifyUrl).catch((fetchError: unknown) => {
+                    const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
+                    ailogger.warn(`Session verification attempt ${verifyAttempt + 1}/${maxVerifyRetries + 1} threw for ${fileID}: ${message}`);
+                    return null;
+                  });
+                  if (attemptResponse?.ok) {
+                    sessionVerifyResponse = attemptResponse;
+                    break;
+                  }
+                  if (attemptResponse) {
+                    ailogger.warn(`Session verification attempt ${verifyAttempt + 1}/${maxVerifyRetries + 1} for ${fileID}: HTTP ${attemptResponse.status}`);
+                  }
+                  if (verifyAttempt < maxVerifyRetries) {
+                    await new Promise(resolveDelay => setTimeout(resolveDelay, verifyRetryDelayMs));
+                  }
+                }
+
+                if (sessionVerifyResponse) {
                   const sessionData = await sessionVerifyResponse.json();
                   const processedCount = Number(sessionData.processedCount || 0);
                   const failedCount = Number(sessionData.failedCount || 0);
@@ -2048,7 +2101,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   // A verification we could not complete is not proof of a clean upload; record
                   // it so completion is blocked rather than optimistically reported as success.
                   unverifiableFiles.push(fileID);
-                  ailogger.error(`Session verification request failed for file ${fileID}: HTTP ${sessionVerifyResponse.status}`);
+                  ailogger.error(`Session verification failed for file ${fileID} after ${maxVerifyRetries + 1} attempts`);
                 }
               } catch (sessionError: unknown) {
                 const message = sessionError instanceof Error ? sessionError.message : String(sessionError);
