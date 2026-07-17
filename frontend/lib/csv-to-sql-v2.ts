@@ -483,8 +483,8 @@ export function renderStage2(opts: Stage2Options): string {
   -- Stage 2c: destination-contract normalization rules from Suzanne's
   -- "Upload scripts" email (TempMultiStems / TempNewPlants behavior):
   --   * For new stems (StemID IS NULL after destination lookup), default HOM
-  --     to '1.3' when DBH is present but HOM is missing. The app already
-  --     normalizes HOM=0 to NULL during ingestion (processbulkingestion.tsx),
+  --     to '1.3' when DBH is present but HOM is missing. Ingestion already
+  --     normalizes HOM=0 to NULL (bulkingestionprocess in storedprocedures.sql),
   --     so HOM IS NULL is the signal that no operator value exists.
   --   * Belt-and-braces: HOM must be NULL when DBH is NULL.
   UPDATE ${m}
