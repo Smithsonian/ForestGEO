@@ -184,8 +184,55 @@ jobs:
           name: app-build
           path: frontend/build/standalone
 
-  deploy-app-production:
+  # Schema migrate + verify + stored-procedure/validation deploy.
+  # This runs BEFORE the app deploy and the app deploy `needs:` it, so a failed
+  # migration or a failed contract verify PREVENTS incompatible app code from
+  # going live. The stored procedures reference the new columns, so they are
+  # deployed only after the migration has added those columns.
+  migrate-and-verify-production:
     needs: build-app-production
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js version
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - name: Install dependencies
+        run: |
+          cd frontend/
+          npm install --production=false
+
+      - name: Apply schema migrations to all schemas
+        env:
+          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+        run: |
+          cd frontend/
+          npx tsx scripts/apply-schema-migrations.ts --all-sites --apply
+        continue-on-error: false
+
+      - name: Verify schema contract across all schemas
+        env:
+          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+        run: |
+          cd frontend/
+          npx tsx scripts/check-schema-contract.ts --all-sites
+        continue-on-error: false
+
+      - name: Deploy validation queries and stored procedures to all schemas
+        env:
+          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+        run: |
+          cd frontend/
+          npx tsx scripts/deploy-validations-to-all-schemas.ts
+        continue-on-error: false
+
+  deploy-app-production:
+    needs: [build-app-production, migrate-and-verify-production]
     runs-on: ubuntu-latest
     environment: production
 
@@ -214,42 +261,25 @@ jobs:
           # Note: External health checks are not performed because Azure Easy Auth
           # requires authentication. Build integrity was verified in the build job.
 
-      - name: Setup Node.js for validation deployment
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24.x'
-
-      - name: Checkout code for validation deployment
-        uses: actions/checkout@v4
-        with:
-          path: repo
-
-      - name: Deploy validation queries and stored procedures to all schemas
-        env:
-          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
-        run: |
-          cd repo/frontend
-          npm install --production=false
-          npx tsx scripts/deploy-validations-to-all-schemas.ts
-        continue-on-error: false
-
-  # Rollback job - creates a GitHub issue on deploy failure for manual intervention.
-  # An app restart is attempted but will not fix code-level issues.
+  # Failure-notification job for schema migration or app deployment failures.
+  # An app restart is attempted only when app deployment itself failed.
   # Real rollback requires redeploying a previous good commit.
   rollback-on-failure:
-    if: failure() && needs.deploy-app-production.result == 'failure'
-    needs: [build-app-production, deploy-app-production]
+    if: always() && (needs.migrate-and-verify-production.result == 'failure' || needs.deploy-app-production.result == 'failure')
+    needs: [build-app-production, migrate-and-verify-production, deploy-app-production]
     runs-on: ubuntu-latest
     environment: production
 
     steps:
       - name: Azure Login
+        if: needs.deploy-app-production.result == 'failure'
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
         continue-on-error: true  # Gracefully handle missing credentials
 
       - name: Attempt app restart
+        if: needs.deploy-app-production.result == 'failure'
         id: rollback
         run: |
           echo "Attempting to restart the app (will not fix code-level issues)..."
@@ -269,25 +299,32 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const migrationFailed = '${{ needs.migrate-and-verify-production.result }}' === 'failure';
+            const failureStage = migrationFailed ? 'schema migration/verification' : 'application deployment';
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: 'URGENT: Production Deployment Failed - Manual Intervention Required',
-              body: `## Production Deployment Failure Alert
+              title: migrationFailed
+                ? 'URGENT: Production Schema Migration Failed - Manual Intervention Required'
+                : 'URGENT: Production Deployment Failed - Manual Intervention Required',
+              body: `## Production Pipeline Failure Alert
 
               **Time**: ${new Date().toISOString()}
               **Branch**: ${{ github.ref_name }}
               **Commit**: ${{ github.sha }}
               **Workflow Run**: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+              **Failure Stage**: ${failureStage}
+              **Migration Job**: ${{ needs.migrate-and-verify-production.result }}
+              **Deployment Job**: ${{ needs.deploy-app-production.result }}
 
               ### What Happened
-              The production deployment failed. An app restart was attempted but this only helps with transient issues, not code-level problems.
+              The production ${failureStage} stage failed. An app restart is attempted only for an application-deployment failure; schema failures require reviewing the migration and ledger state.
 
               ### Recommended Actions
               1. Check the [workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-              2. Check Azure Portal for the app service status and logs
-              3. Verify the app is running by logging in and testing functionality
-              4. To roll back: push the last known good commit to \`main\`
+              2. If migration failed, inspect each schema's \`schema_migrations\` ledger before retrying
+              3. If deployment failed, check Azure Portal for app service status and logs
+              4. Verify the app is running by logging in and testing functionality
 
               > **Note**: The health endpoint requires authentication (Azure Easy Auth) and cannot be checked externally.
 

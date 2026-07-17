@@ -104,7 +104,43 @@ export function buildDroppedMeasurementFailureReason(row: FileRow, existingBatch
   return `Row dropped by INSERT IGNORE - possible constraint violation (Tag=${row.tag}, Quadrat=${row.quadrat}, Date=${normalizeMeasurementDate(row.date)})`;
 }
 
-export function buildTemporaryMeasurementInsertParams(
+/**
+ * Canonical column order for the temporarymeasurements bulk INSERT.
+ *
+ * This is the single source of truth that the INSERT column list, the
+ * per-row placeholder width, and the SQL value order are all derived from.
+ * Adding a column here (and to its keyed record below) is the ONLY change
+ * required to widen the write, which keeps the write contract from silently
+ * diverging from the live schema.
+ */
+export const TEMPORARY_MEASUREMENT_INSERT_COLUMNS = [
+  'FileID',
+  'BatchID',
+  'SessionID',
+  'SourceFormat',
+  'PlotID',
+  'CensusID',
+  'TreeTag',
+  'StemTag',
+  'SpeciesCode',
+  'QuadratName',
+  'LocalX',
+  'LocalY',
+  'DBH',
+  'HOM',
+  'MeasurementDate',
+  'Codes',
+  'Comments',
+  'PublishedStemID'
+] as const;
+
+export type TemporaryMeasurementInsertColumn = (typeof TEMPORARY_MEASUREMENT_INSERT_COLUMNS)[number];
+
+export type TemporaryMeasurementInsertValue = string | number | null;
+
+export type TemporaryMeasurementInsertRecord = Record<TemporaryMeasurementInsertColumn, TemporaryMeasurementInsertValue>;
+
+export function buildTemporaryMeasurementInsertRecord(
   row: FileRow,
   fileName: string,
   batchID: string,
@@ -112,33 +148,38 @@ export function buildTemporaryMeasurementInsertParams(
   sourceFormat: SourceFormat,
   plotID: number,
   censusID: number
-): (string | number | null)[] {
+): TemporaryMeasurementInsertRecord {
   const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments, publishedstemid } = row;
   const formattedDate = normalizeMeasurementDate(date);
   const parsedLx = lx !== undefined && lx !== null && lx !== '' && !isNaN(Number(lx)) ? Number(lx) : null;
   const parsedLy = ly !== undefined && ly !== null && ly !== '' && !isNaN(Number(ly)) ? Number(ly) : null;
   const parsedPublishedStemID = parseUnsignedIntField(publishedstemid);
 
-  return [
-    fileName,
-    batchID,
-    sessionId,
-    sourceFormat,
-    plotID,
-    censusID,
-    tag ?? null,
-    stemtag || null,
-    spcode ?? null,
-    quadrat ?? null,
-    parsedLx,
-    parsedLy,
-    dbh ?? null,
-    hom ?? null,
-    formattedDate,
-    codes ?? null,
-    comments ?? null,
-    parsedPublishedStemID
-  ];
+  return {
+    FileID: fileName,
+    BatchID: batchID,
+    SessionID: sessionId,
+    SourceFormat: sourceFormat,
+    PlotID: plotID,
+    CensusID: censusID,
+    TreeTag: tag ?? null,
+    StemTag: stemtag || null,
+    SpeciesCode: spcode ?? null,
+    QuadratName: quadrat ?? null,
+    LocalX: parsedLx,
+    LocalY: parsedLy,
+    DBH: dbh ?? null,
+    HOM: hom ?? null,
+    MeasurementDate: formattedDate,
+    Codes: codes ?? null,
+    Comments: comments ?? null,
+    PublishedStemID: parsedPublishedStemID
+  };
+}
+
+/** Projects a keyed insert record onto the canonical column order for the SQL VALUES tuple. */
+export function toTemporaryMeasurementInsertValues(record: TemporaryMeasurementInsertRecord): TemporaryMeasurementInsertValue[] {
+  return TEMPORARY_MEASUREMENT_INSERT_COLUMNS.map(column => record[column]);
 }
 
 export async function insertTemporaryMeasurementsInBatches(
@@ -153,17 +194,16 @@ export async function insertTemporaryMeasurementsInBatches(
   censusID: number,
   transactionID: string
 ): Promise<void> {
-  const insertSQLPrefix = format(
-    `INSERT IGNORE INTO ??.temporarymeasurements
-      (FileID, BatchID, SessionID, SourceFormat, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments, PublishedStemID)
-      VALUES `,
-    [schema]
-  );
+  const columnList = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.join(', ');
+  const placeholderTuple = `(${TEMPORARY_MEASUREMENT_INSERT_COLUMNS.map(() => '?').join(', ')})`;
+  const insertSQLPrefix = format(`INSERT IGNORE INTO ??.temporarymeasurements (${columnList}) VALUES `, [schema]);
 
   for (let start = 0; start < rows.length; start += TEMP_MEASUREMENT_INSERT_BATCH_SIZE) {
     const slice = rows.slice(start, start + TEMP_MEASUREMENT_INSERT_BATCH_SIZE);
-    const placeholders = slice.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
-    const values = slice.flatMap(row => buildTemporaryMeasurementInsertParams(row, fileName, batchID, sessionId, sourceFormat, plotID, censusID));
+    const placeholders = slice.map(() => placeholderTuple).join(', ');
+    const values = slice.flatMap(row =>
+      toTemporaryMeasurementInsertValues(buildTemporaryMeasurementInsertRecord(row, fileName, batchID, sessionId, sourceFormat, plotID, censusID))
+    );
     await connectionManager.executeQuery(`${insertSQLPrefix}${placeholders}`, values, transactionID);
   }
 }

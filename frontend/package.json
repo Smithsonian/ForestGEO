@@ -36,6 +36,8 @@
     "stress:workshop:local": "NEXT_PUBLIC_E2E_TESTING=true start-server-and-test 'NEXT_PUBLIC_E2E_TESTING=true next dev --turbo' http://localhost:3000 \"node tests/stress/workshop-stress.mjs --auth=e2e --base-url=http://localhost:3000\"",
     "stress:workshop:smoke": "node tests/stress/workshop-stress.mjs --duration=15s --vus-per-site=1 --max-sites=2 --min-sites=1 --profile=smoke",
     "db:seed:e2e": "npx tsx tests/setup/e2e-seed.ts",
+    "apply-schema-migrations": "npx tsx scripts/apply-schema-migrations.ts",
+    "check:schema-contract": "npx tsx scripts/check-schema-contract.ts",
     "deploy:validations": "npx tsx scripts/deploy-validations-to-all-schemas.ts",
     "deploy:taxonomy-views": "npx tsx scripts/deploy-taxonomy-views-to-all-schemas.ts",
     "docs": "npm run dev --prefix docs",
