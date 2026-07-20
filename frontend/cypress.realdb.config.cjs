@@ -5,11 +5,14 @@
 // pinned to the LOCAL Docker MySQL (127.0.0.1:3306, root/testpassword) that the
 // `test:e2e:realdb` script also points the Next dev server at via AZURE_SQL_*.
 //
-// The single spec under cypress/e2e/column-mapping-realdb/** proves a
-// browser-built column mapping survives the REAL sqlpacketload +
-// bulkingestionprocess server pipeline all the way into coremeasurements. It is
-// intentionally OUT of the PR gate (its own spec pattern + config) because it
-// requires a running Docker MySQL.
+// The specs under cypress/e2e/column-mapping-realdb/** prove a browser-built
+// column mapping survives the REAL sqlpacketload + bulkingestionprocess server
+// pipeline all the way into coremeasurements, and that the error-correction
+// edit flow resolves in place (resolve-and-remove.cy.ts). CI assignment: the
+// upload-only anchor gates PRs (e2e-tests.yml realdb-smoke); the full directory
+// runs nightly (nightly.yml realdb-full). resolve-and-remove's edit-apply step
+// needs AUTH_FUNCTIONS_POLL_URL pointed at the test-only /api/e2e-auth-poll
+// stub — `npm run test:e2e:realdb` and the nightly job both wire it.
 const { defineConfig } = require('cypress');
 const { getSharedWebpackConfig, getLogTask } = require('./cypress/support/shared-config.cjs');
 const mysql = require('mysql2/promise');

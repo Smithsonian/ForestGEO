@@ -61,6 +61,12 @@ import UndoToast from '@/components/editplan/undotoast';
 import { buildEditableFieldsDiffWithMetaForSurface } from '@/components/datagrids/measurementscommonsutils';
 import { isFieldEditableByRole } from '@/config/editplan/fieldpolicy';
 
+// Wide grids column-virtualize off-screen cells out of the DOM, so Cypress
+// assertions against unscrolled columns (e.g. the far-right Codes edit cell)
+// can never observe them. Same e2e-only escape hatch as
+// components/datagrids/isolateddatagridcommons.tsx; production is unchanged.
+const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
+
 const DEFAULT_FACETS: ErrorExplorerFacetsResponse = {
   messages: [],
   fields: [],
@@ -1236,6 +1242,7 @@ export default function ErrorsExplorer() {
               aria-label="Measurement Errors"
               apiRef={explorerApiRef}
               autoHeight={false}
+              disableVirtualization={E2E_DISABLE_VIRTUALIZATION}
               rows={(isInfiniteOn ? infinite.rows : results.rows) as any[]}
               columns={columns}
               loading={isInfiniteOn ? infinite.isLoading : loadingRows}

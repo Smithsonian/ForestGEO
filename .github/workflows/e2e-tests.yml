@@ -162,8 +162,14 @@ jobs:
   #       never touches AUTH_FUNCTIONS_POLL_URL. Runtime is bounded by its own DB polling
   #       budget (2 tests, POLL_RETRIES=60 * POLL_INTERVAL=2s worst case, but ingestion
   #       normally completes in a few polls) — comfortably inside this job's 20-min cap.
-  # Nightly's default config excludes column-mapping-realdb/**, so this dedicated
-  # job is the authoritative CI coverage for the real server/database path.
+  #   * resolve-and-remove.cy.ts  -> NIGHTLY (realdb-full in nightly.yml).
+  #       Its edit-APPLY step needs the edit-plan fresh-authorization poll; the
+  #       nightly job points AUTH_FUNCTIONS_POLL_URL at the hard-gated test-only
+  #       /api/e2e-auth-poll stub. Kept out of the PR gate until nightly runs
+  #       establish its CI-runner variance.
+  # Nightly's DEFAULT Cypress config still excludes column-mapping-realdb/**;
+  # its dedicated realdb-full job runs the whole directory, so PR smoke (this
+  # job) plus nightly realdb-full together cover the real server/database path.
   # ---------------------------------------------------------------------------
   realdb-smoke:
     runs-on: ubuntu-latest
