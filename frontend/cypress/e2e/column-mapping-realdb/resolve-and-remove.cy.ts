@@ -236,6 +236,23 @@ describe('Tier B: error correction removes the validation link, materializes the
       expect(codes, `valid row (tag ${VALID_ROW_TAG}) materialized its "A;D" codes`).to.deep.equal(['A', 'D']);
     });
 
+    // --- 2.5 Wait for the read model BEFORE leaving the upload page ------------------------
+    // The Errors Explorer INNER JOINs measurementssummary, which is only populated
+    // when the post-upload background validation (ValidationRunner, kicked off by
+    // uploadfiresql after completeSession) finishes and refreshes the summary via
+    // /api/refreshviews. That runner is a CLIENT-side singleton: a cy.visit() full
+    // page load destroys it. The raw-row polls above pass ~1s before the upload UI
+    // reaches that stage, so navigating immediately is a race that leaves the
+    // summary empty and the explorer blank (0 matching rows) no matter how long
+    // the grid is polled. Hold the upload page until the REAL pipeline has
+    // materialized both rows into the summary — condition-based, no fixed sleeps.
+    const summaryRowsQuery = () =>
+      `SELECT ms.TreeTag AS treeTag
+       FROM \`${schema}\`.measurementssummary ms
+       WHERE ms.TreeTag IN ('${VALID_ROW_TAG}', '${BAD_ROW_TAG}')
+       ORDER BY ms.TreeTag`;
+    pollDB(summaryRowsQuery, rows => rows.length === 2, 'background validation never refreshed measurementssummary with both uploaded rows (read model empty)');
+
     // --- 3. Correct the code through the REAL Errors Explorer edit flow --------------------
     cy.visit(ERRORS_HARNESS_ROUTE);
     cy.get(ERRORS_HARNESS_TESTID).should('exist');
@@ -247,25 +264,48 @@ describe('Tier B: error correction removes the validation link, materializes the
     // would let a future in-scope tag like "2020" also hit "202".
     const badRowTagMatch = new RegExp(`^${BAD_ROW_TAG}$`);
     cy.contains('[data-field="treeTag"]', badRowTagMatch, { timeout: 30000 }).should('be.visible');
-    cy.contains('[data-field="treeTag"]', badRowTagMatch).closest('.MuiDataGrid-row').as('badRow');
 
-    // Enter row edit mode, then rewrite the codes cell. The edit cell pre-fills from the
-    // uploaded RawCodes "A,D", which the grid renders as two chips (it splits display on
-    // [;,]); clear them, then commit the single corrected valid code.
-    cy.get('@badRow').find('[aria-label="Edit"]').click();
-    cy.get('@badRow').find('[data-field="attributes"] input').as('codesInput');
-    cy.get('@codesInput').click({ force: true });
-    // Backspace on an empty text input removes the trailing chip; three covers the ≤2 chips
-    // and is a no-op once empty. Then type the corrected code and commit it as a chip.
-    cy.get('@codesInput').type('{backspace}{backspace}{backspace}', { force: true });
-    cy.get('@codesInput').type(`${CORRECTED_ATTRIBUTE_CODE}{enter}`, { force: true });
+    // treeTag is an EDITABLE column: once the row enters edit mode its tag cell
+    // re-renders as an input and carries no text, so a contains()-anchored alias
+    // cannot re-resolve after the Edit click. Capture the row's stable MUI
+    // data-id (the grid row id) BEFORE entering edit mode and re-query by
+    // selector at every step, which survives the edit-mode re-render.
+    cy.contains('[data-field="treeTag"]', badRowTagMatch)
+      .closest('.MuiDataGrid-row')
+      .invoke('attr', 'data-id')
+      .then(rowDataId => {
+        expect(rowDataId, 'bad row exposes a stable MUI DataGrid data-id').to.be.a('string').and.not.be.empty;
+        const badRowSelector = `.MuiDataGrid-row[data-id="${rowDataId}"]`;
+        const codesInputSelector = `${badRowSelector} [data-field="attributes"] input`;
 
-    cy.get('@badRow').find('[aria-label="Save"]').click();
+        // Enter row edit mode, then rewrite the codes cell. The edit cell pre-fills from the
+        // uploaded RawCodes "A,D", which the grid renders as two chips (it splits display on
+        // [;,]); clear them, then commit the single corrected valid code.
+        cy.get(badRowSelector).find('[aria-label="Edit"]').click();
+        cy.get(codesInputSelector).click({ force: true });
+        // Backspace on an empty text input removes the trailing chip; three covers the ≤2 chips
+        // and is a no-op once empty.
+        cy.get(codesInputSelector).type('{backspace}{backspace}{backspace}', { force: true });
+        // Commit the corrected code by picking it from the REAL Autocomplete option list —
+        // NOT via {enter}: in row-edit mode the grid consumes Enter and stops the row edit
+        // before the Autocomplete's onChange fires, which silently turns the correction into
+        // "remove all codes" (observed: preview diff "A,D -> —").
+        cy.get(codesInputSelector).type(CORRECTED_ATTRIBUTE_CODE, { force: true });
+        cy.contains('[role="option"]', new RegExp(`^${CORRECTED_ATTRIBUTE_CODE}$`)).click();
+
+        cy.get(badRowSelector).find('[aria-label="Save"]').click();
+      });
 
     // Saving runs the REAL /api/edits/preview. Replacing the "A,D" token with "A" drops a
     // code, so the plan is destructive: the PreviewDialog opens with a typed-confirm gate.
     cy.get(PREVIEW_APPLY, { timeout: 20000 }).should('be.visible');
     cy.get(PREVIEW_DESTRUCTIVE_SEVERITY).should('be.visible');
+    // The committed correction must actually be in the plan: the Attributes To
+    // column must show exactly the corrected code BEFORE applying. Without this,
+    // a silently-empty cell commit applies "remove all codes", which still clears
+    // the validation link and would let the post-edit link assertion pass while
+    // the materialization assertion fails much later with less diagnosable state.
+    cy.get('[data-testid="edit-preview-field-Attributes"]').find('td').eq(2).should('have.text', CORRECTED_ATTRIBUTE_CODE);
     // Condition-based: satisfy the typed-confirm only if the destructive gate is present.
     cy.get('body').then($body => {
       if ($body.find(PREVIEW_TYPED_CONFIRM).length > 0) {

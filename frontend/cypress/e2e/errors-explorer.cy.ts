@@ -212,7 +212,12 @@ describe('Errors Explorer', () => {
 
     cy.wait('@fetchErrorDetails');
     cy.contains('Row 304').should('be.visible');
-    cy.contains('Linked conflicting row').should('be.visible');
+    // Scope to the details panel: the same description text also renders in the
+    // grid's far-right Description cell, which the e2e disableVirtualization
+    // flag keeps in the DOM where it sits horizontally clipped by the grid's
+    // scroll container — an unscoped contains() matches that cell first and
+    // fails visibility.
+    cy.get('[data-testid="errors-explorer-row-details"]').contains('Linked conflicting row').should('be.visible');
   });
 
   it('keeps the updated species code visible after saving an error row', () => {

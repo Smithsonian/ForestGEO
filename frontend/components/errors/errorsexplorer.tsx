@@ -25,6 +25,7 @@ import {
   GridColDef,
   GridEventListener,
   GridPaginationModel,
+  GridRenderEditCellParams,
   GridRowEditStopReasons,
   GridRowModes,
   GridRowModesModel,
@@ -60,6 +61,12 @@ import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast from '@/components/editplan/undotoast';
 import { buildEditableFieldsDiffWithMetaForSurface } from '@/components/datagrids/measurementscommonsutils';
 import { isFieldEditableByRole } from '@/config/editplan/fieldpolicy';
+
+// Wide grids column-virtualize off-screen cells out of the DOM, so Cypress
+// assertions against unscrolled columns (e.g. the far-right Codes edit cell)
+// can never observe them. Same e2e-only escape hatch as
+// components/datagrids/isolateddatagridcommons.tsx; production is unchanged.
+const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
 
 const DEFAULT_FACETS: ErrorExplorerFacetsResponse = {
   messages: [],
@@ -203,11 +210,6 @@ function getCodesMismatchMessage(row?: Partial<CodesRow> | null): string {
   return getMaterializedCodesValue(row) ? 'Some uploaded codes were not materialized.' : 'No valid codes were materialized. Check invalid codes or delimiters.';
 }
 
-function getCodesEditValue(row?: Partial<CodesRow> | null, currentValue?: string | null): string {
-  const editedValue = normalizeCodeValue(currentValue);
-  return editedValue || getUploadedCodesValue(row);
-}
-
 function renderCodesChips(codesValue: string, emptyLabel = '—') {
   const codes = parseCodesString(codesValue);
   if (codes.length === 0) {
@@ -222,6 +224,35 @@ function renderCodesChips(codesValue: string, emptyLabel = '—') {
         </Chip>
       ))}
     </Stack>
+  );
+}
+
+function CodesEditCell({ params, options }: { params: GridRenderEditCellParams<ErrorExplorerRow, string>; options: string[] }) {
+  // Show the uploaded codes as the correction target without writing them into
+  // MUI's row-edit state. Row mode initializes every editable field and saves
+  // all of them, so a column-level valueGetter/valueSetter would otherwise
+  // mutate Attributes when the user edits only DBH, Description, etc.
+  const [selectedCodes, setSelectedCodes] = useState(() => parseCodesString(getUploadedCodesValue(params.row)));
+
+  return (
+    <Autocomplete
+      sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
+      multiple
+      freeSolo
+      autoHighlight
+      clearOnBlur={false}
+      options={options}
+      value={selectedCodes}
+      isOptionEqualToValue={(option, value) => option === value}
+      onChange={(_event, next) => {
+        setSelectedCodes(next);
+        void params.api.setEditCellValue({
+          id: params.id,
+          field: params.field,
+          value: joinCodesArray(next)
+        });
+      }}
+    />
   );
 }
 
@@ -914,25 +945,7 @@ export default function ErrorsExplorer() {
             </Stack>
           );
         },
-        renderEditCell: params => (
-          <Autocomplete
-            sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
-            multiple
-            freeSolo
-            autoHighlight
-            clearOnBlur={false}
-            options={[...selectableOpts.codes].sort((a, b) => a.localeCompare(b))}
-            value={parseCodesString(getCodesEditValue(params.row as ErrorExplorerRow, params.value as string | undefined))}
-            isOptionEqualToValue={(o, v) => o === v}
-            onChange={(_event, next) => {
-              params.api.setEditCellValue({
-                id: params.id,
-                field: params.field,
-                value: joinCodesArray(next)
-              });
-            }}
-          />
-        )
+        renderEditCell: params => <CodesEditCell params={params} options={[...selectableOpts.codes].sort((a, b) => a.localeCompare(b))} />
       }
     ],
     [canEditRows, canEditSpeciesCode, rowModesModel, selectableOpts]
@@ -1220,6 +1233,7 @@ export default function ErrorsExplorer() {
               aria-label="Measurement Errors"
               apiRef={explorerApiRef}
               autoHeight={false}
+              disableVirtualization={E2E_DISABLE_VIRTUALIZATION}
               rows={(isInfiniteOn ? infinite.rows : results.rows) as any[]}
               columns={columns}
               loading={isInfiniteOn ? infinite.isLoading : loadingRows}
@@ -1268,6 +1282,7 @@ export default function ErrorsExplorer() {
 
         <Sheet
           variant="soft"
+          data-testid="errors-explorer-row-details"
           sx={{
             width: '100%',
             minHeight: 320,
