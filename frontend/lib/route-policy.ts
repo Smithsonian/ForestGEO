@@ -35,6 +35,12 @@ export const ROUTE_POLICIES = {
   clearallcookies: 'public',
   // Diagnostics probe restricted to an explicit host allowlist, not user auth
   'diagnostics/streaming-timeout': 'public',
+  // E2E-only fresh-authorization poll stub for the real-DB Cypress edit-apply
+  // flow. Hard-gated to NEXT_PUBLIC_E2E_TESTING === 'true' && NODE_ENV !==
+  // 'production' (404 otherwise), so it is unreachable in any real deployment;
+  // 'public' reflects that the edit-plan freshness check polls it server-to-
+  // server without a session cookie.
+  'e2e-auth-poll': 'public',
 
   // ── Authed routes (session required, no per-site restriction) ────────────
   // Catalog user lookup – cross-site catalog.users table, no schema scoping
