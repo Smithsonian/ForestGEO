@@ -1282,6 +1282,7 @@ export default function ErrorsExplorer() {
 
         <Sheet
           variant="soft"
+          data-testid="errors-explorer-row-details"
           sx={{
             width: '100%',
             minHeight: 320,
