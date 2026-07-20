@@ -25,6 +25,7 @@ import {
   GridColDef,
   GridEventListener,
   GridPaginationModel,
+  GridRenderEditCellParams,
   GridRowEditStopReasons,
   GridRowModes,
   GridRowModesModel,
@@ -209,19 +210,6 @@ function getCodesMismatchMessage(row?: Partial<CodesRow> | null): string {
   return getMaterializedCodesValue(row) ? 'Some uploaded codes were not materialized.' : 'No valid codes were materialized. Check invalid codes or delimiters.';
 }
 
-function getCodesEditValue(row?: Partial<CodesRow> | null, currentValue?: string | null): string {
-  // The attributes column's valueGetter seeds the edit session with the
-  // uploaded codes; after that the live edit state is authoritative. An empty
-  // string means the user CLEARED the chips — falling back to the uploaded
-  // codes here resurrected deleted chips on every render, which made an
-  // Autocomplete re-select toggle the code OFF and silently commit an empty
-  // set while the cell still displayed chips.
-  if (currentValue == null) {
-    return getUploadedCodesValue(row);
-  }
-  return normalizeCodeValue(currentValue);
-}
-
 function renderCodesChips(codesValue: string, emptyLabel = '—') {
   const codes = parseCodesString(codesValue);
   if (codes.length === 0) {
@@ -236,6 +224,35 @@ function renderCodesChips(codesValue: string, emptyLabel = '—') {
         </Chip>
       ))}
     </Stack>
+  );
+}
+
+function CodesEditCell({ params, options }: { params: GridRenderEditCellParams<ErrorExplorerRow, string>; options: string[] }) {
+  // Show the uploaded codes as the correction target without writing them into
+  // MUI's row-edit state. Row mode initializes every editable field and saves
+  // all of them, so a column-level valueGetter/valueSetter would otherwise
+  // mutate Attributes when the user edits only DBH, Description, etc.
+  const [selectedCodes, setSelectedCodes] = useState(() => parseCodesString(getUploadedCodesValue(params.row)));
+
+  return (
+    <Autocomplete
+      sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
+      multiple
+      freeSolo
+      autoHighlight
+      clearOnBlur={false}
+      options={options}
+      value={selectedCodes}
+      isOptionEqualToValue={(option, value) => option === value}
+      onChange={(_event, next) => {
+        setSelectedCodes(next);
+        void params.api.setEditCellValue({
+          id: params.id,
+          field: params.field,
+          value: joinCodesArray(next)
+        });
+      }}
+    />
   );
 }
 
@@ -910,14 +927,6 @@ export default function ErrorsExplorer() {
         minWidth: 180,
         flex: 0.9,
         editable: true,
-        // Seed the cell (and therefore the edit session) with the uploaded
-        // codes — the correction target this surface exists for — instead of
-        // the materialized set, which is empty for exactly the rows users come
-        // here to fix. getCodesEditValue then trusts the live edit state. The
-        // paired valueSetter guarantees the committed row carries the edited
-        // code string (a valueGetter alone can leave newRow[field] unset).
-        valueGetter: (_value: unknown, row: ErrorExplorerRow) => getUploadedCodesValue(row),
-        valueSetter: (value: unknown, row: ErrorExplorerRow) => ({ ...row, attributes: typeof value === 'string' ? value : joinCodesArray(value) }),
         headerAlign: 'left',
         align: 'left',
         renderCell: params => {
@@ -936,25 +945,7 @@ export default function ErrorsExplorer() {
             </Stack>
           );
         },
-        renderEditCell: params => (
-          <Autocomplete
-            sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
-            multiple
-            freeSolo
-            autoHighlight
-            clearOnBlur={false}
-            options={[...selectableOpts.codes].sort((a, b) => a.localeCompare(b))}
-            value={parseCodesString(getCodesEditValue(params.row as ErrorExplorerRow, params.value as string | undefined))}
-            isOptionEqualToValue={(o, v) => o === v}
-            onChange={(_event, next) => {
-              params.api.setEditCellValue({
-                id: params.id,
-                field: params.field,
-                value: joinCodesArray(next)
-              });
-            }}
-          />
-        )
+        renderEditCell: params => <CodesEditCell params={params} options={[...selectableOpts.codes].sort((a, b) => a.localeCompare(b))} />
       }
     ],
     [canEditRows, canEditSpeciesCode, rowModesModel, selectableOpts]

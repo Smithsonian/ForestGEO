@@ -261,11 +261,31 @@ vi.mock('@/config/styleddatagrid', async () => {
     const rows = (props.rows || []) as Array<Record<string, unknown>>;
     const columns = props.columns || [];
 
-    // Expose a test hook that fires processRowUpdate with a modified row.
+    // Expose test hooks for both direct processRowUpdate coverage and the
+    // valueGetter/valueSetter transformations MUI performs in row-edit mode.
     ReactModule.useEffect(() => {
       (globalThis as any).__triggerRowUpdate = async (rowID: number, newRow: Record<string, unknown>) => {
         const oldRow = rows.find(row => Number(row.id) === Number(rowID));
         if (!oldRow || !props.processRowUpdate) return undefined;
+        return props.processRowUpdate(newRow, oldRow);
+      };
+      (globalThis as any).__triggerMuiRowUpdate = async (rowID: number, changes: Record<string, unknown>) => {
+        const oldRow = rows.find(row => Number(row.id) === Number(rowID));
+        if (!oldRow || !props.processRowUpdate) return undefined;
+
+        const editableColumns = columns.filter((column: any) => column.editable);
+        const editValues = Object.fromEntries(
+          editableColumns.map((column: any) => [
+            column.field,
+            column.valueGetter ? column.valueGetter(oldRow[column.field], oldRow, column) : oldRow[column.field]
+          ])
+        );
+        Object.assign(editValues, changes);
+
+        const newRow = editableColumns.reduce((row: Record<string, unknown>, column: any) => {
+          const value = editValues[column.field];
+          return column.valueSetter ? column.valueSetter(value, row, column) : { ...row, [column.field]: value };
+        }, oldRow);
         return props.processRowUpdate(newRow, oldRow);
       };
       (globalThis as any).__triggerInfiniteToggle = (next: boolean) => {
@@ -364,6 +384,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
 
   afterEach(() => {
     delete (globalThis as any).__triggerRowUpdate;
+    delete (globalThis as any).__triggerMuiRowUpdate;
   });
 
   it('configures the edit flow with the current scope and default data type', async () => {
@@ -428,6 +449,57 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     expect(diff).toEqual({ MeasuredDBH: 12, Attributes: 'L;M' });
     expect(Object.keys(diff)).not.toContain('TreeID');
     expect(Object.keys(diff)).not.toContain('CoreMeasurementID');
+  });
+
+  it('does not copy uploaded codes into Attributes when another field is edited', async () => {
+    mockBeginEdit.mockResolvedValue({
+      updatedIDs: { coreMeasurementID: TEST_CORE_MEASUREMENT_ID },
+      applyErrors: [],
+      editOperationID: TEST_EDIT_OPERATION_ID,
+      validationPending: false
+    });
+
+    const rowWithDroppedUploadedCode = { ...GRID_ROW, attributes: 'L', rawCodes: 'L;INVALID' };
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/errors/explorer/query')) {
+        return {
+          ok: true,
+          json: async () => ({
+            rows: [rowWithDroppedUploadedCode],
+            totalRows: 1,
+            summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
+          })
+        } as Response;
+      }
+      if (url.includes('/api/errors/explorer/facets')) {
+        return {
+          ok: true,
+          json: async () => ({
+            messages: [],
+            fields: [],
+            sourceCounts: { validation: 1, ingestion: 0 },
+            contradictionCounts: { duplicateTagStem: 0, sameBatchConflict: 0 }
+          })
+        } as Response;
+      }
+      if (url.includes('/api/refreshviews/')) {
+        return { ok: true, json: async () => ({}) } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('L;INVALID'));
+
+    await act(async () => {
+      await (globalThis as any).__triggerMuiRowUpdate(TEST_CORE_MEASUREMENT_ID, { measuredDBH: 12 });
+    });
+
+    await waitFor(() => expect(mockBeginEdit).toHaveBeenCalledTimes(1));
+    const [, diff] = mockBeginEdit.mock.calls[0];
+    expect(diff).toEqual({ MeasuredDBH: 12 });
+    expect(diff).not.toHaveProperty('Attributes');
   });
 
   // Regression: hard-failed rows (cm.StemGUID IS NULL) must route to the
