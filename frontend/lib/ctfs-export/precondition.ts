@@ -8,6 +8,23 @@
  * identifiers via `quoteSchema`; CensusID bound via `?` placeholder). Schema names
  * are validated against a strict regex before being backtick-quoted, preventing
  * SQL injection through schema name interpolation.
+ *
+ * TODO (Task 10C — deferred warning-vs-blocking publish tier, ratified interim 2026-07-20):
+ * The maintainer wants publish preconditions to surface as *warnings* rather than hard-
+ * block the export, with a proper validation-tier feature (blocking errors vs warnings,
+ * authorized+audited override, server-side gate that stale UI cannot bypass) built later.
+ * The non-blocking pathway already exists — see the `reloadDryRun` branch in
+ * app/api/export/ctfs-sql/.../route.ts, which returns 200 + `X-CTFS-Precondition-Warnings`
+ * instead of a 400. Do NOT flip all eight checks to warnings wholesale: they are two
+ * different kinds. Checks 1-4 (`not-validated`, `unresolved-error`, `no-stem-guid`,
+ * `inactive-join`) are DATA-QUALITY notices — the export SELECT already excludes those
+ * rows (see exportableMeasurementBaseWhere), so warning-and-excluding them is safe. But
+ * checks 6-8 (`missing-taxonomy-fields`, `string-too-long`, `zero-exportable-rows`) are
+ * DESTINATION-INTEGRITY constraints: an artifact that violates them fails to load into, or
+ * silently truncates data in, the on-prem CTFS MySQL — downgrading those to warnings
+ * reintroduces exactly the silent-corruption class this hardening effort exists to prevent.
+ * The tier feature must keep the destination-integrity checks blocking (or gate any override
+ * behind an authenticated, audited operator confirmation).
  */
 
 import type { Connection } from 'mysql2/promise';

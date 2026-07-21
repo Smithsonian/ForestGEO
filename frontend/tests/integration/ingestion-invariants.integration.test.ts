@@ -256,6 +256,78 @@ describe('Ingestion invariants (bulkingestionprocess)', () => {
     });
   });
 
+  describe('DBH/HOM precision (Task 10A — ratified contract: round quietly to the stored scale)', () => {
+    // RATIFIED 2026-07-20 by the scientific-data owner: an uploaded DBH/HOM value carrying
+    // more precision than the DECIMAL(12,6) column stores is ROUNDED to 6 decimal places and
+    // ingested as valid — no failure, no warning (docs/testing/regression-contracts.md).
+    // This pins that behavior so a future schema/type change that silently alters it goes red.
+    // Rounding happens at the DECIMAL(12,6) boundary (staging temporarymeasurements.DBH/HOM,
+    // then copied to coremeasurements.MeasuredDBH/MeasuredHOM). MySQL DECIMAL rounds half away
+    // from zero; the 7th-digit cases below are chosen far from .5 so binary-float noise in the
+    // JS literal cannot flip the asserted result.
+    //
+    // SCOPE: this is the PRECISION contract only. Negative / out-of-range (>=1km) handling is a
+    // SEPARATE validation concern (NEGATIVE_DBH/NEGATIVE_HOM ingestion codes) and is NOT part of
+    // the round-quietly decision — do not fold it in here without its own ratified contract.
+    const PRECISION_CASES = [
+      { name: 'exactly 6 decimals is stored verbatim', dbh: 12.345678, hom: 1.234567, expectedDBH: 12.345678, expectedHOM: 1.234567 },
+      { name: 'a 7th decimal below .5 rounds down to 6', dbh: 10.1234561, hom: 2.7654321, expectedDBH: 10.123456, expectedHOM: 2.765432 },
+      { name: 'a 7th decimal above .5 rounds up to 6', dbh: 10.1234568, hom: 2.7654329, expectedDBH: 10.123457, expectedHOM: 2.765433 },
+      {
+        name: 'maximum in-range precision (6 integer + 6 decimal digits) is stored',
+        dbh: 999999.999999,
+        hom: 500000.123456,
+        expectedDBH: 999999.999999,
+        expectedHOM: 500000.123456
+      }
+    ] as const;
+
+    it.each(PRECISION_CASES)('$name', async ({ dbh, hom, expectedDBH, expectedHOM }) => {
+      const censusID = testData.census[0].censusID;
+      const row: ScenarioMeasurement = {
+        treeTag: 'PRECISION_A',
+        stemTag: '1',
+        speciesCode: testData.species[0].SpeciesCode,
+        quadratName: testData.quadrats[0].QuadratName,
+        x: 1,
+        y: 1,
+        dbh,
+        hom,
+        date: MEASUREMENT_DATE
+      };
+      const { scope, result } = await ingestScenarioRows(connection, testData, [row]);
+
+      // The over-precise row must ingest as a normal success — never a failure or missing row.
+      const outcome = await readIngestionOutcome(connection, scope);
+      assertOutcome(
+        outcome,
+        {
+          sourceRecords: 1,
+          successfulRows: 1,
+          failedRows: 0,
+          remainingTemporaryRows: 0,
+          metricProcessedRecords: 1,
+          metricFailedRecords: 0,
+          metricMissingRecords: 0,
+          errorCodes: [],
+          alertTypes: []
+        },
+        result,
+        1
+      );
+
+      const [storedRows] = await connection.query<RowDataPacket[]>(
+        `SELECT MeasuredDBH, MeasuredHOM
+         FROM coremeasurements
+         WHERE CensusID = ? AND UploadFileID = ? AND StemGUID IS NOT NULL`,
+        [censusID, scope.fileID]
+      );
+      expect(storedRows, 'exactly one successful measurement materialized').toHaveLength(1);
+      expect(Number(storedRows[0].MeasuredDBH), `DBH ${dbh} rounds to the stored ${expectedDBH}`).toBe(expectedDBH);
+      expect(Number(storedRows[0].MeasuredHOM), `HOM ${hom} rounds to the stored ${expectedHOM}`).toBe(expectedHOM);
+    });
+  });
+
   describe('Multi-stem cardinality', () => {
     // The 5-stem case is required in the matrix: a tree with N distinct stem tags must
     // materialize exactly N stem rows (one tree, N stems, N measurements).
