@@ -193,7 +193,14 @@ site. Rotating dev's secret to a distinct value closes that.
 First, confirm whether they are actually shared (optional but informative): copy a live
 `__Secure-authjs.session-token` cookie value and replay it against dev —
 `curl -s https://forestgeo-development.azurewebsites.net/api/auth/session -H "Cookie: __Secure-authjs.session-token=<live-value>"`.
-A session JSON back = shared secret (rotate); `null` = already distinct (done).
+A session JSON back = shared secret (rotate); `null` = already distinct (done). The token
+is the raw cookie value only — do not include the surrounding braces some cookie inspectors
+display, or the token reads as malformed and dev returns a misleading `null`.
+
+**Verified 2026-07-21:** replaying a live production JWE against dev returned `null` — dev
+rejects a prod-minted token, so the two environments already use distinct `AUTH_SECRET`
+values. No rotation is required at this time; the steps below are retained for future use
+(e.g. if the environments are ever re-provisioned from a shared secret).
 
 To rotate (operator action — engineering cannot change Azure/GitHub secrets):
 1. Generate a new value: `openssl rand -base64 33`.
