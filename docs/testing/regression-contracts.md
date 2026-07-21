@@ -109,11 +109,50 @@ Enforced by: `tests/setup/ingestion-outcome.ts` +
   the hard-gated test-only `/api/e2e-auth-poll` stub (404 outside e2e; the production
   authorization path is unchanged).
 
+### 7. DBH/HOM over-precision is rounded quietly to the stored scale
+
+**Ratified 2026-07-20 by the scientific-data owner (Option A: round).** An uploaded DBH or
+HOM value carrying more precision than the `DECIMAL(12,6)` column stores is rounded to 6
+decimal places and ingested as a normal success — no failure row, no warning. The
+rounding happens at the `DECIMAL(12,6)` boundary (staging → coremeasurements). This is
+accepted because 6 decimal places is below instrument-meaningful resolution for the units
+in use. The exact submitted value is NOT preserved (there is no `RawDBH`/`RawHOM`
+column); if provenance is needed later, that is a separate, larger change (Option B).
+
+Note this contract is about *precision only*. Negative and out-of-range (≥ 1 km) values
+are a separate validation concern (`NEGATIVE_DBH`/`NEGATIVE_HOM`), not covered here.
+
+Enforced by: `tests/integration/ingestion-invariants.integration.test.ts` → "DBH/HOM
+precision" block.
+
 ## Explicitly NOT yet contracted (blocked)
 
-- **DBH/HOM precision** (round vs preserve vs reject beyond `DECIMAL(12,6)` scale):
-  awaiting the scientific-data owner's decision; `coremeasurements` has no
-  `RawDBH`/`RawHOM` provenance column today, so a "preserve raw" choice must first
-  define where provenance lives.
-- **Cross-site authentication cookie behavior**: awaiting a reproduced root cause.
-- **Publish gating** (warning-vs-blocking validation tiers): awaiting the tier feature.
+- **Cross-site authentication cookie behavior**: the observed cross-site login is
+  **ratified as expected/acceptable** single sign-on (2026-07-20) — browser cookie-bleed
+  was ruled out (host-only cookies + `azurewebsites.net` Public Suffix). Separately, dev's
+  `AUTH_SECRET` is being rotated to differ from production as hardening (operator action;
+  see `docs/auth-environment-variables-runbook.md`).
+### 8. CTFS publish gate warns on data-quality, blocks on destination-integrity
+
+**Ratified 2026-07-20 (interim of the full validation-tier feature).** "Publish census"
+(the CTFS `.sql` export loaded into the on-prem CTFS MySQL) runs 8 "Finished Census"
+preconditions, now split into two policies:
+
+- **Warnings (publish proceeds):** `not-validated`, `unresolved-error`, `no-stem-guid`,
+  `inactive-join`. These describe rows the export already excludes
+  (`exportableMeasurementBaseWhere`), so the operator is told what won't be exported and
+  the publish continues, surfacing the warnings in `X-CTFS-Precondition-Warnings`.
+- **Blocking (publish 400s):** `unknown-attribute-code`, `missing-taxonomy-fields`,
+  `string-too-long`, `zero-exportable-rows`. Each would produce an artifact that fails to
+  load into, or silently truncates data in, the destination CTFS DB, so these still stop a
+  real publish. A dry run continues to surface everything (blockers included) as a
+  non-blocking preview.
+
+The "nothing left to export" check still runs even when only warnings are present, so a
+warn-only census cannot slip through as an empty publish. The full warning-vs-blocking
+validation-tier feature (authorized+audited override, server-side gate stale UI can't
+bypass) remains a TODO in `lib/ctfs-export/precondition.ts`.
+
+Enforced by: `lib/ctfs-export/precondition.test.ts` (classification + warning-plus-zero-
+rows interaction) and the CTFS export route test (`app/api/export/ctfs-sql/.../route.test.ts`:
+quality warning → 200 + header; blocker → 400 with only blocking reasons).

@@ -6,7 +6,7 @@ import { auth } from '@/auth';
 import { getSessionUserId } from '@/lib/auth-helpers';
 import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
-import { checkFinishedCensus, selectMeasurements, renderArtifact, type PreconditionFailure } from '@/lib/ctfs-export';
+import { checkFinishedCensus, partitionPreconditionFailures, selectMeasurements, renderArtifact, type PreconditionFailure } from '@/lib/ctfs-export';
 import { userCanExportSchema, userIsAdmin } from '@/lib/ctfs-export/export-permissions';
 import type { Session } from 'next-auth';
 
@@ -117,17 +117,22 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
     }
     const plotCensusNumber = String(censusRows[0].PlotCensusNumber);
 
-    // Precondition: census must be fully validated and clean before a real
-    // publish. D6: a Dry run is allowed even when preconditions fail — the
-    // failures are surfaced as non-blocking warnings instead of a 400, so the
-    // operator can preview reload impact and see what would block a real publish.
+    // Precondition gate (Task 10C, ratified 2026-07-20: warn on data-quality, keep
+    // destination-integrity blocking). Data-quality failures (rows the export already
+    // excludes) surface as non-blocking warnings and the publish proceeds; only
+    // destination-integrity failures — an artifact that would break the on-prem CTFS
+    // load — still 400. A Dry run keeps its prior behavior: NOTHING blocks, everything
+    // (including would-be blockers) is surfaced as a warning preview.
     const precondition = await checkFinishedCensus(conn, { schema, plotId: appPlotId, censusId: appCensusId });
     let preconditionWarnings: PreconditionFailure[] = [];
     if (!precondition.ok) {
-      if (!reloadDryRun) {
-        return NextResponse.json({ error: 'Census is not finished', reasons: precondition.reasons }, { status: HTTPResponses.BAD_REQUEST });
+      const { blocking, warnings } = partitionPreconditionFailures(precondition.reasons);
+      if (blocking.length > 0 && !reloadDryRun) {
+        return NextResponse.json({ error: 'Census cannot be published', reasons: blocking }, { status: HTTPResponses.BAD_REQUEST });
       }
-      preconditionWarnings = precondition.reasons;
+      // Non-dry real publish with only quality warnings → surface those warnings and
+      // proceed. Dry run → surface every reason (blockers included) as a preview.
+      preconditionWarnings = reloadDryRun ? precondition.reasons : warnings;
     }
 
     // Fetch measurement + attribute rows from the app database.
