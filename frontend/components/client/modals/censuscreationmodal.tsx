@@ -19,8 +19,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 export interface CensusCreationDetails {
   description?: string;
-  startDate: Date;
-  endDate?: Date;
+  startDate: string;
+  endDate?: string;
 }
 
 interface CensusCreationModalProps {
@@ -38,8 +38,6 @@ const toDateInputValue = (date: Date) => {
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
-
-const parseLocalDate = (value: string) => new Date(`${value}T00:00:00`);
 
 export default function CensusCreationModal({ open, censusNumber, plotName, isCreating, onClose, onCreate }: CensusCreationModalProps) {
   const [description, setDescription] = useState('');
@@ -63,8 +61,8 @@ export default function CensusCreationModal({ open, censusNumber, plotName, isCr
     if (dateError) return;
     return onCreate({
       description: description.trim() || undefined,
-      startDate: parseLocalDate(startDate),
-      endDate: endDate ? parseLocalDate(endDate) : undefined
+      startDate,
+      endDate: endDate || undefined
     });
   };
 
