@@ -72,9 +72,12 @@ export class OrgCensusToCensusResultMapper {
     schema: string,
     plotID: number,
     plotCensusNumber: number,
-    details?: { description?: string; startDate?: Date; endDate?: Date }
+    details?: { description?: string; startDate?: string; endDate?: string }
   ): Promise<number | undefined> {
-    const newCensusRDS: CensusRDS = {
+    // census.StartDate / EndDate are MySQL DATE columns. Keep the browser's date-only
+    // values intact so the insert survives strict sql_mode without a Date/timezone
+    // round-trip that could change the selected calendar day.
+    const newRow = {
       censusID: 0, // This will be replaced with the actual ID after the POST request
       plotID,
       plotCensusNumber,
@@ -86,11 +89,16 @@ export class OrgCensusToCensusResultMapper {
     const response = await fetch(`/api/fixeddata/census/${schema}/censusID`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ newRow: newCensusRDS })
+      body: JSON.stringify({ newRow })
     });
 
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Census creation failed (HTTP ${response.status}): ${errorBody}`);
+    }
+
     const responseJSON = await response.json();
-    return responseJSON.createdIDs.census;
+    return responseJSON.createdIDs?.census;
   }
 }
 
