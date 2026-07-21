@@ -132,8 +132,27 @@ precision" block.
   was ruled out (host-only cookies + `azurewebsites.net` Public Suffix). Separately, dev's
   `AUTH_SECRET` is being rotated to differ from production as hardening (operator action;
   see `docs/auth-environment-variables-runbook.md`).
-- **Publish gating** (warning-vs-blocking validation tiers): interim decision 2026-07-20 —
-  data-quality precondition failures should surface as warnings rather than block the CTFS
-  export, with the full tier feature recorded as a TODO. **Pending a safety confirmation**
-  (some CTFS-export preconditions are destination-integrity constraints, not quality
-  warnings — see the TODO in `lib/ctfs-export/precondition.ts`).
+### 8. CTFS publish gate warns on data-quality, blocks on destination-integrity
+
+**Ratified 2026-07-20 (interim of the full validation-tier feature).** "Publish census"
+(the CTFS `.sql` export loaded into the on-prem CTFS MySQL) runs 8 "Finished Census"
+preconditions, now split into two policies:
+
+- **Warnings (publish proceeds):** `not-validated`, `unresolved-error`, `no-stem-guid`,
+  `inactive-join`. These describe rows the export already excludes
+  (`exportableMeasurementBaseWhere`), so the operator is told what won't be exported and
+  the publish continues, surfacing the warnings in `X-CTFS-Precondition-Warnings`.
+- **Blocking (publish 400s):** `unknown-attribute-code`, `missing-taxonomy-fields`,
+  `string-too-long`, `zero-exportable-rows`. Each would produce an artifact that fails to
+  load into, or silently truncates data in, the destination CTFS DB, so these still stop a
+  real publish. A dry run continues to surface everything (blockers included) as a
+  non-blocking preview.
+
+The "nothing left to export" check still runs even when only warnings are present, so a
+warn-only census cannot slip through as an empty publish. The full warning-vs-blocking
+validation-tier feature (authorized+audited override, server-side gate stale UI can't
+bypass) remains a TODO in `lib/ctfs-export/precondition.ts`.
+
+Enforced by: `lib/ctfs-export/precondition.test.ts` (classification + warning-plus-zero-
+rows interaction) and the CTFS export route test (`app/api/export/ctfs-sql/.../route.test.ts`:
+quality warning → 200 + header; blocker → 400 with only blocking reasons).

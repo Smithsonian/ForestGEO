@@ -54,11 +54,18 @@ vi.mock('@/lib/db/primitives', () => ({
   }))
 }));
 
-vi.mock('@/lib/ctfs-export', () => ({
-  checkFinishedCensus: mocks.checkFinishedCensus,
-  selectMeasurements: mocks.selectMeasurements,
-  renderArtifact: mocks.renderArtifact
-}));
+// Keep the REAL partitionPreconditionFailures (pure block-vs-warn policy) so the
+// route's gating decision is exercised against the actual classification, not a
+// stub — only the DB-touching functions are mocked.
+vi.mock('@/lib/ctfs-export', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/ctfs-export')>('@/lib/ctfs-export');
+  return {
+    ...actual,
+    checkFinishedCensus: mocks.checkFinishedCensus,
+    selectMeasurements: mocks.selectMeasurements,
+    renderArtifact: mocks.renderArtifact
+  };
+});
 
 vi.mock('@/ailogger', () => ({
   default: {
@@ -322,17 +329,54 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
   // Precondition failure
   // -------------------------------------------------------------------------
 
-  it('returns 400 with structured reasons when checkFinishedCensus fails on a real publish', async () => {
-    const reasons = [{ kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] }];
-    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons });
+  it('returns 400 with ONLY the blocking (destination-integrity) reasons on a real publish', async () => {
+    // Mixed failure: a data-quality warning + a destination-integrity blocker. Task 10C
+    // policy: block on the blocker, and the 400 body lists only the blocking reasons —
+    // the quality warning does not stop a publish and must not masquerade as the blocker.
+    const warning = { kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] };
+    const blocker = { kind: 'string-too-long', message: 'Destination-bound value exceeds CTFS legacy column width', coreMeasurementIds: [12] };
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons: [warning, blocker] });
 
     const res = await GET(makeRequest(), makeProps());
 
     expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
     const body = await res.json();
-    expect(body.error).toMatch(/census is not finished/i);
-    expect(body.reasons).toEqual(reasons);
+    expect(body.error).toMatch(/cannot be published/i);
+    expect(body.reasons).toEqual([blocker]);
+    expect(mocks.renderArtifact).not.toHaveBeenCalled();
     expect(mocks.connRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('proceeds to a 200 publish + warning header when only DATA-QUALITY preconditions fail (Task 10C)', async () => {
+    // not-validated is a WARNING kind: the export already excludes those rows, so the
+    // publish proceeds and the operator is warned rather than blocked.
+    const reasons = [{ kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] }];
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons });
+
+    const res = await GET(makeRequest(), makeProps());
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(await res.text()).toBe(STUB_RENDER_RESULT.sql);
+    const warnHeader = res.headers.get('X-CTFS-Precondition-Warnings');
+    expect(warnHeader).toBeTruthy();
+    expect(JSON.parse(warnHeader!)).toEqual(reasons);
+    // Not a dry run, but warnings still flow into the artifact renderer.
+    expect(mocks.renderArtifact).toHaveBeenCalledWith(expect.objectContaining({ reloadDryRun: false, preconditionWarnings: reasons }));
+    expect(mocks.connRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT block a real publish and does NOT downgrade a destination-integrity failure to a warning silently', async () => {
+    // zero-exportable-rows is blocking; a real (non-dry) publish must 400, never emit an
+    // empty artifact with a warning.
+    const blocker = { kind: 'zero-exportable-rows', message: 'No exportable rows remain after applying all filters', coreMeasurementIds: [] };
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons: [blocker] });
+
+    const res = await GET(makeRequest(), makeProps());
+
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    const body = await res.json();
+    expect(body.reasons).toEqual([blocker]);
+    expect(mocks.renderArtifact).not.toHaveBeenCalled();
   });
 
   it('returns 200 with a dry-run artifact + warning header when preconditions fail in dry-run mode', async () => {

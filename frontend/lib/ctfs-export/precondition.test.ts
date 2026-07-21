@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTestDatabase, teardownTestDatabase, loadSchema, DEFAULT_TEST_CONFIG } from '../../tests/setup/local-db-setup';
-import { checkFinishedCensus, MAX_DISPLAY_FAILURES } from './precondition';
+import { checkFinishedCensus, MAX_DISPLAY_FAILURES, partitionPreconditionFailures, isBlockingPreconditionKind, type PreconditionFailure } from './precondition';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -475,6 +475,57 @@ describe('checkFinishedCensus', () => {
       expect(failure, 'not-validated failure should be present').toBeDefined();
       expect(failure!.coreMeasurementIds.length, `coreMeasurementIds must be capped at ${MAX_DISPLAY_FAILURES}`).toBeLessThanOrEqual(MAX_DISPLAY_FAILURES);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 10C: an all-quality-warning census still catches "nothing left to export"
+  // -------------------------------------------------------------------------
+
+  it('reports BOTH the quality warning AND zero-exportable-rows when the only row is unvalidated', async () => {
+    // The single seed row is unvalidated → excluded by the export filter → zero
+    // exportable rows. Under the warn-don't-block policy the zero-rows gate must still
+    // run (it no longer short-circuits on the warning), so a would-be empty publish
+    // is caught rather than slipping through as a warning-only proceed.
+    await conn.query('UPDATE coremeasurements SET IsValidated = FALSE WHERE CoreMeasurementID = 1');
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const kinds = result.reasons.map(r => r.kind);
+      expect(kinds, 'the quality warning is preserved').toContain('not-validated');
+      expect(kinds, 'zero-exportable-rows still fires alongside the warning').toContain('zero-exportable-rows');
+      const { blocking, warnings } = partitionPreconditionFailures(result.reasons);
+      expect(warnings.map(r => r.kind)).toEqual(['not-validated']);
+      expect(blocking.map(r => r.kind)).toEqual(['zero-exportable-rows']);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 10C: block-vs-warn classification (pure)
+  // -------------------------------------------------------------------------
+
+  it('classifies data-quality kinds as warnings and destination-integrity kinds as blocking', () => {
+    // Data-quality: rows the export already excludes → warn, don't block.
+    for (const kind of ['not-validated', 'unresolved-error', 'no-stem-guid', 'inactive-join'] as const) {
+      expect(isBlockingPreconditionKind(kind), `${kind} should be a WARNING`).toBe(false);
+    }
+    // Destination-integrity: an artifact violating these breaks the CTFS load → block.
+    for (const kind of ['unknown-attribute-code', 'missing-taxonomy-fields', 'string-too-long', 'zero-exportable-rows'] as const) {
+      expect(isBlockingPreconditionKind(kind), `${kind} should be BLOCKING`).toBe(true);
+    }
+  });
+
+  it('partitions a mixed reason list preserving per-bucket order', () => {
+    const reasons: PreconditionFailure[] = [
+      { kind: 'not-validated', message: 'w1', coreMeasurementIds: [1] },
+      { kind: 'string-too-long', message: 'b1', coreMeasurementIds: [2] },
+      { kind: 'no-stem-guid', message: 'w2', coreMeasurementIds: [3] },
+      { kind: 'missing-taxonomy-fields', message: 'b2', coreMeasurementIds: [4] }
+    ];
+    const { blocking, warnings } = partitionPreconditionFailures(reasons);
+    expect(warnings.map(r => r.message)).toEqual(['w1', 'w2']);
+    expect(blocking.map(r => r.message)).toEqual(['b1', 'b2']);
   });
 
   // -------------------------------------------------------------------------

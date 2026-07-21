@@ -5,7 +5,15 @@
  * artifact rendering, and identifier utilities.
  */
 
-export { checkFinishedCensus, type PreconditionResult, type PreconditionFailure, type PreconditionFailureKind } from './precondition';
+export {
+  checkFinishedCensus,
+  partitionPreconditionFailures,
+  isBlockingPreconditionKind,
+  WARNING_PRECONDITION_KINDS,
+  type PreconditionResult,
+  type PreconditionFailure,
+  type PreconditionFailureKind
+} from './precondition';
 export { selectMeasurements, type SelectResult, type SelectInput } from './select-measurements';
 export { renderArtifact, renderRebuildViewFullTableArtifact, type RenderArtifactInput, type RenderArtifactResult } from './render-procedure';
 export { buildProcedureName, buildLockName, deterministicSuffix } from './identifier-safety';

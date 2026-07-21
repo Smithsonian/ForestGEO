@@ -9,22 +9,17 @@
  * are validated against a strict regex before being backtick-quoted, preventing
  * SQL injection through schema name interpolation.
  *
- * TODO (Task 10C — deferred warning-vs-blocking publish tier, ratified interim 2026-07-20):
- * The maintainer wants publish preconditions to surface as *warnings* rather than hard-
- * block the export, with a proper validation-tier feature (blocking errors vs warnings,
- * authorized+audited override, server-side gate that stale UI cannot bypass) built later.
- * The non-blocking pathway already exists — see the `reloadDryRun` branch in
- * app/api/export/ctfs-sql/.../route.ts, which returns 200 + `X-CTFS-Precondition-Warnings`
- * instead of a 400. Do NOT flip all eight checks to warnings wholesale: they are two
- * different kinds. Checks 1-4 (`not-validated`, `unresolved-error`, `no-stem-guid`,
- * `inactive-join`) are DATA-QUALITY notices — the export SELECT already excludes those
- * rows (see exportableMeasurementBaseWhere), so warning-and-excluding them is safe. But
- * checks 6-8 (`missing-taxonomy-fields`, `string-too-long`, `zero-exportable-rows`) are
- * DESTINATION-INTEGRITY constraints: an artifact that violates them fails to load into, or
- * silently truncates data in, the on-prem CTFS MySQL — downgrading those to warnings
- * reintroduces exactly the silent-corruption class this hardening effort exists to prevent.
- * The tier feature must keep the destination-integrity checks blocking (or gate any override
- * behind an authenticated, audited operator confirmation).
+ * Task 10C (ratified interim 2026-07-20 — IMPLEMENTED): publish preconditions are split
+ * into WARNING vs BLOCKING kinds (see WARNING_PRECONDITION_KINDS below). Data-quality
+ * failures surface as warnings and the publish proceeds; destination-integrity failures
+ * still 400. The classification lives in this module and the gating in the CTFS export
+ * route; a dry run continues to surface everything as a preview.
+ *
+ * TODO (full validation-tier feature, still deferred): an authorized, AUDITED operator
+ * override that can consciously publish past a destination-integrity blocker, enforced
+ * server-side so stale UI cannot bypass it. Until that exists, the blocking kinds are a
+ * hard stop — do NOT reclassify any of them to a warning to work around a stuck publish,
+ * because a warning-only export of those kinds ships broken data to the on-prem CTFS MySQL.
  */
 
 import type { Connection } from 'mysql2/promise';
@@ -85,6 +80,51 @@ export interface PreconditionInput {
 }
 
 export type PreconditionResult = { ok: true; count: number } | { ok: false; reasons: PreconditionFailure[] };
+
+/**
+ * Publish-gate policy (Task 10C, ratified 2026-07-20: "warn on quality, keep structural
+ * blocking"). Two kinds of precondition failure:
+ *
+ *  - WARNING kinds are data-quality notices about rows the export ALREADY excludes via
+ *    exportableMeasurementBaseWhere (IsValidated=TRUE, StemGUID NOT NULL, active joins).
+ *    Surfacing them and letting the publish proceed drops nothing the artifact would have
+ *    carried — the operator is simply told which rows won't be exported.
+ *  - BLOCKING kinds are destination-integrity constraints. An artifact that violates them
+ *    fails to load into, or silently truncates data in, the on-prem CTFS MySQL:
+ *      • unknown-attribute-code — the row IS exported (base WHERE does not filter on
+ *        attributes) carrying a code the destination's TSMAttributes cannot resolve;
+ *      • missing-taxonomy-fields — the destination species/genus/family lookup fails;
+ *      • string-too-long — a value overflows a narrower CTFS column;
+ *      • zero-exportable-rows — an empty/meaningless artifact.
+ *    These stay blocking so the "warn, don't block" relaxation can never ship broken data
+ *    to CTFS.
+ */
+export const WARNING_PRECONDITION_KINDS: ReadonlySet<PreconditionFailureKind> = new Set<PreconditionFailureKind>([
+  'not-validated',
+  'unresolved-error',
+  'no-stem-guid',
+  'inactive-join'
+]);
+
+export function isBlockingPreconditionKind(kind: PreconditionFailureKind): boolean {
+  return !WARNING_PRECONDITION_KINDS.has(kind);
+}
+
+/**
+ * Split precondition failures into the ones that must block a real publish and the ones
+ * that only warrant a warning. Preserves input order within each bucket.
+ */
+export function partitionPreconditionFailures(reasons: PreconditionFailure[]): {
+  blocking: PreconditionFailure[];
+  warnings: PreconditionFailure[];
+} {
+  const blocking: PreconditionFailure[] = [];
+  const warnings: PreconditionFailure[] = [];
+  for (const reason of reasons) {
+    (isBlockingPreconditionKind(reason.kind) ? blocking : warnings).push(reason);
+  }
+  return { blocking, warnings };
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -322,9 +362,13 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
     });
   }
 
-  // If any checks failed, return the accumulated failure list immediately.
-  // Check 8 (zero rows) only makes sense when no other disqualifiers exist.
-  if (reasons.length > 0) {
+  // Check 8 (zero rows) must still run when the only failures so far are WARNING
+  // kinds — otherwise a census whose rows are all excluded by quality issues (e.g.
+  // every row unvalidated) would skip this gate, the publish would proceed on the
+  // warn-don't-block path, and selectMeasurements would render an empty artifact.
+  // It is skipped only when a BLOCKING failure already exists (the publish is going
+  // to 400 regardless, and the count query may not be meaningful in that state).
+  if (reasons.some(r => isBlockingPreconditionKind(r.kind))) {
     return { ok: false, reasons };
   }
 
@@ -346,16 +390,22 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
   const count = Number((countRows as Array<{ n: number }>)[0].n);
 
   if (count === 0) {
-    return {
-      ok: false,
-      reasons: [
-        {
-          kind: 'zero-exportable-rows',
-          message: 'No exportable rows remain after applying all filters',
-          coreMeasurementIds: []
-        }
-      ]
-    };
+    // Preserve any accumulated WARNING reasons alongside the blocking zero-rows
+    // failure so the operator sees the full picture (what's wrong AND that nothing
+    // is left to export).
+    reasons.push({
+      kind: 'zero-exportable-rows',
+      message: 'No exportable rows remain after applying all filters',
+      coreMeasurementIds: []
+    });
+    return { ok: false, reasons };
+  }
+
+  // Rows exist. If only WARNING reasons accumulated, the census is not perfectly
+  // clean (ok=false) but nothing here is blocking — the route surfaces these as
+  // warnings and proceeds. ok=true is reserved for a fully clean census.
+  if (reasons.length > 0) {
+    return { ok: false, reasons };
   }
 
   return { ok: true, count };
