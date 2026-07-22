@@ -8,7 +8,7 @@ const DEFAULT_VALUE: PlotValue = {
   plotName: '',
   dimensionX: 100,
   dimensionY: 100,
-  area: 1,
+  area: 10000,
   globalX: 0,
   globalY: 0,
   globalZ: 0,
@@ -16,7 +16,7 @@ const DEFAULT_VALUE: PlotValue = {
   description: '',
   defaultDimensionUnits: 'm',
   defaultCoordinateUnits: 'm',
-  defaultAreaUnits: 'ha',
+  defaultAreaUnits: 'm2',
   defaultDBHUnits: 'mm',
   defaultHOMUnits: 'm'
 };
@@ -114,19 +114,22 @@ describe('PlotForm', () => {
     cy.get('@onChangeSpy').should('have.been.calledWithMatch', { plotShape: 'rectangular' });
   });
 
-  it('shows required unit errors when showErrors is true and unit fields are empty', () => {
+  it('renders the five unit fields as dropdowns, not free-text inputs', () => {
     const onChange = cy.stub();
-    const emptyUnits: PlotValue = {
-      ...DEFAULT_VALUE,
-      defaultDimensionUnits: '',
-      defaultCoordinateUnits: '',
-      defaultAreaUnits: '',
-      defaultDBHUnits: '',
-      defaultHOMUnits: ''
-    };
-    cy.mount(<PlotForm value={emptyUnits} onChange={onChange} showErrors />);
-    // Each unit FormControl should show a 'Required.' helper text
-    cy.get('[aria-label="Default Dimension Units"]').closest('[class*="MuiFormControl"]').contains('Required.').should('be.visible');
+    cy.mount(<PlotForm value={DEFAULT_VALUE} onChange={onChange} showErrors />);
+    // MUI Joy Select renders as a <button>, not an <input> — this fails if any
+    // of the five reverts to a free-text Input.
+    for (const label of ['Default Dimension Units', 'Default Coordinate Units', 'Default Area Units', 'Default DBH Units', 'Default HOM Units']) {
+      cy.get(`[aria-label="${label}"]`).should('have.prop', 'tagName', 'BUTTON');
+    }
+  });
+
+  it('emits updated defaultAreaUnits when a different option is selected from the Area Units dropdown', () => {
+    const onChangeSpy = cy.stub().as('onChangeSpy');
+    cy.mount(<StatefulPlotForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
+    cy.get('[aria-label="Default Area Units"]').click();
+    cy.get('[role="option"]').contains('hm2').click();
+    cy.get('@onChangeSpy').should('have.been.calledWithMatch', { defaultAreaUnits: 'hm2' });
   });
 
   it('keeps the dimensionX input empty (not 0) when the user clears it', () => {

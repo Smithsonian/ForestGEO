@@ -16,7 +16,7 @@ const PLOT_100x100: PlotValue = {
   description: '',
   defaultDimensionUnits: 'm',
   defaultCoordinateUnits: 'm',
-  defaultAreaUnits: 'ha',
+  defaultAreaUnits: 'm2',
   defaultDBHUnits: 'mm',
   defaultHOMUnits: 'm'
 };

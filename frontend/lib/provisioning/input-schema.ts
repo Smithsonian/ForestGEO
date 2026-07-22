@@ -1,5 +1,9 @@
 import { z } from 'zod';
+import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { estimateGridQuadratCount, MAX_GENERATED_QUADRATS } from './grid-generator';
+
+const DimensionUnitSchema = z.enum(unitSelectionOptions as [string, ...string[]]);
+const AreaUnitSchema = z.enum(areaSelectionOptions as [string, ...string[]]);
 
 export const ProvisioningSiteSchema = z.object({
   siteName: z.string().min(1),
@@ -23,11 +27,11 @@ export const ProvisioningPlotSchema = z.object({
   globalZ: z.number(),
   plotShape: z.enum(['square', 'rectangular', 'irregular']),
   description: z.string(),
-  defaultDimensionUnits: z.string().min(1),
-  defaultCoordinateUnits: z.string().min(1),
-  defaultAreaUnits: z.string().min(1),
-  defaultDBHUnits: z.string().min(1),
-  defaultHOMUnits: z.string().min(1)
+  defaultDimensionUnits: DimensionUnitSchema,
+  defaultCoordinateUnits: DimensionUnitSchema,
+  defaultAreaUnits: AreaUnitSchema,
+  defaultDBHUnits: DimensionUnitSchema,
+  defaultHOMUnits: DimensionUnitSchema
 });
 
 export const ProvisioningQuadratsSchema = z.discriminatedUnion('mode', [

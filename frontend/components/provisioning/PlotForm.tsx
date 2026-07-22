@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { FormControl, FormHelperText, FormLabel, Input, Option, Select, Stack, Textarea, Typography } from '@mui/joy';
 import type { ProvisioningInput } from '@/lib/provisioning/types';
+import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 
 const PLOT_SHAPE_OPTIONS: Array<{ value: ProvisioningInput['plot']['plotShape']; label: string }> = [
   { value: 'square', label: 'Square' },
@@ -63,11 +64,6 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
   const dimensionXInvalid = !isPositiveNumber(value.dimensionX);
   const dimensionYInvalid = !isPositiveNumber(value.dimensionY);
   const areaInvalid = !isPositiveNumber(value.area);
-  const defaultDimensionUnitsMissing = value.defaultDimensionUnits.trim() === '';
-  const defaultCoordinateUnitsMissing = value.defaultCoordinateUnits.trim() === '';
-  const defaultAreaUnitsMissing = value.defaultAreaUnits.trim() === '';
-  const defaultDBHUnitsMissing = value.defaultDBHUnits.trim() === '';
-  const defaultHOMUnitsMissing = value.defaultHOMUnits.trim() === '';
 
   return (
     <Stack spacing={2}>
@@ -210,69 +206,99 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
 
       <Typography level="title-sm">Default Units</Typography>
       <Stack direction="row" spacing={2} flexWrap="wrap">
-        <FormControl sx={{ flex: 1, minWidth: 160 }} error={shouldShowError('defaultDimensionUnits') && defaultDimensionUnitsMissing}>
+        <FormControl sx={{ flex: 1, minWidth: 160 }}>
           <FormLabel htmlFor="default-dimension-units-input">Dimension Units</FormLabel>
-          <Input
+          <Select
             id="default-dimension-units-input"
             aria-label="Default Dimension Units"
             value={value.defaultDimensionUnits}
-            placeholder="m"
-            onChange={e => onChange({ ...value, defaultDimensionUnits: e.target.value })}
+            onChange={(_event, newValue) => {
+              if (newValue) onChange({ ...value, defaultDimensionUnits: newValue });
+            }}
             onBlur={() => markTouched('defaultDimensionUnits')}
-          />
-          {shouldShowError('defaultDimensionUnits') && defaultDimensionUnitsMissing && <FormHelperText>Required.</FormHelperText>}
+          >
+            {unitSelectionOptions.map(unit => (
+              <Option key={unit} value={unit}>
+                {unit}
+              </Option>
+            ))}
+          </Select>
         </FormControl>
 
-        <FormControl sx={{ flex: 1, minWidth: 160 }} error={shouldShowError('defaultCoordinateUnits') && defaultCoordinateUnitsMissing}>
+        <FormControl sx={{ flex: 1, minWidth: 160 }}>
           <FormLabel htmlFor="default-coordinate-units-input">Coordinate Units</FormLabel>
-          <Input
+          <Select
             id="default-coordinate-units-input"
             aria-label="Default Coordinate Units"
             value={value.defaultCoordinateUnits}
-            placeholder="m"
-            onChange={e => onChange({ ...value, defaultCoordinateUnits: e.target.value })}
+            onChange={(_event, newValue) => {
+              if (newValue) onChange({ ...value, defaultCoordinateUnits: newValue });
+            }}
             onBlur={() => markTouched('defaultCoordinateUnits')}
-          />
-          {shouldShowError('defaultCoordinateUnits') && defaultCoordinateUnitsMissing && <FormHelperText>Required.</FormHelperText>}
+          >
+            {unitSelectionOptions.map(unit => (
+              <Option key={unit} value={unit}>
+                {unit}
+              </Option>
+            ))}
+          </Select>
         </FormControl>
 
-        <FormControl sx={{ flex: 1, minWidth: 160 }} error={shouldShowError('defaultAreaUnits') && defaultAreaUnitsMissing}>
+        <FormControl sx={{ flex: 1, minWidth: 160 }}>
           <FormLabel htmlFor="default-area-units-input">Area Units</FormLabel>
-          <Input
+          <Select
             id="default-area-units-input"
             aria-label="Default Area Units"
             value={value.defaultAreaUnits}
-            placeholder="ha"
-            onChange={e => onChange({ ...value, defaultAreaUnits: e.target.value })}
+            onChange={(_event, newValue) => {
+              if (newValue) onChange({ ...value, defaultAreaUnits: newValue });
+            }}
             onBlur={() => markTouched('defaultAreaUnits')}
-          />
-          {shouldShowError('defaultAreaUnits') && defaultAreaUnitsMissing && <FormHelperText>Required.</FormHelperText>}
+          >
+            {areaSelectionOptions.map(unit => (
+              <Option key={unit} value={unit}>
+                {unit}
+              </Option>
+            ))}
+          </Select>
         </FormControl>
 
-        <FormControl sx={{ flex: 1, minWidth: 160 }} error={shouldShowError('defaultDBHUnits') && defaultDBHUnitsMissing}>
+        <FormControl sx={{ flex: 1, minWidth: 160 }}>
           <FormLabel htmlFor="default-dbh-units-input">DBH Units</FormLabel>
-          <Input
+          <Select
             id="default-dbh-units-input"
             aria-label="Default DBH Units"
             value={value.defaultDBHUnits}
-            placeholder="mm"
-            onChange={e => onChange({ ...value, defaultDBHUnits: e.target.value })}
+            onChange={(_event, newValue) => {
+              if (newValue) onChange({ ...value, defaultDBHUnits: newValue });
+            }}
             onBlur={() => markTouched('defaultDBHUnits')}
-          />
-          {shouldShowError('defaultDBHUnits') && defaultDBHUnitsMissing && <FormHelperText>Required.</FormHelperText>}
+          >
+            {unitSelectionOptions.map(unit => (
+              <Option key={unit} value={unit}>
+                {unit}
+              </Option>
+            ))}
+          </Select>
         </FormControl>
 
-        <FormControl sx={{ flex: 1, minWidth: 160 }} error={shouldShowError('defaultHOMUnits') && defaultHOMUnitsMissing}>
+        <FormControl sx={{ flex: 1, minWidth: 160 }}>
           <FormLabel htmlFor="default-hom-units-input">HOM Units</FormLabel>
-          <Input
+          <Select
             id="default-hom-units-input"
             aria-label="Default HOM Units"
             value={value.defaultHOMUnits}
-            placeholder="m"
-            onChange={e => onChange({ ...value, defaultHOMUnits: e.target.value })}
+            onChange={(_event, newValue) => {
+              if (newValue) onChange({ ...value, defaultHOMUnits: newValue });
+            }}
             onBlur={() => markTouched('defaultHOMUnits')}
-          />
-          {shouldShowError('defaultHOMUnits') && defaultHOMUnitsMissing && <FormHelperText>Required.</FormHelperText>}
+          >
+            {unitSelectionOptions.map(unit => (
+              <Option key={unit} value={unit}>
+                {unit}
+              </Option>
+            ))}
+          </Select>
         </FormControl>
       </Stack>
     </Stack>
