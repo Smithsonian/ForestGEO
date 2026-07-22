@@ -177,5 +177,7 @@ quality warning → 200 + header; blocker → 400 with only blocking reasons).
 - **Cross-site authentication cookie behavior**: the observed cross-site login is
   **ratified as expected/acceptable** single sign-on (2026-07-20) — browser cookie-bleed
   was ruled out (host-only cookies + `azurewebsites.net` Public Suffix). No regression
-  contract needed. Separately, dev's `AUTH_SECRET` is being rotated to differ from
-  production as hardening (operator action; see `docs/auth-environment-variables-runbook.md`).
+  contract needed. Separately, the suspected shared `AUTH_SECRET` was **ruled out on
+  2026-07-21**: replaying a live production session token against dev returned `null`,
+  so dev and production already use distinct secrets and no rotation is required
+  (see `docs/auth-environment-variables-runbook.md`).
