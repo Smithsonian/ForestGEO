@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import mysql from 'mysql2/promise';
 import { readFileSync } from 'fs';
 import path from 'path';
+import { getWorkerPid } from './worker';
 
 // Silence ailogger output during DB-backed tests so audit calls (introduced
 // by the orchestrator's destructive paths) don't print or hit Application
@@ -10,7 +11,18 @@ vi.mock('@/ailogger', () => ({
   default: { info: () => undefined, warn: () => undefined, error: () => undefined }
 }));
 
-import { startRun, retryRun, abortRun, teardownProvisionedSite, markStepFailed, reconcileStaleRun, getRunWithSteps, listRuns } from './orchestrator';
+import {
+  startRun,
+  retryRun,
+  abortRun,
+  teardownProvisionedSite,
+  markStepFailed,
+  reconcileStaleRun,
+  getRunWithSteps,
+  listRuns,
+  parseStoredInput,
+  runProvisioning
+} from './orchestrator';
 import type { ProvisioningRunInput } from './types';
 
 const CATALOG_TABLES_FILE = path.join(process.cwd(), 'db/sql/catalog-provisioning-tables.sql');
@@ -51,6 +63,14 @@ function makeInput(schemaName: string): ProvisioningRunInput {
   };
 }
 
+// A stored payload shaped like a run written before commit 346635ca constrained
+// defaultAreaUnits to areaSelectionOptions: 'ha' was legal free text at write time,
+// so this is well-formed JSON that CanonicalProvisioningSchema now rejects.
+function makeMalformedRunPayload(schemaName: string): unknown {
+  const input = makeInput(schemaName);
+  return { ...input, plot: { ...input.plot, defaultAreaUnits: 'ha' } };
+}
+
 async function waitForTerminal(runId: number, pool: mysql.Pool): Promise<string> {
   const deadline = Date.now() + RUN_TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -67,6 +87,25 @@ async function createManualRun(pool: mysql.Pool, schemaName: string, status: 'ru
       (Status, StartedBy, StartedAt, FinishedAt, SiteName, SchemaName, InputPayload)
      VALUES (?, 'test@manual', NOW(), NULL, 'ManualRun', ?, ?)`,
     [status, schemaName, JSON.stringify(makeInput(schemaName))]
+  );
+  return result.insertId;
+}
+
+// Simulates a run recorded before some schema-tightening commit (e.g. reference-corner
+// support, or the unit-vocabulary constraint from 346635ca): the raw JSON is well-formed
+// but no longer satisfies CanonicalProvisioningSchema. `rawInputPayload` is written as-is,
+// bypassing makeInput's always-valid fixture, so loadRun's parseStoredInput must fail on it.
+async function createManualRunWithRawPayload(
+  pool: mysql.Pool,
+  schemaName: string,
+  status: 'running' | 'failed' | 'completed' | 'aborted',
+  rawInputPayload: unknown
+): Promise<number> {
+  const [result]: any = await pool.query(
+    `INSERT INTO catalog.provisioning_runs
+      (Status, StartedBy, StartedAt, FinishedAt, SiteName, SchemaName, InputPayload)
+     VALUES (?, 'test@manual-raw', NOW(), NULL, 'ManualRawRun', ?, ?)`,
+    [status, schemaName, JSON.stringify(rawInputPayload)]
   );
   return result.insertId;
 }
@@ -113,6 +152,173 @@ async function createCompletedRunWithSite(pool: mysql.Pool, schemaName: string):
   await pool.query(`INSERT INTO catalog.usersiterelations (UserID, SiteID) VALUES (999, ?)`, [siteId]);
   return { runId, siteId };
 }
+
+const STORED_INPUT_SITE = {
+  siteName: 'StoredInputTest',
+  schemaName: 'forestgeo_stored_input_test',
+  sqDimX: 5,
+  sqDimY: 5,
+  defaultUOMDBH: 'mm',
+  defaultUOMHOM: 'm',
+  doubleDataEntry: false,
+  location: 'StoredLoc',
+  country: 'StoredCountry'
+};
+
+const STORED_INPUT_PLOT = {
+  plotName: 'StoredPlot',
+  dimensionX: 100,
+  dimensionY: 100,
+  area: 10000,
+  globalX: 0,
+  globalY: 0,
+  globalZ: 0,
+  plotShape: 'square' as const,
+  description: '',
+  defaultDimensionUnits: 'm' as const,
+  defaultCoordinateUnits: 'm' as const,
+  defaultAreaUnits: 'm2' as const,
+  defaultDBHUnits: 'mm' as const,
+  defaultHOMUnits: 'm' as const
+};
+
+const STORED_INPUT_ROW = { quadratName: 'A01', startX: 20, startY: 20, dimensionX: 20, dimensionY: 20 };
+
+describe('parseStoredInput', () => {
+  it('stamps a legacy CSV payload (no coordinates field) as canonical-sw / SW, rows untouched', () => {
+    const legacy = {
+      site: STORED_INPUT_SITE,
+      plot: STORED_INPUT_PLOT,
+      quadrats: { mode: 'csv', rows: [STORED_INPUT_ROW] }
+    };
+
+    const result = parseStoredInput(legacy);
+
+    expect(result.quadrats).toEqual({
+      mode: 'csv',
+      rows: [STORED_INPUT_ROW],
+      coordinates: 'canonical-sw',
+      sourceCoordinateReferenceCorner: 'SW'
+    });
+  });
+
+  it('leaves an already-canonical CSV payload with a non-SW source corner untouched (no double normalization)', () => {
+    const alreadyCanonical = {
+      site: STORED_INPUT_SITE,
+      plot: STORED_INPUT_PLOT,
+      quadrats: {
+        mode: 'csv',
+        rows: [STORED_INPUT_ROW],
+        coordinates: 'canonical-sw',
+        sourceCoordinateReferenceCorner: 'NE'
+      }
+    };
+
+    const result = parseStoredInput(alreadyCanonical);
+
+    // If parseStoredInput re-ran the normalizing transform (the regression this
+    // guards against), an 'NE' row would be shifted a second time and these
+    // coordinates would no longer match the stored values exactly.
+    expect(result.quadrats).toEqual({
+      mode: 'csv',
+      rows: [STORED_INPUT_ROW],
+      coordinates: 'canonical-sw',
+      sourceCoordinateReferenceCorner: 'NE'
+    });
+  });
+
+  it('passes a grid payload through unchanged', () => {
+    const gridInput = {
+      site: STORED_INPUT_SITE,
+      plot: STORED_INPUT_PLOT,
+      quadrats: { mode: 'grid', quadratSizeX: 20, quadratSizeY: 20, namingPattern: 'sequential' }
+    };
+
+    const result = parseStoredInput(gridInput);
+
+    expect(result.quadrats).toEqual({ mode: 'grid', quadratSizeX: 20, quadratSizeY: 20, namingPattern: 'sequential' });
+  });
+
+  it('passes a none payload through unchanged', () => {
+    const noneInput = { site: STORED_INPUT_SITE, plot: STORED_INPUT_PLOT, quadrats: { mode: 'none' } };
+
+    const result = parseStoredInput(noneInput);
+
+    expect(result.quadrats).toEqual({ mode: 'none' });
+  });
+
+  it('accepts a JSON string and parses it the same as the equivalent object', () => {
+    const legacy = {
+      site: STORED_INPUT_SITE,
+      plot: STORED_INPUT_PLOT,
+      quadrats: { mode: 'csv', rows: [STORED_INPUT_ROW] }
+    };
+
+    const result = parseStoredInput(JSON.stringify(legacy));
+
+    expect(result.quadrats).toEqual({
+      mode: 'csv',
+      rows: [STORED_INPUT_ROW],
+      coordinates: 'canonical-sw',
+      sourceCoordinateReferenceCorner: 'SW'
+    });
+  });
+
+  it('rejects a CSV row missing quadratName', () => {
+    const malformed = {
+      site: STORED_INPUT_SITE,
+      plot: STORED_INPUT_PLOT,
+      quadrats: { mode: 'csv', rows: [{ startX: 20, startY: 20, dimensionX: 20, dimensionY: 20 }] }
+    };
+
+    // Asserting the ZodError name (not just "throws") proves this fails at
+    // CanonicalProvisioningSchema.parse — a bare "not a function" TypeError
+    // would also satisfy a plain .toThrow(), which would hide a regression
+    // where parseStoredInput stops validating shape at all.
+    expect(() => parseStoredInput(malformed)).toThrow(expect.objectContaining({ name: 'ZodError' }));
+  });
+
+  it('rejects a CSV row with a non-numeric coordinate', () => {
+    const malformed = {
+      site: STORED_INPUT_SITE,
+      plot: STORED_INPUT_PLOT,
+      quadrats: { mode: 'csv', rows: [{ ...STORED_INPUT_ROW, startX: 'twenty' }] }
+    };
+
+    expect(() => parseStoredInput(malformed)).toThrow(expect.objectContaining({ name: 'ZodError' }));
+  });
+
+  it('rejects an invalid sourceCoordinateReferenceCorner', () => {
+    const malformed = {
+      site: STORED_INPUT_SITE,
+      plot: STORED_INPUT_PLOT,
+      quadrats: {
+        mode: 'csv',
+        rows: [STORED_INPUT_ROW],
+        coordinates: 'canonical-sw',
+        sourceCoordinateReferenceCorner: 'CENTER'
+      }
+    };
+
+    expect(() => parseStoredInput(malformed)).toThrow(expect.objectContaining({ name: 'ZodError' }));
+  });
+
+  it('rejects invalid JSON strings', () => {
+    expect(() => parseStoredInput('{not valid json')).toThrow(SyntaxError);
+  });
+
+  it('rejects a non-object input', () => {
+    expect(() => parseStoredInput(42)).toThrow('Stored provisioning input is malformed');
+  });
+
+  it('rejects a null input', () => {
+    expect(() => parseStoredInput(null)).toThrow('Stored provisioning input is malformed');
+  });
+
+  it('rejects an object with no quadrats field', () => {
+    expect(() => parseStoredInput({ site: STORED_INPUT_SITE, plot: STORED_INPUT_PLOT })).toThrow('Stored provisioning input is malformed');
+  });
+});
 
 describe('orchestrator', () => {
   let pool: mysql.Pool;
@@ -438,6 +644,128 @@ describe('orchestrator', () => {
     const runId = await createManualRun(pool, schemaName, 'completed');
 
     await expect(teardownProvisionedSite(runId, schemaName, pool, 'test@teardown-unsafe')).rejects.toThrow(/unsafe schema name/);
+  });
+
+  describe('runs whose stored payload no longer validates (blast-radius of the load-boundary check)', () => {
+    it('retryRun rejects rather than re-dispatching a run whose payload no longer validates', async () => {
+      const schemaName = `forestgeo_orch_malformed_retry_${process.pid}`;
+      const runId = await createManualRunWithRawPayload(pool, schemaName, 'failed', makeMalformedRunPayload(schemaName));
+
+      await expect(retryRun(runId, pool, 'test@malformed-retry')).rejects.toThrow(/cannot be retried/);
+
+      // Rejected before any mutation: the run is still failed, not reset to running.
+      const result = await getRunWithSteps(runId, pool);
+      expect(result!.run.status).toBe('failed');
+    });
+
+    it('abortRun still tears down a failed run whose payload no longer validates (cleanup path is tolerant)', async () => {
+      const schemaName = `forestgeo_orch_malformed_abort_${process.pid}`;
+      await pool.query(`CREATE DATABASE IF NOT EXISTS \`${schemaName}\``);
+      const runId = await createManualRunWithRawPayload(pool, schemaName, 'failed', makeMalformedRunPayload(schemaName));
+
+      await abortRun(runId, pool, 'test@malformed-abort');
+
+      const result = await getRunWithSteps(runId, pool);
+      expect(result!.run.status).toBe('aborted');
+      const [schemaRows]: any = await pool.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?`, [schemaName]);
+      expect(schemaRows).toHaveLength(0);
+    });
+
+    it('teardownProvisionedSite still tears down a completed run whose payload no longer validates (cleanup path is tolerant)', async () => {
+      const schemaName = `forestgeo_orch_malformed_teardown_${process.pid}`;
+      const runId = await createManualRunWithRawPayload(pool, schemaName, 'completed', makeMalformedRunPayload(schemaName));
+      await pool.query(`CREATE DATABASE IF NOT EXISTS \`${schemaName}\``);
+      const [siteResult]: any = await pool.query(
+        `INSERT INTO catalog.sites
+          (SiteName, SchemaName, SQDimX, SQDimY, DefaultUOMDBH, DefaultUOMHOM, DoubleDataEntry)
+         VALUES ('MalformedTeardownSite', ?, 5, 5, 'mm', 'm', 0)`,
+        [schemaName]
+      );
+      const siteId = siteResult.insertId;
+      await pool.query(`INSERT INTO catalog.usersiterelations (UserID, SiteID) VALUES (999, ?)`, [siteId]);
+
+      await teardownProvisionedSite(runId, schemaName, pool, 'test@malformed-teardown');
+
+      const result = await getRunWithSteps(runId, pool);
+      expect(result!.run.status).toBe('aborted');
+      const [schemaRows]: any = await pool.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?`, [schemaName]);
+      expect(schemaRows).toHaveLength(0);
+    });
+
+    it('markStepFailed still unsticks a stuck step on a run whose payload no longer validates', async () => {
+      const schemaName = `forestgeo_orch_malformed_mark_${process.pid}`;
+      const runId = await createManualRunWithRawPayload(pool, schemaName, 'running', makeMalformedRunPayload(schemaName));
+      await pool.query(
+        `INSERT INTO catalog.provisioning_steps (RunID, StepIndex, StepKey, Status, StartedAt)
+         VALUES (?, 0, 'validate_inputs', 'running', NOW() - INTERVAL 10 MINUTE)`,
+        [runId]
+      );
+
+      await markStepFailed(runId, 0, pool, 'test@malformed-mark');
+
+      const result = await getRunWithSteps(runId, pool);
+      expect(result!.run.status).toBe('failed');
+      expect(result!.steps[0].status).toBe('failed');
+    });
+
+    it('reconcileStaleRun still reconciles a stale run whose payload no longer validates', async () => {
+      const schemaName = `forestgeo_orch_malformed_reconcile_${process.pid}`;
+      const runId = await createManualRunWithRawPayload(pool, schemaName, 'running', makeMalformedRunPayload(schemaName));
+      await pool.query(`UPDATE catalog.provisioning_runs SET StartedAt = NOW() - INTERVAL 10 MINUTE WHERE RunID = ?`, [runId]);
+      await pool.query(
+        `INSERT INTO catalog.provisioning_steps (RunID, StepIndex, StepKey, Status, StartedAt)
+         VALUES (?, 0, 'validate_inputs', 'running', NOW() - INTERVAL 10 MINUTE)`,
+        [runId]
+      );
+
+      const reconciled = await reconcileStaleRun(runId, pool);
+
+      expect(reconciled).toBe(true);
+      const result = await getRunWithSteps(runId, pool);
+      expect(result!.run.status).toBe('failed');
+    });
+
+    it('getRunWithSteps returns null input (not a throw) for a run whose stored payload no longer validates', async () => {
+      const schemaName = `forestgeo_orch_malformed_get_${process.pid}`;
+      const runId = await createManualRunWithRawPayload(pool, schemaName, 'failed', makeMalformedRunPayload(schemaName));
+
+      const result = await getRunWithSteps(runId, pool);
+
+      expect(result).not.toBeNull();
+      expect(result!.run.status).toBe('failed');
+      expect(result!.run.input).toBeNull();
+    });
+
+    it('runProvisioning fails the run instead of executing steps against a payload that no longer validates', async () => {
+      const schemaName = `forestgeo_orch_malformed_execute_${process.pid}`;
+      const runId = await createManualRunWithRawPayload(pool, schemaName, 'running', makeMalformedRunPayload(schemaName));
+      // Mirrors the STEPS order in steps/index.ts (apply_migrations is deliberately absent there).
+      const stepKeys = [
+        'validate_inputs',
+        'create_schema',
+        'init_tables',
+        'deploy_procedures',
+        'seed_validations',
+        'insert_catalog_row',
+        'insert_plot',
+        'insert_census',
+        'insert_quadrats',
+        'verify'
+      ];
+      const stepInserts = stepKeys.map((key, idx) => [runId, idx, key, 'pending']);
+      await pool.query(`INSERT INTO catalog.provisioning_steps (RunID, StepIndex, StepKey, Status) VALUES ?`, [stepInserts]);
+      // The fatal-error handler only flips a run to 'failed' if it's owned by the calling
+      // worker (WorkerPID match) — normally set by dispatchRun's claim step, which this
+      // test bypasses by calling runProvisioning directly.
+      await pool.query(`UPDATE catalog.provisioning_runs SET WorkerPID = ? WHERE RunID = ?`, [getWorkerPid(), runId]);
+
+      await runProvisioning(runId, pool);
+
+      const result = await getRunWithSteps(runId, pool);
+      expect(result!.run.status).toBe('failed');
+      // No step reached 'running' — the payload failed validation before the step loop started.
+      expect(result!.steps.every(s => s.status === 'pending')).toBe(true);
+    });
   });
 
   it('markStepFailed: only marks old running steps and leaves healthy steps alone', async () => {

@@ -89,6 +89,47 @@ export async function clearProvisioningState(pool: Pool, schemaName?: string): P
 }
 
 /**
+ * A minimal but fully valid `ProvisioningRunInput` (quadrats mode 'none' so it needs
+ * no rows). loadRun's parseStoredInput now validates the stored payload as canonical
+ * run input, so a route test that exercises a real retry/execute success path needs
+ * a payload that actually passes CanonicalProvisioningSchema — not a stub. Tests that
+ * only assert status/authz/precondition behavior never read `input`, so this shape is
+ * a safe default for all of them.
+ */
+function makeSeedInputPayload(siteName: string, schemaName: string): unknown {
+  return {
+    site: {
+      siteName,
+      schemaName,
+      sqDimX: 20,
+      sqDimY: 20,
+      defaultUOMDBH: 'cm',
+      defaultUOMHOM: 'm',
+      doubleDataEntry: false,
+      location: 'Test Location',
+      country: 'Test Country'
+    },
+    plot: {
+      plotName: 'Test Plot',
+      dimensionX: 100,
+      dimensionY: 100,
+      area: 10000,
+      globalX: 0,
+      globalY: 0,
+      globalZ: 0,
+      plotShape: 'square',
+      description: '',
+      defaultDimensionUnits: 'm',
+      defaultCoordinateUnits: 'm',
+      defaultAreaUnits: 'm2',
+      defaultDBHUnits: 'mm',
+      defaultHOMUnits: 'm'
+    },
+    quadrats: { mode: 'none' }
+  };
+}
+
+/**
  * Seeds a single provisioning_runs row plus its catalog.sites companion row.
  * Optionally creates the schema database itself, which abort and teardown paths
  * expect to find when they drop it.
@@ -115,8 +156,8 @@ export async function seedRun(
   const [r]: any = await pool.query(
     `INSERT INTO catalog.provisioning_runs
        (Status, StartedBy, StartedAt, FinishedAt, SiteName, SchemaName, InputPayload)
-     VALUES (?, 'admin@test', NOW(), ?, ?, ?, JSON_OBJECT())`,
-    [status, finishedAt, siteName, schemaName]
+     VALUES (?, 'admin@test', NOW(), ?, ?, ?, ?)`,
+    [status, finishedAt, siteName, schemaName, JSON.stringify(makeSeedInputPayload(siteName, schemaName))]
   );
   return r.insertId;
 }

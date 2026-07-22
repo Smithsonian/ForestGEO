@@ -5,6 +5,8 @@ import { STEPS } from './steps';
 import { ProvisioningError } from './errors';
 import { auditAttempt, auditSuccess, auditFailure } from './audit';
 import { dispatchRun, getWorkerPid, HEARTBEAT_STALE_MS, isRunOwnedByCurrentWorker } from './worker';
+import { upgradeLegacyQuadratConfig } from './coordinate-reference-corner';
+import { CanonicalProvisioningSchema } from './input-schema';
 import ailogger from '@/ailogger';
 
 // Bootstrap DDL inlined so the catalog tables can be created without any
@@ -106,10 +108,47 @@ export interface StartRunArgs {
   catalogPool: Pool;
 }
 
+/**
+ * Stored run payloads are read back without re-running the request schema, which
+ * is deliberate: re-parsing canonical rows through the canonicalizing transform
+ * would shift every quadrat a second time. Runs written before reference-corner
+ * support lack the canonical discriminant, so stamp it here and then validate
+ * the complete stored value as canonical run input.
+ */
+export function parseStoredInput(raw: unknown): ProvisioningRunInput {
+  const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  if (typeof parsed !== 'object' || parsed === null || !('quadrats' in parsed)) {
+    throw new Error('Stored provisioning input is malformed');
+  }
+  const candidate = parsed as Record<string, unknown>;
+  const upgraded = { ...candidate, quadrats: upgradeLegacyQuadratConfig(candidate.quadrats) };
+  return CanonicalProvisioningSchema.parse(upgraded);
+}
+
+/**
+ * Loads a run row and validates its stored input as canonical run input.
+ *
+ * A malformed payload does not fail the whole read: `input` comes back `null`
+ * and the row's status/schema metadata still loads. This keeps the five
+ * status/cleanup callers (retry's precondition check, abort, teardown,
+ * mark-failed, reconcile, and the run-detail GET route) usable against runs
+ * recorded before reference-corner support or other schema tightening — none
+ * of them need `input` to do their job. The two callers that DO need a valid
+ * input to act on (`runProvisioning`, which executes steps against it, and
+ * `retryRun`, which re-dispatches execution) check for `null` themselves and
+ * reject explicitly rather than silently running a corrupted payload.
+ */
 async function loadRun(catalogPool: Pool, runId: number): Promise<ProvisioningRunRecord | null> {
   const [rows]: any = await catalogPool.query(`SELECT * FROM catalog.provisioning_runs WHERE RunID = ?`, [runId]);
   if (rows.length === 0) return null;
   const r = rows[0];
+  let input: ProvisioningRunInput | null;
+  try {
+    input = parseStoredInput(r.InputPayload ?? r.inputpayload);
+  } catch (err) {
+    ailogger.error(`Stored provisioning input for run ${runId} failed validation; input unavailable for this read`, toError(err), { runId });
+    input = null;
+  }
   return {
     runId: r.RunID ?? r.runid,
     status: r.Status ?? r.status,
@@ -118,7 +157,7 @@ async function loadRun(catalogPool: Pool, runId: number): Promise<ProvisioningRu
     finishedAt: r.FinishedAt ?? r.finishedat,
     siteName: r.SiteName ?? r.sitename,
     schemaName: r.SchemaName ?? r.schemaname,
-    input: typeof (r.InputPayload ?? r.inputpayload) === 'string' ? JSON.parse(r.InputPayload ?? r.inputpayload) : (r.InputPayload ?? r.inputpayload)
+    input
   };
 }
 
@@ -338,6 +377,9 @@ export async function runProvisioning(runId: number, catalogPool: Pool): Promise
   try {
     const run = await loadRun(catalogPool, runId);
     if (!run) return;
+    if (run.input === null) {
+      throw new ProvisioningError(`Run ${runId} has a stored input payload that failed validation and cannot be executed`, 'internal', { runId });
+    }
     const steps = await loadSteps(catalogPool, runId);
 
     ctx = {
@@ -420,6 +462,11 @@ export async function retryRun(runId: number, catalogPool: Pool, startedBy: stri
     if (!run) throw new ProvisioningError(`Run ${runId} not found`, 'not_found', { runId });
     if (run.status !== 'failed') {
       throw new ProvisioningError(`Run ${runId} must be failed before retrying`, 'conflict', { runId });
+    }
+    if (run.input === null) {
+      throw new ProvisioningError(`Run ${runId} has a stored input payload that failed validation and cannot be retried; abort it instead`, 'conflict', {
+        runId
+      });
     }
 
     const [failedStepRows]: any = await catalogPool.query(

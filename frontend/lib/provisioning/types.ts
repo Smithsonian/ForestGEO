@@ -127,7 +127,13 @@ export interface ProvisioningRunRecord {
   finishedAt: Date | null;
   siteName: string;
   schemaName: string;
-  input: ProvisioningRunInput;
+  /**
+   * Null when the stored payload fails validation at load (e.g. a run recorded
+   * before reference-corner support, or before some other schema tightening).
+   * Only callers that execute or re-execute the run require a non-null value
+   * and enforce that themselves — see `loadRun` in orchestrator.ts.
+   */
+  input: ProvisioningRunInput | null;
 }
 
 export interface ProvisioningStepRecord {
