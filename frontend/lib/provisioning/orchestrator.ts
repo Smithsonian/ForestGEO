@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import type { Pool, PoolConnection, ResultSetHeader } from 'mysql2/promise';
-import type { ProvisioningInput, ProvisioningRunRecord, ProvisioningStepRecord, StepContext, RunStatus, StepStatus } from './types';
+import type { ProvisioningRunInput, ProvisioningRunRecord, ProvisioningStepRecord, StepContext, RunStatus, StepStatus } from './types';
 import { STEPS } from './steps';
 import { ProvisioningError } from './errors';
 import { auditAttempt, auditSuccess, auditFailure } from './audit';
@@ -101,7 +101,7 @@ function toError(err: unknown): Error {
 }
 
 export interface StartRunArgs {
-  input: ProvisioningInput;
+  input: ProvisioningRunInput;
   startedBy: string;
   catalogPool: Pool;
 }

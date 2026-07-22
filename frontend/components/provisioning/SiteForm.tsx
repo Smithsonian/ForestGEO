@@ -2,11 +2,11 @@
 
 import React, { useState } from 'react';
 import { FormControl, FormHelperText, FormLabel, Input, Stack, Switch, Typography } from '@mui/joy';
-import type { ProvisioningInput } from '@/lib/provisioning/types';
+import type { ProvisioningSiteInput } from '@/lib/provisioning/types';
 
 const SCHEMA_NAME_REGEX = /^forestgeo_[a-z0-9_]+$/;
 
-type SiteValue = ProvisioningInput['site'];
+type SiteValue = ProvisioningSiteInput;
 
 type NumericSiteField = 'sqDimX' | 'sqDimY';
 

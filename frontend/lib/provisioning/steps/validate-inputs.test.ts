@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { validateInputsStep } from './validate-inputs';
-import type { StepContext, ProvisioningInput } from '../types';
+import type { StepContext, ProvisioningRunInput } from '../types';
 
 const CATALOG_SCHEMA = 'catalog';
 
-function makeInput(overrides: Partial<ProvisioningInput> = {}): ProvisioningInput {
+function makeInput(overrides: Partial<ProvisioningRunInput> = {}): ProvisioningRunInput {
   return {
     site: {
       siteName: 'Rabi',
@@ -39,7 +39,7 @@ function makeInput(overrides: Partial<ProvisioningInput> = {}): ProvisioningInpu
   };
 }
 
-function makeCtx(input: ProvisioningInput, pool: any): StepContext {
+function makeCtx(input: ProvisioningRunInput, pool: any): StepContext {
   return {
     runId: 1,
     schemaName: input.site.schemaName,
@@ -214,7 +214,9 @@ describe('validateInputsStep', () => {
           rows: [
             { quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
             { quadratName: 'B', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
-          ]
+          ],
+          coordinates: 'canonical-sw',
+          sourceCoordinateReferenceCorner: 'SW'
         }
       }),
       pool
@@ -227,7 +229,9 @@ describe('validateInputsStep', () => {
       makeInput({
         quadrats: {
           mode: 'csv',
-          rows: [{ quadratName: 'A', startX: 90, startY: 0, dimensionX: 20, dimensionY: 20 }]
+          rows: [{ quadratName: 'A', startX: 90, startY: 0, dimensionX: 20, dimensionY: 20 }],
+          coordinates: 'canonical-sw',
+          sourceCoordinateReferenceCorner: 'SW'
         }
       }),
       pool
@@ -240,7 +244,9 @@ describe('validateInputsStep', () => {
       makeInput({
         quadrats: {
           mode: 'csv',
-          rows: [{ quadratName: 'A', startX: 0, startY: 90, dimensionX: 20, dimensionY: 20 }]
+          rows: [{ quadratName: 'A', startX: 0, startY: 90, dimensionX: 20, dimensionY: 20 }],
+          coordinates: 'canonical-sw',
+          sourceCoordinateReferenceCorner: 'SW'
         }
       }),
       pool
@@ -253,7 +259,9 @@ describe('validateInputsStep', () => {
       makeInput({
         quadrats: {
           mode: 'csv',
-          rows: [{ quadratName: 'A', startX: -5, startY: 0, dimensionX: 20, dimensionY: 20 }]
+          rows: [{ quadratName: 'A', startX: -5, startY: 0, dimensionX: 20, dimensionY: 20 }],
+          coordinates: 'canonical-sw',
+          sourceCoordinateReferenceCorner: 'SW'
         }
       }),
       pool
@@ -269,7 +277,9 @@ describe('validateInputsStep', () => {
           rows: [
             { quadratName: 'A', startX: 0, startY: 0, dimensionX: 50, dimensionY: 100 },
             { quadratName: 'B', startX: 50, startY: 0, dimensionX: 50, dimensionY: 100 }
-          ]
+          ],
+          coordinates: 'canonical-sw',
+          sourceCoordinateReferenceCorner: 'SW'
         }
       }),
       pool

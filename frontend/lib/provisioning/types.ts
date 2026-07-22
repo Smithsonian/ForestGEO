@@ -32,11 +32,6 @@ export interface QuadratCsvRow {
   dimensionY: number;
 }
 
-export interface QuadratCsvConfig {
-  mode: 'csv';
-  rows: QuadratCsvRow[];
-}
-
 /**
  * Create the site with no quadrats. Use when the real quadrat list will be uploaded
  * later through the Quadrats page, so provisioning does not seed a placeholder grid
@@ -45,8 +40,6 @@ export interface QuadratCsvConfig {
 export interface QuadratNoneConfig {
   mode: 'none';
 }
-
-export type QuadratConfig = QuadratGridConfig | QuadratCsvConfig | QuadratNoneConfig;
 
 /**
  * Which corner of its own quadrat a CSV row's StartX/StartY identifies.
@@ -73,35 +66,47 @@ export interface QuadratCsvCanonicalConfig {
 export type QuadratRequestConfig = QuadratGridConfig | QuadratCsvRequestConfig | QuadratNoneConfig;
 export type CanonicalQuadratConfig = QuadratGridConfig | QuadratCsvCanonicalConfig | QuadratNoneConfig;
 
-export interface ProvisioningInput {
-  site: {
-    siteName: string;
-    schemaName: string;
-    sqDimX: number;
-    sqDimY: number;
-    defaultUOMDBH: string;
-    defaultUOMHOM: string;
-    doubleDataEntry: boolean;
-    location: string;
-    country: string;
-  };
-  plot: {
-    plotName: string;
-    dimensionX: number;
-    dimensionY: number;
-    area: number;
-    globalX: number;
-    globalY: number;
-    globalZ: number;
-    plotShape: 'square' | 'rectangular' | 'irregular';
-    description: string;
-    defaultDimensionUnits: DimensionUnit;
-    defaultCoordinateUnits: DimensionUnit;
-    defaultAreaUnits: AreaUnit;
-    defaultDBHUnits: DimensionUnit;
-    defaultHOMUnits: DimensionUnit;
-  };
-  quadrats: QuadratConfig;
+export interface ProvisioningSiteInput {
+  siteName: string;
+  schemaName: string;
+  sqDimX: number;
+  sqDimY: number;
+  defaultUOMDBH: string;
+  defaultUOMHOM: string;
+  doubleDataEntry: boolean;
+  location: string;
+  country: string;
+}
+
+export interface ProvisioningPlotInput {
+  plotName: string;
+  dimensionX: number;
+  dimensionY: number;
+  area: number;
+  globalX: number;
+  globalY: number;
+  globalZ: number;
+  plotShape: 'square' | 'rectangular' | 'irregular';
+  description: string;
+  defaultDimensionUnits: DimensionUnit;
+  defaultCoordinateUnits: DimensionUnit;
+  defaultAreaUnits: AreaUnit;
+  defaultDBHUnits: DimensionUnit;
+  defaultHOMUnits: DimensionUnit;
+}
+
+/** What the browser holds and POSTs. Quadrat rows are in the declared convention. */
+export interface ProvisioningRequestInput {
+  site: ProvisioningSiteInput;
+  plot: ProvisioningPlotInput;
+  quadrats: QuadratRequestConfig;
+}
+
+/** What the server runs, persists and reloads. Quadrat rows are canonical south-west. */
+export interface ProvisioningRunInput {
+  site: ProvisioningSiteInput;
+  plot: ProvisioningPlotInput;
+  quadrats: CanonicalQuadratConfig;
 }
 
 export interface ProvisioningRunListRow {
@@ -122,7 +127,7 @@ export interface ProvisioningRunRecord {
   finishedAt: Date | null;
   siteName: string;
   schemaName: string;
-  input: ProvisioningInput;
+  input: ProvisioningRunInput;
 }
 
 export interface ProvisioningStepRecord {
@@ -140,7 +145,7 @@ export interface ProvisioningStepRecord {
 export interface StepContext {
   runId: number;
   schemaName: string;
-  input: ProvisioningInput;
+  input: ProvisioningRunInput;
   catalogPool: Pool;
   /** Pool whose default schema is the new site schema. May be null before create_schema runs. */
   sitePool: Pool | null;

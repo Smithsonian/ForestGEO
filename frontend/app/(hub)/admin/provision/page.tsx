@@ -9,9 +9,9 @@ import PlotForm from '@/components/provisioning/PlotForm';
 import QuadratPlanner from '@/components/provisioning/QuadratPlanner';
 import Review from '@/components/provisioning/Review';
 import { generateGrid } from '@/lib/provisioning/grid-generator';
-import { ProvisioningPlotSchema, ProvisioningQuadratsSchema, ProvisioningSiteSchema } from '@/lib/provisioning/input-schema';
+import { ProvisioningPlotSchema, ProvisioningQuadratsRequestSchema, ProvisioningSiteSchema } from '@/lib/provisioning/input-schema';
 import { findFirstOverlap } from '@/lib/provisioning/geometry';
-import type { ProvisioningInput } from '@/lib/provisioning/types';
+import type { ProvisioningPlotInput, ProvisioningRequestInput } from '@/lib/provisioning/types';
 import { applyAreaDerivation, resolvePlotAreaChange, type AreaMode } from '@/lib/provisioning/area';
 
 const STEPS = ['Site', 'Plot', 'Quadrats', 'Review'] as const;
@@ -21,7 +21,7 @@ const STEP_PLOT_INDEX = 1;
 const STEP_QUADRATS_INDEX = 2;
 const STEP_REVIEW_INDEX = 3;
 
-const DEFAULT_INPUT: ProvisioningInput = {
+const DEFAULT_INPUT: ProvisioningRequestInput = {
   site: {
     siteName: '',
     schemaName: '',
@@ -57,7 +57,7 @@ const DEFAULT_INPUT: ProvisioningInput = {
   }
 };
 
-function deriveCanAdvance(step: number, input: ProvisioningInput): boolean {
+function deriveCanAdvance(step: number, input: ProvisioningRequestInput): boolean {
   switch (step) {
     case STEP_SITE_INDEX:
       return ProvisioningSiteSchema.safeParse(input.site).success;
@@ -72,8 +72,8 @@ function deriveCanAdvance(step: number, input: ProvisioningInput): boolean {
   }
 }
 
-function quadratLayoutIsValid(input: ProvisioningInput): boolean {
-  if (!ProvisioningQuadratsSchema.safeParse(input.quadrats).success) return false;
+function quadratLayoutIsValid(input: ProvisioningRequestInput): boolean {
+  if (!ProvisioningQuadratsRequestSchema.safeParse(input.quadrats).success) return false;
 
   if (input.quadrats.mode === 'grid') {
     try {
@@ -106,7 +106,7 @@ export default function ProvisionWizardPage() {
   const router = useRouter();
 
   const [step, setStep] = useState(0);
-  const [input, setInput] = useState<ProvisioningInput>(DEFAULT_INPUT);
+  const [input, setInput] = useState<ProvisioningRequestInput>(DEFAULT_INPUT);
   const [areaMode, setAreaMode] = useState<AreaMode>('derived');
   const [showStepErrors, setShowStepErrors] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -155,7 +155,7 @@ export default function ProvisionWizardPage() {
     setStep(prev => prev - 1);
   }
 
-  function handlePlotChange(plot: ProvisioningInput['plot'], requestedMode?: AreaMode) {
+  function handlePlotChange(plot: ProvisioningPlotInput, requestedMode?: AreaMode) {
     const resolved = resolvePlotAreaChange(plot, areaMode, requestedMode);
     setAreaMode(resolved.areaMode);
     setInput(prev => ({ ...prev, plot: resolved.plot }));

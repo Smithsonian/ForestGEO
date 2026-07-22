@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import PlotForm from '@/components/provisioning/PlotForm';
-import type { ProvisioningInput } from '@/lib/provisioning/types';
+import type { ProvisioningPlotInput } from '@/lib/provisioning/types';
 import { applyAreaDerivation, resolvePlotAreaChange, type AreaMode } from '@/lib/provisioning/area';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 
-type PlotValue = ProvisioningInput['plot'];
+type PlotValue = ProvisioningPlotInput;
 
 const DEFAULT_VALUE: PlotValue = {
   plotName: '',

@@ -11,14 +11,14 @@ vi.mock('@/ailogger', () => ({
 }));
 
 import { startRun, retryRun, abortRun, teardownProvisionedSite, markStepFailed, reconcileStaleRun, getRunWithSteps, listRuns } from './orchestrator';
-import type { ProvisioningInput } from './types';
+import type { ProvisioningRunInput } from './types';
 
 const CATALOG_TABLES_FILE = path.join(process.cwd(), 'db/sql/catalog-provisioning-tables.sql');
 const POLL_INTERVAL_MS = 200;
 const RUN_TIMEOUT_MS = 60000;
 const ORCH_SCHEMA_PREFIX = 'forestgeo_orch';
 
-function makeInput(schemaName: string): ProvisioningInput {
+function makeInput(schemaName: string): ProvisioningRunInput {
   return {
     site: {
       siteName: 'OrchTest',

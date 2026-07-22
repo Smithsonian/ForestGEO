@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { generateGrid, MAX_GENERATED_QUADRATS } from './grid-generator';
-import type { ProvisioningInput, QuadratGridConfig } from './types';
+import type { ProvisioningPlotInput, QuadratGridConfig } from './types';
 
-const PLOT_100x100: ProvisioningInput['plot'] = {
+const PLOT_100x100: ProvisioningPlotInput = {
   plotName: 'P',
   dimensionX: 100,
   dimensionY: 100,

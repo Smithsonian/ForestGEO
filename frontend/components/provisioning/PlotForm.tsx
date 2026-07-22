@@ -2,17 +2,17 @@
 
 import { useState } from 'react';
 import { Button, FormControl, FormHelperText, FormLabel, Input, Option, Select, Stack, Textarea, Typography } from '@mui/joy';
-import type { ProvisioningInput } from '@/lib/provisioning/types';
+import type { ProvisioningPlotInput } from '@/lib/provisioning/types';
 import type { AreaMode } from '@/lib/provisioning/area';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 
-const PLOT_SHAPE_OPTIONS: Array<{ value: ProvisioningInput['plot']['plotShape']; label: string }> = [
+const PLOT_SHAPE_OPTIONS: Array<{ value: ProvisioningPlotInput['plotShape']; label: string }> = [
   { value: 'square', label: 'Square' },
   { value: 'rectangular', label: 'Rectangular' },
   { value: 'irregular', label: 'Irregular' }
 ];
 
-type PlotValue = ProvisioningInput['plot'];
+type PlotValue = ProvisioningPlotInput;
 
 type NumericPlotField = 'dimensionX' | 'dimensionY' | 'area' | 'globalX' | 'globalY' | 'globalZ';
 

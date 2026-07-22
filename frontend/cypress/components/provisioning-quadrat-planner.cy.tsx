@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import QuadratPlanner from '@/components/provisioning/QuadratPlanner';
-import type { ProvisioningInput, QuadratConfig } from '@/lib/provisioning/types';
+import type { ProvisioningPlotInput, QuadratRequestConfig } from '@/lib/provisioning/types';
 
-type PlotValue = ProvisioningInput['plot'];
+type PlotValue = ProvisioningPlotInput;
 
 const PLOT_100x100: PlotValue = {
   plotName: 'Test Plot',
@@ -21,21 +21,22 @@ const PLOT_100x100: PlotValue = {
   defaultHOMUnits: 'm'
 };
 
-const DEFAULT_GRID_VALUE: QuadratConfig = {
+const DEFAULT_GRID_VALUE: QuadratRequestConfig = {
   mode: 'grid',
   quadratSizeX: 20,
   quadratSizeY: 20,
   namingPattern: 'sequential'
 };
 
-const DEFAULT_CSV_VALUE: QuadratConfig = {
+const DEFAULT_CSV_VALUE: QuadratRequestConfig = {
   mode: 'csv',
-  rows: []
+  rows: [],
+  coordinateReferenceCorner: 'SW'
 };
 
 // Stateful wrapper so the component re-renders with each onChange and controlled
 // state reflects the latest emitted value on subsequent interactions.
-function StatefulPlanner(props: { initial: QuadratConfig; plot?: PlotValue; onChangeSpy: (v: QuadratConfig) => void; showErrors?: boolean }) {
+function StatefulPlanner(props: { initial: QuadratRequestConfig; plot?: PlotValue; onChangeSpy: (v: QuadratRequestConfig) => void; showErrors?: boolean }) {
   const [value, setValue] = useState(props.initial);
   return (
     <QuadratPlanner
@@ -169,7 +170,7 @@ describe('QuadratPlanner', () => {
       cy.get('@onChange').then((stub: any) => {
         const calls = stub.getCalls();
         const lastCall = calls[calls.length - 1];
-        const emitted = lastCall.args[0] as QuadratConfig;
+        const emitted = lastCall.args[0] as QuadratRequestConfig;
         expect(emitted.mode).to.equal('csv');
         if (emitted.mode === 'csv') {
           expect(emitted.rows).to.have.length(25);
@@ -236,7 +237,7 @@ describe('QuadratPlanner', () => {
       cy.get('@onChange').then((stub: any) => {
         const calls = stub.getCalls();
         const lastCall = calls[calls.length - 1];
-        const emitted = lastCall.args[0] as QuadratConfig;
+        const emitted = lastCall.args[0] as QuadratRequestConfig;
         expect(emitted.mode).to.equal('csv');
         if (emitted.mode === 'csv') {
           expect(emitted.rows).to.have.length(0);
@@ -290,7 +291,7 @@ describe('QuadratPlanner', () => {
       cy.get('@onChange').then((stub: any) => {
         const calls = stub.getCalls();
         const lastCall = calls[calls.length - 1];
-        expect(lastCall.args[0]).to.deep.equal({ mode: 'csv', rows: [] });
+        expect(lastCall.args[0]).to.deep.equal({ mode: 'csv', rows: [], coordinateReferenceCorner: 'SW' });
       });
     });
 

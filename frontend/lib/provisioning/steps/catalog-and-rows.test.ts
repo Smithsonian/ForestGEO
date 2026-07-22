@@ -2,9 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { insertCatalogRowStep, insertPlotStep, insertCensusStep } from './catalog-and-rows';
 import { createSchemaStep, initTablesStep } from './sql-steps';
-import type { StepContext, ProvisioningInput } from '../types';
+import type { StepContext, ProvisioningRunInput } from '../types';
 
-function makeInput(): ProvisioningInput {
+function makeInput(): ProvisioningRunInput {
   return {
     site: {
       siteName: 'CatTest',

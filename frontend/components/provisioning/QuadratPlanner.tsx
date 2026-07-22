@@ -2,10 +2,11 @@
 
 import React, { useMemo } from 'react';
 import { Alert, Box, FormControl, FormHelperText, FormLabel, Input, Radio, RadioGroup, Stack, Typography } from '@mui/joy';
-import type { ProvisioningInput, QuadratConfig, QuadratCsvRow } from '@/lib/provisioning/types';
+import type { ProvisioningPlotInput, QuadratRequestConfig, QuadratCsvRow } from '@/lib/provisioning/types';
 import { generateGrid } from '@/lib/provisioning/grid-generator';
 import { parseQuadratCsv } from '@/lib/provisioning/csv-parser';
 import { findFirstOverlap } from '@/lib/provisioning/geometry';
+import { DEFAULT_REFERENCE_CORNER } from '@/lib/provisioning/coordinate-reference-corner';
 
 const QUADRAT_SIZE_MIN = 1;
 const QUADRAT_SIZE_MAX = 10_000;
@@ -19,13 +20,13 @@ interface CsvValidationIssue {
 }
 
 export interface QuadratPlannerProps {
-  value: QuadratConfig;
-  onChange: (next: QuadratConfig) => void;
-  plot: ProvisioningInput['plot'];
+  value: QuadratRequestConfig;
+  onChange: (next: QuadratRequestConfig) => void;
+  plot: ProvisioningPlotInput;
   showErrors?: boolean;
 }
 
-function collectBoundsIssues(rows: QuadratCsvRow[], plot: ProvisioningInput['plot']): CsvValidationIssue[] {
+function collectBoundsIssues(rows: QuadratCsvRow[], plot: ProvisioningPlotInput): CsvValidationIssue[] {
   const issues: CsvValidationIssue[] = [];
 
   for (const row of rows) {
@@ -51,9 +52,9 @@ function GridModePanel({
   onChange,
   plot
 }: {
-  value: QuadratConfig & { mode: 'grid' };
-  onChange: (next: QuadratConfig) => void;
-  plot: ProvisioningInput['plot'];
+  value: QuadratRequestConfig & { mode: 'grid' };
+  onChange: (next: QuadratRequestConfig) => void;
+  plot: ProvisioningPlotInput;
 }) {
   let previewContent: React.ReactNode;
   try {
@@ -121,7 +122,7 @@ function GridModePanel({
   );
 }
 
-function CsvResultSummary({ rows, plot, overlap }: { rows: QuadratCsvRow[]; plot: ProvisioningInput['plot']; overlap: [QuadratCsvRow, QuadratCsvRow] | null }) {
+function CsvResultSummary({ rows, plot, overlap }: { rows: QuadratCsvRow[]; plot: ProvisioningPlotInput; overlap: [QuadratCsvRow, QuadratCsvRow] | null }) {
   const validationIssues = collectBoundsIssues(rows, plot);
   if (overlap) {
     validationIssues.push({
@@ -174,10 +175,12 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
   const csvIsEmpty = value.mode === 'csv' && value.rows.length === 0 && csvParseErrors.length === 0;
 
   function handleFileSelected(file: File) {
+    // Only rendered while value.mode === 'csv', so coordinateReferenceCorner is always set.
+    const coordinateReferenceCorner = value.mode === 'csv' ? value.coordinateReferenceCorner : DEFAULT_REFERENCE_CORNER;
     file.text().then(content => {
       const { rows, errors: parseErrors } = parseQuadratCsv(content);
       setCsvParseErrors(parseErrors);
-      onChange({ mode: 'csv', rows });
+      onChange({ mode: 'csv', rows, coordinateReferenceCorner });
     });
   }
 
@@ -186,7 +189,7 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
     if (newMode === 'grid') {
       onChange({ mode: 'grid', quadratSizeX: 20, quadratSizeY: 20, namingPattern: NAMING_PATTERN_SEQUENTIAL });
     } else if (newMode === 'csv') {
-      onChange({ mode: 'csv', rows: [] });
+      onChange({ mode: 'csv', rows: [], coordinateReferenceCorner: DEFAULT_REFERENCE_CORNER });
     } else {
       onChange({ mode: 'none' });
     }
