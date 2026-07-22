@@ -43,3 +43,19 @@ export function applyAreaDerivation<T extends AreaDerivable>(plot: T, areaMode: 
     defaultAreaUnits: deriveAreaUnit(plot.defaultDimensionUnits)
   };
 }
+
+export interface PlotAreaChange<T> {
+  plot: T;
+  areaMode: AreaMode;
+}
+
+/**
+ * Resolves a plot edit and any requested mode transition in one step. The
+ * requested mode must win over the current mode here rather than via a
+ * separate state update, because React batches those and the derivation
+ * would still read the pre-transition mode.
+ */
+export function resolvePlotAreaChange<T extends AreaDerivable>(plot: T, currentMode: AreaMode, requestedMode?: AreaMode): PlotAreaChange<T> {
+  const areaMode = requestedMode ?? currentMode;
+  return { plot: applyAreaDerivation(plot, areaMode), areaMode };
+}

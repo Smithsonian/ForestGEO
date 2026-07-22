@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Button, FormControl, FormHelperText, FormLabel, Input, Option, Select, Stack, Textarea, Typography } from '@mui/joy';
 import type { ProvisioningInput } from '@/lib/provisioning/types';
 import type { AreaMode } from '@/lib/provisioning/area';
@@ -29,6 +29,13 @@ interface PlotFormProps {
 
 function isPositiveNumber(n: number): boolean {
   return typeof n === 'number' && !isNaN(n) && n > 0;
+}
+
+// A numeric draft that is empty, a bare '-', or otherwise unparsable is mid-edit
+// and has not been (and will not be) propagated via onChange — see handleNumericChange.
+function isUncommittedNumericDraft(raw: string): boolean {
+  if (raw === '' || raw === '-') return true;
+  return !Number.isFinite(Number(raw));
 }
 
 interface UnitSelectProps<T extends string> {
@@ -81,22 +88,12 @@ export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, 
     globalZ: String(value.globalZ ?? '')
   }));
 
-  // numericDrafts is seeded once from initial props, so a derived area would
-  // never appear in the box without this: keep the draft mirror in sync while derived.
-  React.useEffect(() => {
-    if (areaMode !== 'derived') return;
-    setNumericDrafts(prev => (prev.area === String(value.area) ? prev : { ...prev, area: String(value.area) }));
-  }, [areaMode, value.area]);
-
   function handleNumericChange(field: NumericPlotField, raw: string, requestedMode?: AreaMode) {
     setNumericDrafts(prev => ({ ...prev, [field]: raw }));
-    if (raw === '' || raw === '-') {
+    if (isUncommittedNumericDraft(raw)) {
       return;
     }
-    const n = Number(raw);
-    if (Number.isFinite(n)) {
-      onChange({ ...value, [field]: n }, requestedMode);
-    }
+    onChange({ ...value, [field]: Number(raw) }, requestedMode);
   }
 
   function markTouched(field: keyof PlotValue) {
@@ -187,7 +184,12 @@ export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, 
             id="area-input"
             aria-label="Area"
             type="number"
-            value={numericDrafts.area}
+            // While derived, prefer the live derived value so it tracks dimension edits;
+            // but if the user has an uncommitted edit sitting in the box (e.g. they just
+            // cleared it and haven't typed a replacement yet — see isUncommittedNumericDraft),
+            // that mode transition to 'manual' hasn't happened yet, so show their draft
+            // instead of snapping the box back to the derived number.
+            value={areaMode === 'derived' && !isUncommittedNumericDraft(numericDrafts.area) ? String(value.area) : numericDrafts.area}
             onChange={e => handleNumericChange('area', e.target.value, 'manual')}
             onBlur={() => markTouched('area')}
             slotProps={{ input: { min: 0, step: 0.01 } }}
@@ -196,13 +198,7 @@ export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, 
             <FormHelperText>Auto-calculated from the plot dimensions. Type here to enter it yourself.</FormHelperText>
           ) : (
             <FormHelperText>
-              <Button
-                variant="plain"
-                size="sm"
-                sx={{ minHeight: 'auto', p: 0, fontSize: 'inherit' }}
-                aria-label="Use calculated area"
-                onClick={() => onAreaModeChange('derived')}
-              >
+              <Button variant="plain" size="sm" sx={{ minHeight: 'auto', p: 0, fontSize: 'inherit' }} onClick={() => onAreaModeChange('derived')}>
                 Use calculated value
               </Button>
             </FormHelperText>

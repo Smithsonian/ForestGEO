@@ -12,7 +12,7 @@ import { generateGrid } from '@/lib/provisioning/grid-generator';
 import { ProvisioningPlotSchema, ProvisioningQuadratsSchema, ProvisioningSiteSchema } from '@/lib/provisioning/input-schema';
 import { findFirstOverlap } from '@/lib/provisioning/geometry';
 import type { ProvisioningInput } from '@/lib/provisioning/types';
-import { applyAreaDerivation, type AreaMode } from '@/lib/provisioning/area';
+import { applyAreaDerivation, resolvePlotAreaChange, type AreaMode } from '@/lib/provisioning/area';
 
 const STEPS = ['Site', 'Plot', 'Quadrats', 'Review'] as const;
 
@@ -156,11 +156,9 @@ export default function ProvisionWizardPage() {
   }
 
   function handlePlotChange(plot: ProvisioningInput['plot'], requestedMode?: AreaMode) {
-    const effectiveMode = requestedMode ?? areaMode;
-    if (requestedMode && requestedMode !== areaMode) {
-      setAreaMode(requestedMode);
-    }
-    setInput(prev => ({ ...prev, plot: applyAreaDerivation(plot, effectiveMode) }));
+    const resolved = resolvePlotAreaChange(plot, areaMode, requestedMode);
+    setAreaMode(resolved.areaMode);
+    setInput(prev => ({ ...prev, plot: resolved.plot }));
   }
 
   function handleAreaModeChange(next: AreaMode) {

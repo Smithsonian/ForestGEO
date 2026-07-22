@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
-import { applyAreaDerivation, AreaUnit, deriveArea, deriveAreaUnit, DimensionUnit } from './area';
+import { applyAreaDerivation, AreaUnit, deriveArea, deriveAreaUnit, DimensionUnit, resolvePlotAreaChange } from './area';
 
 const PLOT: {
   dimensionX: number;
@@ -81,5 +81,31 @@ describe('applyAreaDerivation', () => {
   it('preserves unrelated plot fields', () => {
     const withName = { ...PLOT, plotName: 'Niobrara' };
     expect(applyAreaDerivation(withName, 'derived').plotName).toBe('Niobrara');
+  });
+});
+
+describe('resolvePlotAreaChange', () => {
+  it('keeps the current mode when no mode is requested', () => {
+    const result = resolvePlotAreaChange(PLOT, 'manual');
+    expect(result.areaMode).toBe('manual');
+    expect(result.plot.area).toBe(999);
+  });
+
+  it('lets a requested manual mode win over a current derived mode, without re-deriving the returned plot', () => {
+    // This is the regression that would have shipped a wrong area: the plot passed in
+    // already carries the user's just-typed manual value (area: 999), so resolving to
+    // 'manual' must hand that value straight through rather than overwriting it with
+    // dimensionX * dimensionY.
+    const result = resolvePlotAreaChange(PLOT, 'derived', 'manual');
+    expect(result.areaMode).toBe('manual');
+    expect(result.plot.area).toBe(999);
+    expect(result.plot.defaultAreaUnits).toBe('km2');
+  });
+
+  it('lets a requested derived mode win over a current manual mode, and re-derives the returned plot', () => {
+    const result = resolvePlotAreaChange(PLOT, 'manual', 'derived');
+    expect(result.areaMode).toBe('derived');
+    expect(result.plot.area).toBe(1000);
+    expect(result.plot.defaultAreaUnits).toBe('m2');
   });
 });

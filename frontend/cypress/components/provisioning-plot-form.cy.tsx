@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import PlotForm from '@/components/provisioning/PlotForm';
 import type { ProvisioningInput } from '@/lib/provisioning/types';
-import { applyAreaDerivation, type AreaMode } from '@/lib/provisioning/area';
+import { applyAreaDerivation, resolvePlotAreaChange, type AreaMode } from '@/lib/provisioning/area';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 
 type PlotValue = ProvisioningInput['plot'];
@@ -38,11 +38,10 @@ function StatefulPlotForm(props: { initial: PlotValue; onChangeSpy: (v: PlotValu
         if (next === 'derived') setValue(prev => applyAreaDerivation(prev, 'derived'));
       }}
       onChange={(next, requestedMode) => {
-        const effectiveMode = requestedMode ?? areaMode;
-        if (requestedMode) setAreaMode(requestedMode);
-        const derived = applyAreaDerivation(next, effectiveMode);
-        setValue(derived);
-        props.onChangeSpy(derived);
+        const resolved = resolvePlotAreaChange(next, areaMode, requestedMode);
+        setAreaMode(resolved.areaMode);
+        setValue(resolved.plot);
+        props.onChangeSpy(resolved.plot);
       }}
       showErrors={props.showErrors}
     />
@@ -75,11 +74,10 @@ function WizardLikeHarness(props: { initial: PlotValue; onChangeSpy: (v: PlotVal
             if (next === 'derived') setValue(prev => applyAreaDerivation(prev, 'derived'));
           }}
           onChange={(next, requestedMode) => {
-            const effectiveMode = requestedMode ?? areaMode;
-            if (requestedMode) setAreaMode(requestedMode);
-            const derived = applyAreaDerivation(next, effectiveMode);
-            setValue(derived);
-            props.onChangeSpy(derived);
+            const resolved = resolvePlotAreaChange(next, areaMode, requestedMode);
+            setAreaMode(resolved.areaMode);
+            setValue(resolved.plot);
+            props.onChangeSpy(resolved.plot);
           }}
         />
       ) : (
@@ -277,13 +275,33 @@ describe('PlotForm', () => {
       });
     });
 
+    it('clearing Area while still derived stays blank instead of snapping back to the derived value', () => {
+      // Regression for the render-computed Area display: a bare clear never reaches
+      // onChange (see handleNumericChange's isUncommittedNumericDraft guard), so the
+      // mode transition to 'manual' has not happened yet at the moment the box is
+      // cleared. The displayed value must still respect the user's in-progress edit
+      // rather than falling back to the (still current) derived value.
+      const onChangeSpy = cy.stub().as('onChangeSpy');
+      cy.mount(<StatefulPlotForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
+      cy.get('[aria-label="Area"]').should('have.value', '10000');
+      cy.get('[aria-label="Area"]').focus().clear();
+      cy.get('[aria-label="Area"]').should('have.value', '');
+
+      cy.get('[aria-label="Area"]').type('4242');
+      cy.get('[aria-label="Area"]').should('have.value', '4242');
+      cy.get('@onChangeSpy').then((stub: any) => {
+        const lastCall = stub.getCalls().at(-1);
+        expect(lastCall.args[0].area).to.equal(4242);
+      });
+    });
+
     it('"Use calculated area" returns to derived mode and recomputes from current dimensions', () => {
       const onChangeSpy = cy.stub().as('onChangeSpy');
       cy.mount(<StatefulPlotForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
       cy.get('[aria-label="Area"]').focus().type('{selectall}7500');
       cy.get('[aria-label="Area"]').should('have.value', '7500');
 
-      cy.get('[aria-label="Use calculated area"]').click();
+      cy.contains('button', 'Use calculated value').click();
       // DEFAULT_VALUE dimensions are 100x100, so derived area is 10000
       cy.get('[aria-label="Area"]').should('have.value', '10000');
 
@@ -305,6 +323,26 @@ describe('PlotForm', () => {
 
       cy.get('[aria-label="Area"]').focus().type('{selectall}7500');
       cy.get('[aria-label="Default Area Units"]').should('not.be.disabled');
+    });
+
+    it('flips Default Area Units to match Default Dimension Units while derived', () => {
+      // deriveAreaUnit maps unitSelectionOptions[i] -> areaSelectionOptions[i] by index
+      // (see lib/provisioning/area.ts); this exercises that mapping end-to-end through
+      // the actual dropdown rather than asserting on the pure function alone.
+      const onChangeSpy = cy.stub().as('onChangeSpy');
+      cy.mount(<StatefulPlotForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
+      cy.get('[aria-label="Default Area Units"]').should('contain.text', 'm2');
+
+      cy.get('[aria-label="Default Dimension Units"]')
+        .invoke('attr', 'aria-controls')
+        .then(listboxId => {
+          cy.get('[aria-label="Default Dimension Units"]').click();
+          cy.get(`#${listboxId}`).find('[role="option"]').contains('cm').click();
+        });
+
+      cy.get('[aria-label="Default Dimension Units"]').should('contain.text', 'cm');
+      cy.get('[aria-label="Default Area Units"]').should('contain.text', 'cm2');
+      cy.get('@onChangeSpy').should('have.been.calledWithMatch', { defaultDimensionUnits: 'cm', defaultAreaUnits: 'cm2' });
     });
 
     it('shows the selected dimension unit in the Dimension X/Y labels', () => {
