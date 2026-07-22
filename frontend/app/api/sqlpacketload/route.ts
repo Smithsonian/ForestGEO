@@ -11,7 +11,7 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { format } from 'mysql2/promise';
-import { isValidSchema } from '@/lib/db/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import crypto from 'crypto';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
@@ -218,26 +218,38 @@ async function upsertQuadratRows(
     // any downstream measurements, even if the same QuadratName appears again in
     // the upload. Only allow this path when the plot has no stems attached to any
     // active quadrat rows yet.
-    const blockingQuadratSQL = format(
-      `SELECT DISTINCT q.QuadratName
+    // safeFormatQuery fills BOTH ?? with the schema; mysql2 format() with
+    // [schema, schema] would put the second schema into `q.PlotID = ?` and
+    // leave the second ?? to be misfilled by plotID at execute time.
+    // Only stems with IsActive = 1 block the wipe: soft-deleted stems were
+    // already discarded by the user, so cascade-removing their tombstone rows
+    // is part of the intended reset, not a loss of live census data.
+    const blockingQuadratSQL = safeFormatQuery(
+      schema,
+      `SELECT q.QuadratID, q.QuadratName
        FROM ??.quadrats q
        WHERE q.PlotID = ?
          AND q.IsActive = 1
-         AND q.QuadratName IS NOT NULL
          AND EXISTS (
            SELECT 1
            FROM ??.stems s
            WHERE s.QuadratID = q.QuadratID
+             AND s.IsActive = 1
          )
-       ORDER BY q.QuadratName`,
-      [schema, schema]
+       ORDER BY q.QuadratName`
     );
     const blockingQuadratRows = await connectionManager.executeQuery(blockingQuadratSQL, [plotID], transactionID);
-    const blockingQuadratNames = Array.isArray(blockingQuadratRows)
-      ? blockingQuadratRows.map((row: any) => String(row.QuadratName ?? '').trim()).filter(Boolean)
-      : [];
+    const blockingQuadrats = Array.isArray(blockingQuadratRows) ? blockingQuadratRows : [];
 
-    if (blockingQuadratNames.length > 0) {
+    // The refusal must key off the presence of blocking rows, not the name list:
+    // a quadrat whose name is NULL or whitespace-only still cascades its stems
+    // away on DELETE, so it must block even though it has no displayable name.
+    const blockingQuadratNames = blockingQuadrats.map((row: any) => {
+      const quadratName = String(row.QuadratName ?? '').trim();
+      return quadratName || `(unnamed QuadratID ${row.QuadratID})`;
+    });
+
+    if (blockingQuadrats.length > 0) {
       throw new Error(
         `Clean re-upload refused: active quadrat rows in plot ${plotID} are already referenced ` +
           `by stems for the following QuadratName value(s): ${formatBlockedCleanReuploadValues(blockingQuadratNames)}. ` +
@@ -246,7 +258,7 @@ async function upsertQuadratRows(
       );
     }
 
-    const deleteSQL = format(`DELETE FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1`, [schema]);
+    const deleteSQL = safeFormatQuery(schema, `DELETE FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1`);
     await connectionManager.executeQuery(deleteSQL, [plotID], transactionID);
   }
 
@@ -254,7 +266,7 @@ async function upsertQuadratRows(
     // A Revisions upload updates by QuadratName and appends every non-matching row.
     // Refuse only a large, replacement-like file against the known generated Q#####
     // placeholder grid. Other non-overlapping files are valid Revisions additions.
-    const existingNamesSQL = format(`SELECT QuadratName FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1 AND QuadratName IS NOT NULL`, [schema]);
+    const existingNamesSQL = safeFormatQuery(schema, `SELECT QuadratName FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1 AND QuadratName IS NOT NULL`);
     const existingNameRows = await connectionManager.executeQuery(existingNamesSQL, [plotID], transactionID);
     const existingActiveNames = Array.isArray(existingNameRows)
       ? existingNameRows.map(existing => String((existing as { QuadratName?: unknown }).QuadratName ?? ''))
@@ -283,15 +295,18 @@ async function upsertQuadratRows(
     };
 
     if (uploadMode === UploadMode.REVISIONS) {
-      const existingSQL = format(`SELECT QuadratID FROM ??.quadrats WHERE PlotID = ? AND LOWER(QuadratName) = LOWER(?) AND IsActive = 1 LIMIT 1`, [schema]);
+      const existingSQL = safeFormatQuery(
+        schema,
+        `SELECT QuadratID FROM ??.quadrats WHERE PlotID = ? AND LOWER(QuadratName) = LOWER(?) AND IsActive = 1 LIMIT 1`
+      );
       const existingRows = await connectionManager.executeQuery(existingSQL, [plotID, quadratName], transactionID);
 
       if (existingRows.length > 0) {
-        const updateSQL = format(
+        const updateSQL = safeFormatQuery(
+          schema,
           `UPDATE ??.quadrats
            SET QuadratName = ?, StartX = ?, StartY = ?, DimensionX = ?, DimensionY = ?, Area = ?, QuadratShape = ?, DeletedAt = NULL
-           WHERE QuadratID = ?`,
-          [schema]
+           WHERE QuadratID = ?`
         );
         await connectionManager.executeQuery(
           updateSQL,
@@ -303,11 +318,11 @@ async function upsertQuadratRows(
       }
     }
 
-    const insertSQL = format(
+    const insertSQL = safeFormatQuery(
+      schema,
       `INSERT INTO ??.quadrats
        (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape, IsActive, DeletedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL)`,
-      [schema]
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL)`
     );
     await connectionManager.executeQuery(
       insertSQL,

@@ -122,16 +122,24 @@ column); if provenance is needed later, that is a separate, larger change (Optio
 Note this contract is about *precision only*. Negative and out-of-range (≥ 1 km) values
 are a separate validation concern (`NEGATIVE_DBH`/`NEGATIVE_HOM`), not covered here.
 
+Two consequences of rounding at the 6-decimal boundary:
+
+- **Dedup collapse.** The `coremeasurements` uniqueness key includes `MeasuredDBH` and
+  `MeasuredHOM`, so two rows that differ only past the 6th decimal round to identical
+  values and collapse to one measurement. This is intended (sub-6-decimal difference is
+  below meaningful resolution), but it means such near-duplicates are silently deduped
+  rather than both stored.
+- **Downstream `viewfulltable` is narrower.** `coremeasurements.MeasuredDBH/MeasuredHOM`
+  are `DECIMAL(12,6)`, but `viewfulltable.MeasuredDBH/MeasuredHOM` are `DECIMAL(10,6)`
+  (max `9999.999999`). The max-in-range case this contract blesses (`999999.999999`) is
+  storable in `coremeasurements` but exceeds the view column, so a `viewfulltable` rebuild
+  carrying it would error under strict `sql_mode` or truncate otherwise. The precision
+  contract stops at `coremeasurements`; reconciling the two column widths is a separate,
+  untracked follow-up.
+
 Enforced by: `tests/integration/ingestion-invariants.integration.test.ts` → "DBH/HOM
 precision" block.
 
-## Explicitly NOT yet contracted (blocked)
-
-- **Cross-site authentication cookie behavior**: the observed cross-site login is
-  **ratified as expected/acceptable** single sign-on (2026-07-20) — browser cookie-bleed
-  was ruled out (host-only cookies + `azurewebsites.net` Public Suffix). Separately, dev's
-  `AUTH_SECRET` is being rotated to differ from production as hardening (operator action;
-  see `docs/auth-environment-variables-runbook.md`).
 ### 8. CTFS publish gate warns on data-quality, blocks on destination-integrity
 
 **Ratified 2026-07-20 (interim of the full validation-tier feature).** "Publish census"
@@ -156,3 +164,20 @@ bypass) remains a TODO in `lib/ctfs-export/precondition.ts`.
 Enforced by: `lib/ctfs-export/precondition.test.ts` (classification + warning-plus-zero-
 rows interaction) and the CTFS export route test (`app/api/export/ctfs-sql/.../route.test.ts`:
 quality warning → 200 + header; blocker → 400 with only blocking reasons).
+
+## Explicitly NOT yet contracted (blocked)
+
+- **Full publish validation-tier feature**: an authorized, audited operator override that
+  can consciously publish past a destination-integrity blocker, enforced server-side so
+  stale UI cannot bypass it. Contract 8 is the ratified interim; the override remains a
+  TODO in `lib/ctfs-export/precondition.ts` and gets its own contract when built.
+
+## Resolved without a contract
+
+- **Cross-site authentication cookie behavior**: the observed cross-site login is
+  **ratified as expected/acceptable** single sign-on (2026-07-20) — browser cookie-bleed
+  was ruled out (host-only cookies + `azurewebsites.net` Public Suffix). No regression
+  contract needed. Separately, the suspected shared `AUTH_SECRET` was **ruled out on
+  2026-07-21**: replaying a live production session token against dev returned `null`,
+  so dev and production already use distinct secrets and no rotation is required
+  (see `docs/auth-environment-variables-runbook.md`).

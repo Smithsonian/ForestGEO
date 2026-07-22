@@ -377,6 +377,7 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     const body = await res.json();
     expect(body.reasons).toEqual([blocker]);
     expect(mocks.renderArtifact).not.toHaveBeenCalled();
+    expect(mocks.connRelease).toHaveBeenCalledTimes(1);
   });
 
   it('returns 200 with a dry-run artifact + warning header when preconditions fail in dry-run mode', async () => {
