@@ -48,6 +48,31 @@ export interface QuadratNoneConfig {
 
 export type QuadratConfig = QuadratGridConfig | QuadratCsvConfig | QuadratNoneConfig;
 
+/**
+ * Which corner of its own quadrat a CSV row's StartX/StartY identifies.
+ * Compass values are relative to the plot's local axes: east is higher X,
+ * north is higher Y. This does not move the plot's coordinate origin.
+ */
+export type QuadratReferenceCorner = 'SW' | 'SE' | 'NW' | 'NE';
+
+/** Wire/client shape: rows are in the uploaded convention. */
+export interface QuadratCsvRequestConfig {
+  mode: 'csv';
+  rows: QuadratCsvRow[];
+  coordinateReferenceCorner: QuadratReferenceCorner;
+}
+
+/** Server/run shape: rows are canonical south-west. */
+export interface QuadratCsvCanonicalConfig {
+  mode: 'csv';
+  rows: QuadratCsvRow[];
+  coordinates: 'canonical-sw';
+  sourceCoordinateReferenceCorner: QuadratReferenceCorner;
+}
+
+export type QuadratRequestConfig = QuadratGridConfig | QuadratCsvRequestConfig | QuadratNoneConfig;
+export type CanonicalQuadratConfig = QuadratGridConfig | QuadratCsvCanonicalConfig | QuadratNoneConfig;
+
 export interface ProvisioningInput {
   site: {
     siteName: string;
