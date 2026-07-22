@@ -27,6 +27,10 @@ describe('normalizeToSouthwest', () => {
     expect(normalizeToSouthwest(ROW, 'SW')).toEqual(ROW);
   });
 
+  it('returns the same row reference for the south-west identity case', () => {
+    expect(normalizeToSouthwest(ROW, 'SW')).toBe(ROW);
+  });
+
   it('subtracts the width for a south-east referenced row', () => {
     expect(normalizeToSouthwest(ROW, 'SE')).toEqual({ ...ROW, startX: 0, startY: 20 });
   });

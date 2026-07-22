@@ -3,7 +3,7 @@ import type { QuadratCsvRow, QuadratReferenceCorner } from './types';
 export type { QuadratReferenceCorner };
 
 export const REFERENCE_CORNER_OPTIONS: ReadonlyArray<{ value: QuadratReferenceCorner; label: string }> = [
-  { value: 'SW', label: 'South-west (lower-left) — default' },
+  { value: 'SW', label: 'South-west (lower-left)' },
   { value: 'SE', label: 'South-east (lower-right)' },
   { value: 'NW', label: 'North-west (upper-left)' },
   { value: 'NE', label: 'North-east (upper-right)' }
@@ -18,7 +18,10 @@ export function isQuadratReferenceCorner(value: unknown): value is QuadratRefere
 export function normalizeToSouthwest(row: QuadratCsvRow, referenceCorner: QuadratReferenceCorner): QuadratCsvRow {
   const shiftX = referenceCorner === 'SE' || referenceCorner === 'NE' ? row.dimensionX : 0;
   const shiftY = referenceCorner === 'NW' || referenceCorner === 'NE' ? row.dimensionY : 0;
-  if (shiftX === 0 && shiftY === 0) return { ...row };
+  // Same reference is intentional: SW is the default and therefore the common
+  // case, and this runs per-row on files up to MAX_GENERATED_QUADRATS — once
+  // in a client-side preview and again in the server-side schema transform.
+  if (shiftX === 0 && shiftY === 0) return row;
   return { ...row, startX: row.startX - shiftX, startY: row.startY - shiftY };
 }
 
@@ -28,6 +31,9 @@ export function normalizeToSouthwest(row: QuadratCsvRow, referenceCorner: Quadra
  * been south-west, since that was the sole interpretation the app supported.
  * Retry and teardown load stored payloads with a bare JSON.parse, so without
  * this the discriminant would be a compile-time fiction on historical rows.
+ *
+ * The return value is still unvalidated JSON: callers must parse it through
+ * CanonicalProvisioningSchema, never cast it.
  */
 export function upgradeLegacyQuadratConfig(quadrats: unknown): unknown {
   if (typeof quadrats !== 'object' || quadrats === null) return quadrats;
