@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { estimateGridQuadratCount, MAX_GENERATED_QUADRATS } from './grid-generator';
 import { normalizeToSouthwest, REFERENCE_CORNER_OPTIONS } from './coordinate-reference-corner';
-import { findFirstOverlap } from './geometry';
+import { collectQuadratBoundsIssues, findFirstOverlap } from './geometry';
 import type { ProvisioningRequestInput, ProvisioningRunInput, QuadratReferenceCorner } from './types';
 
 const DimensionUnitSchema = z.enum(unitSelectionOptions);
@@ -86,7 +86,16 @@ export const ProvisioningRequestSchema = z.object({
   quadrats: ProvisioningQuadratsRequestSchema
 });
 
-const CanonicalProvisioningSchema = z
+/**
+ * Entry point for values that are ALREADY canonical south-west, e.g. a stored
+ * `catalog.provisioning_runs.InputPayload` row after `JSON.parse` (and, for legacy rows,
+ * `upgradeLegacyQuadratConfig`). It does NOT normalize a declared reference corner — it only
+ * validates. Anything arriving from a client must go through `ProvisioningInputSchema` instead,
+ * which normalizes first and then pipes into this schema. Running this schema's sibling
+ * (`ProvisioningInputSchema`, which re-runs the normalizing `.transform()`) on already-canonical
+ * rows would silently shift every quadrat by one more cell.
+ */
+export const CanonicalProvisioningSchema = z
   .object({
     site: ProvisioningSiteSchema,
     plot: ProvisioningPlotSchema,
@@ -110,30 +119,13 @@ const CanonicalProvisioningSchema = z
     if (input.quadrats.mode !== 'csv') return;
 
     const rows = input.quadrats.rows;
-    for (const row of rows) {
-      if (row.startX < 0 || row.startY < 0) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['quadrats', 'rows'],
-          message: `Quadrat "${row.quadratName}" normalizes to a negative start coordinate. Check the declared reference corner.`
-        });
-        continue;
-      }
-      if (row.startX + row.dimensionX > input.plot.dimensionX) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['quadrats', 'rows'],
-          message: `Quadrat "${row.quadratName}" extends past plot dimensionX. Check the declared reference corner.`
-        });
-        continue;
-      }
-      if (row.startY + row.dimensionY > input.plot.dimensionY) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['quadrats', 'rows'],
-          message: `Quadrat "${row.quadratName}" extends past plot dimensionY. Check the declared reference corner.`
-        });
-      }
+    const boundsIssues = collectQuadratBoundsIssues(rows, input.plot);
+    for (const issue of boundsIssues) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['quadrats', 'rows', issue.rowIndex],
+        message: issue.message
+      });
     }
 
     const overlap = findFirstOverlap(rows);
@@ -172,5 +164,3 @@ type _AssertRequestShape = z.input<typeof ProvisioningInputSchema> extends Provi
 type _AssertRunShape = z.output<typeof ProvisioningInputSchema> extends ProvisioningRunInput ? true : never;
 const _assertRequestShape: _AssertRequestShape = true;
 const _assertRunShape: _AssertRunShape = true;
-void _assertRequestShape;
-void _assertRunShape;

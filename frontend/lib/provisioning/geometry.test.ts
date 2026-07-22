@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findFirstOverlap } from './geometry';
+import { findFirstOverlap, collectQuadratBoundsIssues } from './geometry';
 
 const PERF_QUADRAT_COUNT = 10_000;
 const PERF_BUDGET_MS = 500;
@@ -113,5 +113,60 @@ describe('findFirstOverlap', () => {
     const elapsed = Date.now() - start;
     expect(result).toBeNull();
     expect(elapsed).toBeLessThan(PERF_BUDGET_MS);
+  });
+});
+
+describe('collectQuadratBoundsIssues', () => {
+  const PLOT_100x100 = { dimensionX: 100, dimensionY: 100 };
+
+  it('returns an empty array when every row fits inside the plot', () => {
+    const rows = [
+      { quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+      { quadratName: 'B', startX: 80, startY: 80, dimensionX: 20, dimensionY: 20 }
+    ];
+    expect(collectQuadratBoundsIssues(rows, PLOT_100x100)).toEqual([]);
+  });
+
+  it('reports a row that extends past plot dimensionX, with its name and row index', () => {
+    const rows = [{ quadratName: 'TooFarEast', startX: 90, startY: 0, dimensionX: 20, dimensionY: 20 }];
+    const issues = collectQuadratBoundsIssues(rows, PLOT_100x100);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].rowIndex).toBe(0);
+    expect(issues[0].quadratName).toBe('TooFarEast');
+    expect(issues[0].message).toMatch(/extends past plot dimensionX/);
+    expect(issues[0].message).toMatch(/reference corner/i);
+  });
+
+  it('reports a row that extends past plot dimensionY, with its name and row index', () => {
+    const rows = [{ quadratName: 'TooFarNorth', startX: 0, startY: 90, dimensionX: 20, dimensionY: 20 }];
+    const issues = collectQuadratBoundsIssues(rows, PLOT_100x100);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].rowIndex).toBe(0);
+    expect(issues[0].quadratName).toBe('TooFarNorth');
+    expect(issues[0].message).toMatch(/extends past plot dimensionY/);
+    expect(issues[0].message).toMatch(/reference corner/i);
+  });
+
+  it('reports a row with negative start coordinates', () => {
+    const rows = [{ quadratName: 'BelowOrigin', startX: -5, startY: 0, dimensionX: 20, dimensionY: 20 }];
+    const issues = collectQuadratBoundsIssues(rows, PLOT_100x100);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].rowIndex).toBe(0);
+    expect(issues[0].quadratName).toBe('BelowOrigin');
+    expect(issues[0].message).toMatch(/negative start coordinate/);
+    expect(issues[0].message).toMatch(/reference corner/i);
+  });
+
+  it('reports every offending row in a single pass, not just the first', () => {
+    const rows = [
+      { quadratName: 'Good', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+      { quadratName: 'TooFarEast', startX: 90, startY: 0, dimensionX: 20, dimensionY: 20 },
+      { quadratName: 'BelowOrigin', startX: 0, startY: -5, dimensionX: 20, dimensionY: 20 },
+      { quadratName: 'TooFarNorth', startX: 0, startY: 90, dimensionX: 20, dimensionY: 20 }
+    ];
+    const issues = collectQuadratBoundsIssues(rows, PLOT_100x100);
+    expect(issues).toHaveLength(3);
+    expect(issues.map(issue => issue.quadratName)).toEqual(['TooFarEast', 'BelowOrigin', 'TooFarNorth']);
+    expect(issues.map(issue => issue.rowIndex)).toEqual([1, 2, 3]);
   });
 });

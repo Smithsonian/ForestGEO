@@ -1,6 +1,6 @@
 import type { ProvisioningStep, StepContext } from '../types';
 import { ProvisioningError } from '../types';
-import { findFirstOverlap } from '../geometry';
+import { collectQuadratBoundsIssues, findFirstOverlap } from '../geometry';
 
 const SCHEMA_PATTERN = /^forestgeo_[a-z0-9_]+$/;
 
@@ -68,16 +68,9 @@ export const validateInputsStep: ProvisioningStep = {
       }
     } else if (input.quadrats.mode === 'csv') {
       const rows = input.quadrats.rows;
-      for (const row of rows) {
-        if (row.startX < 0 || row.startY < 0) {
-          throw new ProvisioningError(`Quadrat "${row.quadratName}" has negative start coordinates`, 'invalid_input', { stepKey: 'validate_inputs' });
-        }
-        if (row.startX + row.dimensionX > input.plot.dimensionX) {
-          throw new ProvisioningError(`Quadrat "${row.quadratName}" extends past plot dimensionX`, 'invalid_input', { stepKey: 'validate_inputs' });
-        }
-        if (row.startY + row.dimensionY > input.plot.dimensionY) {
-          throw new ProvisioningError(`Quadrat "${row.quadratName}" extends past plot dimensionY`, 'invalid_input', { stepKey: 'validate_inputs' });
-        }
+      const boundsIssues = collectQuadratBoundsIssues(rows, input.plot);
+      if (boundsIssues.length > 0) {
+        throw new ProvisioningError(boundsIssues[0].message, 'invalid_input', { stepKey: 'validate_inputs' });
       }
       const overlap = findFirstOverlap(rows);
       if (overlap) {

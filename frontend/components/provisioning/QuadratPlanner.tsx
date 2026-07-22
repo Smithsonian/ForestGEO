@@ -5,7 +5,7 @@ import { Alert, Box, FormControl, FormHelperText, FormLabel, Input, Radio, Radio
 import type { ProvisioningPlotInput, QuadratRequestConfig, QuadratCsvRow } from '@/lib/provisioning/types';
 import { generateGrid } from '@/lib/provisioning/grid-generator';
 import { parseQuadratCsv } from '@/lib/provisioning/csv-parser';
-import { findFirstOverlap } from '@/lib/provisioning/geometry';
+import { collectQuadratBoundsIssues, findFirstOverlap } from '@/lib/provisioning/geometry';
 import { DEFAULT_REFERENCE_CORNER } from '@/lib/provisioning/coordinate-reference-corner';
 
 const QUADRAT_SIZE_MIN = 1;
@@ -27,24 +27,7 @@ export interface QuadratPlannerProps {
 }
 
 function collectBoundsIssues(rows: QuadratCsvRow[], plot: ProvisioningPlotInput): CsvValidationIssue[] {
-  const issues: CsvValidationIssue[] = [];
-
-  for (const row of rows) {
-    if (row.startX < 0 || row.startY < 0) {
-      issues.push({ quadratName: row.quadratName, message: 'has negative start coordinates' });
-      continue;
-    }
-    if (row.startX + row.dimensionX > plot.dimensionX) {
-      issues.push({ quadratName: row.quadratName, message: 'extends past plot dimensionX' });
-      continue;
-    }
-    if (row.startY + row.dimensionY > plot.dimensionY) {
-      issues.push({ quadratName: row.quadratName, message: 'extends past plot dimensionY' });
-      continue;
-    }
-  }
-
-  return issues;
+  return collectQuadratBoundsIssues(rows, plot).map(issue => ({ quadratName: issue.quadratName, message: issue.message }));
 }
 
 function GridModePanel({

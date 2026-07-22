@@ -6,6 +6,49 @@ interface SweepEvent {
   row: QuadratCsvRow;
 }
 
+export interface QuadratBoundsIssue {
+  rowIndex: number;
+  quadratName: string;
+  message: string;
+}
+
+/**
+ * Bounds-check every CSV row against the plot, reporting every offending row (not just the first).
+ * Rows arriving here are already declared against a reference corner (see coordinate-reference-corner.ts),
+ * so a violation is phrased as a normalization/declaration problem, not just "bad data".
+ */
+export function collectQuadratBoundsIssues(rows: QuadratCsvRow[], plot: { dimensionX: number; dimensionY: number }): QuadratBoundsIssue[] {
+  const issues: QuadratBoundsIssue[] = [];
+
+  rows.forEach((row, rowIndex) => {
+    if (row.startX < 0 || row.startY < 0) {
+      issues.push({
+        rowIndex,
+        quadratName: row.quadratName,
+        message: `Quadrat "${row.quadratName}" normalizes to a negative start coordinate. Check the declared reference corner.`
+      });
+      return;
+    }
+    if (row.startX + row.dimensionX > plot.dimensionX) {
+      issues.push({
+        rowIndex,
+        quadratName: row.quadratName,
+        message: `Quadrat "${row.quadratName}" extends past plot dimensionX. Check the declared reference corner.`
+      });
+      return;
+    }
+    if (row.startY + row.dimensionY > plot.dimensionY) {
+      issues.push({
+        rowIndex,
+        quadratName: row.quadratName,
+        message: `Quadrat "${row.quadratName}" extends past plot dimensionY. Check the declared reference corner.`
+      });
+    }
+  });
+
+  return issues;
+}
+
 /**
  * Sweep-line: for each row at coordinate X, maintain an active set of rows whose X-interval overlaps.
  * For each new row entering the active set, check against rows already active for Y-overlap.
