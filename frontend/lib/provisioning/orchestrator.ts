@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { z } from 'zod';
 import type { Pool, PoolConnection, ResultSetHeader } from 'mysql2/promise';
 import type { ProvisioningRunInput, ProvisioningRunRecord, ProvisioningStepRecord, StepContext, RunStatus, StepStatus } from './types';
 import { STEPS } from './steps';
@@ -129,7 +130,7 @@ export function parseStoredInput(raw: unknown): ProvisioningRunInput {
  * Loads a run row and validates its stored input as canonical run input.
  *
  * A malformed payload does not fail the whole read: `input` comes back `null`
- * and the row's status/schema metadata still loads. This keeps the five
+ * and the row's status/schema metadata still loads. This keeps the six
  * status/cleanup callers (retry's precondition check, abort, teardown,
  * mark-failed, reconcile, and the run-detail GET route) usable against runs
  * recorded before reference-corner support or other schema tightening — none
@@ -146,7 +147,19 @@ async function loadRun(catalogPool: Pool, runId: number): Promise<ProvisioningRu
   try {
     input = parseStoredInput(r.InputPayload ?? r.inputpayload);
   } catch (err) {
-    ailogger.error(`Stored provisioning input for run ${runId} failed validation; input unavailable for this read`, toError(err), { runId });
+    if (err instanceof z.ZodError) {
+      ailogger.error(
+        `Stored provisioning input for run ${runId} does not match the current canonical schema (expected for runs recorded before reference-corner support); input unavailable for this read`,
+        toError(err),
+        { runId }
+      );
+    } else if (err instanceof SyntaxError) {
+      ailogger.error(`Stored provisioning input for run ${runId} is not valid JSON; InputPayload is corrupt; input unavailable for this read`, toError(err), {
+        runId
+      });
+    } else {
+      ailogger.error(`Unexpected error reading stored provisioning input for run ${runId}; input unavailable for this read`, toError(err), { runId });
+    }
     input = null;
   }
   return {

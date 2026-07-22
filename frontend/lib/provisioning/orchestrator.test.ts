@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import mysql from 'mysql2/promise';
 import { readFileSync } from 'fs';
 import path from 'path';
@@ -6,9 +6,10 @@ import { getWorkerPid } from './worker';
 
 // Silence ailogger output during DB-backed tests so audit calls (introduced
 // by the orchestrator's destructive paths) don't print or hit Application
-// Insights from this suite.
+// Insights from this suite. `error` is a vi.fn() (not a plain no-op) so the
+// loadRun failure-class logging self-check below can assert on call args.
 vi.mock('@/ailogger', () => ({
-  default: { info: () => undefined, warn: () => undefined, error: () => undefined }
+  default: { info: () => undefined, warn: () => undefined, error: vi.fn() }
 }));
 
 import {
@@ -23,6 +24,7 @@ import {
   parseStoredInput,
   runProvisioning
 } from './orchestrator';
+import ailogger from '@/ailogger';
 import type { ProvisioningRunInput } from './types';
 
 const CATALOG_TABLES_FILE = path.join(process.cwd(), 'db/sql/catalog-provisioning-tables.sql');
@@ -317,6 +319,71 @@ describe('parseStoredInput', () => {
 
   it('rejects an object with no quadrats field', () => {
     expect(() => parseStoredInput({ site: STORED_INPUT_SITE, plot: STORED_INPUT_PLOT })).toThrow('Stored provisioning input is malformed');
+  });
+});
+
+// Fake catalog.provisioning_runs/provisioning_steps reader for the loadRun
+// failure-class logging self-check below. Real MySQL JSON columns reject
+// non-JSON text on INSERT, so a malformed-JSON InputPayload can't be produced
+// via the real DB pool used elsewhere in this file — this stub is the only way
+// to drive loadRun's SyntaxError branch end-to-end through a public function.
+function makeFakePoolReturningInputPayload(runId: number, inputPayload: unknown): mysql.Pool {
+  const runRow = {
+    RunID: runId,
+    Status: 'failed',
+    StartedBy: 'test@self-check',
+    StartedAt: new Date(),
+    FinishedAt: null,
+    SiteName: 'SelfCheckSite',
+    SchemaName: `forestgeo_self_check_${runId}`,
+    InputPayload: inputPayload
+  };
+  const query = vi.fn().mockImplementation((sql: unknown) => {
+    if (typeof sql === 'string' && sql.includes('FROM catalog.provisioning_runs')) {
+      return Promise.resolve([[runRow]]);
+    }
+    if (typeof sql === 'string' && sql.includes('FROM catalog.provisioning_steps')) {
+      return Promise.resolve([[]]);
+    }
+    throw new Error(`Unexpected query against fake self-check pool: ${String(sql)}`);
+  });
+  return { query } as unknown as mysql.Pool;
+}
+
+describe('loadRun failure-class logging (Fix 1 self-check)', () => {
+  const errorSpy = ailogger.error as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    errorSpy.mockClear();
+  });
+
+  it('reports a malformed-JSON payload and a schema-invalid payload with distinct messages, both leaving input null', async () => {
+    const malformedJsonRunId = 900001;
+    const schemaInvalidRunId = 900002;
+
+    const jsonResult = await getRunWithSteps(malformedJsonRunId, makeFakePoolReturningInputPayload(malformedJsonRunId, '{not valid json'));
+    expect(jsonResult).not.toBeNull();
+    expect(jsonResult!.run.input).toBeNull();
+
+    const schemaInvalidPayload = makeMalformedRunPayload(`forestgeo_self_check_${schemaInvalidRunId}`);
+    const schemaResult = await getRunWithSteps(schemaInvalidRunId, makeFakePoolReturningInputPayload(schemaInvalidRunId, schemaInvalidPayload));
+    expect(schemaResult).not.toBeNull();
+    expect(schemaResult!.run.input).toBeNull();
+
+    expect(errorSpy).toHaveBeenCalledTimes(2);
+    const [jsonMessage, jsonErr] = errorSpy.mock.calls[0];
+    const [schemaMessage, schemaErr] = errorSpy.mock.calls[1];
+
+    // Distinguishable AND accurate: the JSON case names the SyntaxError, the
+    // schema case names schema drift — neither says the generic "failed validation".
+    expect(jsonMessage).toMatch(/not valid JSON/);
+    expect(jsonErr).toBeInstanceOf(SyntaxError);
+
+    expect(schemaMessage).toMatch(/canonical schema/);
+    expect(schemaErr).toBeInstanceOf(Error);
+    expect(schemaErr.name).toBe('ZodError');
+
+    expect(jsonMessage).not.toBe(schemaMessage);
   });
 });
 
@@ -658,6 +725,12 @@ describe('orchestrator', () => {
       expect(result!.run.status).toBe('failed');
     });
 
+    // The next four tests (abortRun, teardownProvisionedSite, markStepFailed,
+    // reconcileStaleRun) pass identically with or without this task's load-boundary
+    // validation, since none of those functions read `run.input`. They stay here as
+    // regression guards that the cleanup paths remain payload-agnostic, not as proof
+    // that the load-boundary validation works — only the retryRun test above and the
+    // getRunWithSteps/runProvisioning tests below this block actually depend on it.
     it('abortRun still tears down a failed run whose payload no longer validates (cleanup path is tolerant)', async () => {
       const schemaName = `forestgeo_orch_malformed_abort_${process.pid}`;
       await pool.query(`CREATE DATABASE IF NOT EXISTS \`${schemaName}\``);
