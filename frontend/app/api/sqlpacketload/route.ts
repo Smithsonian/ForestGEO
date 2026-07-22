@@ -249,7 +249,7 @@ async function upsertQuadratRows(
       );
     }
 
-    const deleteSQL = format(`DELETE FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1`, [schema]);
+    const deleteSQL = safeFormatQuery(schema, `DELETE FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1`);
     await connectionManager.executeQuery(deleteSQL, [plotID], transactionID);
   }
 
@@ -257,7 +257,7 @@ async function upsertQuadratRows(
     // A Revisions upload updates by QuadratName and appends every non-matching row.
     // Refuse only a large, replacement-like file against the known generated Q#####
     // placeholder grid. Other non-overlapping files are valid Revisions additions.
-    const existingNamesSQL = format(`SELECT QuadratName FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1 AND QuadratName IS NOT NULL`, [schema]);
+    const existingNamesSQL = safeFormatQuery(schema, `SELECT QuadratName FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1 AND QuadratName IS NOT NULL`);
     const existingNameRows = await connectionManager.executeQuery(existingNamesSQL, [plotID], transactionID);
     const existingActiveNames = Array.isArray(existingNameRows)
       ? existingNameRows.map(existing => String((existing as { QuadratName?: unknown }).QuadratName ?? ''))
@@ -286,15 +286,18 @@ async function upsertQuadratRows(
     };
 
     if (uploadMode === UploadMode.REVISIONS) {
-      const existingSQL = format(`SELECT QuadratID FROM ??.quadrats WHERE PlotID = ? AND LOWER(QuadratName) = LOWER(?) AND IsActive = 1 LIMIT 1`, [schema]);
+      const existingSQL = safeFormatQuery(
+        schema,
+        `SELECT QuadratID FROM ??.quadrats WHERE PlotID = ? AND LOWER(QuadratName) = LOWER(?) AND IsActive = 1 LIMIT 1`
+      );
       const existingRows = await connectionManager.executeQuery(existingSQL, [plotID, quadratName], transactionID);
 
       if (existingRows.length > 0) {
-        const updateSQL = format(
+        const updateSQL = safeFormatQuery(
+          schema,
           `UPDATE ??.quadrats
            SET QuadratName = ?, StartX = ?, StartY = ?, DimensionX = ?, DimensionY = ?, Area = ?, QuadratShape = ?, DeletedAt = NULL
-           WHERE QuadratID = ?`,
-          [schema]
+           WHERE QuadratID = ?`
         );
         await connectionManager.executeQuery(
           updateSQL,
@@ -306,11 +309,11 @@ async function upsertQuadratRows(
       }
     }
 
-    const insertSQL = format(
+    const insertSQL = safeFormatQuery(
+      schema,
       `INSERT INTO ??.quadrats
        (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape, IsActive, DeletedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL)`,
-      [schema]
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL)`
     );
     await connectionManager.executeQuery(
       insertSQL,
