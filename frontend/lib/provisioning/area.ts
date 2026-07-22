@@ -2,12 +2,15 @@ import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 
 export type AreaMode = 'derived' | 'manual';
 
+export type DimensionUnit = (typeof unitSelectionOptions)[number];
+export type AreaUnit = (typeof areaSelectionOptions)[number];
+
 interface AreaDerivable {
   dimensionX: number;
   dimensionY: number;
   area: number;
-  defaultDimensionUnits: string;
-  defaultAreaUnits: string;
+  defaultDimensionUnits: DimensionUnit;
+  defaultAreaUnits: AreaUnit;
 }
 
 export function deriveArea(dimensionX: number, dimensionY: number): number {
@@ -20,15 +23,19 @@ export function deriveArea(dimensionX: number, dimensionY: number): number {
  * rather than string concatenation keeps the dependency on that parallelism
  * explicit and lets an unknown unit fail loudly.
  */
-export function deriveAreaUnit(dimensionUnit: string): string {
-  const index = (unitSelectionOptions as readonly string[]).indexOf(dimensionUnit);
+export function deriveAreaUnit(dimensionUnit: DimensionUnit): AreaUnit {
+  const index = unitSelectionOptions.indexOf(dimensionUnit);
   if (index === -1) {
+    // DimensionUnit narrows this branch to unreachable for schema-validated
+    // input; the guard stays for values arriving from unvalidated JSON at runtime.
     throw new Error(`Cannot derive an area unit for unknown dimension unit "${dimensionUnit}"`);
   }
   return areaSelectionOptions[index];
 }
 
 export function applyAreaDerivation<T extends AreaDerivable>(plot: T, areaMode: AreaMode): T {
+  // Same reference is intentional: the wizard calls this on every keystroke
+  // inside a React state setter, and a fresh object here would force needless re-renders.
   if (areaMode === 'manual') return plot;
   return {
     ...plot,

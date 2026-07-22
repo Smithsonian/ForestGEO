@@ -1,8 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
-import { applyAreaDerivation, deriveArea, deriveAreaUnit } from './area';
+import { applyAreaDerivation, AreaUnit, deriveArea, deriveAreaUnit, DimensionUnit } from './area';
 
-const PLOT = {
+const PLOT: {
+  dimensionX: number;
+  dimensionY: number;
+  area: number;
+  defaultDimensionUnits: DimensionUnit;
+  defaultAreaUnits: AreaUnit;
+} = {
   dimensionX: 40,
   dimensionY: 25,
   area: 999,
@@ -29,7 +35,9 @@ describe('deriveAreaUnit', () => {
   });
 
   it('throws on a unit outside the vocabulary rather than guessing', () => {
-    expect(() => deriveAreaUnit('ha')).toThrow(/ha/);
+    // 'ha' deliberately simulates untyped runtime input (e.g. unvalidated JSON)
+    // that bypasses the DimensionUnit compile-time narrowing.
+    expect(() => deriveAreaUnit('ha' as DimensionUnit)).toThrow(/ha/);
   });
 
   it('produces a valid area unit for every dimension unit', () => {
@@ -59,6 +67,10 @@ describe('applyAreaDerivation', () => {
     const result = applyAreaDerivation(PLOT, 'manual');
     expect(result.area).toBe(999);
     expect(result.defaultAreaUnits).toBe('km2');
+  });
+
+  it('returns the same object reference in manual mode so React state setters do not see a new value', () => {
+    expect(applyAreaDerivation(PLOT, 'manual')).toBe(PLOT);
   });
 
   it('does not mutate its argument', () => {
