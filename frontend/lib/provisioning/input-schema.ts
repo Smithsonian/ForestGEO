@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { estimateGridQuadratCount, MAX_GENERATED_QUADRATS } from './grid-generator';
 
-const DimensionUnitSchema = z.enum(unitSelectionOptions as [string, ...string[]]);
-const AreaUnitSchema = z.enum(areaSelectionOptions as [string, ...string[]]);
+const DimensionUnitSchema = z.enum(unitSelectionOptions);
+const AreaUnitSchema = z.enum(areaSelectionOptions);
 
 export const ProvisioningSiteSchema = z.object({
   siteName: z.string().min(1),

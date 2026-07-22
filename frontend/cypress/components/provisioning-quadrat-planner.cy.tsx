@@ -8,7 +8,7 @@ const PLOT_100x100: PlotValue = {
   plotName: 'Test Plot',
   dimensionX: 100,
   dimensionY: 100,
-  area: 1,
+  area: 10000,
   globalX: 0,
   globalY: 0,
   globalZ: 0,

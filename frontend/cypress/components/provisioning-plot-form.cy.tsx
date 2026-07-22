@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import PlotForm from '@/components/provisioning/PlotForm';
 import type { ProvisioningInput } from '@/lib/provisioning/types';
+import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 
 type PlotValue = ProvisioningInput['plot'];
 
@@ -122,6 +123,33 @@ describe('PlotForm', () => {
     for (const label of ['Default Dimension Units', 'Default Coordinate Units', 'Default Area Units', 'Default DBH Units', 'Default HOM Units']) {
       cy.get(`[aria-label="${label}"]`).should('have.prop', 'tagName', 'BUTTON');
     }
+  });
+
+  it('binds each unit dropdown to the correct option list (dimension units vs area units)', () => {
+    // MUI Joy's Select keeps every Listbox mounted (keepMounted: true, linked to its
+    // trigger via aria-controls) even while closed, so a bare [role="option"] query
+    // would collect every Select's options across the form at once. Scope the query
+    // to the Listbox owned by each specific trigger via aria-controls instead.
+    const onChange = cy.stub();
+    cy.mount(<PlotForm value={DEFAULT_VALUE} onChange={onChange} showErrors />);
+
+    const assertOptionsMatch = (triggerAriaLabel: string, expectedOptions: readonly string[]) => {
+      cy.get(`[aria-label="${triggerAriaLabel}"]`)
+        .invoke('attr', 'aria-controls')
+        .then(listboxId => {
+          cy.get(`#${listboxId}`)
+            .find('[role="option"]')
+            .then($options => Cypress._.map($options, el => el.textContent))
+            .should('deep.equal', [...expectedOptions]);
+        });
+    };
+
+    // Dimension Units must be bound to unitSelectionOptions, not areaSelectionOptions —
+    // wiring it to the wrong list would still render a Select and still pass a looser test.
+    assertOptionsMatch('Default Dimension Units', unitSelectionOptions);
+
+    // Area Units must be bound to areaSelectionOptions, not unitSelectionOptions.
+    assertOptionsMatch('Default Area Units', areaSelectionOptions);
   });
 
   it('emits updated defaultAreaUnits when a different option is selected from the Area Units dropdown', () => {

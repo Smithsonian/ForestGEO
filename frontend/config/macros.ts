@@ -98,8 +98,8 @@ export interface DropzoneProps {
 // These are in a separate file to avoid importing heavy dependencies in middleware
 export { bitToBoolean, booleanToBit } from './macros/bitconversion';
 
-export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
-export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
+export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'] as const;
+export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'] as const;
 
 export interface UnifiedValidityFlags {
   attributes: boolean;

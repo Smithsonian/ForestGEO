@@ -21,7 +21,7 @@ export function deriveArea(dimensionX: number, dimensionY: number): number {
  * explicit and lets an unknown unit fail loudly.
  */
 export function deriveAreaUnit(dimensionUnit: string): string {
-  const index = unitSelectionOptions.indexOf(dimensionUnit);
+  const index = (unitSelectionOptions as readonly string[]).indexOf(dimensionUnit);
   if (index === -1) {
     throw new Error(`Cannot derive an area unit for unknown dimension unit "${dimensionUnit}"`);
   }

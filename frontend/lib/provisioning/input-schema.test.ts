@@ -54,14 +54,23 @@ describe('ProvisioningPlotSchema unit vocabulary', () => {
     expect(result.success).toBe(false);
   });
 
+  it("rejects 'm', a dimension unit, in the area slot", () => {
+    const result = ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, defaultAreaUnits: 'm' });
+    expect(result.success).toBe(false);
+  });
+
   it('rejects a free-text dimension unit', () => {
     const result = ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, defaultDimensionUnits: 'metres' });
     expect(result.success).toBe(false);
   });
 
+  const DIMENSION_UNIT_FIELDS = ['defaultDimensionUnits', 'defaultCoordinateUnits', 'defaultDBHUnits', 'defaultHOMUnits'] as const;
+
   it('accepts every member of the enums it draws from', () => {
-    for (const unit of unitSelectionOptions) {
-      expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, defaultDimensionUnits: unit }).success).toBe(true);
+    for (const field of DIMENSION_UNIT_FIELDS) {
+      for (const unit of unitSelectionOptions) {
+        expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, [field]: unit }).success).toBe(true);
+      }
     }
     for (const unit of areaSelectionOptions) {
       expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, defaultAreaUnits: unit }).success).toBe(true);

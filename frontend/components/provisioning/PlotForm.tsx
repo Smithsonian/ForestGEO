@@ -26,6 +26,41 @@ function isPositiveNumber(n: number): boolean {
   return typeof n === 'number' && !isNaN(n) && n > 0;
 }
 
+interface UnitSelectProps {
+  id: string;
+  label: string;
+  ariaLabel: string;
+  value: string;
+  options: readonly string[];
+  onChange: (newValue: string) => void;
+  disabled?: boolean;
+  helperText?: string;
+}
+
+function UnitSelect({ id, label, ariaLabel, value, options, onChange, disabled, helperText }: UnitSelectProps) {
+  return (
+    <FormControl sx={{ flex: 1, minWidth: 160 }}>
+      <FormLabel htmlFor={id}>{label}</FormLabel>
+      <Select
+        id={id}
+        aria-label={ariaLabel}
+        value={value}
+        disabled={disabled}
+        onChange={(_event, newValue) => {
+          if (newValue) onChange(newValue);
+        }}
+      >
+        {options.map(unit => (
+          <Option key={unit} value={unit}>
+            {unit}
+          </Option>
+        ))}
+      </Select>
+      {helperText && <FormHelperText>{helperText}</FormHelperText>}
+    </FormControl>
+  );
+}
+
 export default function PlotForm({ value, onChange, showErrors = false }: PlotFormProps) {
   const [touched, setTouched] = useState<Partial<Record<keyof PlotValue, boolean>>>({});
 
@@ -206,100 +241,50 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
 
       <Typography level="title-sm">Default Units</Typography>
       <Stack direction="row" spacing={2} flexWrap="wrap">
-        <FormControl sx={{ flex: 1, minWidth: 160 }}>
-          <FormLabel htmlFor="default-dimension-units-input">Dimension Units</FormLabel>
-          <Select
-            id="default-dimension-units-input"
-            aria-label="Default Dimension Units"
-            value={value.defaultDimensionUnits}
-            onChange={(_event, newValue) => {
-              if (newValue) onChange({ ...value, defaultDimensionUnits: newValue });
-            }}
-            onBlur={() => markTouched('defaultDimensionUnits')}
-          >
-            {unitSelectionOptions.map(unit => (
-              <Option key={unit} value={unit}>
-                {unit}
-              </Option>
-            ))}
-          </Select>
-        </FormControl>
+        <UnitSelect
+          id="default-dimension-units-input"
+          label="Dimension Units"
+          ariaLabel="Default Dimension Units"
+          value={value.defaultDimensionUnits}
+          options={unitSelectionOptions}
+          onChange={newValue => onChange({ ...value, defaultDimensionUnits: newValue })}
+        />
 
-        <FormControl sx={{ flex: 1, minWidth: 160 }}>
-          <FormLabel htmlFor="default-coordinate-units-input">Coordinate Units</FormLabel>
-          <Select
-            id="default-coordinate-units-input"
-            aria-label="Default Coordinate Units"
-            value={value.defaultCoordinateUnits}
-            onChange={(_event, newValue) => {
-              if (newValue) onChange({ ...value, defaultCoordinateUnits: newValue });
-            }}
-            onBlur={() => markTouched('defaultCoordinateUnits')}
-          >
-            {unitSelectionOptions.map(unit => (
-              <Option key={unit} value={unit}>
-                {unit}
-              </Option>
-            ))}
-          </Select>
-        </FormControl>
+        <UnitSelect
+          id="default-coordinate-units-input"
+          label="Coordinate Units"
+          ariaLabel="Default Coordinate Units"
+          value={value.defaultCoordinateUnits}
+          options={unitSelectionOptions}
+          onChange={newValue => onChange({ ...value, defaultCoordinateUnits: newValue })}
+        />
 
-        <FormControl sx={{ flex: 1, minWidth: 160 }}>
-          <FormLabel htmlFor="default-area-units-input">Area Units</FormLabel>
-          <Select
-            id="default-area-units-input"
-            aria-label="Default Area Units"
-            value={value.defaultAreaUnits}
-            onChange={(_event, newValue) => {
-              if (newValue) onChange({ ...value, defaultAreaUnits: newValue });
-            }}
-            onBlur={() => markTouched('defaultAreaUnits')}
-          >
-            {areaSelectionOptions.map(unit => (
-              <Option key={unit} value={unit}>
-                {unit}
-              </Option>
-            ))}
-          </Select>
-        </FormControl>
+        <UnitSelect
+          id="default-area-units-input"
+          label="Area Units"
+          ariaLabel="Default Area Units"
+          value={value.defaultAreaUnits}
+          options={areaSelectionOptions}
+          onChange={newValue => onChange({ ...value, defaultAreaUnits: newValue })}
+        />
 
-        <FormControl sx={{ flex: 1, minWidth: 160 }}>
-          <FormLabel htmlFor="default-dbh-units-input">DBH Units</FormLabel>
-          <Select
-            id="default-dbh-units-input"
-            aria-label="Default DBH Units"
-            value={value.defaultDBHUnits}
-            onChange={(_event, newValue) => {
-              if (newValue) onChange({ ...value, defaultDBHUnits: newValue });
-            }}
-            onBlur={() => markTouched('defaultDBHUnits')}
-          >
-            {unitSelectionOptions.map(unit => (
-              <Option key={unit} value={unit}>
-                {unit}
-              </Option>
-            ))}
-          </Select>
-        </FormControl>
+        <UnitSelect
+          id="default-dbh-units-input"
+          label="DBH Units"
+          ariaLabel="Default DBH Units"
+          value={value.defaultDBHUnits}
+          options={unitSelectionOptions}
+          onChange={newValue => onChange({ ...value, defaultDBHUnits: newValue })}
+        />
 
-        <FormControl sx={{ flex: 1, minWidth: 160 }}>
-          <FormLabel htmlFor="default-hom-units-input">HOM Units</FormLabel>
-          <Select
-            id="default-hom-units-input"
-            aria-label="Default HOM Units"
-            value={value.defaultHOMUnits}
-            onChange={(_event, newValue) => {
-              if (newValue) onChange({ ...value, defaultHOMUnits: newValue });
-            }}
-            onBlur={() => markTouched('defaultHOMUnits')}
-          >
-            {unitSelectionOptions.map(unit => (
-              <Option key={unit} value={unit}>
-                {unit}
-              </Option>
-            ))}
-          </Select>
-        </FormControl>
+        <UnitSelect
+          id="default-hom-units-input"
+          label="HOM Units"
+          ariaLabel="Default HOM Units"
+          value={value.defaultHOMUnits}
+          options={unitSelectionOptions}
+          onChange={newValue => onChange({ ...value, defaultHOMUnits: newValue })}
+        />
       </Stack>
     </Stack>
   );
