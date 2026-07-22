@@ -221,26 +221,35 @@ async function upsertQuadratRows(
     // safeFormatQuery fills BOTH ?? with the schema; mysql2 format() with
     // [schema, schema] would put the second schema into `q.PlotID = ?` and
     // leave the second ?? to be misfilled by plotID at execute time.
+    // Only stems with IsActive = 1 block the wipe: soft-deleted stems were
+    // already discarded by the user, so cascade-removing their tombstone rows
+    // is part of the intended reset, not a loss of live census data.
     const blockingQuadratSQL = safeFormatQuery(
       schema,
-      `SELECT DISTINCT q.QuadratName
+      `SELECT q.QuadratID, q.QuadratName
        FROM ??.quadrats q
        WHERE q.PlotID = ?
          AND q.IsActive = 1
-         AND q.QuadratName IS NOT NULL
          AND EXISTS (
            SELECT 1
            FROM ??.stems s
            WHERE s.QuadratID = q.QuadratID
+             AND s.IsActive = 1
          )
        ORDER BY q.QuadratName`
     );
     const blockingQuadratRows = await connectionManager.executeQuery(blockingQuadratSQL, [plotID], transactionID);
-    const blockingQuadratNames = Array.isArray(blockingQuadratRows)
-      ? blockingQuadratRows.map((row: any) => String(row.QuadratName ?? '').trim()).filter(Boolean)
-      : [];
+    const blockingQuadrats = Array.isArray(blockingQuadratRows) ? blockingQuadratRows : [];
 
-    if (blockingQuadratNames.length > 0) {
+    // The refusal must key off the presence of blocking rows, not the name list:
+    // a quadrat whose name is NULL or whitespace-only still cascades its stems
+    // away on DELETE, so it must block even though it has no displayable name.
+    const blockingQuadratNames = blockingQuadrats.map((row: any) => {
+      const quadratName = String(row.QuadratName ?? '').trim();
+      return quadratName || `(unnamed QuadratID ${row.QuadratID})`;
+    });
+
+    if (blockingQuadrats.length > 0) {
       throw new Error(
         `Clean re-upload refused: active quadrat rows in plot ${plotID} are already referenced ` +
           `by stems for the following QuadratName value(s): ${formatBlockedCleanReuploadValues(blockingQuadratNames)}. ` +

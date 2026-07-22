@@ -828,7 +828,10 @@ describe('sqlpacketload fixed-data upload modes', () => {
   });
 
   it('refuses quadrat clean re-upload when active quadrats are already referenced by stems', async () => {
-    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ QuadratName: '1011' }, { QuadratName: '1012' }]);
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([
+      { QuadratID: 11, QuadratName: '1011' },
+      { QuadratID: 12, QuadratName: '1012' }
+    ]);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -847,7 +850,39 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(body.error).toContain('1012');
     expect(body.error).toContain('stems and downstream measurements');
     expect(body.error).toContain('Use Revisions Upload instead');
-    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('FROM `forestgeo_testing`.stems');
+    const guardSQL = String(mockConnectionManager.executeQuery.mock.calls[0]?.[0]);
+    expect(guardSQL).toContain('FROM `forestgeo_testing`.stems');
+    // Soft-deleted stems must not block the wipe; only live stems count.
+    expect(guardSQL).toContain('s.IsActive = 1');
+    // NULL-named quadrats still cascade stems away, so the guard must not
+    // exclude them at the SQL level.
+    expect(guardSQL).not.toContain('QuadratName IS NOT NULL');
+    const deleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
+      String(call[0]).includes('DELETE FROM `forestgeo_testing`.quadrats')
+    );
+    expect(deleteCalls.length).toBe(0);
+  });
+
+  it('refuses quadrat clean re-upload even when the blocking quadrat has a whitespace-only name', async () => {
+    // Regression: the guard previously trimmed and filtered out blank names
+    // before deciding whether to refuse, so a stem-referenced quadrat named
+    // ' ' slipped past the check and the DELETE cascade destroyed its stems.
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ QuadratID: 42, QuadratName: '   ' }]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: '1011', startx: 0, starty: 0, dimx: 20, dimy: 20 }
+        },
+        { uploadMode: 'clean_reupload' }
+      )
+    );
+
+    expect(res?.status).toBe(503);
+    const body = await res?.json();
+    expect(body.error).toContain('Clean re-upload refused');
+    expect(body.error).toContain('(unnamed QuadratID 42)');
     const deleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
       String(call[0]).includes('DELETE FROM `forestgeo_testing`.quadrats')
     );
