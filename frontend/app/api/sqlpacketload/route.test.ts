@@ -85,19 +85,14 @@ vi.mock('@/ailogger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }));
 
-vi.mock('mysql2/promise', () => ({
-  format: vi.fn((sql: string, params: any[]) => {
-    let result = sql;
-    params.forEach(param => {
-      if (result.includes('??')) {
-        result = result.replace('??', String(param));
-      } else if (result.includes('?')) {
-        result = result.replace('?', String(param));
-      }
-    });
-    return result;
-  })
-}));
+vi.mock('mysql2/promise', async importOriginal => {
+  const actual = (await importOriginal()) as typeof import('mysql2/promise');
+  // Use the REAL format(): it fills ?? and ? strictly left-to-right, each
+  // placeholder consuming the next param regardless of type. An earlier
+  // hand-rolled mock filled all ?? before any ?, which masked a production
+  // placeholder-misfill bug in queries mixing ?? and ?. Do not re-fake this.
+  return { format: actual.format };
+});
 
 /** Number of columns in the temporarymeasurements INSERT (FileID through PublishedStemID) */
 const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 18;
@@ -244,7 +239,7 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(body.insertedCount).toBe(1);
 
     const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
+      String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
     );
     expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
   });
@@ -293,7 +288,7 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(body.insertedCount).toBe(1);
 
     const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
+      String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
     );
     expect(insertCall).toBeDefined();
     expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
@@ -356,7 +351,7 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(body.insertedCount).toBe(1001);
 
     const insertCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
-      String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
+      String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
     );
     expect(insertCalls).toHaveLength(2);
     expect(insertCalls[0][1]).toHaveLength(TEMP_MEASUREMENT_INSERT_BATCH_SIZE * TEMP_MEASUREMENT_COLUMNS_PER_ROW);
@@ -381,7 +376,7 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(res.status).toBe(200);
 
     const cleanupCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE FROM forestgeo_testing.temporarymeasurements')
+      String(call[0]).includes('DELETE FROM `forestgeo_testing`.temporarymeasurements')
     );
     expect(cleanupCall).toBeDefined();
     expect(cleanupCall[1]).toEqual([TEST_FILE_NAME, TEST_PLOT_ID, TEST_CENSUS_ID, TEST_BATCH_ID]);
@@ -426,21 +421,21 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('tx-test');
 
     const findOldBatchesCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('SELECT batchID FROM forestgeo_testing.uploadmetrics')
+      String(call[0]).includes('SELECT batchID FROM `forestgeo_testing`.uploadmetrics')
     );
     expect(findOldBatchesCall).toBeDefined();
     expect(String(findOldBatchesCall?.[0])).toContain('WHERE plotID = ? AND censusID = ? AND batchID <> ?');
     expect(String(findOldBatchesCall?.[0])).not.toContain('fileID = ?');
 
     const deleteValidationErrorsCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE mel FROM forestgeo_testing.measurement_error_log')
+      String(call[0]).includes('DELETE mel FROM `forestgeo_testing`.measurement_error_log')
     );
     expect(deleteValidationErrorsCall).toBeDefined();
     expect(String(deleteValidationErrorsCall?.[0])).toContain('WHERE cm.CensusID = ? AND cm.UploadBatchID IN');
     expect(String(deleteValidationErrorsCall?.[0])).not.toContain('cm.UploadFileID');
 
     const deleteCmCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE FROM forestgeo_testing.coremeasurements')
+      String(call[0]).includes('DELETE FROM `forestgeo_testing`.coremeasurements')
     );
     expect(deleteCmCall).toBeDefined();
     expect(String(deleteCmCall?.[0])).toContain('WHERE CensusID = ? AND UploadBatchID IN');
@@ -448,7 +443,7 @@ describe('sqlpacketload measurement scope validation', () => {
 
     const deleteFailedCall = mockConnectionManager.executeQuery.mock.calls.find(
       (call: any[]) =>
-        String(call[0]).includes('DELETE FROM forestgeo_testing.failedmeasurements') &&
+        String(call[0]).includes('DELETE FROM `forestgeo_testing`.failedmeasurements') &&
         String(call[0]).includes('WHERE CensusID = ?') &&
         String(call[0]).includes('BatchID IN')
     );
@@ -476,12 +471,12 @@ describe('sqlpacketload measurement scope validation', () => {
     });
 
     const cleanupCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE FROM forestgeo_testing.coremeasurements')
+      String(call[0]).includes('DELETE FROM `forestgeo_testing`.coremeasurements')
     );
     expect(cleanupCall).toBeUndefined();
 
     const staleBatchCleanupCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE FROM forestgeo_testing.temporarymeasurements')
+      String(call[0]).includes('DELETE FROM `forestgeo_testing`.temporarymeasurements')
     );
     expect(staleBatchCleanupCall).toBeDefined();
   });
@@ -517,7 +512,7 @@ describe('sqlpacketload measurement scope validation', () => {
     await expect(res.json()).resolves.toMatchObject({ insertedCount: 1 });
 
     const legacyDeleteCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE e FROM forestgeo_testing.cmverrors')
+      String(call[0]).includes('DELETE e FROM `forestgeo_testing`.cmverrors')
     );
     expect(legacyDeleteCall).toBeDefined();
   });
@@ -585,7 +580,7 @@ describe('sqlpacketload measurement scope validation', () => {
 
     const alertCall = mockConnectionManager.executeQuery.mock.calls.find(
       (call: any[]) =>
-        String(call[0]).includes('INSERT INTO forestgeo_testing.uploadintegrityalerts') &&
+        String(call[0]).includes('INSERT INTO `forestgeo_testing`.uploadintegrityalerts') &&
         String(call[0]).includes('FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS')
     );
 
@@ -709,11 +704,13 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
     // Verify the DELETE happened before the INSERT
     const deleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
-      String(call[0]).includes('DELETE FROM forestgeo_testing.censusactivepersonnel')
+      String(call[0]).includes('DELETE FROM `forestgeo_testing`.censusactivepersonnel')
     );
     expect(deleteCalls.length).toBeGreaterThan(0);
 
-    expect(mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('INSERT INTO forestgeo_testing.personnel'))).toBe(true);
+    expect(mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('INSERT INTO `forestgeo_testing`.personnel'))).toBe(
+      true
+    );
   });
 
   it('normalizes camelCase personnel roles before upserting', async () => {
@@ -797,7 +794,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // both trees and specieslimits in the dependency SQL so this guard covers every
     // current ON DELETE CASCADE path hanging off species.
     const deleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
-      String(call[0]).includes('DELETE FROM forestgeo_testing.species')
+      String(call[0]).includes('DELETE FROM `forestgeo_testing`.species')
     );
     expect(deleteCalls.length).toBe(0);
     expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('specieslimits');
@@ -826,6 +823,13 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
     expect(res?.status).toBe(200);
     expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('specieslimits');
+    // Positive anchor for the refusal test's zero-DELETE filter above: the wipe
+    // must run here with exactly this SQL text, so a quoting change that would
+    // make the negative filter vacuous fails loudly instead.
+    const speciesDeleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
+      String(call[0]).includes('DELETE FROM `forestgeo_testing`.species')
+    );
+    expect(speciesDeleteCalls.length).toBe(1);
   });
 
   it('refuses quadrat clean re-upload when active quadrats are already referenced by stems', async () => {
@@ -850,7 +854,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(body.error).toContain('Use Revisions Upload instead');
     expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('FROM `forestgeo_testing`.stems');
     const deleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
-      String(call[0]).includes('DELETE FROM forestgeo_testing.quadrats')
+      String(call[0]).includes('DELETE FROM `forestgeo_testing`.quadrats')
     );
     expect(deleteCalls.length).toBe(0);
   });
@@ -876,6 +880,13 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
     expect(res?.status).toBe(200);
     expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('FROM `forestgeo_testing`.stems');
+    // Positive anchor for the refusal test's zero-DELETE filter above: the wipe
+    // must run here with exactly this SQL text, so a quoting change that would
+    // make the negative filter vacuous fails loudly instead.
+    const quadratDeleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
+      String(call[0]).includes('DELETE FROM `forestgeo_testing`.quadrats')
+    );
+    expect(quadratDeleteCalls.length).toBe(1);
   });
 
   it('allows a revisions upload to add a new quadrat to a real layout', async () => {
@@ -908,8 +919,8 @@ describe('sqlpacketload fixed-data upload modes', () => {
       updatedCount: 0,
       transactionCompleted: true
     });
-    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('SELECT QuadratName FROM forestgeo_testing.quadrats');
-    expect(String(mockConnectionManager.executeQuery.mock.calls[2]?.[0])).toContain('INSERT INTO forestgeo_testing.quadrats');
+    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('SELECT QuadratName FROM `forestgeo_testing`.quadrats');
+    expect(String(mockConnectionManager.executeQuery.mock.calls[2]?.[0])).toContain('INSERT INTO `forestgeo_testing`.quadrats');
   });
 
   it('rejects revisions when multiple active species rows already exist for one SpeciesCode', async () => {
@@ -1117,7 +1128,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     expect(body.insertedCount).toBe(1);
 
     const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
+      String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
     );
     expect(insertCall).toBeDefined();
     // The INSERT params must carry the canonical lx value (12.5) sourced from MyX, never the raw header.
@@ -1194,7 +1205,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     expect(body.failingRows[0].failureReason).toMatch(/too many columns/i);
 
     const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
+      String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
     );
     expect(insertCall).toBeDefined();
     // The leftover cell and any normalized __parsed_extra key must never reach the insert params.
@@ -1252,7 +1263,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     expect(body.failingRows).toEqual([]);
 
     const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
+      String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
     );
     expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
   });
