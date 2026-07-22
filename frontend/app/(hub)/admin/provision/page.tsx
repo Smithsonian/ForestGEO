@@ -8,9 +8,8 @@ import SiteForm from '@/components/provisioning/SiteForm';
 import PlotForm from '@/components/provisioning/PlotForm';
 import QuadratPlanner from '@/components/provisioning/QuadratPlanner';
 import Review from '@/components/provisioning/Review';
-import { generateGrid } from '@/lib/provisioning/grid-generator';
-import { ProvisioningPlotSchema, ProvisioningQuadratsRequestSchema, ProvisioningSiteSchema } from '@/lib/provisioning/input-schema';
-import { findFirstOverlap } from '@/lib/provisioning/geometry';
+import { ProvisioningPlotSchema, ProvisioningSiteSchema } from '@/lib/provisioning/input-schema';
+import { quadratLayoutIsValid } from '@/lib/provisioning/quadrat-layout-gate';
 import type { ProvisioningPlotInput, ProvisioningRequestInput } from '@/lib/provisioning/types';
 import { applyAreaDerivation, resolvePlotAreaChange, type AreaMode } from '@/lib/provisioning/area';
 
@@ -70,35 +69,6 @@ function deriveCanAdvance(step: number, input: ProvisioningRequestInput): boolea
     default:
       return false;
   }
-}
-
-function quadratLayoutIsValid(input: ProvisioningRequestInput): boolean {
-  if (!ProvisioningQuadratsRequestSchema.safeParse(input.quadrats).success) return false;
-
-  if (input.quadrats.mode === 'grid') {
-    try {
-      generateGrid(input.plot, input.quadrats);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  if (input.quadrats.mode === 'none') {
-    return true;
-  }
-
-  const rows = input.quadrats.rows;
-  if (rows.length === 0) return false;
-  for (const row of rows) {
-    if (row.startX < 0 || row.startY < 0) return false;
-    if (row.startX + row.dimensionX > input.plot.dimensionX) return false;
-    if (row.startY + row.dimensionY > input.plot.dimensionY) return false;
-  }
-
-  if (findFirstOverlap(rows)) return false;
-
-  return true;
 }
 
 export default function ProvisionWizardPage() {

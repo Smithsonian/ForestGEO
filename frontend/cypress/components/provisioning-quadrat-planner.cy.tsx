@@ -72,6 +72,19 @@ function clickRadioByValue(value: string) {
   cy.get(`[type="radio"][value="${value}"]`).click({ force: true });
 }
 
+// MUI Joy's Select keeps every Listbox mounted (keepMounted: true, linked to its trigger
+// via aria-controls) even while closed, so a bare [role="option"] query would collect
+// every Select's options across the form at once. Scope the query to the Listbox owned
+// by the reference-corner trigger via aria-controls, matching provisioning-plot-form.cy.tsx.
+function selectReferenceCorner(optionLabel: string) {
+  cy.get('[aria-label="Coordinate Reference Corner"]')
+    .invoke('attr', 'aria-controls')
+    .then(listboxId => {
+      cy.get('[aria-label="Coordinate Reference Corner"]').click();
+      cy.get(`#${listboxId}`).find('[role="option"]').contains(optionLabel).click();
+    });
+}
+
 describe('QuadratPlanner', () => {
   describe('Grid mode', () => {
     it('shows live preview for a 100x100 plot with 20x20 quadrats (5x5 = 25 quadrats)', () => {
@@ -309,6 +322,60 @@ describe('QuadratPlanner', () => {
         const lastCall = calls[calls.length - 1];
         expect(lastCall.args[0].mode).to.equal('grid');
       });
+    });
+  });
+
+  describe('Coordinate reference corner', () => {
+    it('defaults the selector to south-west', () => {
+      const onChangeSpy = cy.stub().as('onChange');
+      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
+
+      cy.get('[aria-label="Coordinate Reference Corner"]').should('contain.text', 'South-west (lower-left)');
+    });
+
+    it('shows bounds errors for the north-east-labeled grid while the selector is still on south-west', () => {
+      const onChangeSpy = cy.stub().as('onChange');
+      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
+
+      uploadCsvFixture('quadrats-northeast-grid.csv');
+
+      // Q0005 is startX=100 in the file: read as south-west it extends to x=120, past dimensionX=100.
+      cy.contains('Quadrat "Q0005" extends past plot dimensionX').should('be.visible');
+      cy.get('[aria-label="CSV load success"]').should('not.exist');
+    });
+
+    it('clears those errors when the selector is switched to north-east, without re-uploading', () => {
+      const onChangeSpy = cy.stub().as('onChange');
+      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
+
+      uploadCsvFixture('quadrats-northeast-grid.csv');
+      cy.contains('Quadrat "Q0005" extends past plot dimensionX').should('be.visible');
+
+      selectReferenceCorner('North-east (upper-right)');
+
+      cy.contains('Quadrat "Q0005" extends past plot dimensionX').should('not.exist');
+      cy.get('[aria-label="CSV load success"]').should('be.visible');
+      cy.contains('Loaded 25 quadrats (no errors), read as North-east (upper-right)').should('be.visible');
+
+      cy.get('@onChange').then((stub: any) => {
+        const calls = stub.getCalls();
+        const lastCall = calls[calls.length - 1];
+        expect(lastCall.args[0]).to.deep.include({ mode: 'csv', coordinateReferenceCorner: 'NE' });
+        // Re-deriving from the existing rows, not a re-upload: the row count is unchanged.
+        expect(lastCall.args[0].rows).to.have.length(25);
+      });
+    });
+
+    it('still rejects a genuinely out-of-bounds file under north-east — the corner is not an escape hatch', () => {
+      const onChangeSpy = cy.stub().as('onChange');
+      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
+
+      selectReferenceCorner('North-east (upper-right)');
+      uploadCsvFixture('quadrats-out-of-bounds.csv');
+
+      // A,90,0,20,20 read as north-east normalizes to startX=70, startY=-20 — still invalid.
+      cy.get('[aria-label="CSV load success"]').should('not.exist');
+      cy.contains(/validation (error|errors) found/).should('be.visible');
     });
   });
 });

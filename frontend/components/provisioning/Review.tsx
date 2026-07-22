@@ -3,6 +3,7 @@
 import React from 'react';
 import { Card, Divider, Stack, Typography } from '@mui/joy';
 import type { ProvisioningRequestInput } from '@/lib/provisioning/types';
+import { REFERENCE_CORNER_OPTIONS } from '@/lib/provisioning/coordinate-reference-corner';
 
 interface ReviewProps {
   value: ProvisioningRequestInput;
@@ -15,7 +16,8 @@ function buildQuadratsSummary(quadrats: ProvisioningRequestInput['quadrats']): s
   if (quadrats.mode === 'none') {
     return 'None: no quadrats created now — upload them later from the Quadrats page';
   }
-  return `CSV mode: ${quadrats.rows.length} ${quadrats.rows.length === 1 ? 'row' : 'rows'}`;
+  const cornerLabel = REFERENCE_CORNER_OPTIONS.find(option => option.value === quadrats.coordinateReferenceCorner)?.label ?? quadrats.coordinateReferenceCorner;
+  return `CSV mode: ${quadrats.rows.length} ${quadrats.rows.length === 1 ? 'row' : 'rows'}, coordinates identify the ${cornerLabel} corner`;
 }
 
 export default function Review({ value }: ReviewProps) {
