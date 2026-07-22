@@ -50,11 +50,6 @@ vi.mock('@/auth', () => ({
   auth: authMock
 }));
 
-vi.mock('@/lib/db/sqlsecurity', () => ({
-  isValidSchema: vi.fn(() => true),
-  safeFormatQuery: vi.fn((schema: string, query: string) => query.replace(/\?\?/g, `\`${schema}\``))
-}));
-
 vi.mock('@/config/utils', async importOriginal => {
   const actual = (await importOriginal()) as object;
   return {
