@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { FormControl, FormHelperText, FormLabel, Input, Option, Select, Stack, Textarea, Typography } from '@mui/joy';
+import { Button, FormControl, FormHelperText, FormLabel, Input, Option, Select, Stack, Textarea, Typography } from '@mui/joy';
 import type { ProvisioningInput } from '@/lib/provisioning/types';
+import type { AreaMode } from '@/lib/provisioning/area';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 
 const PLOT_SHAPE_OPTIONS: Array<{ value: ProvisioningInput['plot']['plotShape']; label: string }> = [
@@ -17,7 +18,11 @@ type NumericPlotField = 'dimensionX' | 'dimensionY' | 'area' | 'globalX' | 'glob
 
 interface PlotFormProps {
   value: PlotValue;
-  onChange: (next: PlotValue) => void;
+  /** requestedMode makes a mode transition and value change one semantic event. */
+  onChange: (next: PlotValue, requestedMode?: AreaMode) => void;
+  /** Owned by the wizard so it survives step navigation. */
+  areaMode: AreaMode;
+  onAreaModeChange: (next: AreaMode) => void;
   /** When true, show validation errors even on untouched fields */
   showErrors?: boolean;
 }
@@ -26,18 +31,18 @@ function isPositiveNumber(n: number): boolean {
   return typeof n === 'number' && !isNaN(n) && n > 0;
 }
 
-interface UnitSelectProps {
+interface UnitSelectProps<T extends string> {
   id: string;
   label: string;
   ariaLabel: string;
-  value: string;
-  options: readonly string[];
-  onChange: (newValue: string) => void;
+  value: T;
+  options: readonly T[];
+  onChange: (newValue: T) => void;
   disabled?: boolean;
   helperText?: string;
 }
 
-function UnitSelect({ id, label, ariaLabel, value, options, onChange, disabled, helperText }: UnitSelectProps) {
+function UnitSelect<T extends string>({ id, label, ariaLabel, value, options, onChange, disabled, helperText }: UnitSelectProps<T>) {
   return (
     <FormControl sx={{ flex: 1, minWidth: 160 }}>
       <FormLabel htmlFor={id}>{label}</FormLabel>
@@ -61,7 +66,7 @@ function UnitSelect({ id, label, ariaLabel, value, options, onChange, disabled, 
   );
 }
 
-export default function PlotForm({ value, onChange, showErrors = false }: PlotFormProps) {
+export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, showErrors = false }: PlotFormProps) {
   const [touched, setTouched] = useState<Partial<Record<keyof PlotValue, boolean>>>({});
 
   // Local string-typed mirror of numeric fields so an empty input stays empty
@@ -76,14 +81,21 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
     globalZ: String(value.globalZ ?? '')
   }));
 
-  function handleNumericChange(field: NumericPlotField, raw: string) {
+  // numericDrafts is seeded once from initial props, so a derived area would
+  // never appear in the box without this: keep the draft mirror in sync while derived.
+  React.useEffect(() => {
+    if (areaMode !== 'derived') return;
+    setNumericDrafts(prev => (prev.area === String(value.area) ? prev : { ...prev, area: String(value.area) }));
+  }, [areaMode, value.area]);
+
+  function handleNumericChange(field: NumericPlotField, raw: string, requestedMode?: AreaMode) {
     setNumericDrafts(prev => ({ ...prev, [field]: raw }));
     if (raw === '' || raw === '-') {
       return;
     }
     const n = Number(raw);
     if (Number.isFinite(n)) {
-      onChange({ ...value, [field]: n });
+      onChange({ ...value, [field]: n }, requestedMode);
     }
   }
 
@@ -142,7 +154,7 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
 
       <Stack direction="row" spacing={2}>
         <FormControl sx={{ flex: 1 }} error={shouldShowError('dimensionX') && dimensionXInvalid}>
-          <FormLabel htmlFor="dimension-x-input">Dimension X (m)</FormLabel>
+          <FormLabel htmlFor="dimension-x-input">Dimension X ({value.defaultDimensionUnits})</FormLabel>
           <Input
             id="dimension-x-input"
             aria-label="Dimension X"
@@ -156,7 +168,7 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
         </FormControl>
 
         <FormControl sx={{ flex: 1 }} error={shouldShowError('dimensionY') && dimensionYInvalid}>
-          <FormLabel htmlFor="dimension-y-input">Dimension Y (m)</FormLabel>
+          <FormLabel htmlFor="dimension-y-input">Dimension Y ({value.defaultDimensionUnits})</FormLabel>
           <Input
             id="dimension-y-input"
             aria-label="Dimension Y"
@@ -176,10 +188,25 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
             aria-label="Area"
             type="number"
             value={numericDrafts.area}
-            onChange={e => handleNumericChange('area', e.target.value)}
+            onChange={e => handleNumericChange('area', e.target.value, 'manual')}
             onBlur={() => markTouched('area')}
             slotProps={{ input: { min: 0, step: 0.01 } }}
           />
+          {areaMode === 'derived' ? (
+            <FormHelperText>Auto-calculated from the plot dimensions. Type here to enter it yourself.</FormHelperText>
+          ) : (
+            <FormHelperText>
+              <Button
+                variant="plain"
+                size="sm"
+                sx={{ minHeight: 'auto', p: 0, fontSize: 'inherit' }}
+                aria-label="Use calculated area"
+                onClick={() => onAreaModeChange('derived')}
+              >
+                Use calculated value
+              </Button>
+            </FormHelperText>
+          )}
           {shouldShowError('area') && areaInvalid && <FormHelperText>Must be a positive number.</FormHelperText>}
         </FormControl>
       </Stack>
@@ -266,6 +293,8 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
           value={value.defaultAreaUnits}
           options={areaSelectionOptions}
           onChange={newValue => onChange({ ...value, defaultAreaUnits: newValue })}
+          disabled={areaMode === 'derived'}
+          helperText={areaMode === 'derived' ? 'Follows the dimension unit while the area is auto-calculated.' : undefined}
         />
 
         <UnitSelect

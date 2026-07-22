@@ -12,6 +12,7 @@ import { generateGrid } from '@/lib/provisioning/grid-generator';
 import { ProvisioningPlotSchema, ProvisioningQuadratsSchema, ProvisioningSiteSchema } from '@/lib/provisioning/input-schema';
 import { findFirstOverlap } from '@/lib/provisioning/geometry';
 import type { ProvisioningInput } from '@/lib/provisioning/types';
+import { applyAreaDerivation, type AreaMode } from '@/lib/provisioning/area';
 
 const STEPS = ['Site', 'Plot', 'Quadrats', 'Review'] as const;
 
@@ -106,6 +107,7 @@ export default function ProvisionWizardPage() {
 
   const [step, setStep] = useState(0);
   const [input, setInput] = useState<ProvisioningInput>(DEFAULT_INPUT);
+  const [areaMode, setAreaMode] = useState<AreaMode>('derived');
   const [showStepErrors, setShowStepErrors] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -153,6 +155,21 @@ export default function ProvisionWizardPage() {
     setStep(prev => prev - 1);
   }
 
+  function handlePlotChange(plot: ProvisioningInput['plot'], requestedMode?: AreaMode) {
+    const effectiveMode = requestedMode ?? areaMode;
+    if (requestedMode && requestedMode !== areaMode) {
+      setAreaMode(requestedMode);
+    }
+    setInput(prev => ({ ...prev, plot: applyAreaDerivation(plot, effectiveMode) }));
+  }
+
+  function handleAreaModeChange(next: AreaMode) {
+    setAreaMode(next);
+    if (next === 'derived') {
+      setInput(prev => ({ ...prev, plot: applyAreaDerivation(prev.plot, 'derived') }));
+    }
+  }
+
   async function handleSubmit() {
     setSubmitting(true);
     setSubmitError(null);
@@ -196,7 +213,9 @@ export default function ProvisionWizardPage() {
       case STEP_SITE_INDEX:
         return <SiteForm value={input.site} onChange={site => setInput(prev => ({ ...prev, site }))} showErrors={showStepErrors} />;
       case STEP_PLOT_INDEX:
-        return <PlotForm value={input.plot} onChange={plot => setInput(prev => ({ ...prev, plot }))} showErrors={showStepErrors} />;
+        return (
+          <PlotForm value={input.plot} areaMode={areaMode} onAreaModeChange={handleAreaModeChange} onChange={handlePlotChange} showErrors={showStepErrors} />
+        );
       case STEP_QUADRATS_INDEX:
         return (
           <QuadratPlanner

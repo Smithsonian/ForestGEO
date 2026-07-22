@@ -1,4 +1,5 @@
 import type { Pool } from 'mysql2/promise';
+import type { AreaUnit, DimensionUnit } from './area';
 
 export type RunStatus = 'running' | 'completed' | 'failed' | 'aborted';
 export type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
@@ -69,11 +70,11 @@ export interface ProvisioningInput {
     globalZ: number;
     plotShape: 'square' | 'rectangular' | 'irregular';
     description: string;
-    defaultDimensionUnits: string;
-    defaultCoordinateUnits: string;
-    defaultAreaUnits: string;
-    defaultDBHUnits: string;
-    defaultHOMUnits: string;
+    defaultDimensionUnits: DimensionUnit;
+    defaultCoordinateUnits: DimensionUnit;
+    defaultAreaUnits: AreaUnit;
+    defaultDBHUnits: DimensionUnit;
+    defaultHOMUnits: DimensionUnit;
   };
   quadrats: QuadratConfig;
 }

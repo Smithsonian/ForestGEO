@@ -78,7 +78,7 @@ function GridModePanel({
     <Stack spacing={2}>
       <Stack direction="row" spacing={2}>
         <FormControl sx={{ flex: 1 }}>
-          <FormLabel htmlFor="quadrat-size-x-input">Quadrat Size X (m)</FormLabel>
+          <FormLabel htmlFor="quadrat-size-x-input">Quadrat Size X ({plot.defaultDimensionUnits})</FormLabel>
           <Input
             id="quadrat-size-x-input"
             aria-label="Quadrat Size X"
@@ -90,7 +90,7 @@ function GridModePanel({
         </FormControl>
 
         <FormControl sx={{ flex: 1 }}>
-          <FormLabel htmlFor="quadrat-size-y-input">Quadrat Size Y (m)</FormLabel>
+          <FormLabel htmlFor="quadrat-size-y-input">Quadrat Size Y ({plot.defaultDimensionUnits})</FormLabel>
           <Input
             id="quadrat-size-y-input"
             aria-label="Quadrat Size Y"
