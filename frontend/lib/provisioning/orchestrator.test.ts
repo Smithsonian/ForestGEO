@@ -750,6 +750,20 @@ describe('orchestrator', () => {
   });
 
   describe('runs whose stored payload no longer validates (blast-radius of the load-boundary check)', () => {
+    it('a run stored with a recognized legacy free-text unit loads with a valid, upgraded input (retry precondition passes)', async () => {
+      // Written by the free-text-era PlotForm: 'ha' was legal at write time. The load
+      // boundary must upgrade it rather than null the input, or the run is un-retryable.
+      const schemaName = `forestgeo_orch_legacy_unit_${process.pid}`;
+      const input = makeInput(schemaName);
+      const legacyPayload = { ...input, plot: { ...input.plot, defaultAreaUnits: 'ha' } };
+      const runId = await createManualRunWithRawPayload(pool, schemaName, 'failed', legacyPayload);
+
+      const result = await getRunWithSteps(runId, pool);
+
+      expect(result!.run.input, 'the legacy payload must load as valid input, not null').not.toBeNull();
+      expect(result!.run.input!.plot.defaultAreaUnits).toBe('hm2');
+    });
+
     it('retryRun rejects rather than re-dispatching a run whose payload no longer validates', async () => {
       const schemaName = `forestgeo_orch_malformed_retry_${process.pid}`;
       const runId = await createManualRunWithRawPayload(pool, schemaName, 'failed', makeMalformedRunPayload(schemaName));

@@ -440,4 +440,202 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
     expect(Number(persisted!.StartX)).toBe(50);
     expect(Number(persisted!.StartY)).toBe(50);
   });
+
+  // =========================================================================
+  // Legacy database state tolerance -- the write boundary against a DIRTY database.
+  //
+  // Production schemas contain rows written before this boundary existed: quadrats with
+  // NULL geometry or NULL names (all geometry columns are nullable), plots without recorded
+  // dimensions, and layouts with pre-existing overlaps. These tests seed those exact states
+  // via raw SQL -- the same shape the old upload code produced -- and prove the boundary
+  // tolerates what it must (no plot lockouts) while still blocking what it should.
+  // =========================================================================
+
+  it('LEGACY: a revision elsewhere in the plot succeeds despite an existing quadrat with NULL stored geometry', async () => {
+    await connection.query(
+      `INSERT INTO quadrats (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape)
+       VALUES (?, 'LEGACY-NULL', NULL, NULL, NULL, NULL, NULL, 'square')`,
+      [plotID]
+    );
+
+    const unrelatedRow = { quadrat: 'FARAWAY01', startx: '300', starty: '300', dimx: '20', dimy: '20' };
+
+    const res = (await POST(
+      buildQuadratUploadRequest(
+        baseRequestBody({
+          uploadMode: UPLOAD_MODE_REVISIONS,
+          fileRowSet: { 'row-1': unrelatedRow }
+        })
+      )
+    ))!;
+
+    expect(res.status, 'a malformed legacy row the upload never names must not block the plot').toBe(HTTP_OK);
+    expect(await findQuadratByName(connection, plotID, 'FARAWAY01'), 'the unrelated new row must have been written').not.toBeNull();
+
+    const legacyRow = await findQuadratByName(connection, plotID, 'LEGACY-NULL');
+    expect(legacyRow, 'the legacy row must be untouched').not.toBeNull();
+    expect(legacyRow!.StartX, 'the legacy row geometry must still be NULL (not silently repaired)').toBeNull();
+  });
+
+  it('LEGACY: a revision can repair the very quadrat whose stored geometry is NULL', async () => {
+    await connection.query(
+      `INSERT INTO quadrats (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape)
+       VALUES (?, 'LEGACY-REPAIR', NULL, NULL, NULL, NULL, NULL, 'square')`,
+      [plotID]
+    );
+    const before = await findQuadratByName(connection, plotID, 'LEGACY-REPAIR');
+    expect(before!.StartX, 'precondition: seeded geometry must be NULL').toBeNull();
+
+    const REPAIRED_START = 300;
+    const repairRow = { quadrat: 'LEGACY-REPAIR', startx: String(REPAIRED_START), starty: String(REPAIRED_START), dimx: '20', dimy: '20' };
+
+    const res = (await POST(
+      buildQuadratUploadRequest(
+        baseRequestBody({
+          uploadMode: UPLOAD_MODE_REVISIONS,
+          fileRowSet: { 'row-1': repairRow }
+        })
+      )
+    ))!;
+
+    expect(res.status, 'naming the malformed row must repair it, not reject the upload').toBe(HTTP_OK);
+    await expect(res.json()).resolves.toMatchObject({ insertedCount: 0, updatedCount: 1 });
+
+    const after = await findQuadratByName(connection, plotID, 'LEGACY-REPAIR');
+    expect(after!.QuadratID, 'the repair must update the existing row, not insert a duplicate').toBe(before!.QuadratID);
+    expect(Number(after!.StartX)).toBe(REPAIRED_START);
+    expect(Number(after!.StartY)).toBe(REPAIRED_START);
+  });
+
+  it('LEGACY: an unnamed (NULL QuadratName) quadrat still blocks an overlapping revision', async () => {
+    const UNNAMED_START = 300;
+    await connection.query(
+      `INSERT INTO quadrats (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape)
+       VALUES (?, NULL, ?, ?, 20, 20, 400, 'square')`,
+      [plotID, UNNAMED_START, UNNAMED_START]
+    );
+
+    const overlappingRow = { quadrat: 'OVERUNNAMED', startx: String(UNNAMED_START + 10), starty: String(UNNAMED_START + 10), dimx: '20', dimy: '20' };
+
+    const res = (await POST(
+      buildQuadratUploadRequest(
+        baseRequestBody({
+          uploadMode: UPLOAD_MODE_REVISIONS,
+          fileRowSet: { 'row-1': overlappingRow }
+        })
+      )
+    ))!;
+
+    expect(res.status, 'an unnamed quadrat occupies real area and must participate in the overlap check').toBe(HTTP_BAD_REQUEST);
+    const body = await res.json();
+    expect(body.code).toBe(INVALID_QUADRAT_GEOMETRY_CODE);
+    expect(body.error).toMatch(/unnamed QuadratID/i);
+    expect(await findQuadratByName(connection, plotID, 'OVERUNNAMED')).toBeNull();
+  });
+
+  it('LEGACY: two pre-existing overlapping quadrats do not block an unrelated revision', async () => {
+    const PREEXISTING_START = 200;
+    await connection.query(
+      `INSERT INTO quadrats (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape)
+       VALUES (?, 'PREOVL-A', ?, ?, 20, 20, 400, 'square'), (?, 'PREOVL-B', ?, ?, 20, 20, 400, 'square')`,
+      [plotID, PREEXISTING_START, PREEXISTING_START, plotID, PREEXISTING_START + 10, PREEXISTING_START + 10]
+    );
+
+    const unrelatedRow = { quadrat: 'ELSEWHERE01', startx: '400', starty: '400', dimx: '20', dimy: '20' };
+
+    const res = (await POST(
+      buildQuadratUploadRequest(
+        baseRequestBody({
+          uploadMode: UPLOAD_MODE_REVISIONS,
+          fileRowSet: { 'row-1': unrelatedRow }
+        })
+      )
+    ))!;
+
+    expect(res.status, 'defects the upload did not introduce must not reject it').toBe(HTTP_OK);
+    expect(await findQuadratByName(connection, plotID, 'ELSEWHERE01')).not.toBeNull();
+    expect(await findQuadratByName(connection, plotID, 'PREOVL-A'), 'pre-existing rows must be untouched').not.toBeNull();
+    expect(await findQuadratByName(connection, plotID, 'PREOVL-B')).not.toBeNull();
+  });
+
+  it('LEGACY: NULL plot dimensions skip only the bounds checks -- valid uploads pass, overlapping files still fail', async () => {
+    await connection.query('UPDATE plots SET DimensionX = NULL, DimensionY = NULL WHERE PlotID = ?', [plotID]);
+    try {
+      // Far outside the nominal 500x500 plot: only possible because bounds checks are skipped.
+      const beyondNominalBounds = { quadrat: 'NODIMS01', startx: String(TEST_PLOT_DIMENSION * 2), starty: '0', dimx: '20', dimy: '20' };
+
+      const okRes = (await POST(buildQuadratUploadRequest(baseRequestBody({ fileRowSet: { 'row-1': beyondNominalBounds } }))))!;
+      expect(okRes.status, 'a plot without recorded dimensions must not be locked out of quadrat uploads').toBe(HTTP_OK);
+      expect(await findQuadratByName(connection, plotID, 'NODIMS01')).not.toBeNull();
+
+      const rowA = { quadrat: 'NODIMS-OVL-A', startx: '0', starty: '0', dimx: '20', dimy: '20' };
+      const rowB = { quadrat: 'NODIMS-OVL-B', startx: '10', starty: '10', dimx: '20', dimy: '20' };
+      const overlapRes = (await POST(buildQuadratUploadRequest(baseRequestBody({ fileRowSet: { 'row-1': rowA, 'row-2': rowB } }))))!;
+      expect(overlapRes.status, 'degraded validation must still reject overlapping rows').toBe(HTTP_BAD_REQUEST);
+      const body = await overlapRes.json();
+      expect(body.code).toBe(INVALID_QUADRAT_GEOMETRY_CODE);
+      expect(body.error).toMatch(/overlaps/i);
+    } finally {
+      await connection.query('UPDATE plots SET DimensionX = ?, DimensionY = ? WHERE PlotID = ?', [TEST_PLOT_DIMENSION, TEST_PLOT_DIMENSION, plotID]);
+    }
+  });
+
+  it('LEGACY: entirely-blank padding rows are skipped and counted, not fatal', async () => {
+    const validRow = { quadrat: 'PAD01', startx: '0', starty: '0', dimx: '20', dimy: '20' };
+    const paddingRow = { quadrat: '', startx: '', starty: '', dimx: '', dimy: '' };
+
+    const res = (await POST(
+      buildQuadratUploadRequest(
+        baseRequestBody({
+          fileRowSet: { 'row-1': validRow, 'row-2': paddingRow }
+        })
+      )
+    ))!;
+
+    expect(res.status).toBe(HTTP_OK);
+    await expect(res.json()).resolves.toMatchObject({ insertedCount: 1, skippedCount: 1 });
+    expect(await findQuadratByName(connection, plotID, 'PAD01')).not.toBeNull();
+    // CLEAN_REUPLOAD replaced the baseline with exactly the one usable row.
+    expect(await countActiveQuadrats(connection, plotID)).toBe(1);
+  });
+
+  it('LEGACY: a replacement grid over the provisioning placeholder grid gets the divergence guidance, not a raw overlap error', async () => {
+    // Placeholder names must match SEQUENTIAL_QUADRAT_NAME_PATTERN (Q + 5 digits).
+    await connection.query('DELETE FROM quadrats WHERE PlotID = ?', [plotID]);
+    const PLACEHOLDER_SIZE = 20;
+    for (let i = 0; i < 4; i++) {
+      const name = `Q${String(i + 1).padStart(5, '0')}`;
+      const startX = (i % 2) * PLACEHOLDER_SIZE;
+      const startY = Math.floor(i / 2) * PLACEHOLDER_SIZE;
+      await connection.query(
+        `INSERT INTO quadrats (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'square')`,
+        [plotID, name, startX, startY, PLACEHOLDER_SIZE, PLACEHOLDER_SIZE, PLACEHOLDER_SIZE * PLACEHOLDER_SIZE]
+      );
+    }
+
+    // A real replacement grid tiling the same area under researcher naming: every row
+    // geometrically overlaps a placeholder, so if geometry validation ran before the
+    // divergence guard the user would get pairwise overlap errors instead of guidance.
+    const res = (await POST(
+      buildQuadratUploadRequest(
+        baseRequestBody({
+          uploadMode: UPLOAD_MODE_REVISIONS,
+          fileRowSet: {
+            'row-1': { quadrat: 'C01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+            'row-2': { quadrat: 'C02', startx: '20', starty: '0', dimx: '20', dimy: '20' },
+            'row-3': { quadrat: 'C03', startx: '0', starty: '20', dimx: '20', dimy: '20' }
+          }
+        })
+      )
+    ))!;
+
+    expect(res.status, 'the divergence refusal is a generic (non-geometry) error and surfaces as 503').not.toBe(HTTP_OK);
+    const body = await res.json();
+    expect(body.error).toMatch(/appears to replace the generated placeholder grid/i);
+    expect(body.error).not.toMatch(/overlaps quadrat/i);
+
+    expect(await countActiveQuadrats(connection, plotID), 'the placeholder grid must be untouched').toBe(4);
+    expect(await findQuadratByName(connection, plotID, 'C01'), 'no replacement row may have been written').toBeNull();
+  });
 });
