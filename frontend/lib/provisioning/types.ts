@@ -53,6 +53,12 @@ export interface QuadratCsvRequestConfig {
   mode: 'csv';
   rows: QuadratCsvRow[];
   coordinateReferenceCorner: QuadratReferenceCorner;
+  /**
+   * The admin's confirmation text that overlapping quadrat footprints in this CSV reflect
+   * field measurements. Overlaps are refused without it; stored with the run payload for
+   * provenance. Absent when the layout has no overlaps.
+   */
+  overlapAcknowledgment?: string;
 }
 
 /** Server/run shape: rows are canonical south-west. */
@@ -61,6 +67,7 @@ export interface QuadratCsvCanonicalConfig {
   rows: QuadratCsvRow[];
   coordinates: 'canonical-sw';
   sourceCoordinateReferenceCorner: QuadratReferenceCorner;
+  overlapAcknowledgment?: string;
 }
 
 export type QuadratRequestConfig = QuadratGridConfig | QuadratCsvRequestConfig | QuadratNoneConfig;

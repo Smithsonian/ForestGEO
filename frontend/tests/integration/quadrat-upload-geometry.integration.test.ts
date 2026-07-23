@@ -34,6 +34,8 @@ const BASELINE_QUADRATS_PER_ROW = 5;
 const HTTP_OK = 200;
 const HTTP_BAD_REQUEST = 400;
 const INVALID_QUADRAT_GEOMETRY_CODE = 'INVALID_QUADRAT_GEOMETRY';
+const OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE = 'QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT';
+const OVERLAP_ACKNOWLEDGMENT_TEXT = 'I confirm the overlapping quadrat footprints in this upload reflect field measurements.';
 
 const UPLOAD_MODE_CLEAN_REUPLOAD = 'clean_reupload';
 const UPLOAD_MODE_REVISIONS = 'revisions';
@@ -244,7 +246,7 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
     expect(await findQuadratByName(connection, plotID, 'SPOOF01')).toBeNull();
   });
 
-  it('rejects an internally overlapping file with 400 and writes nothing', async () => {
+  it('holds an internally overlapping file for acknowledgment with 400 and writes nothing', async () => {
     const rowA = { quadrat: 'OVLA', startx: '300', starty: '300', dimx: '20', dimy: '20' };
     const rowB = { quadrat: 'OVLB', startx: '310', starty: '310', dimx: '20', dimy: '20' }; // overlaps rowA
 
@@ -258,12 +260,41 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
 
     expect(res.status).toBe(HTTP_BAD_REQUEST);
     const body = await res.json();
-    expect(body.code).toBe(INVALID_QUADRAT_GEOMETRY_CODE);
+    expect(body.code).toBe(OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE);
     expect(body.error).toMatch(/overlaps/i);
 
     expect(await countActiveQuadrats(connection, plotID)).toBe(BASELINE_QUADRAT_COUNT);
     expect(await findQuadratByName(connection, plotID, 'OVLA')).toBeNull();
     expect(await findQuadratByName(connection, plotID, 'OVLB')).toBeNull();
+  });
+
+  it('commits an overlapping file when acknowledged and stores the acknowledgment text in the changelog', async () => {
+    // Overlapping footprints can be real field measurements (e.g. SERC's surveyed widths
+    // exceed the grid pitch), so with an explicit acknowledgment the layout is valid data.
+    const rowA = { quadrat: 'ACKA', startx: '300', starty: '300', dimx: '20', dimy: '20' };
+    const rowB = { quadrat: 'ACKB', startx: '310', starty: '310', dimx: '20', dimy: '20' };
+
+    const res = (await POST(
+      buildQuadratUploadRequest(
+        baseRequestBody({
+          quadratOverlapAcknowledgment: OVERLAP_ACKNOWLEDGMENT_TEXT,
+          fileRowSet: { 'row-1': rowA, 'row-2': rowB }
+        })
+      )
+    ))!;
+
+    expect(res.status, 'acknowledged overlaps must commit').toBe(HTTP_OK);
+    expect(await findQuadratByName(connection, plotID, 'ACKA')).not.toBeNull();
+    expect(await findQuadratByName(connection, plotID, 'ACKB')).not.toBeNull();
+
+    const [changelogRows] = await connection.query<RowDataPacket[]>(
+      `SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload' AND RecordID = 'quadrats.csv' ORDER BY ChangeID DESC LIMIT 1`
+    );
+    expect(changelogRows.length, 'the file_upload changelog entry must exist').toBe(1);
+    const metadata = typeof changelogRows[0].NewRowState === 'string' ? JSON.parse(changelogRows[0].NewRowState) : changelogRows[0].NewRowState;
+    expect(metadata.overlapAcknowledgment.text).toBe(OVERLAP_ACKNOWLEDGMENT_TEXT);
+    expect(metadata.overlapAcknowledgment.overlaps.some((message: string) => message.includes('ACKA'))).toBe(true);
+    expect(metadata.overlapAcknowledgment.acknowledgedBy).toBeDefined();
   });
 
   it('rejects a row with a blank StartX with 400', async () => {
@@ -334,9 +365,9 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
       )
     ))!;
 
-    expect(res.status, 'a new row overlapping an untouched existing quadrat must be rejected').toBe(HTTP_BAD_REQUEST);
+    expect(res.status, 'a new row overlapping an untouched existing quadrat must be held for acknowledgment').toBe(HTTP_BAD_REQUEST);
     const body = await res.json();
-    expect(body.code).toBe(INVALID_QUADRAT_GEOMETRY_CODE);
+    expect(body.code).toBe(OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE);
     expect(body.error).toMatch(/overlaps/i);
 
     const existingRow = await findQuadratByName(connection, plotID, EXISTING_NAME);
@@ -507,7 +538,7 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
     expect(Number(after!.StartY)).toBe(REPAIRED_START);
   });
 
-  it('LEGACY: an unnamed (NULL QuadratName) quadrat still blocks an overlapping revision', async () => {
+  it('LEGACY: an unnamed (NULL QuadratName) quadrat still holds an overlapping revision for acknowledgment', async () => {
     const UNNAMED_START = 300;
     await connection.query(
       `INSERT INTO quadrats (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape)
@@ -528,7 +559,7 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
 
     expect(res.status, 'an unnamed quadrat occupies real area and must participate in the overlap check').toBe(HTTP_BAD_REQUEST);
     const body = await res.json();
-    expect(body.code).toBe(INVALID_QUADRAT_GEOMETRY_CODE);
+    expect(body.code).toBe(OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE);
     expect(body.error).toMatch(/unnamed QuadratID/i);
     expect(await findQuadratByName(connection, plotID, 'OVERUNNAMED')).toBeNull();
   });
@@ -571,9 +602,9 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
       const rowA = { quadrat: 'NODIMS-OVL-A', startx: '0', starty: '0', dimx: '20', dimy: '20' };
       const rowB = { quadrat: 'NODIMS-OVL-B', startx: '10', starty: '10', dimx: '20', dimy: '20' };
       const overlapRes = (await POST(buildQuadratUploadRequest(baseRequestBody({ fileRowSet: { 'row-1': rowA, 'row-2': rowB } }))))!;
-      expect(overlapRes.status, 'degraded validation must still reject overlapping rows').toBe(HTTP_BAD_REQUEST);
+      expect(overlapRes.status, 'degraded validation must still hold unacknowledged overlaps').toBe(HTTP_BAD_REQUEST);
       const body = await overlapRes.json();
-      expect(body.code).toBe(INVALID_QUADRAT_GEOMETRY_CODE);
+      expect(body.code).toBe(OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE);
       expect(body.error).toMatch(/overlaps/i);
     } finally {
       await connection.query('UPDATE plots SET DimensionX = ?, DimensionY = ? WHERE PlotID = ?', [TEST_PLOT_DIMENSION, TEST_PLOT_DIMENSION, plotID]);

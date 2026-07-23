@@ -30,5 +30,8 @@ export function quadratLayoutIsValid(input: ProvisioningRequestInput): boolean {
   const csvQuadrats = input.quadrats;
   const rows = csvQuadrats.rows.map(row => normalizeToSouthwest(row, csvQuadrats.coordinateReferenceCorner));
   if (rows.length === 0) return false;
-  return validateQuadratCollection(rows, input.plot, 'SW').length === 0;
+  // Acknowledged overlaps are valid field measurements, not layout defects (mirrors the
+  // canonical schema's superRefine policy). Unacknowledged overlaps still fail the gate.
+  const overlapsAcknowledged = Boolean(csvQuadrats.overlapAcknowledgment);
+  return validateQuadratCollection(rows, input.plot, 'SW').filter(issue => !(issue.kind === 'overlap' && overlapsAcknowledged)).length === 0;
 }

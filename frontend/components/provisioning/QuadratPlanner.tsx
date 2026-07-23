@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { Alert, Box, FormControl, FormHelperText, FormLabel, Input, Radio, RadioGroup, Stack, Typography } from '@mui/joy';
+import { Alert, Box, Checkbox, FormControl, FormHelperText, FormLabel, Input, Radio, RadioGroup, Stack, Typography } from '@mui/joy';
 import type { ProvisioningPlotInput, QuadratRequestConfig, QuadratCsvRow, QuadratReferenceCorner } from '@/lib/provisioning/types';
 import { generateGrid } from '@/lib/provisioning/grid-generator';
 import { parseQuadratCsv } from '@/lib/provisioning/csv-parser';
 import { DEFAULT_REFERENCE_CORNER, getReferenceCornerLabel, normalizeToSouthwest } from '@/lib/provisioning/coordinate-reference-corner';
-import { validateQuadratCollection } from '@/lib/provisioning/quadrat-collection-validation';
+import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, validateQuadratCollection, type QuadratIssueKind } from '@/lib/provisioning/quadrat-collection-validation';
 import ReferenceCornerSelect from './ReferenceCornerSelect';
 
 const QUADRAT_SIZE_MIN = 1;
@@ -18,6 +18,7 @@ const NAMING_PATTERN_ROW_COL = 'row-col' as const;
 interface CsvValidationIssue {
   quadratName: string;
   message: string;
+  kind: QuadratIssueKind;
 }
 
 export interface QuadratPlannerProps {
@@ -28,7 +29,7 @@ export interface QuadratPlannerProps {
 }
 
 function collectCsvValidationIssues(rows: QuadratCsvRow[], plot: ProvisioningPlotInput): CsvValidationIssue[] {
-  return validateQuadratCollection(rows, plot, 'SW').map(issue => ({ quadratName: issue.quadratName, message: issue.message }));
+  return validateQuadratCollection(rows, plot, 'SW').map(issue => ({ quadratName: issue.quadratName, message: issue.message, kind: issue.kind }));
 }
 
 function GridModePanel({
@@ -106,29 +107,67 @@ function GridModePanel({
   );
 }
 
-function CsvResultSummary({ rows, plot, referenceCornerLabel }: { rows: QuadratCsvRow[]; plot: ProvisioningPlotInput; referenceCornerLabel: string }) {
-  const validationIssues = collectCsvValidationIssues(rows, plot);
-
-  if (validationIssues.length === 0) {
-    return (
-      <Alert color="success" size="sm" aria-label="CSV load success">
-        Loaded {rows.length} quadrats (no errors), read as {referenceCornerLabel}
-      </Alert>
-    );
-  }
-
+function CsvResultSummary({
+  rowCount,
+  blockingIssues,
+  overlapIssues,
+  overlapAcknowledged,
+  onOverlapAcknowledgedChange,
+  referenceCornerLabel
+}: {
+  rowCount: number;
+  blockingIssues: CsvValidationIssue[];
+  overlapIssues: CsvValidationIssue[];
+  overlapAcknowledged: boolean;
+  onOverlapAcknowledgedChange: (acknowledged: boolean) => void;
+  referenceCornerLabel: string;
+}) {
   return (
     <Stack spacing={1}>
-      <Alert color="danger" size="sm">
-        {validationIssues.length} validation {validationIssues.length === 1 ? 'error' : 'errors'} found
-      </Alert>
-      <Stack component="ul" sx={{ pl: 2, m: 0 }} spacing={0.5}>
-        {validationIssues.map((issue, idx) => (
-          <Typography key={idx} component="li" level="body-sm" color="danger">
-            {issue.message}
-          </Typography>
-        ))}
-      </Stack>
+      {blockingIssues.length === 0 && overlapIssues.length === 0 && (
+        <Alert color="success" size="sm" aria-label="CSV load success">
+          Loaded {rowCount} quadrats (no errors), read as {referenceCornerLabel}
+        </Alert>
+      )}
+
+      {blockingIssues.length > 0 && (
+        <>
+          <Alert color="danger" size="sm">
+            {blockingIssues.length} validation {blockingIssues.length === 1 ? 'error' : 'errors'} found
+          </Alert>
+          <Stack component="ul" sx={{ pl: 2, m: 0 }} spacing={0.5}>
+            {blockingIssues.map((issue, idx) => (
+              <Typography key={idx} component="li" level="body-sm" color="danger">
+                {issue.message}
+              </Typography>
+            ))}
+          </Stack>
+        </>
+      )}
+
+      {overlapIssues.length > 0 && (
+        <>
+          {/* Overlaps are warn-and-acknowledge, never a hard error: surveyed quadrat footprints
+              can genuinely overlap, so the admin confirms rather than being refused. */}
+          <Alert color="warning" size="sm" aria-label="CSV overlap warning">
+            Overlapping quadrat footprints detected. Overlaps can be genuine field measurements; confirm below to proceed with them.
+          </Alert>
+          <Stack component="ul" sx={{ pl: 2, m: 0 }} spacing={0.5}>
+            {overlapIssues.map((issue, idx) => (
+              <Typography key={idx} component="li" level="body-sm" color="warning">
+                {issue.message}
+              </Typography>
+            ))}
+          </Stack>
+          {/* eslint-disable-next-line jsx-a11y/control-has-associated-label -- Joy UI Checkbox `label` prop renders an associated <label> at runtime; the linter just doesn't parse the component */}
+          <Checkbox
+            label={QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT}
+            slotProps={{ input: { 'aria-label': 'Acknowledge quadrat overlaps' } }}
+            checked={overlapAcknowledged}
+            onChange={event => onOverlapAcknowledgedChange(event.target.checked)}
+          />
+        </>
+      )}
     </Stack>
   );
 }
@@ -150,6 +189,18 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
     if (value.mode !== 'csv' || !normalizedRows) return [];
     return collectCsvValidationIssues(normalizedRows, plot);
   }, [value.mode, normalizedRows, plot]);
+
+  const csvBlockingIssues = useMemo(() => csvValidationIssues.filter(issue => issue.kind !== 'overlap'), [csvValidationIssues]);
+  const csvOverlapIssues = useMemo(() => csvValidationIssues.filter(issue => issue.kind === 'overlap'), [csvValidationIssues]);
+  const overlapAcknowledged = value.mode === 'csv' && Boolean(value.overlapAcknowledgment);
+  // Blocking issues always block; overlap issues block only until acknowledged.
+  const unresolvedIssueCount = csvBlockingIssues.length + (overlapAcknowledged ? 0 : csvOverlapIssues.length);
+
+  function setOverlapAcknowledged(acknowledged: boolean) {
+    if (value.mode !== 'csv') return;
+    const { overlapAcknowledgment: _dropped, ...rest } = value;
+    onChange(acknowledged ? { ...rest, overlapAcknowledgment: QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT } : rest);
+  }
 
   const csvIsEmpty = value.mode === 'csv' && value.rows.length === 0 && csvParseErrors.length === 0;
 
@@ -187,9 +238,9 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
         </Alert>
       )}
 
-      {showErrors && csvValidationIssues.length > 0 && (
+      {showErrors && unresolvedIssueCount > 0 && (
         <Alert color="danger" variant="soft" size="sm" aria-label="CSV validation summary">
-          {csvValidationIssues.length} validation issue{csvValidationIssues.length === 1 ? '' : 's'} in CSV — review and re-upload.
+          {unresolvedIssueCount} validation issue{unresolvedIssueCount === 1 ? '' : 's'} in CSV — review and re-upload, or acknowledge overlaps below.
         </Alert>
       )}
 
@@ -222,7 +273,13 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
           <ReferenceCornerSelect
             id="reference-corner-input"
             value={referenceCorner}
-            onChange={newCorner => onChange({ ...value, coordinateReferenceCorner: newCorner })}
+            onChange={newCorner => {
+              // Corner normalization shifts each row by its own dimensions, which can change
+              // which footprints overlap -- so a previous overlap acknowledgment no longer
+              // describes the same pairs and must be re-confirmed.
+              const { overlapAcknowledgment: _dropped, ...rest } = value;
+              onChange({ ...rest, coordinateReferenceCorner: newCorner });
+            }}
             helperText="Coordinates are stored relative to the plot's lower-left origin. Choosing a different corner converts the uploaded coordinates on import — it does not move the plot."
           />
 
@@ -258,7 +315,14 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
           )}
 
           {csvParseErrors.length === 0 && normalizedRows && normalizedRows.length > 0 && (
-            <CsvResultSummary rows={normalizedRows} plot={plot} referenceCornerLabel={referenceCornerLabel} />
+            <CsvResultSummary
+              rowCount={normalizedRows.length}
+              blockingIssues={csvBlockingIssues}
+              overlapIssues={csvOverlapIssues}
+              overlapAcknowledged={overlapAcknowledged}
+              onOverlapAcknowledgedChange={setOverlapAcknowledged}
+              referenceCornerLabel={referenceCornerLabel}
+            />
           )}
         </Stack>
       )}

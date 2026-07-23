@@ -990,9 +990,9 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(String(mockConnectionManager.executeQuery.mock.calls[3]?.[0])).toContain('INSERT INTO `forestgeo_testing`.quadrats');
   });
 
-  it('rejects a revisions upload that overlaps an unnamed (NULL QuadratName) existing quadrat', async () => {
+  it('holds a revisions upload that overlaps an unnamed (NULL QuadratName) existing quadrat for acknowledgment', async () => {
     // An unnamed quadrat occupies real plot area. Excluding it from the prospective layout
-    // would let an overlapping upload commit exactly the corruption this check exists to stop.
+    // would let an overlapping upload commit silently with no confirmation at all.
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
       .mockResolvedValueOnce([{ QuadratID: 7, QuadratName: null, StartX: 0, StartY: 0, DimensionX: 20, DimensionY: 20 }]);
@@ -1003,7 +1003,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
     expect(res?.status).toBe(400);
     const body = await res?.json();
-    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
+    expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
     expect(body.error).toContain('overlaps');
     expect(body.error).toContain('(unnamed QuadratID 7)');
     expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(2);
@@ -1106,7 +1106,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
     expect(res?.status).toBe(400);
     const body = await res?.json();
-    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
+    expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
     expect(body.error).toContain('"NEWOVL" overlaps quadrat "FAR"');
   });
 
@@ -1136,6 +1136,65 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(res?.status).toBe(200);
     await expect(res?.json()).resolves.toMatchObject({ insertedCount: 1 });
     expect(ailogger.warn).toHaveBeenCalledWith(expect.stringContaining('pre-existing quadrat layout defects'));
+  });
+
+  it('commits an overlapping upload when the acknowledgment is present and records the text in the changelog', async () => {
+    const ACKNOWLEDGMENT_TEXT = 'I confirm the overlapping quadrat footprints in this upload reflect field measurements.';
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      // stem-safety precheck + DELETE + two INSERTs
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce({ insertId: 1 })
+      .mockResolvedValueOnce({ insertId: 2 })
+      // changelog lookup + insert
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 3 });
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'Q02', startx: '10', starty: '10', dimx: '20', dimy: '20' }
+        },
+        { uploadMode: 'clean_reupload', quadratOverlapAcknowledgment: ACKNOWLEDGMENT_TEXT }
+      )
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({ insertedCount: 2 });
+
+    const changelogInsertCall = mockConnectionManager.executeQuery.mock.calls.find(
+      (call: any[]) => String(call[0]).includes('unifiedchangelog') && String(call[0]).includes('INSERT INTO')
+    );
+    expect(changelogInsertCall, 'the file_upload changelog entry must have been written').toBeDefined();
+    const storedMetadata = JSON.parse(changelogInsertCall![1][3]);
+    expect(storedMetadata.overlapAcknowledgment.text).toBe(ACKNOWLEDGMENT_TEXT);
+    expect(storedMetadata.overlapAcknowledgment.overlaps.some((message: string) => message.includes('overlaps'))).toBe(true);
+    expect(storedMetadata.overlapAcknowledgment.acknowledgedBy).toBeDefined();
+  });
+
+  it('acknowledgment does NOT bypass non-overlap defects: an out-of-bounds row still rejects', async () => {
+    // The acknowledgment covers exactly one condition. A file that is both overlapping AND
+    // out of bounds must still fail on the bounds defect even with the acknowledgment set.
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: '490', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'Q02', startx: '495', starty: '5', dimx: '20', dimy: '20' }
+        },
+        { uploadMode: 'clean_reupload', quadratOverlapAcknowledgment: 'acknowledged' }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
+    expect(body.error).toContain('extends past plot');
   });
 
   it('surfaces the divergent-placeholder guidance INSTEAD of raw overlap errors for a replacement grid', async () => {
@@ -1336,9 +1395,9 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(ailogger.warn).toHaveBeenCalledWith(expect.stringContaining('quadrat plot-bounds checks are skipped'));
   });
 
-  it('still rejects overlapping rows when the plot has non-positive dimensions on record', async () => {
-    // Degraded (bounds-less) validation is not NO validation: overlap and duplicate-name
-    // checks must still block a bad file even when the plot record is unusable.
+  it('still holds overlapping rows for acknowledgment when the plot has non-positive dimensions on record', async () => {
+    // Degraded (bounds-less) validation is not NO validation: unacknowledged overlaps must
+    // still stop the file even when the plot record is unusable.
     mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 0, DimensionY: 500 }]);
 
     const res = await POST(
@@ -1354,8 +1413,8 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
     expect(res?.status).toBe(400);
     const body = await res?.json();
-    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
-    expect(body.error).toContain('overlaps');
+    expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
+    expect(body.error).toContain('overlap');
     expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
   });
 

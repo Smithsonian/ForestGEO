@@ -5,6 +5,7 @@ import {
   Button as JoyButton,
   Card,
   CardContent,
+  Checkbox,
   Chip,
   DialogActions,
   DialogContent,
@@ -37,7 +38,7 @@ import { usePlotContext } from '@/app/contexts/compat-hooks';
 import { makeLegacyCsvHeaderKey } from '@/lib/column-mapping/fields';
 import { transformMeasurementValue } from '@/lib/column-mapping/measurement-rows';
 import { validateQuadratsRow } from '@/lib/db/definitions/zones';
-import { toQuadratGeometry, validateQuadratCollection } from '@/lib/provisioning/quadrat-collection-validation';
+import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, toQuadratGeometry, validateQuadratCollection } from '@/lib/provisioning/quadrat-collection-validation';
 import type { QuadratCsvRow } from '@/lib/provisioning/types';
 import ReferenceCornerSelect from '@/components/provisioning/ReferenceCornerSelect';
 
@@ -153,7 +154,9 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     columnMappings,
     setColumnMappingForFile,
     coordinateReferenceCorner,
-    setCoordinateReferenceCorner
+    setCoordinateReferenceCorner,
+    quadratOverlapAcknowledgment,
+    setQuadratOverlapAcknowledgment
   } = props;
 
   const [fileToReplace, setFileToReplace] = useState<FileWithPath | null>(null);
@@ -167,6 +170,9 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   const plotDimensionY = currentPlot?.dimensionY;
 
   const [quadratPreflightIssuesByFile, setQuadratPreflightIssuesByFile] = useState<Record<string, QuadratPreflightIssue[]>>({});
+  // Overlap findings are kept separate from blocking issues: overlapping footprints can be
+  // genuine field measurements, so they warn and require acknowledgment instead of refusing.
+  const [quadratOverlapWarningsByFile, setQuadratOverlapWarningsByFile] = useState<Record<string, QuadratPreflightIssue[]>>({});
   const [quadratPreflightRunning, setQuadratPreflightRunning] = useState<boolean>(false);
   // True when at least one file had rows that parsed as geometry but the plot's DimensionX/DimensionY
   // are unset, so bounds/overlap/duplicate-name checks (validateQuadratCollection) could not run at
@@ -192,6 +198,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
 
     (async () => {
       const nextIssuesByFile: Record<string, QuadratPreflightIssue[]> = {};
+      const nextOverlapWarningsByFile: Record<string, QuadratPreflightIssue[]> = {};
       let dimensionsUnvalidated = false;
 
       for (const file of acceptedFiles) {
@@ -206,6 +213,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
         }
 
         const fileIssues: QuadratPreflightIssue[] = [];
+        const fileOverlapWarnings: QuadratPreflightIssue[] = [];
 
         try {
           const geometryRows: QuadratCsvRow[] = [];
@@ -245,7 +253,14 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
             collectionIssues.forEach(issue => {
               const geometryRow = geometryRows[issue.rowIndex];
               const originalRowIndex = geometryRow ? (originalRowIndexByGeometryRow.get(geometryRow) ?? issue.rowIndex) : issue.rowIndex;
-              fileIssues.push({ rowIndex: originalRowIndex, quadratName: issue.quadratName, message: issue.message });
+              const preflightIssue = { rowIndex: originalRowIndex, quadratName: issue.quadratName, message: issue.message };
+              // Overlaps warn-and-acknowledge instead of blocking: surveyed quadrat footprints
+              // can genuinely overlap, so the uploader confirms rather than being refused.
+              if (issue.kind === 'overlap') {
+                fileOverlapWarnings.push(preflightIssue);
+              } else {
+                fileIssues.push(preflightIssue);
+              }
             });
           }
         } catch (geometryError: unknown) {
@@ -260,10 +275,14 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
         if (fileIssues.length > 0) {
           nextIssuesByFile[file.name] = fileIssues.sort((a, b) => a.rowIndex - b.rowIndex);
         }
+        if (fileOverlapWarnings.length > 0) {
+          nextOverlapWarningsByFile[file.name] = fileOverlapWarnings.sort((a, b) => a.rowIndex - b.rowIndex);
+        }
       }
 
       if (!cancelled) {
         setQuadratPreflightIssuesByFile(nextIssuesByFile);
+        setQuadratOverlapWarningsByFile(nextOverlapWarningsByFile);
         setQuadratPlotDimensionsUnvalidated(dimensionsUnvalidated);
         setQuadratPreflightRunning(false);
       }
@@ -285,7 +304,17 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     [quadratPreflightIssuesByFile]
   );
 
-  const quadratPreflightBlocksContinue = isQuadratsForm && (quadratPreflightRunning || quadratPreflightHasIssues || quadratPlotDimensionsUnvalidated);
+  const quadratPreflightHasOverlapWarnings = useMemo(
+    () => Object.values(quadratOverlapWarningsByFile).some(warnings => warnings.length > 0),
+    [quadratOverlapWarningsByFile]
+  );
+
+  // Overlaps block Continue only until the uploader confirms them. The acknowledgment is also
+  // sent (and required) server-side, so unchecking cannot be bypassed by skipping the preflight.
+  const quadratOverlapsUnacknowledged = quadratPreflightHasOverlapWarnings && !quadratOverlapAcknowledgment;
+
+  const quadratPreflightBlocksContinue =
+    isQuadratsForm && (quadratPreflightRunning || quadratPreflightHasIssues || quadratPlotDimensionsUnvalidated || quadratOverlapsUnacknowledged);
 
   const handleFileChange = async (newFiles: FileWithPath[]) => {
     for (const file of newFiles) {
@@ -584,6 +613,55 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                             );
                           })}
                         </Box>
+                      </Box>
+                    </Alert>
+                  )}
+
+                  {/* Quadrat Geometry Preflight — overlapping footprints are warn-and-acknowledge,
+                      not a refusal: surveyed quadrats can genuinely overlap, so the uploader
+                      confirms they reflect field measurements. The confirmation text is sent with
+                      the upload and recorded server-side for provenance. */}
+                  {isQuadratsForm && quadratPreflightHasOverlapWarnings && (
+                    <Alert color="warning" variant="soft" startDecorator={<WarningAmberIcon />} sx={{ textAlign: 'left' }}>
+                      <Box sx={{ width: '100%' }}>
+                        <Typography level="title-sm" color="warning">
+                          Overlapping Quadrat Footprints Detected
+                        </Typography>
+                        <Typography level="body-sm" sx={{ mt: 0.5 }}>
+                          Overlaps can be genuine field measurements. Review the pairs below; if they match what was measured in the field, confirm to continue.
+                          The confirmation is stored with this upload.
+                        </Typography>
+                        <Box sx={{ mt: 1, maxHeight: QUADRAT_ISSUES_LIST_MAX_HEIGHT_PX, overflowY: 'auto' }}>
+                          {Object.entries(quadratOverlapWarningsByFile).map(([fileName, warnings]) => {
+                            const shownWarnings = warnings.slice(0, MAX_QUADRAT_ISSUES_SHOWN_PER_FILE);
+                            const hiddenCount = warnings.length - shownWarnings.length;
+                            return (
+                              <Box key={fileName} sx={{ mt: 1 }}>
+                                <Typography level="body-sm" sx={{ fontWeight: 'bold' }}>
+                                  {fileName}: {warnings.length} overlap message{warnings.length === 1 ? '' : 's'}
+                                </Typography>
+                                {shownWarnings.map((warning, idx) => (
+                                  <Typography key={idx} level="body-xs" sx={{ ml: 1 }}>
+                                    • {warning.message}
+                                  </Typography>
+                                ))}
+                                {hiddenCount > 0 && (
+                                  <Typography level="body-xs" sx={{ ml: 1, fontStyle: 'italic' }}>
+                                    Showing the first {shownWarnings.length} of {warnings.length} overlap messages for this file.
+                                  </Typography>
+                                )}
+                              </Box>
+                            );
+                          })}
+                        </Box>
+                        {/* eslint-disable-next-line jsx-a11y/control-has-associated-label -- Joy UI Checkbox `label` prop renders an associated <label> at runtime; the linter just doesn't parse the component */}
+                        <Checkbox
+                          sx={{ mt: 1.5 }}
+                          label={QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT}
+                          slotProps={{ input: { 'aria-label': 'Acknowledge quadrat overlaps' } }}
+                          checked={Boolean(quadratOverlapAcknowledgment)}
+                          onChange={event => setQuadratOverlapAcknowledgment(event.target.checked ? QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT : null)}
+                        />
                       </Box>
                     </Alert>
                   )}

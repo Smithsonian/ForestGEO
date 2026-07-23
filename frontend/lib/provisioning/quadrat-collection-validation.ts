@@ -9,8 +9,25 @@ import { normalizeToSouthwest } from './coordinate-reference-corner';
  */
 const MAX_REPORTED_OVERLAP_PAIRS = 25;
 
-/** Same shape as QuadratBoundsIssue so callers can concatenate/handle both issue sources uniformly. */
-export type QuadratCollectionIssue = QuadratBoundsIssue;
+/**
+ * Overlap is policy-separable from the other kinds: real surveyed quadrats can overlap
+ * (measured widths at SERC exceed the grid pitch), so callers treat 'overlap' as a
+ * warn-and-acknowledge condition while every other kind stays a hard error. The kind is
+ * carried on the issue so that split never relies on message-string matching.
+ */
+export type QuadratIssueKind = 'non-positive-dimension' | 'bounds' | 'duplicate-name' | 'overlap';
+
+/**
+ * The confirmation statement a user accepts when proceeding with overlapping quadrat
+ * footprints. Shared by the upload preflight and the provisioning wizard so the stored
+ * acknowledgment text is identical wherever it was given.
+ */
+export const QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT = 'I confirm the overlapping quadrat footprints in this upload reflect field measurements.';
+
+/** QuadratBoundsIssue plus the machine-readable kind; callers can still concatenate/handle both issue sources uniformly. */
+export interface QuadratCollectionIssue extends QuadratBoundsIssue {
+  kind: QuadratIssueKind;
+}
 
 /** The Quadrats-page upload row shape (see app/api/sqlpacketload/route.ts). Values come straight off a parsed file row. */
 export interface UploadShapedRow {
@@ -90,6 +107,7 @@ export function validateQuadratCollection(
   normalizedRows.forEach((row, rowIndex) => {
     if (row.dimensionX <= 0 || row.dimensionY <= 0) {
       issues.push({
+        kind: 'non-positive-dimension',
         rowIndex,
         quadratName: row.quadratName,
         message: `Quadrat "${row.quadratName}" has a non-positive dimension (dimensionX=${row.dimensionX}, dimensionY=${row.dimensionY}). Dimensions must be greater than zero.`
@@ -101,10 +119,13 @@ export function validateQuadratCollection(
   });
 
   if (plot !== null) {
-    const boundsIssues = collectQuadratBoundsIssues(geometricallyValidRows, plot).map(issue => ({
-      ...issue,
-      rowIndex: originalIndexByGeometricRow.get(geometricallyValidRows[issue.rowIndex]) ?? issue.rowIndex
-    }));
+    const boundsIssues = collectQuadratBoundsIssues(geometricallyValidRows, plot).map(
+      (issue): QuadratCollectionIssue => ({
+        ...issue,
+        kind: 'bounds',
+        rowIndex: originalIndexByGeometricRow.get(geometricallyValidRows[issue.rowIndex]) ?? issue.rowIndex
+      })
+    );
     issues.push(...boundsIssues);
   }
 
@@ -117,6 +138,7 @@ export function validateQuadratCollection(
     const key = row.quadratName.trim().toLowerCase();
     if ((nameOccurrences.get(key) ?? 0) > 1) {
       issues.push({
+        kind: 'duplicate-name',
         rowIndex,
         quadratName: row.quadratName,
         message: `Quadrat name "${row.quadratName}" is used by more than one row. Quadrat names must be unique (compared case-insensitively).`
@@ -126,11 +148,13 @@ export function validateQuadratCollection(
 
   for (const [first, second] of collectOverlappingPairs(geometricallyValidRows, MAX_REPORTED_OVERLAP_PAIRS)) {
     issues.push({
+      kind: 'overlap',
       rowIndex: originalIndexByGeometricRow.get(first) ?? -1,
       quadratName: first.quadratName,
       message: `Quadrat "${first.quadratName}" overlaps quadrat "${second.quadratName}".`
     });
     issues.push({
+      kind: 'overlap',
       rowIndex: originalIndexByGeometricRow.get(second) ?? -1,
       quadratName: second.quadratName,
       message: `Quadrat "${second.quadratName}" overlaps quadrat "${first.quadratName}".`

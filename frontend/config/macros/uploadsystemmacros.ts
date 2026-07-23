@@ -51,6 +51,11 @@ export interface UploadParseFilesProps {
   // when uploadForm === FormType.quadrats; carried forward to UploadFireSQL via UploadFireProps.
   coordinateReferenceCorner: QuadratReferenceCorner;
   setCoordinateReferenceCorner: Dispatch<SetStateAction<QuadratReferenceCorner>>;
+  // The uploader's confirmation text that overlapping quadrat footprints reflect field
+  // measurements (null until confirmed). Quadrats form only; sent to the server, which refuses
+  // overlapping layouts without it and records the text in the file's changelog entry.
+  quadratOverlapAcknowledgment: string | null;
+  setQuadratOverlapAcknowledgment: Dispatch<SetStateAction<string | null>>;
   // centralized functions
   handleInitialSubmit: () => Promise<void>;
   handleAddFile: (newFile: FileWithPath) => void;
@@ -106,6 +111,9 @@ export interface UploadFireProps {
   // Which corner of each quadrat a Quadrats-form file's StartX/StartY identifies, chosen in
   // UploadParseFiles and sent to the server so it can normalize to south-west before writing.
   coordinateReferenceCorner: QuadratReferenceCorner;
+  // Overlap acknowledgment confirmed in UploadParseFiles; forwarded verbatim with each
+  // quadrats-form request so acknowledged overlaps commit and get recorded for provenance.
+  quadratOverlapAcknowledgment: string | null;
   // state setters
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;

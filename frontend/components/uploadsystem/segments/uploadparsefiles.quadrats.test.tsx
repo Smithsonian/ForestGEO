@@ -73,6 +73,7 @@ function buildQuadratFile(fileName: string, dataRow: string): FileWithStream {
 // (owned by UploadParent in production); this reproduces that contract for the test.
 function Harness(props: Partial<UploadParseFilesProps> & { initialCorner?: QuadratReferenceCorner }) {
   const [corner, setCorner] = useState<QuadratReferenceCorner>(props.initialCorner ?? DEFAULT_REFERENCE_CORNER);
+  const [overlapAcknowledgment, setOverlapAcknowledgment] = useState<string | null>(null);
   const defaults: UploadParseFilesProps = {
     uploadForm: FormType.quadrats,
     uploadMode: UploadMode.CLEAN_REUPLOAD,
@@ -86,6 +87,8 @@ function Harness(props: Partial<UploadParseFilesProps> & { initialCorner?: Quadr
     setColumnMappingForFile: () => {},
     coordinateReferenceCorner: corner,
     setCoordinateReferenceCorner: setCorner,
+    quadratOverlapAcknowledgment: overlapAcknowledgment,
+    setQuadratOverlapAcknowledgment: setOverlapAcknowledgment,
     handleInitialSubmit: async () => {},
     handleAddFile: () => {},
     handleRemoveFile: () => {},
@@ -176,6 +179,56 @@ describe('quadrat geometry preflight — collection issues (reference-corner dep
     await waitFor(() => {
       expect(continueButton()).not.toBeDisabled();
     });
+  });
+});
+
+describe('quadrat geometry preflight — overlap acknowledgment', () => {
+  it('surfaces an overlap as a warning with a checkbox, and Continue enables only after acknowledgment', async () => {
+    const fileName = 'quadrats-overlap-ack.csv';
+    // Two in-bounds rows that overlap: warn-and-acknowledge, never the red "geometry problems" refusal.
+    const file = buildQuadratFile(fileName, 'Q0001,10,10,10,10,100,square\nQ0002,15,15,10,10,100,square');
+
+    await act(async () => {
+      render(<Harness uploadForm={FormType.quadrats} acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/overlapping quadrat footprints detected/i)).toBeInTheDocument();
+    });
+    // Overlaps alone must not fire the blocking danger alert.
+    expect(screen.queryByText(/quadrat geometry problem/i)).toBeNull();
+    expect(continueButton()).toBeDisabled();
+
+    const acknowledgmentCheckbox = screen.getByRole('checkbox', { name: /acknowledge quadrat overlaps/i });
+    await act(async () => {
+      fireEvent.click(acknowledgmentCheckbox);
+    });
+
+    await waitFor(() => {
+      expect(continueButton()).not.toBeDisabled();
+    });
+
+    // Unchecking re-blocks: the confirmation is load-bearing, not a one-way latch.
+    await act(async () => {
+      fireEvent.click(acknowledgmentCheckbox);
+    });
+    await waitFor(() => {
+      expect(continueButton()).toBeDisabled();
+    });
+  });
+
+  it('does not show the overlap acknowledgment checkbox for a non-overlapping file', async () => {
+    const fileName = 'quadrats-no-overlap.csv';
+    const file = buildQuadratFile(fileName, 'Q0001,10,10,10,10,100,square\nQ0002,30,30,10,10,100,square');
+
+    await act(async () => {
+      render(<Harness uploadForm={FormType.quadrats} acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} />);
+    });
+
+    await waitFor(() => {
+      expect(continueButton()).not.toBeDisabled();
+    });
+    expect(screen.queryByRole('checkbox', { name: /acknowledge quadrat overlaps/i })).toBeNull();
   });
 });
 

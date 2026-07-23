@@ -224,6 +224,43 @@ describe('validateInputsStep', () => {
     await expect(validateInputsStep.run(ctx)).rejects.toThrow(/overlap/);
   });
 
+  it('accepts overlapping CSV rows when the stored payload carries the overlap acknowledgment', async () => {
+    // The acknowledgment travels inside the run payload, so a re-dispatched (retried) run
+    // with acknowledged field-measurement overlaps must not fail at validate_inputs.
+    const ctx = makeCtx(
+      makeInput({
+        quadrats: {
+          mode: 'csv',
+          rows: [
+            { quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+            { quadratName: 'B', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
+          ],
+          coordinates: 'canonical-sw',
+          sourceCoordinateReferenceCorner: 'SW',
+          overlapAcknowledgment: 'Overlaps reflect field measurements.'
+        }
+      }),
+      pool
+    );
+    await expect(validateInputsStep.run(ctx)).resolves.toBeUndefined();
+  });
+
+  it('acknowledgment does not bypass non-overlap defects (out-of-bounds row still rejects)', async () => {
+    const ctx = makeCtx(
+      makeInput({
+        quadrats: {
+          mode: 'csv',
+          rows: [{ quadratName: 'A', startX: 90, startY: 0, dimensionX: 20, dimensionY: 20 }],
+          coordinates: 'canonical-sw',
+          sourceCoordinateReferenceCorner: 'SW',
+          overlapAcknowledgment: 'Overlaps reflect field measurements.'
+        }
+      }),
+      pool
+    );
+    await expect(validateInputsStep.run(ctx)).rejects.toThrow(/extends past plot/);
+  });
+
   it('rejects out-of-bounds CSV rows (X)', async () => {
     const ctx = makeCtx(
       makeInput({

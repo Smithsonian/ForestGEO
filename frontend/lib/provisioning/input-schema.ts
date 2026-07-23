@@ -63,7 +63,8 @@ export const ProvisioningQuadratsRequestSchema = z.discriminatedUnion('mode', [
   z.object({
     mode: z.literal('csv'),
     rows: z.array(QuadratRowSchema).min(1).max(MAX_GENERATED_QUADRATS),
-    coordinateReferenceCorner: ReferenceCornerSchema
+    coordinateReferenceCorner: ReferenceCornerSchema,
+    overlapAcknowledgment: z.string().trim().min(1).optional()
   }),
   NoneQuadratsSchema
 ]);
@@ -75,7 +76,8 @@ export const CanonicalQuadratsSchema = z.discriminatedUnion('mode', [
     mode: z.literal('csv'),
     rows: z.array(QuadratRowSchema).min(1).max(MAX_GENERATED_QUADRATS),
     coordinates: z.literal('canonical-sw'),
-    sourceCoordinateReferenceCorner: ReferenceCornerSchema
+    sourceCoordinateReferenceCorner: ReferenceCornerSchema,
+    overlapAcknowledgment: z.string().trim().min(1).optional()
   }),
   NoneQuadratsSchema
 ]);
@@ -119,12 +121,18 @@ export const CanonicalProvisioningSchema = z
     if (input.quadrats.mode !== 'csv') return;
 
     const rows = input.quadrats.rows;
+    // Overlaps are warn-and-acknowledge, not fatal: real surveyed quadrats can overlap, so a
+    // layout with overlapping footprints is valid provisioning input when the admin has
+    // explicitly acknowledged them (the acknowledgment text travels in the stored payload).
+    // Every other issue kind remains a hard validation error.
+    const overlapsAcknowledged = Boolean(input.quadrats.overlapAcknowledgment);
     const issues = validateQuadratCollection(rows, input.plot, 'SW');
     for (const issue of issues) {
+      if (issue.kind === 'overlap' && overlapsAcknowledged) continue;
       ctx.addIssue({
         code: 'custom',
         path: ['quadrats', 'rows', issue.rowIndex],
-        message: issue.message
+        message: issue.kind === 'overlap' ? `${issue.message} If the overlap reflects field measurements, confirm the overlap acknowledgment.` : issue.message
       });
     }
   });
@@ -136,7 +144,7 @@ function canonicalizeProvisioningRequest(request: z.infer<typeof ProvisioningReq
     return { site, plot, quadrats };
   }
 
-  const { coordinateReferenceCorner, rows } = quadrats;
+  const { coordinateReferenceCorner, rows, overlapAcknowledgment } = quadrats;
   return {
     site,
     plot,
@@ -144,7 +152,8 @@ function canonicalizeProvisioningRequest(request: z.infer<typeof ProvisioningReq
       mode: 'csv',
       rows: rows.map(row => normalizeToSouthwest(row, coordinateReferenceCorner)),
       coordinates: 'canonical-sw',
-      sourceCoordinateReferenceCorner: coordinateReferenceCorner
+      sourceCoordinateReferenceCorner: coordinateReferenceCorner,
+      ...(overlapAcknowledgment !== undefined ? { overlapAcknowledgment } : {})
     }
   };
 }

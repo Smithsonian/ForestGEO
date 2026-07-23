@@ -128,6 +128,10 @@ function UploadParentInner(props: UploadParentProps) {
   // than inside UploadParseFiles) because UploadFireSQL, in a later ReviewStates screen, must still
   // see the value the user picked. Only meaningful for FormType.quadrats; other forms ignore it.
   const [coordinateReferenceCorner, setCoordinateReferenceCorner] = useState<QuadratReferenceCorner>(DEFAULT_REFERENCE_CORNER);
+  // The uploader's confirmation that overlapping quadrat footprints reflect field measurements.
+  // Held here for the same reason as the reference corner: confirmed in UploadParseFiles, but
+  // UploadFireSQL must still see it when it sends the requests. Quadrats form only.
+  const [quadratOverlapAcknowledgment, setQuadratOverlapAcknowledgment] = useState<string | null>(null);
   const [showFailedMeasurementsModal, setShowFailedMeasurementsModal] = useState(false);
   const [isReingestionMode, setIsReingestionMode] = useState(false);
   const [revisionMatchResult, setRevisionMatchResult] = useState<RevisionUploadResponse | null>(null);
@@ -436,6 +440,8 @@ function UploadParentInner(props: UploadParentProps) {
             setColumnMappingForFile={setColumnMappingForFile}
             coordinateReferenceCorner={coordinateReferenceCorner}
             setCoordinateReferenceCorner={setCoordinateReferenceCorner}
+            quadratOverlapAcknowledgment={quadratOverlapAcknowledgment}
+            setQuadratOverlapAcknowledgment={setQuadratOverlapAcknowledgment}
           />
         );
       case ReviewStates.ARCGIS_PREFLIGHT:
@@ -487,6 +493,7 @@ function UploadParentInner(props: UploadParentProps) {
             selectedDelimiters={selectedDelimiters}
             columnMappings={columnMappings}
             coordinateReferenceCorner={coordinateReferenceCorner}
+            quadratOverlapAcknowledgment={quadratOverlapAcknowledgment}
           />
         );
       case ReviewStates.REVISION_MATCH:

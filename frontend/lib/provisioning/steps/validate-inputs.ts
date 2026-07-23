@@ -1,6 +1,6 @@
 import type { ProvisioningStep, StepContext } from '../types';
 import { ProvisioningError } from '../types';
-import { collectQuadratBoundsIssues, findFirstOverlap } from '../geometry';
+import { validateQuadratCollection } from '../quadrat-collection-validation';
 
 const SCHEMA_PATTERN = /^forestgeo_[a-z0-9_]+$/;
 
@@ -67,16 +67,12 @@ export const validateInputsStep: ProvisioningStep = {
         );
       }
     } else if (input.quadrats.mode === 'csv') {
-      const rows = input.quadrats.rows;
-      const boundsIssues = collectQuadratBoundsIssues(rows, input.plot);
-      if (boundsIssues.length > 0) {
-        throw new ProvisioningError(boundsIssues[0].message, 'invalid_input', { stepKey: 'validate_inputs' });
-      }
-      const overlap = findFirstOverlap(rows);
-      if (overlap) {
-        throw new ProvisioningError(`Quadrats "${overlap[0].quadratName}" and "${overlap[1].quadratName}" overlap`, 'invalid_input', {
-          stepKey: 'validate_inputs'
-        });
+      // Rows here are canonical south-west (run shape). Overlaps the admin acknowledged as
+      // field measurements are not defects; every other issue kind fails the run.
+      const overlapsAcknowledged = Boolean(input.quadrats.overlapAcknowledgment);
+      const issues = validateQuadratCollection(input.quadrats.rows, input.plot, 'SW').filter(issue => !(issue.kind === 'overlap' && overlapsAcknowledged));
+      if (issues.length > 0) {
+        throw new ProvisioningError(issues[0].message, 'invalid_input', { stepKey: 'validate_inputs' });
       }
     }
   }

@@ -115,4 +115,18 @@ describe('quadratLayoutIsValid', () => {
 
     expect(quadratLayoutIsValid(input)).toBe(false);
   });
+
+  it('blocks overlapping rows without an acknowledgment, and passes them with one', () => {
+    const input = buildInput('SW');
+    if (input.quadrats.mode !== 'csv') throw new Error('expected csv mode');
+    input.quadrats.rows = [
+      { quadratName: 'Q01', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+      { quadratName: 'Q02', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
+    ];
+
+    expect(quadratLayoutIsValid(input)).toBe(false);
+
+    input.quadrats.overlapAcknowledgment = 'Overlaps reflect field measurements.';
+    expect(quadratLayoutIsValid(input)).toBe(true);
+  });
 });

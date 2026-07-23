@@ -161,6 +161,40 @@ describe('ProvisioningInputSchema canonicalization', () => {
     expect(result.success).toBe(false);
   });
 
+  it('accepts overlapping rows when acknowledged, carrying the acknowledgment text into the canonical payload', () => {
+    const ACKNOWLEDGMENT = 'I confirm the overlapping quadrat footprints in this upload reflect field measurements.';
+    const result = ProvisioningInputSchema.safeParse({
+      ...BASE_REQUEST,
+      quadrats: {
+        mode: 'csv',
+        coordinateReferenceCorner: 'NE',
+        overlapAcknowledgment: ACKNOWLEDGMENT,
+        rows: [
+          { quadratName: 'A', startX: 30, startY: 30, dimensionX: 30, dimensionY: 30 },
+          { quadratName: 'B', startX: 50, startY: 50, dimensionX: 30, dimensionY: 30 }
+        ]
+      }
+    });
+    expect(result.success).toBe(true);
+    if (result.success && result.data.quadrats.mode === 'csv') {
+      // The stored run payload is the provenance record, so the text must survive canonicalization.
+      expect(result.data.quadrats.overlapAcknowledgment).toBe(ACKNOWLEDGMENT);
+    }
+  });
+
+  it('acknowledgment does not bypass non-overlap defects (out-of-bounds row still rejects)', () => {
+    const result = ProvisioningInputSchema.safeParse({
+      ...BASE_REQUEST,
+      quadrats: {
+        mode: 'csv',
+        coordinateReferenceCorner: 'SW',
+        overlapAcknowledgment: 'Overlaps reflect field measurements.',
+        rows: [{ quadratName: 'TooFar', startX: 95, startY: 0, dimensionX: 20, dimensionY: 20 }]
+      }
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('rejects duplicate quadrat names case-insensitively after trimming', () => {
     const result = ProvisioningInputSchema.safeParse({
       ...BASE_REQUEST,

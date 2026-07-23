@@ -116,6 +116,9 @@ interface FixedDataProcessingResult {
   insertedCount: number;
   updatedCount: number;
   skippedCount: number;
+  // Quadrat uploads only: the overlap messages the uploader explicitly acknowledged as field
+  // measurements, recorded to the file's changelog entry for provenance. Absent elsewhere.
+  acknowledgedOverlaps?: string[];
 }
 
 function normalizeOptionalString(value: unknown): string | null {
@@ -171,6 +174,16 @@ function formatBlockedCleanReuploadValues(values: string[], maxValues: number = 
  * retryable infrastructure failure -- see the fixed-data catch block.
  */
 class QuadratGeometryValidationError extends Error {}
+
+/**
+ * Overlapping quadrat footprints are field reality (surveyed widths can exceed the grid
+ * pitch), not necessarily data errors — so unlike QuadratGeometryValidationError they are
+ * not an outright refusal. The upload proceeds only when the request carries an explicit
+ * acknowledgment that the overlaps reflect field measurements; without it, this error tells
+ * the uploader exactly which pairs overlap and how to proceed.
+ */
+class QuadratOverlapAcknowledgmentRequiredError extends Error {}
+const QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE = 'QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT';
 
 /** Stored quadrat rows are always canonical south-west, regardless of what the upload declared. */
 const CANONICAL_SOUTHWEST_CORNER: QuadratReferenceCorner = 'SW';
@@ -281,6 +294,7 @@ async function upsertQuadratRows(
   rows: FileRow[],
   uploadMode: UploadMode,
   referenceCorner: QuadratReferenceCorner,
+  overlapAcknowledgment: string | null,
   transactionID: string
 ): Promise<FixedDataProcessingResult> {
   if (!plotID) {
@@ -374,15 +388,33 @@ async function upsertQuadratRows(
 
   const normalizedIncoming = incomingGeometry.map(row => normalizeToSouthwest(row, referenceCorner));
 
+  // Overlap policy: overlapping footprints can be genuine field measurements, so 'overlap'
+  // issues never reject outright — they require the request's explicit acknowledgment, and
+  // acknowledged pairs are returned so the caller can record them for provenance. Every
+  // other issue kind (missing/bad geometry, duplicate names, out of bounds) stays fatal.
+  const acknowledgedOverlaps: string[] = [];
+  const requireOverlapAcknowledgment = (overlapMessages: string[]) => {
+    if (overlapMessages.length === 0) return;
+    if (!overlapAcknowledgment) {
+      throw new QuadratOverlapAcknowledgmentRequiredError(
+        `Quadrat footprints overlap: ${truncateAndJoin(overlapMessages, ' ')} ` +
+          `If these overlaps reflect field measurements, confirm the overlap acknowledgment and re-submit.`
+      );
+    }
+    acknowledgedOverlaps.push(...overlapMessages);
+  };
+
   if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
     // Validate the incoming layout BEFORE the stem-safety check and before deleting anything.
     // Rows are already normalized to canonical south-west above, so pass CANONICAL_SOUTHWEST_CORNER
     // here (matching the REVISIONS branch below) rather than re-declaring referenceCorner and
     // making validateQuadratCollection normalize the same rows a second time internally.
     const cleanReuploadIssues = validateQuadratCollection(normalizedIncoming, plotBounds, CANONICAL_SOUTHWEST_CORNER);
-    if (cleanReuploadIssues.length > 0) {
-      throw new QuadratGeometryValidationError(formatQuadratGeometryIssues(cleanReuploadIssues));
+    const cleanFatalIssues = cleanReuploadIssues.filter(issue => issue.kind !== 'overlap');
+    if (cleanFatalIssues.length > 0) {
+      throw new QuadratGeometryValidationError(formatQuadratGeometryIssues(cleanFatalIssues));
     }
+    requireOverlapAcknowledgment([...new Set(cleanReuploadIssues.filter(issue => issue.kind === 'overlap').map(issue => issue.message))]);
 
     // CLEAN_REUPLOAD deletes every active quadrat in the plot before re-inserting
     // the upload contents. Because stems references quadrats via ON DELETE CASCADE,
@@ -549,11 +581,14 @@ async function upsertQuadratRows(
       return `Quadrat "${incomingRow.quadratName}" overlaps quadrat "${otherRow.quadratName}".`;
     });
 
-    const blockingMessages = new Set<string>(introducedIssues.map(issue => issue.message));
-    for (const message of introducedOverlapMessages) blockingMessages.add(message);
-    if (blockingMessages.size > 0) {
-      throw new QuadratGeometryValidationError(formatQuadratGeometryMessages([...blockingMessages]));
+    const fatalIntroducedMessages = new Set<string>(introducedIssues.filter(issue => issue.kind !== 'overlap').map(issue => issue.message));
+    if (fatalIntroducedMessages.size > 0) {
+      throw new QuadratGeometryValidationError(formatQuadratGeometryMessages([...fatalIntroducedMessages]));
     }
+
+    const overlapMessages = new Set<string>(introducedIssues.filter(issue => issue.kind === 'overlap').map(issue => issue.message));
+    for (const message of introducedOverlapMessages) overlapMessages.add(message);
+    requireOverlapAcknowledgment([...overlapMessages]);
   }
 
   // Every incoming row was validated above (unique, in-bounds, non-overlapping), so this
@@ -620,7 +655,7 @@ async function upsertQuadratRows(
     insertedCount += 1;
   }
 
-  return { insertedCount, updatedCount, skippedCount };
+  return { insertedCount, updatedCount, skippedCount, ...(acknowledgedOverlaps.length > 0 ? { acknowledgedOverlaps } : {}) };
 }
 
 async function upsertSpeciesRows(
@@ -1553,7 +1588,17 @@ export async function POST(request: NextRequest) {
 
         if (formType === 'quadrats') {
           const referenceCorner = parseReferenceCorner(body.coordinateReferenceCorner);
-          fixedDataProcessingResult = await upsertQuadratRows(connectionManager, schema, plot?.plotID, uploadRows, uploadMode, referenceCorner, transactionID);
+          const overlapAcknowledgment = normalizeOptionalString(body.quadratOverlapAcknowledgment);
+          fixedDataProcessingResult = await upsertQuadratRows(
+            connectionManager,
+            schema,
+            plot?.plotID,
+            uploadRows,
+            uploadMode,
+            referenceCorner,
+            overlapAcknowledgment,
+            transactionID
+          );
         } else if (formType === 'attributes') {
           fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
         } else if (formType === 'species') {
@@ -1596,6 +1641,17 @@ export async function POST(request: NextRequest) {
         try {
           const batchRowCount = Object.keys(fileRowSet).length;
           const censusID = census?.dateRanges?.[0]?.censusID;
+          // Provenance for acknowledged quadrat overlaps: the acknowledgment TEXT the uploader
+          // confirmed, who confirmed it, and exactly which pairs it covered. Stored on the
+          // file's changelog entry so "why does this plot have overlapping quadrats?" has a
+          // durable, queryable answer.
+          const overlapAcknowledgmentRecord = fixedDataProcessingResult.acknowledgedOverlaps?.length
+            ? {
+                text: normalizeOptionalString(body.quadratOverlapAcknowledgment),
+                acknowledgedBy: session?.user?.email ?? user,
+                overlaps: fixedDataProcessingResult.acknowledgedOverlaps
+              }
+            : null;
 
           // Check if we've already logged this file upload - use format() for schema
           const existingEntrySQL = format(
@@ -1616,7 +1672,8 @@ export async function POST(request: NextRequest) {
               insertedCount: fixedDataProcessingResult.insertedCount,
               updatedCount: fixedDataProcessingResult.updatedCount,
               skippedCount: fixedDataProcessingResult.skippedCount,
-              batchCount: 1
+              batchCount: 1,
+              ...(overlapAcknowledgmentRecord ? { overlapAcknowledgment: overlapAcknowledgmentRecord } : {})
             });
             const insertChangelogSQL = format(
               `INSERT INTO ??.unifiedchangelog
@@ -1635,6 +1692,12 @@ export async function POST(request: NextRequest) {
             metadata.uploadMode = metadata.uploadMode || uploadMode;
             metadata.lastChunkMode = uploadMode;
             metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
+            if (overlapAcknowledgmentRecord) {
+              metadata.overlapAcknowledgment = {
+                ...overlapAcknowledgmentRecord,
+                overlaps: [...new Set([...(metadata.overlapAcknowledgment?.overlaps ?? []), ...overlapAcknowledgmentRecord.overlaps])]
+              };
+            }
             metadata.insertedCount = (metadata.insertedCount || 0) + fixedDataProcessingResult.insertedCount;
             metadata.updatedCount = (metadata.updatedCount || 0) + fixedDataProcessingResult.updatedCount;
             metadata.skippedCount = (metadata.skippedCount || 0) + fixedDataProcessingResult.skippedCount;
@@ -1670,6 +1733,19 @@ export async function POST(request: NextRequest) {
             uploadMode,
             branch: 'fixed-data'
           });
+        }
+
+        // Unacknowledged overlaps are a confirm-and-retry condition, not a data error: the
+        // client re-submits the same file with the acknowledgment flag once the uploader
+        // confirms the overlaps reflect field measurements. Distinct code so the UI can react.
+        if (error instanceof QuadratOverlapAcknowledgmentRequiredError) {
+          ailogger.warn(`Quadrat upload for ${fileName} requires overlap acknowledgment: ${error.message}`, {
+            schema,
+            plotID: plot?.plotID ?? null,
+            uploadMode,
+            code: QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE
+          });
+          return NextResponse.json({ error: error.message, code: QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE }, { status: HTTPResponses.INVALID_REQUEST });
         }
 
         // A geometry validation failure is a client error, never a retryable infrastructure
