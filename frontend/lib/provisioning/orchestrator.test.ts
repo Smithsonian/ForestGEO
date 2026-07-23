@@ -66,11 +66,13 @@ function makeInput(schemaName: string): ProvisioningRunInput {
 }
 
 // A stored payload shaped like a run written before commit 346635ca constrained
-// defaultAreaUnits to areaSelectionOptions: 'ha' was legal free text at write time,
-// so this is well-formed JSON that CanonicalProvisioningSchema now rejects.
+// defaultAreaUnits to areaSelectionOptions: free text was legal at write time. Recognized
+// legacy spellings (like 'ha') are upgraded by parseStoredInput and stay retryable, so this
+// fixture uses a unit outside both the enum and the synonym map — well-formed JSON that
+// CanonicalProvisioningSchema still rejects.
 function makeMalformedRunPayload(schemaName: string): unknown {
   const input = makeInput(schemaName);
-  return { ...input, plot: { ...input.plot, defaultAreaUnits: 'ha' } };
+  return { ...input, plot: { ...input.plot, defaultAreaUnits: 'acres' } };
 }
 
 async function waitForTerminal(runId: number, pool: mysql.Pool): Promise<string> {
@@ -264,6 +266,40 @@ describe('parseStoredInput', () => {
       coordinates: 'canonical-sw',
       sourceCoordinateReferenceCorner: 'SW'
     });
+  });
+
+  it('upgrades recognized legacy free-text units so pre-enum runs stay retryable', () => {
+    // Runs recorded while PlotForm was a free-text input stored whatever the admin typed
+    // (placeholder was 'ha'). Failing them at load made those runs permanently un-retryable.
+    const legacyUnits = {
+      site: STORED_INPUT_SITE,
+      plot: {
+        ...STORED_INPUT_PLOT,
+        defaultDimensionUnits: 'meters',
+        defaultCoordinateUnits: ' M ',
+        defaultAreaUnits: 'ha'
+      },
+      quadrats: { mode: 'none' }
+    };
+
+    const result = parseStoredInput(legacyUnits);
+
+    expect(result.plot.defaultDimensionUnits).toBe('m');
+    expect(result.plot.defaultCoordinateUnits).toBe('m');
+    expect(result.plot.defaultAreaUnits).toBe('hm2');
+    // Untouched fields keep their stored values.
+    expect(result.plot.defaultDBHUnits).toBe('mm');
+  });
+
+  it('still rejects a stored unit outside both the enum and the legacy synonym map', () => {
+    const unknownUnit = {
+      site: STORED_INPUT_SITE,
+      plot: { ...STORED_INPUT_PLOT, defaultAreaUnits: 'acres' },
+      quadrats: { mode: 'none' }
+    };
+
+    // Unrecognized values must fail loudly rather than be silently coerced to some default.
+    expect(() => parseStoredInput(unknownUnit)).toThrow(expect.objectContaining({ name: 'ZodError' }));
   });
 
   it('rejects a CSV row missing quadratName', () => {

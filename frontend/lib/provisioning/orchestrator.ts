@@ -8,6 +8,7 @@ import { auditAttempt, auditSuccess, auditFailure } from './audit';
 import { dispatchRun, getWorkerPid, HEARTBEAT_STALE_MS, isRunOwnedByCurrentWorker } from './worker';
 import { upgradeLegacyQuadratConfig } from './coordinate-reference-corner';
 import { CanonicalProvisioningSchema } from './input-schema';
+import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import ailogger from '@/ailogger';
 
 // Bootstrap DDL inlined so the catalog tables can be created without any
@@ -110,11 +111,73 @@ export interface StartRunArgs {
 }
 
 /**
+ * Runs recorded while PlotForm accepted free-text units stored whatever the admin typed.
+ * The canonical schema now requires the unit enums, so without translation those stored
+ * payloads fail validation and their runs become permanently un-retryable. Recognized
+ * legacy spellings are mapped onto the enum; anything unrecognized is left as-is so the
+ * schema still rejects it explicitly rather than silently coercing.
+ */
+const LEGACY_DIMENSION_UNIT_SYNONYMS: Readonly<Record<string, (typeof unitSelectionOptions)[number]>> = {
+  kilometer: 'km',
+  kilometers: 'km',
+  kilometre: 'km',
+  kilometres: 'km',
+  meter: 'm',
+  meters: 'm',
+  metre: 'm',
+  metres: 'm',
+  decimeter: 'dm',
+  decimeters: 'dm',
+  centimeter: 'cm',
+  centimeters: 'cm',
+  centimetre: 'cm',
+  centimetres: 'cm',
+  millimeter: 'mm',
+  millimeters: 'mm',
+  millimetre: 'mm',
+  millimetres: 'mm'
+};
+
+const LEGACY_AREA_UNIT_SYNONYMS: Readonly<Record<string, (typeof areaSelectionOptions)[number]>> = {
+  ha: 'hm2',
+  hectare: 'hm2',
+  hectares: 'hm2',
+  'km^2': 'km2',
+  'm^2': 'm2',
+  sqm: 'm2',
+  'sq m': 'm2',
+  'square meters': 'm2',
+  'square metres': 'm2'
+};
+
+function upgradeLegacyUnitValue(value: unknown, validOptions: readonly string[], synonyms: Readonly<Record<string, string>>): unknown {
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().toLowerCase();
+  if (validOptions.includes(normalized)) return normalized;
+  return synonyms[normalized] ?? value;
+}
+
+function upgradeLegacyPlotUnits(plot: unknown): unknown {
+  if (typeof plot !== 'object' || plot === null) return plot;
+  const candidate = plot as Record<string, unknown>;
+  return {
+    ...candidate,
+    defaultDimensionUnits: upgradeLegacyUnitValue(candidate.defaultDimensionUnits, unitSelectionOptions, LEGACY_DIMENSION_UNIT_SYNONYMS),
+    defaultCoordinateUnits: upgradeLegacyUnitValue(candidate.defaultCoordinateUnits, unitSelectionOptions, LEGACY_DIMENSION_UNIT_SYNONYMS),
+    defaultDBHUnits: upgradeLegacyUnitValue(candidate.defaultDBHUnits, unitSelectionOptions, LEGACY_DIMENSION_UNIT_SYNONYMS),
+    defaultHOMUnits: upgradeLegacyUnitValue(candidate.defaultHOMUnits, unitSelectionOptions, LEGACY_DIMENSION_UNIT_SYNONYMS),
+    defaultAreaUnits: upgradeLegacyUnitValue(candidate.defaultAreaUnits, areaSelectionOptions, LEGACY_AREA_UNIT_SYNONYMS)
+  };
+}
+
+/**
  * Stored run payloads are read back without re-running the request schema, which
  * is deliberate: re-parsing canonical rows through the canonicalizing transform
  * would shift every quadrat a second time. Runs written before reference-corner
  * support lack the canonical discriminant, so stamp it here and then validate
- * the complete stored value as canonical run input.
+ * the complete stored value as canonical run input. Legacy free-text units are
+ * translated onto the unit enums for the same reason: both upgrades keep runs
+ * recorded under older schemas loadable (and therefore retryable).
  */
 export function parseStoredInput(raw: unknown): ProvisioningRunInput {
   const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -122,7 +185,11 @@ export function parseStoredInput(raw: unknown): ProvisioningRunInput {
     throw new Error('Stored provisioning input is malformed');
   }
   const candidate = parsed as Record<string, unknown>;
-  const upgraded = { ...candidate, quadrats: upgradeLegacyQuadratConfig(candidate.quadrats) };
+  const upgraded = {
+    ...candidate,
+    plot: upgradeLegacyPlotUnits(candidate.plot),
+    quadrats: upgradeLegacyQuadratConfig(candidate.quadrats)
+  };
   return CanonicalProvisioningSchema.parse(upgraded);
 }
 
