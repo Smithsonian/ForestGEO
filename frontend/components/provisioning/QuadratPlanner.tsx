@@ -229,8 +229,7 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
       {value.mode === 'none' && (
         <Alert color="neutral" variant="soft" size="sm" aria-label="No quadrats will be created">
           No quadrats will be created now. Upload the real quadrat list later from the Quadrats page. This avoids seeding a placeholder grid that would coexist
-          with — and duplicate — your uploaded quadrats. The Quadrats page currently assumes every row&apos;s StartX/StartY identifies the south-west
-          (lower-left) corner, so if your file uses a different corner, use CSV mode here instead.
+          with — and duplicate — your uploaded quadrats.
         </Alert>
       )}
 

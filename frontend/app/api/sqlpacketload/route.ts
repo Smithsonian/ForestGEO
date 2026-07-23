@@ -17,6 +17,14 @@ import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
 import { buildDivergentQuadratUploadError, quadratRevisionAppendsDivergentSet } from '@/lib/ingestion/quadrat-upload-guards';
+import { toQuadratGeometry, validateQuadratCollection, type QuadratCollectionIssue } from '@/lib/provisioning/quadrat-collection-validation';
+import {
+  DEFAULT_REFERENCE_CORNER,
+  isQuadratReferenceCorner,
+  normalizeToSouthwest,
+  type QuadratReferenceCorner
+} from '@/lib/provisioning/coordinate-reference-corner';
+import type { QuadratCsvRow } from '@/lib/provisioning/types';
 import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
 import { RoleResult } from '@/lib/db/definitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
@@ -70,6 +78,19 @@ function toNullableNumber(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * `FileRow` is documented as `Record<string, string | null>`, but the request body is raw
+ * `JSON.parse` output that TypeScript cannot actually enforce -- a non-browser caller may send
+ * a JSON number instead of a string (e.g. `startx: 0`). Stringify defensively so a well-formed
+ * numeric value is parsed correctly by `toQuadratGeometry` instead of throwing a raw TypeError
+ * that would surface as an infrastructure failure rather than the intended geometry validation.
+ */
+function coerceGeometryField(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return String(value);
 }
 
 function toPositiveInteger(value: unknown): number | null {
@@ -128,6 +149,29 @@ function formatBlockedCleanReuploadValues(values: string[], maxValues: number = 
   const truncatedValues = uniqueValues.slice(0, maxValues);
   const remainingCount = uniqueValues.length - truncatedValues.length;
   return truncatedValues.join(', ') + (remainingCount > 0 ? `, ...and ${remainingCount} more` : '');
+}
+
+/**
+ * Thrown when a quadrat upload's declared geometry is unusable (missing/blank/non-numeric
+ * coordinates, an unsupported reference corner, or a layout that is out of the plot's bounds
+ * or overlaps another quadrat). The route treats this as a client error (400), never as a
+ * retryable infrastructure failure -- see the fixed-data catch block.
+ */
+class QuadratGeometryValidationError extends Error {}
+
+/** Stored quadrat rows are always canonical south-west, regardless of what the upload declared. */
+const CANONICAL_SOUTHWEST_CORNER: QuadratReferenceCorner = 'SW';
+
+function parseReferenceCorner(value: unknown): QuadratReferenceCorner {
+  if (value === undefined || value === null) return DEFAULT_REFERENCE_CORNER;
+  if (!isQuadratReferenceCorner(value)) {
+    throw new QuadratGeometryValidationError('coordinateReferenceCorner must be SW, SE, NW, or NE');
+  }
+  return value;
+}
+
+function formatQuadratGeometryIssues(issues: QuadratCollectionIssue[]): string {
+  return `Quadrat geometry validation failed: ${issues.map(issue => issue.message).join(' ')}`;
 }
 
 function isRetryableUploadError(error: unknown): boolean {
@@ -201,6 +245,7 @@ async function upsertQuadratRows(
   plotID: number | undefined,
   rows: FileRow[],
   uploadMode: UploadMode,
+  referenceCorner: QuadratReferenceCorner,
   transactionID: string
 ): Promise<FixedDataProcessingResult> {
   if (!plotID) {
@@ -209,9 +254,50 @@ async function upsertQuadratRows(
 
   let insertedCount = 0;
   let updatedCount = 0;
-  let skippedCount = 0;
+  const skippedCount = 0;
+
+  // Trust boundary: authoritative plot bounds come from the database row selected by
+  // plotID. Client-supplied plot dimensions in the request body are never consulted here,
+  // so they cannot widen what a quadrat is allowed to occupy.
+  const plotBoundsSQL = safeFormatQuery(schema, `SELECT DimensionX, DimensionY FROM ??.plots WHERE PlotID = ? LIMIT 1`);
+  const plotBoundsResult = await connectionManager.executeQuery(plotBoundsSQL, [plotID], transactionID);
+  const plotBoundsRow = Array.isArray(plotBoundsResult) ? plotBoundsResult[0] : undefined;
+  const plotDimensionX = toNullableNumber(plotBoundsRow?.DimensionX);
+  const plotDimensionY = toNullableNumber(plotBoundsRow?.DimensionY);
+
+  if (!plotBoundsRow || plotDimensionX === null || plotDimensionY === null || plotDimensionX <= 0 || plotDimensionY <= 0) {
+    throw new QuadratGeometryValidationError(`Plot ${plotID} has no valid DimensionX/DimensionY on record; quadrat geometry cannot be validated.`);
+  }
+  const plotBounds = { dimensionX: plotDimensionX, dimensionY: plotDimensionY };
+
+  // Convert every incoming row to canonical geometry up front. A row that cannot be
+  // interpreted is a hard error: it is never filtered out and never inserted using its
+  // raw, unparsed values -- that is how rows go missing without anyone noticing.
+  const incomingGeometry: QuadratCsvRow[] = rows.map((row, index) => {
+    const geometry = toQuadratGeometry({
+      quadrat: coerceGeometryField(row.quadrat),
+      startx: coerceGeometryField(row.startx),
+      starty: coerceGeometryField(row.starty),
+      dimx: coerceGeometryField(row.dimx),
+      dimy: coerceGeometryField(row.dimy)
+    });
+    if (!geometry) {
+      throw new QuadratGeometryValidationError(
+        `Quadrat upload row ${index + 1} (QuadratName "${normalizeRequiredString(row.quadrat)}") has missing, blank, or non-numeric ` +
+          `geometry (startx/starty/dimx/dimy). Fix the file and re-upload.`
+      );
+    }
+    return geometry;
+  });
+  const normalizedIncoming = incomingGeometry.map(row => normalizeToSouthwest(row, referenceCorner));
 
   if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+    // Validate the incoming layout BEFORE the stem-safety check and before deleting anything.
+    const cleanReuploadIssues = validateQuadratCollection(incomingGeometry, plotBounds, referenceCorner);
+    if (cleanReuploadIssues.length > 0) {
+      throw new QuadratGeometryValidationError(formatQuadratGeometryIssues(cleanReuploadIssues));
+    }
+
     // CLEAN_REUPLOAD deletes every active quadrat in the plot before re-inserting
     // the upload contents. Because stems references quadrats via ON DELETE CASCADE,
     // removing a quadrat that is already in use would also destroy its stems and
@@ -263,14 +349,50 @@ async function upsertQuadratRows(
   }
 
   if (uploadMode === UploadMode.REVISIONS) {
-    // A Revisions upload updates by QuadratName and appends every non-matching row.
+    // A Revisions upload updates by QuadratName and appends every non-matching row, so the
+    // set that must be geometrically valid is the PROSPECTIVE FINAL LAYOUT: every existing
+    // active quadrat NOT named by this upload, plus every incoming row exactly as declared
+    // (duplicates included, so a duplicate incoming name still surfaces as a validation
+    // issue instead of being silently deduplicated before this check runs).
+    const existingQuadratsSQL = safeFormatQuery(
+      schema,
+      `SELECT QuadratName, StartX, StartY, DimensionX, DimensionY FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1 AND QuadratName IS NOT NULL`
+    );
+    const existingQuadratRows = await connectionManager.executeQuery(existingQuadratsSQL, [plotID], transactionID);
+    const existingQuadratList: any[] = Array.isArray(existingQuadratRows) ? existingQuadratRows : [];
+
+    const existingGeometry: QuadratCsvRow[] = existingQuadratList.map(existingRow => {
+      const stringOrNull = (value: unknown): string | null => (value === null || value === undefined ? null : String(value));
+      // Stored rows are always canonical south-west, so toQuadratGeometry here is a pure
+      // parse -- not a re-declaration of the reference corner.
+      const geometry = toQuadratGeometry({
+        quadrat: stringOrNull(existingRow.QuadratName),
+        startx: stringOrNull(existingRow.StartX),
+        starty: stringOrNull(existingRow.StartY),
+        dimx: stringOrNull(existingRow.DimensionX),
+        dimy: stringOrNull(existingRow.DimensionY)
+      });
+      if (!geometry) {
+        throw new QuadratGeometryValidationError(
+          `Existing quadrat "${existingRow.QuadratName}" in plot ${plotID} has malformed stored geometry and cannot be used to validate this revision.`
+        );
+      }
+      return geometry;
+    });
+
+    const incomingNamesLower = new Set(normalizedIncoming.map(row => row.quadratName.toLowerCase()));
+    const carryOverExisting = existingGeometry.filter(row => !incomingNamesLower.has(row.quadratName.toLowerCase()));
+    const prospectiveLayout = [...carryOverExisting, ...normalizedIncoming];
+
+    const revisionIssues = validateQuadratCollection(prospectiveLayout, plotBounds, CANONICAL_SOUTHWEST_CORNER);
+    if (revisionIssues.length > 0) {
+      throw new QuadratGeometryValidationError(formatQuadratGeometryIssues(revisionIssues));
+    }
+
+    // Preserve the existing divergent-placeholder guard, run AFTER geometry validation.
     // Refuse only a large, replacement-like file against the known generated Q#####
     // placeholder grid. Other non-overlapping files are valid Revisions additions.
-    const existingNamesSQL = safeFormatQuery(schema, `SELECT QuadratName FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1 AND QuadratName IS NOT NULL`);
-    const existingNameRows = await connectionManager.executeQuery(existingNamesSQL, [plotID], transactionID);
-    const existingActiveNames = Array.isArray(existingNameRows)
-      ? existingNameRows.map(existing => String((existing as { QuadratName?: unknown }).QuadratName ?? ''))
-      : [];
+    const existingActiveNames = existingQuadratList.map(row => String(row.QuadratName ?? ''));
     const incomingNames = rows.map(row => normalizeRequiredString(row.quadrat)).filter(Boolean);
 
     if (quadratRevisionAppendsDivergentSet(existingActiveNames, incomingNames)) {
@@ -278,18 +400,25 @@ async function upsertQuadratRows(
     }
   }
 
+  // Every incoming row was validated above (unique, in-bounds, non-overlapping), so this
+  // lookup is guaranteed to hit for every row processed below.
+  const canonicalByName = new Map<string, QuadratCsvRow>();
+  for (const row of normalizedIncoming) {
+    canonicalByName.set(row.quadratName.toLowerCase(), row);
+  }
+
   for (const row of rows) {
     const quadratName = normalizeRequiredString(row.quadrat);
-    if (!quadratName) {
-      skippedCount += 1;
-      continue;
+    const canonical = canonicalByName.get(quadratName.toLowerCase());
+    if (!canonical) {
+      throw new QuadratGeometryValidationError(`Internal error: no canonical geometry resolved for quadrat "${quadratName}".`);
     }
 
     const payload = {
-      StartX: row.startx,
-      StartY: row.starty,
-      DimensionX: row.dimx,
-      DimensionY: row.dimy,
+      StartX: canonical.startX,
+      StartY: canonical.startY,
+      DimensionX: canonical.dimensionX,
+      DimensionY: canonical.dimensionY,
       Area: row.area,
       QuadratShape: normalizeOptionalString(row.quadratshape)
     };
@@ -1243,7 +1372,8 @@ export async function POST(request: NextRequest) {
         transactionID = await connectionManager.beginTransaction();
 
         if (formType === 'quadrats') {
-          fixedDataProcessingResult = await upsertQuadratRows(connectionManager, schema, plot?.plotID, uploadRows, uploadMode, transactionID);
+          const referenceCorner = parseReferenceCorner(body.coordinateReferenceCorner);
+          fixedDataProcessingResult = await upsertQuadratRows(connectionManager, schema, plot?.plotID, uploadRows, uploadMode, referenceCorner, transactionID);
         } else if (formType === 'attributes') {
           fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
         } else if (formType === 'species') {
@@ -1349,6 +1479,14 @@ export async function POST(request: NextRequest) {
         if (transactionID) {
           await connectionManager.rollbackTransaction(transactionID);
           transactionID = undefined;
+        }
+
+        // A geometry validation failure is a client error, never a retryable infrastructure
+        // failure -- check for it BEFORE retryCount/isRetryableUploadError so it can never be
+        // retried and never falls through to the generic 503 responses below.
+        if (error instanceof QuadratGeometryValidationError) {
+          ailogger.warn(`Rejected quadrat upload for ${fileName}: ${error.message}`);
+          return NextResponse.json({ error: error.message, code: 'INVALID_QUADRAT_GEOMETRY' }, { status: HTTPResponses.INVALID_REQUEST });
         }
 
         retryCount++;

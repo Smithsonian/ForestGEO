@@ -828,10 +828,14 @@ describe('sqlpacketload fixed-data upload modes', () => {
   });
 
   it('refuses quadrat clean re-upload when active quadrats are already referenced by stems', async () => {
-    mockConnectionManager.executeQuery.mockResolvedValueOnce([
-      { QuadratID: 11, QuadratName: '1011' },
-      { QuadratID: 12, QuadratName: '1012' }
-    ]);
+    mockConnectionManager.executeQuery
+      // 1: authoritative plot bounds lookup
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      // 2: stem-safety blocking query
+      .mockResolvedValueOnce([
+        { QuadratID: 11, QuadratName: '1011' },
+        { QuadratID: 12, QuadratName: '1012' }
+      ]);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -850,7 +854,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(body.error).toContain('1012');
     expect(body.error).toContain('stems and downstream measurements');
     expect(body.error).toContain('Use Revisions Upload instead');
-    const guardSQL = String(mockConnectionManager.executeQuery.mock.calls[0]?.[0]);
+    const guardSQL = String(mockConnectionManager.executeQuery.mock.calls[1]?.[0]);
     expect(guardSQL).toContain('FROM `forestgeo_testing`.stems');
     // Soft-deleted stems must not block the wipe; only live stems count.
     expect(guardSQL).toContain('s.IsActive = 1');
@@ -867,7 +871,9 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // Regression: the guard previously trimmed and filtered out blank names
     // before deciding whether to refuse, so a stem-referenced quadrat named
     // ' ' slipped past the check and the DELETE cascade destroyed its stems.
-    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ QuadratID: 42, QuadratName: '   ' }]);
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([{ QuadratID: 42, QuadratName: '   ' }]);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -891,11 +897,13 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
   it('allows quadrat clean re-upload when the plot has no stems on active quadrats', async () => {
     mockConnectionManager.executeQuery
-      // 1: dependency precheck returns nothing
+      // 1: authoritative plot bounds lookup
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      // 2: dependency precheck returns nothing
       .mockResolvedValueOnce([])
-      // 2: DELETE FROM quadrats
+      // 3: DELETE FROM quadrats
       .mockResolvedValueOnce({ affectedRows: 0 })
-      // 3: INSERT new quadrat
+      // 4: INSERT new quadrat
       .mockResolvedValueOnce({ insertId: 1 });
 
     const res = await POST(
@@ -909,7 +917,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     );
 
     expect(res?.status).toBe(200);
-    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('FROM `forestgeo_testing`.stems');
+    expect(String(mockConnectionManager.executeQuery.mock.calls[1]?.[0])).toContain('FROM `forestgeo_testing`.stems');
     // Positive anchor for the refusal test's zero-DELETE filter above: the wipe
     // must run here with exactly this SQL text, so a quoting change that would
     // make the negative filter vacuous fails loudly instead.
@@ -921,15 +929,21 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
   it('allows a revisions upload to add a new quadrat to a real layout', async () => {
     mockConnectionManager.executeQuery
-      // 1: divergent-placeholder preflight sees a real layout, not Q##### placeholders
-      .mockResolvedValueOnce([{ QuadratName: 'C01' }, { QuadratName: 'D01' }])
-      // 2: the incoming quadrat does not exist yet
+      // 1: authoritative plot bounds lookup
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      // 2: existing active quadrats (geometry) -- also feeds the divergent-placeholder guard.
+      // Real (non-placeholder) names, non-overlapping with the incoming E01 row.
+      .mockResolvedValueOnce([
+        { QuadratName: 'C01', StartX: 0, StartY: 0, DimensionX: 20, DimensionY: 20 },
+        { QuadratName: 'D01', StartX: 20, StartY: 0, DimensionX: 20, DimensionY: 20 }
+      ])
+      // 3: the incoming quadrat does not exist yet
       .mockResolvedValueOnce([])
-      // 3: INSERT new quadrat
+      // 4: INSERT new quadrat
       .mockResolvedValueOnce({ insertId: 3 })
-      // 4: changelog lookup
+      // 5: changelog lookup
       .mockResolvedValueOnce([])
-      // 5: changelog insert
+      // 6: changelog insert
       .mockResolvedValueOnce({ insertId: 4 });
 
     const res = await POST(
@@ -949,8 +963,10 @@ describe('sqlpacketload fixed-data upload modes', () => {
       updatedCount: 0,
       transactionCompleted: true
     });
-    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('SELECT QuadratName FROM `forestgeo_testing`.quadrats');
-    expect(String(mockConnectionManager.executeQuery.mock.calls[2]?.[0])).toContain('INSERT INTO `forestgeo_testing`.quadrats');
+    expect(String(mockConnectionManager.executeQuery.mock.calls[1]?.[0])).toContain(
+      'SELECT QuadratName, StartX, StartY, DimensionX, DimensionY FROM `forestgeo_testing`.quadrats'
+    );
+    expect(String(mockConnectionManager.executeQuery.mock.calls[3]?.[0])).toContain('INSERT INTO `forestgeo_testing`.quadrats');
   });
 
   it('rejects revisions when multiple active species rows already exist for one SpeciesCode', async () => {
