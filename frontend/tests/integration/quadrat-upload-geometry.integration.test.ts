@@ -14,6 +14,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { cleanupTestMeasurements, insertDirectMeasurements, setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
+import {
+  buildQuadratOverlapAcknowledgment,
+  QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+  validateQuadratCollectionDetailed
+} from '@/lib/provisioning/quadrat-collection-validation';
 
 // ---------------------------------------------------------------------------
 // Named constants -- no magic numbers/strings
@@ -35,7 +40,6 @@ const HTTP_OK = 200;
 const HTTP_BAD_REQUEST = 400;
 const INVALID_QUADRAT_GEOMETRY_CODE = 'INVALID_QUADRAT_GEOMETRY';
 const OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE = 'QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT';
-const OVERLAP_ACKNOWLEDGMENT_TEXT = 'I confirm the overlapping quadrat footprints in this upload reflect field measurements.';
 
 const UPLOAD_MODE_CLEAN_REUPLOAD = 'clean_reupload';
 const UPLOAD_MODE_REVISIONS = 'revisions';
@@ -273,11 +277,20 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
     // exceed the grid pitch), so with an explicit acknowledgment the layout is valid data.
     const rowA = { quadrat: 'ACKA', startx: '300', starty: '300', dimx: '20', dimy: '20' };
     const rowB = { quadrat: 'ACKB', startx: '310', starty: '310', dimx: '20', dimy: '20' };
+    const overlapSummary = validateQuadratCollectionDetailed(
+      [
+        { quadratName: 'ACKA', startX: 300, startY: 300, dimensionX: 20, dimensionY: 20 },
+        { quadratName: 'ACKB', startX: 310, startY: 310, dimensionX: 20, dimensionY: 20 }
+      ],
+      { dimensionX: TEST_PLOT_DIMENSION, dimensionY: TEST_PLOT_DIMENSION },
+      'SW'
+    ).overlapSummary;
+    if (!overlapSummary) throw new Error('expected overlap summary');
 
     const res = (await POST(
       buildQuadratUploadRequest(
         baseRequestBody({
-          quadratOverlapAcknowledgment: OVERLAP_ACKNOWLEDGMENT_TEXT,
+          quadratOverlapAcknowledgment: buildQuadratOverlapAcknowledgment([overlapSummary.layoutSignature]),
           fileRowSet: { 'row-1': rowA, 'row-2': rowB }
         })
       )
@@ -292,8 +305,8 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
     );
     expect(changelogRows.length, 'the file_upload changelog entry must exist').toBe(1);
     const metadata = typeof changelogRows[0].NewRowState === 'string' ? JSON.parse(changelogRows[0].NewRowState) : changelogRows[0].NewRowState;
-    expect(metadata.overlapAcknowledgment.text).toBe(OVERLAP_ACKNOWLEDGMENT_TEXT);
-    expect(metadata.overlapAcknowledgment.overlaps.some((message: string) => message.includes('ACKA'))).toBe(true);
+    expect(metadata.overlapAcknowledgment.statement).toBe(QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT);
+    expect(metadata.overlapAcknowledgment.summaries[0].pairs.some((pair: { message: string }) => pair.message.includes('ACKA'))).toBe(true);
     expect(metadata.overlapAcknowledgment.acknowledgedBy).toBeDefined();
   });
 
@@ -375,6 +388,31 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
     expect(Number(existingRow!.StartX)).toBe(EXISTING_START);
     expect(Number(existingRow!.StartY)).toBe(EXISTING_START);
     expect(await findQuadratByName(connection, plotID, 'REV-NEW'), 'the rejected new row must not have been written').toBeNull();
+  });
+
+  it('REVISIONS: accepts the exact server-challenged existing-layout overlap after confirmation', async () => {
+    await connection.query(
+      `INSERT INTO quadrats (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape)
+       VALUES (?, 'CHALLENGE-EXISTING', 200, 200, 20, 20, 400, 'square')`,
+      [plotID]
+    );
+    const fileRowSet = { 'row-1': { quadrat: 'CHALLENGE-NEW', startx: '210', starty: '210', dimx: '20', dimy: '20' } };
+    const requestBody = baseRequestBody({ uploadMode: UPLOAD_MODE_REVISIONS, fileRowSet });
+
+    const challengeResponse = (await POST(buildQuadratUploadRequest(requestBody)))!;
+    expect(challengeResponse.status).toBe(HTTP_BAD_REQUEST);
+    const challenge = await challengeResponse.json();
+    const signature = challenge.overlapSummaries?.[0]?.layoutSignature;
+    expect(signature).toMatch(/^quadrat-layout-v1-[0-9a-f]{16}$/);
+
+    const confirmedResponse = (await POST(
+      buildQuadratUploadRequest({
+        ...requestBody,
+        quadratOverlapAcknowledgment: buildQuadratOverlapAcknowledgment([signature])
+      })
+    ))!;
+    expect(confirmedResponse.status).toBe(HTTP_OK);
+    expect(await findQuadratByName(connection, plotID, 'CHALLENGE-NEW')).not.toBeNull();
   });
 
   // =========================================================================

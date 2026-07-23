@@ -8,6 +8,11 @@ import { headerSignature } from '@/lib/column-mapping/mapping';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
 import ailogger from '@/ailogger';
+import {
+  buildQuadratOverlapAcknowledgment,
+  QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+  validateQuadratCollectionDetailed
+} from '@/lib/provisioning/quadrat-collection-validation';
 
 const { getCookieMock, authMock, handleUpsertMock } = vi.hoisted(() => ({
   getCookieMock: vi.fn(),
@@ -1107,7 +1112,8 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(res?.status).toBe(400);
     const body = await res?.json();
     expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
-    expect(body.error).toContain('"NEWOVL" overlaps quadrat "FAR"');
+    expect(body.error).toContain('NEWOVL');
+    expect(body.error).toContain('FAR');
   });
 
   it('accepts a clean revision on a plot whose pre-existing overlaps saturate the reporting cap', async () => {
@@ -1139,7 +1145,16 @@ describe('sqlpacketload fixed-data upload modes', () => {
   });
 
   it('commits an overlapping upload when the acknowledgment is present and records the text in the changelog', async () => {
-    const ACKNOWLEDGMENT_TEXT = 'I confirm the overlapping quadrat footprints in this upload reflect field measurements.';
+    const overlapSummary = validateQuadratCollectionDetailed(
+      [
+        { quadratName: 'Q01', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+        { quadratName: 'Q02', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
+      ],
+      { dimensionX: 500, dimensionY: 500 },
+      'SW'
+    ).overlapSummary;
+    if (!overlapSummary) throw new Error('expected overlap summary');
+    const acknowledgment = buildQuadratOverlapAcknowledgment([overlapSummary.layoutSignature]);
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
       // stem-safety precheck + DELETE + two INSERTs
@@ -1158,7 +1173,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
           'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
           'row-2': { quadrat: 'Q02', startx: '10', starty: '10', dimx: '20', dimy: '20' }
         },
-        { uploadMode: 'clean_reupload', quadratOverlapAcknowledgment: ACKNOWLEDGMENT_TEXT }
+        { uploadMode: 'clean_reupload', quadratOverlapAcknowledgment: acknowledgment }
       )
     );
 
@@ -1170,9 +1185,93 @@ describe('sqlpacketload fixed-data upload modes', () => {
     );
     expect(changelogInsertCall, 'the file_upload changelog entry must have been written').toBeDefined();
     const storedMetadata = JSON.parse(changelogInsertCall![1][3]);
-    expect(storedMetadata.overlapAcknowledgment.text).toBe(ACKNOWLEDGMENT_TEXT);
-    expect(storedMetadata.overlapAcknowledgment.overlaps.some((message: string) => message.includes('overlaps'))).toBe(true);
-    expect(storedMetadata.overlapAcknowledgment.acknowledgedBy).toBeDefined();
+    expect(storedMetadata.overlapAcknowledgment.statement).toBe(QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT);
+    expect(storedMetadata.overlapAcknowledgment.summaries[0].pairs.some((pair: { message: string }) => pair.message.includes('overlaps'))).toBe(true);
+    expect(storedMetadata.overlapAcknowledgment.acknowledgedBy).toBe('user-1');
+  });
+
+  it('does not treat a coerced false value as an overlap acknowledgment', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'Q02', startx: '10', starty: '10', dimx: '20', dimy: '20' }
+        },
+        { uploadMode: 'clean_reupload', quadratOverlapAcknowledgment: false }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
+    expect(body.overlapSummaries[0].layoutSignature).toMatch(/^quadrat-layout-v1-[0-9a-f]{16}$/);
+    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires re-acknowledgment when the submitted layout signature is stale', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'Q02', startx: '10', starty: '10', dimx: '20', dimy: '20' }
+        },
+        {
+          uploadMode: 'clean_reupload',
+          quadratOverlapAcknowledgment: buildQuadratOverlapAcknowledgment(['quadrat-layout-v1-0000000000000000'])
+        }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
+    expect(body.overlapSummaries[0].layoutSignature).not.toBe('quadrat-layout-v1-0000000000000000');
+    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls acknowledged quadrat writes back when their provenance record cannot be stored', async () => {
+    const overlapSummary = validateQuadratCollectionDetailed(
+      [
+        { quadratName: 'Q01', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+        { quadratName: 'Q02', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
+      ],
+      { dimensionX: 500, dimensionY: 500 },
+      'SW'
+    ).overlapSummary;
+    if (!overlapSummary) throw new Error('expected overlap summary');
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce({ insertId: 1 })
+      .mockResolvedValueOnce({ insertId: 2 })
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('changelog unavailable'));
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'Q02', startx: '10', starty: '10', dimx: '20', dimy: '20' }
+        },
+        {
+          uploadMode: 'clean_reupload',
+          quadratOverlapAcknowledgment: buildQuadratOverlapAcknowledgment([overlapSummary.layoutSignature])
+        }
+      )
+    );
+
+    expect(res?.status).toBe(503);
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
   });
 
   it('acknowledgment does NOT bypass non-overlap defects: an out-of-bounds row still rejects', async () => {
@@ -1187,7 +1286,10 @@ describe('sqlpacketload fixed-data upload modes', () => {
           'row-1': { quadrat: 'Q01', startx: '490', starty: '0', dimx: '20', dimy: '20' },
           'row-2': { quadrat: 'Q02', startx: '495', starty: '5', dimx: '20', dimy: '20' }
         },
-        { uploadMode: 'clean_reupload', quadratOverlapAcknowledgment: 'acknowledged' }
+        {
+          uploadMode: 'clean_reupload',
+          quadratOverlapAcknowledgment: buildQuadratOverlapAcknowledgment(['quadrat-layout-v1-0000000000000000'])
+        }
       )
     );
 

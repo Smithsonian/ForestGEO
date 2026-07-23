@@ -32,8 +32,9 @@ import { canonicalizeRevisionRow, normalizeRevisionHeader } from '@/components/u
 import { EMPTY_REVISION_MATCH_COUNTS, RevisionInvalidRow, RevisionMatchedRow, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { BulkEditPlan } from '@/config/editplan/types';
 import type { ArcgisImportReference } from '@/lib/arcgis/types';
-import type { QuadratReferenceCorner } from '@/lib/provisioning/types';
+import type { QuadratOverlapAcknowledgment, QuadratReferenceCorner } from '@/lib/provisioning/types';
 import { DEFAULT_REFERENCE_CORNER } from '@/lib/provisioning/coordinate-reference-corner';
+import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -118,6 +119,7 @@ function UploadParentInner(props: UploadParentProps) {
   // Custom hooks for state management
   const fileManagement = useFileManagement();
   const uploadState = useUploadState(overrideUploadForm, skipToProcessing, overrideUploadMode, overrideSourceFormat);
+  const { setReviewState: setUploadReviewState } = uploadState;
   const errorHandling = useErrorHandling();
 
   // Remaining local state (not managed by custom hooks)
@@ -131,7 +133,21 @@ function UploadParentInner(props: UploadParentProps) {
   // The uploader's confirmation that overlapping quadrat footprints reflect field measurements.
   // Held here for the same reason as the reference corner: confirmed in UploadParseFiles, but
   // UploadFireSQL must still see it when it sends the requests. Quadrats form only.
-  const [quadratOverlapAcknowledgment, setQuadratOverlapAcknowledgment] = useState<string | null>(null);
+  const [quadratOverlapAcknowledgment, setQuadratOverlapAcknowledgment] = useState<QuadratOverlapAcknowledgment | null>(null);
+  const [serverQuadratOverlapSummaries, setServerQuadratOverlapSummaries] = useState<QuadratOverlapSummary[]>([]);
+  const clearServerQuadratOverlapSummaries = useCallback(() => setServerQuadratOverlapSummaries([]), []);
+  const handleQuadratOverlapAcknowledgmentRequired = useCallback(
+    (summaries: QuadratOverlapSummary[]) => {
+      setQuadratOverlapAcknowledgment(null);
+      setServerQuadratOverlapSummaries(previous => {
+        const bySignature = new Map(previous.map(summary => [summary.layoutSignature, summary]));
+        summaries.forEach(summary => bySignature.set(summary.layoutSignature, summary));
+        return [...bySignature.values()];
+      });
+      setUploadReviewState(ReviewStates.UPLOAD_FILES);
+    },
+    [setUploadReviewState]
+  );
   const [showFailedMeasurementsModal, setShowFailedMeasurementsModal] = useState(false);
   const [isReingestionMode, setIsReingestionMode] = useState(false);
   const [revisionMatchResult, setRevisionMatchResult] = useState<RevisionUploadResponse | null>(null);
@@ -206,6 +222,8 @@ function UploadParentInner(props: UploadParentProps) {
       setRevisionConfirmNewRows(false);
       setArcgisImportSession(null);
       setCoordinateReferenceCorner(DEFAULT_REFERENCE_CORNER);
+      setQuadratOverlapAcknowledgment(null);
+      setServerQuadratOverlapSummaries([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadState.state.uploadForm, uploadState.state.reviewState]);
@@ -237,6 +255,8 @@ function UploadParentInner(props: UploadParentProps) {
     setRevisionConfirmNewRows(false);
     setArcgisImportSession(null);
     setCoordinateReferenceCorner(DEFAULT_REFERENCE_CORNER);
+    setQuadratOverlapAcknowledgment(null);
+    setServerQuadratOverlapSummaries([]);
   }
 
   async function resetError() {
@@ -246,11 +266,15 @@ function UploadParentInner(props: UploadParentProps) {
   // Function to handle file addition
   const handleAddFile = (newFile: FileWithPath) => {
     setArcgisImportSession(null);
+    setQuadratOverlapAcknowledgment(null);
+    setServerQuadratOverlapSummaries([]);
     fileManagement.addFile(newFile);
   };
 
   const handleRemoveFile = (fileIndex: number) => {
     setArcgisImportSession(null);
+    setQuadratOverlapAcknowledgment(null);
+    setServerQuadratOverlapSummaries([]);
     const removed = fileManagement.files[fileIndex];
     if (removed) dropColumnMapping(removed.name);
     fileManagement.removeFile(fileIndex);
@@ -258,6 +282,8 @@ function UploadParentInner(props: UploadParentProps) {
 
   const handleReplaceFile = async (fileIndex: number, newFile: FileWithPath) => {
     setArcgisImportSession(null);
+    setQuadratOverlapAcknowledgment(null);
+    setServerQuadratOverlapSummaries([]);
     const replaced = fileManagement.files[fileIndex];
     if (replaced) dropColumnMapping(replaced.name);
     fileManagement.replaceFile(fileIndex, newFile);
@@ -442,6 +468,8 @@ function UploadParentInner(props: UploadParentProps) {
             setCoordinateReferenceCorner={setCoordinateReferenceCorner}
             quadratOverlapAcknowledgment={quadratOverlapAcknowledgment}
             setQuadratOverlapAcknowledgment={setQuadratOverlapAcknowledgment}
+            serverQuadratOverlapSummaries={serverQuadratOverlapSummaries}
+            clearServerQuadratOverlapSummaries={clearServerQuadratOverlapSummaries}
           />
         );
       case ReviewStates.ARCGIS_PREFLIGHT:
@@ -494,6 +522,7 @@ function UploadParentInner(props: UploadParentProps) {
             columnMappings={columnMappings}
             coordinateReferenceCorner={coordinateReferenceCorner}
             quadratOverlapAcknowledgment={quadratOverlapAcknowledgment}
+            onQuadratOverlapAcknowledgmentRequired={handleQuadratOverlapAcknowledgmentRequired}
           />
         );
       case ReviewStates.REVISION_MATCH:

@@ -5,7 +5,8 @@ import { FileCollectionRowSet, FormType, SourceFormat } from '@/config/macros/fo
 import { UploadMode } from '@/config/uploadmodes';
 import type { ArcgisImportReference } from '@/lib/arcgis/types';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
-import type { QuadratReferenceCorner } from '@/lib/provisioning/types';
+import type { QuadratOverlapAcknowledgment, QuadratReferenceCorner } from '@/lib/provisioning/types';
+import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
 
 // File upload constraints
 export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500MB per file
@@ -51,11 +52,11 @@ export interface UploadParseFilesProps {
   // when uploadForm === FormType.quadrats; carried forward to UploadFireSQL via UploadFireProps.
   coordinateReferenceCorner: QuadratReferenceCorner;
   setCoordinateReferenceCorner: Dispatch<SetStateAction<QuadratReferenceCorner>>;
-  // The uploader's confirmation text that overlapping quadrat footprints reflect field
-  // measurements (null until confirmed). Quadrats form only; sent to the server, which refuses
-  // overlapping layouts without it and records the text in the file's changelog entry.
-  quadratOverlapAcknowledgment: string | null;
-  setQuadratOverlapAcknowledgment: Dispatch<SetStateAction<string | null>>;
+  // Confirmation bound to the exact reviewed quadrat layout signatures.
+  quadratOverlapAcknowledgment: QuadratOverlapAcknowledgment | null;
+  setQuadratOverlapAcknowledgment: Dispatch<SetStateAction<QuadratOverlapAcknowledgment | null>>;
+  serverQuadratOverlapSummaries: QuadratOverlapSummary[];
+  clearServerQuadratOverlapSummaries: () => void;
   // centralized functions
   handleInitialSubmit: () => Promise<void>;
   handleAddFile: (newFile: FileWithPath) => void;
@@ -111,9 +112,9 @@ export interface UploadFireProps {
   // Which corner of each quadrat a Quadrats-form file's StartX/StartY identifies, chosen in
   // UploadParseFiles and sent to the server so it can normalize to south-west before writing.
   coordinateReferenceCorner: QuadratReferenceCorner;
-  // Overlap acknowledgment confirmed in UploadParseFiles; forwarded verbatim with each
-  // quadrats-form request so acknowledged overlaps commit and get recorded for provenance.
-  quadratOverlapAcknowledgment: string | null;
+  // Overlap acknowledgment confirmed in UploadParseFiles and scoped to reviewed layouts.
+  quadratOverlapAcknowledgment: QuadratOverlapAcknowledgment | null;
+  onQuadratOverlapAcknowledgmentRequired: (summaries: QuadratOverlapSummary[]) => void;
   // state setters
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;

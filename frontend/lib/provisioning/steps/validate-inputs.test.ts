@@ -2,6 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { validateInputsStep } from './validate-inputs';
 import type { StepContext, ProvisioningRunInput } from '../types';
+import {
+  buildQuadratOverlapAcknowledgment,
+  QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+  validateQuadratCollectionDetailed
+} from '../quadrat-collection-validation';
 
 const CATALOG_SCHEMA = 'catalog';
 
@@ -227,21 +232,22 @@ describe('validateInputsStep', () => {
   it('accepts overlapping CSV rows when the stored payload carries the overlap acknowledgment', async () => {
     // The acknowledgment travels inside the run payload, so a re-dispatched (retried) run
     // with acknowledged field-measurement overlaps must not fail at validate_inputs.
-    const ctx = makeCtx(
-      makeInput({
-        quadrats: {
-          mode: 'csv',
-          rows: [
-            { quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
-            { quadratName: 'B', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
-          ],
-          coordinates: 'canonical-sw',
-          sourceCoordinateReferenceCorner: 'SW',
-          overlapAcknowledgment: 'Overlaps reflect field measurements.'
-        }
-      }),
-      pool
-    );
+    const input = makeInput({
+      quadrats: {
+        mode: 'csv',
+        rows: [
+          { quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+          { quadratName: 'B', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
+        ],
+        coordinates: 'canonical-sw',
+        sourceCoordinateReferenceCorner: 'SW'
+      }
+    });
+    if (input.quadrats.mode !== 'csv') throw new Error('expected csv mode');
+    const summary = validateQuadratCollectionDetailed(input.quadrats.rows, input.plot, 'SW').overlapSummary;
+    if (!summary) throw new Error('expected overlap summary');
+    input.quadrats.overlapAcknowledgment = buildQuadratOverlapAcknowledgment([summary.layoutSignature]);
+    const ctx = makeCtx(input, pool);
     await expect(validateInputsStep.run(ctx)).resolves.toBeUndefined();
   });
 
@@ -253,7 +259,10 @@ describe('validateInputsStep', () => {
           rows: [{ quadratName: 'A', startX: 90, startY: 0, dimensionX: 20, dimensionY: 20 }],
           coordinates: 'canonical-sw',
           sourceCoordinateReferenceCorner: 'SW',
-          overlapAcknowledgment: 'Overlaps reflect field measurements.'
+          overlapAcknowledgment: {
+            statement: QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+            layoutSignatures: ['quadrat-layout-v1-0000000000000000']
+          }
         }
       }),
       pool

@@ -38,7 +38,14 @@ import { usePlotContext } from '@/app/contexts/compat-hooks';
 import { makeLegacyCsvHeaderKey } from '@/lib/column-mapping/fields';
 import { transformMeasurementValue } from '@/lib/column-mapping/measurement-rows';
 import { validateQuadratsRow } from '@/lib/db/definitions/zones';
-import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, toQuadratGeometry, validateQuadratCollection } from '@/lib/provisioning/quadrat-collection-validation';
+import {
+  acknowledgmentCoversLayout,
+  buildQuadratOverlapAcknowledgment,
+  QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+  toQuadratGeometry,
+  validateQuadratCollectionDetailed,
+  type QuadratOverlapSummary
+} from '@/lib/provisioning/quadrat-collection-validation';
 import type { QuadratCsvRow } from '@/lib/provisioning/types';
 import ReferenceCornerSelect from '@/components/provisioning/ReferenceCornerSelect';
 
@@ -156,7 +163,9 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     coordinateReferenceCorner,
     setCoordinateReferenceCorner,
     quadratOverlapAcknowledgment,
-    setQuadratOverlapAcknowledgment
+    setQuadratOverlapAcknowledgment,
+    serverQuadratOverlapSummaries,
+    clearServerQuadratOverlapSummaries
   } = props;
 
   const [fileToReplace, setFileToReplace] = useState<FileWithPath | null>(null);
@@ -173,6 +182,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   // Overlap findings are kept separate from blocking issues: overlapping footprints can be
   // genuine field measurements, so they warn and require acknowledgment instead of refusing.
   const [quadratOverlapWarningsByFile, setQuadratOverlapWarningsByFile] = useState<Record<string, QuadratPreflightIssue[]>>({});
+  const [localQuadratOverlapSummaries, setLocalQuadratOverlapSummaries] = useState<QuadratOverlapSummary[]>([]);
   const [quadratPreflightRunning, setQuadratPreflightRunning] = useState<boolean>(false);
   // True when at least one file had rows that parsed as geometry but the plot's DimensionX/DimensionY
   // are unset, so bounds/overlap/duplicate-name checks (validateQuadratCollection) could not run at
@@ -187,6 +197,8 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   useEffect(() => {
     if (!isQuadratsForm || acceptedFiles.length === 0) {
       setQuadratPreflightIssuesByFile({});
+      setQuadratOverlapWarningsByFile({});
+      setLocalQuadratOverlapSummaries([]);
       setQuadratPreflightRunning(false);
       setQuadratPlotDimensionsUnvalidated(false);
       return;
@@ -199,7 +211,9 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     (async () => {
       const nextIssuesByFile: Record<string, QuadratPreflightIssue[]> = {};
       const nextOverlapWarningsByFile: Record<string, QuadratPreflightIssue[]> = {};
+      const nextOverlapSummaries: QuadratOverlapSummary[] = [];
       let dimensionsUnvalidated = false;
+      const geometryByFile: Array<{ fileName: string; rows: QuadratCsvRow[]; originalRowIndexes: number[] }> = [];
 
       for (const file of acceptedFiles) {
         let rows: FileRow[];
@@ -213,11 +227,10 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
         }
 
         const fileIssues: QuadratPreflightIssue[] = [];
-        const fileOverlapWarnings: QuadratPreflightIssue[] = [];
 
         try {
           const geometryRows: QuadratCsvRow[] = [];
-          const originalRowIndexByGeometryRow = new Map<QuadratCsvRow, number>();
+          const originalRowIndexes: number[] = [];
 
           rows.forEach((row, rowIndex) => {
             const geometry = toQuadratGeometry(row);
@@ -230,38 +243,12 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
               fileIssues.push({ rowIndex, quadratName: fallbackName, message });
               return;
             }
-            originalRowIndexByGeometryRow.set(geometry, rowIndex);
+            originalRowIndexes.push(rowIndex);
             geometryRows.push(geometry);
           });
 
           if (geometryRows.length > 0) {
-            // The plot record's dimensions are nullable (and detransform maps a DB NULL to null,
-            // not undefined), so test for a usable positive number rather than mere presence:
-            // validating against null bounds would coerce them to 0 and falsely flag every row
-            // as out of bounds. Without usable bounds, overlap/duplicate-name/non-positive checks
-            // still run (the validator skips only the plot-edge checks) and the bounds gap is
-            // surfaced once, collection-wide, via the dedicated "could not validate" alert.
-            const plotBoundsUsable = typeof plotDimensionX === 'number' && plotDimensionX > 0 && typeof plotDimensionY === 'number' && plotDimensionY > 0;
-            if (!plotBoundsUsable) {
-              dimensionsUnvalidated = true;
-            }
-            const collectionIssues = validateQuadratCollection(
-              geometryRows,
-              plotBoundsUsable ? { dimensionX: plotDimensionX, dimensionY: plotDimensionY } : null,
-              coordinateReferenceCorner
-            );
-            collectionIssues.forEach(issue => {
-              const geometryRow = geometryRows[issue.rowIndex];
-              const originalRowIndex = geometryRow ? (originalRowIndexByGeometryRow.get(geometryRow) ?? issue.rowIndex) : issue.rowIndex;
-              const preflightIssue = { rowIndex: originalRowIndex, quadratName: issue.quadratName, message: issue.message };
-              // Overlaps warn-and-acknowledge instead of blocking: surveyed quadrat footprints
-              // can genuinely overlap, so the uploader confirms rather than being refused.
-              if (issue.kind === 'overlap') {
-                fileOverlapWarnings.push(preflightIssue);
-              } else {
-                fileIssues.push(preflightIssue);
-              }
-            });
+            geometryByFile.push({ fileName: file.name, rows: geometryRows, originalRowIndexes });
           }
         } catch (geometryError: unknown) {
           const message = geometryError instanceof Error ? geometryError.message : String(geometryError);
@@ -275,14 +262,54 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
         if (fileIssues.length > 0) {
           nextIssuesByFile[file.name] = fileIssues.sort((a, b) => a.rowIndex - b.rowIndex);
         }
-        if (fileOverlapWarnings.length > 0) {
-          nextOverlapWarningsByFile[file.name] = fileOverlapWarnings.sort((a, b) => a.rowIndex - b.rowIndex);
+      }
+
+      const plotBoundsUsable = typeof plotDimensionX === 'number' && plotDimensionX > 0 && typeof plotDimensionY === 'number' && plotDimensionY > 0;
+      if (geometryByFile.length > 0 && !plotBoundsUsable) {
+        dimensionsUnvalidated = true;
+      }
+
+      const combinedRows = geometryByFile.flatMap(entry => entry.rows);
+      const combinedSources = geometryByFile.flatMap(entry =>
+        entry.rows.map((_, index) => ({ fileName: entry.fileName, rowIndex: entry.originalRowIndexes[index] ?? index }))
+      );
+      if (combinedRows.length > 0) {
+        // Validate the whole selected layout, not each file in isolation. This catches duplicate
+        // names and overlaps spanning separate files before the first file can commit.
+        const combinedValidation = validateQuadratCollectionDetailed(
+          combinedRows,
+          plotBoundsUsable ? { dimensionX: plotDimensionX, dimensionY: plotDimensionY } : null,
+          coordinateReferenceCorner
+        );
+        combinedValidation.issues.forEach(issue => {
+          const source = combinedSources[issue.rowIndex] ?? { fileName: '(selection)', rowIndex: issue.rowIndex };
+          const target = issue.kind === 'overlap' ? nextOverlapWarningsByFile : nextIssuesByFile;
+          const list = target[source.fileName] ?? [];
+          list.push({ rowIndex: source.rowIndex, quadratName: issue.quadratName, message: issue.message });
+          target[source.fileName] = list;
+        });
+
+        // The server processes quadrat files sequentially. Record every cumulative-prefix
+        // signature containing overlaps so a confirmation can cover each exact layout the server
+        // will validate, while still invalidating automatically if any file or ordering changes.
+        const prefixRows: QuadratCsvRow[] = [];
+        for (const entry of geometryByFile) {
+          prefixRows.push(...entry.rows);
+          const prefixValidation = validateQuadratCollectionDetailed(
+            prefixRows,
+            plotBoundsUsable ? { dimensionX: plotDimensionX, dimensionY: plotDimensionY } : null,
+            coordinateReferenceCorner
+          );
+          if (prefixValidation.overlapSummary) nextOverlapSummaries.push(prefixValidation.overlapSummary);
         }
       }
 
       if (!cancelled) {
+        Object.values(nextIssuesByFile).forEach(issues => issues.sort((a, b) => a.rowIndex - b.rowIndex));
+        Object.values(nextOverlapWarningsByFile).forEach(warnings => warnings.sort((a, b) => a.rowIndex - b.rowIndex));
         setQuadratPreflightIssuesByFile(nextIssuesByFile);
         setQuadratOverlapWarningsByFile(nextOverlapWarningsByFile);
+        setLocalQuadratOverlapSummaries(nextOverlapSummaries);
         setQuadratPlotDimensionsUnvalidated(dimensionsUnvalidated);
         setQuadratPreflightRunning(false);
       }
@@ -304,14 +331,19 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     [quadratPreflightIssuesByFile]
   );
 
-  const quadratPreflightHasOverlapWarnings = useMemo(
-    () => Object.values(quadratOverlapWarningsByFile).some(warnings => warnings.length > 0),
-    [quadratOverlapWarningsByFile]
-  );
+  const allQuadratOverlapSummaries = useMemo(() => {
+    const bySignature = new Map<string, QuadratOverlapSummary>();
+    [...localQuadratOverlapSummaries, ...serverQuadratOverlapSummaries].forEach(summary => bySignature.set(summary.layoutSignature, summary));
+    return [...bySignature.values()];
+  }, [localQuadratOverlapSummaries, serverQuadratOverlapSummaries]);
+  const currentOverlapSignatures = useMemo(() => allQuadratOverlapSummaries.map(summary => summary.layoutSignature), [allQuadratOverlapSummaries]);
+  const quadratPreflightHasOverlapWarnings = allQuadratOverlapSummaries.length > 0;
+  const quadratOverlapsAcknowledged =
+    currentOverlapSignatures.length > 0 && currentOverlapSignatures.every(signature => acknowledgmentCoversLayout(quadratOverlapAcknowledgment, signature));
 
   // Overlaps block Continue only until the uploader confirms them. The acknowledgment is also
   // sent (and required) server-side, so unchecking cannot be bypassed by skipping the preflight.
-  const quadratOverlapsUnacknowledged = quadratPreflightHasOverlapWarnings && !quadratOverlapAcknowledgment;
+  const quadratOverlapsUnacknowledged = quadratPreflightHasOverlapWarnings && !quadratOverlapsAcknowledged;
 
   const quadratPreflightBlocksContinue =
     isQuadratsForm && (quadratPreflightRunning || quadratPreflightHasIssues || quadratPlotDimensionsUnvalidated || quadratOverlapsUnacknowledged);
@@ -329,12 +361,14 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
 
   const handleDelimiterChange = useCallback(
     (fileName: string, delimiter: string) => {
+      setQuadratOverlapAcknowledgment(null);
+      clearServerQuadratOverlapSummaries();
       setSelectedDelimiters(prev => ({
         ...prev,
         [fileName]: delimiter
       }));
     },
-    [setSelectedDelimiters]
+    [clearServerQuadratOverlapSummaries, setQuadratOverlapAcknowledgment, setSelectedDelimiters]
   );
 
   const handleValidationStatusChange = useCallback((fileName: string, isValid: boolean, issues: DelimiterIssue[], detectedHeaders: string[]) => {
@@ -535,7 +569,11 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                 <ReferenceCornerSelect
                   id="upload-quadrat-reference-corner-input"
                   value={coordinateReferenceCorner}
-                  onChange={setCoordinateReferenceCorner}
+                  onChange={corner => {
+                    setQuadratOverlapAcknowledgment(null);
+                    clearServerQuadratOverlapSummaries();
+                    setCoordinateReferenceCorner(corner);
+                  }}
                   helperText="Coordinates are stored relative to the plot's lower-left origin. Choosing a different corner converts the uploaded coordinates on import — it does not move the plot."
                 />
               )}
@@ -653,14 +691,40 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                               </Box>
                             );
                           })}
+                          {serverQuadratOverlapSummaries.map(summary => (
+                            <Box key={summary.layoutSignature} sx={{ mt: 1 }}>
+                              <Typography level="body-sm" sx={{ fontWeight: 'bold' }}>
+                                Server validation: {summary.truncated ? `at least ${summary.minimumPairCount}` : summary.reportedPairCount} overlapping pair
+                                {(summary.truncated ? summary.minimumPairCount : summary.reportedPairCount) === 1 ? '' : 's'}
+                              </Typography>
+                              {summary.pairs.slice(0, MAX_QUADRAT_ISSUES_SHOWN_PER_FILE).map(pair => (
+                                <Typography key={pair.key} level="body-xs" sx={{ ml: 1 }}>
+                                  • {pair.message}
+                                </Typography>
+                              ))}
+                              {summary.truncated && (
+                                <Typography level="body-xs" sx={{ ml: 1, fontStyle: 'italic' }}>
+                                  This is a bounded sample. The confirmation is bound to the complete layout signature.
+                                </Typography>
+                              )}
+                            </Box>
+                          ))}
+                          {allQuadratOverlapSummaries.some(summary => summary.truncated) && (
+                            <Typography level="body-xs" sx={{ mt: 1, fontStyle: 'italic' }}>
+                              One or more layouts contain at least 26 overlapping pairs. The displayed pairs are a bounded sample; the confirmation is bound to
+                              each complete layout signature.
+                            </Typography>
+                          )}
                         </Box>
                         {/* eslint-disable-next-line jsx-a11y/control-has-associated-label -- Joy UI Checkbox `label` prop renders an associated <label> at runtime; the linter just doesn't parse the component */}
                         <Checkbox
                           sx={{ mt: 1.5 }}
                           label={QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT}
                           slotProps={{ input: { 'aria-label': 'Acknowledge quadrat overlaps' } }}
-                          checked={Boolean(quadratOverlapAcknowledgment)}
-                          onChange={event => setQuadratOverlapAcknowledgment(event.target.checked ? QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT : null)}
+                          checked={quadratOverlapsAcknowledged}
+                          onChange={event =>
+                            setQuadratOverlapAcknowledgment(event.target.checked ? buildQuadratOverlapAcknowledgment(currentOverlapSignatures) : null)
+                          }
                         />
                       </Box>
                     </Alert>

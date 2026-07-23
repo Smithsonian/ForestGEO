@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { estimateGridQuadratCount, MAX_GENERATED_QUADRATS } from './grid-generator';
 import { normalizeToSouthwest, REFERENCE_CORNER_OPTIONS } from './coordinate-reference-corner';
-import { validateQuadratCollection } from './quadrat-collection-validation';
+import { acknowledgmentCoversLayout, QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, validateQuadratCollectionDetailed } from './quadrat-collection-validation';
 import type { ProvisioningRequestInput, ProvisioningRunInput, QuadratReferenceCorner } from './types';
 
 const DimensionUnitSchema = z.enum(unitSelectionOptions);
@@ -10,6 +10,11 @@ const AreaUnitSchema = z.enum(areaSelectionOptions);
 
 const CORNER_VALUES = REFERENCE_CORNER_OPTIONS.map(option => option.value) as [QuadratReferenceCorner, ...QuadratReferenceCorner[]];
 const ReferenceCornerSchema = z.enum(CORNER_VALUES);
+const LayoutSignatureSchema = z.string().regex(/^quadrat-layout-v1-[0-9a-f]{16}$/);
+const QuadratOverlapAcknowledgmentSchema = z.object({
+  statement: z.literal(QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT),
+  layoutSignatures: z.array(LayoutSignatureSchema).min(1).max(1000)
+});
 
 export const ProvisioningSiteSchema = z.object({
   siteName: z.string().min(1),
@@ -64,7 +69,7 @@ export const ProvisioningQuadratsRequestSchema = z.discriminatedUnion('mode', [
     mode: z.literal('csv'),
     rows: z.array(QuadratRowSchema).min(1).max(MAX_GENERATED_QUADRATS),
     coordinateReferenceCorner: ReferenceCornerSchema,
-    overlapAcknowledgment: z.string().trim().min(1).optional()
+    overlapAcknowledgment: QuadratOverlapAcknowledgmentSchema.optional()
   }),
   NoneQuadratsSchema
 ]);
@@ -77,7 +82,7 @@ export const CanonicalQuadratsSchema = z.discriminatedUnion('mode', [
     rows: z.array(QuadratRowSchema).min(1).max(MAX_GENERATED_QUADRATS),
     coordinates: z.literal('canonical-sw'),
     sourceCoordinateReferenceCorner: ReferenceCornerSchema,
-    overlapAcknowledgment: z.string().trim().min(1).optional()
+    overlapAcknowledgment: QuadratOverlapAcknowledgmentSchema.optional()
   }),
   NoneQuadratsSchema
 ]);
@@ -125,8 +130,8 @@ export const CanonicalProvisioningSchema = z
     // layout with overlapping footprints is valid provisioning input when the admin has
     // explicitly acknowledged them (the acknowledgment text travels in the stored payload).
     // Every other issue kind remains a hard validation error.
-    const overlapsAcknowledged = Boolean(input.quadrats.overlapAcknowledgment);
-    const issues = validateQuadratCollection(rows, input.plot, 'SW');
+    const { issues, overlapSummary } = validateQuadratCollectionDetailed(rows, input.plot, 'SW');
+    const overlapsAcknowledged = overlapSummary !== null && acknowledgmentCoversLayout(input.quadrats.overlapAcknowledgment, overlapSummary.layoutSignature);
     for (const issue of issues) {
       if (issue.kind === 'overlap' && overlapsAcknowledged) continue;
       ctx.addIssue({

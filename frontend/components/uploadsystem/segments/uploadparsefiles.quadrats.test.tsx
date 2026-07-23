@@ -12,7 +12,7 @@ import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { FileWithStream, type UploadParseFilesProps } from '@/config/macros/uploadsystemmacros';
 import { DEFAULT_REFERENCE_CORNER } from '@/lib/provisioning/coordinate-reference-corner';
-import type { QuadratReferenceCorner } from '@/lib/provisioning/types';
+import type { QuadratOverlapAcknowledgment, QuadratReferenceCorner } from '@/lib/provisioning/types';
 import UploadParseFiles, { parseQuadratFileRows } from './uploadparsefiles';
 
 // tests/mocks/platform-mocks.ts stubs '@/lib/db/definitions/zones' with an empty module for
@@ -73,7 +73,7 @@ function buildQuadratFile(fileName: string, dataRow: string): FileWithStream {
 // (owned by UploadParent in production); this reproduces that contract for the test.
 function Harness(props: Partial<UploadParseFilesProps> & { initialCorner?: QuadratReferenceCorner }) {
   const [corner, setCorner] = useState<QuadratReferenceCorner>(props.initialCorner ?? DEFAULT_REFERENCE_CORNER);
-  const [overlapAcknowledgment, setOverlapAcknowledgment] = useState<string | null>(null);
+  const [overlapAcknowledgment, setOverlapAcknowledgment] = useState<QuadratOverlapAcknowledgment | null>(null);
   const defaults: UploadParseFilesProps = {
     uploadForm: FormType.quadrats,
     uploadMode: UploadMode.CLEAN_REUPLOAD,
@@ -89,6 +89,8 @@ function Harness(props: Partial<UploadParseFilesProps> & { initialCorner?: Quadr
     setCoordinateReferenceCorner: setCorner,
     quadratOverlapAcknowledgment: overlapAcknowledgment,
     setQuadratOverlapAcknowledgment: setOverlapAcknowledgment,
+    serverQuadratOverlapSummaries: [],
+    clearServerQuadratOverlapSummaries: () => {},
     handleInitialSubmit: async () => {},
     handleAddFile: () => {},
     handleRemoveFile: () => {},
@@ -229,6 +231,52 @@ describe('quadrat geometry preflight — overlap acknowledgment', () => {
       expect(continueButton()).not.toBeDisabled();
     });
     expect(screen.queryByRole('checkbox', { name: /acknowledge quadrat overlaps/i })).toBeNull();
+  });
+
+  it('detects overlaps spanning separate files before upload begins', async () => {
+    const first = buildQuadratFile('quadrats-a.csv', 'A,10,10,20,20,400,square');
+    const second = buildQuadratFile('quadrats-b.csv', 'B,20,20,20,20,400,square');
+
+    render(<Harness uploadForm={FormType.quadrats} acceptedFiles={[first, second]} selectedDelimiters={{ 'quadrats-a.csv': ',', 'quadrats-b.csv': ',' }} />);
+
+    await waitFor(() => expect(screen.getByText(/overlapping quadrat footprints detected/i)).toBeInTheDocument());
+    expect(screen.getByText(/Quadrat "A" overlaps quadrat "B"/i)).toBeInTheDocument();
+    expect(continueButton()).toBeDisabled();
+  });
+
+  it('surfaces a server-discovered existing-layout overlap and allows an explicit retry acknowledgment', async () => {
+    const fileName = 'quadrats-server-overlap.csv';
+    const file = buildQuadratFile(fileName, 'NEW,40,40,10,10,100,square');
+    const serverSummary = {
+      layoutSignature: 'quadrat-layout-v1-0123456789abcdef',
+      reportedPairCount: 1,
+      minimumPairCount: 1,
+      truncated: false,
+      pairs: [{ key: 'pair-1', message: 'Quadrat "NEW" overlaps quadrat "EXISTING".' }]
+    };
+
+    render(<Harness acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} serverQuadratOverlapSummaries={[serverSummary]} />);
+
+    await waitFor(() => expect(screen.getByText(/NEW.*overlaps.*EXISTING/i)).toBeInTheDocument());
+    expect(continueButton()).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: /acknowledge quadrat overlaps/i }));
+    await waitFor(() => expect(continueButton()).not.toBeDisabled());
+  });
+
+  it('invalidates an acknowledgment when the reference corner changes the reviewed layout signature', async () => {
+    const fileName = 'quadrats-overlap-corner-change.csv';
+    const file = buildQuadratFile(fileName, 'A,30,30,20,20,400,square\nB,40,40,20,20,400,square');
+    render(<Harness acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} />);
+
+    const checkbox = await screen.findByRole('checkbox', { name: /acknowledge quadrat overlaps/i });
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(continueButton()).not.toBeDisabled());
+
+    fireEvent.click(screen.getByRole('combobox', { name: /which corner does each row.*startx\/starty identify/i }));
+    fireEvent.click(screen.getByRole('option', { name: /north-east/i }));
+
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: /acknowledge quadrat overlaps/i })).not.toBeChecked());
+    expect(continueButton()).toBeDisabled();
   });
 });
 

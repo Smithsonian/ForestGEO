@@ -1,7 +1,7 @@
 import { generateGrid } from './grid-generator';
 import { ProvisioningQuadratsRequestSchema } from './input-schema';
 import { normalizeToSouthwest } from './coordinate-reference-corner';
-import { validateQuadratCollection } from './quadrat-collection-validation';
+import { acknowledgmentCoversLayout, validateQuadratCollectionDetailed } from './quadrat-collection-validation';
 import type { ProvisioningRequestInput } from './types';
 
 /**
@@ -32,6 +32,7 @@ export function quadratLayoutIsValid(input: ProvisioningRequestInput): boolean {
   if (rows.length === 0) return false;
   // Acknowledged overlaps are valid field measurements, not layout defects (mirrors the
   // canonical schema's superRefine policy). Unacknowledged overlaps still fail the gate.
-  const overlapsAcknowledged = Boolean(csvQuadrats.overlapAcknowledgment);
-  return validateQuadratCollection(rows, input.plot, 'SW').filter(issue => !(issue.kind === 'overlap' && overlapsAcknowledged)).length === 0;
+  const { issues, overlapSummary } = validateQuadratCollectionDetailed(rows, input.plot, 'SW');
+  const overlapsAcknowledged = overlapSummary !== null && acknowledgmentCoversLayout(csvQuadrats.overlapAcknowledgment, overlapSummary.layoutSignature);
+  return issues.filter(issue => !(issue.kind === 'overlap' && overlapsAcknowledged)).length === 0;
 }

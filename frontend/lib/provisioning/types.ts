@@ -48,17 +48,27 @@ export interface QuadratNoneConfig {
  */
 export type QuadratReferenceCorner = 'SW' | 'SE' | 'NW' | 'NE';
 
+/**
+ * Explicit confirmation for one or more reviewed quadrat layouts. Layout signatures bind the
+ * confirmation to the geometry that was actually shown to the user; changing a file, reference
+ * corner, or prospective database layout produces a different signature and requires a new
+ * confirmation.
+ */
+export interface QuadratOverlapAcknowledgment {
+  statement: string;
+  layoutSignatures: string[];
+}
+
 /** Wire/client shape: rows are in the uploaded convention. */
 export interface QuadratCsvRequestConfig {
   mode: 'csv';
   rows: QuadratCsvRow[];
   coordinateReferenceCorner: QuadratReferenceCorner;
   /**
-   * The admin's confirmation text that overlapping quadrat footprints in this CSV reflect
-   * field measurements. Overlaps are refused without it; stored with the run payload for
-   * provenance. Absent when the layout has no overlaps.
+   * The admin's confirmation that the specifically signed overlapping layout reflects field
+   * measurements. Absent when the layout has no overlaps.
    */
-  overlapAcknowledgment?: string;
+  overlapAcknowledgment?: QuadratOverlapAcknowledgment;
 }
 
 /** Server/run shape: rows are canonical south-west. */
@@ -67,7 +77,7 @@ export interface QuadratCsvCanonicalConfig {
   rows: QuadratCsvRow[];
   coordinates: 'canonical-sw';
   sourceCoordinateReferenceCorner: QuadratReferenceCorner;
-  overlapAcknowledgment?: string;
+  overlapAcknowledgment?: QuadratOverlapAcknowledgment;
 }
 
 export type QuadratRequestConfig = QuadratGridConfig | QuadratCsvRequestConfig | QuadratNoneConfig;

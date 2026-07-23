@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { toQuadratGeometry, validateQuadratCollection, type UploadShapedRow } from './quadrat-collection-validation';
+import {
+  acknowledgmentCoversLayout,
+  buildQuadratOverlapAcknowledgment,
+  toQuadratGeometry,
+  validateQuadratCollection,
+  validateQuadratCollectionDetailed,
+  type UploadShapedRow
+} from './quadrat-collection-validation';
 import type { QuadratCsvRow, QuadratReferenceCorner } from './types';
 
 const PLOT_100x60 = { dimensionX: 100, dimensionY: 60 };
@@ -224,6 +231,32 @@ describe('validateQuadratCollection', () => {
     const issues = validateQuadratCollection(rows, PLOT_100x60, 'SW');
     const overlapIssues = issues.filter(issue => /overlaps quadrat/.test(issue.message));
     expect(overlapIssues.map(issue => issue.quadratName).sort()).toEqual(['A1', 'A2', 'B1', 'B2']);
+  });
+
+  it('marks dense overlap reports as truncated and binds acknowledgment to the complete layout', () => {
+    const rows: QuadratCsvRow[] = Array.from({ length: 8 }, (_, index) => ({
+      quadratName: `Q${index + 1}`,
+      startX: 0,
+      startY: 0,
+      dimensionX: 10,
+      dimensionY: 10
+    }));
+    const summary = validateQuadratCollectionDetailed(rows, PLOT_100x60, 'SW').overlapSummary;
+    expect(summary).toMatchObject({
+      reportedPairCount: 25,
+      minimumPairCount: 26,
+      truncated: true
+    });
+    if (!summary) throw new Error('expected overlap summary');
+
+    const acknowledgment = buildQuadratOverlapAcknowledgment([summary.layoutSignature]);
+    expect(acknowledgmentCoversLayout(acknowledgment, summary.layoutSignature)).toBe(true);
+
+    const changedRows = rows.map((row, index) => (index === 0 ? { ...row, dimensionX: 11 } : row));
+    const changedSummary = validateQuadratCollectionDetailed(changedRows, PLOT_100x60, 'SW').overlapSummary;
+    if (!changedSummary) throw new Error('expected changed overlap summary');
+    expect(changedSummary.layoutSignature).not.toBe(summary.layoutSignature);
+    expect(acknowledgmentCoversLayout(acknowledgment, changedSummary.layoutSignature)).toBe(false);
   });
 
   it('produces the same result for the same physical layout declared from all four reference corners', () => {

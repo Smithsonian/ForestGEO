@@ -2,11 +2,17 @@
 
 import React, { useMemo } from 'react';
 import { Alert, Box, Checkbox, FormControl, FormHelperText, FormLabel, Input, Radio, RadioGroup, Stack, Typography } from '@mui/joy';
-import type { ProvisioningPlotInput, QuadratRequestConfig, QuadratCsvRow, QuadratReferenceCorner } from '@/lib/provisioning/types';
+import type { ProvisioningPlotInput, QuadratRequestConfig, QuadratReferenceCorner } from '@/lib/provisioning/types';
 import { generateGrid } from '@/lib/provisioning/grid-generator';
 import { parseQuadratCsv } from '@/lib/provisioning/csv-parser';
 import { DEFAULT_REFERENCE_CORNER, getReferenceCornerLabel, normalizeToSouthwest } from '@/lib/provisioning/coordinate-reference-corner';
-import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, validateQuadratCollection, type QuadratIssueKind } from '@/lib/provisioning/quadrat-collection-validation';
+import {
+  acknowledgmentCoversLayout,
+  buildQuadratOverlapAcknowledgment,
+  QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+  validateQuadratCollectionDetailed,
+  type QuadratIssueKind
+} from '@/lib/provisioning/quadrat-collection-validation';
 import ReferenceCornerSelect from './ReferenceCornerSelect';
 
 const QUADRAT_SIZE_MIN = 1;
@@ -26,10 +32,6 @@ export interface QuadratPlannerProps {
   onChange: (next: QuadratRequestConfig) => void;
   plot: ProvisioningPlotInput;
   showErrors?: boolean;
-}
-
-function collectCsvValidationIssues(rows: QuadratCsvRow[], plot: ProvisioningPlotInput): CsvValidationIssue[] {
-  return validateQuadratCollection(rows, plot, 'SW').map(issue => ({ quadratName: issue.quadratName, message: issue.message, kind: issue.kind }));
 }
 
 function GridModePanel({
@@ -185,21 +187,30 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
 
   // CSV-mode aggregate validation issues used to surface a top-level error banner
   // when the wizard signals showErrors=true (e.g. user clicked Next on an invalid step).
-  const csvValidationIssues = useMemo(() => {
-    if (value.mode !== 'csv' || !normalizedRows) return [];
-    return collectCsvValidationIssues(normalizedRows, plot);
+  const csvValidation = useMemo(() => {
+    if (value.mode !== 'csv' || !normalizedRows) return null;
+    return validateQuadratCollectionDetailed(normalizedRows, plot, 'SW');
   }, [value.mode, normalizedRows, plot]);
+  const csvValidationIssues = useMemo<CsvValidationIssue[]>(
+    () => csvValidation?.issues.map(issue => ({ quadratName: issue.quadratName, message: issue.message, kind: issue.kind })) ?? [],
+    [csvValidation]
+  );
 
   const csvBlockingIssues = useMemo(() => csvValidationIssues.filter(issue => issue.kind !== 'overlap'), [csvValidationIssues]);
   const csvOverlapIssues = useMemo(() => csvValidationIssues.filter(issue => issue.kind === 'overlap'), [csvValidationIssues]);
-  const overlapAcknowledged = value.mode === 'csv' && Boolean(value.overlapAcknowledgment);
+  const overlapAcknowledged =
+    value.mode === 'csv' &&
+    csvValidation?.overlapSummary !== null &&
+    csvValidation?.overlapSummary !== undefined &&
+    acknowledgmentCoversLayout(value.overlapAcknowledgment, csvValidation.overlapSummary.layoutSignature);
   // Blocking issues always block; overlap issues block only until acknowledged.
   const unresolvedIssueCount = csvBlockingIssues.length + (overlapAcknowledged ? 0 : csvOverlapIssues.length);
 
   function setOverlapAcknowledged(acknowledged: boolean) {
     if (value.mode !== 'csv') return;
     const { overlapAcknowledgment: _dropped, ...rest } = value;
-    onChange(acknowledged ? { ...rest, overlapAcknowledgment: QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT } : rest);
+    const layoutSignature = csvValidation?.overlapSummary?.layoutSignature;
+    onChange(acknowledged && layoutSignature ? { ...rest, overlapAcknowledgment: buildQuadratOverlapAcknowledgment([layoutSignature]) } : rest);
   }
 
   const csvIsEmpty = value.mode === 'csv' && value.rows.length === 0 && csvParseErrors.length === 0;

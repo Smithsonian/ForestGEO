@@ -1,4 +1,4 @@
-import type { QuadratCsvRow, QuadratReferenceCorner } from './types';
+import type { QuadratCsvRow, QuadratOverlapAcknowledgment, QuadratReferenceCorner } from './types';
 import { collectOverlappingPairs, collectQuadratBoundsIssues, type QuadratBoundsIssue } from './geometry';
 import { normalizeToSouthwest } from './coordinate-reference-corner';
 
@@ -8,6 +8,8 @@ import { normalizeToSouthwest } from './coordinate-reference-corner';
  * so this only needs to be comfortably larger than what a user can act on in one pass.
  */
 const MAX_REPORTED_OVERLAP_PAIRS = 25;
+const MAX_ACKNOWLEDGED_LAYOUT_SIGNATURES = 1000;
+const LAYOUT_SIGNATURE_PREFIX = 'quadrat-layout-v1-';
 
 /**
  * Overlap is policy-separable from the other kinds: real surveyed quadrats can overlap
@@ -24,9 +26,109 @@ export type QuadratIssueKind = 'non-positive-dimension' | 'bounds' | 'duplicate-
  */
 export const QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT = 'I confirm the overlapping quadrat footprints in this upload reflect field measurements.';
 
+export interface QuadratOverlapPairSummary {
+  key: string;
+  message: string;
+}
+
+/**
+ * Bounded, truthful description of an overlapping layout. `truncated` explicitly distinguishes
+ * an exhaustive pair list from a sample. `minimumPairCount` is exact when not truncated and a
+ * lower bound otherwise. The layout signature still binds the acknowledgment to the complete
+ * geometry even when enumerating every pair would be quadratic.
+ */
+export interface QuadratOverlapSummary {
+  layoutSignature: string;
+  reportedPairCount: number;
+  minimumPairCount: number;
+  truncated: boolean;
+  pairs: QuadratOverlapPairSummary[];
+}
+
+export interface QuadratCollectionValidationResult {
+  issues: QuadratCollectionIssue[];
+  overlapSummary: QuadratOverlapSummary | null;
+}
+
 /** QuadratBoundsIssue plus the machine-readable kind; callers can still concatenate/handle both issue sources uniformly. */
 export interface QuadratCollectionIssue extends QuadratBoundsIssue {
   kind: QuadratIssueKind;
+}
+
+function fnv1a64(value: string): string {
+  let high = 0x811c9dc5;
+  let low = 0x9e3779b9;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    high = Math.imul(high ^ code, 0x01000193) >>> 0;
+    low = Math.imul(low ^ code, 0x85ebca6b) >>> 0;
+  }
+  return `${high.toString(16).padStart(8, '0')}${low.toString(16).padStart(8, '0')}`;
+}
+
+function canonicalRowTuple(row: QuadratCsvRow): [string, number, number, number, number] {
+  return [row.quadratName.trim().toLowerCase(), row.startX, row.startY, row.dimensionX, row.dimensionY];
+}
+
+function compareCanonicalTuples(left: [string, number, number, number, number], right: [string, number, number, number, number]): number {
+  for (let index = 0; index < left.length; index += 1) {
+    const leftValue = left[index];
+    const rightValue = right[index];
+    if (leftValue === rightValue) continue;
+    return leftValue < rightValue ? -1 : 1;
+  }
+  return 0;
+}
+
+/** Stable in browser and server runtimes; this is a scope fingerprint, not an authentication secret. */
+export function createQuadratLayoutSignature(rows: QuadratCsvRow[]): string {
+  const canonicalRows = rows.map(canonicalRowTuple).sort(compareCanonicalTuples);
+  return `${LAYOUT_SIGNATURE_PREFIX}${fnv1a64(JSON.stringify(canonicalRows))}`;
+}
+
+function createOverlapPairKey(first: QuadratCsvRow, second: QuadratCsvRow): string {
+  const pair = [canonicalRowTuple(first), canonicalRowTuple(second)].sort(compareCanonicalTuples);
+  return fnv1a64(JSON.stringify(pair));
+}
+
+export function summarizeQuadratOverlaps(
+  canonicalRows: QuadratCsvRow[],
+  isReportable: (first: QuadratCsvRow, second: QuadratCsvRow) => boolean = () => true
+): QuadratOverlapSummary | null {
+  const observedOverlapPairs = collectOverlappingPairs(canonicalRows, MAX_REPORTED_OVERLAP_PAIRS + 1, isReportable);
+  if (observedOverlapPairs.length === 0) return null;
+
+  const overlapPairs = observedOverlapPairs.slice(0, MAX_REPORTED_OVERLAP_PAIRS);
+  return {
+    layoutSignature: createQuadratLayoutSignature(canonicalRows),
+    reportedPairCount: overlapPairs.length,
+    minimumPairCount: observedOverlapPairs.length,
+    truncated: observedOverlapPairs.length > MAX_REPORTED_OVERLAP_PAIRS,
+    pairs: overlapPairs.map(([first, second]) => ({
+      key: createOverlapPairKey(first, second),
+      message: `Quadrat "${first.quadratName}" overlaps quadrat "${second.quadratName}".`
+    }))
+  };
+}
+
+export function buildQuadratOverlapAcknowledgment(layoutSignatures: string[]): QuadratOverlapAcknowledgment {
+  return {
+    statement: QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+    layoutSignatures: [...new Set(layoutSignatures)].sort()
+  };
+}
+
+export function isQuadratOverlapAcknowledgment(value: unknown): value is QuadratOverlapAcknowledgment {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.statement !== QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT) return false;
+  if (!Array.isArray(candidate.layoutSignatures) || candidate.layoutSignatures.length === 0) return false;
+  if (candidate.layoutSignatures.length > MAX_ACKNOWLEDGED_LAYOUT_SIGNATURES) return false;
+  return candidate.layoutSignatures.every(signature => typeof signature === 'string' && new RegExp(`^${LAYOUT_SIGNATURE_PREFIX}[0-9a-f]{16}$`).test(signature));
+}
+
+export function acknowledgmentCoversLayout(value: unknown, layoutSignature: string): value is QuadratOverlapAcknowledgment {
+  return isQuadratOverlapAcknowledgment(value) && value.layoutSignatures.includes(layoutSignature);
 }
 
 /** The Quadrats-page upload row shape (see app/api/sqlpacketload/route.ts). Values come straight off a parsed file row. */
@@ -93,11 +195,11 @@ export function toQuadratGeometry(row: UploadShapedRow): QuadratCsvRow | null {
  * one. Those rows are excluded from the bounds and overlap checks and reported solely via their
  * own dimension issue; their original row index is preserved when translating results back.
  */
-export function validateQuadratCollection(
+export function validateQuadratCollectionDetailed(
   rows: QuadratCsvRow[],
   plot: { dimensionX: number; dimensionY: number } | null,
   referenceCorner: QuadratReferenceCorner
-): QuadratCollectionIssue[] {
+): QuadratCollectionValidationResult {
   const issues: QuadratCollectionIssue[] = [];
   const normalizedRows = rows.map(row => normalizeToSouthwest(row, referenceCorner));
 
@@ -146,7 +248,13 @@ export function validateQuadratCollection(
     }
   });
 
-  for (const [first, second] of collectOverlappingPairs(geometricallyValidRows, MAX_REPORTED_OVERLAP_PAIRS)) {
+  // Ask for one pair beyond the reporting cap. This keeps pathological all-overlapping inputs
+  // bounded while allowing callers to distinguish a complete list from a truncated sample.
+  const geometricOverlapSummary = summarizeQuadratOverlaps(geometricallyValidRows);
+  const overlapSummary = geometricOverlapSummary ? { ...geometricOverlapSummary, layoutSignature: createQuadratLayoutSignature(normalizedRows) } : null;
+  const overlapPairs = collectOverlappingPairs(geometricallyValidRows, MAX_REPORTED_OVERLAP_PAIRS);
+
+  for (const [first, second] of overlapPairs) {
     issues.push({
       kind: 'overlap',
       rowIndex: originalIndexByGeometricRow.get(first) ?? -1,
@@ -161,5 +269,13 @@ export function validateQuadratCollection(
     });
   }
 
-  return issues;
+  return { issues, overlapSummary };
+}
+
+export function validateQuadratCollection(
+  rows: QuadratCsvRow[],
+  plot: { dimensionX: number; dimensionY: number } | null,
+  referenceCorner: QuadratReferenceCorner
+): QuadratCollectionIssue[] {
+  return validateQuadratCollectionDetailed(rows, plot, referenceCorner).issues;
 }

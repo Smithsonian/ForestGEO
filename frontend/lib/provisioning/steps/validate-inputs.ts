@@ -1,6 +1,6 @@
 import type { ProvisioningStep, StepContext } from '../types';
 import { ProvisioningError } from '../types';
-import { validateQuadratCollection } from '../quadrat-collection-validation';
+import { acknowledgmentCoversLayout, validateQuadratCollectionDetailed } from '../quadrat-collection-validation';
 
 const SCHEMA_PATTERN = /^forestgeo_[a-z0-9_]+$/;
 
@@ -69,8 +69,10 @@ export const validateInputsStep: ProvisioningStep = {
     } else if (input.quadrats.mode === 'csv') {
       // Rows here are canonical south-west (run shape). Overlaps the admin acknowledged as
       // field measurements are not defects; every other issue kind fails the run.
-      const overlapsAcknowledged = Boolean(input.quadrats.overlapAcknowledgment);
-      const issues = validateQuadratCollection(input.quadrats.rows, input.plot, 'SW').filter(issue => !(issue.kind === 'overlap' && overlapsAcknowledged));
+      const validation = validateQuadratCollectionDetailed(input.quadrats.rows, input.plot, 'SW');
+      const overlapsAcknowledged =
+        validation.overlapSummary !== null && acknowledgmentCoversLayout(input.quadrats.overlapAcknowledgment, validation.overlapSummary.layoutSignature);
+      const issues = validation.issues.filter(issue => !(issue.kind === 'overlap' && overlapsAcknowledged));
       if (issues.length > 0) {
         throw new ProvisioningError(issues[0].message, 'invalid_input', { stepKey: 'validate_inputs' });
       }

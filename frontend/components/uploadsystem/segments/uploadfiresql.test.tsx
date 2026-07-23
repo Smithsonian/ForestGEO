@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import UploadFireSQL from './uploadfiresql';
-import { FileWithStream, type UploadFireProps } from '@/config/macros/uploadsystemmacros';
+import { FileWithStream, ReviewStates, type UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import type { QuadratReferenceCorner } from '@/lib/provisioning/types';
@@ -59,8 +59,8 @@ function buildMultiChunkQuadratFile(): FileWithStream {
   return new FileWithStream(raw, false);
 }
 
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
 describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload request body', () => {
@@ -101,6 +101,8 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
       uploadCompleteMessage: '',
       selectedDelimiters: { 'quadrats.csv': ',' },
       coordinateReferenceCorner,
+      quadratOverlapAcknowledgment: null,
+      onQuadratOverlapAcknowledgmentRequired: vi.fn(),
       setUploadCompleteMessage,
       setIsDataUnsaved,
       setUploadError,
@@ -147,7 +149,56 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
     expect(requestBody.coordinateReferenceCorner).toBe('SW');
   });
 
-  it('uses clean re-upload only for the first committed chunk and revisions for later chunks', async () => {
+  it('returns a server-discovered overlap challenge to the review step instead of a generic error', async () => {
+    const overlapSummary = {
+      layoutSignature: 'quadrat-layout-v1-0123456789abcdef',
+      reportedPairCount: 1,
+      minimumPairCount: 1,
+      truncated: false,
+      pairs: [{ key: 'pair-1', message: 'Quadrat "Q0001" overlaps quadrat "EXISTING".' }]
+    };
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          code: 'QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT',
+          error: 'Review and confirm overlaps.',
+          overlapSummaries: [overlapSummary]
+        },
+        400
+      )
+    );
+    const onAcknowledgmentRequired = vi.fn();
+
+    const props: UploadFireProps = {
+      schema: 'forestgeo_testing',
+      uploadForm: FormType.quadrats,
+      uploadMode: UploadMode.REVISIONS,
+      sourceFormat: SourceFormat.csv,
+      personnelRecording: '',
+      acceptedFiles: [buildQuadratFile()],
+      parsedData: {},
+      uploadCompleteMessage: '',
+      selectedDelimiters: { 'quadrats.csv': ',' },
+      coordinateReferenceCorner: 'SW',
+      quadratOverlapAcknowledgment: null,
+      onQuadratOverlapAcknowledgmentRequired: onAcknowledgmentRequired,
+      setUploadCompleteMessage,
+      setIsDataUnsaved,
+      setUploadError,
+      setErrorComponent,
+      setReviewState,
+      setAllRowToCMID
+    };
+    render(<UploadFireSQL {...props} />);
+
+    await waitFor(() => {
+      expect(onAcknowledgmentRequired).toHaveBeenCalledWith([overlapSummary]);
+    });
+    expect(setUploadError).not.toHaveBeenCalled();
+    expect(setReviewState).not.toHaveBeenCalledWith(ReviewStates.ERRORS);
+  });
+
+  it('uploads a quadrat file atomically in one clean-reupload request', async () => {
     const props: UploadFireProps = {
       schema: 'forestgeo_testing',
       uploadForm: FormType.quadrats,
@@ -159,6 +210,8 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
       uploadCompleteMessage: '',
       selectedDelimiters: { 'quadrats-multi-chunk.csv': ',' },
       coordinateReferenceCorner: 'SW',
+      quadratOverlapAcknowledgment: null,
+      onQuadratOverlapAcknowledgmentRequired: vi.fn(),
       setUploadCompleteMessage,
       setIsDataUnsaved,
       setUploadError,
@@ -172,7 +225,7 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
     await waitFor(
       () => {
         const sqlPacketLoadCalls = fetchMock.mock.calls.filter(call => String(call[0]).includes('/api/sqlpacketload'));
-        expect(sqlPacketLoadCalls.length).toBeGreaterThan(1);
+        expect(sqlPacketLoadCalls.length).toBe(1);
       },
       { timeout: 10_000 }
     );
@@ -180,8 +233,7 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
     const requestModes = fetchMock.mock.calls
       .filter(call => String(call[0]).includes('/api/sqlpacketload'))
       .map(call => JSON.parse(String((call[1] as RequestInit).body)).uploadMode);
-    expect(requestModes[0]).toBe(UploadMode.CLEAN_REUPLOAD);
-    expect(requestModes.slice(1)).toEqual(requestModes.slice(1).map(() => UploadMode.REVISIONS));
+    expect(requestModes).toEqual([UploadMode.CLEAN_REUPLOAD]);
   });
 });
 
@@ -232,6 +284,8 @@ describe('UploadFireSQL — coordinateReferenceCorner in the rawPayload request 
       // Measurements uploads never let the user pick a reference corner; the default must still
       // be present on the wire so a later change to this branch cannot silently drop the field.
       coordinateReferenceCorner: 'SW',
+      quadratOverlapAcknowledgment: null,
+      onQuadratOverlapAcknowledgmentRequired: vi.fn(),
       setUploadCompleteMessage,
       setIsDataUnsaved,
       setUploadError,

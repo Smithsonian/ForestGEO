@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { ProvisioningInputSchema, ProvisioningPlotSchema, ProvisioningQuadratsRequestSchema } from './input-schema';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
+import {
+  buildQuadratOverlapAcknowledgment,
+  QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+  validateQuadratCollectionDetailed
+} from './quadrat-collection-validation';
 
 describe('ProvisioningQuadratsRequestSchema', () => {
   it('accepts grid mode', () => {
@@ -162,24 +167,43 @@ describe('ProvisioningInputSchema canonicalization', () => {
   });
 
   it('accepts overlapping rows when acknowledged, carrying the acknowledgment text into the canonical payload', () => {
-    const ACKNOWLEDGMENT = 'I confirm the overlapping quadrat footprints in this upload reflect field measurements.';
+    const rows = [
+      { quadratName: 'A', startX: 30, startY: 30, dimensionX: 30, dimensionY: 30 },
+      { quadratName: 'B', startX: 50, startY: 50, dimensionX: 30, dimensionY: 30 }
+    ];
+    const overlapSummary = validateQuadratCollectionDetailed(rows, BASE_REQUEST.plot, 'NE').overlapSummary;
+    if (!overlapSummary) throw new Error('expected overlap summary');
+    const ACKNOWLEDGMENT = buildQuadratOverlapAcknowledgment([overlapSummary.layoutSignature]);
     const result = ProvisioningInputSchema.safeParse({
       ...BASE_REQUEST,
       quadrats: {
         mode: 'csv',
         coordinateReferenceCorner: 'NE',
         overlapAcknowledgment: ACKNOWLEDGMENT,
-        rows: [
-          { quadratName: 'A', startX: 30, startY: 30, dimensionX: 30, dimensionY: 30 },
-          { quadratName: 'B', startX: 50, startY: 50, dimensionX: 30, dimensionY: 30 }
-        ]
+        rows
       }
     });
     expect(result.success).toBe(true);
     if (result.success && result.data.quadrats.mode === 'csv') {
       // The stored run payload is the provenance record, so the text must survive canonicalization.
-      expect(result.data.quadrats.overlapAcknowledgment).toBe(ACKNOWLEDGMENT);
+      expect(result.data.quadrats.overlapAcknowledgment).toEqual(ACKNOWLEDGMENT);
     }
+  });
+
+  it('rejects a free-form overlap acknowledgment instead of treating any non-empty string as confirmation', () => {
+    const result = ProvisioningInputSchema.safeParse({
+      ...BASE_REQUEST,
+      quadrats: {
+        mode: 'csv',
+        coordinateReferenceCorner: 'SW',
+        overlapAcknowledgment: 'acknowledged',
+        rows: [
+          { quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+          { quadratName: 'B', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
+        ]
+      }
+    });
+    expect(result.success).toBe(false);
   });
 
   it('acknowledgment does not bypass non-overlap defects (out-of-bounds row still rejects)', () => {
@@ -188,7 +212,10 @@ describe('ProvisioningInputSchema canonicalization', () => {
       quadrats: {
         mode: 'csv',
         coordinateReferenceCorner: 'SW',
-        overlapAcknowledgment: 'Overlaps reflect field measurements.',
+        overlapAcknowledgment: {
+          statement: QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+          layoutSignatures: ['quadrat-layout-v1-0000000000000000']
+        },
         rows: [{ quadratName: 'TooFar', startX: 95, startY: 0, dimensionX: 20, dimensionY: 20 }]
       }
     });

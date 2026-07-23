@@ -20,6 +20,7 @@
 import { describe, it, expect } from 'vitest';
 import { quadratLayoutIsValid } from '@/lib/provisioning/quadrat-layout-gate';
 import type { ProvisioningRequestInput, QuadratCsvRow, QuadratReferenceCorner } from '@/lib/provisioning/types';
+import { buildQuadratOverlapAcknowledgment, validateQuadratCollectionDetailed } from '@/lib/provisioning/quadrat-collection-validation';
 
 const SITE: ProvisioningRequestInput['site'] = {
   siteName: 'Niobrara',
@@ -126,7 +127,9 @@ describe('quadratLayoutIsValid', () => {
 
     expect(quadratLayoutIsValid(input)).toBe(false);
 
-    input.quadrats.overlapAcknowledgment = 'Overlaps reflect field measurements.';
+    const summary = validateQuadratCollectionDetailed(input.quadrats.rows, input.plot, 'SW').overlapSummary;
+    if (!summary) throw new Error('expected overlap summary');
+    input.quadrats.overlapAcknowledgment = buildQuadratOverlapAcknowledgment([summary.layoutSignature]);
     expect(quadratLayoutIsValid(input)).toBe(true);
   });
 });
