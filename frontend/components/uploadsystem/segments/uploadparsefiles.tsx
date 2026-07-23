@@ -227,24 +227,26 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
           });
 
           if (geometryRows.length > 0) {
-            if (plotDimensionX !== undefined && plotDimensionY !== undefined) {
-              const collectionIssues = validateQuadratCollection(
-                geometryRows,
-                { dimensionX: plotDimensionX, dimensionY: plotDimensionY },
-                coordinateReferenceCorner
-              );
-              collectionIssues.forEach(issue => {
-                const geometryRow = geometryRows[issue.rowIndex];
-                const originalRowIndex = geometryRow ? (originalRowIndexByGeometryRow.get(geometryRow) ?? issue.rowIndex) : issue.rowIndex;
-                fileIssues.push({ rowIndex: originalRowIndex, quadratName: issue.quadratName, message: issue.message });
-              });
-            } else {
-              // Row-level checks above still ran; bounds/overlap/duplicate-name checks cannot run
-              // without the plot's dimensions. Surfaced once, collection-wide, via the dedicated
-              // "could not validate" alert rather than per-row — there is no per-row bounds verdict
-              // to report.
+            // The plot record's dimensions are nullable (and detransform maps a DB NULL to null,
+            // not undefined), so test for a usable positive number rather than mere presence:
+            // validating against null bounds would coerce them to 0 and falsely flag every row
+            // as out of bounds. Without usable bounds, overlap/duplicate-name/non-positive checks
+            // still run (the validator skips only the plot-edge checks) and the bounds gap is
+            // surfaced once, collection-wide, via the dedicated "could not validate" alert.
+            const plotBoundsUsable = typeof plotDimensionX === 'number' && plotDimensionX > 0 && typeof plotDimensionY === 'number' && plotDimensionY > 0;
+            if (!plotBoundsUsable) {
               dimensionsUnvalidated = true;
             }
+            const collectionIssues = validateQuadratCollection(
+              geometryRows,
+              plotBoundsUsable ? { dimensionX: plotDimensionX, dimensionY: plotDimensionY } : null,
+              coordinateReferenceCorner
+            );
+            collectionIssues.forEach(issue => {
+              const geometryRow = geometryRows[issue.rowIndex];
+              const originalRowIndex = geometryRow ? (originalRowIndexByGeometryRow.get(geometryRow) ?? issue.rowIndex) : issue.rowIndex;
+              fileIssues.push({ rowIndex: originalRowIndex, quadratName: issue.quadratName, message: issue.message });
+            });
           }
         } catch (geometryError: unknown) {
           const message = geometryError instanceof Error ? geometryError.message : String(geometryError);
@@ -543,9 +545,9 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                           Quadrat Geometry Could Not Be Validated
                         </Typography>
                         <Typography level="body-sm" sx={{ mt: 0.5 }}>
-                          This plot has no DimensionX/DimensionY on record, so bounds, overlap, and duplicate-name checks could not run against it. Per-row
-                          checks (missing or non-numeric coordinates) still completed normally. Continue is disabled until the plot&apos;s dimensions are set —
-                          this preflight cannot confirm your file is correct without them.
+                          This plot has no DimensionX/DimensionY on record, so the plot-bounds checks could not run against it. Overlap, duplicate-name, and
+                          per-row checks (missing or non-numeric coordinates) still completed normally. Continue is disabled until the plot&apos;s dimensions
+                          are set — this preflight cannot confirm your file fits the plot without them.
                         </Typography>
                       </Box>
                     </Alert>

@@ -235,6 +235,50 @@ describe('quadrat geometry preflight — plot dimensions unavailable', () => {
 
     expect(continueButton()).toBeDisabled();
   });
+
+  it('treats NULL plot dimensions like missing ones instead of flagging every row as out of bounds', async () => {
+    // The DB columns are nullable and detransform maps NULL to null, not undefined. A
+    // presence-only (!== undefined) guard let null through, and validating against null
+    // bounds coerces them to 0 — flagging every valid row as "extends past plot dimensionX".
+    mockPlotContext.current = {
+      plotID: 1,
+      plotName: 'Test Plot',
+      dimensionX: null as unknown as number | undefined,
+      dimensionY: null as unknown as number | undefined
+    };
+
+    const fileName = 'quadrats-null-plot-dims.csv';
+    const file = buildQuadratFile(fileName, 'Q0001,10,10,10,10,100,square');
+
+    await act(async () => {
+      render(<Harness uploadForm={FormType.quadrats} acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/quadrat geometry could not be validated/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/extends past plot/i)).toBeNull();
+    expect(screen.queryByText(/quadrat geometry problem/i)).toBeNull();
+  });
+
+  it('still reports an overlap between rows when plot dimensions are unavailable', async () => {
+    // Degraded (bounds-less) preflight is not NO preflight: overlap and duplicate-name
+    // checks need no plot dimensions and must keep running.
+    mockPlotContext.current = { plotID: 1, plotName: 'Test Plot', dimensionX: undefined, dimensionY: undefined };
+
+    const fileName = 'quadrats-overlap-no-dims.csv';
+    const file = buildQuadratFile(fileName, 'Q0001,10,10,10,10,100,square\nQ0002,15,15,10,10,100,square');
+
+    await act(async () => {
+      render(<Harness uploadForm={FormType.quadrats} acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} />);
+    });
+
+    await waitFor(() => {
+      // Both directions of the pair are reported (Q0001 vs Q0002 and Q0002 vs Q0001).
+      expect(screen.getAllByText(/overlaps quadrat/i).length).toBeGreaterThan(0);
+    });
+    expect(continueButton()).toBeDisabled();
+  });
 });
 
 describe('quadrat geometry preflight — large issue set is not clipped', () => {
