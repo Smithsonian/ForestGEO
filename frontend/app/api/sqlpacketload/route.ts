@@ -25,6 +25,7 @@ import {
   type QuadratReferenceCorner
 } from '@/lib/provisioning/coordinate-reference-corner';
 import type { QuadratCsvRow } from '@/lib/provisioning/types';
+import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
 import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
 import { RoleResult } from '@/lib/db/definitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
@@ -181,11 +182,24 @@ function parseReferenceCorner(value: unknown): QuadratReferenceCorner {
   return value;
 }
 
+function isSupportedUploadMode(value: unknown): value is UploadMode {
+  return value === UploadMode.CLEAN_REUPLOAD || value === UploadMode.REVISIONS;
+}
+
 function formatQuadratGeometryIssues(issues: QuadratCollectionIssue[]): string {
   return `Quadrat geometry validation failed: ${truncateAndJoin(
     issues.map(issue => issue.message),
     ' '
   )}`;
+}
+
+async function rollbackPreservingOriginalError(connectionManager: ConnectionManager, transactionID: string, context: Record<string, unknown>): Promise<void> {
+  try {
+    await connectionManager.rollbackTransaction(transactionID);
+  } catch (rollbackError: unknown) {
+    const error = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+    ailogger.error(`Failed to roll back transaction ${transactionID}; preserving the original upload error`, error, context);
+  }
 }
 
 function isRetryableUploadError(error: unknown): boolean {
@@ -264,6 +278,12 @@ async function upsertQuadratRows(
 ): Promise<FixedDataProcessingResult> {
   if (!plotID) {
     throw new Error('PlotID is required for quadrat uploads');
+  }
+  if (rows.length === 0) {
+    throw new QuadratGeometryValidationError('Quadrat upload must contain at least one row.');
+  }
+  if (rows.length > MAX_GENERATED_QUADRATS) {
+    throw new QuadratGeometryValidationError(`Quadrat upload contains ${rows.length} rows; maximum allowed per request is ${MAX_GENERATED_QUADRATS}.`);
   }
 
   let insertedCount = 0;
@@ -425,6 +445,11 @@ async function upsertQuadratRows(
     const incomingNamesLower = new Set(normalizedIncoming.map(row => row.quadratName.toLowerCase()));
     const carryOverExisting = existingGeometry.filter(row => !incomingNamesLower.has(row.quadratName.toLowerCase()));
     const prospectiveLayout = [...carryOverExisting, ...normalizedIncoming];
+    if (prospectiveLayout.length > MAX_GENERATED_QUADRATS) {
+      throw new QuadratGeometryValidationError(
+        `Prospective quadrat layout contains ${prospectiveLayout.length} rows; maximum allowed per plot is ${MAX_GENERATED_QUADRATS}.`
+      );
+    }
 
     const revisionIssues = validateQuadratCollection(prospectiveLayout, plotBounds, CANONICAL_SOUTHWEST_CORNER);
     if (revisionIssues.length > 0) {
@@ -919,6 +944,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return NextResponse.json({ error: 'Request body must be a JSON object', code: 'INVALID_REQUEST_BODY' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+
   const schema: string = body.schema;
 
   // SQL Injection Prevention: Validate schema against whitelist
@@ -952,6 +981,15 @@ export async function POST(request: NextRequest) {
         responseMessage: 'Invalid source format',
         error: `sourceFormat must be ${SourceFormat.csv}`
       }),
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
+  if (body.uploadMode !== undefined && !isSupportedUploadMode(body.uploadMode)) {
+    return NextResponse.json(
+      {
+        error: `uploadMode must be ${UploadMode.CLEAN_REUPLOAD} or ${UploadMode.REVISIONS}`,
+        code: 'INVALID_UPLOAD_MODE'
+      },
       { status: HTTPResponses.INVALID_REQUEST }
     );
   }
@@ -1381,7 +1419,15 @@ export async function POST(request: NextRequest) {
         );
       } catch (e: any) {
         if (transactionID) {
-          await connectionManager.rollbackTransaction(transactionID);
+          const failedTransactionID = transactionID;
+          transactionID = undefined;
+          await rollbackPreservingOriginalError(connectionManager, failedTransactionID, {
+            schema,
+            formType,
+            fileName,
+            uploadMode,
+            branch: 'measurements'
+          });
         }
 
         retryCount++;
@@ -1491,7 +1537,11 @@ export async function POST(request: NextRequest) {
             // Subsequent batch - update the existing entry with accumulated count
             // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
             const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
-            metadata.uploadMode = uploadMode;
+            // Preserve the user's initial mode across chunked fixed-data uploads. Later
+            // quadrat chunks intentionally execute as revisions after the first clean-reset
+            // chunk, but the file-level changelog must continue to say clean_reupload.
+            metadata.uploadMode = metadata.uploadMode || uploadMode;
+            metadata.lastChunkMode = uploadMode;
             metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
             metadata.insertedCount = (metadata.insertedCount || 0) + fixedDataProcessingResult.insertedCount;
             metadata.updatedCount = (metadata.updatedCount || 0) + fixedDataProcessingResult.updatedCount;
@@ -1519,15 +1569,29 @@ export async function POST(request: NextRequest) {
         );
       } catch (error: any) {
         if (transactionID) {
-          await connectionManager.rollbackTransaction(transactionID);
+          const failedTransactionID = transactionID;
           transactionID = undefined;
+          await rollbackPreservingOriginalError(connectionManager, failedTransactionID, {
+            schema,
+            formType,
+            fileName,
+            uploadMode,
+            branch: 'fixed-data'
+          });
         }
 
         // A geometry validation failure is a client error, never a retryable infrastructure
         // failure -- check for it BEFORE retryCount/isRetryableUploadError so it can never be
         // retried and never falls through to the generic 503 responses below.
         if (error instanceof QuadratGeometryValidationError) {
-          ailogger.warn(`Rejected quadrat upload for ${fileName}: ${error.message}`);
+          ailogger.warn(`Rejected quadrat upload for ${fileName}: ${error.message}`, {
+            schema,
+            plotID: plot?.plotID ?? null,
+            uploadMode,
+            coordinateReferenceCorner: body.coordinateReferenceCorner ?? DEFAULT_REFERENCE_CORNER,
+            rowCount: uploadRows.length,
+            code: 'INVALID_QUADRAT_GEOMETRY'
+          });
           return NextResponse.json({ error: error.message, code: 'INVALID_QUADRAT_GEOMETRY' }, { status: HTTPResponses.INVALID_REQUEST });
         }
 

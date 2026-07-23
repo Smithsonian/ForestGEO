@@ -104,4 +104,15 @@ describe('quadratLayoutIsValid', () => {
 
     expect(quadratLayoutIsValid(input)).toBe(true);
   });
+
+  it('blocks duplicate quadrat names even when their geometry does not overlap', () => {
+    const input = buildInput('NE');
+    if (input.quadrats.mode !== 'csv') throw new Error('expected csv mode');
+    input.quadrats.rows = [
+      { quadratName: 'Q01', startX: 20, startY: 20, dimensionX: 20, dimensionY: 20 },
+      { quadratName: 'q01', startX: 40, startY: 20, dimensionX: 20, dimensionY: 20 }
+    ];
+
+    expect(quadratLayoutIsValid(input)).toBe(false);
+  });
 });

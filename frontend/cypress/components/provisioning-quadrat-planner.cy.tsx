@@ -209,7 +209,7 @@ describe('QuadratPlanner', () => {
       // Both quadrat names must appear so the message identifies which quadrat overlaps
       // which — a bare "overlaps with ..." with no subject is a regression (see
       // fixtures/quadrats-overlapping.csv: rows "A" and "B" overlap).
-      cy.contains('Quadrat "A" overlaps with "B"').should('be.visible');
+      cy.contains('Quadrat "A" overlaps quadrat "B"').should('be.visible');
     });
 
     it('shows bounds error when out-of-bounds CSV is uploaded', () => {

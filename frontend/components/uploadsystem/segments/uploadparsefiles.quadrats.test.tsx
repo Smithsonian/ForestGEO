@@ -13,7 +13,7 @@ import { UploadMode } from '@/config/uploadmodes';
 import { FileWithStream, type UploadParseFilesProps } from '@/config/macros/uploadsystemmacros';
 import { DEFAULT_REFERENCE_CORNER } from '@/lib/provisioning/coordinate-reference-corner';
 import type { QuadratReferenceCorner } from '@/lib/provisioning/types';
-import UploadParseFiles from './uploadparsefiles';
+import UploadParseFiles, { parseQuadratFileRows } from './uploadparsefiles';
 
 // tests/mocks/platform-mocks.ts stubs '@/lib/db/definitions/zones' with an empty module for
 // unrelated suites; this component now calls the real validateQuadratsRow, so unmock it here
@@ -97,6 +97,16 @@ function Harness(props: Partial<UploadParseFilesProps> & { initialCorner?: Quadr
 function continueButton() {
   return screen.getByRole('button', { name: /continue upload|fix validation errors to continue|analyzing files/i });
 }
+
+describe('quadrat preflight parser cancellation', () => {
+  it('rejects immediately with AbortError when the owning effect is already cancelled', async () => {
+    const file = new File([`${QUADRAT_HEADER_ROW}\nQ0001,0,0,20,20,400,square\n`], 'cancelled.csv', { type: 'text/csv' });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(parseQuadratFileRows(file, ',', controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
 
 describe('ReferenceCornerSelect visibility', () => {
   it('renders for a quadrats upload and defaults to south-west', () => {

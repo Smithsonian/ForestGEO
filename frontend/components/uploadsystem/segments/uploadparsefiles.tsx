@@ -77,16 +77,61 @@ const QUADRAT_ISSUES_LIST_MAX_HEIGHT_PX = 320;
  * these exact functions, rather than re-deriving header/cell handling here, is what keeps this
  * preflight's verdict from disagreeing with what actually gets uploaded.
  */
-function parseQuadratFileRows(file: File, delimiter: string | undefined): Promise<FileRow[]> {
+function createPreflightAbortError(): Error {
+  const error = new Error('Quadrat preflight parsing was cancelled');
+  error.name = 'AbortError';
+  return error;
+}
+
+export function parseQuadratFileRows(file: File, delimiter: string | undefined, signal?: AbortSignal): Promise<FileRow[]> {
   return new Promise((resolve, reject) => {
+    const rows: FileRow[] = [];
+    let parser: { abort: () => void } | null = null;
+    let settled = false;
+
+    const removeAbortListener = () => signal?.removeEventListener('abort', handleAbort);
+    const resolveOnce = () => {
+      if (settled) return;
+      settled = true;
+      removeAbortListener();
+      resolve(rows);
+    };
+    const rejectOnce = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      removeAbortListener();
+      reject(error);
+    };
+    const handleAbort = () => {
+      if (settled) return;
+      settled = true;
+      removeAbortListener();
+      parser?.abort();
+      reject(createPreflightAbortError());
+    };
+
+    if (signal?.aborted) {
+      rejectOnce(createPreflightAbortError());
+      return;
+    }
+    signal?.addEventListener('abort', handleAbort, { once: true });
+
     Papa.parse<FileRow>(file, {
       delimiter,
       header: true,
       skipEmptyLines: true,
       transformHeader: makeLegacyCsvHeaderKey(FormType.quadrats),
       transform: (value: string, field: string) => transformMeasurementValue(value, field, FormType.quadrats) as string,
-      complete: results => resolve(results.data),
-      error: (err: Error) => reject(err)
+      chunk: (results, chunkParser) => {
+        parser = chunkParser;
+        if (settled || signal?.aborted) {
+          chunkParser.abort();
+          return;
+        }
+        rows.push(...results.data);
+      },
+      complete: resolveOnce,
+      error: (err: Error) => rejectOnce(err)
     });
   });
 }
@@ -142,6 +187,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     }
 
     let cancelled = false;
+    const abortController = new AbortController();
     setQuadratPreflightRunning(true);
 
     (async () => {
@@ -151,8 +197,9 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
       for (const file of acceptedFiles) {
         let rows: FileRow[];
         try {
-          rows = await parseQuadratFileRows(file, selectedDelimiters[file.name]);
+          rows = await parseQuadratFileRows(file, selectedDelimiters[file.name], abortController.signal);
         } catch (parseError: unknown) {
+          if (parseError instanceof Error && parseError.name === 'AbortError') return;
           const message = parseError instanceof Error ? parseError.message : String(parseError);
           nextIssuesByFile[file.name] = [{ rowIndex: -1, quadratName: '(file)', message: `Could not parse ${file.name}: ${message}` }];
           continue;
@@ -222,6 +269,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
 
     return () => {
       cancelled = true;
+      abortController.abort();
     };
   }, [isQuadratsForm, acceptedFiles, selectedDelimiters, coordinateReferenceCorner, plotDimensionX, plotDimensionY]);
 

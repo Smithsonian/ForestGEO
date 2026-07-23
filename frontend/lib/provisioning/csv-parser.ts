@@ -14,6 +14,11 @@ export interface CsvParseResult {
 const REQUIRED_HEADERS = ['quadratname', 'startx', 'starty', 'dimensionx', 'dimensiony'] as const;
 const UTF8_BOM = '﻿';
 
+function parseRequiredNumber(value: unknown): number {
+  const trimmed = String(value ?? '').trim();
+  return trimmed === '' ? Number.NaN : Number(trimmed);
+}
+
 export function parseQuadratCsv(content: string): CsvParseResult {
   const stripped = content.startsWith(UTF8_BOM) ? content.slice(1) : content;
   if (!stripped.trim()) {
@@ -48,10 +53,10 @@ export function parseQuadratCsv(content: string): CsvParseResult {
     const rowNumber = i + 2;
     const row: QuadratCsvRow = {
       quadratName: (rec.quadratname ?? '').trim(),
-      startX: Number(String(rec.startx ?? '').trim()),
-      startY: Number(String(rec.starty ?? '').trim()),
-      dimensionX: Number(String(rec.dimensionx ?? '').trim()),
-      dimensionY: Number(String(rec.dimensiony ?? '').trim())
+      startX: parseRequiredNumber(rec.startx),
+      startY: parseRequiredNumber(rec.starty),
+      dimensionX: parseRequiredNumber(rec.dimensionx),
+      dimensionY: parseRequiredNumber(rec.dimensiony)
     };
     if (!row.quadratName) {
       errors.push({ rowNumber, message: 'Missing quadratName' });

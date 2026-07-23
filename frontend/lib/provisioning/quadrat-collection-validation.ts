@@ -97,11 +97,11 @@ export function validateQuadratCollection(
 
   const nameOccurrences = new Map<string, number>();
   normalizedRows.forEach(row => {
-    const key = row.quadratName.toLowerCase();
+    const key = row.quadratName.trim().toLowerCase();
     nameOccurrences.set(key, (nameOccurrences.get(key) ?? 0) + 1);
   });
   normalizedRows.forEach((row, rowIndex) => {
-    const key = row.quadratName.toLowerCase();
+    const key = row.quadratName.trim().toLowerCase();
     if ((nameOccurrences.get(key) ?? 0) > 1) {
       issues.push({
         rowIndex,

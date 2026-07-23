@@ -5,8 +5,8 @@ import { Alert, Box, FormControl, FormHelperText, FormLabel, Input, Radio, Radio
 import type { ProvisioningPlotInput, QuadratRequestConfig, QuadratCsvRow, QuadratReferenceCorner } from '@/lib/provisioning/types';
 import { generateGrid } from '@/lib/provisioning/grid-generator';
 import { parseQuadratCsv } from '@/lib/provisioning/csv-parser';
-import { collectQuadratBoundsIssues, findFirstOverlap } from '@/lib/provisioning/geometry';
 import { DEFAULT_REFERENCE_CORNER, getReferenceCornerLabel, normalizeToSouthwest } from '@/lib/provisioning/coordinate-reference-corner';
+import { validateQuadratCollection } from '@/lib/provisioning/quadrat-collection-validation';
 import ReferenceCornerSelect from './ReferenceCornerSelect';
 
 const QUADRAT_SIZE_MIN = 1;
@@ -27,8 +27,8 @@ export interface QuadratPlannerProps {
   showErrors?: boolean;
 }
 
-function collectBoundsIssues(rows: QuadratCsvRow[], plot: ProvisioningPlotInput): CsvValidationIssue[] {
-  return collectQuadratBoundsIssues(rows, plot).map(issue => ({ quadratName: issue.quadratName, message: issue.message }));
+function collectCsvValidationIssues(rows: QuadratCsvRow[], plot: ProvisioningPlotInput): CsvValidationIssue[] {
+  return validateQuadratCollection(rows, plot, 'SW').map(issue => ({ quadratName: issue.quadratName, message: issue.message }));
 }
 
 function GridModePanel({
@@ -106,24 +106,8 @@ function GridModePanel({
   );
 }
 
-function CsvResultSummary({
-  rows,
-  plot,
-  overlap,
-  referenceCornerLabel
-}: {
-  rows: QuadratCsvRow[];
-  plot: ProvisioningPlotInput;
-  overlap: [QuadratCsvRow, QuadratCsvRow] | null;
-  referenceCornerLabel: string;
-}) {
-  const validationIssues = collectBoundsIssues(rows, plot);
-  if (overlap) {
-    validationIssues.push({
-      quadratName: overlap[0].quadratName,
-      message: `Quadrat "${overlap[0].quadratName}" overlaps with "${overlap[1].quadratName}"`
-    });
-  }
+function CsvResultSummary({ rows, plot, referenceCornerLabel }: { rows: QuadratCsvRow[]; plot: ProvisioningPlotInput; referenceCornerLabel: string }) {
+  const validationIssues = collectCsvValidationIssues(rows, plot);
 
   if (validationIssues.length === 0) {
     return (
@@ -159,27 +143,27 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
   // Rows in canonical south-west coordinates, re-derived whenever the declared reference
   // corner changes — so switching the selector re-evaluates bounds/overlap without a re-upload.
   const normalizedRows = useMemo(() => (csvRows ? csvRows.map(row => normalizeToSouthwest(row, referenceCorner)) : null), [csvRows, referenceCorner]);
-  const overlap = useMemo(() => (normalizedRows ? findFirstOverlap(normalizedRows) : null), [normalizedRows]);
 
   // CSV-mode aggregate validation issues used to surface a top-level error banner
   // when the wizard signals showErrors=true (e.g. user clicked Next on an invalid step).
   const csvValidationIssues = useMemo(() => {
     if (value.mode !== 'csv' || !normalizedRows) return [];
-    const issues = collectBoundsIssues(normalizedRows, plot);
-    if (overlap) {
-      issues.push({ quadratName: overlap[0].quadratName, message: `Quadrat "${overlap[0].quadratName}" overlaps with "${overlap[1].quadratName}"` });
-    }
-    return issues;
-  }, [value.mode, normalizedRows, plot, overlap]);
+    return collectCsvValidationIssues(normalizedRows, plot);
+  }, [value.mode, normalizedRows, plot]);
 
   const csvIsEmpty = value.mode === 'csv' && value.rows.length === 0 && csvParseErrors.length === 0;
 
-  function handleFileSelected(file: File) {
-    file.text().then(content => {
+  async function handleFileSelected(file: File) {
+    try {
+      const content = await file.text();
       const { rows, errors: parseErrors } = parseQuadratCsv(content);
       setCsvParseErrors(parseErrors);
       onChange({ mode: 'csv', rows, coordinateReferenceCorner: referenceCorner });
-    });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCsvParseErrors([{ rowNumber: 1, message: `Could not read CSV file: ${message}` }]);
+      onChange({ mode: 'csv', rows: [], coordinateReferenceCorner: referenceCorner });
+    }
   }
 
   function switchMode(newMode: 'grid' | 'csv' | 'none') {
@@ -253,7 +237,7 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
               style={{ marginTop: 8 }}
               onChange={e => {
                 const file = e.target.files?.[0];
-                if (file) handleFileSelected(file);
+                if (file) void handleFileSelected(file);
               }}
             />
           </FormControl>
@@ -274,7 +258,7 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
           )}
 
           {csvParseErrors.length === 0 && normalizedRows && normalizedRows.length > 0 && (
-            <CsvResultSummary rows={normalizedRows} plot={plot} overlap={overlap} referenceCornerLabel={referenceCornerLabel} />
+            <CsvResultSummary rows={normalizedRows} plot={plot} referenceCornerLabel={referenceCornerLabel} />
           )}
         </Stack>
       )}

@@ -40,6 +40,11 @@ export function quadratRevisionAppendsDivergentSet(existingActiveNames: string[]
   const incoming = new Set(incomingNames.map(normalizeQuadratName).filter(Boolean));
   if (incoming.size === 0) return false;
 
+  // A large Q##### extension is still the same generated naming scheme, not a
+  // replacement layout. This also lets later chunks of one clean re-upload append
+  // after the first chunk performed the reset.
+  if ([...incoming].every(name => SEQUENTIAL_QUADRAT_NAME_PATTERN.test(name))) return false;
+
   // A single (or otherwise small) addition to a placeholder grid is still a valid
   // Revisions upload. A near-full replacement is the dangerous case seen at Cooks
   // Branch. Count a tiny accidental overlap as divergent too, so it cannot bypass

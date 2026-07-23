@@ -1,7 +1,7 @@
 import { generateGrid } from './grid-generator';
 import { ProvisioningQuadratsRequestSchema } from './input-schema';
-import { findFirstOverlap } from './geometry';
 import { normalizeToSouthwest } from './coordinate-reference-corner';
+import { validateQuadratCollection } from './quadrat-collection-validation';
 import type { ProvisioningRequestInput } from './types';
 
 /**
@@ -30,13 +30,5 @@ export function quadratLayoutIsValid(input: ProvisioningRequestInput): boolean {
   const csvQuadrats = input.quadrats;
   const rows = csvQuadrats.rows.map(row => normalizeToSouthwest(row, csvQuadrats.coordinateReferenceCorner));
   if (rows.length === 0) return false;
-  for (const row of rows) {
-    if (row.startX < 0 || row.startY < 0) return false;
-    if (row.startX + row.dimensionX > input.plot.dimensionX) return false;
-    if (row.startY + row.dimensionY > input.plot.dimensionY) return false;
-  }
-
-  if (findFirstOverlap(rows)) return false;
-
-  return true;
+  return validateQuadratCollection(rows, input.plot, 'SW').length === 0;
 }

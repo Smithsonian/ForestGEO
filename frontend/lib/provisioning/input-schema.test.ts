@@ -161,6 +161,40 @@ describe('ProvisioningInputSchema canonicalization', () => {
     expect(result.success).toBe(false);
   });
 
+  it('rejects duplicate quadrat names case-insensitively after trimming', () => {
+    const result = ProvisioningInputSchema.safeParse({
+      ...BASE_REQUEST,
+      quadrats: {
+        mode: 'csv',
+        coordinateReferenceCorner: 'SW',
+        rows: [
+          { quadratName: ' Q01 ', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+          { quadratName: 'q01', startX: 20, startY: 0, dimensionX: 20, dimensionY: 20 }
+        ]
+      }
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(issue => issue.message.includes('must be unique'))).toBe(true);
+    }
+  });
+
+  it('trims quadrat names in canonical output', () => {
+    const result = ProvisioningInputSchema.safeParse({
+      ...BASE_REQUEST,
+      quadrats: {
+        mode: 'csv',
+        coordinateReferenceCorner: 'SW',
+        rows: [{ quadratName: ' Q01 ', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 }]
+      }
+    });
+
+    if (!result.success) throw new Error('expected success');
+    if (result.data.quadrats.mode !== 'csv') throw new Error('expected csv mode');
+    expect(result.data.quadrats.rows[0].quadratName).toBe('Q01');
+  });
+
   it('leaves grid mode untouched by canonicalization', () => {
     const result = ProvisioningInputSchema.safeParse({
       ...BASE_REQUEST,

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { estimateGridQuadratCount, MAX_GENERATED_QUADRATS } from './grid-generator';
 import { normalizeToSouthwest, REFERENCE_CORNER_OPTIONS } from './coordinate-reference-corner';
-import { collectQuadratBoundsIssues, findFirstOverlap } from './geometry';
+import { validateQuadratCollection } from './quadrat-collection-validation';
 import type { ProvisioningRequestInput, ProvisioningRunInput, QuadratReferenceCorner } from './types';
 
 const DimensionUnitSchema = z.enum(unitSelectionOptions);
@@ -41,7 +41,7 @@ export const ProvisioningPlotSchema = z.object({
 });
 
 const QuadratRowSchema = z.object({
-  quadratName: z.string().min(1),
+  quadratName: z.string().trim().min(1),
   startX: z.number(),
   startY: z.number(),
   dimensionX: z.number().positive(),
@@ -119,21 +119,12 @@ export const CanonicalProvisioningSchema = z
     if (input.quadrats.mode !== 'csv') return;
 
     const rows = input.quadrats.rows;
-    const boundsIssues = collectQuadratBoundsIssues(rows, input.plot);
-    for (const issue of boundsIssues) {
+    const issues = validateQuadratCollection(rows, input.plot, 'SW');
+    for (const issue of issues) {
       ctx.addIssue({
         code: 'custom',
         path: ['quadrats', 'rows', issue.rowIndex],
         message: issue.message
-      });
-    }
-
-    const overlap = findFirstOverlap(rows);
-    if (overlap) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['quadrats', 'rows'],
-        message: `Quadrats "${overlap[0].quadratName}" and "${overlap[1].quadratName}" overlap`
       });
     }
   });

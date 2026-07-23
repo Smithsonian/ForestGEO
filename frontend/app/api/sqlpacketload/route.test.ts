@@ -6,6 +6,7 @@ import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests, TEMP_MEASURE
 import { SourceFormat } from '@/config/macros/formdetails';
 import { headerSignature } from '@/lib/column-mapping/mapping';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
+import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
 
 const { getCookieMock, authMock, handleUpsertMock } = vi.hoisted(() => ({
   getCookieMock: vi.fn(),
@@ -626,6 +627,23 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
   });
 
+  it('rejects an unknown upload mode instead of silently falling back to destructive clean re-upload', async () => {
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: 0, starty: 0, dimx: 20, dimy: 20 }
+        },
+        { uploadMode: 'revision' }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    await expect(res?.json()).resolves.toMatchObject({ code: 'INVALID_UPLOAD_MODE' });
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+  });
+
   it('updates existing attributes and inserts new codes in revisions mode', async () => {
     mockConnectionManager.executeQuery
       // Row 1: SELECT existing (case-insensitive match found)
@@ -1001,6 +1019,45 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
   });
 
+  it('rejects an empty quadrat clean re-upload before reading bounds or deleting existing rows', async () => {
+    const res = await POST(makeFixedDataRequest('quadrats', {}, { uploadMode: 'clean_reupload' }));
+
+    expect(res?.status).toBe(400);
+    await expect(res?.json()).resolves.toMatchObject({
+      code: 'INVALID_QUADRAT_GEOMETRY',
+      error: 'Quadrat upload must contain at least one row.'
+    });
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
+  });
+
+  it('caps quadrat rows per request before running collection validation', async () => {
+    const fileRowSet: Record<string, unknown> = {};
+    for (let i = 0; i <= MAX_GENERATED_QUADRATS; i++) {
+      fileRowSet[`row-${i}`] = { quadrat: `Q${i}`, startx: i, starty: 0, dimx: 1, dimy: 1 };
+    }
+
+    const res = await POST(makeFixedDataRequest('quadrats', fileRowSet, { uploadMode: 'revisions' }));
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
+    expect(body.error).toContain(`maximum allowed per request is ${MAX_GENERATED_QUADRATS}`);
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('preserves a geometry validation response when rollback itself fails', async () => {
+    mockConnectionManager.rollbackTransaction.mockRejectedValueOnce(new Error('rollback connection lost'));
+
+    const res = await POST(makeFixedDataRequest('quadrats', {}, { uploadMode: 'clean_reupload' }));
+
+    expect(res?.status).toBe(400);
+    await expect(res?.json()).resolves.toMatchObject({
+      code: 'INVALID_QUADRAT_GEOMETRY',
+      error: 'Quadrat upload must contain at least one row.'
+    });
+  });
+
   it('caps the aggregated row-failure message and states how many more rows failed', async () => {
     const TOTAL_BAD_ROWS = 25;
     const MAX_LISTED_ROW_FAILURES = 20;
@@ -1139,11 +1196,10 @@ describe('sqlpacketload fixed-data upload modes', () => {
   });
 
   it('retries transient lock wait failures for species revisions uploads', async () => {
-    const originalSetTimeout = global.setTimeout;
-    const immediateSetTimeout = vi.spyOn(global, 'setTimeout').mockImplementation(((callback: TimerHandler) => {
-      if (typeof callback === 'function') callback();
+    const immediateSetTimeout = vi.spyOn(global, 'setTimeout').mockImplementation((callback, _delay, ...args) => {
+      if (typeof callback === 'function') callback(...args);
       return 0 as unknown as ReturnType<typeof setTimeout>;
-    }) as typeof setTimeout);
+    });
 
     mockConnectionManager.executeQuery
       .mockRejectedValueOnce(new Error('Lock wait timeout exceeded; try restarting transaction'))
@@ -1173,7 +1229,6 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('tx-fixed');
 
     immediateSetTimeout.mockRestore();
-    global.setTimeout = originalSetTimeout;
   });
 });
 

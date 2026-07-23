@@ -144,6 +144,13 @@ describe('parseQuadratCsv', () => {
     expect(errors[0].message).toMatch(/Dimension must be positive/);
   });
 
+  it('reports a blank required coordinate instead of coercing it to zero', () => {
+    const content = 'quadratname,startx,starty,dimensionx,dimensiony\nA,,0,20,20';
+    const { rows, errors } = parseQuadratCsv(content);
+    expect(rows).toEqual([]);
+    expect(errors[0].message).toMatch(/Non-numeric value/);
+  });
+
   it('collects errors from multiple bad rows, continuing past each one', () => {
     const content = [
       'quadratname,startx,starty,dimensionx,dimensiony',

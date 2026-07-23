@@ -14,6 +14,12 @@ describe('quadratRevisionAppendsDivergentSet', () => {
     expect(quadratRevisionAppendsDivergentSet(existing, incoming)).toBe(false);
   });
 
+  it('allows a large generated-name extension, including later clean-upload chunks', () => {
+    const existing = Array.from({ length: 20 }, (_, i) => `Q${String(i + 1).padStart(5, '0')}`);
+    const incoming = Array.from({ length: 20 }, (_, i) => `Q${String(i + 21).padStart(5, '0')}`);
+    expect(quadratRevisionAppendsDivergentSet(existing, incoming)).toBe(false);
+  });
+
   it('allows a wholly new set on a real, non-placeholder layout', () => {
     const existing = ['C01', 'D01', 'E01'];
     const incoming = ['F01', 'G01', 'H01'];

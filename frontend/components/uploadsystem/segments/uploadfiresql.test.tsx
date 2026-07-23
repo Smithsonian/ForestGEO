@@ -49,6 +49,16 @@ function buildQuadratFile(): FileWithStream {
   return new FileWithStream(raw, false);
 }
 
+function buildMultiChunkQuadratFile(): FileWithStream {
+  const rows = Array.from(
+    { length: 10_000 },
+    (_, index) => `Q${String(index + 1).padStart(5, '0')},${index % 100},${Math.floor(index / 100)},1,1,1,square,valid-multi-chunk-regression-row`
+  );
+  const csvContent = ['quadrat,startx,starty,dimx,dimy,area,quadratshape,notes', ...rows].join('\n');
+  const raw = new File([csvContent], 'quadrats-multi-chunk.csv', { type: 'text/csv' });
+  return new FileWithStream(raw, false);
+}
+
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
@@ -135,6 +145,43 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
     const sqlPacketLoadCall = fetchMock.mock.calls.find(call => String(call[0]).includes('/api/sqlpacketload'));
     const requestBody = JSON.parse(String((sqlPacketLoadCall?.[1] as RequestInit).body));
     expect(requestBody.coordinateReferenceCorner).toBe('SW');
+  });
+
+  it('uses clean re-upload only for the first committed chunk and revisions for later chunks', async () => {
+    const props: UploadFireProps = {
+      schema: 'forestgeo_testing',
+      uploadForm: FormType.quadrats,
+      uploadMode: UploadMode.CLEAN_REUPLOAD,
+      sourceFormat: SourceFormat.csv,
+      personnelRecording: '',
+      acceptedFiles: [buildMultiChunkQuadratFile()],
+      parsedData: {},
+      uploadCompleteMessage: '',
+      selectedDelimiters: { 'quadrats-multi-chunk.csv': ',' },
+      coordinateReferenceCorner: 'SW',
+      setUploadCompleteMessage,
+      setIsDataUnsaved,
+      setUploadError,
+      setErrorComponent,
+      setReviewState,
+      setAllRowToCMID
+    };
+
+    render(<UploadFireSQL {...props} />);
+
+    await waitFor(
+      () => {
+        const sqlPacketLoadCalls = fetchMock.mock.calls.filter(call => String(call[0]).includes('/api/sqlpacketload'));
+        expect(sqlPacketLoadCalls.length).toBeGreaterThan(1);
+      },
+      { timeout: 10_000 }
+    );
+
+    const requestModes = fetchMock.mock.calls
+      .filter(call => String(call[0]).includes('/api/sqlpacketload'))
+      .map(call => JSON.parse(String((call[1] as RequestInit).body)).uploadMode);
+    expect(requestModes[0]).toBe(UploadMode.CLEAN_REUPLOAD);
+    expect(requestModes.slice(1)).toEqual(requestModes.slice(1).map(() => UploadMode.REVISIONS));
   });
 });
 
