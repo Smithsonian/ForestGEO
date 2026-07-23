@@ -1737,6 +1737,15 @@ export async function POST(request: NextRequest) {
           }
         } catch (logError: any) {
           ailogger.error('Failed to log file upload to changelog', logError);
+          // The changelog now shares the data transaction, so a transaction-fatal error here
+          // (deadlock, lock-wait timeout, lost connection -- e.g. two concurrent chunks racing
+          // on the same changelog row) may have rolled the WHOLE transaction back. Swallowing
+          // it would let the commit below no-op "succeed" and return 200 while this chunk's
+          // data rows were silently lost. Rethrow so the outer catch rolls back cleanly and
+          // the retry loop re-runs the chunk.
+          if (isRetryableUploadError(logError)) {
+            throw logError;
+          }
           // An overlap acknowledgment is part of the write authorization and provenance, not
           // optional telemetry. Keep it in the same transaction so an audit failure rolls the
           // quadrat data back. Preserve the legacy best-effort behavior for unrelated uploads.

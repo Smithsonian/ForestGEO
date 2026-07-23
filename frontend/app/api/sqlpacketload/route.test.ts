@@ -650,6 +650,40 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
   });
 
+  it('re-runs the chunk instead of phantom-committing when the changelog write deadlocks', async () => {
+    // The changelog shares the data transaction. A deadlock on the changelog statement rolls
+    // the WHOLE transaction back server-side; if it were swallowed like a benign logging
+    // failure, the commit would no-op "succeed" and the response would claim 200 while the
+    // chunk's data rows were silently lost. It must instead propagate into the retry loop.
+    let changelogInsertAttempts = 0;
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql);
+      if (text.includes('unifiedchangelog')) {
+        if (text.includes('INSERT INTO')) {
+          changelogInsertAttempts += 1;
+          if (changelogInsertAttempts === 1) {
+            throw new Error('Deadlock found when trying to get lock; try restarting transaction');
+          }
+          return { insertId: 9 };
+        }
+        return []; // changelog lookup: no existing file_upload entry
+      }
+      if (text.startsWith('SELECT')) return []; // no existing attribute rows
+      return { insertId: 1 };
+    });
+
+    const res = await POST(
+      makeFixedDataRequest('attributes', { 'row-1': { code: 'alive', description: 'Alive', status: 'alive' } }, { uploadMode: 'revisions' })
+    );
+
+    expect(res?.status).toBe(200);
+    expect(changelogInsertAttempts, 'the chunk must have been retried after the deadlock').toBe(2);
+    // The deadlocked attempt was rolled back -- never committed as an empty shell.
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.beginTransaction).toHaveBeenCalledTimes(2);
+    expect(mockConnectionManager.commitTransaction).toHaveBeenCalledTimes(1);
+  });
+
   it('updates existing attributes and inserts new codes in revisions mode', async () => {
     mockConnectionManager.executeQuery
       // Row 1: SELECT existing (case-insensitive match found)
