@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import SiteForm from '@/components/provisioning/SiteForm';
-import type { ProvisioningInput } from '@/lib/provisioning/types';
+import type { ProvisioningSiteInput } from '@/lib/provisioning/types';
 
-type SiteValue = ProvisioningInput['site'];
+type SiteValue = ProvisioningSiteInput;
 
 const DEFAULT_VALUE: SiteValue = {
   siteName: '',

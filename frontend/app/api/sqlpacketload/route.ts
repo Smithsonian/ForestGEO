@@ -17,6 +17,23 @@ import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
 import { buildDivergentQuadratUploadError, quadratRevisionAppendsDivergentSet } from '@/lib/ingestion/quadrat-upload-guards';
+import {
+  acknowledgmentCoversLayout,
+  QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+  summarizeQuadratOverlaps,
+  toQuadratGeometry,
+  validateQuadratCollectionDetailed,
+  type QuadratCollectionIssue,
+  type QuadratOverlapSummary
+} from '@/lib/provisioning/quadrat-collection-validation';
+import {
+  DEFAULT_REFERENCE_CORNER,
+  isQuadratReferenceCorner,
+  normalizeToSouthwest,
+  type QuadratReferenceCorner
+} from '@/lib/provisioning/coordinate-reference-corner';
+import type { QuadratCsvRow } from '@/lib/provisioning/types';
+import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
 import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
 import { RoleResult } from '@/lib/db/definitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
@@ -72,6 +89,19 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * `FileRow` is documented as `Record<string, string | null>`, but the request body is raw
+ * `JSON.parse` output that TypeScript cannot actually enforce -- a non-browser caller may send
+ * a JSON number instead of a string (e.g. `startx: 0`). Stringify defensively so a well-formed
+ * numeric value is parsed correctly by `toQuadratGeometry` instead of throwing a raw TypeError
+ * that would surface as an infrastructure failure rather than the intended geometry validation.
+ */
+function coerceGeometryField(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return String(value);
+}
+
 function toPositiveInteger(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null;
   const parsed = Number(value);
@@ -93,12 +123,25 @@ interface FixedDataProcessingResult {
   insertedCount: number;
   updatedCount: number;
   skippedCount: number;
+  // Quadrat uploads only: bounded overlap reports plus complete layout signatures explicitly
+  // acknowledged as field measurements and recorded in the file changelog.
+  acknowledgedOverlapSummaries?: QuadratOverlapSummary[];
 }
 
 function normalizeOptionalString(value: unknown): string | null {
   if (value === undefined || value === null) return null;
   const normalized = String(value).trim();
   return normalized === '' ? null : normalized;
+}
+
+function authenticatedSessionIdentity(sessionUser: unknown): string {
+  if (!sessionUser || typeof sessionUser !== 'object' || Array.isArray(sessionUser)) return 'authenticated-user';
+  const record = sessionUser as Record<string, unknown>;
+  for (const key of ['email', 'name', 'id']) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  }
+  return 'authenticated-user';
 }
 
 function normalizeRequiredString(value: unknown): string {
@@ -122,12 +165,81 @@ function findDuplicateSpeciesCodes(rows: FileRow[]): string[] {
   return Array.from(duplicates).sort();
 }
 
-function formatBlockedCleanReuploadValues(values: string[], maxValues: number = 20): string {
-  const uniqueValues = Array.from(new Set(values.map(value => String(value ?? '').trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right));
+/** Shared cap for every user-facing list of blocked values / validation issues below, so a
+ *  single bad file (hundreds of blocked names, hundreds of failed rows) cannot produce an
+ *  unbounded run-on error message. */
+const MAX_LISTED_ISSUES = 20;
 
-  const truncatedValues = uniqueValues.slice(0, maxValues);
-  const remainingCount = uniqueValues.length - truncatedValues.length;
-  return truncatedValues.join(', ') + (remainingCount > 0 ? `, ...and ${remainingCount} more` : '');
+/** Joins `items` with `separator`, truncating at `maxItems` and appending an "...and N more"
+ *  tail instead of listing everything. Shared by every truncated-list message in this file so
+ *  there is one truncation style, not one per caller. */
+function truncateAndJoin(items: string[], separator: string, maxItems: number = MAX_LISTED_ISSUES): string {
+  const truncatedItems = items.slice(0, maxItems);
+  const remainingCount = items.length - truncatedItems.length;
+  return truncatedItems.join(separator) + (remainingCount > 0 ? `${separator}...and ${remainingCount} more` : '');
+}
+
+function formatBlockedCleanReuploadValues(values: string[], maxValues: number = MAX_LISTED_ISSUES): string {
+  const uniqueValues = Array.from(new Set(values.map(value => String(value ?? '').trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right));
+  return truncateAndJoin(uniqueValues, ', ', maxValues);
+}
+
+/**
+ * Thrown when a quadrat upload's declared geometry is unusable (missing/blank/non-numeric
+ * coordinates, an unsupported reference corner, or a layout that is out of the plot's bounds).
+ * The route treats this as a client error (400), never as a
+ * retryable infrastructure failure -- see the fixed-data catch block.
+ */
+class QuadratGeometryValidationError extends Error {}
+
+/**
+ * Overlapping quadrat footprints are field reality (surveyed widths can exceed the grid
+ * pitch), not necessarily data errors — so unlike QuadratGeometryValidationError they are
+ * not an outright refusal. The upload proceeds only when the request carries an explicit
+ * acknowledgment that the overlaps reflect field measurements; without it, this error tells
+ * the uploader exactly which pairs overlap and how to proceed.
+ */
+class QuadratOverlapAcknowledgmentRequiredError extends Error {
+  constructor(
+    message: string,
+    readonly overlapSummary: QuadratOverlapSummary
+  ) {
+    super(message);
+    this.name = 'QuadratOverlapAcknowledgmentRequiredError';
+  }
+}
+const QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE = 'QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT';
+
+/** Stored quadrat rows are always canonical south-west, regardless of what the upload declared. */
+const CANONICAL_SOUTHWEST_CORNER: QuadratReferenceCorner = 'SW';
+
+function parseReferenceCorner(value: unknown): QuadratReferenceCorner {
+  if (value === undefined || value === null) return DEFAULT_REFERENCE_CORNER;
+  if (!isQuadratReferenceCorner(value)) {
+    throw new QuadratGeometryValidationError('coordinateReferenceCorner must be SW, SE, NW, or NE');
+  }
+  return value;
+}
+
+function isSupportedUploadMode(value: unknown): value is UploadMode {
+  return value === UploadMode.CLEAN_REUPLOAD || value === UploadMode.REVISIONS;
+}
+
+function formatQuadratGeometryMessages(messages: string[]): string {
+  return `Quadrat geometry validation failed: ${truncateAndJoin(messages, ' ')}`;
+}
+
+function formatQuadratGeometryIssues(issues: QuadratCollectionIssue[]): string {
+  return formatQuadratGeometryMessages(issues.map(issue => issue.message));
+}
+
+async function rollbackPreservingOriginalError(connectionManager: ConnectionManager, transactionID: string, context: Record<string, unknown>): Promise<void> {
+  try {
+    await connectionManager.rollbackTransaction(transactionID);
+  } catch (rollbackError: unknown) {
+    const error = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+    ailogger.error(`Failed to roll back transaction ${transactionID}; preserving the original upload error`, error, context);
+  }
 }
 
 function isRetryableUploadError(error: unknown): boolean {
@@ -201,17 +313,135 @@ async function upsertQuadratRows(
   plotID: number | undefined,
   rows: FileRow[],
   uploadMode: UploadMode,
+  referenceCorner: QuadratReferenceCorner,
+  overlapAcknowledgment: unknown,
   transactionID: string
 ): Promise<FixedDataProcessingResult> {
   if (!plotID) {
     throw new Error('PlotID is required for quadrat uploads');
   }
+  if (rows.length === 0) {
+    throw new QuadratGeometryValidationError('Quadrat upload must contain at least one row.');
+  }
+  if (rows.length > MAX_GENERATED_QUADRATS) {
+    throw new QuadratGeometryValidationError(`Quadrat upload contains ${rows.length} rows; maximum allowed per request is ${MAX_GENERATED_QUADRATS}.`);
+  }
 
   let insertedCount = 0;
   let updatedCount = 0;
+  // Only entirely-empty rows (no name AND no geometry values -- e.g. trailing padding lines
+  // in a hand-edited CSV) are skipped, and they are counted so the response accounts for
+  // every input row. A row carrying ANY data that cannot be interpreted throws instead of
+  // being silently dropped or inserted with raw, unparsed values.
   let skippedCount = 0;
 
+  // Trust boundary: authoritative plot bounds come from the database row selected by
+  // plotID. Client-supplied plot dimensions in the request body are never consulted here,
+  // so they cannot widen what a quadrat is allowed to occupy.
+  const plotBoundsSQL = safeFormatQuery(schema, `SELECT DimensionX, DimensionY FROM ??.plots WHERE PlotID = ? LIMIT 1`);
+  const plotBoundsResult = await connectionManager.executeQuery(plotBoundsSQL, [plotID], transactionID);
+  const plotBoundsRow = Array.isArray(plotBoundsResult) ? plotBoundsResult[0] : undefined;
+  const plotDimensionX = toNullableNumber(plotBoundsRow?.DimensionX);
+  const plotDimensionY = toNullableNumber(plotBoundsRow?.DimensionY);
+
+  // Plots recorded without usable dimensions (nullable columns, and rows written before this
+  // boundary existed) must not lock their sites out of quadrat management: degrade to bounds-less
+  // validation instead of rejecting. Overlap, duplicate-name, and non-positive-dimension checks
+  // still run in full; only the plot-edge checks are skipped, and the gap is logged.
+  const plotBoundsUsable = !!plotBoundsRow && plotDimensionX !== null && plotDimensionY !== null && plotDimensionX > 0 && plotDimensionY > 0;
+  const plotBounds = plotBoundsUsable ? { dimensionX: plotDimensionX, dimensionY: plotDimensionY } : null;
+  if (!plotBounds) {
+    ailogger.warn(
+      `Plot ${plotID} has no valid DimensionX/DimensionY on record; quadrat plot-bounds checks are skipped for this upload. ` +
+        `Overlap and duplicate-name validation still applies. Record the plot dimensions to restore full validation.`
+    );
+  }
+
+  // Convert every incoming row to canonical geometry up front. A row that cannot be
+  // interpreted is a hard error: it is never filtered out and never inserted using its
+  // raw, unparsed values -- that is how rows go missing without anyone noticing.
+  //
+  // Every row is checked, not just the first bad one: a file with a systemic problem
+  // (wrong delimiter, a shifted column mapping, a whole blank column) can have hundreds
+  // of unusable rows, and reporting only row 1 forces a guess-and-check loop where the
+  // user re-uploads once per bad row. Collect every failure and throw once, capped by
+  // truncateAndJoin the same way the geometry-issue and blocked-value messages already are.
+  const rowConversionFailures: string[] = [];
+  const incomingGeometry: QuadratCsvRow[] = [];
+  rows.forEach((row, index) => {
+    const quadratName = normalizeRequiredString(row.quadrat);
+    if (!quadratName) {
+      const hasGeometryValues = [row.startx, row.starty, row.dimx, row.dimy].some(value => normalizeRequiredString(value) !== '');
+      if (!hasGeometryValues) {
+        skippedCount += 1;
+        return;
+      }
+      rowConversionFailures.push(`Quadrat upload row ${index + 1} has a missing or blank QuadratName.`);
+      return;
+    }
+
+    const geometry = toQuadratGeometry({
+      quadrat: quadratName,
+      startx: coerceGeometryField(row.startx),
+      starty: coerceGeometryField(row.starty),
+      dimx: coerceGeometryField(row.dimx),
+      dimy: coerceGeometryField(row.dimy)
+    });
+    if (!geometry) {
+      rowConversionFailures.push(
+        `Quadrat upload row ${index + 1} (QuadratName "${quadratName}") has missing, blank, or non-numeric ` +
+          `geometry (startx/starty/dimx/dimy). Fix the file and re-upload.`
+      );
+      return;
+    }
+    incomingGeometry.push(geometry);
+  });
+
+  if (rowConversionFailures.length > 0) {
+    throw new QuadratGeometryValidationError(`Quadrat upload has unusable rows: ${truncateAndJoin(rowConversionFailures, ' ')}`);
+  }
+  // A request that was all padding rows must not fall through: in CLEAN_REUPLOAD it would
+  // validate an empty layout and then wipe the plot's quadrats without inserting anything.
+  if (incomingGeometry.length === 0) {
+    throw new QuadratGeometryValidationError(`Quadrat upload contains no usable rows (${skippedCount} blank row(s) skipped).`);
+  }
+
+  const normalizedIncoming = incomingGeometry.map(row => normalizeToSouthwest(row, referenceCorner));
+
+  // Overlap policy: overlapping footprints can be genuine field measurements, so 'overlap'
+  // issues never reject outright — they require the request's explicit acknowledgment, and
+  // acknowledged pairs are returned so the caller can record them for provenance. Every
+  // other issue kind (missing/bad geometry, duplicate names, out of bounds) stays fatal.
+  const acknowledgedOverlapSummaries: QuadratOverlapSummary[] = [];
+  const requireOverlapAcknowledgment = (overlapSummary: QuadratOverlapSummary | null) => {
+    if (!overlapSummary) return;
+    if (!acknowledgmentCoversLayout(overlapAcknowledgment, overlapSummary.layoutSignature)) {
+      const pairMessages = overlapSummary.pairs.map(pair => pair.message);
+      const truncationNotice = overlapSummary.truncated
+        ? ` At least ${overlapSummary.minimumPairCount} pairs overlap; the response includes a ${overlapSummary.reportedPairCount}-pair sample.`
+        : '';
+      throw new QuadratOverlapAcknowledgmentRequiredError(
+        `Quadrat footprints overlap: ${truncateAndJoin(pairMessages, ' ')}${truncationNotice} ` +
+          `If these overlaps reflect field measurements, review and confirm the overlap acknowledgment, then re-submit.`,
+        overlapSummary
+      );
+    }
+    acknowledgedOverlapSummaries.push(overlapSummary);
+  };
+
   if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+    // Validate the incoming layout BEFORE the stem-safety check and before deleting anything.
+    // Rows are already normalized to canonical south-west above, so pass CANONICAL_SOUTHWEST_CORNER
+    // here (matching the REVISIONS branch below) rather than re-declaring referenceCorner and
+    // making validateQuadratCollection normalize the same rows a second time internally.
+    const cleanValidation = validateQuadratCollectionDetailed(normalizedIncoming, plotBounds, CANONICAL_SOUTHWEST_CORNER);
+    const cleanReuploadIssues = cleanValidation.issues;
+    const cleanFatalIssues = cleanReuploadIssues.filter(issue => issue.kind !== 'overlap');
+    if (cleanFatalIssues.length > 0) {
+      throw new QuadratGeometryValidationError(formatQuadratGeometryIssues(cleanFatalIssues));
+    }
+    requireOverlapAcknowledgment(cleanValidation.overlapSummary);
+
     // CLEAN_REUPLOAD deletes every active quadrat in the plot before re-inserting
     // the upload contents. Because stems references quadrats via ON DELETE CASCADE,
     // removing a quadrat that is already in use would also destroy its stems and
@@ -263,33 +493,144 @@ async function upsertQuadratRows(
   }
 
   if (uploadMode === UploadMode.REVISIONS) {
-    // A Revisions upload updates by QuadratName and appends every non-matching row.
-    // Refuse only a large, replacement-like file against the known generated Q#####
-    // placeholder grid. Other non-overlapping files are valid Revisions additions.
-    const existingNamesSQL = safeFormatQuery(schema, `SELECT QuadratName FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1 AND QuadratName IS NOT NULL`);
-    const existingNameRows = await connectionManager.executeQuery(existingNamesSQL, [plotID], transactionID);
-    const existingActiveNames = Array.isArray(existingNameRows)
-      ? existingNameRows.map(existing => String((existing as { QuadratName?: unknown }).QuadratName ?? ''))
-      : [];
-    const incomingNames = rows.map(row => normalizeRequiredString(row.quadrat)).filter(Boolean);
+    // A Revisions upload updates by QuadratName and appends every non-matching row, so the
+    // set that must be geometrically valid is the PROSPECTIVE FINAL LAYOUT: every existing
+    // active quadrat NOT named by this upload, plus every incoming row exactly as declared
+    // (duplicates included, so a duplicate incoming name still surfaces as a validation
+    // issue instead of being silently deduplicated before this check runs). NULL-named
+    // rows are deliberately included: an unnamed quadrat still occupies plot area, so it
+    // must participate in the overlap check even though no upload row can ever replace it.
+    const existingQuadratsSQL = safeFormatQuery(
+      schema,
+      `SELECT QuadratID, QuadratName, StartX, StartY, DimensionX, DimensionY FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1`
+    );
+    const existingQuadratRows = await connectionManager.executeQuery(existingQuadratsSQL, [plotID], transactionID);
+    const existingQuadratList: any[] = Array.isArray(existingQuadratRows) ? existingQuadratRows : [];
 
+    // Divergent-placeholder guard runs FIRST: it needs only names, and its guidance message
+    // ("this plot still holds the provisioning placeholder grid, here is how to proceed") is
+    // strictly more actionable than the raw pairwise-overlap errors the geometry check would
+    // produce for the same replacement-grid upload. Running it after geometry validation made
+    // it unreachable in exactly its primary scenario, since a replacement grid always overlaps
+    // the placeholder grid it replaces.
+    const existingActiveNames = existingQuadratList.map(row => String(row.QuadratName ?? ''));
+    const incomingNames = rows.map(row => normalizeRequiredString(row.quadrat)).filter(Boolean);
     if (quadratRevisionAppendsDivergentSet(existingActiveNames, incomingNames)) {
       throw new Error(buildDivergentQuadratUploadError(plotID, existingActiveNames, incomingNames.length));
     }
+
+    const incomingNamesLower = new Set(normalizedIncoming.map(row => row.quadratName.toLowerCase()));
+
+    // Build the carry-over set. Rows named by the upload are being replaced, so their stored
+    // geometry is irrelevant (and must not be parsed: rejecting a revision because the very
+    // row it repairs has malformed stored geometry would make that row permanently unfixable).
+    // A carry-over row whose stored geometry cannot be parsed -- legacy rows written before
+    // this boundary enforced geometry -- cannot participate in geometry math, so it is
+    // excluded from the prospective layout with a logged warning rather than rejecting the
+    // upload outright, which would lock the plot out of quadrat revisions entirely.
+    const carryOverExisting: QuadratCsvRow[] = [];
+    const unvalidatableExistingNames: string[] = [];
+    for (const existingRow of existingQuadratList) {
+      const storedName = String(existingRow.QuadratName ?? '').trim();
+      if (storedName && incomingNamesLower.has(storedName.toLowerCase())) continue;
+
+      // Unnamed rows get a synthetic display name: it keeps them visible in issue messages
+      // and cannot collide with incoming names, which are non-blank by this point.
+      const displayName = storedName || `(unnamed QuadratID ${existingRow.QuadratID})`;
+      // Stored rows are always canonical south-west, so toQuadratGeometry here is a pure
+      // parse -- not a re-declaration of the reference corner. coerceGeometryField is reused
+      // rather than a second near-identical coercer: it maps undefined to undefined and
+      // everything else through String(), which toQuadratGeometry treats the same as null.
+      const geometry = toQuadratGeometry({
+        quadrat: displayName,
+        startx: coerceGeometryField(existingRow.StartX),
+        starty: coerceGeometryField(existingRow.StartY),
+        dimx: coerceGeometryField(existingRow.DimensionX),
+        dimy: coerceGeometryField(existingRow.DimensionY)
+      });
+      if (!geometry) {
+        unvalidatableExistingNames.push(displayName);
+        continue;
+      }
+      carryOverExisting.push(geometry);
+    }
+    if (unvalidatableExistingNames.length > 0) {
+      ailogger.warn(
+        `Plot ${plotID} has ${unvalidatableExistingNames.length} existing active quadrat(s) with malformed stored geometry; ` +
+          `they were excluded from revision geometry validation: ${truncateAndJoin(unvalidatableExistingNames, ', ')}. ` +
+          `Re-upload those quadrats with valid geometry to restore full validation.`
+      );
+    }
+
+    const prospectiveLayout = [...carryOverExisting, ...normalizedIncoming];
+    if (prospectiveLayout.length > MAX_GENERATED_QUADRATS) {
+      throw new QuadratGeometryValidationError(
+        `Prospective quadrat layout contains ${prospectiveLayout.length} rows; maximum allowed per plot is ${MAX_GENERATED_QUADRATS}.`
+      );
+    }
+
+    // Reject only defects this upload INTRODUCES. Issues confined to carry-over rows are
+    // pre-existing database state the uploader neither caused nor can repair in this file
+    // (repairing them is itself a Revisions upload, which would re-run this same check --
+    // blocking on them would deadlock the plot). Issue rowIndexes map into prospectiveLayout,
+    // so everything at or past carryOverExisting.length was introduced by an incoming row;
+    // an incoming row overlapping a carry-over row still blocks via the incoming row's entry.
+    const incomingStartIndex = carryOverExisting.length;
+    const revisionIssues = validateQuadratCollectionDetailed(prospectiveLayout, plotBounds, CANONICAL_SOUTHWEST_CORNER).issues;
+    const preExistingIssues = revisionIssues.filter(issue => issue.rowIndex < incomingStartIndex);
+    const introducedIssues = revisionIssues.filter(issue => issue.rowIndex >= incomingStartIndex);
+    if (preExistingIssues.length > 0) {
+      ailogger.warn(
+        `Plot ${plotID} has pre-existing quadrat layout defects not caused by this upload: ` +
+          `${truncateAndJoin(
+            preExistingIssues.map(issue => issue.message),
+            ' '
+          )}`
+      );
+    }
+
+    // Supplemental cap-proof overlap sweep. validateQuadratCollection caps how many overlapping
+    // pairs it reports, and on a plot whose existing layout is saturated with overlaps (a real
+    // production case: every quadrat stacked at the same coordinates) pre-existing pairs can
+    // exhaust that cap and mask a NEW overlap this upload introduces. Only incoming-involving
+    // pairs are reportable here, so pre-existing pairs cannot crowd them out. Rows are already
+    // canonical south-west; non-positive-dimension rows are excluded from the sweep the same
+    // way the shared validator excludes them (they surface via their own dimension issue).
+    const incomingRowSet = new Set<QuadratCsvRow>(normalizedIncoming);
+    const sweepableLayout = prospectiveLayout.filter(row => row.dimensionX > 0 && row.dimensionY > 0);
+    const introducedOverlapSummary = summarizeQuadratOverlaps(sweepableLayout, (a, b) => incomingRowSet.has(a) || incomingRowSet.has(b));
+
+    const fatalIntroducedMessages = new Set<string>(introducedIssues.filter(issue => issue.kind !== 'overlap').map(issue => issue.message));
+    if (fatalIntroducedMessages.size > 0) {
+      throw new QuadratGeometryValidationError(formatQuadratGeometryMessages([...fatalIntroducedMessages]));
+    }
+
+    requireOverlapAcknowledgment(introducedOverlapSummary);
+  }
+
+  // Every incoming row was validated above (unique, in-bounds, with any overlaps explicitly
+  // acknowledged for this exact layout), so this
+  // lookup is guaranteed to hit for every row processed below.
+  const canonicalByName = new Map<string, QuadratCsvRow>();
+  for (const row of normalizedIncoming) {
+    canonicalByName.set(row.quadratName.toLowerCase(), row);
   }
 
   for (const row of rows) {
     const quadratName = normalizeRequiredString(row.quadrat);
-    if (!quadratName) {
-      skippedCount += 1;
-      continue;
+    // Blank name here means an entirely-blank padding row: it was counted in skippedCount
+    // above (a blank name WITH data present already threw during row conversion).
+    if (!quadratName) continue;
+    const canonical = canonicalByName.get(quadratName.toLowerCase());
+    if (!canonical) {
+      throw new QuadratGeometryValidationError(`Internal error: no canonical geometry resolved for quadrat "${quadratName}".`);
     }
 
     const payload = {
-      StartX: row.startx,
-      StartY: row.starty,
-      DimensionX: row.dimx,
-      DimensionY: row.dimy,
+      StartX: canonical.startX,
+      StartY: canonical.startY,
+      DimensionX: canonical.dimensionX,
+      DimensionY: canonical.dimensionY,
       Area: row.area,
       QuadratShape: normalizeOptionalString(row.quadratshape)
     };
@@ -332,7 +673,12 @@ async function upsertQuadratRows(
     insertedCount += 1;
   }
 
-  return { insertedCount, updatedCount, skippedCount };
+  return {
+    insertedCount,
+    updatedCount,
+    skippedCount,
+    ...(acknowledgedOverlapSummaries.length > 0 ? { acknowledgedOverlapSummaries } : {})
+  };
 }
 
 async function upsertSpeciesRows(
@@ -748,6 +1094,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return NextResponse.json({ error: 'Request body must be a JSON object', code: 'INVALID_REQUEST_BODY' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+
   const schema: string = body.schema;
 
   // SQL Injection Prevention: Validate schema against whitelist
@@ -781,6 +1131,15 @@ export async function POST(request: NextRequest) {
         responseMessage: 'Invalid source format',
         error: `sourceFormat must be ${SourceFormat.csv}`
       }),
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
+  if (body.uploadMode !== undefined && !isSupportedUploadMode(body.uploadMode)) {
+    return NextResponse.json(
+      {
+        error: `uploadMode must be ${UploadMode.CLEAN_REUPLOAD} or ${UploadMode.REVISIONS}`,
+        code: 'INVALID_UPLOAD_MODE'
+      },
       { status: HTTPResponses.INVALID_REQUEST }
     );
   }
@@ -1210,7 +1569,15 @@ export async function POST(request: NextRequest) {
         );
       } catch (e: any) {
         if (transactionID) {
-          await connectionManager.rollbackTransaction(transactionID);
+          const failedTransactionID = transactionID;
+          transactionID = undefined;
+          await rollbackPreservingOriginalError(connectionManager, failedTransactionID, {
+            schema,
+            formType,
+            fileName,
+            uploadMode,
+            branch: 'measurements'
+          });
         }
 
         retryCount++;
@@ -1243,7 +1610,18 @@ export async function POST(request: NextRequest) {
         transactionID = await connectionManager.beginTransaction();
 
         if (formType === 'quadrats') {
-          fixedDataProcessingResult = await upsertQuadratRows(connectionManager, schema, plot?.plotID, uploadRows, uploadMode, transactionID);
+          const referenceCorner = parseReferenceCorner(body.coordinateReferenceCorner);
+          const overlapAcknowledgment: unknown = body.quadratOverlapAcknowledgment;
+          fixedDataProcessingResult = await upsertQuadratRows(
+            connectionManager,
+            schema,
+            plot?.plotID,
+            uploadRows,
+            uploadMode,
+            referenceCorner,
+            overlapAcknowledgment,
+            transactionID
+          );
         } else if (formType === 'attributes') {
           fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
         } else if (formType === 'species') {
@@ -1279,13 +1657,20 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        await connectionManager.commitTransaction(transactionID ?? '');
-        transactionID = undefined;
-
         // Track file upload in unifiedchangelog (single row per file)
         try {
           const batchRowCount = Object.keys(fileRowSet).length;
           const censusID = census?.dateRanges?.[0]?.censusID;
+          // Provenance for acknowledged quadrat overlaps: the fixed statement, authoritative
+          // session identity, complete layout signature, and either an exhaustive pair list or
+          // an explicitly truncated sample. This record is part of the quadrat transaction.
+          const overlapAcknowledgmentRecord = fixedDataProcessingResult.acknowledgedOverlapSummaries?.length
+            ? {
+                statement: QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+                acknowledgedBy: authenticatedSessionIdentity(session?.user),
+                summaries: fixedDataProcessingResult.acknowledgedOverlapSummaries
+              }
+            : null;
 
           // Check if we've already logged this file upload - use format() for schema
           const existingEntrySQL = format(
@@ -1294,7 +1679,7 @@ export async function POST(request: NextRequest) {
              ORDER BY ChangeID DESC LIMIT 1`,
             [schema]
           );
-          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID]);
+          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID], transactionID);
 
           if (existingEntry.length === 0) {
             // First batch for this file - insert new entry
@@ -1306,7 +1691,8 @@ export async function POST(request: NextRequest) {
               insertedCount: fixedDataProcessingResult.insertedCount,
               updatedCount: fixedDataProcessingResult.updatedCount,
               skippedCount: fixedDataProcessingResult.skippedCount,
-              batchCount: 1
+              batchCount: 1,
+              ...(overlapAcknowledgmentRecord ? { overlapAcknowledgment: overlapAcknowledgmentRecord } : {})
             });
             const insertChangelogSQL = format(
               `INSERT INTO ??.unifiedchangelog
@@ -1314,24 +1700,62 @@ export async function POST(request: NextRequest) {
               VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
               [schema]
             );
-            await connectionManager.executeQuery(insertChangelogSQL, ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID]);
+            await connectionManager.executeQuery(
+              insertChangelogSQL,
+              ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID],
+              transactionID
+            );
           } else {
             // Subsequent batch - update the existing entry with accumulated count
             // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
             const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
-            metadata.uploadMode = uploadMode;
+            // Preserve the user's initial mode across chunked fixed-data uploads. Later
+            // quadrat chunks intentionally execute as revisions after the first clean-reset
+            // chunk, but the file-level changelog must continue to say clean_reupload.
+            metadata.uploadMode = metadata.uploadMode || uploadMode;
+            metadata.lastChunkMode = uploadMode;
             metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
+            if (overlapAcknowledgmentRecord) {
+              const existingSummaries = Array.isArray(metadata.overlapAcknowledgment?.summaries) ? metadata.overlapAcknowledgment.summaries : [];
+              const summariesBySignature = new Map<string, QuadratOverlapSummary>();
+              for (const summary of [...existingSummaries, ...overlapAcknowledgmentRecord.summaries]) {
+                if (summary && typeof summary.layoutSignature === 'string') {
+                  summariesBySignature.set(summary.layoutSignature, summary);
+                }
+              }
+              metadata.overlapAcknowledgment = {
+                ...overlapAcknowledgmentRecord,
+                summaries: [...summariesBySignature.values()]
+              };
+            }
             metadata.insertedCount = (metadata.insertedCount || 0) + fixedDataProcessingResult.insertedCount;
             metadata.updatedCount = (metadata.updatedCount || 0) + fixedDataProcessingResult.updatedCount;
             metadata.skippedCount = (metadata.skippedCount || 0) + fixedDataProcessingResult.skippedCount;
             metadata.batchCount = (metadata.batchCount || 1) + 1;
             const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
-            await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID]);
+            await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
           }
         } catch (logError: any) {
-          // Log but don't fail the upload if changelog tracking fails
           ailogger.error('Failed to log file upload to changelog', logError);
+          // The changelog now shares the data transaction, so a transaction-fatal error here
+          // (deadlock, lock-wait timeout, lost connection -- e.g. two concurrent chunks racing
+          // on the same changelog row) may have rolled the WHOLE transaction back. Swallowing
+          // it would let the commit below no-op "succeed" and return 200 while this chunk's
+          // data rows were silently lost. Rethrow so the outer catch rolls back cleanly and
+          // the retry loop re-runs the chunk.
+          if (isRetryableUploadError(logError)) {
+            throw logError;
+          }
+          // An overlap acknowledgment is part of the write authorization and provenance, not
+          // optional telemetry. Keep it in the same transaction so an audit failure rolls the
+          // quadrat data back. Preserve the legacy best-effort behavior for unrelated uploads.
+          if (fixedDataProcessingResult.acknowledgedOverlapSummaries?.length) {
+            throw new Error(`Failed to persist quadrat overlap acknowledgment: ${logError instanceof Error ? logError.message : String(logError)}`);
+          }
         }
+
+        await connectionManager.commitTransaction(transactionID ?? '');
+        transactionID = undefined;
 
         return new NextResponse(
           JSON.stringify({
@@ -1347,8 +1771,50 @@ export async function POST(request: NextRequest) {
         );
       } catch (error: any) {
         if (transactionID) {
-          await connectionManager.rollbackTransaction(transactionID);
+          const failedTransactionID = transactionID;
           transactionID = undefined;
+          await rollbackPreservingOriginalError(connectionManager, failedTransactionID, {
+            schema,
+            formType,
+            fileName,
+            uploadMode,
+            branch: 'fixed-data'
+          });
+        }
+
+        // Unacknowledged overlaps are a confirm-and-retry condition, not a data error: the
+        // client re-submits the same file with the acknowledgment flag once the uploader
+        // confirms the overlaps reflect field measurements. Distinct code so the UI can react.
+        if (error instanceof QuadratOverlapAcknowledgmentRequiredError) {
+          ailogger.warn(`Quadrat upload for ${fileName} requires overlap acknowledgment: ${error.message}`, {
+            schema,
+            plotID: plot?.plotID ?? null,
+            uploadMode,
+            code: QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE
+          });
+          return NextResponse.json(
+            {
+              error: error.message,
+              code: QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE,
+              overlapSummaries: [error.overlapSummary]
+            },
+            { status: HTTPResponses.INVALID_REQUEST }
+          );
+        }
+
+        // A geometry validation failure is a client error, never a retryable infrastructure
+        // failure -- check for it BEFORE retryCount/isRetryableUploadError so it can never be
+        // retried and never falls through to the generic 503 responses below.
+        if (error instanceof QuadratGeometryValidationError) {
+          ailogger.warn(`Rejected quadrat upload for ${fileName}: ${error.message}`, {
+            schema,
+            plotID: plot?.plotID ?? null,
+            uploadMode,
+            coordinateReferenceCorner: body.coordinateReferenceCorner ?? DEFAULT_REFERENCE_CORNER,
+            rowCount: uploadRows.length,
+            code: 'INVALID_QUADRAT_GEOMETRY'
+          });
+          return NextResponse.json({ error: error.message, code: 'INVALID_QUADRAT_GEOMETRY' }, { status: HTTPResponses.INVALID_REQUEST });
         }
 
         retryCount++;

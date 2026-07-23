@@ -18,7 +18,7 @@ import { createTestPool, TEST_SCHEMA_PREFIX } from './_shared';
 vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 import { initTablesStep, deployProceduresStep, seedValidationsStep } from '@/lib/provisioning/steps/sql-steps';
-import type { StepContext, ProvisioningInput } from '@/lib/provisioning/types';
+import type { StepContext, ProvisioningRunInput } from '@/lib/provisioning/types';
 
 const TEST_SCHEMA = TEST_SCHEMA_PREFIX + 'meta';
 const CURRENT_SCHEMA_VERSION = '2026-05-13';
@@ -52,7 +52,7 @@ describe('schema-version stamping (alreadyDone)', () => {
     return {
       runId: 0,
       schemaName: TEST_SCHEMA,
-      input: {} as ProvisioningInput,
+      input: {} as ProvisioningRunInput,
       catalogPool: pool,
       sitePool: pool,
       state: {},

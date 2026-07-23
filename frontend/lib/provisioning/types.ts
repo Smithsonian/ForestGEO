@@ -1,4 +1,5 @@
 import type { Pool } from 'mysql2/promise';
+import type { AreaUnit, DimensionUnit } from './area';
 
 export type RunStatus = 'running' | 'completed' | 'failed' | 'aborted';
 export type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
@@ -31,11 +32,6 @@ export interface QuadratCsvRow {
   dimensionY: number;
 }
 
-export interface QuadratCsvConfig {
-  mode: 'csv';
-  rows: QuadratCsvRow[];
-}
-
 /**
  * Create the site with no quadrats. Use when the real quadrat list will be uploaded
  * later through the Quadrats page, so provisioning does not seed a placeholder grid
@@ -45,37 +41,89 @@ export interface QuadratNoneConfig {
   mode: 'none';
 }
 
-export type QuadratConfig = QuadratGridConfig | QuadratCsvConfig | QuadratNoneConfig;
+/**
+ * Which corner of its own quadrat a CSV row's StartX/StartY identifies.
+ * Compass values are relative to the plot's local axes: east is higher X,
+ * north is higher Y. This does not move the plot's coordinate origin.
+ */
+export type QuadratReferenceCorner = 'SW' | 'SE' | 'NW' | 'NE';
 
-export interface ProvisioningInput {
-  site: {
-    siteName: string;
-    schemaName: string;
-    sqDimX: number;
-    sqDimY: number;
-    defaultUOMDBH: string;
-    defaultUOMHOM: string;
-    doubleDataEntry: boolean;
-    location: string;
-    country: string;
-  };
-  plot: {
-    plotName: string;
-    dimensionX: number;
-    dimensionY: number;
-    area: number;
-    globalX: number;
-    globalY: number;
-    globalZ: number;
-    plotShape: 'square' | 'rectangular' | 'irregular';
-    description: string;
-    defaultDimensionUnits: string;
-    defaultCoordinateUnits: string;
-    defaultAreaUnits: string;
-    defaultDBHUnits: string;
-    defaultHOMUnits: string;
-  };
-  quadrats: QuadratConfig;
+/**
+ * Explicit confirmation for one or more reviewed quadrat layouts. Layout signatures bind the
+ * confirmation to the geometry that was actually shown to the user; changing a file, reference
+ * corner, or prospective database layout produces a different signature and requires a new
+ * confirmation.
+ */
+export interface QuadratOverlapAcknowledgment {
+  statement: string;
+  layoutSignatures: string[];
+}
+
+/** Wire/client shape: rows are in the uploaded convention. */
+export interface QuadratCsvRequestConfig {
+  mode: 'csv';
+  rows: QuadratCsvRow[];
+  coordinateReferenceCorner: QuadratReferenceCorner;
+  /**
+   * The admin's confirmation that the specifically signed overlapping layout reflects field
+   * measurements. Absent when the layout has no overlaps.
+   */
+  overlapAcknowledgment?: QuadratOverlapAcknowledgment;
+}
+
+/** Server/run shape: rows are canonical south-west. */
+export interface QuadratCsvCanonicalConfig {
+  mode: 'csv';
+  rows: QuadratCsvRow[];
+  coordinates: 'canonical-sw';
+  sourceCoordinateReferenceCorner: QuadratReferenceCorner;
+  overlapAcknowledgment?: QuadratOverlapAcknowledgment;
+}
+
+export type QuadratRequestConfig = QuadratGridConfig | QuadratCsvRequestConfig | QuadratNoneConfig;
+export type CanonicalQuadratConfig = QuadratGridConfig | QuadratCsvCanonicalConfig | QuadratNoneConfig;
+
+export interface ProvisioningSiteInput {
+  siteName: string;
+  schemaName: string;
+  sqDimX: number;
+  sqDimY: number;
+  defaultUOMDBH: string;
+  defaultUOMHOM: string;
+  doubleDataEntry: boolean;
+  location: string;
+  country: string;
+}
+
+export interface ProvisioningPlotInput {
+  plotName: string;
+  dimensionX: number;
+  dimensionY: number;
+  area: number;
+  globalX: number;
+  globalY: number;
+  globalZ: number;
+  plotShape: 'square' | 'rectangular' | 'irregular';
+  description: string;
+  defaultDimensionUnits: DimensionUnit;
+  defaultCoordinateUnits: DimensionUnit;
+  defaultAreaUnits: AreaUnit;
+  defaultDBHUnits: DimensionUnit;
+  defaultHOMUnits: DimensionUnit;
+}
+
+/** What the browser holds and POSTs. Quadrat rows are in the declared convention. */
+export interface ProvisioningRequestInput {
+  site: ProvisioningSiteInput;
+  plot: ProvisioningPlotInput;
+  quadrats: QuadratRequestConfig;
+}
+
+/** What the server runs, persists and reloads. Quadrat rows are canonical south-west. */
+export interface ProvisioningRunInput {
+  site: ProvisioningSiteInput;
+  plot: ProvisioningPlotInput;
+  quadrats: CanonicalQuadratConfig;
 }
 
 export interface ProvisioningRunListRow {
@@ -96,7 +144,13 @@ export interface ProvisioningRunRecord {
   finishedAt: Date | null;
   siteName: string;
   schemaName: string;
-  input: ProvisioningInput;
+  /**
+   * Null when the stored payload fails validation at load (e.g. a run recorded
+   * before reference-corner support, or before some other schema tightening).
+   * Only callers that execute or re-execute the run require a non-null value
+   * and enforce that themselves — see `loadRun` in orchestrator.ts.
+   */
+  input: ProvisioningRunInput | null;
 }
 
 export interface ProvisioningStepRecord {
@@ -114,7 +168,7 @@ export interface ProvisioningStepRecord {
 export interface StepContext {
   runId: number;
   schemaName: string;
-  input: ProvisioningInput;
+  input: ProvisioningRunInput;
   catalogPool: Pool;
   /** Pool whose default schema is the new site schema. May be null before create_schema runs. */
   sitePool: Pool | null;

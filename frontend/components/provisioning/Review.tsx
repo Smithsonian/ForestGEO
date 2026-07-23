@@ -2,20 +2,22 @@
 
 import React from 'react';
 import { Card, Divider, Stack, Typography } from '@mui/joy';
-import type { ProvisioningInput } from '@/lib/provisioning/types';
+import type { ProvisioningRequestInput } from '@/lib/provisioning/types';
+import { getReferenceCornerLabel } from '@/lib/provisioning/coordinate-reference-corner';
 
 interface ReviewProps {
-  value: ProvisioningInput;
+  value: ProvisioningRequestInput;
 }
 
-function buildQuadratsSummary(quadrats: ProvisioningInput['quadrats']): string {
+function buildQuadratsSummary(quadrats: ProvisioningRequestInput['quadrats']): string {
   if (quadrats.mode === 'grid') {
     return `Grid mode: ${quadrats.quadratSizeX}×${quadrats.quadratSizeY} m, naming = ${quadrats.namingPattern}`;
   }
   if (quadrats.mode === 'none') {
     return 'None: no quadrats created now — upload them later from the Quadrats page';
   }
-  return `CSV mode: ${quadrats.rows.length} ${quadrats.rows.length === 1 ? 'row' : 'rows'}`;
+  const cornerLabel = getReferenceCornerLabel(quadrats.coordinateReferenceCorner);
+  return `CSV mode: ${quadrats.rows.length} ${quadrats.rows.length === 1 ? 'row' : 'rows'}, coordinates identify the ${cornerLabel} corner`;
 }
 
 export default function Review({ value }: ReviewProps) {

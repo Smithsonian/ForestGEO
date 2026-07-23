@@ -3,9 +3,9 @@ import mysql from 'mysql2/promise';
 import { insertQuadratsStep } from './insert-quadrats';
 import { createSchemaStep, initTablesStep } from './sql-steps';
 import { insertPlotStep } from './catalog-and-rows';
-import type { StepContext, ProvisioningInput, QuadratCsvRow } from '../types';
+import type { StepContext, ProvisioningRunInput, QuadratCsvRow } from '../types';
 
-function makeInput(quadrats: ProvisioningInput['quadrats']): ProvisioningInput {
+function makeInput(quadrats: ProvisioningRunInput['quadrats']): ProvisioningRunInput {
   return {
     site: {
       siteName: 'QuadTest',
@@ -121,7 +121,7 @@ describe('insertQuadratsStep', () => {
     ];
     const csvCtx: StepContext = {
       ...ctx,
-      input: makeInput({ mode: 'csv', rows: csvRows })
+      input: makeInput({ mode: 'csv', rows: csvRows, coordinates: 'canonical-sw', sourceCoordinateReferenceCorner: 'SW' })
     };
     csvCtx.input.site.schemaName = SCHEMA_NAME;
     csvCtx.state = { plotId: ctx.state.plotId };

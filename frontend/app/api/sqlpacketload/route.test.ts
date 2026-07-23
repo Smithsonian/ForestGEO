@@ -6,6 +6,13 @@ import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests, TEMP_MEASURE
 import { SourceFormat } from '@/config/macros/formdetails';
 import { headerSignature } from '@/lib/column-mapping/mapping';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
+import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
+import ailogger from '@/ailogger';
+import {
+  buildQuadratOverlapAcknowledgment,
+  QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+  validateQuadratCollectionDetailed
+} from '@/lib/provisioning/quadrat-collection-validation';
 
 const { getCookieMock, authMock, handleUpsertMock } = vi.hoisted(() => ({
   getCookieMock: vi.fn(),
@@ -626,6 +633,57 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
   });
 
+  it('rejects an unknown upload mode instead of silently falling back to destructive clean re-upload', async () => {
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: 0, starty: 0, dimx: 20, dimy: 20 }
+        },
+        { uploadMode: 'revision' }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    await expect(res?.json()).resolves.toMatchObject({ code: 'INVALID_UPLOAD_MODE' });
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('re-runs the chunk instead of phantom-committing when the changelog write deadlocks', async () => {
+    // The changelog shares the data transaction. A deadlock on the changelog statement rolls
+    // the WHOLE transaction back server-side; if it were swallowed like a benign logging
+    // failure, the commit would no-op "succeed" and the response would claim 200 while the
+    // chunk's data rows were silently lost. It must instead propagate into the retry loop.
+    let changelogInsertAttempts = 0;
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql);
+      if (text.includes('unifiedchangelog')) {
+        if (text.includes('INSERT INTO')) {
+          changelogInsertAttempts += 1;
+          if (changelogInsertAttempts === 1) {
+            throw new Error('Deadlock found when trying to get lock; try restarting transaction');
+          }
+          return { insertId: 9 };
+        }
+        return []; // changelog lookup: no existing file_upload entry
+      }
+      if (text.startsWith('SELECT')) return []; // no existing attribute rows
+      return { insertId: 1 };
+    });
+
+    const res = await POST(
+      makeFixedDataRequest('attributes', { 'row-1': { code: 'alive', description: 'Alive', status: 'alive' } }, { uploadMode: 'revisions' })
+    );
+
+    expect(res?.status).toBe(200);
+    expect(changelogInsertAttempts, 'the chunk must have been retried after the deadlock').toBe(2);
+    // The deadlocked attempt was rolled back -- never committed as an empty shell.
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.beginTransaction).toHaveBeenCalledTimes(2);
+    expect(mockConnectionManager.commitTransaction).toHaveBeenCalledTimes(1);
+  });
+
   it('updates existing attributes and inserts new codes in revisions mode', async () => {
     mockConnectionManager.executeQuery
       // Row 1: SELECT existing (case-insensitive match found)
@@ -828,10 +886,14 @@ describe('sqlpacketload fixed-data upload modes', () => {
   });
 
   it('refuses quadrat clean re-upload when active quadrats are already referenced by stems', async () => {
-    mockConnectionManager.executeQuery.mockResolvedValueOnce([
-      { QuadratID: 11, QuadratName: '1011' },
-      { QuadratID: 12, QuadratName: '1012' }
-    ]);
+    mockConnectionManager.executeQuery
+      // 1: authoritative plot bounds lookup
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      // 2: stem-safety blocking query
+      .mockResolvedValueOnce([
+        { QuadratID: 11, QuadratName: '1011' },
+        { QuadratID: 12, QuadratName: '1012' }
+      ]);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -850,7 +912,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(body.error).toContain('1012');
     expect(body.error).toContain('stems and downstream measurements');
     expect(body.error).toContain('Use Revisions Upload instead');
-    const guardSQL = String(mockConnectionManager.executeQuery.mock.calls[0]?.[0]);
+    const guardSQL = String(mockConnectionManager.executeQuery.mock.calls[1]?.[0]);
     expect(guardSQL).toContain('FROM `forestgeo_testing`.stems');
     // Soft-deleted stems must not block the wipe; only live stems count.
     expect(guardSQL).toContain('s.IsActive = 1');
@@ -867,7 +929,9 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // Regression: the guard previously trimmed and filtered out blank names
     // before deciding whether to refuse, so a stem-referenced quadrat named
     // ' ' slipped past the check and the DELETE cascade destroyed its stems.
-    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ QuadratID: 42, QuadratName: '   ' }]);
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([{ QuadratID: 42, QuadratName: '   ' }]);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -891,11 +955,13 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
   it('allows quadrat clean re-upload when the plot has no stems on active quadrats', async () => {
     mockConnectionManager.executeQuery
-      // 1: dependency precheck returns nothing
+      // 1: authoritative plot bounds lookup
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      // 2: dependency precheck returns nothing
       .mockResolvedValueOnce([])
-      // 2: DELETE FROM quadrats
+      // 3: DELETE FROM quadrats
       .mockResolvedValueOnce({ affectedRows: 0 })
-      // 3: INSERT new quadrat
+      // 4: INSERT new quadrat
       .mockResolvedValueOnce({ insertId: 1 });
 
     const res = await POST(
@@ -909,7 +975,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     );
 
     expect(res?.status).toBe(200);
-    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('FROM `forestgeo_testing`.stems');
+    expect(String(mockConnectionManager.executeQuery.mock.calls[1]?.[0])).toContain('FROM `forestgeo_testing`.stems');
     // Positive anchor for the refusal test's zero-DELETE filter above: the wipe
     // must run here with exactly this SQL text, so a quoting change that would
     // make the negative filter vacuous fails loudly instead.
@@ -921,15 +987,21 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
   it('allows a revisions upload to add a new quadrat to a real layout', async () => {
     mockConnectionManager.executeQuery
-      // 1: divergent-placeholder preflight sees a real layout, not Q##### placeholders
-      .mockResolvedValueOnce([{ QuadratName: 'C01' }, { QuadratName: 'D01' }])
-      // 2: the incoming quadrat does not exist yet
+      // 1: authoritative plot bounds lookup
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      // 2: existing active quadrats (geometry) -- also feeds the divergent-placeholder guard.
+      // Real (non-placeholder) names, non-overlapping with the incoming E01 row.
+      .mockResolvedValueOnce([
+        { QuadratName: 'C01', StartX: 0, StartY: 0, DimensionX: 20, DimensionY: 20 },
+        { QuadratName: 'D01', StartX: 20, StartY: 0, DimensionX: 20, DimensionY: 20 }
+      ])
+      // 3: the incoming quadrat does not exist yet
       .mockResolvedValueOnce([])
-      // 3: INSERT new quadrat
+      // 4: INSERT new quadrat
       .mockResolvedValueOnce({ insertId: 3 })
-      // 4: changelog lookup
+      // 5: changelog lookup
       .mockResolvedValueOnce([])
-      // 5: changelog insert
+      // 6: changelog insert
       .mockResolvedValueOnce({ insertId: 4 });
 
     const res = await POST(
@@ -949,8 +1021,563 @@ describe('sqlpacketload fixed-data upload modes', () => {
       updatedCount: 0,
       transactionCompleted: true
     });
-    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('SELECT QuadratName FROM `forestgeo_testing`.quadrats');
-    expect(String(mockConnectionManager.executeQuery.mock.calls[2]?.[0])).toContain('INSERT INTO `forestgeo_testing`.quadrats');
+    // No QuadratName IS NOT NULL filter: an unnamed quadrat still occupies plot area, so it
+    // must be fetched and participate in the prospective-layout overlap check.
+    const existingQuadratsSelect = String(mockConnectionManager.executeQuery.mock.calls[1]?.[0]);
+    expect(existingQuadratsSelect).toContain('SELECT QuadratID, QuadratName, StartX, StartY, DimensionX, DimensionY FROM `forestgeo_testing`.quadrats');
+    expect(existingQuadratsSelect).not.toContain('QuadratName IS NOT NULL');
+    expect(String(mockConnectionManager.executeQuery.mock.calls[3]?.[0])).toContain('INSERT INTO `forestgeo_testing`.quadrats');
+  });
+
+  it('holds a revisions upload that overlaps an unnamed (NULL QuadratName) existing quadrat for acknowledgment', async () => {
+    // An unnamed quadrat occupies real plot area. Excluding it from the prospective layout
+    // would let an overlapping upload commit silently with no confirmation at all.
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([{ QuadratID: 7, QuadratName: null, StartX: 0, StartY: 0, DimensionX: 20, DimensionY: 20 }]);
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' } }, { uploadMode: 'revisions' })
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
+    expect(body.error).toContain('overlaps');
+    expect(body.error).toContain('(unnamed QuadratID 7)');
+    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reject a revisions upload because an UNRELATED existing quadrat has malformed stored geometry', async () => {
+    // Legacy rows written before the write boundary can hold NULL geometry. Throwing on them
+    // would make quadrat revisions permanently impossible for the whole plot; instead they are
+    // excluded from geometry validation with a logged warning.
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([
+        { QuadratID: 9, QuadratName: 'LEGACY', StartX: null, StartY: null, DimensionX: null, DimensionY: null },
+        { QuadratID: 10, QuadratName: 'C01', StartX: 0, StartY: 0, DimensionX: 20, DimensionY: 20 }
+      ])
+      // incoming E01 does not exist yet
+      .mockResolvedValueOnce([])
+      // INSERT + changelog lookup + changelog insert
+      .mockResolvedValueOnce({ insertId: 3 })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 4 });
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'E01', startx: '40', starty: '0', dimx: '20', dimy: '20' } }, { uploadMode: 'revisions' })
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({ insertedCount: 1, updatedCount: 0 });
+    expect(ailogger.warn).toHaveBeenCalledWith(expect.stringContaining('malformed stored geometry'));
+  });
+
+  it('allows a revisions upload to repair the very quadrat whose stored geometry is malformed', async () => {
+    // The malformed row is named BY the upload, so its stored geometry is irrelevant -- it is
+    // being replaced. Parsing it anyway (and throwing) would make that row unfixable in-app.
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([{ QuadratID: 9, QuadratName: 'LEGACY', StartX: null, StartY: null, DimensionX: null, DimensionY: null }])
+      // per-row lookup finds the row to update
+      .mockResolvedValueOnce([{ QuadratID: 9 }])
+      // UPDATE + changelog lookup + changelog insert
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 4 });
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'LEGACY', startx: '0', starty: '0', dimx: '20', dimy: '20' } }, { uploadMode: 'revisions' })
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({ insertedCount: 0, updatedCount: 1 });
+    expect(ailogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('malformed stored geometry'));
+  });
+
+  it('does not reject a revisions upload because two UNRELATED existing quadrats already overlap', async () => {
+    // Pre-existing layout defects among rows the upload never names are database state the
+    // uploader cannot repair in this file (any repair is itself a Revisions upload that re-runs
+    // this check). They are logged, and only defects the upload INTRODUCES are blocking.
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([
+        { QuadratID: 1, QuadratName: 'C01', StartX: 0, StartY: 0, DimensionX: 20, DimensionY: 20 },
+        { QuadratID: 2, QuadratName: 'C02', StartX: 10, StartY: 10, DimensionX: 20, DimensionY: 20 }
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 3 })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 4 });
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'E01', startx: '100', starty: '0', dimx: '20', dimy: '20' } }, { uploadMode: 'revisions' })
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({ insertedCount: 1 });
+    expect(ailogger.warn).toHaveBeenCalledWith(expect.stringContaining('pre-existing quadrat layout defects'));
+  });
+
+  it('still rejects an introduced overlap when pre-existing overlaps saturate the reporting cap', async () => {
+    // Real production case: a plot where every existing quadrat is stacked at the same
+    // coordinates, yielding thousands of pre-existing overlap pairs. The shared validator
+    // caps reported pairs, so those pre-existing pairs could exhaust the cap and mask the
+    // one NEW overlap this upload introduces. The supplemental incoming-only sweep must
+    // catch it regardless.
+    const STACKED_ROW_COUNT = 30; // 30 choose 2 = 435 pre-existing pairs, far past the 25-pair cap
+    const stackedExisting = Array.from({ length: STACKED_ROW_COUNT }, (_, i) => ({
+      QuadratID: i + 1,
+      QuadratName: `STACK${String(i + 1).padStart(2, '0')}`,
+      StartX: 0,
+      StartY: 0,
+      DimensionX: 20,
+      DimensionY: 20
+    }));
+    const farExisting = { QuadratID: 99, QuadratName: 'FAR', StartX: 400, StartY: 400, DimensionX: 20, DimensionY: 20 };
+
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]).mockResolvedValueOnce([...stackedExisting, farExisting]);
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'NEWOVL', startx: '410', starty: '410', dimx: '20', dimy: '20' } }, { uploadMode: 'revisions' })
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
+    expect(body.error).toContain('NEWOVL');
+    expect(body.error).toContain('FAR');
+  });
+
+  it('accepts a clean revision on a plot whose pre-existing overlaps saturate the reporting cap', async () => {
+    const STACKED_ROW_COUNT = 30;
+    const stackedExisting = Array.from({ length: STACKED_ROW_COUNT }, (_, i) => ({
+      QuadratID: i + 1,
+      QuadratName: `STACK${String(i + 1).padStart(2, '0')}`,
+      StartX: 0,
+      StartY: 0,
+      DimensionX: 20,
+      DimensionY: 20
+    }));
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce(stackedExisting)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 100 })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 101 });
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'CLEANADD', startx: '400', starty: '400', dimx: '20', dimy: '20' } }, { uploadMode: 'revisions' })
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({ insertedCount: 1 });
+    expect(ailogger.warn).toHaveBeenCalledWith(expect.stringContaining('pre-existing quadrat layout defects'));
+  });
+
+  it('commits an overlapping upload when the acknowledgment is present and records the text in the changelog', async () => {
+    const overlapSummary = validateQuadratCollectionDetailed(
+      [
+        { quadratName: 'Q01', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+        { quadratName: 'Q02', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
+      ],
+      { dimensionX: 500, dimensionY: 500 },
+      'SW'
+    ).overlapSummary;
+    if (!overlapSummary) throw new Error('expected overlap summary');
+    const acknowledgment = buildQuadratOverlapAcknowledgment([overlapSummary.layoutSignature]);
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      // stem-safety precheck + DELETE + two INSERTs
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce({ insertId: 1 })
+      .mockResolvedValueOnce({ insertId: 2 })
+      // changelog lookup + insert
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 3 });
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'Q02', startx: '10', starty: '10', dimx: '20', dimy: '20' }
+        },
+        { uploadMode: 'clean_reupload', quadratOverlapAcknowledgment: acknowledgment }
+      )
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({ insertedCount: 2 });
+
+    const changelogInsertCall = mockConnectionManager.executeQuery.mock.calls.find(
+      (call: any[]) => String(call[0]).includes('unifiedchangelog') && String(call[0]).includes('INSERT INTO')
+    );
+    expect(changelogInsertCall, 'the file_upload changelog entry must have been written').toBeDefined();
+    const storedMetadata = JSON.parse(changelogInsertCall![1][3]);
+    expect(storedMetadata.overlapAcknowledgment.statement).toBe(QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT);
+    expect(storedMetadata.overlapAcknowledgment.summaries[0].pairs.some((pair: { message: string }) => pair.message.includes('overlaps'))).toBe(true);
+    expect(storedMetadata.overlapAcknowledgment.acknowledgedBy).toBe('user-1');
+  });
+
+  it('does not treat a coerced false value as an overlap acknowledgment', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'Q02', startx: '10', starty: '10', dimx: '20', dimy: '20' }
+        },
+        { uploadMode: 'clean_reupload', quadratOverlapAcknowledgment: false }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
+    expect(body.overlapSummaries[0].layoutSignature).toMatch(/^quadrat-layout-v1-[0-9a-f]{16}$/);
+    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires re-acknowledgment when the submitted layout signature is stale', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'Q02', startx: '10', starty: '10', dimx: '20', dimy: '20' }
+        },
+        {
+          uploadMode: 'clean_reupload',
+          quadratOverlapAcknowledgment: buildQuadratOverlapAcknowledgment(['quadrat-layout-v1-0000000000000000'])
+        }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
+    expect(body.overlapSummaries[0].layoutSignature).not.toBe('quadrat-layout-v1-0000000000000000');
+    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls acknowledged quadrat writes back when their provenance record cannot be stored', async () => {
+    const overlapSummary = validateQuadratCollectionDetailed(
+      [
+        { quadratName: 'Q01', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+        { quadratName: 'Q02', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
+      ],
+      { dimensionX: 500, dimensionY: 500 },
+      'SW'
+    ).overlapSummary;
+    if (!overlapSummary) throw new Error('expected overlap summary');
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce({ insertId: 1 })
+      .mockResolvedValueOnce({ insertId: 2 })
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('changelog unavailable'));
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'Q02', startx: '10', starty: '10', dimx: '20', dimy: '20' }
+        },
+        {
+          uploadMode: 'clean_reupload',
+          quadratOverlapAcknowledgment: buildQuadratOverlapAcknowledgment([overlapSummary.layoutSignature])
+        }
+      )
+    );
+
+    expect(res?.status).toBe(503);
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+  });
+
+  it('acknowledgment does NOT bypass non-overlap defects: an out-of-bounds row still rejects', async () => {
+    // The acknowledgment covers exactly one condition. A file that is both overlapping AND
+    // out of bounds must still fail on the bounds defect even with the acknowledgment set.
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: '490', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'Q02', startx: '495', starty: '5', dimx: '20', dimy: '20' }
+        },
+        {
+          uploadMode: 'clean_reupload',
+          quadratOverlapAcknowledgment: buildQuadratOverlapAcknowledgment(['quadrat-layout-v1-0000000000000000'])
+        }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
+    expect(body.error).toContain('extends past plot');
+  });
+
+  it('surfaces the divergent-placeholder guidance INSTEAD of raw overlap errors for a replacement grid', async () => {
+    // A real replacement grid always geometrically overlaps the placeholder grid it replaces,
+    // so if geometry validation ran first the guard's actionable message would be unreachable
+    // in exactly its primary scenario (the Cooks Branch doubling).
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 40, DimensionY: 40 }]).mockResolvedValueOnce([
+      { QuadratID: 1, QuadratName: 'Q00001', StartX: 0, StartY: 0, DimensionX: 20, DimensionY: 20 },
+      { QuadratID: 2, QuadratName: 'Q00002', StartX: 20, StartY: 0, DimensionX: 20, DimensionY: 20 },
+      { QuadratID: 3, QuadratName: 'Q00003', StartX: 0, StartY: 20, DimensionX: 20, DimensionY: 20 },
+      { QuadratID: 4, QuadratName: 'Q00004', StartX: 20, StartY: 20, DimensionX: 20, DimensionY: 20 }
+    ]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'C01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'C02', startx: '20', starty: '0', dimx: '20', dimy: '20' },
+          'row-3': { quadrat: 'C03', startx: '0', starty: '20', dimx: '20', dimy: '20' }
+        },
+        { uploadMode: 'revisions' }
+      )
+    );
+
+    expect(res?.status).toBe(503);
+    const body = await res?.json();
+    expect(body.error).toContain('appears to replace the generated placeholder grid');
+    expect(body.error).not.toContain('overlaps quadrat');
+  });
+
+  it('skips entirely-blank padding rows instead of rejecting the upload, and reports the skip count', async () => {
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce({ insertId: 1 })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 2 });
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: '', startx: '', starty: '', dimx: '', dimy: '' }
+        },
+        { uploadMode: 'clean_reupload' }
+      )
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({ insertedCount: 1, skippedCount: 1 });
+  });
+
+  it('rejects a quadrat upload whose rows are ALL blank padding before deleting anything', async () => {
+    // Falling through with zero usable rows would validate an empty layout and then, in
+    // CLEAN_REUPLOAD, wipe the plot's quadrats without inserting anything.
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: '', startx: '', starty: '', dimx: '', dimy: '' } }, { uploadMode: 'clean_reupload' })
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
+    expect(body.error).toContain('contains no usable rows (1 blank row(s) skipped)');
+    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports every unconvertible row in a rejected quadrat upload, not just the first', async () => {
+    // Two rows are bad for two DIFFERENT reasons (blank name vs. non-numeric coordinate) and
+    // one row is entirely valid. A fail-fast implementation would only ever mention row 1.
+    mockConnectionManager.executeQuery
+      // authoritative plot bounds lookup
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: '', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'BAD02', startx: 'not-a-number', starty: '0', dimx: '20', dimy: '20' },
+          'row-3': { quadrat: 'GOOD03', startx: '40', starty: '0', dimx: '20', dimy: '20' }
+        },
+        { uploadMode: 'clean_reupload' }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
+    expect(body.error).toContain('row 1');
+    expect(body.error).toContain('row 2');
+    expect(body.error).toContain('BAD02');
+    // The valid third row must not be reported.
+    expect(body.error).not.toContain('GOOD03');
+    // Nothing was ever written: the failure happens before the stem-safety check or delete.
+    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
+  });
+
+  it('rejects an empty quadrat clean re-upload before reading bounds or deleting existing rows', async () => {
+    const res = await POST(makeFixedDataRequest('quadrats', {}, { uploadMode: 'clean_reupload' }));
+
+    expect(res?.status).toBe(400);
+    await expect(res?.json()).resolves.toMatchObject({
+      code: 'INVALID_QUADRAT_GEOMETRY',
+      error: 'Quadrat upload must contain at least one row.'
+    });
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
+  });
+
+  it('caps quadrat rows per request before running collection validation', async () => {
+    const fileRowSet: Record<string, unknown> = {};
+    for (let i = 0; i <= MAX_GENERATED_QUADRATS; i++) {
+      fileRowSet[`row-${i}`] = { quadrat: `Q${i}`, startx: i, starty: 0, dimx: 1, dimy: 1 };
+    }
+
+    const res = await POST(makeFixedDataRequest('quadrats', fileRowSet, { uploadMode: 'revisions' }));
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
+    expect(body.error).toContain(`maximum allowed per request is ${MAX_GENERATED_QUADRATS}`);
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('preserves a geometry validation response when rollback itself fails', async () => {
+    mockConnectionManager.rollbackTransaction.mockRejectedValueOnce(new Error('rollback connection lost'));
+
+    const res = await POST(makeFixedDataRequest('quadrats', {}, { uploadMode: 'clean_reupload' }));
+
+    expect(res?.status).toBe(400);
+    await expect(res?.json()).resolves.toMatchObject({
+      code: 'INVALID_QUADRAT_GEOMETRY',
+      error: 'Quadrat upload must contain at least one row.'
+    });
+  });
+
+  it('caps the aggregated row-failure message and states how many more rows failed', async () => {
+    const TOTAL_BAD_ROWS = 25;
+    const MAX_LISTED_ROW_FAILURES = 20;
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const fileRowSet: Record<string, unknown> = {};
+    for (let i = 0; i < TOTAL_BAD_ROWS; i++) {
+      fileRowSet[`row-${i + 1}`] = { quadrat: '', startx: '0', starty: '0', dimx: '20', dimy: '20' };
+    }
+
+    const res = await POST(makeFixedDataRequest('quadrats', fileRowSet, { uploadMode: 'clean_reupload' }));
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.error).toContain(`...and ${TOTAL_BAD_ROWS - MAX_LISTED_ROW_FAILURES} more`);
+    expect(body.error).toContain(`row ${MAX_LISTED_ROW_FAILURES}`);
+    expect(body.error).not.toContain(`row ${MAX_LISTED_ROW_FAILURES + 1}`);
+  });
+
+  it('distinguishes a blank quadrat name from bad coordinates in the row-failure message', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: '   ', startx: '0', starty: '0', dimx: '20', dimy: '20' } }, { uploadMode: 'clean_reupload' })
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.error).toContain('missing or blank QuadratName');
+    expect(body.error).not.toContain('missing, blank, or non-numeric');
+  });
+
+  it('accepts a quadrat upload with bounds checks skipped (and logged) when the plot has null dimensions on record', async () => {
+    // Plots recorded without dimensions accepted quadrat uploads before the write boundary
+    // existed; rejecting them would lock those sites out of quadrat management entirely.
+    // The row below extends to x=100000, which would fail any real plot-bounds check --
+    // proving the bounds check was skipped rather than run against coerced-to-zero bounds.
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: null, DimensionY: null }])
+      // stem-safety precheck: nothing blocking
+      .mockResolvedValueOnce([])
+      // DELETE FROM quadrats
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      // INSERT new quadrat
+      .mockResolvedValueOnce({ insertId: 1 })
+      // changelog lookup + insert
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 2 });
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'Q01', startx: '99980', starty: '0', dimx: '20', dimy: '20' } }, { uploadMode: 'clean_reupload' })
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({ insertedCount: 1 });
+    expect(ailogger.warn).toHaveBeenCalledWith(expect.stringContaining('quadrat plot-bounds checks are skipped'));
+  });
+
+  it('still holds overlapping rows for acknowledgment when the plot has non-positive dimensions on record', async () => {
+    // Degraded (bounds-less) validation is not NO validation: unacknowledged overlaps must
+    // still stop the file even when the plot record is unusable.
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 0, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'Q02', startx: '10', starty: '10', dimx: '20', dimy: '20' }
+        },
+        { uploadMode: 'clean_reupload' }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
+    expect(body.error).toContain('overlap');
+    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('parses numeric JSON geometry values (not just strings) for a quadrat upload', async () => {
+    // FileRow is documented as Record<string, string | null>, but a non-browser caller can send
+    // raw JSON numbers. `0` is falsy, so a naive coercion could wrongly treat it as missing.
+    mockConnectionManager.executeQuery
+      // authoritative plot bounds lookup
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      // stem-safety precheck: nothing blocking
+      .mockResolvedValueOnce([])
+      // DELETE FROM quadrats
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      // INSERT new quadrat
+      .mockResolvedValueOnce({ insertId: 1 });
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'NUM01', startx: 0, starty: 0, dimx: 20, dimy: 20 } }, { uploadMode: 'clean_reupload' })
+    );
+
+    expect(res?.status).toBe(200);
+    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT INTO `forestgeo_testing`.quadrats')
+    );
+    expect(insertCall).toBeDefined();
+    const insertParams = insertCall![1];
+    expect(insertParams).toEqual(expect.arrayContaining(['NUM01', 0, 0, 20, 20]));
   });
 
   it('rejects revisions when multiple active species rows already exist for one SpeciesCode', async () => {
@@ -1006,11 +1633,10 @@ describe('sqlpacketload fixed-data upload modes', () => {
   });
 
   it('retries transient lock wait failures for species revisions uploads', async () => {
-    const originalSetTimeout = global.setTimeout;
-    const immediateSetTimeout = vi.spyOn(global, 'setTimeout').mockImplementation(((callback: TimerHandler) => {
-      if (typeof callback === 'function') callback();
+    const immediateSetTimeout = vi.spyOn(global, 'setTimeout').mockImplementation((callback, _delay, ...args) => {
+      if (typeof callback === 'function') callback(...args);
       return 0 as unknown as ReturnType<typeof setTimeout>;
-    }) as typeof setTimeout);
+    });
 
     mockConnectionManager.executeQuery
       .mockRejectedValueOnce(new Error('Lock wait timeout exceeded; try restarting transaction'))
@@ -1040,7 +1666,6 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('tx-fixed');
 
     immediateSetTimeout.mockRestore();
-    global.setTimeout = originalSetTimeout;
   });
 });
 

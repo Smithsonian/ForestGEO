@@ -1,6 +1,6 @@
 import { IDataMapper } from '@/config/datamapper';
 import { ResultType } from '@/config/utils';
-import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
+import { FileRow, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 import { bitToBoolean, booleanToBit } from '@/config/macros/bitconversion';
 import type { ColumnStates } from '@/config/macros';
 
@@ -94,8 +94,54 @@ export interface QuadratRDS {
 
 export type QuadratResult = ResultType<QuadratRDS>;
 export type Quadrat = QuadratRDS | undefined;
-export const validateQuadratsRow: ValidationFunction = _row => {
+
+// Row-level fields on the Quadrats upload (see TableHeadersByFormType[FormType.quadrats]).
+const QUADRAT_NAME_FIELD = 'quadrat';
+const QUADRAT_COORDINATE_FIELDS = ['startx', 'starty'] as const;
+const QUADRAT_DIMENSION_FIELDS = ['dimx', 'dimy'] as const;
+
+/**
+ * Parses a required numeric upload field. Returns null for missing, blank, or non-numeric
+ * input — never 0 — so a blank StartX/StartY cannot be silently coerced to the plot origin.
+ * Mirrors lib/provisioning/quadrat-collection-validation.ts#parseRequiredNumber.
+ */
+function parseRequiredQuadratNumber(row: FileRow, field: string): number | null {
+  const raw = row[field];
+  if (raw === null || raw === undefined) return null;
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Scalar, per-row checks only: a non-blank quadrat name, and StartX/StartY/DimensionX/DimensionY
+ * present and numeric with DimensionX/DimensionY strictly positive. Collection-level geometry
+ * (bounds against the plot, overlap, duplicate names, reference-corner normalization) is owned by
+ * lib/provisioning/quadrat-collection-validation.ts#validateQuadratCollection, not duplicated here.
+ */
+export const validateQuadratsRow: ValidationFunction = row => {
   const errors: RowValidationErrors = {};
+
+  if (!row[QUADRAT_NAME_FIELD]?.trim()) {
+    errors[QUADRAT_NAME_FIELD] = 'Quadrat name is required.';
+  }
+
+  for (const field of QUADRAT_COORDINATE_FIELDS) {
+    if (parseRequiredQuadratNumber(row, field) === null) {
+      errors[field] = `${field} is required and must be numeric.`;
+    }
+  }
+
+  for (const field of QUADRAT_DIMENSION_FIELDS) {
+    const parsed = parseRequiredQuadratNumber(row, field);
+    if (parsed === null) {
+      errors[field] = `${field} is required and must be numeric.`;
+    } else if (parsed <= 0) {
+      errors[field] = `${field} must be greater than zero.`;
+    }
+  }
+
   return Object.keys(errors).length > 0 ? errors : null;
 };
 

@@ -1,22 +1,28 @@
 'use client';
 
-import React, { useState } from 'react';
-import { FormControl, FormHelperText, FormLabel, Input, Option, Select, Stack, Textarea, Typography } from '@mui/joy';
-import type { ProvisioningInput } from '@/lib/provisioning/types';
+import { useState } from 'react';
+import { Button, FormControl, FormHelperText, FormLabel, Input, Option, Select, Stack, Textarea, Typography } from '@mui/joy';
+import type { ProvisioningPlotInput } from '@/lib/provisioning/types';
+import type { AreaMode } from '@/lib/provisioning/area';
+import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 
-const PLOT_SHAPE_OPTIONS: Array<{ value: ProvisioningInput['plot']['plotShape']; label: string }> = [
+const PLOT_SHAPE_OPTIONS: Array<{ value: ProvisioningPlotInput['plotShape']; label: string }> = [
   { value: 'square', label: 'Square' },
   { value: 'rectangular', label: 'Rectangular' },
   { value: 'irregular', label: 'Irregular' }
 ];
 
-type PlotValue = ProvisioningInput['plot'];
+type PlotValue = ProvisioningPlotInput;
 
 type NumericPlotField = 'dimensionX' | 'dimensionY' | 'area' | 'globalX' | 'globalY' | 'globalZ';
 
 interface PlotFormProps {
   value: PlotValue;
-  onChange: (next: PlotValue) => void;
+  /** requestedMode makes a mode transition and value change one semantic event. */
+  onChange: (next: PlotValue, requestedMode?: AreaMode) => void;
+  /** Owned by the wizard so it survives step navigation. */
+  areaMode: AreaMode;
+  onAreaModeChange: (next: AreaMode) => void;
   /** When true, show validation errors even on untouched fields */
   showErrors?: boolean;
 }
@@ -25,7 +31,49 @@ function isPositiveNumber(n: number): boolean {
   return typeof n === 'number' && !isNaN(n) && n > 0;
 }
 
-export default function PlotForm({ value, onChange, showErrors = false }: PlotFormProps) {
+// A numeric draft that is empty, a bare '-', or otherwise unparsable is mid-edit
+// and has not been (and will not be) propagated via onChange — see handleNumericChange.
+function isUncommittedNumericDraft(raw: string): boolean {
+  if (raw === '' || raw === '-') return true;
+  return !Number.isFinite(Number(raw));
+}
+
+interface UnitSelectProps<T extends string> {
+  id: string;
+  label: string;
+  ariaLabel: string;
+  value: T;
+  options: readonly T[];
+  onChange: (newValue: T) => void;
+  disabled?: boolean;
+  helperText?: string;
+}
+
+function UnitSelect<T extends string>({ id, label, ariaLabel, value, options, onChange, disabled, helperText }: UnitSelectProps<T>) {
+  return (
+    <FormControl sx={{ flex: 1, minWidth: 160 }}>
+      <FormLabel htmlFor={id}>{label}</FormLabel>
+      <Select
+        id={id}
+        aria-label={ariaLabel}
+        value={value}
+        disabled={disabled}
+        onChange={(_event, newValue) => {
+          if (newValue) onChange(newValue);
+        }}
+      >
+        {options.map(unit => (
+          <Option key={unit} value={unit}>
+            {unit}
+          </Option>
+        ))}
+      </Select>
+      {helperText && <FormHelperText>{helperText}</FormHelperText>}
+    </FormControl>
+  );
+}
+
+export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, showErrors = false }: PlotFormProps) {
   const [touched, setTouched] = useState<Partial<Record<keyof PlotValue, boolean>>>({});
 
   // Local string-typed mirror of numeric fields so an empty input stays empty
@@ -40,15 +88,12 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
     globalZ: String(value.globalZ ?? '')
   }));
 
-  function handleNumericChange(field: NumericPlotField, raw: string) {
+  function handleNumericChange(field: NumericPlotField, raw: string, requestedMode?: AreaMode) {
     setNumericDrafts(prev => ({ ...prev, [field]: raw }));
-    if (raw === '' || raw === '-') {
+    if (isUncommittedNumericDraft(raw)) {
       return;
     }
-    const n = Number(raw);
-    if (Number.isFinite(n)) {
-      onChange({ ...value, [field]: n });
-    }
+    onChange({ ...value, [field]: Number(raw) }, requestedMode);
   }
 
   function markTouched(field: keyof PlotValue) {
@@ -63,11 +108,6 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
   const dimensionXInvalid = !isPositiveNumber(value.dimensionX);
   const dimensionYInvalid = !isPositiveNumber(value.dimensionY);
   const areaInvalid = !isPositiveNumber(value.area);
-  const defaultDimensionUnitsMissing = value.defaultDimensionUnits.trim() === '';
-  const defaultCoordinateUnitsMissing = value.defaultCoordinateUnits.trim() === '';
-  const defaultAreaUnitsMissing = value.defaultAreaUnits.trim() === '';
-  const defaultDBHUnitsMissing = value.defaultDBHUnits.trim() === '';
-  const defaultHOMUnitsMissing = value.defaultHOMUnits.trim() === '';
 
   return (
     <Stack spacing={2}>
@@ -111,7 +151,7 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
 
       <Stack direction="row" spacing={2}>
         <FormControl sx={{ flex: 1 }} error={shouldShowError('dimensionX') && dimensionXInvalid}>
-          <FormLabel htmlFor="dimension-x-input">Dimension X (m)</FormLabel>
+          <FormLabel htmlFor="dimension-x-input">Dimension X ({value.defaultDimensionUnits})</FormLabel>
           <Input
             id="dimension-x-input"
             aria-label="Dimension X"
@@ -125,7 +165,7 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
         </FormControl>
 
         <FormControl sx={{ flex: 1 }} error={shouldShowError('dimensionY') && dimensionYInvalid}>
-          <FormLabel htmlFor="dimension-y-input">Dimension Y (m)</FormLabel>
+          <FormLabel htmlFor="dimension-y-input">Dimension Y ({value.defaultDimensionUnits})</FormLabel>
           <Input
             id="dimension-y-input"
             aria-label="Dimension Y"
@@ -144,11 +184,25 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
             id="area-input"
             aria-label="Area"
             type="number"
-            value={numericDrafts.area}
-            onChange={e => handleNumericChange('area', e.target.value)}
+            // While derived, prefer the live derived value so it tracks dimension edits;
+            // but if the user has an uncommitted edit sitting in the box (e.g. they just
+            // cleared it and haven't typed a replacement yet — see isUncommittedNumericDraft),
+            // that mode transition to 'manual' hasn't happened yet, so show their draft
+            // instead of snapping the box back to the derived number.
+            value={areaMode === 'derived' && !isUncommittedNumericDraft(numericDrafts.area) ? String(value.area) : numericDrafts.area}
+            onChange={e => handleNumericChange('area', e.target.value, 'manual')}
             onBlur={() => markTouched('area')}
             slotProps={{ input: { min: 0, step: 0.01 } }}
           />
+          {areaMode === 'derived' ? (
+            <FormHelperText>Auto-calculated from the plot dimensions. Type here to enter it yourself.</FormHelperText>
+          ) : (
+            <FormHelperText>
+              <Button variant="plain" size="sm" sx={{ minHeight: 'auto', p: 0, fontSize: 'inherit' }} onClick={() => onAreaModeChange('derived')}>
+                Use calculated value
+              </Button>
+            </FormHelperText>
+          )}
           {shouldShowError('area') && areaInvalid && <FormHelperText>Must be a positive number.</FormHelperText>}
         </FormControl>
       </Stack>
@@ -210,70 +264,52 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
 
       <Typography level="title-sm">Default Units</Typography>
       <Stack direction="row" spacing={2} flexWrap="wrap">
-        <FormControl sx={{ flex: 1, minWidth: 160 }} error={shouldShowError('defaultDimensionUnits') && defaultDimensionUnitsMissing}>
-          <FormLabel htmlFor="default-dimension-units-input">Dimension Units</FormLabel>
-          <Input
-            id="default-dimension-units-input"
-            aria-label="Default Dimension Units"
-            value={value.defaultDimensionUnits}
-            placeholder="m"
-            onChange={e => onChange({ ...value, defaultDimensionUnits: e.target.value })}
-            onBlur={() => markTouched('defaultDimensionUnits')}
-          />
-          {shouldShowError('defaultDimensionUnits') && defaultDimensionUnitsMissing && <FormHelperText>Required.</FormHelperText>}
-        </FormControl>
+        <UnitSelect
+          id="default-dimension-units-input"
+          label="Dimension Units"
+          ariaLabel="Default Dimension Units"
+          value={value.defaultDimensionUnits}
+          options={unitSelectionOptions}
+          onChange={newValue => onChange({ ...value, defaultDimensionUnits: newValue })}
+        />
 
-        <FormControl sx={{ flex: 1, minWidth: 160 }} error={shouldShowError('defaultCoordinateUnits') && defaultCoordinateUnitsMissing}>
-          <FormLabel htmlFor="default-coordinate-units-input">Coordinate Units</FormLabel>
-          <Input
-            id="default-coordinate-units-input"
-            aria-label="Default Coordinate Units"
-            value={value.defaultCoordinateUnits}
-            placeholder="m"
-            onChange={e => onChange({ ...value, defaultCoordinateUnits: e.target.value })}
-            onBlur={() => markTouched('defaultCoordinateUnits')}
-          />
-          {shouldShowError('defaultCoordinateUnits') && defaultCoordinateUnitsMissing && <FormHelperText>Required.</FormHelperText>}
-        </FormControl>
+        <UnitSelect
+          id="default-coordinate-units-input"
+          label="Coordinate Units"
+          ariaLabel="Default Coordinate Units"
+          value={value.defaultCoordinateUnits}
+          options={unitSelectionOptions}
+          onChange={newValue => onChange({ ...value, defaultCoordinateUnits: newValue })}
+        />
 
-        <FormControl sx={{ flex: 1, minWidth: 160 }} error={shouldShowError('defaultAreaUnits') && defaultAreaUnitsMissing}>
-          <FormLabel htmlFor="default-area-units-input">Area Units</FormLabel>
-          <Input
-            id="default-area-units-input"
-            aria-label="Default Area Units"
-            value={value.defaultAreaUnits}
-            placeholder="ha"
-            onChange={e => onChange({ ...value, defaultAreaUnits: e.target.value })}
-            onBlur={() => markTouched('defaultAreaUnits')}
-          />
-          {shouldShowError('defaultAreaUnits') && defaultAreaUnitsMissing && <FormHelperText>Required.</FormHelperText>}
-        </FormControl>
+        <UnitSelect
+          id="default-area-units-input"
+          label="Area Units"
+          ariaLabel="Default Area Units"
+          value={value.defaultAreaUnits}
+          options={areaSelectionOptions}
+          onChange={newValue => onChange({ ...value, defaultAreaUnits: newValue })}
+          disabled={areaMode === 'derived'}
+          helperText={areaMode === 'derived' ? 'Follows the dimension unit while the area is auto-calculated.' : undefined}
+        />
 
-        <FormControl sx={{ flex: 1, minWidth: 160 }} error={shouldShowError('defaultDBHUnits') && defaultDBHUnitsMissing}>
-          <FormLabel htmlFor="default-dbh-units-input">DBH Units</FormLabel>
-          <Input
-            id="default-dbh-units-input"
-            aria-label="Default DBH Units"
-            value={value.defaultDBHUnits}
-            placeholder="mm"
-            onChange={e => onChange({ ...value, defaultDBHUnits: e.target.value })}
-            onBlur={() => markTouched('defaultDBHUnits')}
-          />
-          {shouldShowError('defaultDBHUnits') && defaultDBHUnitsMissing && <FormHelperText>Required.</FormHelperText>}
-        </FormControl>
+        <UnitSelect
+          id="default-dbh-units-input"
+          label="DBH Units"
+          ariaLabel="Default DBH Units"
+          value={value.defaultDBHUnits}
+          options={unitSelectionOptions}
+          onChange={newValue => onChange({ ...value, defaultDBHUnits: newValue })}
+        />
 
-        <FormControl sx={{ flex: 1, minWidth: 160 }} error={shouldShowError('defaultHOMUnits') && defaultHOMUnitsMissing}>
-          <FormLabel htmlFor="default-hom-units-input">HOM Units</FormLabel>
-          <Input
-            id="default-hom-units-input"
-            aria-label="Default HOM Units"
-            value={value.defaultHOMUnits}
-            placeholder="m"
-            onChange={e => onChange({ ...value, defaultHOMUnits: e.target.value })}
-            onBlur={() => markTouched('defaultHOMUnits')}
-          />
-          {shouldShowError('defaultHOMUnits') && defaultHOMUnitsMissing && <FormHelperText>Required.</FormHelperText>}
-        </FormControl>
+        <UnitSelect
+          id="default-hom-units-input"
+          label="HOM Units"
+          ariaLabel="Default HOM Units"
+          value={value.defaultHOMUnits}
+          options={unitSelectionOptions}
+          onChange={newValue => onChange({ ...value, defaultHOMUnits: newValue })}
+        />
       </Stack>
     </Stack>
   );

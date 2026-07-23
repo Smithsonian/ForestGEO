@@ -42,6 +42,7 @@ import { aliasesFor, makeLegacyCsvHeaderKey } from '@/lib/column-mapping/fields'
 import { transformMeasurementValue, validateMeasurementRow } from '@/lib/column-mapping/measurement-rows';
 import { UploadMode } from '@/config/uploadmodes';
 import { evaluateUploadReconciliation, type UploadReconciliationVerdict } from '@/lib/ingestion/reconciliation';
+import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
 
 const CSV_MAPPING_REJECTION_SENTENCE: Record<CsvMappingRejectionCode, string> = {
   stale: 'the saved column mapping was built from different headers',
@@ -53,6 +54,36 @@ class UploadReconciliationError extends Error {
     super(message);
     this.name = 'UploadReconciliationError';
   }
+}
+
+const QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE = 'QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT';
+
+class QuadratOverlapAcknowledgmentRequiredClientError extends Error {
+  constructor(
+    message: string,
+    readonly overlapSummaries: QuadratOverlapSummary[]
+  ) {
+    super(message);
+    this.name = 'QuadratOverlapAcknowledgmentRequiredClientError';
+  }
+}
+
+function parseQuadratOverlapSummaries(payload: unknown): QuadratOverlapSummary[] | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  if (record.code !== QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE || !Array.isArray(record.overlapSummaries)) return null;
+  const summaries = record.overlapSummaries.filter((summary): summary is QuadratOverlapSummary => {
+    if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return false;
+    const candidate = summary as Record<string, unknown>;
+    return (
+      typeof candidate.layoutSignature === 'string' &&
+      typeof candidate.reportedPairCount === 'number' &&
+      typeof candidate.minimumPairCount === 'number' &&
+      typeof candidate.truncated === 'boolean' &&
+      Array.isArray(candidate.pairs)
+    );
+  });
+  return summaries.length > 0 ? summaries : null;
 }
 
 function createAbortError(message: string): Error {
@@ -113,7 +144,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   setReviewState,
   selectedDelimiters,
   arcgisImportSession,
-  columnMappings
+  columnMappings,
+  coordinateReferenceCorner,
+  quadratOverlapAcknowledgment,
+  onQuadratOverlapAcknowledgmentRequired
 }) => {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -170,6 +204,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const uploadRunningRef = useRef<boolean>(false);
   const batchProcessingStartedRef = useRef<boolean>(false);
   const lastPreparedUploadAttemptRef = useRef<string>('');
+  // A clean quadrat upload may span many Papa Parse chunks (and even several selected files).
+  // Only the first successfully committed chunk may perform the destructive reset; every
+  // subsequent chunk must append through revisions mode or it would delete the prior chunks.
+  const quadratCleanResetCommittedRef = useRef<boolean>(false);
 
   // Transaction-aware queue for managing concurrent operations
   const queue = useMemo(() => createTransactionAwareQueue(connectionLimit), [connectionLimit]);
@@ -309,6 +347,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const buildClientResponseError = useCallback(
     async (response: Response, context: string): Promise<Error> => {
       const payload = await readResponsePayload(response);
+      const overlapSummaries = parseQuadratOverlapSummaries(payload);
+      if (response.status === 400 && overlapSummaries) {
+        return new QuadratOverlapAcknowledgmentRequiredClientError(getApiErrorMessage(payload) ?? 'Quadrat overlaps require acknowledgment.', overlapSummaries);
+      }
       const uploadSessionConflict = parseUploadSessionConflict(payload);
 
       if (response.status === 409 && uploadSessionConflict?.restartRequired) {
@@ -542,7 +584,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       fileName: string,
       batchID?: string,
       rawPayload?: { rawRows: FileRow[]; csvHeaders: string[]; mapping: ColumnMapping | null; delimiter: string },
-      _retryCount = 0
+      effectiveUploadMode: UploadMode | undefined = uploadMode
     ) => {
       if (!isMountedRef.current) {
         throw createAbortError(`Upload cancelled before starting ${fileName}`);
@@ -576,8 +618,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   ? {
                       schema,
                       formType: uploadForm,
+                      coordinateReferenceCorner,
+                      quadratOverlapAcknowledgment: uploadForm === FormType.quadrats ? quadratOverlapAcknowledgment : undefined,
                       sourceFormat: sourceFormat ?? SourceFormat.csv,
-                      uploadMode,
+                      uploadMode: effectiveUploadMode,
                       fileName,
                       plot: currentPlot,
                       census: currentCensus,
@@ -591,8 +635,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   : {
                       schema,
                       formType: uploadForm,
+                      coordinateReferenceCorner,
+                      quadratOverlapAcknowledgment: uploadForm === FormType.quadrats ? quadratOverlapAcknowledgment : undefined,
                       sourceFormat: sourceFormat ?? SourceFormat.csv,
-                      uploadMode,
+                      uploadMode: effectiveUploadMode,
                       fileName,
                       plot: currentPlot,
                       census: currentCensus,
@@ -717,6 +763,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       currentCensus,
       session,
       schema,
+      coordinateReferenceCorner,
+      quadratOverlapAcknowledgment,
       fetchWithTimeout,
       getRequiredUploadSessionId,
       isMountedRef,
@@ -952,7 +1000,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           delimiter: delimiter,
           header: true,
           skipEmptyLines: true,
-          chunkSize: chunkSize,
+          // Quadrat plots are bounded to 10,000 rows. Upload each quadrat file as one request so
+          // overlap validation and its acknowledgment are atomic at file scope rather than
+          // committing earlier chunks before a later chunk discovers a new overlap.
+          chunkSize: uploadForm === FormType.quadrats ? Math.max(file.size + 1, chunkSize) : chunkSize,
           transformHeader,
           transform,
           chunk(results: ParseResult<FileRow>, parser) {
@@ -1079,13 +1130,25 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   }
 
                   try {
+                    const requestedUploadMode = uploadMode ?? UploadMode.CLEAN_REUPLOAD;
+                    const chunkUploadMode =
+                      uploadForm === FormType.quadrats && requestedUploadMode === UploadMode.CLEAN_REUPLOAD && quadratCleanResetCommittedRef.current
+                        ? UploadMode.REVISIONS
+                        : requestedUploadMode;
+
                     if (serverResolves) {
-                      const data = await uploadToSql(null, file.name, fileBatchID, {
-                        rawRows: rawChunkRows,
-                        csvHeaders: serverCsvHeaders,
-                        mapping: columnMappings?.[file.name] ?? null,
-                        delimiter
-                      });
+                      const data = await uploadToSql(
+                        null,
+                        file.name,
+                        fileBatchID,
+                        {
+                          rawRows: rawChunkRows,
+                          csvHeaders: serverCsvHeaders,
+                          mapping: columnMappings?.[file.name] ?? null,
+                          delimiter
+                        },
+                        chunkUploadMode
+                      );
                       if (data?.failingRows?.length) {
                         serverFailingRowsCount += data.failingRows.length;
                         await pushErrorRowsToFailedMeasurements(data.failingRows, file.name);
@@ -1096,7 +1159,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                         setMappingWarnings(prev => (prev.includes(warning) ? prev : [...prev, warning]));
                       }
                     } else {
-                      await uploadToSql(fileCollectionRowSet, file.name, fileBatchID);
+                      await uploadToSql(fileCollectionRowSet, file.name, fileBatchID, undefined, chunkUploadMode);
+                    }
+
+                    if (uploadForm === FormType.quadrats && chunkUploadMode === UploadMode.CLEAN_REUPLOAD) {
+                      quadratCleanResetCommittedRef.current = true;
                     }
                   } catch (error: unknown) {
                     const errorObj = error instanceof Error ? error : new Error(String(error));
@@ -1336,6 +1403,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         expectedTemporaryRowCounts.current.clear();
         persistedRejectedRowCounts.current.clear();
         serverAccountedRejectedRowCounts.current.clear();
+        quadratCleanResetCommittedRef.current = false;
 
         if (fatalUploadErrorRef.current) {
           throw fatalUploadErrorRef.current;
@@ -1572,6 +1640,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             return;
           }
 
+          if (error instanceof QuadratOverlapAcknowledgmentRequiredClientError) {
+            ailogger.info('Quadrat upload paused for overlap acknowledgment; returning to the file review step.');
+            cancelSession(true).catch(cancelErr => {
+              ailogger.warn(`Failed to cancel paused quadrat upload session: ${cancelErr.message}`);
+            });
+            if (isMountedRef.current) {
+              onQuadratOverlapAcknowledgmentRequired(error.overlapSummaries);
+            }
+            return;
+          }
+
           ailogger.error('runUploads failed:', error);
           if (!isUploadSessionRestartRequiredError(error)) {
             // Cancel the session and clean up staged temp data on error.
@@ -1610,6 +1689,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     estimateChunkCount,
     isApplicationInsightsError,
     isMountedRef,
+    onQuadratOverlapAcknowledgmentRequired,
     parseFileInChunks,
     arcgisImportSession,
     processed,
