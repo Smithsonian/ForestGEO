@@ -969,6 +969,123 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(String(mockConnectionManager.executeQuery.mock.calls[3]?.[0])).toContain('INSERT INTO `forestgeo_testing`.quadrats');
   });
 
+  it('reports every unconvertible row in a rejected quadrat upload, not just the first', async () => {
+    // Two rows are bad for two DIFFERENT reasons (blank name vs. non-numeric coordinate) and
+    // one row is entirely valid. A fail-fast implementation would only ever mention row 1.
+    mockConnectionManager.executeQuery
+      // authoritative plot bounds lookup
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: '', startx: '0', starty: '0', dimx: '20', dimy: '20' },
+          'row-2': { quadrat: 'BAD02', startx: 'not-a-number', starty: '0', dimx: '20', dimy: '20' },
+          'row-3': { quadrat: 'GOOD03', startx: '40', starty: '0', dimx: '20', dimy: '20' }
+        },
+        { uploadMode: 'clean_reupload' }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
+    expect(body.error).toContain('row 1');
+    expect(body.error).toContain('row 2');
+    expect(body.error).toContain('BAD02');
+    // The valid third row must not be reported.
+    expect(body.error).not.toContain('GOOD03');
+    // Nothing was ever written: the failure happens before the stem-safety check or delete.
+    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
+  });
+
+  it('caps the aggregated row-failure message and states how many more rows failed', async () => {
+    const TOTAL_BAD_ROWS = 25;
+    const MAX_LISTED_ROW_FAILURES = 20;
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const fileRowSet: Record<string, unknown> = {};
+    for (let i = 0; i < TOTAL_BAD_ROWS; i++) {
+      fileRowSet[`row-${i + 1}`] = { quadrat: '', startx: '0', starty: '0', dimx: '20', dimy: '20' };
+    }
+
+    const res = await POST(makeFixedDataRequest('quadrats', fileRowSet, { uploadMode: 'clean_reupload' }));
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.error).toContain(`...and ${TOTAL_BAD_ROWS - MAX_LISTED_ROW_FAILURES} more`);
+    expect(body.error).toContain(`row ${MAX_LISTED_ROW_FAILURES}`);
+    expect(body.error).not.toContain(`row ${MAX_LISTED_ROW_FAILURES + 1}`);
+  });
+
+  it('distinguishes a blank quadrat name from bad coordinates in the row-failure message', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: '   ', startx: '0', starty: '0', dimx: '20', dimy: '20' } }, { uploadMode: 'clean_reupload' })
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.error).toContain('missing or blank QuadratName');
+    expect(body.error).not.toContain('missing, blank, or non-numeric');
+  });
+
+  it('rejects a quadrat upload when the plot has null DimensionX/DimensionY on record', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: null, DimensionY: null }]);
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' } }, { uploadMode: 'clean_reupload' })
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
+    expect(body.error).toContain('has no valid DimensionX/DimensionY on record');
+    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a quadrat upload when the plot has non-positive DimensionX/DimensionY on record', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 0, DimensionY: 500 }]);
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'Q01', startx: '0', starty: '0', dimx: '20', dimy: '20' } }, { uploadMode: 'clean_reupload' })
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
+    expect(body.error).toContain('has no valid DimensionX/DimensionY on record');
+  });
+
+  it('parses numeric JSON geometry values (not just strings) for a quadrat upload', async () => {
+    // FileRow is documented as Record<string, string | null>, but a non-browser caller can send
+    // raw JSON numbers. `0` is falsy, so a naive coercion could wrongly treat it as missing.
+    mockConnectionManager.executeQuery
+      // authoritative plot bounds lookup
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      // stem-safety precheck: nothing blocking
+      .mockResolvedValueOnce([])
+      // DELETE FROM quadrats
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      // INSERT new quadrat
+      .mockResolvedValueOnce({ insertId: 1 });
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'NUM01', startx: 0, starty: 0, dimx: 20, dimy: 20 } }, { uploadMode: 'clean_reupload' })
+    );
+
+    expect(res?.status).toBe(200);
+    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT INTO `forestgeo_testing`.quadrats')
+    );
+    expect(insertCall).toBeDefined();
+    const insertParams = insertCall![1];
+    expect(insertParams).toEqual(expect.arrayContaining(['NUM01', 0, 0, 20, 20]));
+  });
+
   it('rejects revisions when multiple active species rows already exist for one SpeciesCode', async () => {
     mockConnectionManager.executeQuery.mockResolvedValueOnce([{ SpeciesID: 11 }, { SpeciesID: 19 }]);
 

@@ -143,12 +143,23 @@ function findDuplicateSpeciesCodes(rows: FileRow[]): string[] {
   return Array.from(duplicates).sort();
 }
 
-function formatBlockedCleanReuploadValues(values: string[], maxValues: number = 20): string {
-  const uniqueValues = Array.from(new Set(values.map(value => String(value ?? '').trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right));
+/** Shared cap for every user-facing list of blocked values / validation issues below, so a
+ *  single bad file (hundreds of blocked names, hundreds of failed rows) cannot produce an
+ *  unbounded run-on error message. */
+const MAX_LISTED_ISSUES = 20;
 
-  const truncatedValues = uniqueValues.slice(0, maxValues);
-  const remainingCount = uniqueValues.length - truncatedValues.length;
-  return truncatedValues.join(', ') + (remainingCount > 0 ? `, ...and ${remainingCount} more` : '');
+/** Joins `items` with `separator`, truncating at `maxItems` and appending an "...and N more"
+ *  tail instead of listing everything. Shared by every truncated-list message in this file so
+ *  there is one truncation style, not one per caller. */
+function truncateAndJoin(items: string[], separator: string, maxItems: number = MAX_LISTED_ISSUES): string {
+  const truncatedItems = items.slice(0, maxItems);
+  const remainingCount = items.length - truncatedItems.length;
+  return truncatedItems.join(separator) + (remainingCount > 0 ? `${separator}...and ${remainingCount} more` : '');
+}
+
+function formatBlockedCleanReuploadValues(values: string[], maxValues: number = MAX_LISTED_ISSUES): string {
+  const uniqueValues = Array.from(new Set(values.map(value => String(value ?? '').trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right));
+  return truncateAndJoin(uniqueValues, ', ', maxValues);
 }
 
 /**
@@ -171,7 +182,10 @@ function parseReferenceCorner(value: unknown): QuadratReferenceCorner {
 }
 
 function formatQuadratGeometryIssues(issues: QuadratCollectionIssue[]): string {
-  return `Quadrat geometry validation failed: ${issues.map(issue => issue.message).join(' ')}`;
+  return `Quadrat geometry validation failed: ${truncateAndJoin(
+    issues.map(issue => issue.message),
+    ' '
+  )}`;
 }
 
 function isRetryableUploadError(error: unknown): boolean {
@@ -254,6 +268,10 @@ async function upsertQuadratRows(
 
   let insertedCount = 0;
   let updatedCount = 0;
+  // Quadrats never skip a row post-validation: a row that cannot be interpreted throws
+  // instead of being silently dropped, and every validated row is either inserted or
+  // updated. Always 0; kept in the return shape for interface parity with the other
+  // upsert*Rows functions (FixedDataProcessingResult), not because a skip path exists here.
   const skippedCount = 0;
 
   // Trust boundary: authoritative plot bounds come from the database row selected by
@@ -273,27 +291,50 @@ async function upsertQuadratRows(
   // Convert every incoming row to canonical geometry up front. A row that cannot be
   // interpreted is a hard error: it is never filtered out and never inserted using its
   // raw, unparsed values -- that is how rows go missing without anyone noticing.
-  const incomingGeometry: QuadratCsvRow[] = rows.map((row, index) => {
+  //
+  // Every row is checked, not just the first bad one: a file with a systemic problem
+  // (wrong delimiter, a shifted column mapping, a whole blank column) can have hundreds
+  // of unusable rows, and reporting only row 1 forces a guess-and-check loop where the
+  // user re-uploads once per bad row. Collect every failure and throw once, capped by
+  // truncateAndJoin the same way the geometry-issue and blocked-value messages already are.
+  const rowConversionFailures: string[] = [];
+  const incomingGeometry: QuadratCsvRow[] = [];
+  rows.forEach((row, index) => {
+    const quadratName = normalizeRequiredString(row.quadrat);
+    if (!quadratName) {
+      rowConversionFailures.push(`Quadrat upload row ${index + 1} has a missing or blank QuadratName.`);
+      return;
+    }
+
     const geometry = toQuadratGeometry({
-      quadrat: coerceGeometryField(row.quadrat),
+      quadrat: quadratName,
       startx: coerceGeometryField(row.startx),
       starty: coerceGeometryField(row.starty),
       dimx: coerceGeometryField(row.dimx),
       dimy: coerceGeometryField(row.dimy)
     });
     if (!geometry) {
-      throw new QuadratGeometryValidationError(
-        `Quadrat upload row ${index + 1} (QuadratName "${normalizeRequiredString(row.quadrat)}") has missing, blank, or non-numeric ` +
+      rowConversionFailures.push(
+        `Quadrat upload row ${index + 1} (QuadratName "${quadratName}") has missing, blank, or non-numeric ` +
           `geometry (startx/starty/dimx/dimy). Fix the file and re-upload.`
       );
+      return;
     }
-    return geometry;
+    incomingGeometry.push(geometry);
   });
+
+  if (rowConversionFailures.length > 0) {
+    throw new QuadratGeometryValidationError(`Quadrat upload has unusable rows: ${truncateAndJoin(rowConversionFailures, ' ')}`);
+  }
+
   const normalizedIncoming = incomingGeometry.map(row => normalizeToSouthwest(row, referenceCorner));
 
   if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
     // Validate the incoming layout BEFORE the stem-safety check and before deleting anything.
-    const cleanReuploadIssues = validateQuadratCollection(incomingGeometry, plotBounds, referenceCorner);
+    // Rows are already normalized to canonical south-west above, so pass CANONICAL_SOUTHWEST_CORNER
+    // here (matching the REVISIONS branch below) rather than re-declaring referenceCorner and
+    // making validateQuadratCollection normalize the same rows a second time internally.
+    const cleanReuploadIssues = validateQuadratCollection(normalizedIncoming, plotBounds, CANONICAL_SOUTHWEST_CORNER);
     if (cleanReuploadIssues.length > 0) {
       throw new QuadratGeometryValidationError(formatQuadratGeometryIssues(cleanReuploadIssues));
     }
@@ -362,15 +403,16 @@ async function upsertQuadratRows(
     const existingQuadratList: any[] = Array.isArray(existingQuadratRows) ? existingQuadratRows : [];
 
     const existingGeometry: QuadratCsvRow[] = existingQuadratList.map(existingRow => {
-      const stringOrNull = (value: unknown): string | null => (value === null || value === undefined ? null : String(value));
       // Stored rows are always canonical south-west, so toQuadratGeometry here is a pure
-      // parse -- not a re-declaration of the reference corner.
+      // parse -- not a re-declaration of the reference corner. coerceGeometryField is reused
+      // rather than a second near-identical coercer: it maps undefined to undefined and
+      // everything else through String(), which toQuadratGeometry treats the same as null.
       const geometry = toQuadratGeometry({
-        quadrat: stringOrNull(existingRow.QuadratName),
-        startx: stringOrNull(existingRow.StartX),
-        starty: stringOrNull(existingRow.StartY),
-        dimx: stringOrNull(existingRow.DimensionX),
-        dimy: stringOrNull(existingRow.DimensionY)
+        quadrat: coerceGeometryField(existingRow.QuadratName),
+        startx: coerceGeometryField(existingRow.StartX),
+        starty: coerceGeometryField(existingRow.StartY),
+        dimx: coerceGeometryField(existingRow.DimensionX),
+        dimy: coerceGeometryField(existingRow.DimensionY)
       });
       if (!geometry) {
         throw new QuadratGeometryValidationError(
