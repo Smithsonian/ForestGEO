@@ -320,6 +320,12 @@ function UploadParentInner(props: UploadParentProps) {
   }
 
   async function handleInitialSubmit() {
+    if (uploadState.state.uploadForm === FormType.quadrats && fileManagement.files.length !== 1) {
+      errorHandling.setError(new Error('Quadrat uploads require exactly one file. Remove extra files or select a single complete quadrat file.'));
+      uploadState.setReviewState(ReviewStates.ERRORS);
+      return;
+    }
+
     if (uploadState.state.sourceFormat === SourceFormat.arcgis_xlsx) {
       setArcgisImportSession(null);
       uploadState.setReviewState(ReviewStates.ARCGIS_PREFLIGHT);

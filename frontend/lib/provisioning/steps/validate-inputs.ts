@@ -72,9 +72,11 @@ export const validateInputsStep: ProvisioningStep = {
       const validation = validateQuadratCollectionDetailed(input.quadrats.rows, input.plot, 'SW');
       const overlapsAcknowledged =
         validation.overlapSummary !== null && acknowledgmentCoversLayout(input.quadrats.overlapAcknowledgment, validation.overlapSummary.layoutSignature);
-      const issues = validation.issues.filter(issue => !(issue.kind === 'overlap' && overlapsAcknowledged));
-      if (issues.length > 0) {
-        throw new ProvisioningError(issues[0].message, 'invalid_input', { stepKey: 'validate_inputs' });
+      if (validation.fatalIssues.length > 0) {
+        throw new ProvisioningError(validation.fatalIssues[0].message, 'invalid_input', { stepKey: 'validate_inputs' });
+      }
+      if (validation.overlapSummary && !overlapsAcknowledged) {
+        throw new ProvisioningError(validation.overlapSummary.pairs[0].message, 'invalid_input', { stepKey: 'validate_inputs' });
       }
     }
   }

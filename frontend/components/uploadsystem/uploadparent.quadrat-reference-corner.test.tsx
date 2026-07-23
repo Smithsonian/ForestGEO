@@ -86,15 +86,18 @@ vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
   default: ({
     coordinateReferenceCorner,
     setCoordinateReferenceCorner,
+    handleAddFile,
     handleInitialSubmit
   }: {
     coordinateReferenceCorner: QuadratReferenceCorner;
     setCoordinateReferenceCorner: (next: QuadratReferenceCorner) => void;
+    handleAddFile: (file: File) => void;
     handleInitialSubmit: () => Promise<void>;
   }) => (
     <div data-testid="upload-parse-files">
       <div data-testid="corner-in-parse-files">{coordinateReferenceCorner}</div>
       <button onClick={() => setCoordinateReferenceCorner('NE')}>Select North-East</button>
+      <button onClick={() => handleAddFile(new File(['quadrat,startx,starty,dimx,dimy\nQ1,0,0,10,10'], 'quadrats.csv'))}>Select File</button>
       <button onClick={() => handleInitialSubmit()}>Continue Upload</button>
     </div>
   )
@@ -125,6 +128,7 @@ describe('UploadParent — coordinateReferenceCorner survives the UPLOAD_FILES -
     await user.click(screen.getByText('Select North-East'));
     expect(screen.getByTestId('corner-in-parse-files')).toHaveTextContent('NE');
 
+    await user.click(screen.getByText('Select File'));
     await user.click(screen.getByText('Continue Upload'));
 
     await waitFor(() => {

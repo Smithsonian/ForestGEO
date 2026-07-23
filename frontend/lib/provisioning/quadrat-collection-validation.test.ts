@@ -3,7 +3,6 @@ import {
   acknowledgmentCoversLayout,
   buildQuadratOverlapAcknowledgment,
   toQuadratGeometry,
-  validateQuadratCollection,
   validateQuadratCollectionDetailed,
   type UploadShapedRow
 } from './quadrat-collection-validation';
@@ -11,6 +10,10 @@ import type { QuadratCsvRow, QuadratReferenceCorner } from './types';
 
 const PLOT_100x60 = { dimensionX: 100, dimensionY: 60 };
 const ALL_CORNERS: QuadratReferenceCorner[] = ['SW', 'SE', 'NW', 'NE'];
+
+function fatalIssuesFor(rows: QuadratCsvRow[], plot: { dimensionX: number; dimensionY: number } | null, corner: QuadratReferenceCorner) {
+  return validateQuadratCollectionDetailed(rows, plot, corner).fatalIssues;
+}
 
 /**
  * Inverse of normalizeToSouthwest: given a canonical (south-west) row, produces the row a file
@@ -94,12 +97,12 @@ describe('validateQuadratCollection', () => {
       { quadratName: 'A', startX: 0, startY: 0, dimensionX: 30, dimensionY: 10 },
       { quadratName: 'B', startX: 40, startY: 0, dimensionX: 20, dimensionY: 20 }
     ];
-    expect(validateQuadratCollection(rows, PLOT_100x60, 'SW')).toEqual([]);
+    expect(fatalIssuesFor(rows, PLOT_100x60, 'SW')).toEqual([]);
   });
 
   it('reports a row extending past the plot, naming the offending quadrat', () => {
     const rows: QuadratCsvRow[] = [{ quadratName: 'TooFarEast', startX: 95, startY: 0, dimensionX: 20, dimensionY: 10 }];
-    const issues = validateQuadratCollection(rows, PLOT_100x60, 'SW');
+    const issues = fatalIssuesFor(rows, PLOT_100x60, 'SW');
     expect(issues).toHaveLength(1);
     expect(issues[0].rowIndex).toBe(0);
     expect(issues[0].quadratName).toBe('TooFarEast');
@@ -108,7 +111,7 @@ describe('validateQuadratCollection', () => {
 
   it('rejects a zero-width dimension', () => {
     const rows: QuadratCsvRow[] = [{ quadratName: 'ZeroWidth', startX: 0, startY: 0, dimensionX: 0, dimensionY: 10 }];
-    const issues = validateQuadratCollection(rows, PLOT_100x60, 'SW');
+    const issues = fatalIssuesFor(rows, PLOT_100x60, 'SW');
     expect(issues).toHaveLength(1);
     expect(issues[0].rowIndex).toBe(0);
     expect(issues[0].quadratName).toBe('ZeroWidth');
@@ -117,7 +120,7 @@ describe('validateQuadratCollection', () => {
 
   it('rejects a negative-height dimension', () => {
     const rows: QuadratCsvRow[] = [{ quadratName: 'NegativeHeight', startX: 0, startY: 0, dimensionX: 10, dimensionY: -5 }];
-    const issues = validateQuadratCollection(rows, PLOT_100x60, 'SW');
+    const issues = fatalIssuesFor(rows, PLOT_100x60, 'SW');
     expect(issues).toHaveLength(1);
     expect(issues[0].rowIndex).toBe(0);
     expect(issues[0].quadratName).toBe('NegativeHeight');
@@ -128,7 +131,7 @@ describe('validateQuadratCollection', () => {
     // dimensionX is negative, so startX + dimensionX < plot.dimensionX would otherwise
     // look "in bounds" to a naive check even though the row is nonsensical.
     const rows: QuadratCsvRow[] = [{ quadratName: 'InvalidButWouldPassBoundsMath', startX: 98, startY: 0, dimensionX: -5, dimensionY: 10 }];
-    const issues = validateQuadratCollection(rows, PLOT_100x60, 'SW');
+    const issues = fatalIssuesFor(rows, PLOT_100x60, 'SW');
     expect(issues).toHaveLength(1);
     expect(issues[0].message).toMatch(/non-positive dimension/);
     expect(issues.some(issue => /extends past plot/.test(issue.message))).toBe(false);
@@ -144,7 +147,7 @@ describe('validateQuadratCollection', () => {
       { quadratName: 'FilteredZeroDim', startX: 10, startY: 10, dimensionX: -5, dimensionY: 10 },
       { quadratName: 'OutOfBoundsNE', startX: 115, startY: 10, dimensionX: 20, dimensionY: 10 }
     ];
-    const issues = validateQuadratCollection(rows, PLOT_100x60, 'NE');
+    const issues = fatalIssuesFor(rows, PLOT_100x60, 'NE');
 
     const dimensionIssue = issues.find(issue => /non-positive dimension/.test(issue.message));
     const boundsIssue = issues.find(issue => /extends past plot/.test(issue.message));
@@ -155,22 +158,18 @@ describe('validateQuadratCollection', () => {
     expect(boundsIssue?.quadratName).toBe('OutOfBoundsNE');
   });
 
-  it('maps overlap issues back to the original array indices when a preceding row was filtered out for a non-positive dimension (NE reference corner)', () => {
-    // Same reasoning as the bounds case above, but for findFirstOverlap: the leading
-    // filtered row makes the two overlapping rows land at filtered-indices 0 and 1 while
-    // their real positions in the caller's array are 1 and 2. Without the remap, both
-    // overlap issues would report the wrong (filtered-array) indices.
+  it('excludes a non-positive-dimension row from the overlap summary', () => {
     const rows: QuadratCsvRow[] = [
       { quadratName: 'FilteredZeroDim', startX: 50, startY: 50, dimensionX: 0, dimensionY: 10 },
       { quadratName: 'OverlapLeftNE', startX: 10, startY: 10, dimensionX: 10, dimensionY: 10 },
       { quadratName: 'OverlapRightNE', startX: 15, startY: 15, dimensionX: 10, dimensionY: 10 }
     ];
-    const issues = validateQuadratCollection(rows, PLOT_100x60, 'NE');
+    const validation = validateQuadratCollectionDetailed(rows, PLOT_100x60, 'NE');
 
-    const overlapIssues = issues.filter(issue => /overlaps quadrat/.test(issue.message));
-    expect(overlapIssues).toHaveLength(2);
-    expect(overlapIssues.map(issue => issue.rowIndex).sort()).toEqual([1, 2]);
-    expect(overlapIssues.map(issue => issue.quadratName).sort()).toEqual(['OverlapLeftNE', 'OverlapRightNE']);
+    expect(validation.fatalIssues).toHaveLength(1);
+    expect(validation.overlapSummary?.pairs).toHaveLength(1);
+    expect(validation.overlapSummary?.pairs[0].message).toMatch(/OverlapLeftNE.*overlaps.*OverlapRightNE/);
+    expect(validation.overlapSummary?.pairs[0].message).not.toContain('FilteredZeroDim');
   });
 
   it('reports duplicate quadrat names, including two names differing only by case', () => {
@@ -178,7 +177,7 @@ describe('validateQuadratCollection', () => {
       { quadratName: 'Dup', startX: 0, startY: 0, dimensionX: 10, dimensionY: 10 },
       { quadratName: 'dup', startX: 50, startY: 0, dimensionX: 10, dimensionY: 10 }
     ];
-    const issues = validateQuadratCollection(rows, PLOT_100x60, 'SW');
+    const issues = fatalIssuesFor(rows, PLOT_100x60, 'SW');
     expect(issues).toHaveLength(2);
     expect(issues.map(issue => issue.rowIndex)).toEqual([0, 1]);
     expect(issues.map(issue => issue.quadratName)).toEqual(['Dup', 'dup']);
@@ -195,11 +194,11 @@ describe('validateQuadratCollection', () => {
       { quadratName: 'Distant', startX: 50, startY: 0, dimensionX: 10, dimensionY: 10 },
       { quadratName: 'Right', startX: 5, startY: 5, dimensionX: 10, dimensionY: 10 }
     ];
-    const issues = validateQuadratCollection(rows, PLOT_100x60, 'SW');
-    const overlapIssues = issues.filter(issue => /overlaps quadrat/.test(issue.message));
-    expect(overlapIssues).toHaveLength(2);
-    expect(overlapIssues.map(issue => issue.quadratName).sort()).toEqual(['Left', 'Right']);
-    expect(issues.some(issue => issue.quadratName === 'Distant')).toBe(false);
+    const validation = validateQuadratCollectionDetailed(rows, PLOT_100x60, 'SW');
+    expect(validation.fatalIssues).toEqual([]);
+    expect(validation.overlapSummary?.pairs).toHaveLength(1);
+    expect(validation.overlapSummary?.pairs[0].message).toMatch(/Left.*overlaps.*Right/);
+    expect(validation.overlapSummary?.pairs[0].message).not.toContain('Distant');
   });
 
   it('skips only the bounds checks when the plot is null; overlap and duplicate-name checks still run', () => {
@@ -210,12 +209,13 @@ describe('validateQuadratCollection', () => {
       { quadratName: 'A', startX: 0, startY: 0, dimensionX: 10, dimensionY: 10 },
       { quadratName: 'a', startX: 5, startY: 5, dimensionX: 10, dimensionY: 10 }
     ];
-    const issues = validateQuadratCollection(rows, null, 'SW');
+    const validation = validateQuadratCollectionDetailed(rows, null, 'SW');
+    const issues = validation.fatalIssues;
 
     expect(issues.some(issue => /extends past plot/.test(issue.message))).toBe(false);
     expect(issues.some(issue => /negative start coordinate/.test(issue.message))).toBe(false);
     expect(issues.filter(issue => /used by more than one row/.test(issue.message))).toHaveLength(2);
-    expect(issues.filter(issue => /overlaps quadrat/.test(issue.message))).toHaveLength(2);
+    expect(validation.overlapSummary?.pairs).toHaveLength(1);
   });
 
   it('reports every overlapping pair, not just the first', () => {
@@ -228,9 +228,8 @@ describe('validateQuadratCollection', () => {
       { quadratName: 'B1', startX: 50, startY: 0, dimensionX: 10, dimensionY: 10 },
       { quadratName: 'B2', startX: 55, startY: 5, dimensionX: 10, dimensionY: 10 }
     ];
-    const issues = validateQuadratCollection(rows, PLOT_100x60, 'SW');
-    const overlapIssues = issues.filter(issue => /overlaps quadrat/.test(issue.message));
-    expect(overlapIssues.map(issue => issue.quadratName).sort()).toEqual(['A1', 'A2', 'B1', 'B2']);
+    const summary = validateQuadratCollectionDetailed(rows, PLOT_100x60, 'SW').overlapSummary;
+    expect(summary?.pairs.map(pair => pair.message)).toEqual(['Quadrat "A1" overlaps quadrat "A2".', 'Quadrat "B1" overlaps quadrat "B2".']);
   });
 
   it('marks dense overlap reports as truncated and binds acknowledgment to the complete layout', () => {
@@ -264,12 +263,12 @@ describe('validateQuadratCollection', () => {
       { quadratName: 'X', startX: 0, startY: 0, dimensionX: 30, dimensionY: 10 },
       { quadratName: 'x', startX: 50, startY: 0, dimensionX: 10, dimensionY: 10 }
     ];
-    const expected = validateQuadratCollection(canonicalRows, PLOT_100x60, 'SW');
-    expect(expected.length).toBeGreaterThan(0); // sanity: this fixture is deliberately not clean (duplicate name)
+    const expected = validateQuadratCollectionDetailed(canonicalRows, PLOT_100x60, 'SW');
+    expect(expected.fatalIssues.length).toBeGreaterThan(0); // sanity: this fixture is deliberately not clean (duplicate name)
 
     for (const corner of ALL_CORNERS) {
       const declaredRows = canonicalRows.map(row => declareFromCorner(row, corner));
-      const actual = validateQuadratCollection(declaredRows, PLOT_100x60, corner);
+      const actual = validateQuadratCollectionDetailed(declaredRows, PLOT_100x60, corner);
       expect(actual).toEqual(expected);
     }
   });
@@ -277,14 +276,14 @@ describe('validateQuadratCollection', () => {
   it('correctly validates as clean under its true NE reference corner', () => {
     const canonicalRow: QuadratCsvRow = { quadratName: 'NEQuadrat', startX: 80, startY: 45, dimensionX: 15, dimensionY: 10 };
     const declaredAsNE = declareFromCorner(canonicalRow, 'NE');
-    expect(validateQuadratCollection([declaredAsNE], PLOT_100x60, 'NE')).toEqual([]);
+    expect(fatalIssuesFor([declaredAsNE], PLOT_100x60, 'NE')).toEqual([]);
   });
 
   it('flags a north-east file misread as south-west', () => {
     const canonicalRow: QuadratCsvRow = { quadratName: 'NEQuadrat', startX: 80, startY: 45, dimensionX: 15, dimensionY: 10 };
     const declaredAsNE = declareFromCorner(canonicalRow, 'NE');
 
-    const issues = validateQuadratCollection([declaredAsNE], PLOT_100x60, 'SW');
+    const issues = fatalIssuesFor([declaredAsNE], PLOT_100x60, 'SW');
     expect(issues.length).toBeGreaterThan(0);
     expect(issues[0].quadratName).toBe('NEQuadrat');
     expect(issues[0].message).toMatch(/extends past plot/);

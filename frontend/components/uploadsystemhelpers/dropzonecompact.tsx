@@ -9,10 +9,12 @@ interface DropzoneCompactProps {
   onChange: (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => void;
   hasFiles?: boolean;
   sourceFormat?: SourceFormat;
+  allowMultipleFiles?: boolean;
 }
 
-export function DropzoneCompact({ onChange, hasFiles = false, sourceFormat = SourceFormat.csv }: DropzoneCompactProps) {
+export function DropzoneCompact({ onChange, hasFiles = false, sourceFormat = SourceFormat.csv, allowMultipleFiles = true }: DropzoneCompactProps) {
   const isArcgisWorkbook = sourceFormat === SourceFormat.arcgis_xlsx;
+  const acceptsMultipleFiles = allowMultipleFiles && !isArcgisWorkbook;
   const onDrop = useCallback(
     (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => {
       onChange(acceptedFiles, rejectedFiles);
@@ -32,7 +34,8 @@ export function DropzoneCompact({ onChange, hasFiles = false, sourceFormat = Sou
           'text/csv': ['.csv'],
           'text/plain': ['.txt', '.tsv']
         },
-    multiple: !isArcgisWorkbook
+    multiple: acceptsMultipleFiles,
+    maxFiles: acceptsMultipleFiles ? undefined : 1
   });
 
   const getBorderColor = () => {
@@ -107,7 +110,9 @@ export function DropzoneCompact({ onChange, hasFiles = false, sourceFormat = Sou
                 ? 'Choose a replacement file'
                 : isArcgisWorkbook
                   ? 'Choose one ArcGIS .xlsx workbook or drag it here'
-                  : 'Choose files or drag them here'}
+                  : acceptsMultipleFiles
+                    ? 'Choose files or drag them here'
+                    : 'Choose one file or drag it here'}
             </Typography>
             <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', justifyContent: 'center' }}>
               {isArcgisWorkbook ? (

@@ -10,8 +10,7 @@ import {
   acknowledgmentCoversLayout,
   buildQuadratOverlapAcknowledgment,
   QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
-  validateQuadratCollectionDetailed,
-  type QuadratIssueKind
+  validateQuadratCollectionDetailed
 } from '@/lib/provisioning/quadrat-collection-validation';
 import ReferenceCornerSelect from './ReferenceCornerSelect';
 
@@ -24,7 +23,6 @@ const NAMING_PATTERN_ROW_COL = 'row-col' as const;
 interface CsvValidationIssue {
   quadratName: string;
   message: string;
-  kind: QuadratIssueKind;
 }
 
 export interface QuadratPlannerProps {
@@ -191,13 +189,14 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
     if (value.mode !== 'csv' || !normalizedRows) return null;
     return validateQuadratCollectionDetailed(normalizedRows, plot, 'SW');
   }, [value.mode, normalizedRows, plot]);
-  const csvValidationIssues = useMemo<CsvValidationIssue[]>(
-    () => csvValidation?.issues.map(issue => ({ quadratName: issue.quadratName, message: issue.message, kind: issue.kind })) ?? [],
+  const csvBlockingIssues = useMemo<CsvValidationIssue[]>(
+    () => csvValidation?.fatalIssues.map(issue => ({ quadratName: issue.quadratName, message: issue.message })) ?? [],
     [csvValidation]
   );
-
-  const csvBlockingIssues = useMemo(() => csvValidationIssues.filter(issue => issue.kind !== 'overlap'), [csvValidationIssues]);
-  const csvOverlapIssues = useMemo(() => csvValidationIssues.filter(issue => issue.kind === 'overlap'), [csvValidationIssues]);
+  const csvOverlapIssues = useMemo<CsvValidationIssue[]>(
+    () => csvValidation?.overlapSummary?.pairs.map(pair => ({ quadratName: '(layout)', message: pair.message })) ?? [],
+    [csvValidation]
+  );
   const overlapAcknowledged =
     value.mode === 'csv' &&
     csvValidation?.overlapSummary !== null &&
