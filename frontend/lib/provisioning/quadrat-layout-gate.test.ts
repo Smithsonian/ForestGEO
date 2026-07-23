@@ -1,13 +1,15 @@
 /**
  * quadratLayoutIsValid — the Quadrats-step Next-button gate.
  *
- * This is the exact function `deriveCanAdvance` in ./page.tsx calls to decide whether the
- * wizard's Next button is enabled on the Quadrats step. It lives in
- * lib/provisioning/quadrat-layout-gate.ts rather than being exported from page.tsx itself:
- * Next.js's generated page-entry type check (build/types/app/.../page.ts) only permits a
- * page.tsx to export a fixed set of route symbols, so any other named export fails
- * `tsc --noEmit`. This test file still lives under app/(hub)/admin/provision/ so it runs
- * under the unit vitest config (no DB), matching where page.tsx itself is tested from.
+ * This is the exact function `deriveCanAdvance` in app/(hub)/admin/provision/page.tsx calls
+ * to decide whether the wizard's Next button is enabled on the Quadrats step. It lives in
+ * lib/provisioning/quadrat-layout-gate.ts (rather than being exported from page.tsx itself)
+ * because Next.js's generated page-entry type check (build/types/app/.../page.ts) only
+ * permits a page.tsx to export a fixed set of route symbols, so any other named export
+ * fails `tsc --noEmit`. Co-located here alongside quadrat-layout-gate.ts per the convention
+ * every other file in lib/provisioning/ follows — which also means it runs under
+ * vitest.integration.config.mts (lib/provisioning/** is excluded from the unit config),
+ * not the unit config page.tsx itself is tested from.
  *
  * A CSV whose rows name the north-east corner of each quadrat (e.g. the Niobrara plot)
  * must be rejected when declared as south-west (the outer row/column falls outside the

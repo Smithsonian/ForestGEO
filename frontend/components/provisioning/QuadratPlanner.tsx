@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { Alert, Box, FormControl, FormHelperText, FormLabel, Input, Option, Radio, RadioGroup, Select, Stack, Typography } from '@mui/joy';
+import { Alert, Box, FormControl, FormHelperText, FormLabel, Input, Radio, RadioGroup, Stack, Typography } from '@mui/joy';
 import type { ProvisioningPlotInput, QuadratRequestConfig, QuadratCsvRow, QuadratReferenceCorner } from '@/lib/provisioning/types';
 import { generateGrid } from '@/lib/provisioning/grid-generator';
 import { parseQuadratCsv } from '@/lib/provisioning/csv-parser';
 import { collectQuadratBoundsIssues, findFirstOverlap } from '@/lib/provisioning/geometry';
-import { DEFAULT_REFERENCE_CORNER, REFERENCE_CORNER_OPTIONS, normalizeToSouthwest } from '@/lib/provisioning/coordinate-reference-corner';
+import { DEFAULT_REFERENCE_CORNER, getReferenceCornerLabel, normalizeToSouthwest } from '@/lib/provisioning/coordinate-reference-corner';
+import ReferenceCornerSelect from './ReferenceCornerSelect';
 
 const QUADRAT_SIZE_MIN = 1;
 const QUADRAT_SIZE_MAX = 10_000;
@@ -120,7 +121,7 @@ function CsvResultSummary({
   if (overlap) {
     validationIssues.push({
       quadratName: overlap[0].quadratName,
-      message: `overlaps with "${overlap[1].quadratName}"`
+      message: `Quadrat "${overlap[0].quadratName}" overlaps with "${overlap[1].quadratName}"`
     });
   }
 
@@ -153,7 +154,7 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
 
   const csvRows = value.mode === 'csv' ? value.rows : null;
   const referenceCorner: QuadratReferenceCorner = value.mode === 'csv' ? value.coordinateReferenceCorner : DEFAULT_REFERENCE_CORNER;
-  const referenceCornerLabel = REFERENCE_CORNER_OPTIONS.find(option => option.value === referenceCorner)?.label ?? referenceCorner;
+  const referenceCornerLabel = getReferenceCornerLabel(referenceCorner);
 
   // Rows in canonical south-west coordinates, re-derived whenever the declared reference
   // corner changes — so switching the selector re-evaluates bounds/overlap without a re-upload.
@@ -166,7 +167,7 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
     if (value.mode !== 'csv' || !normalizedRows) return [];
     const issues = collectBoundsIssues(normalizedRows, plot);
     if (overlap) {
-      issues.push({ quadratName: overlap[0].quadratName, message: `overlaps with "${overlap[1].quadratName}"` });
+      issues.push({ quadratName: overlap[0].quadratName, message: `Quadrat "${overlap[0].quadratName}" overlaps with "${overlap[1].quadratName}"` });
     }
     return issues;
   }, [value.mode, normalizedRows, plot, overlap]);
@@ -174,12 +175,10 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
   const csvIsEmpty = value.mode === 'csv' && value.rows.length === 0 && csvParseErrors.length === 0;
 
   function handleFileSelected(file: File) {
-    // Only rendered while value.mode === 'csv', so coordinateReferenceCorner is always set.
-    const coordinateReferenceCorner = value.mode === 'csv' ? value.coordinateReferenceCorner : DEFAULT_REFERENCE_CORNER;
     file.text().then(content => {
       const { rows, errors: parseErrors } = parseQuadratCsv(content);
       setCsvParseErrors(parseErrors);
-      onChange({ mode: 'csv', rows, coordinateReferenceCorner });
+      onChange({ mode: 'csv', rows, coordinateReferenceCorner: referenceCorner });
     });
   }
 
@@ -237,30 +236,12 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
 
       {value.mode === 'csv' && (
         <Stack spacing={2}>
-          <FormControl>
-            <FormLabel htmlFor="reference-corner-input">Which corner does each row&apos;s StartX/StartY identify?</FormLabel>
-            <Select
-              id="reference-corner-input"
-              aria-label="Coordinate Reference Corner"
-              value={referenceCorner}
-              onChange={(_event, newValue) => {
-                if (newValue) {
-                  onChange({ ...value, coordinateReferenceCorner: newValue as QuadratReferenceCorner });
-                }
-              }}
-            >
-              {REFERENCE_CORNER_OPTIONS.map(option => (
-                <Option key={option.value} value={option.value}>
-                  {option.label}
-                  {option.value === DEFAULT_REFERENCE_CORNER ? ' (default)' : ''}
-                </Option>
-              ))}
-            </Select>
-            <FormHelperText>
-              Coordinates are stored relative to the plot&apos;s lower-left origin. Choosing a different corner converts the uploaded coordinates on import — it
-              does not move the plot.
-            </FormHelperText>
-          </FormControl>
+          <ReferenceCornerSelect
+            id="reference-corner-input"
+            value={referenceCorner}
+            onChange={newCorner => onChange({ ...value, coordinateReferenceCorner: newCorner })}
+            helperText="Coordinates are stored relative to the plot's lower-left origin. Choosing a different corner converts the uploaded coordinates on import — it does not move the plot."
+          />
 
           <FormControl>
             <FormLabel htmlFor="csv-file-input">Upload Quadrat CSV</FormLabel>

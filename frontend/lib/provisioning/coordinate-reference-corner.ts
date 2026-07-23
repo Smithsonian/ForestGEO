@@ -15,6 +15,10 @@ export function isQuadratReferenceCorner(value: unknown): value is QuadratRefere
   return typeof value === 'string' && REFERENCE_CORNER_OPTIONS.some(option => option.value === value);
 }
 
+export function getReferenceCornerLabel(corner: QuadratReferenceCorner): string {
+  return REFERENCE_CORNER_OPTIONS.find(option => option.value === corner)?.label ?? corner;
+}
+
 export function normalizeToSouthwest(row: QuadratCsvRow, referenceCorner: QuadratReferenceCorner): QuadratCsvRow {
   const shiftX = referenceCorner === 'SE' || referenceCorner === 'NE' ? row.dimensionX : 0;
   const shiftY = referenceCorner === 'NW' || referenceCorner === 'NE' ? row.dimensionY : 0;

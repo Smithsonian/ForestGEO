@@ -34,6 +34,11 @@ const DEFAULT_CSV_VALUE: QuadratRequestConfig = {
   coordinateReferenceCorner: 'SW'
 };
 
+// ReferenceCornerSelect has no aria-label — its accessible name comes from the
+// FormLabel it's associated with via htmlFor/id — so tests select it by id.
+const REFERENCE_CORNER_SELECT_ID = 'reference-corner-input';
+const REFERENCE_CORNER_SELECT_SELECTOR = `#${REFERENCE_CORNER_SELECT_ID}`;
+
 // Stateful wrapper so the component re-renders with each onChange and controlled
 // state reflects the latest emitted value on subsequent interactions.
 function StatefulPlanner(props: { initial: QuadratRequestConfig; plot?: PlotValue; onChangeSpy: (v: QuadratRequestConfig) => void; showErrors?: boolean }) {
@@ -76,11 +81,14 @@ function clickRadioByValue(value: string) {
 // via aria-controls) even while closed, so a bare [role="option"] query would collect
 // every Select's options across the form at once. Scope the query to the Listbox owned
 // by the reference-corner trigger via aria-controls, matching provisioning-plot-form.cy.tsx.
+// Selected by id (not aria-label): ReferenceCornerSelect deliberately has no aria-label
+// so its accessible name comes from the associated FormLabel — see the "accessible name"
+// describe block below.
 function selectReferenceCorner(optionLabel: string) {
-  cy.get('[aria-label="Coordinate Reference Corner"]')
+  cy.get(REFERENCE_CORNER_SELECT_SELECTOR)
     .invoke('attr', 'aria-controls')
     .then(listboxId => {
-      cy.get('[aria-label="Coordinate Reference Corner"]').click();
+      cy.get(REFERENCE_CORNER_SELECT_SELECTOR).click();
       cy.get(`#${listboxId}`).find('[role="option"]').contains(optionLabel).click();
     });
 }
@@ -198,8 +206,10 @@ describe('QuadratPlanner', () => {
 
       uploadCsvFixture('quadrats-overlapping.csv');
 
-      // Wait for DOM update after async file read
-      cy.contains('overlap').should('be.visible');
+      // Both quadrat names must appear so the message identifies which quadrat overlaps
+      // which — a bare "overlaps with ..." with no subject is a regression (see
+      // fixtures/quadrats-overlapping.csv: rows "A" and "B" overlap).
+      cy.contains('Quadrat "A" overlaps with "B"').should('be.visible');
     });
 
     it('shows bounds error when out-of-bounds CSV is uploaded', () => {
@@ -330,7 +340,21 @@ describe('QuadratPlanner', () => {
       const onChangeSpy = cy.stub().as('onChange');
       cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
 
-      cy.get('[aria-label="Coordinate Reference Corner"]').should('contain.text', 'South-west (lower-left)');
+      cy.get(REFERENCE_CORNER_SELECT_SELECTOR).should('contain.text', 'South-west (lower-left)');
+    });
+
+    it("exposes the visible FormLabel text as the select's accessible name (WCAG 2.5.3 Label in Name)", () => {
+      const onChangeSpy = cy.stub().as('onChange');
+      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
+
+      // No aria-label: an explicit aria-label wins over label association and would make
+      // the accessible name diverge from what a sighted user reads. The FormLabel's
+      // htmlFor targeting the rendered control's id is what supplies the accessible name.
+      const labelText = "Which corner does each row's StartX/StartY identify?";
+      // The label's `for` must target the id ReferenceCornerSelect actually renders on
+      // its control — proving the association is live, not just two matching literals.
+      cy.contains('label', labelText).should('have.attr', 'for', REFERENCE_CORNER_SELECT_ID);
+      cy.get(REFERENCE_CORNER_SELECT_SELECTOR).should('exist').and('not.have.attr', 'aria-label');
     });
 
     it('shows bounds errors for the north-east-labeled grid while the selector is still on south-west', () => {
