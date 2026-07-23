@@ -19,9 +19,9 @@ import { UploadParseFilesProps } from '@/config/macros/uploadsystemmacros';
 // Using Box layout instead of Grid for better compatibility
 import { DropzoneCompact } from '@/components/uploadsystemhelpers/dropzonecompact';
 import { FileListEnhanced } from '@/components/uploadsystemhelpers/filelistenhanced';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
-import { RequiredTableHeadersByFormType, SourceFormat, TableHeadersByFormType } from '@/config/macros/formdetails';
+import { FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat, TableHeadersByFormType } from '@/config/macros/formdetails';
 import InfoIcon from '@mui/icons-material/Info';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
@@ -31,6 +31,14 @@ import ColumnMappingDialog from './columnmappingdialog';
 import { mappingApplies, seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
 import { ColumnMapping, CsvSourceMetadata } from '@/lib/column-mapping/types';
 import { DelimiterIssue, DelimiterIssueCode } from '@/components/uploadsystemhelpers/delimiterdetection';
+import Papa from 'papaparse';
+import { usePlotContext } from '@/app/contexts/compat-hooks';
+import { makeLegacyCsvHeaderKey } from '@/lib/column-mapping/fields';
+import { transformMeasurementValue } from '@/lib/column-mapping/measurement-rows';
+import { validateQuadratsRow } from '@/lib/db/definitions/zones';
+import { toQuadratGeometry, validateQuadratCollection } from '@/lib/provisioning/quadrat-collection-validation';
+import type { QuadratCsvRow } from '@/lib/provisioning/types';
+import ReferenceCornerSelect from '@/components/provisioning/ReferenceCornerSelect';
 
 export interface FileValidationStatus {
   fileName: string;
@@ -45,6 +53,34 @@ const HEADER_COVERAGE_ISSUE_CODES = new Set([DelimiterIssueCode.MISSING_REQUIRED
 
 function isHeaderCoverageIssue(issue: DelimiterIssue): boolean {
   return HEADER_COVERAGE_ISSUE_CODES.has(issue.code);
+}
+
+export interface QuadratPreflightIssue {
+  rowIndex: number;
+  quadratName: string;
+  message: string;
+}
+
+/**
+ * Parses one Quadrats-form file the same way UploadFireSQL does for that form: Papa.parse with
+ * makeLegacyCsvHeaderKey(FormType.quadrats) (identity header normalization — quadrats CSVs are not
+ * measurements-aliased) and transformMeasurementValue per cell (NA/NULL/'' -> null, otherwise
+ * pass-through, since none of the measurement-only transform branches apply to this form). Reusing
+ * these exact functions, rather than re-deriving header/cell handling here, is what keeps this
+ * preflight's verdict from disagreeing with what actually gets uploaded.
+ */
+function parseQuadratFileRows(file: File, delimiter: string | undefined): Promise<FileRow[]> {
+  return new Promise((resolve, reject) => {
+    Papa.parse<FileRow>(file, {
+      delimiter,
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: makeLegacyCsvHeaderKey(FormType.quadrats),
+      transform: (value: string, field: string) => transformMeasurementValue(value, field, FormType.quadrats) as string,
+      complete: results => resolve(results.data),
+      error: (err: Error) => reject(err)
+    });
+  });
 }
 
 export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>) {
@@ -62,13 +98,105 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     selectedDelimiters,
     setSelectedDelimiters,
     columnMappings,
-    setColumnMappingForFile
+    setColumnMappingForFile,
+    coordinateReferenceCorner,
+    setCoordinateReferenceCorner
   } = props;
 
   const [fileToReplace, setFileToReplace] = useState<FileWithPath | null>(null);
   const [showHeaderHelp, setShowHeaderHelp] = useState<boolean>(false);
   const [fileValidationStatuses, setFileValidationStatuses] = useState<Record<string, FileValidationStatus>>({});
   const [mappingOpen, setMappingOpen] = useState<boolean>(false);
+
+  const isQuadratsForm = uploadForm === FormType.quadrats;
+  const currentPlot = usePlotContext();
+  const plotDimensionX = currentPlot?.dimensionX;
+  const plotDimensionY = currentPlot?.dimensionY;
+
+  const [quadratPreflightIssuesByFile, setQuadratPreflightIssuesByFile] = useState<Record<string, QuadratPreflightIssue[]>>({});
+  const [quadratPreflightRunning, setQuadratPreflightRunning] = useState<boolean>(false);
+
+  // Advisory preflight only (Task 11 owns server-side enforcement): parses every accepted quadrat
+  // file with the same header/cell conventions the real upload uses, converts each row to geometry,
+  // and runs the shared collection validator against the current plot and declared reference corner.
+  // Re-runs whenever the inputs that change its verdict change.
+  useEffect(() => {
+    if (!isQuadratsForm || acceptedFiles.length === 0) {
+      setQuadratPreflightIssuesByFile({});
+      setQuadratPreflightRunning(false);
+      return;
+    }
+
+    let cancelled = false;
+    setQuadratPreflightRunning(true);
+
+    (async () => {
+      const nextIssuesByFile: Record<string, QuadratPreflightIssue[]> = {};
+
+      for (const file of acceptedFiles) {
+        let rows: FileRow[];
+        try {
+          rows = await parseQuadratFileRows(file, selectedDelimiters[file.name]);
+        } catch (parseError: unknown) {
+          const message = parseError instanceof Error ? parseError.message : String(parseError);
+          nextIssuesByFile[file.name] = [{ rowIndex: -1, quadratName: '(file)', message: `Could not parse ${file.name}: ${message}` }];
+          continue;
+        }
+
+        const fileIssues: QuadratPreflightIssue[] = [];
+        const geometryRows: QuadratCsvRow[] = [];
+        const originalRowIndexByGeometryRow = new Map<QuadratCsvRow, number>();
+
+        rows.forEach((row, rowIndex) => {
+          const geometry = toQuadratGeometry(row);
+          if (!geometry) {
+            // A null conversion is a blocking scalar issue, not a row to silently drop — reuse the
+            // real per-row validator so this preflight's reasons agree with what the row actually fails.
+            const scalarErrors = validateQuadratsRow(row);
+            const fallbackName = row.quadrat?.trim() || `(row ${rowIndex + 1})`;
+            const message = scalarErrors ? Object.values(scalarErrors).join(' ') : `Row ${rowIndex + 1} could not be read as quadrat geometry.`;
+            fileIssues.push({ rowIndex, quadratName: fallbackName, message });
+            return;
+          }
+          originalRowIndexByGeometryRow.set(geometry, rowIndex);
+          geometryRows.push(geometry);
+        });
+
+        if (geometryRows.length > 0 && plotDimensionX !== undefined && plotDimensionY !== undefined) {
+          const collectionIssues = validateQuadratCollection(
+            geometryRows,
+            { dimensionX: plotDimensionX, dimensionY: plotDimensionY },
+            coordinateReferenceCorner
+          );
+          collectionIssues.forEach(issue => {
+            const geometryRow = geometryRows[issue.rowIndex];
+            const originalRowIndex = geometryRow ? (originalRowIndexByGeometryRow.get(geometryRow) ?? issue.rowIndex) : issue.rowIndex;
+            fileIssues.push({ rowIndex: originalRowIndex, quadratName: issue.quadratName, message: issue.message });
+          });
+        }
+
+        if (fileIssues.length > 0) {
+          nextIssuesByFile[file.name] = fileIssues.sort((a, b) => a.rowIndex - b.rowIndex);
+        }
+      }
+
+      if (!cancelled) {
+        setQuadratPreflightIssuesByFile(nextIssuesByFile);
+        setQuadratPreflightRunning(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isQuadratsForm, acceptedFiles, selectedDelimiters, coordinateReferenceCorner, plotDimensionX, plotDimensionY]);
+
+  const quadratPreflightHasIssues = useMemo(
+    () => Object.values(quadratPreflightIssuesByFile).some(issues => issues.length > 0),
+    [quadratPreflightIssuesByFile]
+  );
+
+  const quadratPreflightBlocksContinue = isQuadratsForm && (quadratPreflightRunning || quadratPreflightHasIssues);
 
   const handleFileChange = async (newFiles: FileWithPath[]) => {
     for (const file of newFiles) {
@@ -285,6 +413,14 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
           >
             <Stack spacing={3} sx={{ height: '100%' }}>
               <DropzoneCompact onChange={handleFileChange} hasFiles={acceptedFiles.length > 0} sourceFormat={sourceFormat} />
+              {isQuadratsForm && (
+                <ReferenceCornerSelect
+                  id="upload-quadrat-reference-corner-input"
+                  value={coordinateReferenceCorner}
+                  onChange={setCoordinateReferenceCorner}
+                  helperText="Coordinates are stored relative to the plot's lower-left origin. Choosing a different corner converts the uploaded coordinates on import — it does not move the plot."
+                />
+              )}
               {acceptedFiles.length > 0 && (
                 <Stack spacing={2}>
                   {/* Validation Error Alert */}
@@ -302,6 +438,29 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                             {issues.map((issue, idx) => (
                               <Typography key={idx} level="body-xs" sx={{ ml: 1 }}>
                                 • {issue}
+                              </Typography>
+                            ))}
+                          </Box>
+                        ))}
+                      </Box>
+                    </Alert>
+                  )}
+
+                  {/* Quadrat Geometry Preflight — advisory client-side check; Task 11 owns server enforcement */}
+                  {isQuadratsForm && Object.keys(quadratPreflightIssuesByFile).length > 0 && (
+                    <Alert color="danger" variant="soft" startDecorator={<ErrorOutlineIcon />} sx={{ textAlign: 'left' }}>
+                      <Box>
+                        <Typography level="title-sm" color="danger">
+                          Quadrat Geometry Issues
+                        </Typography>
+                        {Object.entries(quadratPreflightIssuesByFile).map(([fileName, issues]) => (
+                          <Box key={fileName} sx={{ mt: 1 }}>
+                            <Typography level="body-sm" sx={{ fontWeight: 'bold' }}>
+                              {fileName}:
+                            </Typography>
+                            {issues.map((issue, idx) => (
+                              <Typography key={idx} level="body-xs" sx={{ ml: 1 }}>
+                                • {issue.quadratName}: {issue.message}
                               </Typography>
                             ))}
                           </Box>
@@ -353,16 +512,16 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                       })()}
                     <JoyButton
                       variant="solid"
-                      color={allFilesValid ? 'primary' : 'neutral'}
+                      color={allFilesValid && !quadratPreflightBlocksContinue ? 'primary' : 'neutral'}
                       size="lg"
-                      disabled={acceptedFiles.length === 0 || !allFilesValid || isAnalyzing}
+                      disabled={acceptedFiles.length === 0 || !allFilesValid || isAnalyzing || quadratPreflightBlocksContinue}
                       onClick={handleInitialSubmit}
-                      startDecorator={allFilesValid ? <CheckCircleIcon /> : <ErrorOutlineIcon />}
+                      startDecorator={allFilesValid && !quadratPreflightBlocksContinue ? <CheckCircleIcon /> : <ErrorOutlineIcon />}
                       sx={{ flex: 1, maxWidth: 300 }}
                     >
-                      {isAnalyzing
+                      {isAnalyzing || (isQuadratsForm && quadratPreflightRunning)
                         ? 'Analyzing files...'
-                        : allFilesValid
+                        : allFilesValid && !quadratPreflightBlocksContinue
                           ? sourceFormat === SourceFormat.arcgis_xlsx
                             ? 'Continue to pre-flight'
                             : `Continue Upload (${acceptedFiles.length} ${acceptedFiles.length === 1 ? 'file' : 'files'})`

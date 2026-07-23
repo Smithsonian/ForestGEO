@@ -113,7 +113,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   setReviewState,
   selectedDelimiters,
   arcgisImportSession,
-  columnMappings
+  columnMappings,
+  coordinateReferenceCorner
 }) => {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -576,6 +577,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   ? {
                       schema,
                       formType: uploadForm,
+                      coordinateReferenceCorner,
                       sourceFormat: sourceFormat ?? SourceFormat.csv,
                       uploadMode,
                       fileName,
@@ -591,6 +593,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   : {
                       schema,
                       formType: uploadForm,
+                      coordinateReferenceCorner,
                       sourceFormat: sourceFormat ?? SourceFormat.csv,
                       uploadMode,
                       fileName,
@@ -717,6 +720,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       currentCensus,
       session,
       schema,
+      coordinateReferenceCorner,
       fetchWithTimeout,
       getRequiredUploadSessionId,
       isMountedRef,

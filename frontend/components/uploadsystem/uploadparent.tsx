@@ -32,6 +32,8 @@ import { canonicalizeRevisionRow, normalizeRevisionHeader } from '@/components/u
 import { EMPTY_REVISION_MATCH_COUNTS, RevisionInvalidRow, RevisionMatchedRow, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { BulkEditPlan } from '@/config/editplan/types';
 import type { ArcgisImportReference } from '@/lib/arcgis/types';
+import type { QuadratReferenceCorner } from '@/lib/provisioning/types';
+import { DEFAULT_REFERENCE_CORNER } from '@/lib/provisioning/coordinate-reference-corner';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -122,6 +124,10 @@ function UploadParentInner(props: UploadParentProps) {
   const [parsedData, setParsedData] = useState<FileCollectionRowSet>({});
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
   const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
+  // Which corner of each quadrat a Quadrats-form upload's StartX/StartY identifies. Held here (rather
+  // than inside UploadParseFiles) because UploadFireSQL, in a later ReviewStates screen, must still
+  // see the value the user picked. Only meaningful for FormType.quadrats; other forms ignore it.
+  const [coordinateReferenceCorner, setCoordinateReferenceCorner] = useState<QuadratReferenceCorner>(DEFAULT_REFERENCE_CORNER);
   const [showFailedMeasurementsModal, setShowFailedMeasurementsModal] = useState(false);
   const [isReingestionMode, setIsReingestionMode] = useState(false);
   const [revisionMatchResult, setRevisionMatchResult] = useState<RevisionUploadResponse | null>(null);
@@ -195,6 +201,7 @@ function UploadParentInner(props: UploadParentProps) {
       setRevisionMatchResult(null);
       setRevisionConfirmNewRows(false);
       setArcgisImportSession(null);
+      setCoordinateReferenceCorner(DEFAULT_REFERENCE_CORNER);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadState.state.uploadForm, uploadState.state.reviewState]);
@@ -225,6 +232,7 @@ function UploadParentInner(props: UploadParentProps) {
     setRevisionMatchResult(null);
     setRevisionConfirmNewRows(false);
     setArcgisImportSession(null);
+    setCoordinateReferenceCorner(DEFAULT_REFERENCE_CORNER);
   }
 
   async function resetError() {
@@ -426,6 +434,8 @@ function UploadParentInner(props: UploadParentProps) {
             setSelectedDelimiters={setSelectedDelimiters}
             columnMappings={columnMappings}
             setColumnMappingForFile={setColumnMappingForFile}
+            coordinateReferenceCorner={coordinateReferenceCorner}
+            setCoordinateReferenceCorner={setCoordinateReferenceCorner}
           />
         );
       case ReviewStates.ARCGIS_PREFLIGHT:
@@ -476,6 +486,7 @@ function UploadParentInner(props: UploadParentProps) {
             setAllRowToCMID={setAllRowToCMID}
             selectedDelimiters={selectedDelimiters}
             columnMappings={columnMappings}
+            coordinateReferenceCorner={coordinateReferenceCorner}
           />
         );
       case ReviewStates.REVISION_MATCH:

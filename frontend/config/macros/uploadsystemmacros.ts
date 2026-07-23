@@ -5,6 +5,7 @@ import { FileCollectionRowSet, FormType, SourceFormat } from '@/config/macros/fo
 import { UploadMode } from '@/config/uploadmodes';
 import type { ArcgisImportReference } from '@/lib/arcgis/types';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
+import type { QuadratReferenceCorner } from '@/lib/provisioning/types';
 
 // File upload constraints
 export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500MB per file
@@ -46,6 +47,10 @@ export interface UploadParseFilesProps {
   // column mapping (CSV flow): per-file mappings keyed by file name, confirmed via the mapping dialog
   columnMappings?: Record<string, ColumnMapping>;
   setColumnMappingForFile?: (fileName: string, mapping: ColumnMapping) => void;
+  // Which corner of each quadrat a Quadrats-form file's StartX/StartY identifies. Only rendered/used
+  // when uploadForm === FormType.quadrats; carried forward to UploadFireSQL via UploadFireProps.
+  coordinateReferenceCorner: QuadratReferenceCorner;
+  setCoordinateReferenceCorner: Dispatch<SetStateAction<QuadratReferenceCorner>>;
   // centralized functions
   handleInitialSubmit: () => Promise<void>;
   handleAddFile: (newFile: FileWithPath) => void;
@@ -98,6 +103,9 @@ export interface UploadFireProps {
   selectedDelimiters: Record<string, string>;
   // Per-file confirmed column mappings from the parse step. When omitted, falls back to legacy header aliasing.
   columnMappings?: Record<string, ColumnMapping>;
+  // Which corner of each quadrat a Quadrats-form file's StartX/StartY identifies, chosen in
+  // UploadParseFiles and sent to the server so it can normalize to south-west before writing.
+  coordinateReferenceCorner: QuadratReferenceCorner;
   // state setters
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
