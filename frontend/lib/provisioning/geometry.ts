@@ -55,9 +55,14 @@ export function collectQuadratBoundsIssues(rows: QuadratCsvRow[], plot: { dimens
  * O(n log n) for the sort + O(n * |active|) for the scan. |active| is bounded by horizontal density;
  * worst case O(n^2) for fully-overlapping inputs, but realistic forest-plot grids are nearly disjoint
  * along X so |active| approximates sqrt(n) in practice.
+ *
+ * Every overlapping pair (up to `maxPairs`) is reported, not just the first: callers that decide
+ * per-pair — e.g. the Revisions write boundary, which blocks only pairs the upload introduces —
+ * would otherwise have a new overlap masked behind a pre-existing one. `maxPairs` bounds the
+ * result on pathological all-overlapping inputs, where the pair count is quadratic in row count.
  */
-export function findFirstOverlap(rows: QuadratCsvRow[]): [QuadratCsvRow, QuadratCsvRow] | null {
-  if (rows.length < 2) return null;
+export function collectOverlappingPairs(rows: QuadratCsvRow[], maxPairs: number): Array<[QuadratCsvRow, QuadratCsvRow]> {
+  if (rows.length < 2 || maxPairs <= 0) return [];
 
   const events: SweepEvent[] = [];
   for (const row of rows) {
@@ -67,12 +72,16 @@ export function findFirstOverlap(rows: QuadratCsvRow[]): [QuadratCsvRow, Quadrat
   // Process closes before opens at the same x (touching edges don't overlap).
   events.sort((a, b) => a.x - b.x || (a.type === 'close' ? -1 : 1));
 
+  const pairs: Array<[QuadratCsvRow, QuadratCsvRow]> = [];
   const active: QuadratCsvRow[] = [];
   for (const event of events) {
     if (event.type === 'open') {
       for (const other of active) {
         const yOverlap = event.row.startY < other.startY + other.dimensionY && event.row.startY + event.row.dimensionY > other.startY;
-        if (yOverlap) return [other, event.row];
+        if (yOverlap) {
+          pairs.push([other, event.row]);
+          if (pairs.length >= maxPairs) return pairs;
+        }
       }
       active.push(event.row);
     } else {
@@ -80,5 +89,9 @@ export function findFirstOverlap(rows: QuadratCsvRow[]): [QuadratCsvRow, Quadrat
       if (idx >= 0) active.splice(idx, 1);
     }
   }
-  return null;
+  return pairs;
+}
+
+export function findFirstOverlap(rows: QuadratCsvRow[]): [QuadratCsvRow, QuadratCsvRow] | null {
+  return collectOverlappingPairs(rows, 1)[0] ?? null;
 }

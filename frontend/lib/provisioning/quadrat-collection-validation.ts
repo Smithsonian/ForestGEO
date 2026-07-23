@@ -1,6 +1,13 @@
 import type { QuadratCsvRow, QuadratReferenceCorner } from './types';
-import { collectQuadratBoundsIssues, findFirstOverlap, type QuadratBoundsIssue } from './geometry';
+import { collectOverlappingPairs, collectQuadratBoundsIssues, type QuadratBoundsIssue } from './geometry';
 import { normalizeToSouthwest } from './coordinate-reference-corner';
+
+/**
+ * Bounds the overlap sweep's result on pathological inputs where every quadrat overlaps every
+ * other (quadratic pair count). Message output is capped separately by the callers' truncation,
+ * so this only needs to be comfortably larger than what a user can act on in one pass.
+ */
+const MAX_REPORTED_OVERLAP_PAIRS = 25;
 
 /** Same shape as QuadratBoundsIssue so callers can concatenate/handle both issue sources uniformly. */
 export type QuadratCollectionIssue = QuadratBoundsIssue;
@@ -54,9 +61,13 @@ export function toQuadratGeometry(row: UploadShapedRow): QuadratCsvRow | null {
  * Validates a whole collection of quadrat rows declared against `referenceCorner`, composing
  * the existing single-source-of-truth checks rather than re-implementing them:
  *   - `collectQuadratBoundsIssues` for negative coordinates / exceeding plot dimensions
- *   - `findFirstOverlap` for pairwise geometric overlap across the whole set
+ *   - `collectOverlappingPairs` for pairwise geometric overlap across the whole set
  * This module adds the two checks that were genuinely missing: non-positive dimensions and
  * duplicate quadrat names (case-insensitive, matching the upload path's `LOWER()` SQL comparison).
+ *
+ * `plot` may be null when the plot has no usable recorded dimensions: overlap, duplicate-name,
+ * and non-positive-dimension checks still run, and only the bounds checks are skipped. Callers
+ * choosing that degraded mode are responsible for telling the user bounds went unvalidated.
  *
  * Ordering: rows are normalized to south-west first, since every downstream check assumes that
  * convention. Non-positive dimensions are checked, and flagged, before bounds/overlap — a row
@@ -67,7 +78,7 @@ export function toQuadratGeometry(row: UploadShapedRow): QuadratCsvRow | null {
  */
 export function validateQuadratCollection(
   rows: QuadratCsvRow[],
-  plot: { dimensionX: number; dimensionY: number },
+  plot: { dimensionX: number; dimensionY: number } | null,
   referenceCorner: QuadratReferenceCorner
 ): QuadratCollectionIssue[] {
   const issues: QuadratCollectionIssue[] = [];
@@ -89,11 +100,13 @@ export function validateQuadratCollection(
     originalIndexByGeometricRow.set(row, rowIndex);
   });
 
-  const boundsIssues = collectQuadratBoundsIssues(geometricallyValidRows, plot).map(issue => ({
-    ...issue,
-    rowIndex: originalIndexByGeometricRow.get(geometricallyValidRows[issue.rowIndex]) ?? issue.rowIndex
-  }));
-  issues.push(...boundsIssues);
+  if (plot !== null) {
+    const boundsIssues = collectQuadratBoundsIssues(geometricallyValidRows, plot).map(issue => ({
+      ...issue,
+      rowIndex: originalIndexByGeometricRow.get(geometricallyValidRows[issue.rowIndex]) ?? issue.rowIndex
+    }));
+    issues.push(...boundsIssues);
+  }
 
   const nameOccurrences = new Map<string, number>();
   normalizedRows.forEach(row => {
@@ -111,9 +124,7 @@ export function validateQuadratCollection(
     }
   });
 
-  const overlap = findFirstOverlap(geometricallyValidRows);
-  if (overlap) {
-    const [first, second] = overlap;
+  for (const [first, second] of collectOverlappingPairs(geometricallyValidRows, MAX_REPORTED_OVERLAP_PAIRS)) {
     issues.push({
       rowIndex: originalIndexByGeometricRow.get(first) ?? -1,
       quadratName: first.quadratName,

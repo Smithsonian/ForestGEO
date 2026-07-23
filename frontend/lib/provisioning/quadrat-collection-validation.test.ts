@@ -195,6 +195,37 @@ describe('validateQuadratCollection', () => {
     expect(issues.some(issue => issue.quadratName === 'Distant')).toBe(false);
   });
 
+  it('skips only the bounds checks when the plot is null; overlap and duplicate-name checks still run', () => {
+    // Callers degrade to null bounds when the plot record has no usable dimensions
+    // (nullable columns). That must not disable the checks that need no bounds.
+    const rows: QuadratCsvRow[] = [
+      { quadratName: 'WayOut', startX: 5000, startY: 5000, dimensionX: 10, dimensionY: 10 },
+      { quadratName: 'A', startX: 0, startY: 0, dimensionX: 10, dimensionY: 10 },
+      { quadratName: 'a', startX: 5, startY: 5, dimensionX: 10, dimensionY: 10 }
+    ];
+    const issues = validateQuadratCollection(rows, null, 'SW');
+
+    expect(issues.some(issue => /extends past plot/.test(issue.message))).toBe(false);
+    expect(issues.some(issue => /negative start coordinate/.test(issue.message))).toBe(false);
+    expect(issues.filter(issue => /used by more than one row/.test(issue.message))).toHaveLength(2);
+    expect(issues.filter(issue => /overlaps quadrat/.test(issue.message))).toHaveLength(2);
+  });
+
+  it('reports every overlapping pair, not just the first', () => {
+    // Two disjoint overlapping pairs: (A1,A2) and (B1,B2). First-overlap-only reporting
+    // would mask the second pair, which matters to callers that decide per-pair (the
+    // Revisions write boundary blocks only pairs the upload introduces).
+    const rows: QuadratCsvRow[] = [
+      { quadratName: 'A1', startX: 0, startY: 0, dimensionX: 10, dimensionY: 10 },
+      { quadratName: 'A2', startX: 5, startY: 5, dimensionX: 10, dimensionY: 10 },
+      { quadratName: 'B1', startX: 50, startY: 0, dimensionX: 10, dimensionY: 10 },
+      { quadratName: 'B2', startX: 55, startY: 5, dimensionX: 10, dimensionY: 10 }
+    ];
+    const issues = validateQuadratCollection(rows, PLOT_100x60, 'SW');
+    const overlapIssues = issues.filter(issue => /overlaps quadrat/.test(issue.message));
+    expect(overlapIssues.map(issue => issue.quadratName).sort()).toEqual(['A1', 'A2', 'B1', 'B2']);
+  });
+
   it('produces the same result for the same physical layout declared from all four reference corners', () => {
     const canonicalRows: QuadratCsvRow[] = [
       { quadratName: 'X', startX: 0, startY: 0, dimensionX: 30, dimensionY: 10 },
