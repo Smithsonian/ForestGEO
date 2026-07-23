@@ -25,6 +25,7 @@ import { FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat, TableH
 import InfoIcon from '@mui/icons-material/Info';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import TuneIcon from '@mui/icons-material/Tune';
 import { UploadMode } from '@/config/uploadmodes';
 import ColumnMappingDialog from './columnmappingdialog';
@@ -60,6 +61,13 @@ export interface QuadratPreflightIssue {
   quadratName: string;
   message: string;
 }
+
+// A misdeclared reference corner can fail bounds for most/all rows plus two overlap entries per
+// colliding pair — easily hundreds of lines. Cap what's rendered per file and let the list scroll
+// within its own panel instead of relying on an ancestor that clips overflow (see uploadparsefiles.tsx
+// page shell's `maxHeight: '90vh', overflow: 'hidden'`).
+const MAX_QUADRAT_ISSUES_SHOWN_PER_FILE = 20;
+const QUADRAT_ISSUES_LIST_MAX_HEIGHT_PX = 320;
 
 /**
  * Parses one Quadrats-form file the same way UploadFireSQL does for that form: Papa.parse with
@@ -115,6 +123,11 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
 
   const [quadratPreflightIssuesByFile, setQuadratPreflightIssuesByFile] = useState<Record<string, QuadratPreflightIssue[]>>({});
   const [quadratPreflightRunning, setQuadratPreflightRunning] = useState<boolean>(false);
+  // True when at least one file had rows that parsed as geometry but the plot's DimensionX/DimensionY
+  // are unset, so bounds/overlap/duplicate-name checks (validateQuadratCollection) could not run at
+  // all. This is "we could not check", never conflated with quadratPreflightIssuesByFile's "your file
+  // is wrong" — the two are rendered as separate alerts and both independently block Continue.
+  const [quadratPlotDimensionsUnvalidated, setQuadratPlotDimensionsUnvalidated] = useState<boolean>(false);
 
   // Advisory preflight only (Task 11 owns server-side enforcement): parses every accepted quadrat
   // file with the same header/cell conventions the real upload uses, converts each row to geometry,
@@ -124,6 +137,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     if (!isQuadratsForm || acceptedFiles.length === 0) {
       setQuadratPreflightIssuesByFile({});
       setQuadratPreflightRunning(false);
+      setQuadratPlotDimensionsUnvalidated(false);
       return;
     }
 
@@ -132,6 +146,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
 
     (async () => {
       const nextIssuesByFile: Record<string, QuadratPreflightIssue[]> = {};
+      let dimensionsUnvalidated = false;
 
       for (const file of acceptedFiles) {
         let rows: FileRow[];
@@ -144,34 +159,52 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
         }
 
         const fileIssues: QuadratPreflightIssue[] = [];
-        const geometryRows: QuadratCsvRow[] = [];
-        const originalRowIndexByGeometryRow = new Map<QuadratCsvRow, number>();
 
-        rows.forEach((row, rowIndex) => {
-          const geometry = toQuadratGeometry(row);
-          if (!geometry) {
-            // A null conversion is a blocking scalar issue, not a row to silently drop — reuse the
-            // real per-row validator so this preflight's reasons agree with what the row actually fails.
-            const scalarErrors = validateQuadratsRow(row);
-            const fallbackName = row.quadrat?.trim() || `(row ${rowIndex + 1})`;
-            const message = scalarErrors ? Object.values(scalarErrors).join(' ') : `Row ${rowIndex + 1} could not be read as quadrat geometry.`;
-            fileIssues.push({ rowIndex, quadratName: fallbackName, message });
-            return;
+        try {
+          const geometryRows: QuadratCsvRow[] = [];
+          const originalRowIndexByGeometryRow = new Map<QuadratCsvRow, number>();
+
+          rows.forEach((row, rowIndex) => {
+            const geometry = toQuadratGeometry(row);
+            if (!geometry) {
+              // A null conversion is a blocking scalar issue, not a row to silently drop — reuse the
+              // real per-row validator so this preflight's reasons agree with what the row actually fails.
+              const scalarErrors = validateQuadratsRow(row);
+              const fallbackName = row.quadrat?.trim() || `(row ${rowIndex + 1})`;
+              const message = scalarErrors ? Object.values(scalarErrors).join(' ') : `Row ${rowIndex + 1} could not be read as quadrat geometry.`;
+              fileIssues.push({ rowIndex, quadratName: fallbackName, message });
+              return;
+            }
+            originalRowIndexByGeometryRow.set(geometry, rowIndex);
+            geometryRows.push(geometry);
+          });
+
+          if (geometryRows.length > 0) {
+            if (plotDimensionX !== undefined && plotDimensionY !== undefined) {
+              const collectionIssues = validateQuadratCollection(
+                geometryRows,
+                { dimensionX: plotDimensionX, dimensionY: plotDimensionY },
+                coordinateReferenceCorner
+              );
+              collectionIssues.forEach(issue => {
+                const geometryRow = geometryRows[issue.rowIndex];
+                const originalRowIndex = geometryRow ? (originalRowIndexByGeometryRow.get(geometryRow) ?? issue.rowIndex) : issue.rowIndex;
+                fileIssues.push({ rowIndex: originalRowIndex, quadratName: issue.quadratName, message: issue.message });
+              });
+            } else {
+              // Row-level checks above still ran; bounds/overlap/duplicate-name checks cannot run
+              // without the plot's dimensions. Surfaced once, collection-wide, via the dedicated
+              // "could not validate" alert rather than per-row — there is no per-row bounds verdict
+              // to report.
+              dimensionsUnvalidated = true;
+            }
           }
-          originalRowIndexByGeometryRow.set(geometry, rowIndex);
-          geometryRows.push(geometry);
-        });
-
-        if (geometryRows.length > 0 && plotDimensionX !== undefined && plotDimensionY !== undefined) {
-          const collectionIssues = validateQuadratCollection(
-            geometryRows,
-            { dimensionX: plotDimensionX, dimensionY: plotDimensionY },
-            coordinateReferenceCorner
-          );
-          collectionIssues.forEach(issue => {
-            const geometryRow = geometryRows[issue.rowIndex];
-            const originalRowIndex = geometryRow ? (originalRowIndexByGeometryRow.get(geometryRow) ?? issue.rowIndex) : issue.rowIndex;
-            fileIssues.push({ rowIndex: originalRowIndex, quadratName: issue.quadratName, message: issue.message });
+        } catch (geometryError: unknown) {
+          const message = geometryError instanceof Error ? geometryError.message : String(geometryError);
+          fileIssues.push({
+            rowIndex: -1,
+            quadratName: '(file)',
+            message: `Could not validate quadrat geometry for ${file.name}: ${message}`
           });
         }
 
@@ -182,6 +215,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
 
       if (!cancelled) {
         setQuadratPreflightIssuesByFile(nextIssuesByFile);
+        setQuadratPlotDimensionsUnvalidated(dimensionsUnvalidated);
         setQuadratPreflightRunning(false);
       }
     })();
@@ -196,7 +230,12 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     [quadratPreflightIssuesByFile]
   );
 
-  const quadratPreflightBlocksContinue = isQuadratsForm && (quadratPreflightRunning || quadratPreflightHasIssues);
+  const quadratPreflightTotalIssueCount = useMemo(
+    () => Object.values(quadratPreflightIssuesByFile).reduce((total, issues) => total + issues.length, 0),
+    [quadratPreflightIssuesByFile]
+  );
+
+  const quadratPreflightBlocksContinue = isQuadratsForm && (quadratPreflightRunning || quadratPreflightHasIssues || quadratPlotDimensionsUnvalidated);
 
   const handleFileChange = async (newFiles: FileWithPath[]) => {
     for (const file of newFiles) {
@@ -446,25 +485,55 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                     </Alert>
                   )}
 
+                  {/* Quadrat Geometry Preflight — "we could not check" (plot has no dimensions to check
+                      against), distinct from and rendered separately from the "your file is wrong"
+                      alert below. Both independently block Continue. */}
+                  {isQuadratsForm && quadratPlotDimensionsUnvalidated && (
+                    <Alert color="warning" variant="soft" startDecorator={<WarningAmberIcon />} sx={{ textAlign: 'left' }}>
+                      <Box>
+                        <Typography level="title-sm" color="warning">
+                          Quadrat Geometry Could Not Be Validated
+                        </Typography>
+                        <Typography level="body-sm" sx={{ mt: 0.5 }}>
+                          This plot has no DimensionX/DimensionY on record, so bounds, overlap, and duplicate-name checks could not run against it. Per-row
+                          checks (missing or non-numeric coordinates) still completed normally. Continue is disabled until the plot&apos;s dimensions are set —
+                          this preflight cannot confirm your file is correct without them.
+                        </Typography>
+                      </Box>
+                    </Alert>
+                  )}
+
                   {/* Quadrat Geometry Preflight — advisory client-side check; Task 11 owns server enforcement */}
                   {isQuadratsForm && Object.keys(quadratPreflightIssuesByFile).length > 0 && (
                     <Alert color="danger" variant="soft" startDecorator={<ErrorOutlineIcon />} sx={{ textAlign: 'left' }}>
-                      <Box>
+                      <Box sx={{ width: '100%' }}>
                         <Typography level="title-sm" color="danger">
-                          Quadrat Geometry Issues
+                          {quadratPreflightTotalIssueCount} quadrat geometry problem{quadratPreflightTotalIssueCount === 1 ? '' : 's'} found
                         </Typography>
-                        {Object.entries(quadratPreflightIssuesByFile).map(([fileName, issues]) => (
-                          <Box key={fileName} sx={{ mt: 1 }}>
-                            <Typography level="body-sm" sx={{ fontWeight: 'bold' }}>
-                              {fileName}:
-                            </Typography>
-                            {issues.map((issue, idx) => (
-                              <Typography key={idx} level="body-xs" sx={{ ml: 1 }}>
-                                • {issue.quadratName}: {issue.message}
-                              </Typography>
-                            ))}
-                          </Box>
-                        ))}
+                        <Box sx={{ mt: 1, maxHeight: QUADRAT_ISSUES_LIST_MAX_HEIGHT_PX, overflowY: 'auto' }}>
+                          {Object.entries(quadratPreflightIssuesByFile).map(([fileName, issues]) => {
+                            const shownIssues = issues.slice(0, MAX_QUADRAT_ISSUES_SHOWN_PER_FILE);
+                            const hiddenCount = issues.length - shownIssues.length;
+                            return (
+                              <Box key={fileName} sx={{ mt: 1 }}>
+                                <Typography level="body-sm" sx={{ fontWeight: 'bold' }}>
+                                  {fileName}: {issues.length} issue{issues.length === 1 ? '' : 's'}
+                                </Typography>
+                                {shownIssues.map((issue, idx) => (
+                                  <Typography key={idx} level="body-xs" sx={{ ml: 1 }}>
+                                    • {issue.quadratName}: {issue.message}
+                                  </Typography>
+                                ))}
+                                {hiddenCount > 0 && (
+                                  <Typography level="body-xs" sx={{ ml: 1, fontStyle: 'italic' }}>
+                                    Showing the first {shownIssues.length} of {issues.length} issues for this file — {hiddenCount} more not shown. Fix the
+                                    issues above and re-check, or narrow the file, to see the rest.
+                                  </Typography>
+                                )}
+                              </Box>
+                            );
+                          })}
+                        </Box>
                       </Box>
                     </Alert>
                   )}

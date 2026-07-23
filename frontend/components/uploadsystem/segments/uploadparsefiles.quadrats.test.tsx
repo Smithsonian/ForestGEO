@@ -5,7 +5,7 @@
  * appearing for Quadrats uploads, and the client-side geometry preflight that blocks Continue on
  * scalar or collection issues. Task 11 (server-side enforcement) is out of scope here.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React, { useState } from 'react';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
@@ -20,10 +20,22 @@ import UploadParseFiles from './uploadparsefiles';
 // (matching lib/db/definitions/zones.test.ts's pattern).
 vi.unmock('@/lib/db/definitions/zones');
 
+// Mutable so individual tests (e.g. missing plot dimensions) can override the plot context
+// per-render without re-declaring the whole vi.mock factory. Reset in afterEach so a mutation in
+// one test never bleeds into the next.
+const DEFAULT_MOCK_PLOT_CONTEXT = { plotID: 1, plotName: 'Test Plot', dimensionX: 100, dimensionY: 100 };
+const mockPlotContext = vi.hoisted(() => ({
+  current: { plotID: 1, plotName: 'Test Plot', dimensionX: 100 as number | undefined, dimensionY: 100 as number | undefined }
+}));
+
 vi.mock('@/app/contexts/compat-hooks', () => ({
-  usePlotContext: () => ({ plotID: 1, plotName: 'Test Plot', dimensionX: 100, dimensionY: 100 }),
+  usePlotContext: () => mockPlotContext.current,
   useOrgCensusContext: () => ({ dateRanges: [{ censusID: 1 }] })
 }));
+
+afterEach(() => {
+  mockPlotContext.current = { ...DEFAULT_MOCK_PLOT_CONTEXT };
+});
 
 // FileListEnhanced does real header/delimiter validation independent of the quadrat geometry
 // preflight under test; report every file as header-valid so allFilesValid never masks the
@@ -184,6 +196,58 @@ describe('quadrat geometry preflight — scalar issues (blank/missing coordinate
     await waitFor(() => {
       expect(screen.getByText(/quadrat name is required/i)).toBeInTheDocument();
     });
+
+    expect(continueButton()).toBeDisabled();
+  });
+});
+
+describe('quadrat geometry preflight — plot dimensions unavailable', () => {
+  it('warns that geometry could not be validated and blocks Continue when the plot has no dimensions on record', async () => {
+    mockPlotContext.current = { plotID: 1, plotName: 'Test Plot', dimensionX: undefined, dimensionY: undefined };
+
+    const fileName = 'quadrats-no-plot-dims.csv';
+    // A row that would otherwise pass every row-level check cleanly — the only thing standing
+    // between this file and "all clear" is the missing plot dimensions collection validation needs.
+    const file = buildQuadratFile(fileName, 'Q0001,10,10,10,10,100,square');
+
+    await act(async () => {
+      render(<Harness uploadForm={FormType.quadrats} acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/quadrat geometry could not be validated/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/no dimensionx\/dimensiony on record/i)).toBeInTheDocument();
+
+    // This is "we could not check", not "your file is wrong" — the ordinary geometry-issues alert
+    // must not also fire for this otherwise-clean row.
+    expect(screen.queryByText(/quadrat geometry problem/i)).toBeNull();
+
+    expect(continueButton()).toBeDisabled();
+  });
+});
+
+describe('quadrat geometry preflight — large issue set is not clipped', () => {
+  it('shows a total count and caps rendered lines instead of rendering every issue', async () => {
+    const fileName = 'quadrats-many-issues.csv';
+    const totalIssueCount = 25;
+    const dataRows = Array.from({ length: totalIssueCount }, (_, i) => `Q${String(i + 1).padStart(4, '0')},,10,10,10,100,square`).join('\n');
+    const file = buildQuadratFile(fileName, dataRows);
+
+    await act(async () => {
+      render(<Harness uploadForm={FormType.quadrats} acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(new RegExp(`${totalIssueCount} quadrat geometry problems found`, 'i'))).toBeInTheDocument();
+    });
+
+    // The first issue line renders...
+    expect(screen.getByText(/Q0001: startx is required and must be numeric/i)).toBeInTheDocument();
+    // ...but the list is capped well below the full 25, so a late row's line must not be rendered,
+    // and the panel must say so rather than silently truncating.
+    expect(screen.queryByText(/Q0025: startx is required and must be numeric/i)).toBeNull();
+    expect(screen.getByText(/showing the first 20 of 25 issues for this file/i)).toBeInTheDocument();
 
     expect(continueButton()).toBeDisabled();
   });
