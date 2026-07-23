@@ -288,11 +288,11 @@ async function upsertQuadratRows(
 
   let insertedCount = 0;
   let updatedCount = 0;
-  // Quadrats never skip a row post-validation: a row that cannot be interpreted throws
-  // instead of being silently dropped, and every validated row is either inserted or
-  // updated. Always 0; kept in the return shape for interface parity with the other
-  // upsert*Rows functions (FixedDataProcessingResult), not because a skip path exists here.
-  const skippedCount = 0;
+  // Only entirely-empty rows (no name AND no geometry values -- e.g. trailing padding lines
+  // in a hand-edited CSV) are skipped, and they are counted so the response accounts for
+  // every input row. A row carrying ANY data that cannot be interpreted throws instead of
+  // being silently dropped or inserted with raw, unparsed values.
+  let skippedCount = 0;
 
   // Trust boundary: authoritative plot bounds come from the database row selected by
   // plotID. Client-supplied plot dimensions in the request body are never consulted here,
@@ -303,10 +303,18 @@ async function upsertQuadratRows(
   const plotDimensionX = toNullableNumber(plotBoundsRow?.DimensionX);
   const plotDimensionY = toNullableNumber(plotBoundsRow?.DimensionY);
 
-  if (!plotBoundsRow || plotDimensionX === null || plotDimensionY === null || plotDimensionX <= 0 || plotDimensionY <= 0) {
-    throw new QuadratGeometryValidationError(`Plot ${plotID} has no valid DimensionX/DimensionY on record; quadrat geometry cannot be validated.`);
+  // Plots recorded without usable dimensions (nullable columns, and rows written before this
+  // boundary existed) must not lock their sites out of quadrat management: degrade to bounds-less
+  // validation instead of rejecting. Overlap, duplicate-name, and non-positive-dimension checks
+  // still run in full; only the plot-edge checks are skipped, and the gap is logged.
+  const plotBoundsUsable = !!plotBoundsRow && plotDimensionX !== null && plotDimensionY !== null && plotDimensionX > 0 && plotDimensionY > 0;
+  const plotBounds = plotBoundsUsable ? { dimensionX: plotDimensionX, dimensionY: plotDimensionY } : null;
+  if (!plotBounds) {
+    ailogger.warn(
+      `Plot ${plotID} has no valid DimensionX/DimensionY on record; quadrat plot-bounds checks are skipped for this upload. ` +
+        `Overlap and duplicate-name validation still applies. Record the plot dimensions to restore full validation.`
+    );
   }
-  const plotBounds = { dimensionX: plotDimensionX, dimensionY: plotDimensionY };
 
   // Convert every incoming row to canonical geometry up front. A row that cannot be
   // interpreted is a hard error: it is never filtered out and never inserted using its
@@ -322,6 +330,11 @@ async function upsertQuadratRows(
   rows.forEach((row, index) => {
     const quadratName = normalizeRequiredString(row.quadrat);
     if (!quadratName) {
+      const hasGeometryValues = [row.startx, row.starty, row.dimx, row.dimy].some(value => normalizeRequiredString(value) !== '');
+      if (!hasGeometryValues) {
+        skippedCount += 1;
+        return;
+      }
       rowConversionFailures.push(`Quadrat upload row ${index + 1} has a missing or blank QuadratName.`);
       return;
     }
@@ -345,6 +358,11 @@ async function upsertQuadratRows(
 
   if (rowConversionFailures.length > 0) {
     throw new QuadratGeometryValidationError(`Quadrat upload has unusable rows: ${truncateAndJoin(rowConversionFailures, ' ')}`);
+  }
+  // A request that was all padding rows must not fall through: in CLEAN_REUPLOAD it would
+  // validate an empty layout and then wipe the plot's quadrats without inserting anything.
+  if (incomingGeometry.length === 0) {
+    throw new QuadratGeometryValidationError(`Quadrat upload contains no usable rows (${skippedCount} blank row(s) skipped).`);
   }
 
   const normalizedIncoming = incomingGeometry.map(row => normalizeToSouthwest(row, referenceCorner));
@@ -414,36 +432,71 @@ async function upsertQuadratRows(
     // set that must be geometrically valid is the PROSPECTIVE FINAL LAYOUT: every existing
     // active quadrat NOT named by this upload, plus every incoming row exactly as declared
     // (duplicates included, so a duplicate incoming name still surfaces as a validation
-    // issue instead of being silently deduplicated before this check runs).
+    // issue instead of being silently deduplicated before this check runs). NULL-named
+    // rows are deliberately included: an unnamed quadrat still occupies plot area, so it
+    // must participate in the overlap check even though no upload row can ever replace it.
     const existingQuadratsSQL = safeFormatQuery(
       schema,
-      `SELECT QuadratName, StartX, StartY, DimensionX, DimensionY FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1 AND QuadratName IS NOT NULL`
+      `SELECT QuadratID, QuadratName, StartX, StartY, DimensionX, DimensionY FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1`
     );
     const existingQuadratRows = await connectionManager.executeQuery(existingQuadratsSQL, [plotID], transactionID);
     const existingQuadratList: any[] = Array.isArray(existingQuadratRows) ? existingQuadratRows : [];
 
-    const existingGeometry: QuadratCsvRow[] = existingQuadratList.map(existingRow => {
+    // Divergent-placeholder guard runs FIRST: it needs only names, and its guidance message
+    // ("this plot still holds the provisioning placeholder grid, here is how to proceed") is
+    // strictly more actionable than the raw pairwise-overlap errors the geometry check would
+    // produce for the same replacement-grid upload. Running it after geometry validation made
+    // it unreachable in exactly its primary scenario, since a replacement grid always overlaps
+    // the placeholder grid it replaces.
+    const existingActiveNames = existingQuadratList.map(row => String(row.QuadratName ?? ''));
+    const incomingNames = rows.map(row => normalizeRequiredString(row.quadrat)).filter(Boolean);
+    if (quadratRevisionAppendsDivergentSet(existingActiveNames, incomingNames)) {
+      throw new Error(buildDivergentQuadratUploadError(plotID, existingActiveNames, incomingNames.length));
+    }
+
+    const incomingNamesLower = new Set(normalizedIncoming.map(row => row.quadratName.toLowerCase()));
+
+    // Build the carry-over set. Rows named by the upload are being replaced, so their stored
+    // geometry is irrelevant (and must not be parsed: rejecting a revision because the very
+    // row it repairs has malformed stored geometry would make that row permanently unfixable).
+    // A carry-over row whose stored geometry cannot be parsed -- legacy rows written before
+    // this boundary enforced geometry -- cannot participate in geometry math, so it is
+    // excluded from the prospective layout with a logged warning rather than rejecting the
+    // upload outright, which would lock the plot out of quadrat revisions entirely.
+    const carryOverExisting: QuadratCsvRow[] = [];
+    const unvalidatableExistingNames: string[] = [];
+    for (const existingRow of existingQuadratList) {
+      const storedName = String(existingRow.QuadratName ?? '').trim();
+      if (storedName && incomingNamesLower.has(storedName.toLowerCase())) continue;
+
+      // Unnamed rows get a synthetic display name: it keeps them visible in issue messages
+      // and cannot collide with incoming names, which are non-blank by this point.
+      const displayName = storedName || `(unnamed QuadratID ${existingRow.QuadratID})`;
       // Stored rows are always canonical south-west, so toQuadratGeometry here is a pure
       // parse -- not a re-declaration of the reference corner. coerceGeometryField is reused
       // rather than a second near-identical coercer: it maps undefined to undefined and
       // everything else through String(), which toQuadratGeometry treats the same as null.
       const geometry = toQuadratGeometry({
-        quadrat: coerceGeometryField(existingRow.QuadratName),
+        quadrat: displayName,
         startx: coerceGeometryField(existingRow.StartX),
         starty: coerceGeometryField(existingRow.StartY),
         dimx: coerceGeometryField(existingRow.DimensionX),
         dimy: coerceGeometryField(existingRow.DimensionY)
       });
       if (!geometry) {
-        throw new QuadratGeometryValidationError(
-          `Existing quadrat "${existingRow.QuadratName}" in plot ${plotID} has malformed stored geometry and cannot be used to validate this revision.`
-        );
+        unvalidatableExistingNames.push(displayName);
+        continue;
       }
-      return geometry;
-    });
+      carryOverExisting.push(geometry);
+    }
+    if (unvalidatableExistingNames.length > 0) {
+      ailogger.warn(
+        `Plot ${plotID} has ${unvalidatableExistingNames.length} existing active quadrat(s) with malformed stored geometry; ` +
+          `they were excluded from revision geometry validation: ${truncateAndJoin(unvalidatableExistingNames, ', ')}. ` +
+          `Re-upload those quadrats with valid geometry to restore full validation.`
+      );
+    }
 
-    const incomingNamesLower = new Set(normalizedIncoming.map(row => row.quadratName.toLowerCase()));
-    const carryOverExisting = existingGeometry.filter(row => !incomingNamesLower.has(row.quadratName.toLowerCase()));
     const prospectiveLayout = [...carryOverExisting, ...normalizedIncoming];
     if (prospectiveLayout.length > MAX_GENERATED_QUADRATS) {
       throw new QuadratGeometryValidationError(
@@ -451,19 +504,27 @@ async function upsertQuadratRows(
       );
     }
 
+    // Reject only defects this upload INTRODUCES. Issues confined to carry-over rows are
+    // pre-existing database state the uploader neither caused nor can repair in this file
+    // (repairing them is itself a Revisions upload, which would re-run this same check --
+    // blocking on them would deadlock the plot). Issue rowIndexes map into prospectiveLayout,
+    // so everything at or past carryOverExisting.length was introduced by an incoming row;
+    // an incoming row overlapping a carry-over row still blocks via the incoming row's entry.
+    const incomingStartIndex = carryOverExisting.length;
     const revisionIssues = validateQuadratCollection(prospectiveLayout, plotBounds, CANONICAL_SOUTHWEST_CORNER);
-    if (revisionIssues.length > 0) {
-      throw new QuadratGeometryValidationError(formatQuadratGeometryIssues(revisionIssues));
+    const preExistingIssues = revisionIssues.filter(issue => issue.rowIndex < incomingStartIndex);
+    const introducedIssues = revisionIssues.filter(issue => issue.rowIndex >= incomingStartIndex);
+    if (preExistingIssues.length > 0) {
+      ailogger.warn(
+        `Plot ${plotID} has pre-existing quadrat layout defects not caused by this upload: ` +
+          `${truncateAndJoin(
+            preExistingIssues.map(issue => issue.message),
+            ' '
+          )}`
+      );
     }
-
-    // Preserve the existing divergent-placeholder guard, run AFTER geometry validation.
-    // Refuse only a large, replacement-like file against the known generated Q#####
-    // placeholder grid. Other non-overlapping files are valid Revisions additions.
-    const existingActiveNames = existingQuadratList.map(row => String(row.QuadratName ?? ''));
-    const incomingNames = rows.map(row => normalizeRequiredString(row.quadrat)).filter(Boolean);
-
-    if (quadratRevisionAppendsDivergentSet(existingActiveNames, incomingNames)) {
-      throw new Error(buildDivergentQuadratUploadError(plotID, existingActiveNames, incomingNames.length));
+    if (introducedIssues.length > 0) {
+      throw new QuadratGeometryValidationError(formatQuadratGeometryIssues(introducedIssues));
     }
   }
 
@@ -476,6 +537,9 @@ async function upsertQuadratRows(
 
   for (const row of rows) {
     const quadratName = normalizeRequiredString(row.quadrat);
+    // Blank name here means an entirely-blank padding row: it was counted in skippedCount
+    // above (a blank name WITH data present already threw during row conversion).
+    if (!quadratName) continue;
     const canonical = canonicalByName.get(quadratName.toLowerCase());
     if (!canonical) {
       throw new QuadratGeometryValidationError(`Internal error: no canonical geometry resolved for quadrat "${quadratName}".`);
