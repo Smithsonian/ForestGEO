@@ -127,6 +127,45 @@ describe('validateQuadratCollection', () => {
     expect(issues.some(issue => /extends past plot/.test(issue.message))).toBe(false);
   });
 
+  it('maps a bounds issue back to the original array index when a preceding row was filtered out for a non-positive dimension (NE reference corner)', () => {
+    // Index 0 has a non-positive dimension and is dropped before collectQuadratBoundsIssues
+    // ever runs, so the filtered array handed to it has only one entry (the out-of-bounds
+    // row) sitting at filtered-index 0. That makes this fixture diverge from a single-row
+    // array: without the remap back to the caller's original index, the bounds issue below
+    // would misreport rowIndex 0 instead of its real position, 1.
+    const rows: QuadratCsvRow[] = [
+      { quadratName: 'FilteredZeroDim', startX: 10, startY: 10, dimensionX: -5, dimensionY: 10 },
+      { quadratName: 'OutOfBoundsNE', startX: 115, startY: 10, dimensionX: 20, dimensionY: 10 }
+    ];
+    const issues = validateQuadratCollection(rows, PLOT_100x60, 'NE');
+
+    const dimensionIssue = issues.find(issue => /non-positive dimension/.test(issue.message));
+    const boundsIssue = issues.find(issue => /extends past plot/.test(issue.message));
+
+    expect(dimensionIssue?.rowIndex).toBe(0);
+    expect(dimensionIssue?.quadratName).toBe('FilteredZeroDim');
+    expect(boundsIssue?.rowIndex).toBe(1);
+    expect(boundsIssue?.quadratName).toBe('OutOfBoundsNE');
+  });
+
+  it('maps overlap issues back to the original array indices when a preceding row was filtered out for a non-positive dimension (NE reference corner)', () => {
+    // Same reasoning as the bounds case above, but for findFirstOverlap: the leading
+    // filtered row makes the two overlapping rows land at filtered-indices 0 and 1 while
+    // their real positions in the caller's array are 1 and 2. Without the remap, both
+    // overlap issues would report the wrong (filtered-array) indices.
+    const rows: QuadratCsvRow[] = [
+      { quadratName: 'FilteredZeroDim', startX: 50, startY: 50, dimensionX: 0, dimensionY: 10 },
+      { quadratName: 'OverlapLeftNE', startX: 10, startY: 10, dimensionX: 10, dimensionY: 10 },
+      { quadratName: 'OverlapRightNE', startX: 15, startY: 15, dimensionX: 10, dimensionY: 10 }
+    ];
+    const issues = validateQuadratCollection(rows, PLOT_100x60, 'NE');
+
+    const overlapIssues = issues.filter(issue => /overlaps quadrat/.test(issue.message));
+    expect(overlapIssues).toHaveLength(2);
+    expect(overlapIssues.map(issue => issue.rowIndex).sort()).toEqual([1, 2]);
+    expect(overlapIssues.map(issue => issue.quadratName).sort()).toEqual(['OverlapLeftNE', 'OverlapRightNE']);
+  });
+
   it('reports duplicate quadrat names, including two names differing only by case', () => {
     const rows: QuadratCsvRow[] = [
       { quadratName: 'Dup', startX: 0, startY: 0, dimensionX: 10, dimensionY: 10 },
