@@ -18,6 +18,7 @@ import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessi
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
 import { buildDivergentQuadratUploadError, quadratRevisionAppendsDivergentSet } from '@/lib/ingestion/quadrat-upload-guards';
 import { toQuadratGeometry, validateQuadratCollection, type QuadratCollectionIssue } from '@/lib/provisioning/quadrat-collection-validation';
+import { collectOverlappingPairs } from '@/lib/provisioning/geometry';
 import {
   DEFAULT_REFERENCE_CORNER,
   isQuadratReferenceCorner,
@@ -186,11 +187,17 @@ function isSupportedUploadMode(value: unknown): value is UploadMode {
   return value === UploadMode.CLEAN_REUPLOAD || value === UploadMode.REVISIONS;
 }
 
+// Bounds the supplemental incoming-vs-layout overlap sweep in the REVISIONS branch. Because
+// that sweep only counts pairs involving an incoming row, this is a cap on what one upload
+// can itself introduce -- pre-existing overlaps in the plot never consume it.
+const MAX_BLOCKING_OVERLAP_PAIRS = 25;
+
+function formatQuadratGeometryMessages(messages: string[]): string {
+  return `Quadrat geometry validation failed: ${truncateAndJoin(messages, ' ')}`;
+}
+
 function formatQuadratGeometryIssues(issues: QuadratCollectionIssue[]): string {
-  return `Quadrat geometry validation failed: ${truncateAndJoin(
-    issues.map(issue => issue.message),
-    ' '
-  )}`;
+  return formatQuadratGeometryMessages(issues.map(issue => issue.message));
 }
 
 async function rollbackPreservingOriginalError(connectionManager: ConnectionManager, transactionID: string, context: Record<string, unknown>): Promise<void> {
@@ -523,8 +530,29 @@ async function upsertQuadratRows(
           )}`
       );
     }
-    if (introducedIssues.length > 0) {
-      throw new QuadratGeometryValidationError(formatQuadratGeometryIssues(introducedIssues));
+
+    // Supplemental cap-proof overlap sweep. validateQuadratCollection caps how many overlapping
+    // pairs it reports, and on a plot whose existing layout is saturated with overlaps (a real
+    // production case: every quadrat stacked at the same coordinates) pre-existing pairs can
+    // exhaust that cap and mask a NEW overlap this upload introduces. Only incoming-involving
+    // pairs are reportable here, so pre-existing pairs cannot crowd them out. Rows are already
+    // canonical south-west; non-positive-dimension rows are excluded from the sweep the same
+    // way the shared validator excludes them (they surface via their own dimension issue).
+    const incomingRowSet = new Set<QuadratCsvRow>(normalizedIncoming);
+    const sweepableLayout = prospectiveLayout.filter(row => row.dimensionX > 0 && row.dimensionY > 0);
+    const introducedOverlapMessages = collectOverlappingPairs(
+      sweepableLayout,
+      MAX_BLOCKING_OVERLAP_PAIRS,
+      (a, b) => incomingRowSet.has(a) || incomingRowSet.has(b)
+    ).map(([a, b]) => {
+      const [incomingRow, otherRow] = incomingRowSet.has(a) ? [a, b] : [b, a];
+      return `Quadrat "${incomingRow.quadratName}" overlaps quadrat "${otherRow.quadratName}".`;
+    });
+
+    const blockingMessages = new Set<string>(introducedIssues.map(issue => issue.message));
+    for (const message of introducedOverlapMessages) blockingMessages.add(message);
+    if (blockingMessages.size > 0) {
+      throw new QuadratGeometryValidationError(formatQuadratGeometryMessages([...blockingMessages]));
     }
   }
 

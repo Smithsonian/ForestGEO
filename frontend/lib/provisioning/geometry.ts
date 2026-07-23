@@ -60,8 +60,18 @@ export function collectQuadratBoundsIssues(rows: QuadratCsvRow[], plot: { dimens
  * per-pair — e.g. the Revisions write boundary, which blocks only pairs the upload introduces —
  * would otherwise have a new overlap masked behind a pre-existing one. `maxPairs` bounds the
  * result on pathological all-overlapping inputs, where the pair count is quadratic in row count.
+ *
+ * `isReportable` filters which pairs are collected — and only reportable pairs consume the cap.
+ * This matters on plots whose EXISTING layout is already saturated with overlaps (a real case:
+ * one production site has every quadrat stacked at the same coordinates): a caller that only
+ * cares about pairs involving new rows must not have them crowded out by thousands of
+ * pre-existing pairs that would exhaust `maxPairs` first.
  */
-export function collectOverlappingPairs(rows: QuadratCsvRow[], maxPairs: number): Array<[QuadratCsvRow, QuadratCsvRow]> {
+export function collectOverlappingPairs(
+  rows: QuadratCsvRow[],
+  maxPairs: number,
+  isReportable: (a: QuadratCsvRow, b: QuadratCsvRow) => boolean = () => true
+): Array<[QuadratCsvRow, QuadratCsvRow]> {
   if (rows.length < 2 || maxPairs <= 0) return [];
 
   const events: SweepEvent[] = [];
@@ -78,7 +88,7 @@ export function collectOverlappingPairs(rows: QuadratCsvRow[], maxPairs: number)
     if (event.type === 'open') {
       for (const other of active) {
         const yOverlap = event.row.startY < other.startY + other.dimensionY && event.row.startY + event.row.dimensionY > other.startY;
-        if (yOverlap) {
+        if (yOverlap && isReportable(other, event.row)) {
           pairs.push([other, event.row]);
           if (pairs.length >= maxPairs) return pairs;
         }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findFirstOverlap, collectQuadratBoundsIssues } from './geometry';
+import { collectOverlappingPairs, findFirstOverlap, collectQuadratBoundsIssues } from './geometry';
 
 const PERF_QUADRAT_COUNT = 10_000;
 const PERF_BUDGET_MS = 500;
@@ -113,6 +113,53 @@ describe('findFirstOverlap', () => {
     const elapsed = Date.now() - start;
     expect(result).toBeNull();
     expect(elapsed).toBeLessThan(PERF_BUDGET_MS);
+  });
+});
+
+describe('collectOverlappingPairs', () => {
+  it('reports every overlapping pair up to the cap', () => {
+    const rows = [
+      { quadratName: 'A1', startX: 0, startY: 0, dimensionX: 10, dimensionY: 10 },
+      { quadratName: 'A2', startX: 5, startY: 5, dimensionX: 10, dimensionY: 10 },
+      { quadratName: 'B1', startX: 50, startY: 0, dimensionX: 10, dimensionY: 10 },
+      { quadratName: 'B2', startX: 55, startY: 5, dimensionX: 10, dimensionY: 10 }
+    ];
+    const pairs = collectOverlappingPairs(rows, 10);
+    expect(pairs).toHaveLength(2);
+    const named = pairs.map(([a, b]) => [a.quadratName, b.quadratName].sort().join('-')).sort();
+    expect(named).toEqual(['A1-A2', 'B1-B2']);
+  });
+
+  it('stops collecting once the cap is reached', () => {
+    const stacked = Array.from({ length: 10 }, (_, i) => ({ quadratName: `S${i}`, startX: 0, startY: 0, dimensionX: 10, dimensionY: 10 }));
+    expect(collectOverlappingPairs(stacked, 3)).toHaveLength(3);
+  });
+
+  it('non-reportable pairs do not consume the cap', () => {
+    // Many stacked "existing" rows saturate any small cap on their own; the one pair
+    // involving the "incoming" row must still be reported when a predicate scopes the
+    // sweep to it. This is the masking case the predicate exists to prevent.
+    const stackedExisting = Array.from({ length: 20 }, (_, i) => ({
+      quadratName: `EXIST${i}`,
+      startX: 0,
+      startY: 0,
+      dimensionX: 10,
+      dimensionY: 10
+    }));
+    const farExisting = { quadratName: 'FAR', startX: 100, startY: 100, dimensionX: 10, dimensionY: 10 };
+    const incoming = { quadratName: 'INCOMING', startX: 105, startY: 105, dimensionX: 10, dimensionY: 10 };
+    const rows = [...stackedExisting, farExisting, incoming];
+
+    const cappedWithoutPredicate = collectOverlappingPairs(rows, 5);
+    expect(
+      cappedWithoutPredicate.some(([a, b]) => a.quadratName === 'INCOMING' || b.quadratName === 'INCOMING'),
+      'sanity: without a predicate the small cap is consumed by stacked pairs and the incoming pair is masked'
+    ).toBe(false);
+
+    const scoped = collectOverlappingPairs(rows, 5, (a, b) => a === incoming || b === incoming);
+    expect(scoped).toHaveLength(1);
+    const [a, b] = scoped[0];
+    expect([a.quadratName, b.quadratName].sort()).toEqual(['FAR', 'INCOMING']);
   });
 });
 

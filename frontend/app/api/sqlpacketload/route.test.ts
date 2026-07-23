@@ -1081,6 +1081,63 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(ailogger.warn).toHaveBeenCalledWith(expect.stringContaining('pre-existing quadrat layout defects'));
   });
 
+  it('still rejects an introduced overlap when pre-existing overlaps saturate the reporting cap', async () => {
+    // Real production case: a plot where every existing quadrat is stacked at the same
+    // coordinates, yielding thousands of pre-existing overlap pairs. The shared validator
+    // caps reported pairs, so those pre-existing pairs could exhaust the cap and mask the
+    // one NEW overlap this upload introduces. The supplemental incoming-only sweep must
+    // catch it regardless.
+    const STACKED_ROW_COUNT = 30; // 30 choose 2 = 435 pre-existing pairs, far past the 25-pair cap
+    const stackedExisting = Array.from({ length: STACKED_ROW_COUNT }, (_, i) => ({
+      QuadratID: i + 1,
+      QuadratName: `STACK${String(i + 1).padStart(2, '0')}`,
+      StartX: 0,
+      StartY: 0,
+      DimensionX: 20,
+      DimensionY: 20
+    }));
+    const farExisting = { QuadratID: 99, QuadratName: 'FAR', StartX: 400, StartY: 400, DimensionX: 20, DimensionY: 20 };
+
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]).mockResolvedValueOnce([...stackedExisting, farExisting]);
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'NEWOVL', startx: '410', starty: '410', dimx: '20', dimy: '20' } }, { uploadMode: 'revisions' })
+    );
+
+    expect(res?.status).toBe(400);
+    const body = await res?.json();
+    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
+    expect(body.error).toContain('"NEWOVL" overlaps quadrat "FAR"');
+  });
+
+  it('accepts a clean revision on a plot whose pre-existing overlaps saturate the reporting cap', async () => {
+    const STACKED_ROW_COUNT = 30;
+    const stackedExisting = Array.from({ length: STACKED_ROW_COUNT }, (_, i) => ({
+      QuadratID: i + 1,
+      QuadratName: `STACK${String(i + 1).padStart(2, '0')}`,
+      StartX: 0,
+      StartY: 0,
+      DimensionX: 20,
+      DimensionY: 20
+    }));
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce(stackedExisting)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 100 })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 101 });
+
+    const res = await POST(
+      makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'CLEANADD', startx: '400', starty: '400', dimx: '20', dimy: '20' } }, { uploadMode: 'revisions' })
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({ insertedCount: 1 });
+    expect(ailogger.warn).toHaveBeenCalledWith(expect.stringContaining('pre-existing quadrat layout defects'));
+  });
+
   it('surfaces the divergent-placeholder guidance INSTEAD of raw overlap errors for a replacement grid', async () => {
     // A real replacement grid always geometrically overlaps the placeholder grid it replaces,
     // so if geometry validation ran first the guard's actionable message would be unreachable
