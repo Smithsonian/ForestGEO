@@ -111,6 +111,12 @@ function renderUploadParseFiles(files: FileWithStream[], setColumnMappingForFile
       setSelectedDelimiters={() => {}}
       columnMappings={{}}
       setColumnMappingForFile={setColumnMappingForFile}
+      coordinateReferenceCorner="SW"
+      setCoordinateReferenceCorner={() => {}}
+      quadratOverlapAcknowledgment={null}
+      setQuadratOverlapAcknowledgment={() => {}}
+      serverQuadratOverlapSummaries={[]}
+      clearServerQuadratOverlapSummaries={() => {}}
       handleInitialSubmit={async () => {}}
       handleAddFile={() => {}}
       handleRemoveFile={() => {}}
