@@ -52,6 +52,15 @@ const OOB_NE_SCHEMA = TEST_SCHEMA_PREFIX + 'corner_ne_oob';
 
 const QUADRAT_SIDE = 20;
 const PLOT_SIDE = 100;
+// Every other row in CANONICAL_SW_ROWS is a 20x20 square, so shiftX and
+// shiftY are numerically identical for them regardless of which dimension
+// feeds which axis — an X/Y-transposed normalizeToSouthwest bug is invisible
+// against a square row. RECT_DIMENSION_X != RECT_DIMENSION_Y makes the
+// rectangular row's correct south-west position provably distinct from what
+// a transposed shift would produce, so the bug can only pass this suite by
+// accident (see the mutation proof in the task write-up, not asserted here).
+const RECT_DIMENSION_X = 30;
+const RECT_DIMENSION_Y = 10;
 const POLL_INTERVAL_MS = 200;
 // Two full provisioning runs (create_schema, init_tables, deploy_procedures,
 // seed_validations, apply_migrations, insert_catalog_row, insert_plot,
@@ -68,13 +77,23 @@ const RUN_TIMEOUT_MS = 60_000;
  *     NE-declared coordinate is exactly the plot's 100x100 boundary) — the
  *     row that overflows the bounds check under a missing normalization
  *   - two off-diagonal quadrats so a swapped X/Y shift would also be caught
+ *   - a rectangular (non-square) quadrat, Q_50_20_RECT — every other row here
+ *     is 20x20, and a square quadrat can't distinguish a correct normalization
+ *     from one with dimensionX/dimensionY transposed between the two axes,
+ *     since the shift is numerically identical either way. Placed at
+ *     (50, 20)-(80, 30): clear of every other row (nearest neighbors are
+ *     Q_40_00 at (40,0)-(60,20), touching only at the y=20 edge, and
+ *     Q_40_40/Q_80_80_FAR_EDGE, both clear on both axes) under the correct
+ *     transform, so it fails only on wrong coordinates, never on a spurious
+ *     overlap.
  */
 const CANONICAL_SW_ROWS: readonly QuadratCsvRow[] = [
   { quadratName: 'Q_00_00', startX: 0, startY: 0, dimensionX: QUADRAT_SIDE, dimensionY: QUADRAT_SIDE },
   { quadratName: 'Q_40_00', startX: 40, startY: 0, dimensionX: QUADRAT_SIDE, dimensionY: QUADRAT_SIDE },
   { quadratName: 'Q_00_40', startX: 0, startY: 40, dimensionX: QUADRAT_SIDE, dimensionY: QUADRAT_SIDE },
   { quadratName: 'Q_40_40', startX: 40, startY: 40, dimensionX: QUADRAT_SIDE, dimensionY: QUADRAT_SIDE },
-  { quadratName: 'Q_80_80_FAR_EDGE', startX: 80, startY: 80, dimensionX: QUADRAT_SIDE, dimensionY: QUADRAT_SIDE }
+  { quadratName: 'Q_80_80_FAR_EDGE', startX: 80, startY: 80, dimensionX: QUADRAT_SIDE, dimensionY: QUADRAT_SIDE },
+  { quadratName: 'Q_50_20_RECT', startX: 50, startY: 20, dimensionX: RECT_DIMENSION_X, dimensionY: RECT_DIMENSION_Y }
 ];
 
 /**

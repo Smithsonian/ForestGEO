@@ -22,6 +22,17 @@ const PLOT_100 = {
 
 const ROW = { quadratName: 'A', startX: 20, startY: 20, dimensionX: 20, dimensionY: 20 };
 
+// Every other fixture in this file (and, before this addition, every fixture
+// in the repo) is a 20x20 square. A square quadrat makes shiftX and shiftY
+// numerically identical, so swapping which dimension feeds which axis (or
+// dropping an axis entirely) is invisible against ROW. RECT_ROW's two
+// dimensions are deliberately unequal so all four reference corners produce
+// four distinct results, and a transposed-axis bug produces a wrong-but
+// -plausible answer instead of an accidental pass.
+const RECT_DIMENSION_X = 30;
+const RECT_DIMENSION_Y = 10;
+const RECT_ROW = { quadratName: 'RECT', startX: 20, startY: 20, dimensionX: RECT_DIMENSION_X, dimensionY: RECT_DIMENSION_Y };
+
 describe('normalizeToSouthwest', () => {
   it('leaves a south-west referenced row unchanged', () => {
     expect(normalizeToSouthwest(ROW, 'SW')).toEqual(ROW);
@@ -53,6 +64,31 @@ describe('normalizeToSouthwest', () => {
 
   it('preserves the quadrat name', () => {
     expect(normalizeToSouthwest(ROW, 'NE').quadratName).toBe('A');
+  });
+
+  it('leaves a south-west referenced rectangular row unchanged', () => {
+    expect(normalizeToSouthwest(RECT_ROW, 'SW')).toEqual(RECT_ROW);
+  });
+
+  it('subtracts the width (not the height) for a south-east referenced rectangular row', () => {
+    expect(normalizeToSouthwest(RECT_ROW, 'SE')).toEqual({ ...RECT_ROW, startX: 20 - RECT_DIMENSION_X, startY: 20 });
+  });
+
+  it('subtracts the height (not the width) for a north-west referenced rectangular row', () => {
+    expect(normalizeToSouthwest(RECT_ROW, 'NW')).toEqual({ ...RECT_ROW, startX: 20, startY: 20 - RECT_DIMENSION_Y });
+  });
+
+  it('subtracts the width from X and the height from Y for a north-east referenced rectangular row', () => {
+    expect(normalizeToSouthwest(RECT_ROW, 'NE')).toEqual({ ...RECT_ROW, startX: 20 - RECT_DIMENSION_X, startY: 20 - RECT_DIMENSION_Y });
+  });
+
+  it('produces four distinct results across the four corners for a rectangular row', () => {
+    // With a square row all four results can coincide pairwise depending on the
+    // bug; with RECT_ROW's unequal dimensions, a transposed or dropped axis is
+    // guaranteed to diverge from at least one of these four values.
+    const results = REFERENCE_CORNER_OPTIONS.map(o => normalizeToSouthwest(RECT_ROW, o.value));
+    const serialized = results.map(r => `${r.startX},${r.startY}`);
+    expect(new Set(serialized).size).toBe(4);
   });
 
   it('offers exactly the four corners', () => {
