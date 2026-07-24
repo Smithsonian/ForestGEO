@@ -17,7 +17,7 @@ const LAYOUT_SIGNATURE_PREFIX = 'quadrat-layout-v1-';
  * warn-and-acknowledge condition while every other kind stays a hard error. The kind is
  * carried on the issue so that split never relies on message-string matching.
  */
-export type QuadratIssueKind = 'non-positive-dimension' | 'bounds' | 'duplicate-name' | 'overlap';
+export type QuadratIssueKind = 'non-positive-dimension' | 'bounds' | 'duplicate-name';
 
 /**
  * The confirmation statement a user accepts when proceeding with overlapping quadrat
@@ -46,7 +46,7 @@ export interface QuadratOverlapSummary {
 }
 
 export interface QuadratCollectionValidationResult {
-  issues: QuadratCollectionIssue[];
+  fatalIssues: QuadratCollectionIssue[];
   overlapSummary: QuadratOverlapSummary | null;
 }
 
@@ -133,13 +133,22 @@ export function acknowledgmentCoversLayout(value: unknown, layoutSignature: stri
 
 /** The Quadrats-page upload row shape (see app/api/sqlpacketload/route.ts). Values come straight off a parsed file row. */
 export interface UploadShapedRow {
-  quadrat?: string | null;
-  startx?: string | null;
-  starty?: string | null;
-  dimx?: string | null;
-  dimy?: string | null;
-  area?: string | null;
-  quadratshape?: string | null;
+  quadrat?: unknown;
+  startx?: unknown;
+  starty?: unknown;
+  dimx?: unknown;
+  dimy?: unknown;
+  area?: unknown;
+  quadratshape?: unknown;
+}
+
+function isBlankValue(value: unknown): boolean {
+  return value === undefined || value === null || String(value).trim() === '';
+}
+
+/** Matches the write boundary's padding policy: name and all geometry cells are blank. */
+export function isBlankQuadratPaddingRow(row: UploadShapedRow): boolean {
+  return [row.quadrat, row.startx, row.starty, row.dimx, row.dimy].every(isBlankValue);
 }
 
 /**
@@ -147,9 +156,9 @@ export interface UploadShapedRow {
  * never 0. `Number('')` is 0 in JavaScript, so a naive `Number(value)` would silently turn a
  * missing coordinate into a quadrat pinned to the plot origin.
  */
-function parseRequiredNumber(value: string | null | undefined): number | null {
+function parseRequiredNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
-  const trimmed = value.trim();
+  const trimmed = String(value).trim();
   if (trimmed === '') return null;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
@@ -163,7 +172,7 @@ function parseRequiredNumber(value: string | null | undefined): number | null {
  * at (0, 0).
  */
 export function toQuadratGeometry(row: UploadShapedRow): QuadratCsvRow | null {
-  const quadratName = row.quadrat?.trim();
+  const quadratName = typeof row.quadrat === 'string' ? row.quadrat.trim() : String(row.quadrat ?? '').trim();
   if (!quadratName) return null;
 
   const startX = parseRequiredNumber(row.startx);
@@ -200,7 +209,7 @@ export function validateQuadratCollectionDetailed(
   plot: { dimensionX: number; dimensionY: number } | null,
   referenceCorner: QuadratReferenceCorner
 ): QuadratCollectionValidationResult {
-  const issues: QuadratCollectionIssue[] = [];
+  const fatalIssues: QuadratCollectionIssue[] = [];
   const normalizedRows = rows.map(row => normalizeToSouthwest(row, referenceCorner));
 
   const geometricallyValidRows: QuadratCsvRow[] = [];
@@ -208,7 +217,7 @@ export function validateQuadratCollectionDetailed(
 
   normalizedRows.forEach((row, rowIndex) => {
     if (row.dimensionX <= 0 || row.dimensionY <= 0) {
-      issues.push({
+      fatalIssues.push({
         kind: 'non-positive-dimension',
         rowIndex,
         quadratName: row.quadratName,
@@ -228,7 +237,7 @@ export function validateQuadratCollectionDetailed(
         rowIndex: originalIndexByGeometricRow.get(geometricallyValidRows[issue.rowIndex]) ?? issue.rowIndex
       })
     );
-    issues.push(...boundsIssues);
+    fatalIssues.push(...boundsIssues);
   }
 
   const nameOccurrences = new Map<string, number>();
@@ -239,7 +248,7 @@ export function validateQuadratCollectionDetailed(
   normalizedRows.forEach((row, rowIndex) => {
     const key = row.quadratName.trim().toLowerCase();
     if ((nameOccurrences.get(key) ?? 0) > 1) {
-      issues.push({
+      fatalIssues.push({
         kind: 'duplicate-name',
         rowIndex,
         quadratName: row.quadratName,
@@ -248,34 +257,10 @@ export function validateQuadratCollectionDetailed(
     }
   });
 
-  // Ask for one pair beyond the reporting cap. This keeps pathological all-overlapping inputs
-  // bounded while allowing callers to distinguish a complete list from a truncated sample.
+  // Overlaps are represented once, as a bounded summary. Callers no longer receive duplicate
+  // directional issues that they immediately have to filter back out before applying policy.
   const geometricOverlapSummary = summarizeQuadratOverlaps(geometricallyValidRows);
   const overlapSummary = geometricOverlapSummary ? { ...geometricOverlapSummary, layoutSignature: createQuadratLayoutSignature(normalizedRows) } : null;
-  const overlapPairs = collectOverlappingPairs(geometricallyValidRows, MAX_REPORTED_OVERLAP_PAIRS);
 
-  for (const [first, second] of overlapPairs) {
-    issues.push({
-      kind: 'overlap',
-      rowIndex: originalIndexByGeometricRow.get(first) ?? -1,
-      quadratName: first.quadratName,
-      message: `Quadrat "${first.quadratName}" overlaps quadrat "${second.quadratName}".`
-    });
-    issues.push({
-      kind: 'overlap',
-      rowIndex: originalIndexByGeometricRow.get(second) ?? -1,
-      quadratName: second.quadratName,
-      message: `Quadrat "${second.quadratName}" overlaps quadrat "${first.quadratName}".`
-    });
-  }
-
-  return { issues, overlapSummary };
-}
-
-export function validateQuadratCollection(
-  rows: QuadratCsvRow[],
-  plot: { dimensionX: number; dimensionY: number } | null,
-  referenceCorner: QuadratReferenceCorner
-): QuadratCollectionIssue[] {
-  return validateQuadratCollectionDetailed(rows, plot, referenceCorner).issues;
+  return { fatalIssues, overlapSummary };
 }

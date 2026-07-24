@@ -1214,14 +1214,24 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(res?.status).toBe(200);
     await expect(res?.json()).resolves.toMatchObject({ insertedCount: 2 });
 
-    const changelogInsertCall = mockConnectionManager.executeQuery.mock.calls.find(
-      (call: any[]) => String(call[0]).includes('unifiedchangelog') && String(call[0]).includes('INSERT INTO')
+    const fileUploadInsertCall = mockConnectionManager.executeQuery.mock.calls.find(
+      (call: any[]) => String(call[0]).includes('unifiedchangelog') && call[1]?.[0] === 'file_upload'
     );
-    expect(changelogInsertCall, 'the file_upload changelog entry must have been written').toBeDefined();
-    const storedMetadata = JSON.parse(changelogInsertCall![1][3]);
-    expect(storedMetadata.overlapAcknowledgment.statement).toBe(QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT);
-    expect(storedMetadata.overlapAcknowledgment.summaries[0].pairs.some((pair: { message: string }) => pair.message.includes('overlaps'))).toBe(true);
-    expect(storedMetadata.overlapAcknowledgment.acknowledgedBy).toBe('user-1');
+    expect(fileUploadInsertCall, 'the file_upload changelog entry must have been written').toBeDefined();
+    expect(JSON.parse(fileUploadInsertCall![1][3])).not.toHaveProperty('overlapAcknowledgment');
+
+    const acknowledgmentInsertCall = mockConnectionManager.executeQuery.mock.calls.find(
+      (call: any[]) => String(call[0]).includes('unifiedchangelog') && call[1]?.[0] === 'quadrat_overlap_acknowledgment'
+    );
+    expect(acknowledgmentInsertCall, 'the immutable acknowledgment event must have been written').toBeDefined();
+    expect(String(acknowledgmentInsertCall![0])).toContain('WHERE NOT EXISTS');
+    expect(acknowledgmentInsertCall![1][1]).toMatch(/^[a-f0-9]{40}$/);
+    expect(acknowledgmentInsertCall![1][1]).toBe(acknowledgmentInsertCall![1][6]);
+    const storedEvent = JSON.parse(acknowledgmentInsertCall![1][2]);
+    expect(storedEvent.statement).toBe(QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT);
+    expect(storedEvent.summaries[0].pairs.some((pair: { message: string }) => pair.message.includes('overlaps'))).toBe(true);
+    expect(storedEvent.acknowledgedBy).toBe('user-1');
+    expect(storedEvent.uploadSessionId).toBe(TEST_SESSION_ID);
   });
 
   it('does not treat a coerced false value as an overlap acknowledgment', async () => {
@@ -1287,7 +1297,8 @@ describe('sqlpacketload fixed-data upload modes', () => {
       .mockResolvedValueOnce({ insertId: 1 })
       .mockResolvedValueOnce({ insertId: 2 })
       .mockResolvedValueOnce([])
-      .mockRejectedValueOnce(new Error('changelog unavailable'));
+      .mockResolvedValueOnce({ insertId: 3 })
+      .mockRejectedValueOnce(new Error('acknowledgment changelog unavailable'));
 
     const res = await POST(
       makeFixedDataRequest(
@@ -1389,8 +1400,6 @@ describe('sqlpacketload fixed-data upload modes', () => {
   it('rejects a quadrat upload whose rows are ALL blank padding before deleting anything', async () => {
     // Falling through with zero usable rows would validate an empty layout and then, in
     // CLEAN_REUPLOAD, wipe the plot's quadrats without inserting anything.
-    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
-
     const res = await POST(
       makeFixedDataRequest('quadrats', { 'row-1': { quadrat: '', startx: '', starty: '', dimx: '', dimy: '' } }, { uploadMode: 'clean_reupload' })
     );
@@ -1399,16 +1408,12 @@ describe('sqlpacketload fixed-data upload modes', () => {
     const body = await res?.json();
     expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
     expect(body.error).toContain('contains no usable rows (1 blank row(s) skipped)');
-    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
   });
 
   it('reports every unconvertible row in a rejected quadrat upload, not just the first', async () => {
     // Two rows are bad for two DIFFERENT reasons (blank name vs. non-numeric coordinate) and
     // one row is entirely valid. A fail-fast implementation would only ever mention row 1.
-    mockConnectionManager.executeQuery
-      // authoritative plot bounds lookup
-      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
-
     const res = await POST(
       makeFixedDataRequest(
         'quadrats',
@@ -1430,7 +1435,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // The valid third row must not be reported.
     expect(body.error).not.toContain('GOOD03');
     // Nothing was ever written: the failure happens before the stem-safety check or delete.
-    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
     expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
   });
 

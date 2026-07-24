@@ -32,7 +32,7 @@ export function quadratLayoutIsValid(input: ProvisioningRequestInput): boolean {
   if (rows.length === 0) return false;
   // Acknowledged overlaps are valid field measurements, not layout defects (mirrors the
   // canonical schema's superRefine policy). Unacknowledged overlaps still fail the gate.
-  const { issues, overlapSummary } = validateQuadratCollectionDetailed(rows, input.plot, 'SW');
+  const { fatalIssues, overlapSummary } = validateQuadratCollectionDetailed(rows, input.plot, 'SW');
   const overlapsAcknowledged = overlapSummary !== null && acknowledgmentCoversLayout(csvQuadrats.overlapAcknowledgment, overlapSummary.layoutSignature);
-  return issues.filter(issue => !(issue.kind === 'overlap' && overlapsAcknowledged)).length === 0;
+  return fatalIssues.length === 0 && (overlapSummary === null || overlapsAcknowledged);
 }

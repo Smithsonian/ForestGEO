@@ -130,15 +130,23 @@ export const CanonicalProvisioningSchema = z
     // layout with overlapping footprints is valid provisioning input when the admin has
     // explicitly acknowledged them (the acknowledgment text travels in the stored payload).
     // Every other issue kind remains a hard validation error.
-    const { issues, overlapSummary } = validateQuadratCollectionDetailed(rows, input.plot, 'SW');
+    const { fatalIssues, overlapSummary } = validateQuadratCollectionDetailed(rows, input.plot, 'SW');
     const overlapsAcknowledged = overlapSummary !== null && acknowledgmentCoversLayout(input.quadrats.overlapAcknowledgment, overlapSummary.layoutSignature);
-    for (const issue of issues) {
-      if (issue.kind === 'overlap' && overlapsAcknowledged) continue;
+    for (const issue of fatalIssues) {
       ctx.addIssue({
         code: 'custom',
         path: ['quadrats', 'rows', issue.rowIndex],
-        message: issue.kind === 'overlap' ? `${issue.message} If the overlap reflects field measurements, confirm the overlap acknowledgment.` : issue.message
+        message: issue.message
       });
+    }
+    if (overlapSummary && !overlapsAcknowledged) {
+      for (const pair of overlapSummary.pairs) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['quadrats', 'rows'],
+          message: `${pair.message} If the overlap reflects field measurements, confirm the overlap acknowledgment.`
+        });
+      }
     }
   });
 

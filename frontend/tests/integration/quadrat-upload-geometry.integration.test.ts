@@ -120,7 +120,7 @@ import { POST } from '@/app/api/sqlpacketload/route';
 function buildQuadratUploadRequest(body: Record<string, unknown>) {
   return new Request('http://localhost/api/sqlpacketload', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-upload-session-id': 'quadrat-geometry-integration-session' },
     body: JSON.stringify(body)
   }) as any;
 }
@@ -296,18 +296,28 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
       )
     ))!;
 
-    expect(res.status, 'acknowledged overlaps must commit').toBe(HTTP_OK);
+    const responsePayload = await res.clone().json();
+    expect(res.status, `acknowledged overlaps must commit: ${JSON.stringify(responsePayload)}`).toBe(HTTP_OK);
     expect(await findQuadratByName(connection, plotID, 'ACKA')).not.toBeNull();
     expect(await findQuadratByName(connection, plotID, 'ACKB')).not.toBeNull();
 
-    const [changelogRows] = await connection.query<RowDataPacket[]>(
+    const [fileUploadRows] = await connection.query<RowDataPacket[]>(
       `SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload' AND RecordID = 'quadrats.csv' ORDER BY ChangeID DESC LIMIT 1`
     );
-    expect(changelogRows.length, 'the file_upload changelog entry must exist').toBe(1);
-    const metadata = typeof changelogRows[0].NewRowState === 'string' ? JSON.parse(changelogRows[0].NewRowState) : changelogRows[0].NewRowState;
-    expect(metadata.overlapAcknowledgment.statement).toBe(QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT);
-    expect(metadata.overlapAcknowledgment.summaries[0].pairs.some((pair: { message: string }) => pair.message.includes('ACKA'))).toBe(true);
-    expect(metadata.overlapAcknowledgment.acknowledgedBy).toBeDefined();
+    expect(fileUploadRows.length, 'the file_upload changelog entry must exist').toBe(1);
+    const fileUploadMetadata = typeof fileUploadRows[0].NewRowState === 'string' ? JSON.parse(fileUploadRows[0].NewRowState) : fileUploadRows[0].NewRowState;
+    expect(fileUploadMetadata).not.toHaveProperty('overlapAcknowledgment');
+
+    const [acknowledgmentRows] = await connection.query<RowDataPacket[]>(
+      `SELECT NewRowState FROM unifiedchangelog
+       WHERE TableName = 'quadrat_overlap_acknowledgment' AND Operation = 'INSERT'
+       ORDER BY ChangeID DESC LIMIT 1`
+    );
+    expect(acknowledgmentRows.length, 'the append-only acknowledgment changelog event must exist').toBe(1);
+    const event = typeof acknowledgmentRows[0].NewRowState === 'string' ? JSON.parse(acknowledgmentRows[0].NewRowState) : acknowledgmentRows[0].NewRowState;
+    expect(event.statement).toBe(QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT);
+    expect(event.summaries[0].pairs.some((pair: { message: string }) => pair.message.includes('ACKA'))).toBe(true);
+    expect(event.acknowledgedBy).toBeDefined();
   });
 
   it('rejects a row with a blank StartX with 400', async () => {
@@ -411,7 +421,8 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
         quadratOverlapAcknowledgment: buildQuadratOverlapAcknowledgment([signature])
       })
     ))!;
-    expect(confirmedResponse.status).toBe(HTTP_OK);
+    const confirmedPayload = await confirmedResponse.clone().json();
+    expect(confirmedResponse.status, JSON.stringify(confirmedPayload)).toBe(HTTP_OK);
     expect(await findQuadratByName(connection, plotID, 'CHALLENGE-NEW')).not.toBeNull();
   });
 

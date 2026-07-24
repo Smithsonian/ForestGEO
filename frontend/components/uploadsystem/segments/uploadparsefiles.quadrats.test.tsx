@@ -12,6 +12,7 @@ import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { FileWithStream, type UploadParseFilesProps } from '@/config/macros/uploadsystemmacros';
 import { DEFAULT_REFERENCE_CORNER } from '@/lib/provisioning/coordinate-reference-corner';
+import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
 import type { QuadratOverlapAcknowledgment, QuadratReferenceCorner } from '@/lib/provisioning/types';
 import UploadParseFiles, { parseQuadratFileRows } from './uploadparsefiles';
 
@@ -59,7 +60,9 @@ vi.mock('@/components/uploadsystemhelpers/filelistenhanced', async () => {
 });
 
 vi.mock('@/components/uploadsystemhelpers/dropzonecompact', () => ({
-  DropzoneCompact: () => null
+  DropzoneCompact: ({ allowMultipleFiles }: { allowMultipleFiles?: boolean }) => (
+    <div data-testid="dropzone-file-mode">{allowMultipleFiles === false ? 'single' : 'multiple'}</div>
+  )
 }));
 
 const QUADRAT_HEADER_ROW = 'quadrat,startx,starty,dimx,dimy,area,quadratshape';
@@ -233,15 +236,9 @@ describe('quadrat geometry preflight — overlap acknowledgment', () => {
     expect(screen.queryByRole('checkbox', { name: /acknowledge quadrat overlaps/i })).toBeNull();
   });
 
-  it('detects overlaps spanning separate files before upload begins', async () => {
-    const first = buildQuadratFile('quadrats-a.csv', 'A,10,10,20,20,400,square');
-    const second = buildQuadratFile('quadrats-b.csv', 'B,20,20,20,20,400,square');
-
-    render(<Harness uploadForm={FormType.quadrats} acceptedFiles={[first, second]} selectedDelimiters={{ 'quadrats-a.csv': ',', 'quadrats-b.csv': ',' }} />);
-
-    await waitFor(() => expect(screen.getByText(/overlapping quadrat footprints detected/i)).toBeInTheDocument());
-    expect(screen.getByText(/Quadrat "A" overlaps quadrat "B"/i)).toBeInTheDocument();
-    expect(continueButton()).toBeDisabled();
+  it('configures the quadrat dropzone for exactly one file', () => {
+    render(<Harness uploadForm={FormType.quadrats} />);
+    expect(screen.getByTestId('dropzone-file-mode')).toHaveTextContent('single');
   });
 
   it('surfaces a server-discovered existing-layout overlap and allows an explicit retry acknowledgment', async () => {
@@ -313,7 +310,7 @@ describe('quadrat geometry preflight — scalar issues (blank/missing coordinate
 });
 
 describe('quadrat geometry preflight — plot dimensions unavailable', () => {
-  it('warns that geometry could not be validated and blocks Continue when the plot has no dimensions on record', async () => {
+  it('warns that bounds could not be validated but allows Continue when the plot has no dimensions on record', async () => {
     mockPlotContext.current = { plotID: 1, plotName: 'Test Plot', dimensionX: undefined, dimensionY: undefined };
 
     const fileName = 'quadrats-no-plot-dims.csv';
@@ -334,7 +331,7 @@ describe('quadrat geometry preflight — plot dimensions unavailable', () => {
     // must not also fire for this otherwise-clean row.
     expect(screen.queryByText(/quadrat geometry problem/i)).toBeNull();
 
-    expect(continueButton()).toBeDisabled();
+    expect(continueButton()).not.toBeDisabled();
   });
 
   it('treats NULL plot dimensions like missing ones instead of flagging every row as out of bounds', async () => {
@@ -360,6 +357,7 @@ describe('quadrat geometry preflight — plot dimensions unavailable', () => {
     });
     expect(screen.queryByText(/extends past plot/i)).toBeNull();
     expect(screen.queryByText(/quadrat geometry problem/i)).toBeNull();
+    expect(continueButton()).not.toBeDisabled();
   });
 
   it('still reports an overlap between rows when plot dimensions are unavailable', async () => {
@@ -375,9 +373,41 @@ describe('quadrat geometry preflight — plot dimensions unavailable', () => {
     });
 
     await waitFor(() => {
-      // Both directions of the pair are reported (Q0001 vs Q0002 and Q0002 vs Q0001).
       expect(screen.getAllByText(/overlaps quadrat/i).length).toBeGreaterThan(0);
     });
+    expect(continueButton()).toBeDisabled();
+  });
+});
+
+describe('quadrat geometry preflight — usable-row parity', () => {
+  it('ignores delimiter-only padding rows when a usable quadrat row is present', async () => {
+    const fileName = 'quadrats-with-padding.csv';
+    const file = buildQuadratFile(fileName, ',,,,,,\nQ0001,10,10,10,10,100,square');
+
+    render(<Harness acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} />);
+
+    await waitFor(() => expect(continueButton()).not.toBeDisabled());
+    expect(screen.queryByText(/quadrat geometry problem/i)).toBeNull();
+  });
+
+  it('blocks a file containing only delimiter padding rows', async () => {
+    const fileName = 'quadrats-only-padding.csv';
+    const file = buildQuadratFile(fileName, ',,,,,,');
+
+    render(<Harness acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} />);
+
+    await waitFor(() => expect(screen.getByText(/contains no usable quadrat rows/i)).toBeInTheDocument());
+    expect(continueButton()).toBeDisabled();
+  });
+
+  it('blocks more than the maximum number of usable quadrat rows', async () => {
+    const fileName = 'quadrats-too-many.csv';
+    const dataRows = Array.from({ length: MAX_GENERATED_QUADRATS + 1 }, (_, index) => `Q${index},${index},0,1,1,1,square`).join('\n');
+    const file = buildQuadratFile(fileName, dataRows);
+
+    render(<Harness acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} />);
+
+    await waitFor(() => expect(screen.getByText(new RegExp(`maximum is ${MAX_GENERATED_QUADRATS}`, 'i'))).toBeInTheDocument(), { timeout: 10_000 });
     expect(continueButton()).toBeDisabled();
   });
 });
