@@ -13,17 +13,10 @@ import {
   type QuadratCollectionIssue,
   type QuadratOverlapSummary
 } from '@/lib/provisioning/quadrat-collection-validation';
-import {
-  DEFAULT_REFERENCE_CORNER,
-  isQuadratReferenceCorner,
-  normalizeToSouthwest,
-  type QuadratReferenceCorner
-} from '@/lib/provisioning/coordinate-reference-corner';
 import type { QuadratCsvRow } from '@/lib/provisioning/types';
 import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
 
 const MAX_LISTED_ISSUES = 20;
-const CANONICAL_SOUTHWEST_CORNER: QuadratReferenceCorner = 'SW';
 
 export interface QuadratWriteResult {
   insertedCount: number;
@@ -42,14 +35,6 @@ export class QuadratOverlapAcknowledgmentRequiredError extends Error {
     super(message);
     this.name = 'QuadratOverlapAcknowledgmentRequiredError';
   }
-}
-
-export function parseQuadratReferenceCorner(value: unknown): QuadratReferenceCorner {
-  if (value === undefined || value === null) return DEFAULT_REFERENCE_CORNER;
-  if (!isQuadratReferenceCorner(value)) {
-    throw new QuadratGeometryValidationError('coordinateReferenceCorner must be SW, SE, NW, or NE');
-  }
-  return value;
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -99,7 +84,6 @@ export async function writeQuadratUpload(
   plotID: number | undefined,
   rows: FileRow[],
   uploadMode: UploadMode,
-  referenceCorner: QuadratReferenceCorner,
   overlapAcknowledgment: unknown,
   transactionID: string
 ): Promise<QuadratWriteResult> {
@@ -169,7 +153,6 @@ export async function writeQuadratUpload(
     );
   }
 
-  const normalizedIncoming = incomingGeometry.map(row => normalizeToSouthwest(row, referenceCorner));
   const acknowledgedOverlapSummaries: QuadratOverlapSummary[] = [];
   const requireOverlapAcknowledgment = (overlapSummary: QuadratOverlapSummary | null) => {
     if (!overlapSummary) return;
@@ -188,7 +171,7 @@ export async function writeQuadratUpload(
   };
 
   if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-    const cleanValidation = validateQuadratCollectionDetailed(normalizedIncoming, plotBounds, CANONICAL_SOUTHWEST_CORNER);
+    const cleanValidation = validateQuadratCollectionDetailed(incomingGeometry, plotBounds);
     if (cleanValidation.fatalIssues.length > 0) {
       throw new QuadratGeometryValidationError(formatGeometryIssues(cleanValidation.fatalIssues));
     }
@@ -242,7 +225,7 @@ export async function writeQuadratUpload(
       throw new Error(buildDivergentQuadratUploadError(plotID, existingActiveNames, incomingNames.length));
     }
 
-    const incomingNamesLower = new Set(normalizedIncoming.map(row => row.quadratName.toLowerCase()));
+    const incomingNamesLower = new Set(incomingGeometry.map(row => row.quadratName.toLowerCase()));
     const carryOverExisting: QuadratCsvRow[] = [];
     const unvalidatableExistingNames: string[] = [];
     for (const existingRow of existingQuadratList) {
@@ -271,7 +254,7 @@ export async function writeQuadratUpload(
       );
     }
 
-    const prospectiveLayout = [...carryOverExisting, ...normalizedIncoming];
+    const prospectiveLayout = [...carryOverExisting, ...incomingGeometry];
     if (prospectiveLayout.length > MAX_GENERATED_QUADRATS) {
       throw new QuadratGeometryValidationError(
         `Prospective quadrat layout contains ${prospectiveLayout.length} rows; maximum allowed per plot is ${MAX_GENERATED_QUADRATS}.`
@@ -279,7 +262,7 @@ export async function writeQuadratUpload(
     }
 
     const incomingStartIndex = carryOverExisting.length;
-    const revisionFatalIssues = validateQuadratCollectionDetailed(prospectiveLayout, plotBounds, CANONICAL_SOUTHWEST_CORNER).fatalIssues;
+    const revisionFatalIssues = validateQuadratCollectionDetailed(prospectiveLayout, plotBounds).fatalIssues;
     const preExistingIssues = revisionFatalIssues.filter(issue => issue.rowIndex < incomingStartIndex);
     const introducedIssues = revisionFatalIssues.filter(issue => issue.rowIndex >= incomingStartIndex);
     if (preExistingIssues.length > 0) {
@@ -302,7 +285,7 @@ export async function writeQuadratUpload(
       );
     }
 
-    const incomingRowSet = new Set<QuadratCsvRow>(normalizedIncoming);
+    const incomingRowSet = new Set<QuadratCsvRow>(incomingGeometry);
     const sweepableLayout = prospectiveLayout.filter(row => row.dimensionX > 0 && row.dimensionY > 0);
     const introducedOverlapSummary = summarizeQuadratOverlaps(sweepableLayout, (a, b) => incomingRowSet.has(a) || incomingRowSet.has(b));
 
@@ -313,24 +296,24 @@ export async function writeQuadratUpload(
     requireOverlapAcknowledgment(introducedOverlapSummary);
   }
 
-  const canonicalByName = new Map<string, QuadratCsvRow>();
-  for (const row of normalizedIncoming) {
-    canonicalByName.set(row.quadratName.toLowerCase(), row);
+  const geometryByName = new Map<string, QuadratCsvRow>();
+  for (const row of incomingGeometry) {
+    geometryByName.set(row.quadratName.toLowerCase(), row);
   }
 
   for (const row of rows) {
     const quadratName = normalizeRequiredString(row.quadrat);
     if (!quadratName) continue;
-    const canonical = canonicalByName.get(quadratName.toLowerCase());
-    if (!canonical) {
-      throw new QuadratGeometryValidationError(`Internal error: no canonical geometry resolved for quadrat "${quadratName}".`);
+    const geometry = geometryByName.get(quadratName.toLowerCase());
+    if (!geometry) {
+      throw new QuadratGeometryValidationError(`Internal error: no validated geometry resolved for quadrat "${quadratName}".`);
     }
 
     const payload = {
-      StartX: canonical.startX,
-      StartY: canonical.startY,
-      DimensionX: canonical.dimensionX,
-      DimensionY: canonical.dimensionY,
+      StartX: geometry.startX,
+      StartY: geometry.startY,
+      DimensionX: geometry.dimensionX,
+      DimensionY: geometry.dimensionY,
       Area: row.area,
       QuadratShape: normalizeOptionalString(row.quadratshape)
     };

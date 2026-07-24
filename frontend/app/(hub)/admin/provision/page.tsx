@@ -10,7 +10,7 @@ import QuadratPlanner from '@/components/provisioning/QuadratPlanner';
 import Review from '@/components/provisioning/Review';
 import { ProvisioningPlotSchema, ProvisioningSiteSchema } from '@/lib/provisioning/input-schema';
 import { quadratLayoutIsValid } from '@/lib/provisioning/quadrat-layout-gate';
-import type { ProvisioningPlotInput, ProvisioningRequestInput } from '@/lib/provisioning/types';
+import type { ProvisioningPlotInput, ProvisioningInput } from '@/lib/provisioning/types';
 import { applyAreaDerivation, resolvePlotAreaChange, type AreaMode } from '@/lib/provisioning/area';
 
 const STEPS = ['Site', 'Plot', 'Quadrats', 'Review'] as const;
@@ -20,7 +20,7 @@ const STEP_PLOT_INDEX = 1;
 const STEP_QUADRATS_INDEX = 2;
 const STEP_REVIEW_INDEX = 3;
 
-const DEFAULT_INPUT: ProvisioningRequestInput = {
+const DEFAULT_INPUT: ProvisioningInput = {
   site: {
     siteName: '',
     schemaName: '',
@@ -56,7 +56,7 @@ const DEFAULT_INPUT: ProvisioningRequestInput = {
   }
 };
 
-function deriveCanAdvance(step: number, input: ProvisioningRequestInput): boolean {
+function deriveCanAdvance(step: number, input: ProvisioningInput): boolean {
   switch (step) {
     case STEP_SITE_INDEX:
       return ProvisioningSiteSchema.safeParse(input.site).success;
@@ -76,7 +76,7 @@ export default function ProvisionWizardPage() {
   const router = useRouter();
 
   const [step, setStep] = useState(0);
-  const [input, setInput] = useState<ProvisioningRequestInput>(DEFAULT_INPUT);
+  const [input, setInput] = useState<ProvisioningInput>(DEFAULT_INPUT);
   const [areaMode, setAreaMode] = useState<AreaMode>('derived');
   const [showStepErrors, setShowStepErrors] = useState(false);
   const [submitting, setSubmitting] = useState(false);

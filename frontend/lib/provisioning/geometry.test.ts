@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { collectOverlappingPairs, findFirstOverlap, collectQuadratBoundsIssues } from './geometry';
+import { collectOverlappingPairs, findFirstOverlap, collectQuadratBoundsIssues, SOUTHWEST_CONVENTION_HINT } from './geometry';
 
 const PERF_QUADRAT_COUNT = 10_000;
 const PERF_BUDGET_MS = 500;
@@ -181,7 +181,7 @@ describe('collectQuadratBoundsIssues', () => {
     expect(issues[0].rowIndex).toBe(0);
     expect(issues[0].quadratName).toBe('TooFarEast');
     expect(issues[0].message).toMatch(/extends past plot dimensionX/);
-    expect(issues[0].message).toMatch(/reference corner/i);
+    expect(issues[0].message).toContain(SOUTHWEST_CONVENTION_HINT);
   });
 
   it('reports a row that extends past plot dimensionY, with its name and row index', () => {
@@ -191,7 +191,7 @@ describe('collectQuadratBoundsIssues', () => {
     expect(issues[0].rowIndex).toBe(0);
     expect(issues[0].quadratName).toBe('TooFarNorth');
     expect(issues[0].message).toMatch(/extends past plot dimensionY/);
-    expect(issues[0].message).toMatch(/reference corner/i);
+    expect(issues[0].message).toContain(SOUTHWEST_CONVENTION_HINT);
   });
 
   it('reports a row with negative start coordinates', () => {
@@ -201,7 +201,7 @@ describe('collectQuadratBoundsIssues', () => {
     expect(issues[0].rowIndex).toBe(0);
     expect(issues[0].quadratName).toBe('BelowOrigin');
     expect(issues[0].message).toMatch(/negative start coordinate/);
-    expect(issues[0].message).toMatch(/reference corner/i);
+    expect(issues[0].message).toContain(SOUTHWEST_CONVENTION_HINT);
   });
 
   it('reports every offending row in a single pass, not just the first', () => {

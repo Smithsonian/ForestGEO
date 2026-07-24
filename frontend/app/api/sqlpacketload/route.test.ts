@@ -1184,8 +1184,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
         { quadratName: 'Q01', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
         { quadratName: 'Q02', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
       ],
-      { dimensionX: 500, dimensionY: 500 },
-      'SW'
+      { dimensionX: 500, dimensionY: 500 }
     ).overlapSummary;
     if (!overlapSummary) throw new Error('expected overlap summary');
     const acknowledgment = buildQuadratOverlapAcknowledgment([overlapSummary.layoutSignature]);
@@ -1285,8 +1284,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
         { quadratName: 'Q01', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
         { quadratName: 'Q02', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
       ],
-      { dimensionX: 500, dimensionY: 500 },
-      'SW'
+      { dimensionX: 500, dimensionY: 500 }
     ).overlapSummary;
     if (!overlapSummary) throw new Error('expected overlap summary');
 

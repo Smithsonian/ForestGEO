@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { createSchemaStep, initTablesStep, deployProceduresStep, seedValidationsStep } from './sql-steps';
-import type { StepContext, ProvisioningRunInput } from '../types';
+import type { StepContext, ProvisioningInput } from '../types';
 
 describe('SQL-file steps', () => {
   const SCHEMA_NAME = `forestgeo_sqlsteps_test_${process.pid}`;
@@ -22,7 +22,7 @@ describe('SQL-file steps', () => {
     ctx = {
       runId: 0,
       schemaName: SCHEMA_NAME,
-      input: {} as ProvisioningRunInput,
+      input: {} as ProvisioningInput,
       catalogPool,
       sitePool: null,
       state: {},

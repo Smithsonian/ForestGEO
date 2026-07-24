@@ -5,9 +5,9 @@ import { insertCatalogRowStep, insertPlotStep, insertCensusStep } from './catalo
 import { insertQuadratsStep } from './insert-quadrats';
 import { verifyStep } from './verify';
 import { STEPS } from './index';
-import type { StepContext, ProvisioningRunInput } from '../types';
+import type { StepContext, ProvisioningInput } from '../types';
 
-function makeInput(schemaName: string): ProvisioningRunInput {
+function makeInput(schemaName: string): ProvisioningInput {
   return {
     site: {
       siteName: 'VerifyTest',

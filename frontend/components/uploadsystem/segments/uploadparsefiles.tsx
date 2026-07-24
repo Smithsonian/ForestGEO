@@ -48,7 +48,6 @@ import {
   type QuadratOverlapSummary
 } from '@/lib/provisioning/quadrat-collection-validation';
 import type { QuadratCsvRow } from '@/lib/provisioning/types';
-import ReferenceCornerSelect from '@/components/provisioning/ReferenceCornerSelect';
 import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
 
 export interface FileValidationStatus {
@@ -72,10 +71,10 @@ export interface QuadratPreflightIssue {
   message: string;
 }
 
-// A misdeclared reference corner can fail bounds for most/all rows plus two overlap entries per
-// colliding pair — easily hundreds of lines. Cap what's rendered per file and let the list scroll
-// within its own panel instead of relying on an ancestor that clips overflow (see uploadparsefiles.tsx
-// page shell's `maxHeight: '90vh', overflow: 'hidden'`).
+// A file recorded against the wrong corner can fail bounds for most/all rows plus two overlap
+// entries per colliding pair — easily hundreds of lines. Cap what's rendered per file and let the
+// list scroll within its own panel instead of relying on an ancestor that clips overflow (see
+// uploadparsefiles.tsx page shell's `maxHeight: '90vh', overflow: 'hidden'`).
 const MAX_QUADRAT_ISSUES_SHOWN_PER_FILE = 20;
 const QUADRAT_ISSUES_LIST_MAX_HEIGHT_PX = 320;
 
@@ -162,8 +161,6 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     setSelectedDelimiters,
     columnMappings,
     setColumnMappingForFile,
-    coordinateReferenceCorner,
-    setCoordinateReferenceCorner,
     quadratOverlapAcknowledgment,
     setQuadratOverlapAcknowledgment,
     serverQuadratOverlapSummaries,
@@ -190,9 +187,9 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   // an advisory warning: overlap and duplicate-name checks still run without plot bounds.
   const [quadratPlotDimensionsUnvalidated, setQuadratPlotDimensionsUnvalidated] = useState<boolean>(false);
 
-  // Advisory preflight only (Task 11 owns server-side enforcement): parses every accepted quadrat
-  // file with the same header/cell conventions the real upload uses, converts each row to geometry,
-  // and runs the shared collection validator against the current plot and declared reference corner.
+  // Advisory preflight only (the write boundary owns server-side enforcement): parses every accepted
+  // quadrat file with the same header/cell conventions the real upload uses, converts each row to
+  // geometry, and runs the shared collection validator against the current plot.
   // Re-runs whenever the inputs that change its verdict change.
   useEffect(() => {
     if (!isQuadratsForm || acceptedFiles.length === 0) {
@@ -281,8 +278,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
       if (parsedGeometry) {
         const validation = validateQuadratCollectionDetailed(
           parsedGeometry.rows,
-          plotBoundsUsable ? { dimensionX: plotDimensionX, dimensionY: plotDimensionY } : null,
-          coordinateReferenceCorner
+          plotBoundsUsable ? { dimensionX: plotDimensionX, dimensionY: plotDimensionY } : null
         );
         validation.fatalIssues.forEach(issue => {
           const sourceRowIndex = parsedGeometry?.originalRowIndexes[issue.rowIndex] ?? issue.rowIndex;
@@ -315,7 +311,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
       cancelled = true;
       abortController.abort();
     };
-  }, [isQuadratsForm, acceptedFiles, selectedDelimiters, coordinateReferenceCorner, plotDimensionX, plotDimensionY]);
+  }, [isQuadratsForm, acceptedFiles, selectedDelimiters, plotDimensionX, plotDimensionY]);
 
   const quadratPreflightHasIssues = useMemo(
     () => Object.values(quadratPreflightIssuesByFile).some(issues => issues.length > 0),
@@ -577,16 +573,12 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                 allowMultipleFiles={!isQuadratsForm}
               />
               {isQuadratsForm && (
-                <ReferenceCornerSelect
-                  id="upload-quadrat-reference-corner-input"
-                  value={coordinateReferenceCorner}
-                  onChange={corner => {
-                    setQuadratOverlapAcknowledgment(null);
-                    clearServerQuadratOverlapSummaries();
-                    setCoordinateReferenceCorner(corner);
-                  }}
-                  helperText="Coordinates are stored relative to the plot's lower-left origin. Choosing a different corner converts the uploaded coordinates on import — it does not move the plot."
-                />
+                <Alert color="neutral" variant="soft" sx={{ textAlign: 'left' }} aria-label="Quadrat coordinate convention">
+                  <Typography level="body-sm">
+                    StartX/StartY must identify each quadrat&apos;s south-west (lower-left) corner, measured from the plot&apos;s south-west origin. Files
+                    recorded against a different corner have to be converted before upload.
+                  </Typography>
+                </Alert>
               )}
               {acceptedFiles.length > 0 && (
                 <Stack spacing={2}>

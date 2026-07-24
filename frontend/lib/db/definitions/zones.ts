@@ -117,7 +117,7 @@ function parseRequiredQuadratNumber(row: FileRow, field: string): number | null 
 /**
  * Scalar, per-row checks only: a non-blank quadrat name, and StartX/StartY/DimensionX/DimensionY
  * present and numeric with DimensionX/DimensionY strictly positive. Collection-level geometry
- * (bounds against the plot, overlap, duplicate names, reference-corner normalization) is owned by
+ * (bounds against the plot, overlap, duplicate names) is owned by
  * lib/provisioning/quadrat-collection-validation.ts#validateQuadratCollection, not duplicated here.
  */
 export const validateQuadratsRow: ValidationFunction = row => {

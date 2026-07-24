@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import QuadratPlanner from '@/components/provisioning/QuadratPlanner';
-import type { ProvisioningPlotInput, QuadratRequestConfig } from '@/lib/provisioning/types';
+import type { ProvisioningPlotInput, QuadratConfig } from '@/lib/provisioning/types';
 
 type PlotValue = ProvisioningPlotInput;
 
@@ -21,27 +21,21 @@ const PLOT_100x100: PlotValue = {
   defaultHOMUnits: 'm'
 };
 
-const DEFAULT_GRID_VALUE: QuadratRequestConfig = {
+const DEFAULT_GRID_VALUE: QuadratConfig = {
   mode: 'grid',
   quadratSizeX: 20,
   quadratSizeY: 20,
   namingPattern: 'sequential'
 };
 
-const DEFAULT_CSV_VALUE: QuadratRequestConfig = {
+const DEFAULT_CSV_VALUE: QuadratConfig = {
   mode: 'csv',
-  rows: [],
-  coordinateReferenceCorner: 'SW'
+  rows: []
 };
-
-// ReferenceCornerSelect has no aria-label — its accessible name comes from the
-// FormLabel it's associated with via htmlFor/id — so tests select it by id.
-const REFERENCE_CORNER_SELECT_ID = 'reference-corner-input';
-const REFERENCE_CORNER_SELECT_SELECTOR = `#${REFERENCE_CORNER_SELECT_ID}`;
 
 // Stateful wrapper so the component re-renders with each onChange and controlled
 // state reflects the latest emitted value on subsequent interactions.
-function StatefulPlanner(props: { initial: QuadratRequestConfig; plot?: PlotValue; onChangeSpy: (v: QuadratRequestConfig) => void; showErrors?: boolean }) {
+function StatefulPlanner(props: { initial: QuadratConfig; plot?: PlotValue; onChangeSpy: (v: QuadratConfig) => void; showErrors?: boolean }) {
   const [value, setValue] = useState(props.initial);
   return (
     <QuadratPlanner
@@ -75,22 +69,6 @@ function uploadCsvFixture(fixtureFile: string) {
 // overlap their labels, preventing a normal label click in headless Cypress.
 function clickRadioByValue(value: string) {
   cy.get(`[type="radio"][value="${value}"]`).click({ force: true });
-}
-
-// MUI Joy's Select keeps every Listbox mounted (keepMounted: true, linked to its trigger
-// via aria-controls) even while closed, so a bare [role="option"] query would collect
-// every Select's options across the form at once. Scope the query to the Listbox owned
-// by the reference-corner trigger via aria-controls, matching provisioning-plot-form.cy.tsx.
-// Selected by id (not aria-label): ReferenceCornerSelect deliberately has no aria-label
-// so its accessible name comes from the associated FormLabel — see the "accessible name"
-// describe block below.
-function selectReferenceCorner(optionLabel: string) {
-  cy.get(REFERENCE_CORNER_SELECT_SELECTOR)
-    .invoke('attr', 'aria-controls')
-    .then(listboxId => {
-      cy.get(REFERENCE_CORNER_SELECT_SELECTOR).click();
-      cy.get(`#${listboxId}`).find('[role="option"]').contains(optionLabel).click();
-    });
 }
 
 describe('QuadratPlanner', () => {
@@ -191,7 +169,7 @@ describe('QuadratPlanner', () => {
       cy.get('@onChange').then((stub: any) => {
         const calls = stub.getCalls();
         const lastCall = calls[calls.length - 1];
-        const emitted = lastCall.args[0] as QuadratRequestConfig;
+        const emitted = lastCall.args[0] as QuadratConfig;
         expect(emitted.mode).to.equal('csv');
         if (emitted.mode === 'csv') {
           expect(emitted.rows).to.have.length(25);
@@ -260,7 +238,7 @@ describe('QuadratPlanner', () => {
       cy.get('@onChange').then((stub: any) => {
         const calls = stub.getCalls();
         const lastCall = calls[calls.length - 1];
-        const emitted = lastCall.args[0] as QuadratRequestConfig;
+        const emitted = lastCall.args[0] as QuadratConfig;
         expect(emitted.mode).to.equal('csv');
         if (emitted.mode === 'csv') {
           expect(emitted.rows).to.have.length(0);
@@ -314,7 +292,7 @@ describe('QuadratPlanner', () => {
       cy.get('@onChange').then((stub: any) => {
         const calls = stub.getCalls();
         const lastCall = calls[calls.length - 1];
-        expect(lastCall.args[0]).to.deep.equal({ mode: 'csv', rows: [], coordinateReferenceCorner: 'SW' });
+        expect(lastCall.args[0]).to.deep.equal({ mode: 'csv', rows: [] });
       });
     });
 
@@ -335,69 +313,28 @@ describe('QuadratPlanner', () => {
     });
   });
 
-  describe('Coordinate reference corner', () => {
-    it('defaults the selector to south-west', () => {
+  describe('South-west coordinate convention', () => {
+    it('states the required convention in the upload helper text', () => {
       const onChangeSpy = cy.stub().as('onChange');
       cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
 
-      cy.get(REFERENCE_CORNER_SELECT_SELECTOR).should('contain.text', 'South-west (lower-left)');
+      cy.contains("startX/startY must be each quadrat's south-west (lower-left) corner").should('be.visible');
     });
 
-    it("exposes the visible FormLabel text as the select's accessible name (WCAG 2.5.3 Label in Name)", () => {
+    it('offers no control for declaring a different reference corner', () => {
       const onChangeSpy = cy.stub().as('onChange');
       cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
 
-      // No aria-label: an explicit aria-label wins over label association and would make
-      // the accessible name diverge from what a sighted user reads. The FormLabel's
-      // htmlFor targeting the rendered control's id is what supplies the accessible name.
-      const labelText = "Which corner does each row's StartX/StartY identify?";
-      // The label's `for` must target the id ReferenceCornerSelect actually renders on
-      // its control — proving the association is live, not just two matching literals.
-      cy.contains('label', labelText).should('have.attr', 'for', REFERENCE_CORNER_SELECT_ID);
-      cy.get(REFERENCE_CORNER_SELECT_SELECTOR).should('exist').and('not.have.attr', 'aria-label');
+      cy.contains('label', "Which corner does each row's StartX/StartY identify?").should('not.exist');
     });
 
-    it('shows bounds errors for the north-east-labeled grid while the selector is still on south-west', () => {
+    it('rejects a file whose coordinates name the north-east corner', () => {
       const onChangeSpy = cy.stub().as('onChange');
       cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
 
-      uploadCsvFixture('quadrats-northeast-grid.csv');
-
-      // Q0005 is startX=100 in the file: read as south-west it extends to x=120, past dimensionX=100.
-      cy.contains('Quadrat "Q0005" extends past plot dimensionX').should('be.visible');
-      cy.get('[aria-label="CSV load success"]').should('not.exist');
-    });
-
-    it('clears those errors when the selector is switched to north-east, without re-uploading', () => {
-      const onChangeSpy = cy.stub().as('onChange');
-      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
-
-      uploadCsvFixture('quadrats-northeast-grid.csv');
-      cy.contains('Quadrat "Q0005" extends past plot dimensionX').should('be.visible');
-
-      selectReferenceCorner('North-east (upper-right)');
-
-      cy.contains('Quadrat "Q0005" extends past plot dimensionX').should('not.exist');
-      cy.get('[aria-label="CSV load success"]').should('be.visible');
-      cy.contains('Loaded 25 quadrats (no errors), read as North-east (upper-right)').should('be.visible');
-
-      cy.get('@onChange').then((stub: any) => {
-        const calls = stub.getCalls();
-        const lastCall = calls[calls.length - 1];
-        expect(lastCall.args[0]).to.deep.include({ mode: 'csv', coordinateReferenceCorner: 'NE' });
-        // Re-deriving from the existing rows, not a re-upload: the row count is unchanged.
-        expect(lastCall.args[0].rows).to.have.length(25);
-      });
-    });
-
-    it('still rejects a genuinely out-of-bounds file under north-east — the corner is not an escape hatch', () => {
-      const onChangeSpy = cy.stub().as('onChange');
-      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
-
-      selectReferenceCorner('North-east (upper-right)');
+      // quadrats-out-of-bounds.csv: A,90,0,20,20 in a 100x100 plot reaches x=110.
       uploadCsvFixture('quadrats-out-of-bounds.csv');
 
-      // A,90,0,20,20 read as north-east normalizes to startX=70, startY=-20 — still invalid.
       cy.get('[aria-label="CSV load success"]').should('not.exist');
       cy.contains(/validation (error|errors) found/).should('be.visible');
     });

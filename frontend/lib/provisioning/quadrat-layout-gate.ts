@@ -1,8 +1,7 @@
 import { generateGrid } from './grid-generator';
-import { ProvisioningQuadratsRequestSchema } from './input-schema';
-import { normalizeToSouthwest } from './coordinate-reference-corner';
+import { ProvisioningQuadratsSchema } from './input-schema';
 import { acknowledgmentCoversLayout, validateQuadratCollectionDetailed } from './quadrat-collection-validation';
-import type { ProvisioningRequestInput } from './types';
+import type { ProvisioningInput } from './types';
 
 /**
  * The Quadrats-step Next-button gate. Lives outside app/(hub)/admin/provision/page.tsx
@@ -11,8 +10,8 @@ import type { ProvisioningRequestInput } from './types';
  * symbols (default, metadata, generateStaticParams, ...) — any other named export fails
  * that check under `tsc --noEmit`. The page still owns `deriveCanAdvance` and imports this.
  */
-export function quadratLayoutIsValid(input: ProvisioningRequestInput): boolean {
-  if (!ProvisioningQuadratsRequestSchema.safeParse(input.quadrats).success) return false;
+export function quadratLayoutIsValid(input: ProvisioningInput): boolean {
+  if (!ProvisioningQuadratsSchema.safeParse(input.quadrats).success) return false;
 
   if (input.quadrats.mode === 'grid') {
     try {
@@ -28,11 +27,11 @@ export function quadratLayoutIsValid(input: ProvisioningRequestInput): boolean {
   }
 
   const csvQuadrats = input.quadrats;
-  const rows = csvQuadrats.rows.map(row => normalizeToSouthwest(row, csvQuadrats.coordinateReferenceCorner));
+  const rows = csvQuadrats.rows;
   if (rows.length === 0) return false;
   // Acknowledged overlaps are valid field measurements, not layout defects (mirrors the
-  // canonical schema's superRefine policy). Unacknowledged overlaps still fail the gate.
-  const { fatalIssues, overlapSummary } = validateQuadratCollectionDetailed(rows, input.plot, 'SW');
+  // input schema's superRefine policy). Unacknowledged overlaps still fail the gate.
+  const { fatalIssues, overlapSummary } = validateQuadratCollectionDetailed(rows, input.plot);
   const overlapsAcknowledged = overlapSummary !== null && acknowledgmentCoversLayout(csvQuadrats.overlapAcknowledgment, overlapSummary.layoutSignature);
   return fatalIssues.length === 0 && (overlapSummary === null || overlapsAcknowledged);
 }

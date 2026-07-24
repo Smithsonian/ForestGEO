@@ -89,7 +89,7 @@ export async function clearProvisioningState(pool: Pool, schemaName?: string): P
 }
 
 /**
- * A minimal but fully valid `ProvisioningRunInput` (quadrats mode 'none' so it needs
+ * A minimal but fully valid `ProvisioningInput` (quadrats mode 'none' so it needs
  * no rows). loadRun's parseStoredInput now validates the stored payload as canonical
  * run input, so a route test that exercises a real retry/execute success path needs
  * a payload that actually passes CanonicalProvisioningSchema — not a stub. Tests that

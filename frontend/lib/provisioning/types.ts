@@ -42,28 +42,23 @@ export interface QuadratNoneConfig {
 }
 
 /**
- * Which corner of its own quadrat a CSV row's StartX/StartY identifies.
- * Compass values are relative to the plot's local axes: east is higher X,
- * north is higher Y. This does not move the plot's coordinate origin.
- */
-export type QuadratReferenceCorner = 'SW' | 'SE' | 'NW' | 'NE';
-
-/**
  * Explicit confirmation for one or more reviewed quadrat layouts. Layout signatures bind the
- * confirmation to the geometry that was actually shown to the user; changing a file, reference
- * corner, or prospective database layout produces a different signature and requires a new
- * confirmation.
+ * confirmation to the geometry that was actually shown to the user; changing a file or a
+ * prospective database layout produces a different signature and requires a new confirmation.
  */
 export interface QuadratOverlapAcknowledgment {
   statement: string;
   layoutSignatures: string[];
 }
 
-/** Wire/client shape: rows are in the uploaded convention. */
-export interface QuadratCsvRequestConfig {
+/**
+ * StartX/StartY identify each quadrat's south-west (lower-left) corner, measured from the
+ * plot's south-west origin. That is the only supported convention: a file recorded against
+ * any other corner has to be converted by the researcher before upload.
+ */
+export interface QuadratCsvConfig {
   mode: 'csv';
   rows: QuadratCsvRow[];
-  coordinateReferenceCorner: QuadratReferenceCorner;
   /**
    * The admin's confirmation that the specifically signed overlapping layout reflects field
    * measurements. Absent when the layout has no overlaps.
@@ -71,17 +66,7 @@ export interface QuadratCsvRequestConfig {
   overlapAcknowledgment?: QuadratOverlapAcknowledgment;
 }
 
-/** Server/run shape: rows are canonical south-west. */
-export interface QuadratCsvCanonicalConfig {
-  mode: 'csv';
-  rows: QuadratCsvRow[];
-  coordinates: 'canonical-sw';
-  sourceCoordinateReferenceCorner: QuadratReferenceCorner;
-  overlapAcknowledgment?: QuadratOverlapAcknowledgment;
-}
-
-export type QuadratRequestConfig = QuadratGridConfig | QuadratCsvRequestConfig | QuadratNoneConfig;
-export type CanonicalQuadratConfig = QuadratGridConfig | QuadratCsvCanonicalConfig | QuadratNoneConfig;
+export type QuadratConfig = QuadratGridConfig | QuadratCsvConfig | QuadratNoneConfig;
 
 export interface ProvisioningSiteInput {
   siteName: string;
@@ -112,18 +97,11 @@ export interface ProvisioningPlotInput {
   defaultHOMUnits: DimensionUnit;
 }
 
-/** What the browser holds and POSTs. Quadrat rows are in the declared convention. */
-export interface ProvisioningRequestInput {
+/** What the browser holds and POSTs, and what the server runs, persists and reloads. */
+export interface ProvisioningInput {
   site: ProvisioningSiteInput;
   plot: ProvisioningPlotInput;
-  quadrats: QuadratRequestConfig;
-}
-
-/** What the server runs, persists and reloads. Quadrat rows are canonical south-west. */
-export interface ProvisioningRunInput {
-  site: ProvisioningSiteInput;
-  plot: ProvisioningPlotInput;
-  quadrats: CanonicalQuadratConfig;
+  quadrats: QuadratConfig;
 }
 
 export interface ProvisioningRunListRow {
@@ -146,11 +124,11 @@ export interface ProvisioningRunRecord {
   schemaName: string;
   /**
    * Null when the stored payload fails validation at load (e.g. a run recorded
-   * before reference-corner support, or before some other schema tightening).
-   * Only callers that execute or re-execute the run require a non-null value
-   * and enforce that themselves — see `loadRun` in orchestrator.ts.
+   * before some schema tightening). Only callers that execute or re-execute the
+   * run require a non-null value and enforce that themselves — see `loadRun` in
+   * orchestrator.ts.
    */
-  input: ProvisioningRunInput | null;
+  input: ProvisioningInput | null;
 }
 
 export interface ProvisioningStepRecord {
@@ -168,7 +146,7 @@ export interface ProvisioningStepRecord {
 export interface StepContext {
   runId: number;
   schemaName: string;
-  input: ProvisioningRunInput;
+  input: ProvisioningInput;
   catalogPool: Pool;
   /** Pool whose default schema is the new site schema. May be null before create_schema runs. */
   sitePool: Pool | null;

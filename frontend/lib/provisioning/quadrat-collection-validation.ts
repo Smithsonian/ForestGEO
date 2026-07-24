@@ -1,6 +1,5 @@
-import type { QuadratCsvRow, QuadratOverlapAcknowledgment, QuadratReferenceCorner } from './types';
+import type { QuadratCsvRow, QuadratOverlapAcknowledgment } from './types';
 import { collectOverlappingPairs, collectQuadratBoundsIssues, type QuadratBoundsIssue } from './geometry';
-import { normalizeToSouthwest } from './coordinate-reference-corner';
 
 /**
  * Bounds the overlap sweep's result on pathological inputs where every quadrat overlaps every
@@ -186,8 +185,8 @@ export function toQuadratGeometry(row: UploadShapedRow): QuadratCsvRow | null {
 }
 
 /**
- * Validates a whole collection of quadrat rows declared against `referenceCorner`, composing
- * the existing single-source-of-truth checks rather than re-implementing them:
+ * Validates a whole collection of quadrat rows, composing the existing single-source-of-truth
+ * checks rather than re-implementing them:
  *   - `collectQuadratBoundsIssues` for negative coordinates / exceeding plot dimensions
  *   - `collectOverlappingPairs` for pairwise geometric overlap across the whole set
  * This module adds the two checks that were genuinely missing: non-positive dimensions and
@@ -197,8 +196,7 @@ export function toQuadratGeometry(row: UploadShapedRow): QuadratCsvRow | null {
  * and non-positive-dimension checks still run, and only the bounds checks are skipped. Callers
  * choosing that degraded mode are responsible for telling the user bounds went unvalidated.
  *
- * Ordering: rows are normalized to south-west first, since every downstream check assumes that
- * convention. Non-positive dimensions are checked, and flagged, before bounds/overlap — a row
+ * Ordering: non-positive dimensions are checked, and flagged, before bounds/overlap — a row
  * with a zero or negative dimension has no meaningful footprint, so running bounds/overlap math
  * on it would produce a misleading pass (or a nonsensical extra failure) rather than a useful
  * one. Those rows are excluded from the bounds and overlap checks and reported solely via their
@@ -206,16 +204,14 @@ export function toQuadratGeometry(row: UploadShapedRow): QuadratCsvRow | null {
  */
 export function validateQuadratCollectionDetailed(
   rows: QuadratCsvRow[],
-  plot: { dimensionX: number; dimensionY: number } | null,
-  referenceCorner: QuadratReferenceCorner
+  plot: { dimensionX: number; dimensionY: number } | null
 ): QuadratCollectionValidationResult {
   const fatalIssues: QuadratCollectionIssue[] = [];
-  const normalizedRows = rows.map(row => normalizeToSouthwest(row, referenceCorner));
 
   const geometricallyValidRows: QuadratCsvRow[] = [];
   const originalIndexByGeometricRow = new Map<QuadratCsvRow, number>();
 
-  normalizedRows.forEach((row, rowIndex) => {
+  rows.forEach((row, rowIndex) => {
     if (row.dimensionX <= 0 || row.dimensionY <= 0) {
       fatalIssues.push({
         kind: 'non-positive-dimension',
@@ -241,11 +237,11 @@ export function validateQuadratCollectionDetailed(
   }
 
   const nameOccurrences = new Map<string, number>();
-  normalizedRows.forEach(row => {
+  rows.forEach(row => {
     const key = row.quadratName.trim().toLowerCase();
     nameOccurrences.set(key, (nameOccurrences.get(key) ?? 0) + 1);
   });
-  normalizedRows.forEach((row, rowIndex) => {
+  rows.forEach((row, rowIndex) => {
     const key = row.quadratName.trim().toLowerCase();
     if ((nameOccurrences.get(key) ?? 0) > 1) {
       fatalIssues.push({
@@ -260,7 +256,7 @@ export function validateQuadratCollectionDetailed(
   // Overlaps are represented once, as a bounded summary. Callers no longer receive duplicate
   // directional issues that they immediately have to filter back out before applying policy.
   const geometricOverlapSummary = summarizeQuadratOverlaps(geometricallyValidRows);
-  const overlapSummary = geometricOverlapSummary ? { ...geometricOverlapSummary, layoutSignature: createQuadratLayoutSignature(normalizedRows) } : null;
+  const overlapSummary = geometricOverlapSummary ? { ...geometricOverlapSummary, layoutSignature: createQuadratLayoutSignature(rows) } : null;
 
   return { fatalIssues, overlapSummary };
 }

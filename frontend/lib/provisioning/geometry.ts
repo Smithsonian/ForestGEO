@@ -13,9 +13,14 @@ export interface QuadratBoundsIssue {
 }
 
 /**
+ * The one supported coordinate convention. Appended to every bounds violation so the message
+ * says what the file has to look like, rather than leaving the uploader to guess.
+ */
+export const SOUTHWEST_CONVENTION_HINT =
+  "StartX/StartY must be the quadrat's south-west (lower-left) corner, measured from the plot's south-west origin. Correct the file and re-upload.";
+
+/**
  * Bounds-check every CSV row against the plot, reporting every offending row (not just the first).
- * Rows arriving here are already declared against a reference corner (see coordinate-reference-corner.ts),
- * so a violation is phrased as a normalization/declaration problem, not just "bad data".
  */
 export function collectQuadratBoundsIssues(rows: QuadratCsvRow[], plot: { dimensionX: number; dimensionY: number }): QuadratBoundsIssue[] {
   const issues: QuadratBoundsIssue[] = [];
@@ -25,7 +30,7 @@ export function collectQuadratBoundsIssues(rows: QuadratCsvRow[], plot: { dimens
       issues.push({
         rowIndex,
         quadratName: row.quadratName,
-        message: `Quadrat "${row.quadratName}" normalizes to a negative start coordinate. Check the declared reference corner.`
+        message: `Quadrat "${row.quadratName}" has a negative start coordinate. ${SOUTHWEST_CONVENTION_HINT}`
       });
       return;
     }
@@ -33,7 +38,7 @@ export function collectQuadratBoundsIssues(rows: QuadratCsvRow[], plot: { dimens
       issues.push({
         rowIndex,
         quadratName: row.quadratName,
-        message: `Quadrat "${row.quadratName}" extends past plot dimensionX. Check the declared reference corner.`
+        message: `Quadrat "${row.quadratName}" extends past plot dimensionX. ${SOUTHWEST_CONVENTION_HINT}`
       });
       return;
     }
@@ -41,7 +46,7 @@ export function collectQuadratBoundsIssues(rows: QuadratCsvRow[], plot: { dimens
       issues.push({
         rowIndex,
         quadratName: row.quadratName,
-        message: `Quadrat "${row.quadratName}" extends past plot dimensionY. Check the declared reference corner.`
+        message: `Quadrat "${row.quadratName}" extends past plot dimensionY. ${SOUTHWEST_CONVENTION_HINT}`
       });
     }
   });

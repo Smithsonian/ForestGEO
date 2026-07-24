@@ -67,9 +67,9 @@ export const validateInputsStep: ProvisioningStep = {
         );
       }
     } else if (input.quadrats.mode === 'csv') {
-      // Rows here are canonical south-west (run shape). Overlaps the admin acknowledged as
-      // field measurements are not defects; every other issue kind fails the run.
-      const validation = validateQuadratCollectionDetailed(input.quadrats.rows, input.plot, 'SW');
+      // Overlaps the admin acknowledged as field measurements are not defects; every other
+      // issue kind fails the run.
+      const validation = validateQuadratCollectionDetailed(input.quadrats.rows, input.plot);
       const overlapsAcknowledged =
         validation.overlapSummary !== null && acknowledgmentCoversLayout(input.quadrats.overlapAcknowledgment, validation.overlapSummary.layoutSignature);
       if (validation.fatalIssues.length > 0) {

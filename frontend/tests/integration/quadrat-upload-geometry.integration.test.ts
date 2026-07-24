@@ -282,8 +282,7 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
         { quadratName: 'ACKA', startX: 300, startY: 300, dimensionX: 20, dimensionY: 20 },
         { quadratName: 'ACKB', startX: 310, startY: 310, dimensionX: 20, dimensionY: 20 }
       ],
-      { dimensionX: TEST_PLOT_DIMENSION, dimensionY: TEST_PLOT_DIMENSION },
-      'SW'
+      { dimensionX: TEST_PLOT_DIMENSION, dimensionY: TEST_PLOT_DIMENSION }
     ).overlapSummary;
     if (!overlapSummary) throw new Error('expected overlap summary');
 
@@ -342,25 +341,6 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
     expect(body.code).toBe(INVALID_QUADRAT_GEOMETRY_CODE);
     expect(await countActiveQuadrats(connection, plotID)).toBe(BASELINE_QUADRAT_COUNT);
     expect(await findQuadratByName(connection, plotID, 'NAN01')).toBeNull();
-  });
-
-  it('rejects an unsupported reference corner with 400 and the INVALID_QUADRAT_GEOMETRY code', async () => {
-    const validRow = { quadrat: 'CORNER01', startx: '0', starty: '0', dimx: '20', dimy: '20' };
-
-    const res = (await POST(
-      buildQuadratUploadRequest(
-        baseRequestBody({
-          coordinateReferenceCorner: 'CENTER',
-          fileRowSet: { 'row-1': validRow }
-        })
-      )
-    ))!;
-
-    expect(res.status).toBe(HTTP_BAD_REQUEST);
-    const body = await res.json();
-    expect(body.code).toBe(INVALID_QUADRAT_GEOMETRY_CODE);
-    expect(body.error).toMatch(/SW, SE, NW, or NE/);
-    expect(await countActiveQuadrats(connection, plotID)).toBe(BASELINE_QUADRAT_COUNT);
   });
 
   // =========================================================================
@@ -473,45 +453,13 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
   });
 
   // =========================================================================
-  // Reference-corner conversion
+  // Coordinates are stored verbatim: south-west is the only convention.
   // =========================================================================
 
-  it('a north-east request persists canonical south-west coordinates', async () => {
-    const NE_FOOTPRINT_X = 120; // declared NE corner X
-    const NE_FOOTPRINT_Y = 120; // declared NE corner Y
-    const DIMENSION = 20;
-    const EXPECTED_CANONICAL_START = NE_FOOTPRINT_X - DIMENSION; // 100
-
-    const neRow = { quadrat: 'NE01', startx: String(NE_FOOTPRINT_X), starty: String(NE_FOOTPRINT_Y), dimx: String(DIMENSION), dimy: String(DIMENSION) };
-
-    const res = (await POST(
-      buildQuadratUploadRequest(
-        baseRequestBody({
-          coordinateReferenceCorner: 'NE',
-          fileRowSet: { 'row-1': neRow }
-        })
-      )
-    ))!;
-
-    expect(res.status).toBe(HTTP_OK);
-
-    const persisted = await findQuadratByName(connection, plotID, 'NE01');
-    expect(persisted, 'the NE-declared quadrat must have been written').not.toBeNull();
-    expect(Number(persisted!.StartX), 'StartX must be normalized to the canonical south-west corner').toBe(EXPECTED_CANONICAL_START);
-    expect(Number(persisted!.StartY), 'StartY must be normalized to the canonical south-west corner').toBe(EXPECTED_CANONICAL_START);
-  });
-
-  it('an undeclared reference corner behaves as south-west (no shift applied)', async () => {
+  it('persists StartX/StartY exactly as uploaded', async () => {
     const swRow = { quadrat: 'SW01', startx: '50', starty: '50', dimx: '20', dimy: '20' };
 
-    const res = (await POST(
-      buildQuadratUploadRequest(
-        baseRequestBody({
-          // coordinateReferenceCorner intentionally omitted
-          fileRowSet: { 'row-1': swRow }
-        })
-      )
-    ))!;
+    const res = (await POST(buildQuadratUploadRequest(baseRequestBody({ fileRowSet: { 'row-1': swRow } }))))!;
 
     expect(res.status).toBe(HTTP_OK);
 
@@ -519,6 +467,28 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
     expect(persisted).not.toBeNull();
     expect(Number(persisted!.StartX)).toBe(50);
     expect(Number(persisted!.StartY)).toBe(50);
+  });
+
+  it('ignores a stale coordinateReferenceCorner in the request body rather than shifting the row', async () => {
+    // A client left over from the removed reference-corner feature must not be able to move
+    // a quadrat: the server reads coordinates as south-west and nothing else.
+    const row = { quadrat: 'STALE01', startx: '60', starty: '60', dimx: '20', dimy: '20' };
+
+    const res = (await POST(
+      buildQuadratUploadRequest(
+        baseRequestBody({
+          coordinateReferenceCorner: 'NE',
+          fileRowSet: { 'row-1': row }
+        })
+      )
+    ))!;
+
+    expect(res.status).toBe(HTTP_OK);
+
+    const persisted = await findQuadratByName(connection, plotID, 'STALE01');
+    expect(persisted, 'the row must have been written unshifted').not.toBeNull();
+    expect(Number(persisted!.StartX)).toBe(60);
+    expect(Number(persisted!.StartY)).toBe(60);
   });
 
   // =========================================================================

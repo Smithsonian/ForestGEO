@@ -1,15 +1,12 @@
 import { z } from 'zod';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { estimateGridQuadratCount, MAX_GENERATED_QUADRATS } from './grid-generator';
-import { normalizeToSouthwest, REFERENCE_CORNER_OPTIONS } from './coordinate-reference-corner';
 import { acknowledgmentCoversLayout, QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, validateQuadratCollectionDetailed } from './quadrat-collection-validation';
-import type { ProvisioningRequestInput, ProvisioningRunInput, QuadratReferenceCorner } from './types';
+import type { ProvisioningInput } from './types';
 
 const DimensionUnitSchema = z.enum(unitSelectionOptions);
 const AreaUnitSchema = z.enum(areaSelectionOptions);
 
-const CORNER_VALUES = REFERENCE_CORNER_OPTIONS.map(option => option.value) as [QuadratReferenceCorner, ...QuadratReferenceCorner[]];
-const ReferenceCornerSchema = z.enum(CORNER_VALUES);
 const LayoutSignatureSchema = z.string().regex(/^quadrat-layout-v1-[0-9a-f]{16}$/);
 const QuadratOverlapAcknowledgmentSchema = z.object({
   statement: z.literal(QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT),
@@ -62,51 +59,27 @@ const GridQuadratsSchema = z.object({
 
 const NoneQuadratsSchema = z.object({ mode: z.literal('none') });
 
-/** Request side. Rows are in the declared convention, so startX may exceed the plot. */
-export const ProvisioningQuadratsRequestSchema = z.discriminatedUnion('mode', [
+/** StartX/StartY are the quadrat's south-west corner, measured from the plot's south-west origin. */
+export const ProvisioningQuadratsSchema = z.discriminatedUnion('mode', [
   GridQuadratsSchema,
   z.object({
     mode: z.literal('csv'),
     rows: z.array(QuadratRowSchema).min(1).max(MAX_GENERATED_QUADRATS),
-    coordinateReferenceCorner: ReferenceCornerSchema,
     overlapAcknowledgment: QuadratOverlapAcknowledgmentSchema.optional()
   }),
   NoneQuadratsSchema
 ]);
-
-/** Canonical side. Rows are south-west and must lie inside the plot. */
-export const CanonicalQuadratsSchema = z.discriminatedUnion('mode', [
-  GridQuadratsSchema,
-  z.object({
-    mode: z.literal('csv'),
-    rows: z.array(QuadratRowSchema).min(1).max(MAX_GENERATED_QUADRATS),
-    coordinates: z.literal('canonical-sw'),
-    sourceCoordinateReferenceCorner: ReferenceCornerSchema,
-    overlapAcknowledgment: QuadratOverlapAcknowledgmentSchema.optional()
-  }),
-  NoneQuadratsSchema
-]);
-
-export const ProvisioningRequestSchema = z.object({
-  site: ProvisioningSiteSchema,
-  plot: ProvisioningPlotSchema,
-  quadrats: ProvisioningQuadratsRequestSchema
-});
 
 /**
- * Entry point for values that are ALREADY canonical south-west, e.g. a stored
- * `catalog.provisioning_runs.InputPayload` row after `JSON.parse` (and, for legacy rows,
- * `upgradeLegacyQuadratConfig`). It does NOT normalize a declared reference corner — it only
- * validates. Anything arriving from a client must go through `ProvisioningInputSchema` instead,
- * which normalizes first and then pipes into this schema. Running this schema's sibling
- * (`ProvisioningInputSchema`, which re-runs the normalizing `.transform()`) on already-canonical
- * rows would silently shift every quadrat by one more cell.
+ * The single entry point for provisioning input, whether it arrives from a client POST or from a
+ * stored `catalog.provisioning_runs.InputPayload` row after `JSON.parse`. It validates only —
+ * coordinates are never rewritten — so parsing an already-stored payload is idempotent.
  */
-export const CanonicalProvisioningSchema = z
+export const ProvisioningInputSchema = z
   .object({
     site: ProvisioningSiteSchema,
     plot: ProvisioningPlotSchema,
-    quadrats: CanonicalQuadratsSchema
+    quadrats: ProvisioningQuadratsSchema
   })
   .superRefine((input, ctx) => {
     if (input.quadrats.mode === 'grid') {
@@ -130,7 +103,7 @@ export const CanonicalProvisioningSchema = z
     // layout with overlapping footprints is valid provisioning input when the admin has
     // explicitly acknowledged them (the acknowledgment text travels in the stored payload).
     // Every other issue kind remains a hard validation error.
-    const { fatalIssues, overlapSummary } = validateQuadratCollectionDetailed(rows, input.plot, 'SW');
+    const { fatalIssues, overlapSummary } = validateQuadratCollectionDetailed(rows, input.plot);
     const overlapsAcknowledged = overlapSummary !== null && acknowledgmentCoversLayout(input.quadrats.overlapAcknowledgment, overlapSummary.layoutSignature);
     for (const issue of fatalIssues) {
       ctx.addIssue({
@@ -150,30 +123,5 @@ export const CanonicalProvisioningSchema = z
     }
   });
 
-function canonicalizeProvisioningRequest(request: z.infer<typeof ProvisioningRequestSchema>): z.input<typeof CanonicalProvisioningSchema> {
-  const { site, plot, quadrats } = request;
-
-  if (quadrats.mode !== 'csv') {
-    return { site, plot, quadrats };
-  }
-
-  const { coordinateReferenceCorner, rows, overlapAcknowledgment } = quadrats;
-  return {
-    site,
-    plot,
-    quadrats: {
-      mode: 'csv',
-      rows: rows.map(row => normalizeToSouthwest(row, coordinateReferenceCorner)),
-      coordinates: 'canonical-sw',
-      sourceCoordinateReferenceCorner: coordinateReferenceCorner,
-      ...(overlapAcknowledgment !== undefined ? { overlapAcknowledgment } : {})
-    }
-  };
-}
-
-export const ProvisioningInputSchema = ProvisioningRequestSchema.transform(canonicalizeProvisioningRequest).pipe(CanonicalProvisioningSchema);
-
-type _AssertRequestShape = z.input<typeof ProvisioningInputSchema> extends ProvisioningRequestInput ? true : never;
-type _AssertRunShape = z.output<typeof ProvisioningInputSchema> extends ProvisioningRunInput ? true : never;
-const _assertRequestShape: _AssertRequestShape = true;
-const _assertRunShape: _AssertRunShape = true;
+type _AssertInputShape = z.output<typeof ProvisioningInputSchema> extends ProvisioningInput ? true : never;
+const _assertInputShape: _AssertInputShape = true;
