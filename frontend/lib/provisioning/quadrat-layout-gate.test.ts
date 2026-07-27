@@ -11,18 +11,17 @@
  * vitest.integration.config.mts (lib/provisioning/** is excluded from the unit config),
  * not the unit config page.tsx itself is tested from.
  *
- * A CSV whose rows name the north-east corner of each quadrat (e.g. the Niobrara plot)
- * must be rejected when declared as south-west (the outer row/column falls outside the
- * plot) and accepted once declared as north-east (normalization brings every row back
- * inside the plot).
+ * South-west is the only coordinate convention the gate reads. A CSV whose rows name the
+ * north-east corner of each quadrat (e.g. the Niobrara plot) must therefore be rejected —
+ * its outer row and column fall outside the plot — rather than silently re-oriented.
  */
 
 import { describe, it, expect } from 'vitest';
 import { quadratLayoutIsValid } from '@/lib/provisioning/quadrat-layout-gate';
-import type { ProvisioningRequestInput, QuadratCsvRow, QuadratReferenceCorner } from '@/lib/provisioning/types';
+import type { ProvisioningInput, QuadratCsvRow } from '@/lib/provisioning/types';
 import { buildQuadratOverlapAcknowledgment, validateQuadratCollectionDetailed } from '@/lib/provisioning/quadrat-collection-validation';
 
-const SITE: ProvisioningRequestInput['site'] = {
+const SITE: ProvisioningInput['site'] = {
   siteName: 'Niobrara',
   schemaName: 'forestgeo_niobrara',
   sqDimX: 5,
@@ -34,7 +33,7 @@ const SITE: ProvisioningRequestInput['site'] = {
   country: 'USA'
 };
 
-const PLOT_100x100: ProvisioningRequestInput['plot'] = {
+const PLOT_100x100: ProvisioningInput['plot'] = {
   plotName: 'Niobrara Plot',
   dimensionX: 100,
   dimensionY: 100,
@@ -51,8 +50,23 @@ const PLOT_100x100: ProvisioningRequestInput['plot'] = {
   defaultHOMUnits: 'm'
 };
 
-// Mirrors cypress/fixtures/quadrats-northeast-grid.csv: quadrats-valid-grid.csv with
-// 20 added to every coordinate, so each row names its own upper-right (north-east) corner.
+const QUADRAT_SIZE = 20;
+const GRID_ORIGINS = [0, 20, 40, 60, 80];
+
+/** A 5×5 grid of 20×20 quadrats tiling the 100×100 plot exactly, in the supported south-west convention. */
+const SOUTHWEST_GRID_ROWS: QuadratCsvRow[] = GRID_ORIGINS.flatMap((startY, rowIndex) =>
+  GRID_ORIGINS.map((startX, colIndex) => ({
+    quadratName: `Q${String(rowIndex * GRID_ORIGINS.length + colIndex + 1).padStart(4, '0')}`,
+    startX,
+    startY,
+    dimensionX: QUADRAT_SIZE,
+    dimensionY: QUADRAT_SIZE
+  }))
+);
+
+// The same physical grid recorded against each quadrat's upper-right (north-east) corner:
+// SOUTHWEST_GRID_ROWS with 20 added to every coordinate. The outer row and column then
+// extend to 120, past the 100×100 plot.
 const NORTHEAST_GRID_ROWS: QuadratCsvRow[] = [
   { quadratName: 'Q0001', startX: 20, startY: 20, dimensionX: 20, dimensionY: 20 },
   { quadratName: 'Q0002', startX: 40, startY: 20, dimensionX: 20, dimensionY: 20 },
@@ -81,53 +95,45 @@ const NORTHEAST_GRID_ROWS: QuadratCsvRow[] = [
   { quadratName: 'Q0025', startX: 100, startY: 100, dimensionX: 20, dimensionY: 20 }
 ];
 
-function buildInput(coordinateReferenceCorner: QuadratReferenceCorner): ProvisioningRequestInput {
+function buildInput(rows: QuadratCsvRow[]): ProvisioningInput {
   return {
     site: SITE,
     plot: PLOT_100x100,
     quadrats: {
       mode: 'csv',
-      rows: NORTHEAST_GRID_ROWS,
-      coordinateReferenceCorner
+      rows
     }
   };
 }
 
 describe('quadratLayoutIsValid', () => {
-  it('rejects the north-east-labeled grid when declared as south-west: the outer row and column extend past the plot', () => {
-    const input = buildInput('SW');
-
-    expect(quadratLayoutIsValid(input)).toBe(false);
+  it('accepts a south-west grid that tiles the plot exactly', () => {
+    expect(quadratLayoutIsValid(buildInput(SOUTHWEST_GRID_ROWS))).toBe(true);
   });
 
-  it('accepts the same rows once the only change is declaring the reference corner as north-east', () => {
-    const input = buildInput('NE');
-
-    expect(quadratLayoutIsValid(input)).toBe(true);
+  it('rejects the north-east-labeled grid: the outer row and column extend past the plot', () => {
+    expect(quadratLayoutIsValid(buildInput(NORTHEAST_GRID_ROWS))).toBe(false);
   });
 
   it('blocks duplicate quadrat names even when their geometry does not overlap', () => {
-    const input = buildInput('NE');
-    if (input.quadrats.mode !== 'csv') throw new Error('expected csv mode');
-    input.quadrats.rows = [
+    const input = buildInput([
       { quadratName: 'Q01', startX: 20, startY: 20, dimensionX: 20, dimensionY: 20 },
       { quadratName: 'q01', startX: 40, startY: 20, dimensionX: 20, dimensionY: 20 }
-    ];
+    ]);
 
     expect(quadratLayoutIsValid(input)).toBe(false);
   });
 
   it('blocks overlapping rows without an acknowledgment, and passes them with one', () => {
-    const input = buildInput('SW');
-    if (input.quadrats.mode !== 'csv') throw new Error('expected csv mode');
-    input.quadrats.rows = [
+    const input = buildInput([
       { quadratName: 'Q01', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
       { quadratName: 'Q02', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
-    ];
+    ]);
+    if (input.quadrats.mode !== 'csv') throw new Error('expected csv mode');
 
     expect(quadratLayoutIsValid(input)).toBe(false);
 
-    const summary = validateQuadratCollectionDetailed(input.quadrats.rows, input.plot, 'SW').overlapSummary;
+    const summary = validateQuadratCollectionDetailed(input.quadrats.rows, input.plot).overlapSummary;
     if (!summary) throw new Error('expected overlap summary');
     input.quadrats.overlapAcknowledgment = buildQuadratOverlapAcknowledgment([summary.layoutSignature]);
     expect(quadratLayoutIsValid(input)).toBe(true);

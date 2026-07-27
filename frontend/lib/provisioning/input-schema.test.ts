@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ProvisioningInputSchema, ProvisioningPlotSchema, ProvisioningQuadratsRequestSchema } from './input-schema';
+import { ProvisioningInputSchema, ProvisioningPlotSchema, ProvisioningQuadratsSchema } from './input-schema';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import {
   buildQuadratOverlapAcknowledgment,
@@ -7,28 +7,27 @@ import {
   validateQuadratCollectionDetailed
 } from './quadrat-collection-validation';
 
-describe('ProvisioningQuadratsRequestSchema', () => {
+describe('ProvisioningQuadratsSchema', () => {
   it('accepts grid mode', () => {
-    const result = ProvisioningQuadratsRequestSchema.safeParse({ mode: 'grid', quadratSizeX: 20, quadratSizeY: 20, namingPattern: 'sequential' });
+    const result = ProvisioningQuadratsSchema.safeParse({ mode: 'grid', quadratSizeX: 20, quadratSizeY: 20, namingPattern: 'sequential' });
     expect(result.success).toBe(true);
   });
 
   it('accepts csv mode with at least one row', () => {
-    const result = ProvisioningQuadratsRequestSchema.safeParse({
+    const result = ProvisioningQuadratsSchema.safeParse({
       mode: 'csv',
-      rows: [{ quadratName: 'C01', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 }],
-      coordinateReferenceCorner: 'SW'
+      rows: [{ quadratName: 'C01', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 }]
     });
     expect(result.success).toBe(true);
   });
 
   it('accepts none mode (create no quadrats now)', () => {
-    const result = ProvisioningQuadratsRequestSchema.safeParse({ mode: 'none' });
+    const result = ProvisioningQuadratsSchema.safeParse({ mode: 'none' });
     expect(result.success).toBe(true);
   });
 
   it('rejects an unknown mode', () => {
-    const result = ProvisioningQuadratsRequestSchema.safeParse({ mode: 'auto' });
+    const result = ProvisioningQuadratsSchema.safeParse({ mode: 'auto' });
     expect(result.success).toBe(false);
   });
 });
@@ -99,64 +98,82 @@ const BASE_REQUEST = {
   plot: VALID_PLOT,
   quadrats: {
     mode: 'csv' as const,
-    coordinateReferenceCorner: 'NE' as const,
     rows: [
-      { quadratName: 'A', startX: 20, startY: 20, dimensionX: 20, dimensionY: 20 },
-      { quadratName: 'B', startX: 100, startY: 100, dimensionX: 20, dimensionY: 20 }
+      { quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+      { quadratName: 'B', startX: 80, startY: 80, dimensionX: 20, dimensionY: 20 }
     ]
   }
 };
 
-describe('ProvisioningInputSchema canonicalization', () => {
-  it('accepts a north-east referenced payload that the south-west reading would reject', () => {
+describe('ProvisioningInputSchema', () => {
+  it('accepts a south-west payload that lies inside the plot', () => {
     expect(ProvisioningInputSchema.safeParse(BASE_REQUEST).success).toBe(true);
   });
 
-  it('returns canonical south-west rows as the parsed output, not just a validation copy', () => {
+  it('returns the submitted rows unchanged: coordinates are validated, never re-oriented', () => {
     const result = ProvisioningInputSchema.safeParse(BASE_REQUEST);
     if (!result.success) throw new Error('expected success');
     const quadrats = result.data.quadrats;
     if (quadrats.mode !== 'csv') throw new Error('expected csv mode');
-    expect(quadrats.rows).toEqual([
-      { quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
-      { quadratName: 'B', startX: 80, startY: 80, dimensionX: 20, dimensionY: 20 }
-    ]);
-    expect(quadrats.coordinates).toBe('canonical-sw');
-    expect(quadrats.sourceCoordinateReferenceCorner).toBe('NE');
+    expect(quadrats.rows).toEqual(BASE_REQUEST.quadrats.rows);
   });
 
-  it('rejects a genuinely out-of-bounds layout under every reference corner', () => {
-    for (const corner of ['SW', 'SE', 'NW', 'NE'] as const) {
-      const result = ProvisioningInputSchema.safeParse({
-        ...BASE_REQUEST,
-        quadrats: {
-          mode: 'csv',
-          coordinateReferenceCorner: corner,
-          rows: [{ quadratName: 'Way out', startX: 500, startY: 500, dimensionX: 20, dimensionY: 20 }]
-        }
-      });
-      expect(result.success, `corner ${corner} should be rejected`).toBe(false);
-    }
-  });
-
-  it('rejects rows that normalize to negative coordinates', () => {
+  it('rejects a payload whose coordinates name each quadrat’s north-east corner', () => {
+    // The same physical layout as BASE_REQUEST recorded against the upper-right corner:
+    // 'B' then reaches 120, past the 100×100 plot. The researcher converts the file; the
+    // schema does not.
     const result = ProvisioningInputSchema.safeParse({
       ...BASE_REQUEST,
       quadrats: {
         mode: 'csv',
-        coordinateReferenceCorner: 'NE',
-        rows: [{ quadratName: 'Below origin', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }]
+        rows: [
+          { quadratName: 'A', startX: 20, startY: 20, dimensionX: 20, dimensionY: 20 },
+          { quadratName: 'B', startX: 100, startY: 100, dimensionX: 20, dimensionY: 20 }
+        ]
       }
     });
     expect(result.success).toBe(false);
   });
 
-  it('detects overlaps after normalization', () => {
+  it('ignores a stale coordinateReferenceCorner field instead of re-orienting the rows', () => {
     const result = ProvisioningInputSchema.safeParse({
       ...BASE_REQUEST,
       quadrats: {
         mode: 'csv',
         coordinateReferenceCorner: 'NE',
+        rows: [{ quadratName: 'B', startX: 100, startY: 100, dimensionX: 20, dimensionY: 20 }]
+      }
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a genuinely out-of-bounds layout', () => {
+    const result = ProvisioningInputSchema.safeParse({
+      ...BASE_REQUEST,
+      quadrats: {
+        mode: 'csv',
+        rows: [{ quadratName: 'Way out', startX: 500, startY: 500, dimensionX: 20, dimensionY: 20 }]
+      }
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a negative start coordinate', () => {
+    const result = ProvisioningInputSchema.safeParse({
+      ...BASE_REQUEST,
+      quadrats: {
+        mode: 'csv',
+        rows: [{ quadratName: 'Below origin', startX: -10, startY: -10, dimensionX: 20, dimensionY: 20 }]
+      }
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('detects overlapping footprints', () => {
+    const result = ProvisioningInputSchema.safeParse({
+      ...BASE_REQUEST,
+      quadrats: {
+        mode: 'csv',
         rows: [
           { quadratName: 'A', startX: 30, startY: 30, dimensionX: 30, dimensionY: 30 },
           { quadratName: 'B', startX: 50, startY: 50, dimensionX: 30, dimensionY: 30 }
@@ -166,26 +183,25 @@ describe('ProvisioningInputSchema canonicalization', () => {
     expect(result.success).toBe(false);
   });
 
-  it('accepts overlapping rows when acknowledged, carrying the acknowledgment text into the canonical payload', () => {
+  it('accepts overlapping rows when acknowledged, carrying the acknowledgment text into the parsed payload', () => {
     const rows = [
       { quadratName: 'A', startX: 30, startY: 30, dimensionX: 30, dimensionY: 30 },
       { quadratName: 'B', startX: 50, startY: 50, dimensionX: 30, dimensionY: 30 }
     ];
-    const overlapSummary = validateQuadratCollectionDetailed(rows, BASE_REQUEST.plot, 'NE').overlapSummary;
+    const overlapSummary = validateQuadratCollectionDetailed(rows, BASE_REQUEST.plot).overlapSummary;
     if (!overlapSummary) throw new Error('expected overlap summary');
     const ACKNOWLEDGMENT = buildQuadratOverlapAcknowledgment([overlapSummary.layoutSignature]);
     const result = ProvisioningInputSchema.safeParse({
       ...BASE_REQUEST,
       quadrats: {
         mode: 'csv',
-        coordinateReferenceCorner: 'NE',
         overlapAcknowledgment: ACKNOWLEDGMENT,
         rows
       }
     });
     expect(result.success).toBe(true);
     if (result.success && result.data.quadrats.mode === 'csv') {
-      // The stored run payload is the provenance record, so the text must survive canonicalization.
+      // The stored run payload is the provenance record, so the text must survive parsing.
       expect(result.data.quadrats.overlapAcknowledgment).toEqual(ACKNOWLEDGMENT);
     }
   });
@@ -195,7 +211,6 @@ describe('ProvisioningInputSchema canonicalization', () => {
       ...BASE_REQUEST,
       quadrats: {
         mode: 'csv',
-        coordinateReferenceCorner: 'SW',
         overlapAcknowledgment: 'acknowledged',
         rows: [
           { quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
@@ -211,7 +226,6 @@ describe('ProvisioningInputSchema canonicalization', () => {
       ...BASE_REQUEST,
       quadrats: {
         mode: 'csv',
-        coordinateReferenceCorner: 'SW',
         overlapAcknowledgment: {
           statement: QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
           layoutSignatures: ['quadrat-layout-v1-0000000000000000']
@@ -227,7 +241,6 @@ describe('ProvisioningInputSchema canonicalization', () => {
       ...BASE_REQUEST,
       quadrats: {
         mode: 'csv',
-        coordinateReferenceCorner: 'SW',
         rows: [
           { quadratName: ' Q01 ', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
           { quadratName: 'q01', startX: 20, startY: 0, dimensionX: 20, dimensionY: 20 }
@@ -246,7 +259,6 @@ describe('ProvisioningInputSchema canonicalization', () => {
       ...BASE_REQUEST,
       quadrats: {
         mode: 'csv',
-        coordinateReferenceCorner: 'SW',
         rows: [{ quadratName: ' Q01 ', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 }]
       }
     });
@@ -256,7 +268,7 @@ describe('ProvisioningInputSchema canonicalization', () => {
     expect(result.data.quadrats.rows[0].quadratName).toBe('Q01');
   });
 
-  it('leaves grid mode untouched by canonicalization', () => {
+  it('leaves grid mode untouched', () => {
     const result = ProvisioningInputSchema.safeParse({
       ...BASE_REQUEST,
       quadrats: { mode: 'grid', quadratSizeX: 20, quadratSizeY: 20, namingPattern: 'sequential' }
@@ -265,11 +277,11 @@ describe('ProvisioningInputSchema canonicalization', () => {
     expect(result.data.quadrats.mode).toBe('grid');
   });
 
-  it('requires the reference corner to be declared on the wire', () => {
-    const result = ProvisioningQuadratsRequestSchema.safeParse({
-      mode: 'csv',
-      rows: [{ quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 }]
-    });
-    expect(result.success).toBe(false);
+  it('is idempotent, so re-parsing a stored payload never shifts its coordinates', () => {
+    const first = ProvisioningInputSchema.safeParse(BASE_REQUEST);
+    if (!first.success) throw new Error('expected success');
+    const second = ProvisioningInputSchema.safeParse(JSON.parse(JSON.stringify(first.data)));
+    if (!second.success) throw new Error('expected re-parse to succeed');
+    expect(second.data).toEqual(first.data);
   });
 });

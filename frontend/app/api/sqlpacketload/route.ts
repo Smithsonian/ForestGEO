@@ -17,13 +17,7 @@ import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
 import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, type QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
-import { DEFAULT_REFERENCE_CORNER } from '@/lib/provisioning/coordinate-reference-corner';
-import {
-  parseQuadratReferenceCorner,
-  QuadratGeometryValidationError,
-  QuadratOverlapAcknowledgmentRequiredError,
-  writeQuadratUpload
-} from '@/lib/ingestion/quadrat-write-boundary';
+import { QuadratGeometryValidationError, QuadratOverlapAcknowledgmentRequiredError, writeQuadratUpload } from '@/lib/ingestion/quadrat-write-boundary';
 import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE } from '@/lib/ingestion/quadrat-overlap-contract';
 import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
 import { RoleResult } from '@/lib/db/definitions/personnel';
@@ -1218,7 +1212,6 @@ export async function POST(request: NextRequest) {
         transactionID = await connectionManager.beginTransaction();
 
         if (formType === 'quadrats') {
-          const referenceCorner = parseQuadratReferenceCorner(body.coordinateReferenceCorner);
           const overlapAcknowledgment: unknown = body.quadratOverlapAcknowledgment;
           fixedDataProcessingResult = await writeQuadratUpload(
             connectionManager,
@@ -1226,8 +1219,8 @@ export async function POST(request: NextRequest) {
             plot?.plotID,
             uploadRows,
             uploadMode,
-            referenceCorner,
             overlapAcknowledgment,
+            body.coordinateReferenceCorner,
             transactionID
           );
         } else if (formType === 'attributes') {
@@ -1409,7 +1402,6 @@ export async function POST(request: NextRequest) {
             schema,
             plotID: plot?.plotID ?? null,
             uploadMode,
-            coordinateReferenceCorner: body.coordinateReferenceCorner ?? DEFAULT_REFERENCE_CORNER,
             rowCount: uploadRows.length,
             code: 'INVALID_QUADRAT_GEOMETRY'
           });

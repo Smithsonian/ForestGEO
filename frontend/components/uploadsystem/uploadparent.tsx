@@ -32,8 +32,7 @@ import { canonicalizeRevisionRow, normalizeRevisionHeader } from '@/components/u
 import { EMPTY_REVISION_MATCH_COUNTS, RevisionInvalidRow, RevisionMatchedRow, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { BulkEditPlan } from '@/config/editplan/types';
 import type { ArcgisImportReference } from '@/lib/arcgis/types';
-import type { QuadratOverlapAcknowledgment, QuadratReferenceCorner } from '@/lib/provisioning/types';
-import { DEFAULT_REFERENCE_CORNER } from '@/lib/provisioning/coordinate-reference-corner';
+import type { QuadratOverlapAcknowledgment } from '@/lib/provisioning/types';
 import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
 
 export interface CMIDRow {
@@ -126,13 +125,10 @@ function UploadParentInner(props: UploadParentProps) {
   const [parsedData, setParsedData] = useState<FileCollectionRowSet>({});
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
   const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
-  // Which corner of each quadrat a Quadrats-form upload's StartX/StartY identifies. Held here (rather
-  // than inside UploadParseFiles) because UploadFireSQL, in a later ReviewStates screen, must still
-  // see the value the user picked. Only meaningful for FormType.quadrats; other forms ignore it.
-  const [coordinateReferenceCorner, setCoordinateReferenceCorner] = useState<QuadratReferenceCorner>(DEFAULT_REFERENCE_CORNER);
   // The uploader's confirmation that overlapping quadrat footprints reflect field measurements.
-  // Held here for the same reason as the reference corner: confirmed in UploadParseFiles, but
-  // UploadFireSQL must still see it when it sends the requests. Quadrats form only.
+  // Held here (rather than inside UploadParseFiles) because it is confirmed in UploadParseFiles but
+  // UploadFireSQL, in a later ReviewStates screen, must still see it when it sends the requests.
+  // Quadrats form only.
   const [quadratOverlapAcknowledgment, setQuadratOverlapAcknowledgment] = useState<QuadratOverlapAcknowledgment | null>(null);
   const [serverQuadratOverlapSummaries, setServerQuadratOverlapSummaries] = useState<QuadratOverlapSummary[]>([]);
   const clearServerQuadratOverlapSummaries = useCallback(() => setServerQuadratOverlapSummaries([]), []);
@@ -221,7 +217,6 @@ function UploadParentInner(props: UploadParentProps) {
       setRevisionMatchResult(null);
       setRevisionConfirmNewRows(false);
       setArcgisImportSession(null);
-      setCoordinateReferenceCorner(DEFAULT_REFERENCE_CORNER);
       setQuadratOverlapAcknowledgment(null);
       setServerQuadratOverlapSummaries([]);
     }
@@ -254,7 +249,6 @@ function UploadParentInner(props: UploadParentProps) {
     setRevisionMatchResult(null);
     setRevisionConfirmNewRows(false);
     setArcgisImportSession(null);
-    setCoordinateReferenceCorner(DEFAULT_REFERENCE_CORNER);
     setQuadratOverlapAcknowledgment(null);
     setServerQuadratOverlapSummaries([]);
   }
@@ -470,8 +464,6 @@ function UploadParentInner(props: UploadParentProps) {
             setSelectedDelimiters={setSelectedDelimiters}
             columnMappings={columnMappings}
             setColumnMappingForFile={setColumnMappingForFile}
-            coordinateReferenceCorner={coordinateReferenceCorner}
-            setCoordinateReferenceCorner={setCoordinateReferenceCorner}
             quadratOverlapAcknowledgment={quadratOverlapAcknowledgment}
             setQuadratOverlapAcknowledgment={setQuadratOverlapAcknowledgment}
             serverQuadratOverlapSummaries={serverQuadratOverlapSummaries}
@@ -526,7 +518,6 @@ function UploadParentInner(props: UploadParentProps) {
             setAllRowToCMID={setAllRowToCMID}
             selectedDelimiters={selectedDelimiters}
             columnMappings={columnMappings}
-            coordinateReferenceCorner={coordinateReferenceCorner}
             quadratOverlapAcknowledgment={quadratOverlapAcknowledgment}
             onQuadratOverlapAcknowledgmentRequired={handleQuadratOverlapAcknowledgmentRequired}
           />

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { validateInputsStep } from './validate-inputs';
-import type { StepContext, ProvisioningRunInput } from '../types';
+import type { StepContext, ProvisioningInput } from '../types';
 import {
   buildQuadratOverlapAcknowledgment,
   QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
@@ -10,7 +10,7 @@ import {
 
 const CATALOG_SCHEMA = 'catalog';
 
-function makeInput(overrides: Partial<ProvisioningRunInput> = {}): ProvisioningRunInput {
+function makeInput(overrides: Partial<ProvisioningInput> = {}): ProvisioningInput {
   return {
     site: {
       siteName: 'Rabi',
@@ -44,7 +44,7 @@ function makeInput(overrides: Partial<ProvisioningRunInput> = {}): ProvisioningR
   };
 }
 
-function makeCtx(input: ProvisioningRunInput, pool: any): StepContext {
+function makeCtx(input: ProvisioningInput, pool: any): StepContext {
   return {
     runId: 1,
     schemaName: input.site.schemaName,
@@ -219,9 +219,7 @@ describe('validateInputsStep', () => {
           rows: [
             { quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
             { quadratName: 'B', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
-          ],
-          coordinates: 'canonical-sw',
-          sourceCoordinateReferenceCorner: 'SW'
+          ]
         }
       }),
       pool
@@ -238,13 +236,11 @@ describe('validateInputsStep', () => {
         rows: [
           { quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
           { quadratName: 'B', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
-        ],
-        coordinates: 'canonical-sw',
-        sourceCoordinateReferenceCorner: 'SW'
+        ]
       }
     });
     if (input.quadrats.mode !== 'csv') throw new Error('expected csv mode');
-    const summary = validateQuadratCollectionDetailed(input.quadrats.rows, input.plot, 'SW').overlapSummary;
+    const summary = validateQuadratCollectionDetailed(input.quadrats.rows, input.plot).overlapSummary;
     if (!summary) throw new Error('expected overlap summary');
     input.quadrats.overlapAcknowledgment = buildQuadratOverlapAcknowledgment([summary.layoutSignature]);
     const ctx = makeCtx(input, pool);
@@ -257,8 +253,6 @@ describe('validateInputsStep', () => {
         quadrats: {
           mode: 'csv',
           rows: [{ quadratName: 'A', startX: 90, startY: 0, dimensionX: 20, dimensionY: 20 }],
-          coordinates: 'canonical-sw',
-          sourceCoordinateReferenceCorner: 'SW',
           overlapAcknowledgment: {
             statement: QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
             layoutSignatures: ['quadrat-layout-v1-0000000000000000']
@@ -275,9 +269,7 @@ describe('validateInputsStep', () => {
       makeInput({
         quadrats: {
           mode: 'csv',
-          rows: [{ quadratName: 'A', startX: 90, startY: 0, dimensionX: 20, dimensionY: 20 }],
-          coordinates: 'canonical-sw',
-          sourceCoordinateReferenceCorner: 'SW'
+          rows: [{ quadratName: 'A', startX: 90, startY: 0, dimensionX: 20, dimensionY: 20 }]
         }
       }),
       pool
@@ -290,9 +282,7 @@ describe('validateInputsStep', () => {
       makeInput({
         quadrats: {
           mode: 'csv',
-          rows: [{ quadratName: 'A', startX: 0, startY: 90, dimensionX: 20, dimensionY: 20 }],
-          coordinates: 'canonical-sw',
-          sourceCoordinateReferenceCorner: 'SW'
+          rows: [{ quadratName: 'A', startX: 0, startY: 90, dimensionX: 20, dimensionY: 20 }]
         }
       }),
       pool
@@ -305,9 +295,7 @@ describe('validateInputsStep', () => {
       makeInput({
         quadrats: {
           mode: 'csv',
-          rows: [{ quadratName: 'A', startX: -5, startY: 0, dimensionX: 20, dimensionY: 20 }],
-          coordinates: 'canonical-sw',
-          sourceCoordinateReferenceCorner: 'SW'
+          rows: [{ quadratName: 'A', startX: -5, startY: 0, dimensionX: 20, dimensionY: 20 }]
         }
       }),
       pool
@@ -323,9 +311,7 @@ describe('validateInputsStep', () => {
           rows: [
             { quadratName: 'A', startX: 0, startY: 0, dimensionX: 50, dimensionY: 100 },
             { quadratName: 'B', startX: 50, startY: 0, dimensionX: 50, dimensionY: 100 }
-          ],
-          coordinates: 'canonical-sw',
-          sourceCoordinateReferenceCorner: 'SW'
+          ]
         }
       }),
       pool

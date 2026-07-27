@@ -4,7 +4,6 @@ import UploadFireSQL from './uploadfiresql';
 import { FileWithStream, ReviewStates, type UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
-import type { QuadratReferenceCorner } from '@/lib/provisioning/types';
 
 const startValidation = vi.fn();
 
@@ -63,7 +62,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload request body', () => {
+describe('UploadFireSQL — the /api/sqlpacketload request body', () => {
   const fetchMock = vi.fn();
   const setReviewState = vi.fn();
   const setIsDataUnsaved = vi.fn();
@@ -89,7 +88,7 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
     vi.unstubAllGlobals();
   });
 
-  function renderFor(coordinateReferenceCorner: QuadratReferenceCorner) {
+  function renderQuadratUpload() {
     const props: UploadFireProps = {
       schema: 'forestgeo_testing',
       uploadForm: FormType.quadrats,
@@ -100,7 +99,6 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
       parsedData: {},
       uploadCompleteMessage: '',
       selectedDelimiters: { 'quadrats.csv': ',' },
-      coordinateReferenceCorner,
       quadratOverlapAcknowledgment: null,
       onQuadratOverlapAcknowledgmentRequired: vi.fn(),
       setUploadCompleteMessage,
@@ -114,10 +112,9 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
   }
 
   // Quadrats uploads (non-measurements) never populate `rawPayload`, so uploadToSql always takes
-  // the `fileRowSet` JSON.stringify branch — this is the real production path a north-east file
-  // travels through today. Regression coverage for this branch is the load-bearing case.
-  it('sends the selected corner in the fileRowSet request branch for a quadrats upload', async () => {
-    renderFor('NE');
+  // the `fileRowSet` JSON.stringify branch — the real production path a quadrat file travels.
+  it('sends a quadrats upload through the fileRowSet branch, with no coordinate-orientation field', async () => {
+    renderQuadratUpload();
 
     await waitFor(() => {
       const sqlPacketLoadCalls = fetchMock.mock.calls.filter(call => String(call[0]).includes('/api/sqlpacketload'));
@@ -130,23 +127,11 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
     const requestBody = JSON.parse(String(requestInit.body));
 
     expect(requestBody.formType).toBe(FormType.quadrats);
-    expect(requestBody.coordinateReferenceCorner).toBe('NE');
+    // Coordinates are south-west by definition, so the client must not negotiate an orientation.
+    expect(requestBody.coordinateReferenceCorner).toBeUndefined();
     // fileRowSet branch: the request must NOT carry rawRows (that is the measurements-mapping branch).
     expect(requestBody.fileRowSet).toBeDefined();
     expect(requestBody.rawRows).toBeUndefined();
-  });
-
-  it('defaults to south-west when that is the value passed down from UploadParent', async () => {
-    renderFor('SW');
-
-    await waitFor(() => {
-      const sqlPacketLoadCalls = fetchMock.mock.calls.filter(call => String(call[0]).includes('/api/sqlpacketload'));
-      expect(sqlPacketLoadCalls.length).toBeGreaterThan(0);
-    });
-
-    const sqlPacketLoadCall = fetchMock.mock.calls.find(call => String(call[0]).includes('/api/sqlpacketload'));
-    const requestBody = JSON.parse(String((sqlPacketLoadCall?.[1] as RequestInit).body));
-    expect(requestBody.coordinateReferenceCorner).toBe('SW');
   });
 
   it('returns a server-discovered overlap challenge to the review step instead of a generic error', async () => {
@@ -179,7 +164,6 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
       parsedData: {},
       uploadCompleteMessage: '',
       selectedDelimiters: { 'quadrats.csv': ',' },
-      coordinateReferenceCorner: 'SW',
       quadratOverlapAcknowledgment: null,
       onQuadratOverlapAcknowledgmentRequired: onAcknowledgmentRequired,
       setUploadCompleteMessage,
@@ -209,7 +193,6 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
       parsedData: {},
       uploadCompleteMessage: '',
       selectedDelimiters: { 'quadrats-multi-chunk.csv': ',' },
-      coordinateReferenceCorner: 'SW',
       quadratOverlapAcknowledgment: null,
       onQuadratOverlapAcknowledgmentRequired: vi.fn(),
       setUploadCompleteMessage,
@@ -237,10 +220,9 @@ describe('UploadFireSQL — coordinateReferenceCorner in the /api/sqlpacketload 
   });
 });
 
-// The rawPayload branch is only reachable on the measurements + column-mapping flow. Coverage here
-// is a defensive regression test per the task's instruction: keeping both JSON.stringify branches
-// aligned prevents a later encoding change from silently reverting one branch to south-west.
-describe('UploadFireSQL — coordinateReferenceCorner in the rawPayload request branch (measurements/mapping flow)', () => {
+// The rawPayload branch is only reachable on the measurements + column-mapping flow. Covered
+// separately so a later encoding change cannot silently diverge the two JSON.stringify branches.
+describe('UploadFireSQL — the rawPayload request branch (measurements/mapping flow)', () => {
   const fetchMock = vi.fn();
   const setReviewState = vi.fn();
   const setIsDataUnsaved = vi.fn();
@@ -266,7 +248,7 @@ describe('UploadFireSQL — coordinateReferenceCorner in the rawPayload request 
     vi.unstubAllGlobals();
   });
 
-  it('sends the selected corner in the rawPayload request branch for a measurements upload', async () => {
+  it('sends a measurements upload through the rawPayload branch', async () => {
     const csvContent = ['tag,spcode,quadrat,lx,ly,date', '1,ABAL,Q0001,1.5,2.5,2020-01-01'].join('\n');
     const raw = new File([csvContent], 'measurements.csv', { type: 'text/csv' });
     const file = new FileWithStream(raw, false);
@@ -281,9 +263,6 @@ describe('UploadFireSQL — coordinateReferenceCorner in the rawPayload request 
       parsedData: {},
       uploadCompleteMessage: '',
       selectedDelimiters: { 'measurements.csv': ',' },
-      // Measurements uploads never let the user pick a reference corner; the default must still
-      // be present on the wire so a later change to this branch cannot silently drop the field.
-      coordinateReferenceCorner: 'SW',
       quadratOverlapAcknowledgment: null,
       onQuadratOverlapAcknowledgmentRequired: vi.fn(),
       setUploadCompleteMessage,
@@ -304,7 +283,6 @@ describe('UploadFireSQL — coordinateReferenceCorner in the rawPayload request 
     const sqlPacketLoadCall = fetchMock.mock.calls.find(call => String(call[0]).includes('/api/sqlpacketload'));
     const requestBody = JSON.parse(String((sqlPacketLoadCall?.[1] as RequestInit).body));
 
-    expect(requestBody.coordinateReferenceCorner).toBe('SW');
     // rawPayload branch: the request must carry rawRows, not a fileRowSet.
     expect(requestBody.rawRows).toBeDefined();
     expect(requestBody.fileRowSet).toBeUndefined();

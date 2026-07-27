@@ -1,9 +1,9 @@
 /**
- * UploadParseFiles — quadrat reference-corner preflight
+ * UploadParseFiles — quadrat geometry preflight
  *
- * Covers the Task 10 surface added to the active upload screen: the ReferenceCornerSelect only
- * appearing for Quadrats uploads, and the client-side geometry preflight that blocks Continue on
- * scalar or collection issues. Task 11 (server-side enforcement) is out of scope here.
+ * Covers the quadrat surface of the active upload screen: the south-west coordinate advisory
+ * shown only for Quadrats uploads, and the client-side geometry preflight that blocks Continue
+ * on scalar or collection issues. Server-side enforcement is out of scope here.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -11,9 +11,8 @@ import React, { useState } from 'react';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { FileWithStream, type UploadParseFilesProps } from '@/config/macros/uploadsystemmacros';
-import { DEFAULT_REFERENCE_CORNER } from '@/lib/provisioning/coordinate-reference-corner';
 import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
-import type { QuadratOverlapAcknowledgment, QuadratReferenceCorner } from '@/lib/provisioning/types';
+import type { QuadratOverlapAcknowledgment } from '@/lib/provisioning/types';
 import UploadParseFiles, { parseQuadratFileRows } from './uploadparsefiles';
 
 // tests/mocks/platform-mocks.ts stubs '@/lib/db/definitions/zones' with an empty module for
@@ -72,10 +71,9 @@ function buildQuadratFile(fileName: string, dataRow: string): FileWithStream {
   return new FileWithStream(raw, false);
 }
 
-// Controlled-corner wrapper: UploadParseFiles receives coordinateReferenceCorner/setter as props
-// (owned by UploadParent in production); this reproduces that contract for the test.
-function Harness(props: Partial<UploadParseFilesProps> & { initialCorner?: QuadratReferenceCorner }) {
-  const [corner, setCorner] = useState<QuadratReferenceCorner>(props.initialCorner ?? DEFAULT_REFERENCE_CORNER);
+// UploadParseFiles receives the overlap acknowledgment and its setter as props (owned by
+// UploadParent in production); this reproduces that contract for the test.
+function Harness(props: Partial<UploadParseFilesProps>) {
   const [overlapAcknowledgment, setOverlapAcknowledgment] = useState<QuadratOverlapAcknowledgment | null>(null);
   const defaults: UploadParseFilesProps = {
     uploadForm: FormType.quadrats,
@@ -88,8 +86,6 @@ function Harness(props: Partial<UploadParseFilesProps> & { initialCorner?: Quadr
     setSelectedDelimiters: () => {},
     columnMappings: {},
     setColumnMappingForFile: () => {},
-    coordinateReferenceCorner: corner,
-    setCoordinateReferenceCorner: setCorner,
     quadratOverlapAcknowledgment: overlapAcknowledgment,
     setQuadratOverlapAcknowledgment: setOverlapAcknowledgment,
     serverQuadratOverlapSummaries: [],
@@ -116,35 +112,34 @@ describe('quadrat preflight parser cancellation', () => {
   });
 });
 
-describe('ReferenceCornerSelect visibility', () => {
-  it('renders for a quadrats upload and defaults to south-west', () => {
+describe('south-west coordinate advisory', () => {
+  it('tells a quadrats uploader which corner StartX/StartY must identify', () => {
     render(<Harness uploadForm={FormType.quadrats} />);
-    expect(screen.getByRole('combobox', { name: /which corner does each row.*startx\/starty identify/i })).toBeInTheDocument();
-    // Joy Select's visible button renders no text without an explicit renderValue; the underlying
-    // native <input> mirrors the selected value and is what actually reaches the form/onChange
-    // machinery, so assert against that rather than visual text content.
-    expect(screen.getByDisplayValue(DEFAULT_REFERENCE_CORNER)).toBeInTheDocument();
+    expect(screen.getByText(/south-west \(lower-left\) corner/i)).toBeInTheDocument();
+  });
+
+  it('offers no control for choosing a different corner', () => {
+    render(<Harness uploadForm={FormType.quadrats} />);
+    expect(screen.queryByRole('combobox', { name: /which corner does each row.*startx\/starty identify/i })).toBeNull();
   });
 
   it('does not render for a non-quadrats upload (e.g. measurements)', () => {
     render(<Harness uploadForm={FormType.measurements} />);
-    expect(screen.queryByRole('combobox', { name: /which corner does each row.*startx\/starty identify/i })).toBeNull();
-    expect(screen.queryByText(/which corner does each row/i)).toBeNull();
+    expect(screen.queryByText(/south-west \(lower-left\) corner/i)).toBeNull();
   });
 
   it('does not render for a non-quadrats upload (e.g. attributes)', () => {
     render(<Harness uploadForm={FormType.attributes} />);
-    expect(screen.queryByText(/which corner does each row/i)).toBeNull();
+    expect(screen.queryByText(/south-west \(lower-left\) corner/i)).toBeNull();
   });
 });
 
-describe('quadrat geometry preflight — collection issues (reference-corner dependent)', () => {
-  // Q0001 at StartX=90, StartY=90, 20x20 in a 100x100 plot: read as south-west it extends past the
-  // plot edge (90+20=110 > 100). Read as north-east (the file's actual declared corner), it
-  // normalizes to StartX=70, StartY=70 and fits entirely inside the plot.
-  const fileName = 'quadrats-ne.csv';
-
-  it('blocks Continue with a bounds issue under the default south-west corner', async () => {
+describe('quadrat geometry preflight — collection issues', () => {
+  it('blocks Continue for a file recorded against the north-east corner', async () => {
+    // Q0001 at StartX=90, StartY=90, 20x20 in a 100x100 plot: as south-west coordinates it
+    // extends past the plot edge (90+20=110 > 100). There is no corner to re-declare — the
+    // researcher converts the file — so this stays blocked.
+    const fileName = 'quadrats-ne.csv';
     const file = buildQuadratFile(fileName, 'Q0001,90,90,20,20,400,square');
 
     await act(async () => {
@@ -158,32 +153,18 @@ describe('quadrat geometry preflight — collection issues (reference-corner dep
     expect(continueButton()).toBeDisabled();
   });
 
-  it('clears the issue and enables Continue once north-east is selected', async () => {
-    const file = buildQuadratFile(fileName, 'Q0001,90,90,20,20,400,square');
+  it('enables Continue for the same footprint once its south-west corner is recorded', async () => {
+    const fileName = 'quadrats-sw.csv';
+    const file = buildQuadratFile(fileName, 'Q0001,70,70,20,20,400,square');
 
     await act(async () => {
       render(<Harness uploadForm={FormType.quadrats} acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} />);
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/extends past plot dimension/i)).toBeInTheDocument();
-    });
-
-    const combobox = screen.getByRole('combobox', { name: /which corner does each row.*startx\/starty identify/i });
-    await act(async () => {
-      fireEvent.click(combobox);
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('option', { name: /north-east/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.queryByText(/extends past plot dimension/i)).toBeNull();
-    });
-
-    await waitFor(() => {
       expect(continueButton()).not.toBeDisabled();
     });
+    expect(screen.queryByText(/extends past plot dimension/i)).toBeNull();
   });
 });
 
@@ -260,17 +241,22 @@ describe('quadrat geometry preflight — overlap acknowledgment', () => {
     await waitFor(() => expect(continueButton()).not.toBeDisabled());
   });
 
-  it('invalidates an acknowledgment when the reference corner changes the reviewed layout signature', async () => {
-    const fileName = 'quadrats-overlap-corner-change.csv';
-    const file = buildQuadratFile(fileName, 'A,30,30,20,20,400,square\nB,40,40,20,20,400,square');
-    render(<Harness acceptedFiles={[file]} selectedDelimiters={{ [fileName]: ',' }} />);
+  it('invalidates an acknowledgment when a replacement file changes the reviewed layout signature', async () => {
+    // The acknowledgment is bound to the exact layout the uploader reviewed, not to "overlaps
+    // were confirmed once" — swapping in a different overlapping file must re-block Continue.
+    const firstFileName = 'quadrats-overlap-first.csv';
+    const firstFile = buildQuadratFile(firstFileName, 'A,30,30,20,20,400,square\nB,40,40,20,20,400,square');
+    const { rerender } = render(<Harness acceptedFiles={[firstFile]} selectedDelimiters={{ [firstFileName]: ',' }} />);
 
     const checkbox = await screen.findByRole('checkbox', { name: /acknowledge quadrat overlaps/i });
     fireEvent.click(checkbox);
     await waitFor(() => expect(continueButton()).not.toBeDisabled());
 
-    fireEvent.click(screen.getByRole('combobox', { name: /which corner does each row.*startx\/starty identify/i }));
-    fireEvent.click(screen.getByRole('option', { name: /north-east/i }));
+    const secondFileName = 'quadrats-overlap-second.csv';
+    const secondFile = buildQuadratFile(secondFileName, 'A,10,10,20,20,400,square\nB,20,20,20,20,400,square');
+    await act(async () => {
+      rerender(<Harness acceptedFiles={[secondFile]} selectedDelimiters={{ [secondFileName]: ',' }} />);
+    });
 
     await waitFor(() => expect(screen.getByRole('checkbox', { name: /acknowledge quadrat overlaps/i })).not.toBeChecked());
     expect(continueButton()).toBeDisabled();

@@ -1,13 +1,12 @@
 import { createHash } from 'crypto';
 import { z } from 'zod';
 import type { Pool, PoolConnection, ResultSetHeader } from 'mysql2/promise';
-import type { ProvisioningRunInput, ProvisioningRunRecord, ProvisioningStepRecord, StepContext, RunStatus, StepStatus } from './types';
+import type { ProvisioningInput, ProvisioningRunRecord, ProvisioningStepRecord, StepContext, RunStatus, StepStatus } from './types';
 import { STEPS } from './steps';
 import { ProvisioningError } from './errors';
 import { auditAttempt, auditSuccess, auditFailure } from './audit';
 import { dispatchRun, getWorkerPid, HEARTBEAT_STALE_MS, isRunOwnedByCurrentWorker } from './worker';
-import { upgradeLegacyQuadratConfig } from './coordinate-reference-corner';
-import { CanonicalProvisioningSchema } from './input-schema';
+import { ProvisioningInputSchema } from './input-schema';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import ailogger from '@/ailogger';
 
@@ -105,7 +104,7 @@ function toError(err: unknown): Error {
 }
 
 export interface StartRunArgs {
-  input: ProvisioningRunInput;
+  input: ProvisioningInput;
   startedBy: string;
   catalogPool: Pool;
 }
@@ -171,15 +170,10 @@ function upgradeLegacyPlotUnits(plot: unknown): unknown {
 }
 
 /**
- * Stored run payloads are read back without re-running the request schema, which
- * is deliberate: re-parsing canonical rows through the canonicalizing transform
- * would shift every quadrat a second time. Runs written before reference-corner
- * support lack the canonical discriminant, so stamp it here and then validate
- * the complete stored value as canonical run input. Legacy free-text units are
- * translated onto the unit enums for the same reason: both upgrades keep runs
- * recorded under older schemas loadable (and therefore retryable).
+ * Legacy free-text units are translated onto the unit enums before validation so
+ * that runs recorded under older schemas stay loadable (and therefore retryable).
  */
-export function parseStoredInput(raw: unknown): ProvisioningRunInput {
+export function parseStoredInput(raw: unknown): ProvisioningInput {
   const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
   if (typeof parsed !== 'object' || parsed === null || !('quadrats' in parsed)) {
     throw new Error('Stored provisioning input is malformed');
@@ -187,10 +181,9 @@ export function parseStoredInput(raw: unknown): ProvisioningRunInput {
   const candidate = parsed as Record<string, unknown>;
   const upgraded = {
     ...candidate,
-    plot: upgradeLegacyPlotUnits(candidate.plot),
-    quadrats: upgradeLegacyQuadratConfig(candidate.quadrats)
+    plot: upgradeLegacyPlotUnits(candidate.plot)
   };
-  return CanonicalProvisioningSchema.parse(upgraded);
+  return ProvisioningInputSchema.parse(upgraded);
 }
 
 /**
@@ -200,9 +193,9 @@ export function parseStoredInput(raw: unknown): ProvisioningRunInput {
  * and the row's status/schema metadata still loads. This keeps the six
  * status/cleanup callers (retry's precondition check, abort, teardown,
  * mark-failed, reconcile, and the run-detail GET route) usable against runs
- * recorded before reference-corner support or other schema tightening — none
- * of them need `input` to do their job. The two callers that DO need a valid
- * input to act on (`runProvisioning`, which executes steps against it, and
+ * recorded before a schema tightening — none of them need `input` to do their
+ * job. The two callers that DO need a valid input to act on
+ * (`runProvisioning`, which executes steps against it, and
  * `retryRun`, which re-dispatches execution) check for `null` themselves and
  * reject explicitly rather than silently running a corrupted payload.
  */
@@ -210,13 +203,13 @@ async function loadRun(catalogPool: Pool, runId: number): Promise<ProvisioningRu
   const [rows]: any = await catalogPool.query(`SELECT * FROM catalog.provisioning_runs WHERE RunID = ?`, [runId]);
   if (rows.length === 0) return null;
   const r = rows[0];
-  let input: ProvisioningRunInput | null;
+  let input: ProvisioningInput | null;
   try {
     input = parseStoredInput(r.InputPayload ?? r.inputpayload);
   } catch (err) {
     if (err instanceof z.ZodError) {
       ailogger.error(
-        `Stored provisioning input for run ${runId} does not match the current canonical schema (expected for runs recorded before reference-corner support); input unavailable for this read`,
+        `Stored provisioning input for run ${runId} does not match the current schema (expected for runs recorded before a schema tightening); input unavailable for this read`,
         toError(err),
         { runId }
       );

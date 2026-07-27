@@ -2,17 +2,15 @@
 
 import React, { useMemo } from 'react';
 import { Alert, Box, Checkbox, FormControl, FormHelperText, FormLabel, Input, Radio, RadioGroup, Stack, Typography } from '@mui/joy';
-import type { ProvisioningPlotInput, QuadratRequestConfig, QuadratReferenceCorner } from '@/lib/provisioning/types';
+import type { ProvisioningPlotInput, QuadratConfig } from '@/lib/provisioning/types';
 import { generateGrid } from '@/lib/provisioning/grid-generator';
 import { parseQuadratCsv } from '@/lib/provisioning/csv-parser';
-import { DEFAULT_REFERENCE_CORNER, getReferenceCornerLabel, normalizeToSouthwest } from '@/lib/provisioning/coordinate-reference-corner';
 import {
   acknowledgmentCoversLayout,
   buildQuadratOverlapAcknowledgment,
   QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
   validateQuadratCollectionDetailed
 } from '@/lib/provisioning/quadrat-collection-validation';
-import ReferenceCornerSelect from './ReferenceCornerSelect';
 
 const QUADRAT_SIZE_MIN = 1;
 const QUADRAT_SIZE_MAX = 10_000;
@@ -26,8 +24,8 @@ interface CsvValidationIssue {
 }
 
 export interface QuadratPlannerProps {
-  value: QuadratRequestConfig;
-  onChange: (next: QuadratRequestConfig) => void;
+  value: QuadratConfig;
+  onChange: (next: QuadratConfig) => void;
   plot: ProvisioningPlotInput;
   showErrors?: boolean;
 }
@@ -37,8 +35,8 @@ function GridModePanel({
   onChange,
   plot
 }: {
-  value: QuadratRequestConfig & { mode: 'grid' };
-  onChange: (next: QuadratRequestConfig) => void;
+  value: QuadratConfig & { mode: 'grid' };
+  onChange: (next: QuadratConfig) => void;
   plot: ProvisioningPlotInput;
 }) {
   let previewContent: React.ReactNode;
@@ -112,21 +110,19 @@ function CsvResultSummary({
   blockingIssues,
   overlapIssues,
   overlapAcknowledged,
-  onOverlapAcknowledgedChange,
-  referenceCornerLabel
+  onOverlapAcknowledgedChange
 }: {
   rowCount: number;
   blockingIssues: CsvValidationIssue[];
   overlapIssues: CsvValidationIssue[];
   overlapAcknowledged: boolean;
   onOverlapAcknowledgedChange: (acknowledged: boolean) => void;
-  referenceCornerLabel: string;
 }) {
   return (
     <Stack spacing={1}>
       {blockingIssues.length === 0 && overlapIssues.length === 0 && (
         <Alert color="success" size="sm" aria-label="CSV load success">
-          Loaded {rowCount} quadrats (no errors), read as {referenceCornerLabel}
+          Loaded {rowCount} quadrats (no errors)
         </Alert>
       )}
 
@@ -176,19 +172,13 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
   const [csvParseErrors, setCsvParseErrors] = React.useState<Array<{ rowNumber: number; message: string }>>([]);
 
   const csvRows = value.mode === 'csv' ? value.rows : null;
-  const referenceCorner: QuadratReferenceCorner = value.mode === 'csv' ? value.coordinateReferenceCorner : DEFAULT_REFERENCE_CORNER;
-  const referenceCornerLabel = getReferenceCornerLabel(referenceCorner);
-
-  // Rows in canonical south-west coordinates, re-derived whenever the declared reference
-  // corner changes — so switching the selector re-evaluates bounds/overlap without a re-upload.
-  const normalizedRows = useMemo(() => (csvRows ? csvRows.map(row => normalizeToSouthwest(row, referenceCorner)) : null), [csvRows, referenceCorner]);
 
   // CSV-mode aggregate validation issues used to surface a top-level error banner
   // when the wizard signals showErrors=true (e.g. user clicked Next on an invalid step).
   const csvValidation = useMemo(() => {
-    if (value.mode !== 'csv' || !normalizedRows) return null;
-    return validateQuadratCollectionDetailed(normalizedRows, plot, 'SW');
-  }, [value.mode, normalizedRows, plot]);
+    if (value.mode !== 'csv' || !csvRows) return null;
+    return validateQuadratCollectionDetailed(csvRows, plot);
+  }, [value.mode, csvRows, plot]);
   const csvBlockingIssues = useMemo<CsvValidationIssue[]>(
     () => csvValidation?.fatalIssues.map(issue => ({ quadratName: issue.quadratName, message: issue.message })) ?? [],
     [csvValidation]
@@ -219,11 +209,11 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
       const content = await file.text();
       const { rows, errors: parseErrors } = parseQuadratCsv(content);
       setCsvParseErrors(parseErrors);
-      onChange({ mode: 'csv', rows, coordinateReferenceCorner: referenceCorner });
+      onChange({ mode: 'csv', rows });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       setCsvParseErrors([{ rowNumber: 1, message: `Could not read CSV file: ${message}` }]);
-      onChange({ mode: 'csv', rows: [], coordinateReferenceCorner: referenceCorner });
+      onChange({ mode: 'csv', rows: [] });
     }
   }
 
@@ -232,7 +222,7 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
     if (newMode === 'grid') {
       onChange({ mode: 'grid', quadratSizeX: 20, quadratSizeY: 20, namingPattern: NAMING_PATTERN_SEQUENTIAL });
     } else if (newMode === 'csv') {
-      onChange({ mode: 'csv', rows: [], coordinateReferenceCorner: DEFAULT_REFERENCE_CORNER });
+      onChange({ mode: 'csv', rows: [] });
     } else {
       onChange({ mode: 'none' });
     }
@@ -280,22 +270,12 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
 
       {value.mode === 'csv' && (
         <Stack spacing={2}>
-          <ReferenceCornerSelect
-            id="reference-corner-input"
-            value={referenceCorner}
-            onChange={newCorner => {
-              // Corner normalization shifts each row by its own dimensions, which can change
-              // which footprints overlap -- so a previous overlap acknowledgment no longer
-              // describes the same pairs and must be re-confirmed.
-              const { overlapAcknowledgment: _dropped, ...rest } = value;
-              onChange({ ...rest, coordinateReferenceCorner: newCorner });
-            }}
-            helperText="Coordinates are stored relative to the plot's lower-left origin. Choosing a different corner converts the uploaded coordinates on import — it does not move the plot."
-          />
-
           <FormControl>
             <FormLabel htmlFor="csv-file-input">Upload Quadrat CSV</FormLabel>
-            <FormHelperText>Required columns: quadratName, startX, startY, dimensionX, dimensionY</FormHelperText>
+            <FormHelperText>
+              Required columns: quadratName, startX, startY, dimensionX, dimensionY. startX/startY must be each quadrat&apos;s south-west (lower-left) corner,
+              measured from the plot&apos;s south-west origin.
+            </FormHelperText>
             <input
               id="csv-file-input"
               aria-label="Upload Quadrat CSV"
@@ -324,14 +304,13 @@ export default function QuadratPlanner({ value, onChange, plot, showErrors = fal
             </Stack>
           )}
 
-          {csvParseErrors.length === 0 && normalizedRows && normalizedRows.length > 0 && (
+          {csvParseErrors.length === 0 && csvRows && csvRows.length > 0 && (
             <CsvResultSummary
-              rowCount={normalizedRows.length}
+              rowCount={csvRows.length}
               blockingIssues={csvBlockingIssues}
               overlapIssues={csvOverlapIssues}
               overlapAcknowledged={overlapAcknowledged}
               onOverlapAcknowledgedChange={setOverlapAcknowledged}
-              referenceCornerLabel={referenceCornerLabel}
             />
           )}
         </Stack>

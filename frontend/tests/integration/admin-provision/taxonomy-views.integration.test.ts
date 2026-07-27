@@ -22,7 +22,7 @@ vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: v
 
 import { initTablesStep } from '@/lib/provisioning/steps/sql-steps';
 import MapperFactory from '@/config/datamapper';
-import type { StepContext, ProvisioningRunInput } from '@/lib/provisioning/types';
+import type { StepContext, ProvisioningInput } from '@/lib/provisioning/types';
 
 const TEST_SCHEMA = TEST_SCHEMA_PREFIX + 'taxviews';
 
@@ -89,7 +89,7 @@ describe('provisioning creates taxonomy views', () => {
     return {
       runId: 0,
       schemaName: TEST_SCHEMA,
-      input: {} as ProvisioningRunInput,
+      input: {} as ProvisioningInput,
       catalogPool: pool,
       sitePool: pool,
       state: {},

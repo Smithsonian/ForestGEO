@@ -25,14 +25,14 @@ import {
   runProvisioning
 } from './orchestrator';
 import ailogger from '@/ailogger';
-import type { ProvisioningRunInput } from './types';
+import type { ProvisioningInput } from './types';
 
 const CATALOG_TABLES_FILE = path.join(process.cwd(), 'db/sql/catalog-provisioning-tables.sql');
 const POLL_INTERVAL_MS = 200;
 const RUN_TIMEOUT_MS = 60000;
 const ORCH_SCHEMA_PREFIX = 'forestgeo_orch';
 
-function makeInput(schemaName: string): ProvisioningRunInput {
+function makeInput(schemaName: string): ProvisioningInput {
   return {
     site: {
       siteName: 'OrchTest',
@@ -69,7 +69,7 @@ function makeInput(schemaName: string): ProvisioningRunInput {
 // defaultAreaUnits to areaSelectionOptions: free text was legal at write time. Recognized
 // legacy spellings (like 'ha') are upgraded by parseStoredInput and stay retryable, so this
 // fixture uses a unit outside both the enum and the synonym map — well-formed JSON that
-// CanonicalProvisioningSchema still rejects.
+// ProvisioningInputSchema still rejects.
 function makeMalformedRunPayload(schemaName: string): unknown {
   const input = makeInput(schemaName);
   return { ...input, plot: { ...input.plot, defaultAreaUnits: 'acres' } };
@@ -95,9 +95,9 @@ async function createManualRun(pool: mysql.Pool, schemaName: string, status: 'ru
   return result.insertId;
 }
 
-// Simulates a run recorded before some schema-tightening commit (e.g. reference-corner
-// support, or the unit-vocabulary constraint from 346635ca): the raw JSON is well-formed
-// but no longer satisfies CanonicalProvisioningSchema. `rawInputPayload` is written as-is,
+// Simulates a run recorded before some schema-tightening commit (e.g. the unit-vocabulary
+// constraint from 346635ca): the raw JSON is well-formed but no longer satisfies
+// ProvisioningInputSchema. `rawInputPayload` is written as-is,
 // bypassing makeInput's always-valid fixture, so loadRun's parseStoredInput must fail on it.
 async function createManualRunWithRawPayload(
   pool: mysql.Pool,
@@ -189,25 +189,23 @@ const STORED_INPUT_PLOT = {
 const STORED_INPUT_ROW = { quadratName: 'A01', startX: 20, startY: 20, dimensionX: 20, dimensionY: 20 };
 
 describe('parseStoredInput', () => {
-  it('stamps a legacy CSV payload (no coordinates field) as canonical-sw / SW, rows untouched', () => {
-    const legacy = {
+  it('loads a CSV payload with its rows untouched', () => {
+    const stored = {
       site: STORED_INPUT_SITE,
       plot: STORED_INPUT_PLOT,
       quadrats: { mode: 'csv', rows: [STORED_INPUT_ROW] }
     };
 
-    const result = parseStoredInput(legacy);
+    const result = parseStoredInput(stored);
 
-    expect(result.quadrats).toEqual({
-      mode: 'csv',
-      rows: [STORED_INPUT_ROW],
-      coordinates: 'canonical-sw',
-      sourceCoordinateReferenceCorner: 'SW'
-    });
+    expect(result.quadrats).toEqual({ mode: 'csv', rows: [STORED_INPUT_ROW] });
   });
 
-  it('leaves an already-canonical CSV payload with a non-SW source corner untouched (no double normalization)', () => {
-    const alreadyCanonical = {
+  it('drops the discriminants written by the removed reference-corner feature rather than failing the load', () => {
+    // Runs recorded while that feature shipped carry `coordinates`/`sourceCoordinateReferenceCorner`
+    // in InputPayload. Those runs must stay loadable (and therefore retryable), and their already-
+    // stored coordinates must come back exactly as written — never shifted a second time.
+    const storedWithRemovedFields = {
       site: STORED_INPUT_SITE,
       plot: STORED_INPUT_PLOT,
       quadrats: {
@@ -218,17 +216,9 @@ describe('parseStoredInput', () => {
       }
     };
 
-    const result = parseStoredInput(alreadyCanonical);
+    const result = parseStoredInput(storedWithRemovedFields);
 
-    // If parseStoredInput re-ran the normalizing transform (the regression this
-    // guards against), an 'NE' row would be shifted a second time and these
-    // coordinates would no longer match the stored values exactly.
-    expect(result.quadrats).toEqual({
-      mode: 'csv',
-      rows: [STORED_INPUT_ROW],
-      coordinates: 'canonical-sw',
-      sourceCoordinateReferenceCorner: 'NE'
-    });
+    expect(result.quadrats).toEqual({ mode: 'csv', rows: [STORED_INPUT_ROW] });
   });
 
   it('passes a grid payload through unchanged', () => {
@@ -252,20 +242,15 @@ describe('parseStoredInput', () => {
   });
 
   it('accepts a JSON string and parses it the same as the equivalent object', () => {
-    const legacy = {
+    const stored = {
       site: STORED_INPUT_SITE,
       plot: STORED_INPUT_PLOT,
       quadrats: { mode: 'csv', rows: [STORED_INPUT_ROW] }
     };
 
-    const result = parseStoredInput(JSON.stringify(legacy));
+    const result = parseStoredInput(JSON.stringify(stored));
 
-    expect(result.quadrats).toEqual({
-      mode: 'csv',
-      rows: [STORED_INPUT_ROW],
-      coordinates: 'canonical-sw',
-      sourceCoordinateReferenceCorner: 'SW'
-    });
+    expect(result.quadrats).toEqual({ mode: 'csv', rows: [STORED_INPUT_ROW] });
   });
 
   it('upgrades recognized legacy free-text units so pre-enum runs stay retryable', () => {
@@ -310,7 +295,7 @@ describe('parseStoredInput', () => {
     };
 
     // Asserting the ZodError name (not just "throws") proves this fails at
-    // CanonicalProvisioningSchema.parse — a bare "not a function" TypeError
+    // ProvisioningInputSchema.parse — a bare "not a function" TypeError
     // would also satisfy a plain .toThrow(), which would hide a regression
     // where parseStoredInput stops validating shape at all.
     expect(() => parseStoredInput(malformed)).toThrow(expect.objectContaining({ name: 'ZodError' }));
@@ -321,21 +306,6 @@ describe('parseStoredInput', () => {
       site: STORED_INPUT_SITE,
       plot: STORED_INPUT_PLOT,
       quadrats: { mode: 'csv', rows: [{ ...STORED_INPUT_ROW, startX: 'twenty' }] }
-    };
-
-    expect(() => parseStoredInput(malformed)).toThrow(expect.objectContaining({ name: 'ZodError' }));
-  });
-
-  it('rejects an invalid sourceCoordinateReferenceCorner', () => {
-    const malformed = {
-      site: STORED_INPUT_SITE,
-      plot: STORED_INPUT_PLOT,
-      quadrats: {
-        mode: 'csv',
-        rows: [STORED_INPUT_ROW],
-        coordinates: 'canonical-sw',
-        sourceCoordinateReferenceCorner: 'CENTER'
-      }
     };
 
     expect(() => parseStoredInput(malformed)).toThrow(expect.objectContaining({ name: 'ZodError' }));
@@ -415,7 +385,7 @@ describe('loadRun failure-class logging (Fix 1 self-check)', () => {
     expect(jsonMessage).toMatch(/not valid JSON/);
     expect(jsonErr).toBeInstanceOf(SyntaxError);
 
-    expect(schemaMessage).toMatch(/canonical schema/);
+    expect(schemaMessage).toMatch(/does not match the current schema/);
     expect(schemaErr).toBeInstanceOf(Error);
     expect(schemaErr.name).toBe('ZodError');
 
