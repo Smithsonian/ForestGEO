@@ -85,10 +85,21 @@ export async function writeQuadratUpload(
   rows: FileRow[],
   uploadMode: UploadMode,
   overlapAcknowledgment: unknown,
+  coordinateReferenceCorner: unknown,
   transactionID: string
 ): Promise<QuadratWriteResult> {
   if (!plotID) {
     throw new Error('PlotID is required for quadrat uploads');
+  }
+  const declaredCorner = normalizeOptionalString(coordinateReferenceCorner);
+  if (declaredCorner !== null && declaredCorner.toUpperCase() !== 'SW') {
+    // A stale client declaring a non-SW corner expects the server to shift coordinates.
+    // Silently stripping the declaration would store every quadrat at the wrong location,
+    // and bounds validation cannot catch it when the shifted coordinates still fit the plot.
+    throw new QuadratGeometryValidationError(
+      `coordinateReferenceCorner "${declaredCorner}" is not supported: quadrat start coordinates must be the south-west (SW) corner. ` +
+        `Convert the coordinates to south-west origin and re-upload without a reference corner.`
+    );
   }
   if (rows.length === 0) {
     throw new QuadratGeometryValidationError('Quadrat upload must contain at least one row.');

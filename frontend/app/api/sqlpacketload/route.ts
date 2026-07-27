@@ -1220,6 +1220,7 @@ export async function POST(request: NextRequest) {
             uploadRows,
             uploadMode,
             overlapAcknowledgment,
+            body.coordinateReferenceCorner,
             transactionID
           );
         } else if (formType === 'attributes') {

@@ -469,9 +469,10 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
     expect(Number(persisted!.StartY)).toBe(50);
   });
 
-  it('ignores a stale coordinateReferenceCorner in the request body rather than shifting the row', async () => {
-    // A client left over from the removed reference-corner feature must not be able to move
-    // a quadrat: the server reads coordinates as south-west and nothing else.
+  it('rejects a stale non-south-west coordinateReferenceCorner rather than silently moving the row', async () => {
+    // The coordinates fit inside the plot under either interpretation, so bounds validation
+    // cannot reveal the stale client's convention. The explicit NE declaration must be rejected
+    // instead of being stripped and causing the row to be stored at the wrong location.
     const row = { quadrat: 'STALE01', startx: '60', starty: '60', dimx: '20', dimy: '20' };
 
     const res = (await POST(
@@ -483,12 +484,12 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
       )
     ))!;
 
-    expect(res.status).toBe(HTTP_OK);
-
-    const persisted = await findQuadratByName(connection, plotID, 'STALE01');
-    expect(persisted, 'the row must have been written unshifted').not.toBeNull();
-    expect(Number(persisted!.StartX)).toBe(60);
-    expect(Number(persisted!.StartY)).toBe(60);
+    expect(res.status).toBe(HTTP_BAD_REQUEST);
+    const body = await res.json();
+    expect(body.code).toBe(INVALID_QUADRAT_GEOMETRY_CODE);
+    expect(body.error).toMatch(/south-west|SW/i);
+    expect(await findQuadratByName(connection, plotID, 'STALE01')).toBeNull();
+    expect(await countActiveQuadrats(connection, plotID)).toBe(BASELINE_QUADRAT_COUNT);
   });
 
   // =========================================================================
