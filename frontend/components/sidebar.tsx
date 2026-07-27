@@ -927,7 +927,7 @@ export default function Sidebar(props: SidebarProps) {
                         )}
                       </Box>
                       {currentCensus && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
                           <ValidationStatusBadge
                             schema={currentSite?.schemaName}
                             plotID={currentPlot?.plotID}

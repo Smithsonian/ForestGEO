@@ -105,7 +105,8 @@ function mockSuccessfulProcedureRun() {
     fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
   );
   cm.executeQuery
-    .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
+    .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6 }]) // route preamble: plot/census discovery for ownership check
+    .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }]) // ingestBatch setup: plot/census + row count
     .mockResolvedValueOnce([{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }])
     .mockResolvedValueOnce({ affectedRows: 0 })
     .mockResolvedValueOnce([])
@@ -155,7 +156,8 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
     );
     cm.executeQuery
-      .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
+      .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6 }]) // route preamble: plot/census discovery for ownership check
+      .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }]) // ingestBatch setup: plot/census + row count
       .mockResolvedValueOnce([{ completedUploads: 0, incompleteUploads: 1, treeCount: 1, stemCount: 1, coreMeasurementCount: 244 }])
       .mockResolvedValue({})
       .mockResolvedValue({})
@@ -196,7 +198,8 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
     );
     cm.executeQuery
-      .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
+      .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6 }]) // route preamble: plot/census discovery for ownership check
+      .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }]) // ingestBatch setup: plot/census + row count
       .mockResolvedValueOnce([{ completedUploads: 1, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 244 }])
       .mockResolvedValueOnce({ affectedRows: 244 })
       .mockResolvedValueOnce([])
@@ -226,7 +229,8 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
     );
     cm.executeQuery
-      .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
+      .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6 }]) // route preamble: plot/census discovery for ownership check
+      .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }]) // ingestBatch setup: plot/census + row count
       .mockResolvedValueOnce([{ completedUploads: 1, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 244 }])
       .mockResolvedValueOnce({ affectedRows: 0 })
       .mockResolvedValueOnce([{ 1: 1 }])

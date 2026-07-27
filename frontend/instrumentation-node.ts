@@ -12,15 +12,29 @@
  *   - Pick up any `running` provisioning runs whose worker heartbeat went
  *     silent — these are orphans from a previous process that crashed or was
  *     SIGKILLed.
+ *   - Start the upload-job sweeper and run one startup sweep: the startup
+ *     sweep IS the deploy-recovery moment for background upload jobs whose
+ *     worker died with the previous process.
  */
 import ailogger from '@/ailogger';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
+import { installUploadSweeperShutdown, startUploadJobSweeper, sweepOnce } from '@/lib/background-jobs/sweeper';
 import { ensureCatalogTables } from '@/lib/provisioning/orchestrator';
 import { installShutdownHandler, pickupStaleRuns } from '@/lib/provisioning/worker';
 
 void (async () => {
+  let pool: ReturnType<typeof getPoolMonitorInstance>['pool'];
   try {
-    const pool = getPoolMonitorInstance().pool;
+    pool = getPoolMonitorInstance().pool;
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    ailogger.warn('instrumentation.pool_unavailable', { errorMessage });
+    return; // nothing below can run without a pool
+  }
+
+  // Provisioning worker — guarded separately so its failure does not block the
+  // upload-job sweeper below (the sweeper interval self-heals on later ticks).
+  try {
     // Bootstrap the catalog.* tables on first boot so a fresh database
     // (or a partially-applied prior deploy) self-heals before the worker
     // tries to read catalog.provisioning_runs.
@@ -33,5 +47,24 @@ void (async () => {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     ailogger.warn('provisioning.worker.startup_failed', { errorMessage });
+  }
+
+  // Upload-job sweeper — guarded separately so a sweep failure cannot abort
+  // the rest of instrumentation, and the interval keeps running even when the
+  // startup sweep fails (the next tick retries).
+  try {
+    startUploadJobSweeper(pool);
+    // installUploadSweeperShutdown is HMR-safe: the shutdownInstalled flag on
+    // the globalThis sentinel prevents stacking listeners across module reloads.
+    // Both shutdown hooks (provisioning's installShutdownHandler and this one)
+    // coexist via separate process.once registrations.
+    installUploadSweeperShutdown();
+    const { reclaimed, dispatched } = await sweepOnce(pool);
+    if (reclaimed.length > 0 || dispatched.length > 0) {
+      ailogger.info('upload.sweeper.startup', { reclaimed, dispatched });
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    ailogger.warn('upload.sweeper.startup_failed', { errorMessage });
   }
 })();

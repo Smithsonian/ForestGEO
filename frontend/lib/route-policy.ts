@@ -152,7 +152,18 @@ export const ROUTE_POLICIES = {
   // File management
   'files/[operation]': 'site-scoped',
   // Census rollover (currently a no-op stub, but operates on site data)
-  'rollover/[primaryKey]/[schema]/[plotIDParam]/[censusIDParam]/[newCensusIDParam]': 'site-scoped'
+  'rollover/[primaryKey]/[schema]/[plotIDParam]/[censusIDParam]/[newCensusIDParam]': 'site-scoped',
+
+  // ── Async upload (background-job) routes ─────────────────────────────────
+  // Feature-flag probe: requireSession, returns enablement for the schema; no
+  // per-site mutation, so 'authed' (mirrors the 'query' posture).
+  'features/async-upload': 'authed',
+  // Create/list upload jobs: POST gates on assertCanEditMeasurementScope (DB
+  // schema/plot/census scope check; 403 via ScopeAccessError) — site-scoped.
+  uploadjobs: 'site-scoped',
+  // Job status by id (jobId-only URL, no declared schema); requireSession with
+  // per-user ownership enforced inside the handler — 'authed' (like 'query').
+  'uploadjobs/[jobId]': 'authed'
 } satisfies Record<string, RoutePolicy>;
 
 /** Compile-time union of every declared route key. Adoption sites use this so a

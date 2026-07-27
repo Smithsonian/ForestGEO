@@ -30,6 +30,7 @@ import ailogger from '@/ailogger';
 import Sidebar from '@/components/sidebar';
 import Header from '@/components/header';
 import { MOBILE_SIDEBAR_TOGGLE_EVENT } from '@/config/utils';
+import UploadJobStatusBadge from '@/components/client/uploadjobstatusbadge';
 
 function renderSwitch(endpoint: string) {
   const commonStyle = {
@@ -406,6 +407,20 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           }
         }}
       >
+        {currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID && (
+          <Box
+            sx={{
+              width: '100%',
+              px: 1,
+              pt: 1,
+              position: 'sticky',
+              top: 'var(--Header-height)',
+              zIndex: 900
+            }}
+          >
+            <UploadJobStatusBadge schema={currentSite.schemaName} plotID={currentPlot.plotID} censusID={currentCensus.dateRanges[0].censusID} />
+          </Box>
+        )}
         <Box
           sx={{
             display: 'flex',
