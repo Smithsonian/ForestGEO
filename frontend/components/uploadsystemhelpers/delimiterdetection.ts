@@ -6,13 +6,9 @@
  */
 
 import { parseLineWithDelimiter } from './csvparserutils';
+import { analyzeDelimiters, calculateVariance, DelimiterDetectionResult } from '@/lib/uploads/detect-delimiter';
 
-export interface DelimiterDetectionResult {
-  delimiter: string;
-  confidence: number;
-  sampleRows: number;
-  avgColumnsPerRow: number;
-}
+export type { DelimiterDetectionResult } from '@/lib/uploads/detect-delimiter';
 
 export enum DelimiterIssueCode {
   EMPTY_FIRST_ROW = 'EMPTY_FIRST_ROW',
@@ -157,86 +153,6 @@ export async function detectDelimiter(file: File, sessionId?: string): Promise<D
     const blob = file.slice(0, 20 * 1024);
     reader.readAsText(blob);
   });
-}
-
-/**
- * Analyzes text content to determine the most likely delimiter
- */
-function analyzeDelimiters(content: string): DelimiterDetectionResult {
-  const lines = content.split('\n').slice(0, 10); // Analyze first 10 lines
-  const delimiters = [',', '\t', ';', '|'];
-  const results: Array<DelimiterDetectionResult> = [];
-
-  for (const delimiter of delimiters) {
-    const analysis = analyzeDelimiter(lines, delimiter);
-    results.push(analysis);
-  }
-
-  // Return the delimiter with highest confidence
-  return results.reduce((best, current) => (current.confidence > best.confidence ? current : best));
-}
-
-/**
- * Analyzes how well a specific delimiter works for the given lines
- */
-function analyzeDelimiter(lines: string[], delimiter: string): DelimiterDetectionResult {
-  let totalColumns = 0;
-  let validRows = 0;
-  const columnCounts: number[] = [];
-
-  for (const line of lines) {
-    if (line.trim().length === 0) continue;
-
-    const columns = parseLineWithDelimiter(line, delimiter);
-    const columnCount = columns.length;
-
-    if (columnCount > 1) {
-      columnCounts.push(columnCount);
-      totalColumns += columnCount;
-      validRows++;
-    }
-  }
-
-  if (validRows === 0) {
-    return {
-      delimiter,
-      confidence: 0,
-      sampleRows: 0,
-      avgColumnsPerRow: 0
-    };
-  }
-
-  const avgColumns = totalColumns / validRows;
-  const columnVariance = calculateVariance(columnCounts);
-
-  // Calculate confidence based on:
-  // 1. Consistency of column count across rows (lower variance = higher confidence)
-  // 2. Average number of columns (more columns usually = more confident)
-  // 3. Number of valid rows processed
-  const consistencyScore = Math.max(0, 1 - columnVariance / Math.max(avgColumns, 1));
-  const volumeScore = Math.min(1, validRows / lines.length);
-  const columnScore = Math.min(1, avgColumns / 10); // Normalize around 10 columns
-
-  const confidence = (consistencyScore * 0.6 + volumeScore * 0.2 + columnScore * 0.2) * 100;
-
-  return {
-    delimiter,
-    confidence,
-    sampleRows: validRows,
-    avgColumnsPerRow: avgColumns
-  };
-}
-
-/**
- * Calculates variance for an array of numbers
- */
-function calculateVariance(numbers: number[]): number {
-  if (numbers.length === 0) return 0;
-
-  const mean = numbers.reduce((sum, num) => sum + num, 0) / numbers.length;
-  const variance = numbers.reduce((sum, num) => sum + Math.pow(num - mean, 2), 0) / numbers.length;
-
-  return variance;
 }
 
 /**

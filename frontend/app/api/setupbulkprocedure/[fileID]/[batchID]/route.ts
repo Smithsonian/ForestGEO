@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
-import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
-import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
+import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
+import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
+import { BatchFamilyScopeError, discoverBatchFamily } from '@/lib/uploads/batch-family';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -13,21 +13,9 @@ import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz'
 export const runtime = 'nodejs';
 export const maxDuration = 900;
 
-// Sub-batches of 10K rows keep transaction duration ~6.5s (benchmarked),
-// well under the 50s innodb_lock_wait_timeout on Azure MySQL.
-const INGESTION_BATCH_SIZE = 10_000;
-
-const MAX_ATTEMPTS_PER_SUBBATCH = 5;
-const SUB_BATCH_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes per sub-batch (10K rows take ~6.5s, leaves headroom for retries)
-
-interface SubBatchResult {
-  subBatchID: string;
-  rowCount: number;
-  durationMs: number;
-  attemptsNeeded: number;
-  batchFailedButHandled: boolean;
-  message?: string;
-}
+// Non-standard nginx status code for "client closed request"; preserved from
+// the pre-extraction handler so callers see the same abort signal.
+const HTTP_CLIENT_CLOSED_REQUEST = 499;
 
 function isRequestAborted(request: NextRequest): boolean {
   try {
@@ -38,369 +26,8 @@ function isRequestAborted(request: NextRequest): boolean {
   }
 }
 
-function toCount(value: unknown): number {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'bigint') return Number(value);
-  if (typeof value === 'string') return Number(value) || 0;
-  return 0;
-}
-
-/**
- * Extracts the first data row from a mysql2 stored procedure result.
- * mysql2 returns CALL results as [[row1, row2, ...], OkPacket] — the first
- * element is the result set array.  We need the first row object.
- */
-function extractProcedureRow(procedureResult: any): Record<string, any> | null {
-  if (!procedureResult) return null;
-  const firstResultSet = procedureResult[0];
-  if (Array.isArray(firstResultSet) && firstResultSet.length > 0) {
-    return firstResultSet[0];
-  }
-  // Fallback: some code paths may already return the row directly
-  if (firstResultSet && typeof firstResultSet === 'object' && !Array.isArray(firstResultSet)) {
-    return firstResultSet;
-  }
-  return null;
-}
-
-async function recoverFailedInitialCensusIfNeeded(
-  connectionManager: ConnectionManager,
-  schema: string,
-  fileID: string,
-  batchID: string,
-  plotID: number,
-  censusID: number,
-  transactionID: string
-): Promise<boolean> {
-  const recoveryStateSQL = safeFormatQuery(
-    schema,
-    `SELECT
-       (SELECT COUNT(*) FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status = 'completed') AS completedUploads,
-       (SELECT COUNT(*) FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status IN ('failed', 'processing')) AS incompleteUploads,
-       (SELECT COUNT(*) FROM ??.trees WHERE CensusID = ?) AS treeCount,
-       (SELECT COUNT(*) FROM ??.stems WHERE CensusID = ?) AS stemCount,
-       (SELECT COUNT(*) FROM ??.coremeasurements WHERE CensusID = ?) AS coreMeasurementCount`
-  );
-
-  const recoveryStateRows = await connectionManager.executeQuery(
-    recoveryStateSQL,
-    [plotID, censusID, plotID, censusID, censusID, censusID, censusID],
-    transactionID
-  );
-  const recoveryStateRow = recoveryStateRows[0] ?? {};
-  const recoveryState = {
-    completedUploads: toCount(recoveryStateRow.completedUploads),
-    incompleteUploads: toCount(recoveryStateRow.incompleteUploads),
-    treeCount: toCount(recoveryStateRow.treeCount),
-    stemCount: toCount(recoveryStateRow.stemCount),
-    coreMeasurementCount: toCount(recoveryStateRow.coreMeasurementCount)
-  };
-
-  if (!shouldRecoverFailedInitialCensus(recoveryState)) {
-    return false;
-  }
-
-  ailogger.warn(`Recovering dirty failed first-load census state for plot ${plotID}, census ${censusID} before processing ${fileID}-${batchID}`, {
-    plotID,
-    censusID,
-    fileID,
-    batchID,
-    recoveryState
-  });
-
-  const cleanupSteps = [
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE CensusID = ?'),
-      params: [censusID]
-    },
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.coremeasurements WHERE CensusID = ?'),
-      params: [censusID]
-    },
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.stems WHERE CensusID = ?'),
-      params: [censusID]
-    },
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.trees WHERE CensusID = ?'),
-      params: [censusID]
-    },
-    {
-      sql: safeFormatQuery(
-        schema,
-        `DELETE tm
-         FROM ??.temporarymeasurements tm
-         INNER JOIN ??.uploadmetrics um
-           ON um.fileID = tm.FileID
-          AND um.batchID = tm.BatchID
-          AND um.plotID = tm.PlotID
-          AND um.censusID = tm.CensusID
-         WHERE tm.PlotID = ?
-           AND tm.CensusID = ?
-           AND um.status IN ('failed', 'processing')
-           AND NOT (tm.FileID = ? AND tm.BatchID = ?)`
-      ),
-      params: [plotID, censusID, fileID, batchID]
-    },
-    {
-      sql: safeFormatQuery(schema, 'DELETE FROM ??.uploadintegrityalerts WHERE PlotID = ? AND CensusID = ?'),
-      params: [plotID, censusID]
-    },
-    {
-      sql: safeFormatQuery(schema, "DELETE FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status IN ('failed', 'processing')"),
-      params: [plotID, censusID]
-    }
-  ];
-
-  for (const step of cleanupSteps) {
-    await connectionManager.executeQuery(step.sql, step.params, transactionID);
-  }
-
-  return true;
-}
-
-async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
-  connectionManager: ConnectionManager,
-  schema: string,
-  fileID: string,
-  batchID: string,
-  censusID: number,
-  transactionID: string
-): Promise<number> {
-  const sameFileDeleteSQL = safeFormatQuery(
-    schema,
-    `DELETE FROM ??.coremeasurements
-     WHERE CensusID = ?
-       AND StemGUID IS NULL
-       AND UploadFileID = ?
-       AND NOT (UploadBatchID <=> ?)`
-  );
-
-  const sameFileDeleteResult = await connectionManager.executeQuery(sameFileDeleteSQL, [censusID, fileID, batchID], transactionID);
-  const sameFileDeletedRows = toCount(sameFileDeleteResult?.affectedRows);
-
-  if (sameFileDeletedRows > 0) {
-    ailogger.warn(`Removed ${sameFileDeletedRows} stale unresolved row(s) from prior same-file upload batches for ${fileID}-${batchID}`);
-  }
-
-  const crossFileCandidatesSQL = safeFormatQuery(
-    schema,
-    `SELECT 1
-     FROM ??.coremeasurements
-     WHERE CensusID = ?
-       AND StemGUID IS NULL
-       AND UploadFileID IS NOT NULL
-       AND NOT (UploadFileID <=> ?)
-     LIMIT 1`
-  );
-
-  const crossFileCandidateRows = await connectionManager.executeQuery(crossFileCandidatesSQL, [censusID, fileID], transactionID);
-  if (!Array.isArray(crossFileCandidateRows) || crossFileCandidateRows.length === 0) {
-    return sameFileDeletedRows;
-  }
-
-  const deleteSQL = safeFormatQuery(
-    schema,
-    `DELETE cm
-     FROM ??.coremeasurements cm
-     INNER JOIN ??.measurement_error_log mel
-       ON mel.MeasurementID = cm.CoreMeasurementID
-      AND mel.IsResolved = FALSE
-     INNER JOIN ??.measurement_errors me
-       ON me.ErrorID = mel.ErrorID
-      AND me.ErrorSource = 'ingestion'
-     INNER JOIN ??.temporarymeasurements tm
-       ON tm.CensusID = cm.CensusID
-      AND tm.FileID = ?
-      AND tm.BatchID = ?
-      AND tm.TreeTag <=> cm.RawTreeTag
-      AND tm.StemTag <=> cm.RawStemTag
-      AND tm.SpeciesCode <=> cm.RawSpCode
-      AND tm.QuadratName <=> cm.RawQuadrat
-      AND tm.LocalX <=> cm.RawX
-      AND tm.LocalY <=> cm.RawY
-      AND tm.DBH <=> cm.MeasuredDBH
-      AND tm.HOM <=> cm.MeasuredHOM
-      AND tm.MeasurementDate <=> cm.MeasurementDate
-      AND tm.Codes <=> cm.RawCodes
-      AND tm.Comments <=> cm.RawComments
-     WHERE cm.CensusID = ?
-       AND cm.StemGUID IS NULL
-       AND NOT (cm.UploadFileID <=> ? AND cm.UploadBatchID <=> ?)`
-  );
-
-  const deleteResult = await connectionManager.executeQuery(deleteSQL, [fileID, batchID, censusID, fileID, batchID], transactionID);
-  const deletedRows = toCount(deleteResult?.affectedRows);
-
-  if (deletedRows > 0) {
-    ailogger.warn(`Removed ${deletedRows} stale unresolved row(s) from prior cross-file uploads that matched ${fileID}-${batchID}`);
-  }
-
-  return sameFileDeletedRows + deletedRows;
-}
-
-/**
- * Splits a large batch into sub-batches of INGESTION_BATCH_SIZE by updating
- * the BatchID column on subsets of rows. Returns the list of sub-batch IDs
- * (or the original batchID if no split was needed).
- */
-async function splitIntoSubBatches(
-  connectionManager: ConnectionManager,
-  schema: string,
-  fileID: string,
-  originalBatchID: string,
-  totalRows: number,
-  transactionID: string
-): Promise<string[]> {
-  if (totalRows <= INGESTION_BATCH_SIZE) {
-    return [originalBatchID];
-  }
-
-  const subBatchCount = Math.ceil(totalRows / INGESTION_BATCH_SIZE);
-  const subBatchIDs: string[] = [];
-
-  ailogger.info(`Splitting ${totalRows} rows into ${subBatchCount} sub-batches of ~${INGESTION_BATCH_SIZE} rows each for ${fileID}`);
-
-  for (let i = 0; i < subBatchCount; i++) {
-    const subBatchID = `${originalBatchID}__sub${String(i + 1).padStart(3, '0')}`;
-    // LIMIT cannot be parameterized in mysql2 prepared statements, so inline the constant
-    const updateSQL = safeFormatQuery(schema, `UPDATE ??.temporarymeasurements SET BatchID = ? WHERE FileID = ? AND BatchID = ? LIMIT ${INGESTION_BATCH_SIZE}`);
-    const updateResult = await connectionManager.executeQuery(updateSQL, [subBatchID, fileID, originalBatchID], transactionID);
-    const affectedRows = toCount(updateResult?.affectedRows);
-
-    if (affectedRows === 0) break;
-
-    subBatchIDs.push(subBatchID);
-    ailogger.info(`Created sub-batch ${subBatchID} with ${affectedRows} rows (${i + 1}/${subBatchCount})`);
-  }
-
-  return subBatchIDs;
-}
-
-/**
- * Process a single sub-batch through bulkingestionprocess with retry logic.
- *
- * The procedure manages its own transaction (START TRANSACTION / COMMIT),
- * so we must NOT wrap it in withTransaction — that would create a nested
- * transaction which MySQL handles by implicitly committing the outer one,
- * corrupting the wrapper's state. Instead we call executeQuery directly
- * (no transactionID) and rely on the procedure's internal transaction.
- */
-async function processSubBatch(
-  connectionManager: ConnectionManager,
-  schema: string,
-  procedureSQL: string,
-  fileID: string,
-  subBatchID: string,
-  _plotID: number,
-  _censusID: number,
-  request: NextRequest
-): Promise<SubBatchResult> {
-  let attempt = 0;
-  let delay = 100;
-
-  while (attempt < MAX_ATTEMPTS_PER_SUBBATCH) {
-    if (isRequestAborted(request)) {
-      throw new Error('Client disconnected');
-    }
-
-    try {
-      attempt++;
-      const startTime = Date.now();
-
-      ailogger.info(`Sub-batch ${subBatchID} attempt ${attempt}: calling bulkingestionprocess...`);
-
-      // Call procedure directly — it manages its own transaction internally.
-      // No outer transaction or application lock needed per sub-batch since
-      // sub-batches are processed sequentially and the procedure is self-contained.
-      const procedureResult = await connectionManager.executeQuery(procedureSQL, [fileID, subBatchID]);
-
-      ailogger.info(`Sub-batch ${subBatchID} attempt ${attempt}: procedure returned, parsing result...`, {
-        resultType: typeof procedureResult,
-        isArray: Array.isArray(procedureResult),
-        firstElementType: procedureResult?.[0] ? typeof procedureResult[0] : 'undefined',
-        firstElementIsArray: Array.isArray(procedureResult?.[0])
-      });
-
-      const row = extractProcedureRow(procedureResult);
-
-      const batchFailedButHandled = row !== null && (toCount(row.records_failed) > 0 || toCount(row.batch_failed) === 1);
-
-      const result: SubBatchResult = {
-        subBatchID,
-        rowCount: 0,
-        durationMs: Date.now() - startTime,
-        attemptsNeeded: attempt,
-        batchFailedButHandled,
-        message: row?.message
-      };
-
-      ailogger.info(`Sub-batch ${subBatchID} completed in ${result.durationMs}ms (attempt ${attempt})`, {
-        batchFailedButHandled,
-        message: row?.message,
-        recordsFailed: row?.records_failed,
-        batchFailed: row?.batch_failed
-      });
-      return result;
-    } catch (e: any) {
-      const isTimeout = e.message?.includes('timed out');
-      const isConnectionError = e.code === 'ECONNRESET' || e.code === 'PROTOCOL_CONNECTION_LOST' || e.errno === 1927 || e.errno === 2013;
-      const isDeadlock = e.code === 'ER_LOCK_DEADLOCK' || e.errno === 1213;
-      const isLockContention = e.message?.includes('Failed to acquire application lock') || e.message?.includes('Another upload is in progress');
-
-      ailogger.error(`Sub-batch ${subBatchID} attempt ${attempt} failed — MySQL error details:`, e, {
-        message: e.message,
-        code: e.code,
-        errno: e.errno,
-        sqlState: e.sqlState,
-        sqlMessage: e.sqlMessage,
-        sql: e.sql?.substring(0, 200),
-        isTimeout,
-        isConnectionError,
-        isDeadlock,
-        isLockContention,
-        attempt,
-        maxAttempts: MAX_ATTEMPTS_PER_SUBBATCH,
-        fileID,
-        subBatchID
-      });
-
-      if (isTimeout && attempt >= 3) break;
-      if (isLockContention && attempt >= 2) break;
-
-      if (isLockContention) {
-        delay = 15000;
-      } else if (isConnectionError) {
-        delay = Math.min(delay * 3, 15000);
-      } else if (isDeadlock) {
-        delay = Math.min(delay * 1.5, 3000);
-      } else {
-        delay = Math.min(delay * 2, 5000);
-      }
-
-      await new Promise(resolve => setTimeout(resolve, delay + Math.random() * 1000));
-    }
-  }
-
-  // All retries exhausted for this sub-batch — move remaining rows to failed
-  ailogger.error(`All ${MAX_ATTEMPTS_PER_SUBBATCH} attempts exhausted for sub-batch ${subBatchID}`);
-  const movedRows = await moveTemporaryBatchToFailedMeasurements(
-    connectionManager,
-    schema,
-    fileID,
-    subBatchID,
-    `Sub-batch moved after ${MAX_ATTEMPTS_PER_SUBBATCH} failed attempts`
-  );
-  ailogger.warn(`Moved ${movedRows} rows from sub-batch ${subBatchID} to unresolved coremeasurements`);
-
-  return {
-    subBatchID,
-    rowCount: movedRows,
-    durationMs: 0,
-    attemptsNeeded: attempt,
-    batchFailedButHandled: true,
-    message: `Sub-batch exhausted retries, ${movedRows} rows moved to unresolved coremeasurements`
-  };
+function noDataFoundResponse(): NextResponse {
+  return new NextResponse(JSON.stringify({ attemptsNeeded: 0, batchFailedButHandled: false, message: 'No data found' }), { status: HTTPResponses.OK });
 }
 
 // Phase-3: user→schema membership via guard; requireUploadSessionOwnership retains plot/census token ownership.
@@ -417,9 +44,10 @@ async function handler(request: NextRequest, context: RouteContext) {
   }
   ailogger.info(`Processing batch ${fileID}-${batchID} for session ${sessionId}`);
 
-  let procedureSQL: string;
+  // Validate the schema name up front so an invalid schema surfaces as
+  // INVALID_REQUEST instead of a setup failure deeper in the pipeline.
   try {
-    procedureSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
+    validateSchemaOrThrow(schema);
   } catch (error: any) {
     ailogger.error(`Invalid schema in setupbulkprocedure: ${schema}`);
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
@@ -427,158 +55,85 @@ async function handler(request: NextRequest, context: RouteContext) {
 
   const connectionManager = ConnectionManager.getInstance();
 
-  // --- Phase 1: Setup (count rows, get plot/census, recovery, split) ---
-  let subBatchIDs: string[];
-  let plotID: number;
-  let censusID: number;
-
+  // Upload-session ownership is a route-only concern: derive the plot/census
+  // scope from the staged rows, then verify this session owns that scope.
+  //
+  // The scope must come from the whole batch FAMILY, not just the unsuffixed
+  // BatchID. Once a prior attempt split this batch, every row lives under
+  // `<batchID>__subNNN` and an exact-match lookup finds nothing — which is how
+  // the 2026-07-27 Harvard retry returned 200 "No data found" in 31ms while
+  // 106,227 rows were still staged. Only a genuinely empty family may return
+  // early; otherwise authorize the discovered scope and let ingestBatch resume.
   try {
-    const setupResult = await connectionManager.withTransaction(
-      async tx => {
-        const lockTimeoutMs = 2 * 60 * 1000;
+    const family = await discoverBatchFamily((sql, sqlParams) => connectionManager.executeQuery(sql, sqlParams), schema, fileID, batchID);
 
-        // Get plot/census and row count
-        const infoSQL = safeFormatQuery(
-          schema,
-          'SELECT PlotID, CensusID, COUNT(*) AS rowCount FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ? GROUP BY PlotID, CensusID LIMIT 1'
-        );
-        const infoRows = await tx.query(infoSQL, [fileID, batchID]);
-
-        if (!infoRows || infoRows.length === 0) {
-          return { plotID: null, censusID: null, totalRows: 0, subBatchIDs: [] as string[] };
-        }
-
-        const currentPlotID = Number(infoRows[0].PlotID);
-        const currentCensusID = Number(infoRows[0].CensusID);
-        const totalRows = toCount(infoRows[0].rowCount);
-
-        await requireUploadSessionOwnership({
-          schema,
-          sessionId,
-          plotId: currentPlotID,
-          censusId: currentCensusID,
-          allowedStates: [UploadSessionState.UPLOADED, UploadSessionState.PROCESSING],
-          contextLabel: `batch processing for ${fileID}-${batchID}`
-        });
-
-        // Acquire lock for setup phase
-        const lockKey = `upload:file:${fileID}:plot:${currentPlotID}:census:${currentCensusID}`;
-        const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, tx.id, lockTimeoutMs);
-        if (!lockAcquired) {
-          throw new Error(`Failed to acquire application lock for file ${fileID}. Another upload may be in progress.`);
-        }
-
-        // Recovery check (uses original batchID before any splitting)
-        await recoverFailedInitialCensusIfNeeded(connectionManager, schema, fileID, batchID, currentPlotID, currentCensusID, tx.id);
-
-        // If the same census is re-uploaded under a new filename, remove any old
-        // unresolved ingestion rows that exactly match the currently staged rows.
-        await cleanupMatchedUnresolvedIngestionFailuresForBatch(connectionManager, schema, fileID, batchID, currentCensusID, tx.id);
-
-        // Split into sub-batches if needed (UPDATE within same transaction)
-        const ids = await splitIntoSubBatches(connectionManager, schema, fileID, batchID, totalRows, tx.id);
-
-        ailogger.info(`Setup complete for ${fileID}: ${totalRows} rows → ${ids.length} batch(es), plot=${currentPlotID}, census=${currentCensusID}`);
-
-        return { plotID: currentPlotID, censusID: currentCensusID, totalRows, subBatchIDs: ids };
-      },
-      { timeoutMs: 2 * 60 * 1000 }
-    );
-
-    if (setupResult.plotID === null || setupResult.subBatchIDs.length === 0) {
-      ailogger.warn(`No temporary rows found for ${fileID}-${batchID}`);
-      return new NextResponse(JSON.stringify({ attemptsNeeded: 0, batchFailedButHandled: false, message: 'No data found' }), { status: HTTPResponses.OK });
+    if (!family) {
+      ailogger.warn(`No temporary rows found for ${fileID}-${batchID} (original ID or sub-batch family)`);
+      return noDataFoundResponse();
     }
 
-    plotID = setupResult.plotID;
-    censusID = setupResult.censusID!;
-    subBatchIDs = setupResult.subBatchIDs;
+    if (family.orphanedSubBatchIDs.length > 0) {
+      ailogger.warn(
+        `Found ${family.orphanedSubBatchIDs.length} orphaned sub-batch(es) for ${fileID}-${batchID} ` +
+          `holding ${family.totalRows} row(s); authorizing their scope and resuming`
+      );
+    }
+
+    await requireUploadSessionOwnership({
+      schema,
+      sessionId,
+      plotId: family.plotID,
+      censusId: family.censusID,
+      allowedStates: [UploadSessionState.UPLOADED, UploadSessionState.PROCESSING],
+      contextLabel: `batch processing for ${fileID}-${batchID}`
+    });
   } catch (setupError: any) {
     if (setupError instanceof UploadSessionOwnershipError) {
       return new NextResponse(JSON.stringify({ error: setupError.message, fileID, batchID }), { status: setupError.status });
+    }
+    if (setupError instanceof BatchFamilyScopeError) {
+      ailogger.error(`Ambiguous batch family for ${fileID}-${batchID}: ${setupError.message}`);
+      return new NextResponse(JSON.stringify({ error: setupError.message, fileID, batchID }), { status: HTTPResponses.CONFLICT });
     }
     ailogger.error(`Setup phase failed for ${fileID}-${batchID}: ${setupError.message}`, setupError);
     return new NextResponse(JSON.stringify({ error: `Setup failed: ${setupError.message}`, fileID, batchID }), { status: HTTPResponses.SERVICE_UNAVAILABLE });
   }
 
-  // --- Phase 2: Process each sub-batch sequentially ---
-  const results: SubBatchResult[] = [];
-  const overallStartTime = Date.now();
-
-  for (let i = 0; i < subBatchIDs.length; i++) {
-    const subBatchID = subBatchIDs[i];
-
-    if (isRequestAborted(request)) {
-      ailogger.warn(`Client disconnected before sub-batch ${i + 1}/${subBatchIDs.length} for ${fileID}`);
-      return new NextResponse(JSON.stringify({ error: 'Client disconnected', aborted: true }), { status: 499 });
+  let result: IngestBatchResult;
+  try {
+    result = await ingestBatch(connectionManager, {
+      schema,
+      fileID,
+      batchID,
+      isAborted: () => isRequestAborted(request)
+    });
+  } catch (error: any) {
+    if (error instanceof IngestBatchAbortedError) {
+      return new NextResponse(JSON.stringify({ error: 'Client disconnected', aborted: true }), { status: HTTP_CLIENT_CLOSED_REQUEST });
     }
-
-    ailogger.info(`Processing sub-batch ${i + 1}/${subBatchIDs.length}: ${subBatchID}`);
-
-    try {
-      const subResult = await processSubBatch(connectionManager, schema, procedureSQL, fileID, subBatchID, plotID, censusID, request);
-      results.push(subResult);
-    } catch (subError: any) {
-      // Client disconnect or truly unrecoverable error — move remaining sub-batches to failed
-      ailogger.error(`Unrecoverable error on sub-batch ${subBatchID}: ${subError.message}`, subError);
-
-      // Move all remaining sub-batches in a single transaction so cleanup
-      // is atomic — either every remaining sub-batch is moved to failures
-      // or none are (no orphaned rows left in temporarymeasurements).
-      let cleanupTransactionID: string | undefined;
-      try {
-        cleanupTransactionID = await connectionManager.beginTransaction();
-        for (let j = i; j < subBatchIDs.length; j++) {
-          const movedRows = await moveTemporaryBatchToFailedMeasurements(
-            connectionManager,
-            schema,
-            fileID,
-            subBatchIDs[j],
-            `Sub-batch abandoned after unrecoverable error: ${subError.message}`,
-            cleanupTransactionID
-          );
-          results.push({
-            subBatchID: subBatchIDs[j],
-            rowCount: movedRows,
-            durationMs: 0,
-            attemptsNeeded: 0,
-            batchFailedButHandled: true,
-            message: `Moved ${movedRows} rows to unresolved coremeasurements`
-          });
-        }
-        await connectionManager.commitTransaction(cleanupTransactionID);
-      } catch (moveError: any) {
-        ailogger.error(`Failed to move remaining sub-batches to failed: ${moveError.message}`);
-        if (cleanupTransactionID) {
-          try {
-            await connectionManager.rollbackTransaction(cleanupTransactionID);
-          } catch (rollbackError: any) {
-            ailogger.error(`Rollback of sub-batch cleanup also failed: ${rollbackError.message}`);
-          }
-        }
-      }
-      break;
-    }
+    // Only Phase-1 (setup) errors escape ingestBatch; sub-batch failures are
+    // handled internally by moving rows to unresolved coremeasurements.
+    ailogger.error(`Setup phase failed for ${fileID}-${batchID}: ${error.message}`, error);
+    return new NextResponse(JSON.stringify({ error: `Setup failed: ${error.message}`, fileID, batchID }), { status: HTTPResponses.SERVICE_UNAVAILABLE });
   }
 
-  const overallDuration = Date.now() - overallStartTime;
-  const totalAttempts = results.reduce((sum, r) => sum + r.attemptsNeeded, 0);
-  const anyFailed = results.some(r => r.batchFailedButHandled);
+  if (result.noDataFound) {
+    return noDataFoundResponse();
+  }
 
-  ailogger.info(
-    `All ${results.length} sub-batch(es) for ${fileID} completed in ${overallDuration}ms` +
-      ` (${totalAttempts} total attempts, ${anyFailed ? 'some failures handled' : 'all succeeded'})`
-  );
+  const totalAttempts = result.subBatchResults.reduce((sum, r) => sum + r.attemptsNeeded, 0);
+  const anyFailed = result.subBatchResults.some(r => r.batchFailedButHandled);
+  const failedSubBatchCount = result.subBatchResults.filter(r => r.batchFailedButHandled).length;
 
   return new NextResponse(
     JSON.stringify({
       attemptsNeeded: totalAttempts,
       batchFailedButHandled: anyFailed,
-      subBatchCount: results.length,
-      totalDurationMs: overallDuration,
+      subBatchCount: result.processedSubBatches,
+      totalDurationMs: result.totalDurationMs,
       message: anyFailed
-        ? `${results.filter(r => r.batchFailedButHandled).length} of ${results.length} sub-batches had failures (handled)`
-        : `All ${results.length} sub-batch(es) processed successfully`
+        ? `${failedSubBatchCount} of ${result.processedSubBatches} sub-batches had failures (handled)`
+        : `All ${result.processedSubBatches} sub-batch(es) processed successfully`
     }),
     { status: HTTPResponses.OK }
   );

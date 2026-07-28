@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getContainerClient, uploadValidFileAsBuffer } from '@/config/macros/azurestorage';
+import { getContainerClient, uploadValidFileAsBufferWithMetadata } from '@/config/macros/azurestorage';
 import { BlobSASPermissions, BlobServiceClient, generateBlobSASQueryParameters, StorageSharedKeyCredential } from '@azure/storage-blob';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
@@ -235,7 +235,7 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
     const containerClient = await getContainerClient(scope.container);
 
     // uploadValidFileAsBuffer now always returns a response or throws
-    const uploadResponse = await uploadValidFileAsBuffer(
+    const uploadResult = await uploadValidFileAsBufferWithMetadata(
       containerClient,
       file,
       scope.userId,
@@ -246,12 +246,24 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
     );
 
     // Verify the response status
-    if (uploadResponse._response.status < 200 || uploadResponse._response.status >= 300) {
-      throw new Error(`Upload failed: Azure returned status ${uploadResponse._response.status}`);
+    if (uploadResult.response._response.status < 200 || uploadResult.response._response.status >= 300) {
+      throw new Error(`Upload failed: Azure returned status ${uploadResult.response._response.status}`);
     }
 
-    ailogger.info(`File uploaded successfully: ${sanitizedFileName} by ${scope.userId}`);
-    return new NextResponse(JSON.stringify({ message: 'File uploaded successfully' }), { status: HTTPResponses.OK });
+    ailogger.info(`File uploaded successfully: ${uploadResult.blobName} by ${scope.userId}`);
+    return new NextResponse(
+      JSON.stringify({
+        message: 'File uploaded successfully',
+        fileName: sanitizedFileName,
+        blobContainer: scope.container,
+        blobName: uploadResult.blobName,
+        contentType: file.type || null,
+        byteSize: file.size,
+        formType,
+        sourceFormat: normalizedSourceFormat
+      }),
+      { status: HTTPResponses.OK }
+    );
   } catch (error: any) {
     // Log the full error for debugging but don't expose details to client
     ailogger.error(`File upload error for ${sanitizedFileName} (${scope.container}): ${error.message}`);

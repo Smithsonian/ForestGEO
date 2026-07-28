@@ -208,6 +208,18 @@ jobs:
           cd frontend/
           npm install --production=false
 
+      # Shared `catalog` DDL runs ONCE per server and must land before the
+      # per-site gate and before the app deploy, so code that reads
+      # catalog.background_jobs can never ship ahead of those tables. The runner
+      # fails closed on an incompatible existing table and never drops anything.
+      - name: Apply catalog migrations (shared catalog database)
+        env:
+          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+        run: |
+          cd frontend/
+          npx tsx scripts/apply-catalog-migrations.ts --azure --apply
+        continue-on-error: false
+
       - name: Apply schema migrations to all schemas
         env:
           AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}

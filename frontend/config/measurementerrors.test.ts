@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildFailedMeasurementsSelectQuery, insertIngestionFailureRows, revalidateEditedFailedRow } from './measurementerrors';
+import {
+  buildFailedMeasurementsSelectQuery,
+  ensureMeasurementErrorDefinition,
+  getIngestionErrorMessage,
+  inferAllIngestionErrorCodes,
+  insertIngestionFailureRows,
+  revalidateEditedFailedRow
+} from './measurementerrors';
 
 vi.mock('@/ailogger', () => ({
   default: {
@@ -202,5 +209,79 @@ describe('measurementerrors helpers', () => {
     });
     expect(String(executeQuery.mock.calls[1]?.[0])).toContain('IsActive = 1');
     expect(String(executeQuery.mock.calls[2]?.[0])).toContain('LOWER(SpeciesCode) = LOWER(?)');
+  });
+});
+
+/**
+ * Regression cover for the 2026-07-27 Harvard Forest incident: 106,227 rows were
+ * parked as SQL_EXCEPTION because the Azure front-end timeout and the abandoned
+ * upload session produced reasons that matched no classifier pattern. An
+ * interruption is not a data defect — the row was never judged at all — so it
+ * must carry its own code.
+ */
+describe('inferAllIngestionErrorCodes — upload interruptions', () => {
+  const INTERRUPTION_REASONS = [
+    // Verbatim from the incident's parked rows.
+    'Server error 504: 504.0 GatewayTimeout',
+    'Upload session upload_ms3jw74a_97uvta1zlug cleaned up after abandonment',
+    'Client disconnected',
+    // Emitted by the revived async pipeline when a job is cancelled mid-flight.
+    'Batch cancelled before completion'
+  ];
+
+  it.each(INTERRUPTION_REASONS)('maps %j to INTERRUPTED_UPLOAD, not SQL_EXCEPTION', reason => {
+    expect(inferAllIngestionErrorCodes(reason)).toEqual(['INTERRUPTED_UPLOAD']);
+  });
+
+  it('gives INTERRUPTED_UPLOAD a message that distinguishes it from a rejected row', () => {
+    const message = getIngestionErrorMessage('INTERRUPTED_UPLOAD');
+
+    expect(message).not.toBe('Ingestion error');
+    expect(message.toLowerCase()).toContain('interrupted');
+    // The operator-facing point of the code: the row itself was never rejected.
+    expect(message.toLowerCase()).toContain('not rejected');
+  });
+
+  it('does not swallow genuine data errors that merely mention a timeout-adjacent word', () => {
+    // A real per-row defect must keep its specific code even when the reason
+    // string is unusual — the interruption branch must not become a catch-all.
+    expect(inferAllIngestionErrorCodes('Missing required field: TreeTag')).toEqual(['MISSING_FIELD_TREETAG']);
+    expect(inferAllIngestionErrorCodes('Duplicate measurement row detected')).toEqual(['DUPLICATE_ENTRY']);
+  });
+
+  it('still defaults genuinely unmapped reasons to SQL_EXCEPTION', () => {
+    expect(inferAllIngestionErrorCodes('some brand new failure nobody has classified')).toEqual(['SQL_EXCEPTION']);
+  });
+
+  /**
+   * INTERRUPTED_UPLOAD is not seeded anywhere: measurement_errors is a per-site
+   * table, so the definition has to be creatable on first use in whichever
+   * schema hits an interruption first.
+   */
+  it('creates the INTERRUPTED_UPLOAD definition in the per-site measurement_errors table on first use', async () => {
+    const NEW_ERROR_ID = 42;
+    const executeQuery = vi.fn().mockResolvedValueOnce({ insertId: NEW_ERROR_ID });
+    const connectionManager = { executeQuery } as any;
+
+    const errorID = await ensureMeasurementErrorDefinition(
+      connectionManager,
+      'forestgeo_harvard',
+      'ingestion',
+      'INTERRUPTED_UPLOAD',
+      getIngestionErrorMessage('INTERRUPTED_UPLOAD'),
+      'tx-9'
+    );
+
+    expect(errorID).toBe(NEW_ERROR_ID);
+    expect(executeQuery).toHaveBeenCalledTimes(1);
+
+    const [sql, params, transactionID] = executeQuery.mock.calls[0];
+    // safeFormatQuery backtick-quotes the validated schema identifier.
+    expect(String(sql)).toContain('`forestgeo_harvard`.measurement_errors');
+    expect(String(sql)).toContain('ON DUPLICATE KEY UPDATE');
+    expect(params[0]).toBe('ingestion');
+    expect(params[1]).toBe('INTERRUPTED_UPLOAD');
+    expect(String(params[2]).toLowerCase()).toContain('interrupted');
+    expect(transactionID).toBe('tx-9');
   });
 });

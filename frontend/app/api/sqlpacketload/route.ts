@@ -1,11 +1,10 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
-import { FileRow, FileRowSet, FormType, normalizeSourceFormat, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
+import { FileRow, FileRowSet, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
 import { NextRequest, NextResponse } from 'next/server';
 import { Plot } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
-import moment from 'moment/moment';
 import { generateShortBatchID, handleUpsert } from '@/config/utils';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
@@ -13,7 +12,6 @@ import { auth } from '@/auth';
 import { format } from 'mysql2/promise';
 import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import crypto from 'crypto';
-import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
 import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, type QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
@@ -24,17 +22,7 @@ import { RoleResult } from '@/lib/db/definitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
 import { assertSchemaAccess } from '@/lib/authz';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
-import { resolveMeasurementChunk } from '@/lib/column-mapping/measurement-rows';
-import {
-  buildDroppedMeasurementFailureReason,
-  cleanupPreviousFileUploads,
-  cleanupStaleMeasurementBatchesForFile,
-  ensureTemporaryMeasurementsSourceFormatColumn,
-  findDroppedMeasurementCandidates,
-  insertTemporaryMeasurementsInBatches,
-  isUnsignedIntFieldInvalid,
-  type DroppedMeasurementRow
-} from '@/lib/ingestion/temporary-measurements';
+import { MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
 
 /**
  * Generate idempotency key for a batch of data
@@ -62,16 +50,6 @@ function hashChunkContent(fileRowSet: FileRowSet): string {
   const data = sortedRows.join('|');
   // Use full SHA-256 hash for better collision resistance
   return crypto.createHash('sha256').update(data).digest('hex');
-}
-
-function buildUploadId(schema: string, plotID: number, censusID: number, fileID: string, batchID: string, purpose: string = 'upload'): string {
-  return crypto.createHash('sha256').update([schema, plotID, censusID, fileID, batchID, purpose].join('#')).digest('hex').slice(0, 40);
-}
-
-function toNullableNumber(value: unknown): number | null {
-  if (value === undefined || value === null || value === '') return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function toPositiveInteger(value: unknown): number | null {
@@ -764,8 +742,6 @@ export async function POST(request: NextRequest) {
   let retryCount = 0;
   const sessionId = request.headers.get('x-upload-session-id');
   if (formType === 'measurements') {
-    let chunkRows = Object.values(fileRowSet ?? {});
-    let mappingDiagnostics: { invalidDateValues: string[]; extraColumnRows: number; ignoredColumnCount: number } | null = null;
     const batchID = body.batchID || generateShortBatchID();
     let scopeValidation: Awaited<ReturnType<typeof validateMeasurementUploadScope>>;
     try {
@@ -813,354 +789,73 @@ export async function POST(request: NextRequest) {
     }
 
     // SERVER-RESOLUTION STAGE (#6): when the client sends RAW rows, the server is authoritative
-    // over CSV header resolution. We re-key/validate via the shared pipeline rather than trusting
-    // client-computed keys. Gated on rawRows + non-revisions so the legacy fileRowSet path is byte
-    // identical. Revisions uploads keep their existing measurementID-matching path untouched.
-    if (rawRows && uploadMode !== UploadMode.REVISIONS) {
+    // over CSV header resolution (stageMeasurementChunk re-keys/validates via the shared
+    // lib/column-mapping pipeline). Gated on rawRows + non-revisions so the legacy fileRowSet path
+    // is byte identical. Revisions uploads keep their existing measurementID-matching path untouched.
+    const useServerResolution = rawRows !== undefined && uploadMode !== UploadMode.REVISIONS;
+    if (useServerResolution) {
       // Reject a malformed/tampered mapping at the wire boundary (parity with the arcgis preflight route).
       if (clientMapping !== undefined && clientMapping !== null && !isColumnMappingShape(clientMapping)) {
         return new NextResponse(JSON.stringify({ responseMessage: 'Invalid mapping payload', fileName, batchID }), { status: HTTPResponses.INVALID_REQUEST });
       }
-      const requiredHeaders = RequiredTableHeadersByFormType[FormType.measurements] ?? [];
-      const resolved = resolveMeasurementChunk(rawRows, csvHeaders.length, {
-        formType: FormType.measurements,
-        uploadMode: 'other',
-        delimiter: csvDelimiter,
-        requiredHeaders,
-        csvHeaders,
-        storedMapping: isColumnMappingShape(clientMapping) ? clientMapping : undefined
-      });
-      if (resolved.columnCountMismatch) {
-        return new NextResponse(JSON.stringify({ responseMessage: 'Header plan misalignment for the uploaded file', fileName, batchID }), {
-          status: HTTPResponses.UNPROCESSABLE_ENTITY
-        });
-      }
-      chunkRows = resolved.validRows;
-      for (const invalid of resolved.invalidRows) failingRows.add(invalid);
-      // Surface resolution diagnostics so silently-dropped columns / unparseable inputs are visible to
-      // the client instead of vanishing. Logged here too for server-side observability.
-      mappingDiagnostics = resolved.diagnostics;
-      if (mappingDiagnostics.ignoredColumnCount > 0) {
-        ailogger.warn(
-          `Column mapping for ${fileName}-${batchID} dropped ${mappingDiagnostics.ignoredColumnCount} unmatched column(s); they will not be ingested.`
-        );
-      }
     }
 
-    const rowCount = chunkRows.length;
-    // On the rawRows path fileRowSet is `{}`, which would make the hash constant across distinct
-    // chunks and break idempotency. Hash the rows actually being inserted instead.
-    const effectiveRowSet: FileRowSet = rawRows ? Object.fromEntries(chunkRows.map((row, index) => [`row-${index}`, row] as const)) : fileRowSet;
-    const contentHash = hashChunkContent(effectiveRowSet);
-    const idempotencyKey = generateIdempotencyKey(fileName, resolvedPlotID, resolvedCensusID, rowCount, contentHash);
-    await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, schema);
-
-    // NOTE:
-    // Sample-row duplicate short-circuit checks were removed because they could
-    // falsely classify unique chunks as duplicates. We now always ingest the chunk
-    // and rely on downstream dedupe + explicit dropped-row tracking.
+    // Captured before any DB write inside stageMeasurementChunk so error responses can still
+    // report the resolution's parse rejects after a rollback.
+    let resolutionInvalidRows: FileRow[] = [];
+    // Surfaced from the staging result so silently-dropped columns / unparseable inputs are
+    // visible to the client instead of vanishing.
+    let mappingDiagnostics: { invalidDateValues: string[]; extraColumnRows: number; ignoredColumnCount: number } | null = null;
 
     // Retry logic for database operations
     while (retryCount <= maxRetries) {
       try {
         transactionID = await connectionManager.beginTransaction();
 
-        // Count rows BEFORE insert so we can measure the delta (important when
-        // multiple chunks share a single BatchID under batch consolidation).
-        const expectedRowCount = chunkRows.length;
-        const countSQL = format(`SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [schema]);
-        const preInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
-        const preInsertCount = preInsertResult[0]?.count || 0;
-
-        // A retry of the same file should not inherit stale batches that were left
-        // behind by an earlier interrupted upload for the same plot/census.
-        if (preInsertCount === 0) {
-          if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-            // Clean up data from any previous uploads for this census.
-            // Clean re-upload is census replacement, not filename replacement.
-            await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
-          }
-
-          await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
-        }
-
-        await insertTemporaryMeasurementsInBatches(
-          connectionManager,
+        const stageResult = await stageMeasurementChunk(connectionManager, {
           schema,
-          chunkRows,
           fileName,
           batchID,
-          sessionId,
+          plotID: resolvedPlotID,
+          censusID: resolvedCensusID,
+          uploadMode,
           sourceFormat,
-          resolvedPlotID,
-          resolvedCensusID,
-          transactionID
-        );
-
-        // A present-but-unparseable PublishedStemID is coerced to NULL at staging so the row still
-        // ingests, but the SI-assigned identifier the upload carried is lost. Surface it as a
-        // visible warning alert rather than dropping it silently.
-        const invalidPublishedStemIdRows = chunkRows
-          .map((row, index) => ({ value: row.publishedstemid, sourceRowIndex: index + 1 }))
-          .filter(candidate => isUnsignedIntFieldInvalid(candidate.value));
-
-        if (invalidPublishedStemIdRows.length > 0) {
-          ailogger.warn(
-            `Coerced ${invalidPublishedStemIdRows.length} unparseable PublishedStemID value(s) to NULL for ${fileName}-${batchID}; ` +
-              `the SI-assigned identifier was not stored for those rows.`
-          );
-          try {
-            const publishedStemIdAlertSQL = format(
-              `INSERT INTO ??.uploadintegrityalerts
-               (uploadId, fileID, batchID, plotID, censusID, type, message, severity,
-                sourceRecords, processedRecords, failedRecords, missingRecords)
-               VALUES (?, ?, ?, ?, ?, 'INVALID_PUBLISHED_STEMID', ?, 'warning', ?, ?, ?, ?)`,
-              [schema]
-            );
-            const publishedStemIdAlertMessage = JSON.stringify({
-              coercedToNullCount: invalidPublishedStemIdRows.length,
-              sample: invalidPublishedStemIdRows.slice(0, 10).map(candidate => ({
-                sourceRowIndex: candidate.sourceRowIndex,
-                value: `${candidate.value}`
-              })),
-              note: 'PublishedStemID values that are present but not a positive integer were stored as NULL; the row was still ingested.'
-            });
-            await connectionManager.executeQuery(
-              publishedStemIdAlertSQL,
-              [
-                buildUploadId(schema, resolvedPlotID, resolvedCensusID, fileName, batchID, 'invalid-published-stemid'),
-                fileName,
-                batchID,
-                resolvedPlotID,
-                resolvedCensusID,
-                publishedStemIdAlertMessage,
-                expectedRowCount,
-                expectedRowCount,
-                0,
-                0
-              ],
-              transactionID
-            );
-          } catch (alertError: unknown) {
-            const message = alertError instanceof Error ? alertError.message : String(alertError);
-            ailogger.error(`Failed to log INVALID_PUBLISHED_STEMID alert for ${fileName}-${batchID}: ${message}`);
+          rawRows: rawRows ?? [],
+          csvHeaders,
+          delimiter: csvDelimiter,
+          storedMapping: isColumnMappingShape(clientMapping) ? clientMapping : undefined,
+          uploadSessionID: sessionId,
+          transactionID,
+          preKeyedRows: useServerResolution ? undefined : Object.values(fileRowSet ?? {}),
+          changedBy: user,
+          onInvalidRows: invalidRows => {
+            resolutionInvalidRows = invalidRows;
           }
-        }
-
-        // CRITICAL FIX: Verify expected vs actual row count to detect silent data loss from INSERT IGNORE
-        const postInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
-        const postInsertCount = postInsertResult[0]?.count || 0;
-        const actualInsertedCount = postInsertCount - preInsertCount;
-
-        // Check for discrepancy - this would indicate INSERT IGNORE silently dropped rows
-        const droppedRowCount = expectedRowCount - actualInsertedCount;
-
-        if (droppedRowCount > 0) {
-          ailogger.error(
-            `DATA INTEGRITY WARNING: Expected ${expectedRowCount} rows but only ${actualInsertedCount} were inserted for ${fileName}-${batchID}. ` +
-              `${droppedRowCount} row(s) were silently dropped by INSERT IGNORE (likely duplicates). This indicates potential data loss!`
-          );
-
-          const droppedCandidates = await findDroppedMeasurementCandidates(
-            connectionManager,
-            schema,
-            fileName,
-            batchID,
-            resolvedPlotID,
-            resolvedCensusID,
-            chunkRows,
-            transactionID
-          );
-          const droppedRows: DroppedMeasurementRow[] = droppedCandidates.map(candidate => {
-            const row = chunkRows[candidate.rowOrdinal - 1];
-            return Object.assign({}, row, {
-              failureReason: buildDroppedMeasurementFailureReason(row, candidate.existingBatch),
-              sourceRowIndex: candidate.rowOrdinal
-            }) as DroppedMeasurementRow;
-          });
-
-          if (droppedRows.length !== droppedRowCount) {
-            ailogger.warn(
-              `Dropped-row batch detection identified ${droppedRows.length} of ${droppedRowCount} dropped row(s) for ${fileName}-${batchID}. ` +
-                `Persisted unresolved ingestion errors may be incomplete for this chunk.`
-            );
-          }
-
-          // Persist dropped rows as unresolved ingestion errors in coremeasurements.
-          if (droppedRows.length > 0) {
-            try {
-              await insertIngestionFailureRows(
-                connectionManager,
-                schema,
-                droppedRows.map(row => ({
-                  plotID: resolvedPlotID,
-                  censusID: resolvedCensusID,
-                  tag: row.tag,
-                  stemTag: row.stemtag || null,
-                  spCode: row.spcode,
-                  quadrat: row.quadrat,
-                  x: toNullableNumber(row.lx),
-                  y: toNullableNumber(row.ly),
-                  dbh: toNullableNumber(row.dbh),
-                  hom: toNullableNumber(row.hom),
-                  date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
-                  codes: row.codes || null,
-                  comments: null,
-                  fileID: fileName,
-                  batchID,
-                  sourceRowIndex: row.sourceRowIndex,
-                  failureReason: row.failureReason || 'Unknown error during insert'
-                })),
-                transactionID
-              );
-              ailogger.info(`Persisted ${droppedRows.length} dropped rows as unresolved ingestion errors for ${fileName}-${batchID}`);
-            } catch (failedInsertError: any) {
-              ailogger.error(`Failed to persist dropped rows as unresolved ingestion errors (attempt 1): ${failedInsertError.message}`);
-
-              // Retry once before giving up
-              try {
-                await insertIngestionFailureRows(
-                  connectionManager,
-                  schema,
-                  droppedRows.map(row => ({
-                    plotID: resolvedPlotID,
-                    censusID: resolvedCensusID,
-                    tag: row.tag,
-                    stemTag: row.stemtag || null,
-                    spCode: row.spcode,
-                    quadrat: row.quadrat,
-                    x: toNullableNumber(row.lx),
-                    y: toNullableNumber(row.ly),
-                    dbh: toNullableNumber(row.dbh),
-                    hom: toNullableNumber(row.hom),
-                    date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
-                    codes: row.codes || null,
-                    comments: null,
-                    fileID: fileName,
-                    batchID,
-                    sourceRowIndex: row.sourceRowIndex,
-                    failureReason: row.failureReason || 'Unknown error during insert'
-                  })),
-                  transactionID
-                );
-                ailogger.info(`Retry successful: persisted ${droppedRows.length} dropped rows as unresolved ingestion errors for ${fileName}-${batchID}`);
-              } catch (retryError: any) {
-                ailogger.error(`Failed to persist dropped rows as unresolved ingestion errors (attempt 2): ${retryError.message}`);
-
-                // Critical: log to uploadintegrityalerts so data loss is not silent.
-                try {
-                  const alertUploadId = buildUploadId(
-                    schema,
-                    resolvedPlotID,
-                    resolvedCensusID,
-                    fileName,
-                    batchID,
-                    'failed-insert-to-unresolved-coremeasurements'
-                  );
-                  const alertSQL = format(
-                    `INSERT INTO ??.uploadintegrityalerts
-                     (uploadId, fileID, batchID, plotID, censusID, type, message, severity,
-                      sourceRecords, processedRecords, failedRecords, missingRecords)
-                     VALUES (?, ?, ?, ?, ?, 'FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS', ?, 'critical', ?, ?, ?, ?)`,
-                    [schema]
-                  );
-                  const alertMessage = JSON.stringify({
-                    error: retryError.message,
-                    droppedRowCount: droppedRows.length,
-                    timestamp: new Date().toISOString(),
-                    note: 'These rows were dropped during upload and could not be persisted as unresolved ingestion errors'
-                  });
-                  await connectionManager.executeQuery(
-                    alertSQL,
-                    [
-                      alertUploadId,
-                      fileName,
-                      batchID,
-                      resolvedPlotID,
-                      resolvedCensusID,
-                      alertMessage,
-                      expectedRowCount,
-                      actualInsertedCount,
-                      droppedRows.length,
-                      0
-                    ],
-                    transactionID
-                  );
-                  ailogger.error(`Logged failed insert to uploadintegrityalerts for ${fileName}-${batchID}`);
-                } catch (alertError: any) {
-                  ailogger.error(`CRITICAL: Failed to log data loss to uploadintegrityalerts: ${alertError.message}. Dropped rows: ${droppedRows.length}`);
-                }
-              }
-            }
-          }
-        } else {
-          ailogger.info(`Successfully inserted ${actualInsertedCount} rows for ${fileName}-${batchID} (expected: ${expectedRowCount}, no data loss detected)`);
-        }
-
-        // Track file upload in unifiedchangelog (single row per file, not per batch)
-        try {
-          // Check if we've already logged this file upload - use format() for schema
-          const existingEntrySQL = format(
-            `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
-             WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?
-             ORDER BY ChangeID DESC LIMIT 1`,
-            [schema]
-          );
-          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, resolvedCensusID], transactionID);
-
-          if (existingEntry.length === 0) {
-            // First batch for this file - insert new entry
-            const uploadMetadata = JSON.stringify({
-              fileName,
-              formType,
-              sourceFormat,
-              uploadMode,
-              rowCount: actualInsertedCount,
-              droppedCount: droppedRowCount,
-              batchCount: 1
-            });
-            const insertChangelogSQL = format(
-              `INSERT INTO ??.unifiedchangelog
-              (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
-              VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
-              [schema]
-            );
-            await connectionManager.executeQuery(
-              insertChangelogSQL,
-              ['file_upload', fileName, 'INSERT', uploadMetadata, user, resolvedPlotID, resolvedCensusID],
-              transactionID
-            );
-          } else {
-            // Subsequent batch - update the existing entry with accumulated count
-            // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
-            const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
-            metadata.sourceFormat = sourceFormat;
-            metadata.uploadMode = uploadMode;
-            metadata.rowCount = (metadata.rowCount || 0) + actualInsertedCount;
-            metadata.droppedCount = (metadata.droppedCount || 0) + droppedRowCount;
-            metadata.batchCount = (metadata.batchCount || 1) + 1;
-            const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
-            await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
-          }
-        } catch (logError: any) {
-          // Log but don't fail the upload if changelog tracking fails
-          ailogger.error('Failed to log file upload to changelog', logError);
-        }
+        });
+        mappingDiagnostics = stageResult.diagnostics;
 
         await connectionManager.commitTransaction(transactionID);
         transactionID = undefined;
 
+        // On the rawRows path fileRowSet is `{}`, which would make the hash constant across distinct
+        // chunks and break idempotency. Hash the rows actually being inserted instead.
+        const effectiveRowSet: FileRowSet = rawRows
+          ? Object.fromEntries(stageResult.stagedRows.map((row, index) => [`row-${index}`, row] as const))
+          : fileRowSet;
+        const contentHash = hashChunkContent(effectiveRowSet);
+        const idempotencyKey = generateIdempotencyKey(fileName, resolvedPlotID, resolvedCensusID, stageResult.stagedRows.length, contentHash);
+
         return new NextResponse(
           JSON.stringify({
             responseMessage:
-              droppedRowCount > 0
-                ? `Bulk insert completed with ${droppedRowCount} row(s) dropped - check unresolved ingestion errors`
+              stageResult.droppedCount > 0
+                ? `Bulk insert completed with ${stageResult.droppedCount} row(s) dropped - check unresolved ingestion errors`
                 : `Bulk insert to SQL completed`,
-            failingRows: Array.from(failingRows),
-            insertedCount: actualInsertedCount,
-            expectedCount: expectedRowCount,
-            droppedCount: droppedRowCount,
-            dataIntegrityWarning: droppedRowCount > 0,
+            failingRows: stageResult.invalidRows,
+            insertedCount: stageResult.insertedCount,
+            expectedCount: stageResult.expectedCount,
+            droppedCount: stageResult.droppedCount,
+            dataIntegrityWarning: stageResult.droppedCount > 0,
             transactionCompleted: true,
             batchID: batchID,
             uploadMode,
@@ -1182,6 +877,12 @@ export async function POST(request: NextRequest) {
           });
         }
 
+        if (e instanceof MeasurementChunkResolutionError) {
+          return new NextResponse(JSON.stringify({ responseMessage: 'Header plan misalignment for the uploaded file', fileName, batchID }), {
+            status: HTTPResponses.UNPROCESSABLE_ENTITY
+          });
+        }
+
         retryCount++;
         if (isRetryableUploadError(e) && retryCount <= maxRetries) {
           const delay = getUploadRetryDelayMs(retryCount);
@@ -1194,7 +895,7 @@ export async function POST(request: NextRequest) {
         return new NextResponse(
           JSON.stringify({
             responseMessage: `Error processing file ${fileName}: ${e.message}`,
-            failingRows: Array.from(failingRows),
+            failingRows: resolutionInvalidRows,
             retryCount
           }),
           { status: HTTPResponses.INTERNAL_SERVER_ERROR }

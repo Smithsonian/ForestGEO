@@ -66,7 +66,12 @@ vi.mock('@/app/actions/cookiemanager', () => ({ getCookie: getCookieMock }));
 
 vi.mock('@/auth', () => ({ auth: authMock }));
 
-vi.mock('@/lib/db/sqlsecurity', () => ({ isValidSchema: vi.fn(() => true) }));
+// safeFormatQuery is required because the measurements branch now stages through
+// lib/uploads/stage-measurements, which builds its SQL with it.
+vi.mock('@/lib/db/sqlsecurity', () => ({
+  safeFormatQuery: vi.fn((schema: string, sql: string) => sql.replace(/\?\?/g, schema)),
+  isValidSchema: vi.fn(() => true)
+}));
 
 vi.mock('@/config/utils', async importOriginal => {
   const actual = (await importOriginal()) as object;

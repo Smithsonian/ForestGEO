@@ -130,6 +130,8 @@ vi.mock('@/config/uploadsessiontracker', async () => {
 
 // Route handler + session loader imported AFTER vi.mock so the mocks are wired.
 import { POST as commitPOST } from '@/app/api/arcgis/commit/route';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
 import { createArcgisImportSession } from '@/lib/arcgis/import-session';
 import { UploadMode } from '@/config/uploadmodes';
 import { HTTPResponses } from '@/config/macros';
@@ -551,6 +553,43 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     const metadata = typeof changelogRows[0].NewRowState === 'string' ? JSON.parse(changelogRows[0].NewRowState) : changelogRows[0].NewRowState;
     expect(metadata.rowCount).toBe(seeded.stagedRowCount);
     expect(metadata.batchCount).toBe(1);
+  });
+
+  // Worker-style direct call (Task 10 in-process worker): no HTTP request, no
+  // auth/ownership guards — commitArcgisImport is invoked exactly as the
+  // background worker will invoke it, and a same-batch retry must be a no-op.
+  it('commitArcgisImport called directly twice: second call returns alreadyCommitted with the preserved rowCount and stages no new rows', async () => {
+    // temporarymeasurements.FileID is varchar(36); keep the fixture name short
+    // or INSERT IGNORE silently truncates it and count-by-FileID finds nothing.
+    const seeded = await seedValidStagedSession({ fileName: `arc-direct-${Date.now()}.xlsx` });
+    const batchID = `arcgis_direct_idem_${Date.now()}`;
+    const connectionManager = ConnectionManager.getInstance();
+    const params = {
+      schema: seeded.schema,
+      plotID: seeded.plotID,
+      censusID: seeded.censusID,
+      importSessionId: seeded.importSessionId,
+      fileName: seeded.fileName,
+      batchID,
+      uploadMode: UploadMode.REVISIONS,
+      userId: AUTH_USER_EMAIL,
+      uploadSessionID: 'worker-session-direct-idem'
+    };
+
+    const first = await commitArcgisImport(connectionManager, params);
+    expect(first).toEqual({ rowCount: seeded.stagedRowCount, fileName: seeded.fileName, alreadyCommitted: false });
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
+
+    const second = await commitArcgisImport(connectionManager, params);
+    expect(second).toEqual({ rowCount: seeded.stagedRowCount, fileName: seeded.fileName, alreadyCommitted: true });
+
+    // The retry must NOT have inserted any additional temporarymeasurements rows.
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
+
+    const sessionRow = await getImportSession(seeded.importSessionId);
+    expect(sessionRow.state).toBe('committed');
+    expect(sessionRow.committed_batch_id).toBe(batchID);
+    expect(Number(sessionRow.committed_row_count)).toBe(seeded.stagedRowCount);
   });
 
   it('rejects a committed ArcGIS import session when replayed with a different BatchID', async () => {

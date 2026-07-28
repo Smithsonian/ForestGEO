@@ -31,8 +31,8 @@ vi.mock('@/lib/db/connectionmanager', () => {
   };
 });
 
-vi.mock('@/config/measurementerrors', () => ({
-  insertIngestionFailureRows: vi.fn().mockResolvedValue([1, 2])
+vi.mock('@/lib/uploads/record-invalid-rows', () => ({
+  recordFailedMeasurementRows: vi.fn().mockResolvedValue(2)
 }));
 
 vi.mock('@/ailogger', () => ({
@@ -48,7 +48,7 @@ vi.mock('mysql2/promise', () => {
 import { POST } from './route';
 import ailogger from '@/ailogger';
 import connectionmanager from '@/lib/db/connectionmanager';
-import { insertIngestionFailureRows } from '@/config/measurementerrors';
+import { recordFailedMeasurementRows } from '@/lib/uploads/record-invalid-rows';
 
 function makeRequest(body: unknown) {
   const req = new Request('http://localhost/api', {
@@ -99,19 +99,34 @@ describe('batchedupload POST route', () => {
     expect(body.message).toMatch(/Inserted ingestion error rows/i);
     expect(body.rowCount).toBe(2);
 
-    const insertMock = insertIngestionFailureRows as ReturnType<typeof vi.fn>;
+    const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
     expect(insertMock).toHaveBeenCalledTimes(1);
-    const [connArg, schemaArg, rowsArg] = insertMock.mock.calls[0];
+    const [connArg, schemaArg, rowsArg, fileIDArg, batchIDArg, plotIDArg, censusIDArg] = insertMock.mock.calls[0];
     expect(connArg).toBe(connectionmanager.getInstance());
     expect(schemaArg).toBe('forestgeo_testing');
     expect(rowsArg).toHaveLength(2);
-    expect(rowsArg[0]).toMatchObject({ plotID: 42, censusID: 7, sourceRowIndex: 1, failureReason: 'Unknown error' });
+    expect(plotIDArg).toBe(42);
+    expect(censusIDArg).toBe(7);
+    expect(typeof fileIDArg).toBe('string');
+    expect(typeof batchIDArg).toBe('string');
+
+    // Per-row shape: the route enriches each row with plotID, censusID, batchID,
+    // fileID before passing to recordFailedMeasurementRows. Verify the mapped-in
+    // fields match the URL params so misrouted rows are caught early.
+    expect(rowsArg[0]).toMatchObject({ plotID: 42, censusID: 7 });
+    expect(rowsArg[1]).toMatchObject({ plotID: 42, censusID: 7 });
+
+    // failureReasons fallback: rows without an explicit failureReasons value should
+    // carry whatever field the route maps (reason field is not normalised here, but
+    // the batchID/fileID overrides must be strings).
+    expect(typeof (rowsArg[0] as any).batchID).toBe('string');
+    expect(typeof (rowsArg[0] as any).fileID).toBe('string');
 
     expect(validatedSchemaMock).toHaveBeenCalledWith('forestgeo_testing');
   });
 
   it('500 and logs on DB error', async () => {
-    const insertMock = insertIngestionFailureRows as ReturnType<typeof vi.fn>;
+    const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
     insertMock.mockRejectedValueOnce(new Error('boom'));
 
     const payload = [{ treeID: 1, stemGUID: 2, reason: 'oops' }];
@@ -146,7 +161,7 @@ describe('batchedupload POST route', () => {
       const body = await res.json();
       expect(body.message).toMatch(/Invalid plotID or censusID/i);
 
-      const insertMock = insertIngestionFailureRows as ReturnType<typeof vi.fn>;
+      const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
       expect(insertMock).not.toHaveBeenCalled();
     });
 
@@ -161,7 +176,7 @@ describe('batchedupload POST route', () => {
       const body = await res.json();
       expect(body.code).toBe('UNAUTHENTICATED');
 
-      const insertMock = insertIngestionFailureRows as ReturnType<typeof vi.fn>;
+      const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
       expect(insertMock).not.toHaveBeenCalled();
     });
 
@@ -176,7 +191,7 @@ describe('batchedupload POST route', () => {
 
       expect(res.status).toBe(403);
 
-      const insertMock = insertIngestionFailureRows as ReturnType<typeof vi.fn>;
+      const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
       expect(insertMock).not.toHaveBeenCalled();
     });
 
@@ -193,7 +208,7 @@ describe('batchedupload POST route', () => {
       const body = await res.json();
       expect(body.code).toBe('INVALID_SCHEMA');
 
-      const insertMock = insertIngestionFailureRows as ReturnType<typeof vi.fn>;
+      const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
       expect(insertMock).not.toHaveBeenCalled();
     });
 
@@ -208,7 +223,7 @@ describe('batchedupload POST route', () => {
 
       expect(res.status).toBe(200);
 
-      const insertMock = insertIngestionFailureRows as ReturnType<typeof vi.fn>;
+      const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
       expect(insertMock).toHaveBeenCalledTimes(1);
       const [, schemaArg] = insertMock.mock.calls[0];
       expect(schemaArg).toBe('forestgeo_testing');
@@ -234,7 +249,7 @@ describe('batchedupload POST route', () => {
       // Falls back to validation.response (400 from validateContextualValuesMock)
       expect(res.status).toBe(VALIDATION_FAIL_RESPONSE.status);
 
-      const insertMock = insertIngestionFailureRows as ReturnType<typeof vi.fn>;
+      const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
       expect(insertMock).not.toHaveBeenCalled();
     });
   });
