@@ -1,6 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET, POST } from './route';
 
+// GET/POST are wrapped by withRouteAuthz, whose Handler type requires a
+// RouteContext second argument even though this route never reads
+// context.params. These routes have no dynamic segments, so an always-empty
+// context is a faithful stand-in for what Next.js would supply.
+const EMPTY_CONTEXT = { params: Promise.resolve({}) };
+function callPost(request: any) {
+  return POST(request, EMPTY_CONTEXT);
+}
+function callGet(request: any) {
+  return GET(request, EMPTY_CONTEXT);
+}
+
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   requireSession: vi.fn(() => null),
@@ -13,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   listBackgroundJobs: vi.fn(),
   isAsyncUploadEnabledFor: vi.fn(() => true),
   runJobIfClaimable: vi.fn(async () => undefined),
+  executeQuery: vi.fn(),
   loggerError: vi.fn()
 }));
 
@@ -37,7 +50,7 @@ vi.mock('@/config/editplan/scopeguard', () => ({
 
 vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
-    getInstance: () => ({})
+    getInstance: () => ({ executeQuery: mocks.executeQuery })
   }
 }));
 
@@ -76,7 +89,7 @@ const session = {
 const VALID_COLUMN_MAPPING = {
   version: 1,
   format: 'csv',
-  fields: [{ canonicalField: 'tag', sourceColumns: ['Tag'] }]
+  fields: [{ canonicalField: 'tag', sourceColumns: ['Tag'], scope: 'both' }]
 };
 
 function makeCreateBody(overrides: Record<string, unknown> = {}) {
@@ -109,6 +122,13 @@ function makeCreateRequest(body: Record<string, unknown>) {
   }) as any;
 }
 
+function makeListRequest(query: string) {
+  const url = new URL(`http://localhost/api/uploadjobs${query}`);
+  const req = new Request(url.toString()) as any;
+  req.nextUrl = url; // withRouteAuthz's fromQuery resolver reads request.nextUrl
+  return req;
+}
+
 describe('POST /api/uploadjobs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -121,7 +141,7 @@ describe('POST /api/uploadjobs', () => {
   });
 
   it('creates a job, kicks the worker, and returns 202 with accepted: true', async () => {
-    const response = await POST(
+    const response = await callPost(
       makeCreateRequest(
         makeCreateBody({
           payload: {
@@ -162,7 +182,7 @@ describe('POST /api/uploadjobs', () => {
   it('still returns 202 when the worker kick rejects, and logs the kick failure', async () => {
     mocks.runJobIfClaimable.mockRejectedValueOnce(new Error('claim-time infrastructure outage'));
 
-    const response = await POST(makeCreateRequest(makeCreateBody()));
+    const response = await callPost(makeCreateRequest(makeCreateBody()));
 
     expect(response.status).toBe(202);
     const body = await response.json();
@@ -178,15 +198,53 @@ describe('POST /api/uploadjobs', () => {
   it('rejects invalid schemas before creating a job', async () => {
     mocks.isValidSchema.mockReturnValueOnce(false);
 
-    const response = await POST(makeCreateRequest(makeCreateBody({ schema: 'bad-schema' })));
+    const response = await callPost(makeCreateRequest(makeCreateBody({ schema: 'bad-schema' })));
 
     expect(response.status).toBe(400);
     expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
     expect(mocks.runJobIfClaimable).not.toHaveBeenCalled();
   });
 
+  it('rejects a body with no schema field with 400 before any repository or scope call (withRouteAuthz gate)', async () => {
+    const response = await callPost(makeCreateRequest(makeCreateBody({ schema: undefined })));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'INVALID_SCHEMA' });
+    expect(mocks.assertCanEditMeasurementScope).not.toHaveBeenCalled();
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    expect(mocks.runJobIfClaimable).not.toHaveBeenCalled();
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects job creation for a schema outside the caller session scope with 403 and zero repository/SQL calls', async () => {
+    const response = await callPost(makeCreateRequest(makeCreateBody({ schema: 'forestgeo_other' })));
+
+    expect(response.status).toBe(403);
+    expect(mocks.assertCanEditMeasurementScope).not.toHaveBeenCalled();
+    expect(mocks.isAsyncUploadEnabledFor).not.toHaveBeenCalled();
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    expect(mocks.runJobIfClaimable).not.toHaveBeenCalled();
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('reaches job creation for an admin session even when the schema is not in their sites list', async () => {
+    // withRouteAuthz calls auth() to gate the request and the handler calls
+    // auth() again for its own identity lookups, so the override must persist
+    // across both calls rather than being consumed by the wrapper alone.
+    mocks.auth.mockResolvedValue({ user: { ...session.user, userStatus: 'global', sites: [] } });
+
+    const response = await callPost(makeCreateRequest(makeCreateBody({ schema: 'forestgeo_other' })));
+
+    expect(response.status).toBe(202);
+    expect(mocks.assertCanEditMeasurementScope).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ user: expect.objectContaining({ userStatus: 'global' }) }),
+      { schema: 'forestgeo_other', plotID: 1, censusID: 2 }
+    );
+  });
+
   it('rejects an unknown formType with a field-level issue', async () => {
-    const response = await POST(makeCreateRequest(makeCreateBody({ formType: 'bogus' })));
+    const response = await callPost(makeCreateRequest(makeCreateBody({ formType: 'bogus' })));
 
     expect(response.status).toBe(400);
     const body = await response.json();
@@ -196,7 +254,7 @@ describe('POST /api/uploadjobs', () => {
   });
 
   it('rejects an unknown sourceFormat with a field-level issue', async () => {
-    const response = await POST(makeCreateRequest(makeCreateBody({ sourceFormat: 'xlsx' })));
+    const response = await callPost(makeCreateRequest(makeCreateBody({ sourceFormat: 'xlsx' })));
 
     expect(response.status).toBe(400);
     const body = await response.json();
@@ -205,7 +263,7 @@ describe('POST /api/uploadjobs', () => {
   });
 
   it('rejects an unrecognized uploadMode', async () => {
-    const response = await POST(makeCreateRequest(makeCreateBody({ uploadMode: 'overwrite_everything' })));
+    const response = await callPost(makeCreateRequest(makeCreateBody({ uploadMode: 'overwrite_everything' })));
 
     expect(response.status).toBe(400);
     const body = await response.json();
@@ -214,7 +272,7 @@ describe('POST /api/uploadjobs', () => {
   });
 
   it('rejects a malformed column mapping value with the offending file in the field path', async () => {
-    const response = await POST(
+    const response = await callPost(
       makeCreateRequest(
         makeCreateBody({
           payload: { columnMappings: { 'measurements.csv': { version: 2, fields: 'not-an-array' } } }
@@ -229,7 +287,7 @@ describe('POST /api/uploadjobs', () => {
   });
 
   it('rejects an unsupported delimiter selection', async () => {
-    const response = await POST(
+    const response = await callPost(
       makeCreateRequest(
         makeCreateBody({
           payload: { selectedDelimiters: { 'measurements.csv': '##' } }
@@ -244,7 +302,7 @@ describe('POST /api/uploadjobs', () => {
   });
 
   it('rejects a formType/sourceFormat combination the worker does not support', async () => {
-    const response = await POST(makeCreateRequest(makeCreateBody({ formType: 'species', sourceFormat: 'csv' })));
+    const response = await callPost(makeCreateRequest(makeCreateBody({ formType: 'species', sourceFormat: 'csv' })));
 
     expect(response.status).toBe(403);
     const body = await response.json();
@@ -256,7 +314,7 @@ describe('POST /api/uploadjobs', () => {
   it('rejects job creation when the async upload feature gate is disabled', async () => {
     mocks.isAsyncUploadEnabledFor.mockReturnValueOnce(false);
 
-    const response = await POST(makeCreateRequest(makeCreateBody()));
+    const response = await callPost(makeCreateRequest(makeCreateBody()));
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: 'Async uploads are not enabled for this form/site/user' });
@@ -265,7 +323,7 @@ describe('POST /api/uploadjobs', () => {
   });
 
   it('rejects arcgis_xlsx jobs that are missing the pre-flight import session', async () => {
-    const response = await POST(
+    const response = await callPost(
       makeCreateRequest(
         makeCreateBody({
           sourceFormat: 'arcgis_xlsx',
@@ -281,7 +339,7 @@ describe('POST /api/uploadjobs', () => {
   });
 
   it('accepts arcgis_xlsx jobs that carry a complete pre-flight import session', async () => {
-    const response = await POST(
+    const response = await callPost(
       makeCreateRequest(
         makeCreateBody({
           sourceFormat: 'arcgis_xlsx',
@@ -305,9 +363,9 @@ describe('GET /api/uploadjobs', () => {
   });
 
   it('lists active jobs for the authenticated user and optional scope', async () => {
-    const request = new Request('http://localhost/api/uploadjobs?schema=forestgeo_testing&plotID=1&censusID=2') as any;
+    const request = makeListRequest('?schema=forestgeo_testing&plotID=1&censusID=2');
 
-    const response = await GET(request);
+    const response = await callGet(request);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ jobs: [{ jobID: 42, status: 'queued' }] });
@@ -323,12 +381,34 @@ describe('GET /api/uploadjobs', () => {
   });
 
   it('allows privileged users to request all users', async () => {
-    mocks.auth.mockResolvedValueOnce({ user: { ...session.user, userStatus: 'global' } });
-    const request = new Request('http://localhost/api/uploadjobs?allUsers=true&activeOnly=false&limit=5') as any;
+    // Persist (not "once") the admin override — withRouteAuthz's own auth()
+    // call and the handler's auth() call both need the same session.
+    mocks.auth.mockResolvedValue({ user: { ...session.user, userStatus: 'global' } });
+    const request = makeListRequest('?schema=forestgeo_testing&allUsers=true&activeOnly=false&limit=5');
 
-    const response = await GET(request);
+    const response = await callGet(request);
 
     expect(response.status).toBe(200);
     expect(mocks.listBackgroundJobs).toHaveBeenCalledWith('catalog-pool', expect.objectContaining({ includeAllUsers: true, activeOnly: false, limit: 5 }));
+  });
+
+  it('rejects a list request with a missing schema with 400 before any repository call', async () => {
+    const request = makeListRequest('?plotID=1&censusID=2');
+
+    const response = await callGet(request);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'INVALID_SCHEMA' });
+    expect(mocks.listBackgroundJobs).not.toHaveBeenCalled();
+  });
+
+  it('rejects a list request for a schema outside the caller session scope with 403 and zero repository calls', async () => {
+    const request = makeListRequest('?schema=forestgeo_other');
+
+    const response = await callGet(request);
+
+    expect(response.status).toBe(403);
+    expect(mocks.listBackgroundJobs).not.toHaveBeenCalled();
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
   });
 });

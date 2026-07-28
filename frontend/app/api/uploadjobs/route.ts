@@ -16,6 +16,7 @@ import { isAllowedAsyncPipeline } from '@/lib/background-jobs/types';
 import { createUploadBackgroundJob, listBackgroundJobs } from '@/lib/background-jobs/repository';
 import { isPrivilegedSession, parseOptionalPositiveInteger } from '@/lib/background-jobs/route-helpers';
 import { runJobIfClaimable } from '@/lib/background-jobs/worker';
+import { fromBody, fromQuery, withRouteAuthz } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 
 export const runtime = 'nodejs';
@@ -133,7 +134,7 @@ function validationErrorResponse(error: z.ZodError) {
   );
 }
 
-export async function POST(request: NextRequest) {
+async function postHandler(request: NextRequest) {
   const session = await auth();
   const authError = requireSession(session);
   if (authError) return authError;
@@ -216,7 +217,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ job, accepted: true }, { status: HTTPResponses.ACCEPTED });
 }
 
-export async function GET(request: NextRequest) {
+async function getHandler(request: NextRequest) {
   const session = await auth();
   const authError = requireSession(session);
   if (authError) return authError;
@@ -227,8 +228,8 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const schema = searchParams.get('schema') || undefined;
-  if (schema && !isValidSchema(schema)) {
+  const schema = searchParams.get('schema');
+  if (!schema || !isValidSchema(schema)) {
     return NextResponse.json({ error: 'Invalid schema' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
@@ -250,3 +251,6 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({ jobs }, { status: HTTPResponses.OK });
 }
+
+export const POST = withRouteAuthz('uploadjobs', postHandler, { schema: fromBody('schema') });
+export const GET = withRouteAuthz('uploadjobs', getHandler, { schema: fromQuery('schema') });

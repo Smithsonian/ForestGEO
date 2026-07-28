@@ -45,9 +45,11 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function handleCancelJob(jobID: number) {
+    if (!schema) return;
     setCancellingJobIDs(prev => new Set(prev).add(jobID));
     try {
-      const response = await fetch(`/api/uploadjobs/${jobID}`, {
+      const params = new URLSearchParams({ schema });
+      const response = await fetch(`/api/uploadjobs/${jobID}?${params.toString()}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'cancel' })

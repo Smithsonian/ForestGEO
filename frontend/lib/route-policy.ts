@@ -155,15 +155,18 @@ export const ROUTE_POLICIES = {
   'rollover/[primaryKey]/[schema]/[plotIDParam]/[censusIDParam]/[newCensusIDParam]': 'site-scoped',
 
   // ── Async upload (background-job) routes ─────────────────────────────────
-  // Feature-flag probe: requireSession, returns enablement for the schema; no
-  // per-site mutation, so 'authed' (mirrors the 'query' posture).
-  'features/async-upload': 'authed',
-  // Create/list upload jobs: POST gates on assertCanEditMeasurementScope (DB
-  // schema/plot/census scope check; 403 via ScopeAccessError) — site-scoped.
+  // Feature-flag probe: enablement is schema-specific config, so it is
+  // site-scoped like every other per-site read; withRouteAuthz + fromQuery.
+  'features/async-upload': 'site-scoped',
+  // Create/list upload jobs: withRouteAuthz + fromBody('schema') on POST,
+  // fromQuery('schema') on GET; handlers retain their own deeper
+  // assertCanEditMeasurementScope (plot/census scope) check on top.
   uploadjobs: 'site-scoped',
-  // Job status by id (jobId-only URL, no declared schema); requireSession with
-  // per-user ownership enforced inside the handler — 'authed' (like 'query').
-  'uploadjobs/[jobId]': 'authed'
+  // Job status/cancel by id: withRouteAuthz + fromQuery('schema') gates
+  // membership up front; the handler then verifies the loaded job's
+  // SchemaName matches the authorized query schema (404 on mismatch) before
+  // the existing per-user ownership check (requireJobAccess) runs.
+  'uploadjobs/[jobId]': 'site-scoped'
 } satisfies Record<string, RoutePolicy>;
 
 /** Compile-time union of every declared route key. Adoption sites use this so a

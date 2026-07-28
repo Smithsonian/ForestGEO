@@ -5,27 +5,38 @@ import { HTTPResponses } from '@/config/macros';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { cancelBackgroundJob, getBackgroundJobWithDetails, requestBackgroundJobCancel } from '@/lib/background-jobs/repository';
 import { parseJobID, requireJobAccess } from '@/lib/background-jobs/route-helpers';
+import type { BackgroundJobWithDetails } from '@/lib/background-jobs/types';
+import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 export const runtime = 'nodejs';
 
-export async function GET(
-  _request: NextRequest,
-  props: {
-    params: Promise<{ jobId: string }>;
-  }
-) {
+/**
+ * The `schema` query param authorizes the request (withRouteAuthz already
+ * confirmed the caller is a member of it, or an admin). A job lookup by
+ * numeric ID alone would otherwise let a member of one schema probe/cancel a
+ * job that belongs to a different schema, so every loaded job's SchemaName
+ * must be checked against it before any details are returned or a mutation
+ * runs. A mismatch is reported as 404 (not 403) to avoid confirming the job
+ * exists in a schema the caller didn't ask about.
+ */
+function jobBelongsToAuthorizedSchema(job: BackgroundJobWithDetails, authorizedSchema: string): boolean {
+  return job.schemaName === authorizedSchema;
+}
+
+async function getHandler(request: NextRequest, context: RouteContext) {
   const session = await auth();
   const authError = requireSession(session);
   if (authError) return authError;
 
-  const { jobId } = await props.params;
+  const schema = request.nextUrl.searchParams.get('schema')!;
+  const { jobId } = (await context.params) as { jobId: string };
   const parsedJobID = parseJobID(jobId);
   if (parsedJobID === null) {
     return NextResponse.json({ error: 'Invalid job ID' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
   const job = await getBackgroundJobWithDetails(getPoolMonitorInstance().pool, parsedJobID);
-  if (!job) {
+  if (!job || !jobBelongsToAuthorizedSchema(job, schema)) {
     return NextResponse.json({ error: 'Upload job not found' }, { status: HTTPResponses.NOT_FOUND });
   }
 
@@ -35,24 +46,20 @@ export async function GET(
   return NextResponse.json({ job }, { status: HTTPResponses.OK });
 }
 
-export async function POST(
-  request: NextRequest,
-  props: {
-    params: Promise<{ jobId: string }>;
-  }
-) {
+async function postHandler(request: NextRequest, context: RouteContext) {
   const session = await auth();
   const authError = requireSession(session);
   if (authError) return authError;
 
-  const { jobId } = await props.params;
+  const schema = request.nextUrl.searchParams.get('schema')!;
+  const { jobId } = (await context.params) as { jobId: string };
   const parsedJobID = parseJobID(jobId);
   if (parsedJobID === null) {
     return NextResponse.json({ error: 'Invalid job ID' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
   const job = await getBackgroundJobWithDetails(getPoolMonitorInstance().pool, parsedJobID);
-  if (!job) {
+  if (!job || !jobBelongsToAuthorizedSchema(job, schema)) {
     return NextResponse.json({ error: 'Upload job not found' }, { status: HTTPResponses.NOT_FOUND });
   }
 
@@ -96,3 +103,6 @@ export async function POST(
 
   return NextResponse.json({ error: 'Upload job cannot be cancelled from its current state' }, { status: HTTPResponses.CONFLICT });
 }
+
+export const GET = withRouteAuthz('uploadjobs/[jobId]', getHandler, { schema: fromQuery('schema') });
+export const POST = withRouteAuthz('uploadjobs/[jobId]', postHandler, { schema: fromQuery('schema') });
