@@ -14,8 +14,10 @@ import {
   runCatalogPreflight,
   selectPendingCatalogMigrations,
   StaleCatalogSchemaError,
+  CATALOG_TABLE_CONTRACTS,
   type CatalogPreflight,
-  type LiveColumn
+  type LiveColumn,
+  type LiveIndex
 } from './apply-catalog-migrations';
 import { CATALOG_MIGRATION_MANIFEST } from '../db/migrations/catalog-manifest';
 import { SCHEMA_MIGRATION_MANIFEST } from '../db/migrations/manifest';
@@ -86,6 +88,15 @@ function currentColumns(table: (typeof CATALOG_BACKGROUND_JOB_TABLES)[number]): 
   return ['EventID', 'JobID', 'EventType', 'Message', 'Details', 'CreatedAt'].map(name => ({ name, columnType: 'varchar(64)' }));
 }
 
+/** Indexes matching the canonical migration for a given table. */
+function currentIndexes(table: (typeof CATALOG_BACKGROUND_JOB_TABLES)[number]): LiveIndex[] {
+  return CATALOG_TABLE_CONTRACTS[table].requiredIndexes.map(index => ({
+    name: index.name,
+    columns: [...index.columns],
+    unique: index.unique
+  }));
+}
+
 function makeSource(overrides: Partial<MigrationSource> = {}): MigrationSource {
   return { id: 'cat-1', file: 'catalog/cat-1.sql', contents: 'CREATE TABLE x', checksum: 'aaa', ...overrides };
 }
@@ -149,7 +160,7 @@ describe('classifyCatalogTable', () => {
   });
 
   it('classifies the canonical shape as current', () => {
-    const result = classifyCatalogTable(BACKGROUND_JOBS, currentColumns(BACKGROUND_JOBS));
+    const result = classifyCatalogTable(BACKGROUND_JOBS, currentColumns(BACKGROUND_JOBS), currentIndexes(BACKGROUND_JOBS));
 
     expect(result.state).toBe('current');
     expect(result.differences).toEqual([]);
@@ -158,7 +169,7 @@ describe('classifyCatalogTable', () => {
   it('classifies a table missing a required column as stale', () => {
     const columns = currentColumns(BACKGROUND_JOBS).filter(column => column.name !== 'WorkerID');
 
-    const result = classifyCatalogTable(BACKGROUND_JOBS, columns);
+    const result = classifyCatalogTable(BACKGROUND_JOBS, columns, currentIndexes(BACKGROUND_JOBS));
 
     expect(result.state).toBe('stale');
     expect(result.differences).toContain('missing column WorkerID');
@@ -167,7 +178,7 @@ describe('classifyCatalogTable', () => {
   it('classifies the Service Bus era LastMessageID column as stale', () => {
     const columns = [...currentColumns(BACKGROUND_JOBS), { name: 'LastMessageID', columnType: 'varchar(128)' }];
 
-    const result = classifyCatalogTable(BACKGROUND_JOBS, columns);
+    const result = classifyCatalogTable(BACKGROUND_JOBS, columns, currentIndexes(BACKGROUND_JOBS));
 
     expect(result.state).toBe('stale');
     expect(result.differences).toContain('legacy column LastMessageID present');
@@ -178,13 +189,53 @@ describe('classifyCatalogTable', () => {
       column.name === 'Status' ? { name: 'Status', columnType: "enum('created','dead_lettered','blob_received')" } : column
     );
 
-    const result = classifyCatalogTable(BACKGROUND_JOBS, columns);
+    const result = classifyCatalogTable(BACKGROUND_JOBS, columns, currentIndexes(BACKGROUND_JOBS));
 
     expect(result.state).toBe('stale');
     const enumDifference = result.differences.find(difference => difference.startsWith('column Status ENUM mismatch'));
     expect(enumDifference).toBeDefined();
     expect(enumDifference).toContain('cancel_requested');
     expect(enumDifference).toContain('dead_lettered');
+  });
+});
+
+describe('classifyCatalogTable — index contract', () => {
+  it('classifies a table whose columns are perfect but whose idempotency key is missing as stale', () => {
+    // The exact hazard: createUploadBackgroundJob implements idempotency by
+    // catching a duplicate-key violation. Without the unique key the insert
+    // simply succeeds and the same idempotency key yields a SECOND job.
+    const indexes = currentIndexes(BACKGROUND_JOBS).filter(index => index.name !== 'uq_background_jobs_user_idempotency');
+
+    const result = classifyCatalogTable(BACKGROUND_JOBS, currentColumns(BACKGROUND_JOBS), indexes);
+
+    expect(result.state).toBe('stale');
+    expect(result.differences).toContain('missing index uq_background_jobs_user_idempotency (CreatedBy, IdempotencyKey)');
+  });
+
+  it('classifies a non-unique idempotency index as stale', () => {
+    const indexes = currentIndexes(BACKGROUND_JOBS).map(index => (index.name === 'uq_background_jobs_user_idempotency' ? { ...index, unique: false } : index));
+
+    const result = classifyCatalogTable(BACKGROUND_JOBS, currentColumns(BACKGROUND_JOBS), indexes);
+
+    expect(result.state).toBe('stale');
+    expect(result.differences.some(difference => difference.includes('uniqueness mismatch'))).toBe(true);
+  });
+
+  it('classifies an index built on the wrong columns as stale', () => {
+    const indexes = currentIndexes(BACKGROUND_JOBS).map(index =>
+      index.name === 'uq_background_jobs_user_idempotency' ? { ...index, columns: ['CreatedBy'] } : index
+    );
+
+    const result = classifyCatalogTable(BACKGROUND_JOBS, currentColumns(BACKGROUND_JOBS), indexes);
+
+    expect(result.state).toBe('stale');
+    expect(result.differences.some(difference => difference.includes('column mismatch'))).toBe(true);
+  });
+
+  it('accepts the canonical index set for every owned table', () => {
+    for (const table of CATALOG_BACKGROUND_JOB_TABLES) {
+      expect(classifyCatalogTable(table, currentColumns(table), currentIndexes(table)).state).toBe('current');
+    }
   });
 });
 
@@ -210,6 +261,10 @@ describe('runCatalogPreflight', () => {
         const table = String((params as unknown[])[1]) as (typeof CATALOG_BACKGROUND_JOB_TABLES)[number];
         if (table !== BACKGROUND_JOBS) return currentColumns(table).map(column => ({ name: column.name, columnType: column.columnType }));
         return [...currentColumns(BACKGROUND_JOBS), { name: 'LastMessageID', columnType: 'varchar(128)' }];
+      }
+      if (sql.includes('information_schema.STATISTICS')) {
+        const table = String((params as unknown[])[1]) as (typeof CATALOG_BACKGROUND_JOB_TABLES)[number];
+        return currentIndexes(table).map(index => ({ name: index.name, nonUnique: index.unique ? 0 : 1, columns: index.columns.join(',') }));
       }
       if (sql.includes('COUNT(*)')) return [{ rowCount: sql.includes('background_jobs`') ? 7 : 0 }];
       throw new Error(`unexpected query: ${sql}`);

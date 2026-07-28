@@ -84,12 +84,27 @@ export type CatalogTableName = (typeof CATALOG_BACKGROUND_JOB_TABLES)[number];
  * writes, the ENUM domains whose values changed between the unreleased
  * iterations, and the legacy columns whose presence proves a stale bootstrap.
  */
+interface RequiredIndex {
+  name: string;
+  /** Ordered key columns. */
+  columns: readonly string[];
+  unique: boolean;
+}
+
 interface CatalogTableContract {
   requiredColumns: readonly string[];
   /** Columns that only an older, incompatible bootstrap would have created. */
   forbiddenColumns: readonly string[];
   /** Exact ENUM value sets, keyed by column name. */
   enumValues: Readonly<Record<string, readonly string[]>>;
+  /**
+   * Indexes the application's correctness depends on — not merely its speed.
+   * uq_background_jobs_user_idempotency is the load-bearing one: idempotent job
+   * creation works by catching that unique violation, so a table with perfect
+   * columns but no unique key would accept duplicate jobs for one idempotency
+   * key. Columns alone are therefore not a sufficient definition of CURRENT.
+   */
+  requiredIndexes: readonly RequiredIndex[];
 }
 
 export const CATALOG_TABLE_CONTRACTS: Readonly<Record<CatalogTableName, CatalogTableContract>> = {
@@ -130,7 +145,15 @@ export const CATALOG_TABLE_CONTRACTS: Readonly<Record<CatalogTableName, CatalogT
       JobType: ['upload_validation'],
       Status: ['queued', 'running', 'cancel_requested', 'waiting_retry', 'completed', 'failed', 'cancelled'],
       Phase: ['queued', 'staging', 'ingestion', 'collapsing', 'validation', 'refreshing_views', 'completed', 'failed', 'cancelled']
-    }
+    },
+    requiredIndexes: [
+      // Idempotent creation catches a violation of THIS key; without it the
+      // same idempotency key would create duplicate jobs.
+      { name: 'uq_background_jobs_user_idempotency', columns: ['CreatedBy', 'IdempotencyKey'], unique: true },
+      { name: 'idx_background_jobs_retry', columns: ['Status', 'NextAttemptAt'], unique: false },
+      { name: 'idx_background_jobs_scope_status', columns: ['SchemaName', 'PlotID', 'CensusID', 'Status'], unique: false },
+      { name: 'idx_background_jobs_user_status', columns: ['CreatedBy', 'Status', 'UpdatedAt'], unique: false }
+    ]
   },
   background_job_files: {
     requiredColumns: [
@@ -156,12 +179,17 @@ export const CATALOG_TABLE_CONTRACTS: Readonly<Record<CatalogTableName, CatalogT
     forbiddenColumns: [],
     enumValues: {
       Status: ['pending', 'staged', 'processed', 'failed', 'skipped']
-    }
+    },
+    requiredIndexes: [
+      { name: 'uq_background_job_files_blob', columns: ['JobID', 'BlobContainer', 'BlobName'], unique: true },
+      { name: 'idx_background_job_files_job_status', columns: ['JobID', 'Status'], unique: false }
+    ]
   },
   background_job_events: {
     requiredColumns: ['EventID', 'JobID', 'EventType', 'Message', 'Details', 'CreatedAt'],
     forbiddenColumns: [],
-    enumValues: {}
+    enumValues: {},
+    requiredIndexes: [{ name: 'idx_background_job_events_job_created', columns: ['JobID', 'CreatedAt'], unique: false }]
   }
 } as const;
 
@@ -269,6 +297,13 @@ export interface LiveColumn {
   columnType: string;
 }
 
+export interface LiveIndex {
+  name: string;
+  /** Ordered key columns. */
+  columns: string[];
+  unique: boolean;
+}
+
 /** Parses `enum('a','b')` into ['a','b']; returns null for non-ENUM types. */
 export function parseEnumValues(columnType: string): string[] | null {
   const match = /^enum\((.*)\)$/i.exec(columnType.trim());
@@ -280,7 +315,7 @@ export function parseEnumValues(columnType: string): string[] | null {
 }
 
 /** Pure classifier — no DB access, so every branch is unit-testable. */
-export function classifyCatalogTable(table: CatalogTableName, columns: LiveColumn[] | null): CatalogTablePreflight {
+export function classifyCatalogTable(table: CatalogTableName, columns: LiveColumn[] | null, indexes: LiveIndex[] = []): CatalogTablePreflight {
   if (columns === null || columns.length === 0) {
     return { table, state: 'absent', differences: [], rowCount: null };
   }
@@ -310,6 +345,21 @@ export function classifyCatalogTable(table: CatalogTableName, columns: LiveColum
     }
   }
 
+  const indexByName = new Map(indexes.map(index => [index.name.toLowerCase(), index]));
+  for (const required of contract.requiredIndexes) {
+    const live = indexByName.get(required.name.toLowerCase());
+    if (!live) {
+      differences.push(`missing index ${required.name} (${required.columns.join(', ')})`);
+      continue;
+    }
+    if (live.unique !== required.unique) {
+      differences.push(`index ${required.name} uniqueness mismatch (expected unique=${required.unique}, actual unique=${live.unique})`);
+    }
+    if (live.columns.join(',').toLowerCase() !== required.columns.join(',').toLowerCase()) {
+      differences.push(`index ${required.name} column mismatch (expected [${required.columns.join(', ')}], actual [${live.columns.join(', ')}])`);
+    }
+  }
+
   return { table, state: differences.length === 0 ? 'current' : 'stale', differences, rowCount: null };
 }
 
@@ -323,7 +373,28 @@ export async function runCatalogPreflight(exec: SqlExecutor, database: string = 
       [database, table]
     );
     const columns: LiveColumn[] = columnRows.map(row => ({ name: String(row.name), columnType: String(row.columnType) }));
-    const classified = classifyCatalogTable(table, columns.length === 0 ? null : columns);
+
+    // Index metadata only matters for a table that exists; skip the round trip
+    // when the table is absent.
+    let indexes: LiveIndex[] = [];
+    if (columns.length > 0) {
+      const indexRows = await exec(
+        `SELECT INDEX_NAME AS name, NON_UNIQUE AS nonUnique, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS columns
+         FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+         GROUP BY INDEX_NAME, NON_UNIQUE`,
+        [database, table]
+      );
+      indexes = indexRows.map(row => ({
+        name: String(row.name),
+        unique: Number(row.nonUnique) === 0,
+        columns: String(row.columns ?? '')
+          .split(',')
+          .filter(Boolean)
+      }));
+    }
+
+    const classified = classifyCatalogTable(table, columns.length === 0 ? null : columns, indexes);
 
     if (classified.state !== 'absent') {
       const countRows = await exec(`SELECT COUNT(*) AS rowCount FROM \`${database}\`.\`${table}\``);
