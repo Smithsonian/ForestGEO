@@ -49,7 +49,7 @@ void (async () => {
     ailogger.warn('provisioning.worker.startup_failed', { errorMessage });
   }
 
-  // Upload-job sweeper — guarded separately so a sweep failure cannot abort
+  // Upload-job sweeper — guarded separately so a start-up failure cannot abort
   // the rest of instrumentation, and the interval keeps running even when the
   // startup sweep fails (the next tick retries).
   try {
@@ -59,9 +59,14 @@ void (async () => {
     // Both shutdown hooks (provisioning's installShutdownHandler and this one)
     // coexist via separate process.once registrations.
     installUploadSweeperShutdown();
-    const result = await runSweepTick(pool);
-    if (result && (result.reclaimed.length > 0 || result.dispatched.length > 0)) {
-      ailogger.info('upload.sweeper.startup', result);
+    // runSweepTick reports rather than throws, so the startup sweep's own
+    // failure is escalated here: this pass IS the deploy-recovery moment, and
+    // missing it is louder news than a routine mid-life tick failure.
+    const outcome = await runSweepTick(pool);
+    if (outcome.status === 'failed') {
+      ailogger.error('upload.sweeper.startup_failed', outcome.error);
+    } else if (outcome.status === 'completed' && (outcome.result.reclaimed.length > 0 || outcome.result.dispatched.length > 0)) {
+      ailogger.info('upload.sweeper.startup', outcome.result);
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

@@ -8,6 +8,7 @@ import { auth } from '@/auth';
 import { getSessionUserId } from '@/lib/auth-helpers';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
+import { sanitizeUploadFileName as sanitizeFileName } from '@/lib/uploads/file-names';
 import path from 'path';
 import type { Session } from 'next-auth';
 import { FormType, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
@@ -20,13 +21,6 @@ export const runtime = 'nodejs';
 const ALLOWED_FILE_EXTENSIONS = ['.csv', '.txt', '.xlsx'] as const;
 const ALLOWED_MIME_TYPES = ['text/csv', 'text/plain', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'] as const;
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB limit
-
-function sanitizeFileName(fileName: string): string {
-  // Remove path separators and special characters
-  const baseName = path.basename(fileName);
-  // Allow only alphanumeric, dots, hyphens, underscores
-  return baseName.replace(/[^a-zA-Z0-9._-]/g, '_');
-}
 
 function isValidFileExtension(fileName: string): boolean {
   const ext = path.extname(fileName).toLowerCase();

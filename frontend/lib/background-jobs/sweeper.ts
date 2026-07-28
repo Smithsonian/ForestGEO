@@ -134,26 +134,33 @@ export async function sweepOnce(catalogPool: Pool, deps: SweepDeps = defaultSwee
 // ---------------------------------------------------------------------------
 
 /**
- * One interval tick: skips when a previous pass hasn't resolved yet (in-flight
- * guard), otherwise runs a sweep pass. Used by the interval and exported for
- * direct use in tests.
+ * Outcome of one tick. A skipped tick and a failed tick are different events —
+ * the startup caller escalates a failure (the deploy-recovery sweep did not
+ * happen) but not a skip — so they are reported as distinct variants rather
+ * than a shared null.
  */
-export async function runSweepTick(catalogPool: Pool, deps: SweepDeps = defaultSweepDeps): Promise<SweepResult | null> {
+export type SweepTickOutcome = { status: 'completed'; result: SweepResult } | { status: 'skipped_in_flight' } | { status: 'failed'; error: Error };
+
+/**
+ * One interval tick: skips when a previous pass hasn't resolved yet (in-flight
+ * guard), otherwise runs a sweep pass. Never throws — a failed pass must not
+ * kill the interval — so callers read the outcome instead of catching.
+ */
+export async function runSweepTick(catalogPool: Pool, deps: SweepDeps = defaultSweepDeps): Promise<SweepTickOutcome> {
   const sweeperGlobal = globalThis as SweeperGlobal;
   const sentinel = sweeperGlobal[SWEEPER_SENTINEL];
   if (sentinel?.inFlight) {
     ailogger.info('upload.sweeper.tick_skipped_in_flight');
-    return null;
+    return { status: 'skipped_in_flight' };
   }
   if (sentinel) sentinel.inFlight = true;
   try {
-    return await sweepOnce(catalogPool, deps);
+    return { status: 'completed', result: await sweepOnce(catalogPool, deps) };
   } catch (error: unknown) {
     // A failed pass must never kill the interval — the next tick retries.
-    ailogger.warn('upload.sweeper.pass_failed', {
-      errorMessage: error instanceof Error ? error.message : String(error)
-    });
-    return null;
+    const failure = error instanceof Error ? error : new Error(String(error));
+    ailogger.warn('upload.sweeper.pass_failed', { errorMessage: failure.message });
+    return { status: 'failed', error: failure };
   } finally {
     const afterSentinel = (globalThis as SweeperGlobal)[SWEEPER_SENTINEL];
     if (afterSentinel) afterSentinel.inFlight = false;

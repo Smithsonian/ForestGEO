@@ -401,11 +401,14 @@ describe('runSweepTick — in-flight guard', () => {
         dispatchCalls.push(jobID);
       })
     };
-    await runSweepTick(pool, skippingDeps);
-    console.log(`[in-flight] after tick 2: dispatchCalls=[${dispatchCalls.join(', ')}]`);
+    const skippedOutcome = await runSweepTick(pool, skippingDeps);
+    console.log(`[in-flight] after tick 2: outcome=${skippedOutcome.status} dispatchCalls=[${dispatchCalls.join(', ')}]`);
 
     // tick 2 must NOT have dispatched anything — the skip guard fired.
     expect(skippingDeps.dispatch).not.toHaveBeenCalled();
+    // A skip and a failure are different events: the startup caller escalates
+    // one and not the other, so they must be distinguishable.
+    expect(skippedOutcome).toEqual({ status: 'skipped_in_flight' });
 
     // Unblock tick 1 and let it finish.
     resolveFirstDispatch();
@@ -417,8 +420,40 @@ describe('runSweepTick — in-flight guard', () => {
 
     // A third tick now runs freely.
     const { deps: deps3, calls: calls3 } = makeDispatchStub();
-    await runSweepTick(pool, deps3);
-    console.log(`[in-flight] tick 3 (free): calls=[${calls3.join(', ')}]`);
+    const freeOutcome = await runSweepTick(pool, deps3);
+    console.log(`[in-flight] tick 3 (free): outcome=${freeOutcome.status} calls=[${calls3.join(', ')}]`);
     expect(deps3.dispatch).toHaveBeenCalled();
+    expect(freeOutcome.status).toBe('completed');
+  });
+});
+
+describe('runSweepTick — failure reporting', () => {
+  // The startup sweep IS the deploy-recovery moment for jobs orphaned by the
+  // previous process. runSweepTick must not throw (that would kill the
+  // interval), but a caller has to be able to tell a failed pass from a skipped
+  // one, or a boot that never recovered anything looks like a routine tick.
+  it('reports a failed pass as a distinct outcome carrying the error, without throwing', async () => {
+    const failure = new Error('catalog unreachable');
+    const throwingDeps: SweepDeps = {
+      dispatch: vi.fn(async () => {
+        throw failure;
+      })
+    };
+    // sweepOnce catches per-job dispatch errors, so fail the pass at the query
+    // layer instead — a dead pool is the real-world shape of this failure.
+    const deadPool = {
+      query: async () => {
+        throw failure;
+      },
+      execute: async () => {
+        throw failure;
+      }
+    } as unknown as Pool;
+
+    const outcome = await runSweepTick(deadPool, throwingDeps);
+    console.log(`[failure] outcome=${outcome.status}`);
+
+    expect(outcome.status).toBe('failed');
+    expect(outcome.status === 'failed' && outcome.error.message).toBe(failure.message);
   });
 });

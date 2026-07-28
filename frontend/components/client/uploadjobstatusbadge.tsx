@@ -34,6 +34,25 @@ export function selectVisibleJobs(jobs: UploadJobSummary[], nowMs: number = Date
   });
 }
 
+/**
+ * Chooses the job the badge headline speaks for, and whether the badge reads as
+ * failed.
+ *
+ * The list arrives ordered by UpdatedAt and terminal jobs stay visible for a
+ * day, so `jobs[0]` is regularly a finished job standing in front of work that
+ * is still running. Live work is what the badge exists to surface, so an active
+ * job always outranks a terminal one, and a past failure only colours the badge
+ * once nothing is in flight — otherwise one failed job paints a healthy running
+ * upload red for the rest of the day.
+ */
+export function summarizeJobs(jobs: UploadJobSummary[]): { primaryJob: UploadJobSummary; hasFailure: boolean } {
+  const activeJobs = jobs.filter(job => ACTIVE_JOB_STATUSES.has(job.status));
+  return {
+    primaryJob: activeJobs[0] ?? jobs[0],
+    hasFailure: activeJobs.length === 0 && jobs.some(job => job.status === 'failed')
+  };
+}
+
 function formatPhase(phase: string): string {
   return phase
     .split('_')
@@ -144,9 +163,8 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
 
   if (jobs.length === 0) return null;
 
-  const hasFailure = jobs.some(job => job.status === 'failed');
+  const { primaryJob, hasFailure } = summarizeJobs(jobs);
   const hasWaitingRetry = jobs.some(job => job.status === 'waiting_retry');
-  const primaryJob = jobs[0];
   const color = hasFailure ? 'danger' : hasWaitingRetry ? 'warning' : 'primary';
   const progressValue = Math.max(1, Math.round(primaryJob.percentComplete || 0));
 
@@ -221,7 +239,7 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
                   <Chip
                     variant="soft"
-                    color={job.status === 'waiting_retry' || job.status === 'cancel_requested' ? 'warning' : hasFailure ? 'danger' : 'primary'}
+                    color={job.status === 'waiting_retry' || job.status === 'cancel_requested' ? 'warning' : job.status === 'failed' ? 'danger' : 'primary'}
                     size="sm"
                   >
                     Job {job.jobID}

@@ -43,6 +43,7 @@ import type { ColumnMapping } from '@/lib/column-mapping/types';
 import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { detectDelimiter } from '@/lib/uploads/detect-delimiter';
+import { sanitizeUploadFileName } from '@/lib/uploads/file-names';
 import { ingestBatch, IngestBatchAbortedError } from '@/lib/uploads/ingest-batch';
 import { deleteUnresolvedRowsForBatchFamily, recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
@@ -873,7 +874,9 @@ async function runArcgisPipeline(ctx: WorkerRunContext): Promise<void> {
 
   for (const file of job.files) {
     await assertStillOwned(ctx);
-    if (file.fileName !== arcgisSession.fileName) {
+    // The pre-flight session records the raw browser file name; file.fileName
+    // is the sanitized name the blob upload stored. Compare the canonical form.
+    if (file.fileName !== sanitizeUploadFileName(arcgisSession.fileName)) {
       throw new NonRetryableJobError(`ArcGIS async upload file ${file.fileName} does not match pre-flight file ${arcgisSession.fileName}`);
     }
 

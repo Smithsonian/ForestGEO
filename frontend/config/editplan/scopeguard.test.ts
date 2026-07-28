@@ -72,9 +72,17 @@ describe('assertCanEditMeasurementScope', () => {
     ).rejects.toBeInstanceOf(ScopeAccessError);
   });
 
-  it('rejects a census row whose storage census number is invalid', async () => {
+  // census.PlotCensusNumber is nullable and legacy/ctfsweb-imported rows carry
+  // NULL. Authorization must not hinge on it — editing, revisions and upload
+  // sessions only need the scope to exist and belong to the user. Callers that
+  // genuinely need the number (blob container naming) reject the null.
+  it.each([
+    ['NULL', null],
+    ['zero', 0],
+    ['non-numeric', 'not-a-number']
+  ])('reports an unusable %s census number instead of denying access', async (_label, storedValue) => {
     const cm = makeConnectionManager();
-    cm.executeQuery.mockResolvedValueOnce([{ PlotCensusNumber: null }]);
+    cm.executeQuery.mockResolvedValueOnce([{ PlotCensusNumber: storedValue }]);
 
     await expect(
       assertCanEditMeasurementScope(cm, makeSession(), {
@@ -82,7 +90,7 @@ describe('assertCanEditMeasurementScope', () => {
         plotID: 1,
         censusID: 2
       })
-    ).rejects.toBeInstanceOf(ScopeAccessError);
+    ).resolves.toEqual({ plotCensusNumber: null });
   });
 });
 

@@ -398,6 +398,115 @@ describe('POST /api/uploadjobs', () => {
     expect(mocks.runJobIfClaimable).toHaveBeenCalledWith(42);
   });
 
+  // /api/files/upload rewrites the stored file name through sanitizeFileName,
+  // and that stored name is what files[].fileName carries. Every later
+  // reference — payload map keys, the ArcGIS pre-flight file name — has to be
+  // compared in the same canonical form, or a file whose name contains a
+  // space (Harvard Forest 2014.csv) can never be queued.
+  it('accepts payload maps keyed by the sanitized name the blob upload stored', async () => {
+    const response = await callPost(
+      makeCreateRequest(
+        makeCreateBody({
+          files: [{ ...makeCreateBody().files[0], fileName: 'Harvard_Forest_2014.csv', blobName: 'uploads/job-1/Harvard_Forest_2014.csv' }],
+          payload: {
+            selectedDelimiters: { 'Harvard_Forest_2014.csv': ',' },
+            columnMappings: { 'Harvard_Forest_2014.csv': VALID_COLUMN_MAPPING }
+          }
+        })
+      )
+    );
+
+    expect(response.status).toBe(202);
+    expect(mocks.createUploadBackgroundJob).toHaveBeenCalledWith(
+      'catalog-pool',
+      expect.objectContaining({
+        payload: expect.objectContaining({ selectedDelimiters: { 'Harvard_Forest_2014.csv': ',' } })
+      }),
+      'mason@example.com'
+    );
+  });
+
+  it('still rejects payload maps naming a file the job does not carry', async () => {
+    const response = await callPost(
+      makeCreateRequest(
+        makeCreateBody({
+          payload: { selectedDelimiters: { 'some-other-file.csv': ',' } }
+        })
+      )
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'payload.selectedDelimiters.some-other-file.csv', message: expect.stringContaining('unknown file name') })
+      ])
+    );
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  it('accepts an ArcGIS job whose pre-flight file name only differs by blob-name sanitization', async () => {
+    const response = await callPost(
+      makeCreateRequest(
+        makeCreateBody({
+          sourceFormat: 'arcgis_xlsx',
+          files: [{ ...makeCreateBody().files[0], fileName: 'Harvard_Survey_2014.xlsx', blobName: 'Harvard_Survey_2014.xlsx', sourceFormat: 'arcgis_xlsx' }],
+          payload: {
+            // The pre-flight session records the raw browser name.
+            arcgisImportSession: { importSessionId: 'import-1', fileName: 'Harvard Survey 2014.xlsx', rowCount: 100 }
+          }
+        })
+      )
+    );
+
+    expect(response.status).toBe(202);
+    expect(mocks.runJobIfClaimable).toHaveBeenCalledWith(42);
+  });
+
+  it('rejects an ArcGIS job whose file is not the pre-flight file at all', async () => {
+    const response = await callPost(
+      makeCreateRequest(
+        makeCreateBody({
+          sourceFormat: 'arcgis_xlsx',
+          files: [{ ...makeCreateBody().files[0], fileName: 'unrelated.xlsx', blobName: 'unrelated.xlsx', sourceFormat: 'arcgis_xlsx' }],
+          payload: { arcgisImportSession: { importSessionId: 'import-1', fileName: 'Harvard Survey 2014.xlsx', rowCount: 100 } }
+        })
+      )
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  // census.PlotCensusNumber is nullable. The scope guard reports that rather
+  // than denying access (other routes do not need the number), so THIS route —
+  // which needs it to name the blob container — must reject it itself, and as
+  // a request problem rather than an authorization failure.
+  it('rejects a census with no plot census number with 400, not 403', async () => {
+    mocks.assertCanEditMeasurementScope.mockResolvedValueOnce({ plotCensusNumber: null } as any);
+
+    const response = await callPost(makeCreateRequest(makeCreateBody()));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining('no plot census number') });
+    expect(mocks.getContainerName).not.toHaveBeenCalled();
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  it('rejects an oversized request before anything reads or parses the body', async () => {
+    const request = makeCreateRequest(makeCreateBody());
+    request.headers.set('content-length', String(8 * 1024 * 1024));
+    const jsonSpy = vi.spyOn(request, 'json');
+
+    const response = await callPost(request);
+
+    expect(response.status).toBe(413);
+    expect(jsonSpy).not.toHaveBeenCalled();
+    expect(mocks.auth).not.toHaveBeenCalled();
+    expect(mocks.assertCanEditMeasurementScope).not.toHaveBeenCalled();
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
   it('rejects an ArcGIS job with more than one file', async () => {
     const file = makeCreateBody().files[0];
     const response = await callPost(

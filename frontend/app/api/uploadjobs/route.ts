@@ -17,7 +17,8 @@ import { createUploadBackgroundJob, listBackgroundJobs } from '@/lib/background-
 import { IdempotencyKeyConflictError } from '@/lib/background-jobs/errors';
 import { isPrivilegedSession, parseOptionalPositiveInteger } from '@/lib/background-jobs/route-helpers';
 import { runJobIfClaimable } from '@/lib/background-jobs/worker';
-import { fromBody, fromQuery, withRouteAuthz } from '@/lib/route-authz';
+import { fromBody, fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
+import { sanitizeUploadFileName } from '@/lib/uploads/file-names';
 import { getContainerName, SchemaContainerNameError } from '@/config/macros/containernames';
 import ailogger from '@/ailogger';
 
@@ -26,6 +27,14 @@ export const runtime = 'nodejs';
 const ASYNC_UPLOADS_DISABLED_MESSAGE = 'Async uploads are not enabled for this form/site/user';
 const MAX_UPLOAD_JOB_FILES = 100;
 const MAX_UPLOAD_JOB_PAYLOAD_BYTES = 1024 * 1024;
+/**
+ * Whole-request ceiling, checked against Content-Length before anything reads
+ * the body. The payload cap below can only be measured after parsing, so it
+ * cannot stop an oversized request from being buffered — this can. The headroom
+ * over the payload cap covers the envelope and up to MAX_UPLOAD_JOB_FILES file
+ * descriptors.
+ */
+const MAX_UPLOAD_JOB_REQUEST_BYTES = 4 * 1024 * 1024;
 const MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024;
 const MYSQL_SIGNED_INT_MAX = 2_147_483_647;
 
@@ -144,6 +153,9 @@ const CreateUploadJobSchema = z
       ctx.addIssue({ code: 'custom', path: ['files'], message: 'Combined expectedRows exceeds the supported job total' });
     }
 
+    // Second layer: bounds the payload the worker will persist and replay.
+    // MAX_UPLOAD_JOB_REQUEST_BYTES is what keeps an oversized body from being
+    // buffered in the first place.
     if (Buffer.byteLength(JSON.stringify(input.payload ?? {}), 'utf8') > MAX_UPLOAD_JOB_PAYLOAD_BYTES) {
       ctx.addIssue({ code: 'custom', path: ['payload'], message: 'Upload job payload exceeds the 1 MiB limit' });
     }
@@ -166,7 +178,10 @@ const CreateUploadJobSchema = z
           path: ['payload', 'arcgisImportSession'],
           message: 'ArcGIS uploads require payload.arcgisImportSession with importSessionId, fileName, and rowCount'
         });
-      } else if (input.files.length !== 1 || input.files[0]?.fileName !== arcgisSession.data.fileName) {
+        // The pre-flight session records the raw browser file name while
+        // files[].fileName is the sanitized name the blob upload stored, so the
+        // identity cross-check has to run on the canonical form of both.
+      } else if (input.files.length !== 1 || input.files[0]?.fileName !== sanitizeUploadFileName(arcgisSession.data.fileName)) {
         ctx.addIssue({
           code: 'custom',
           path: ['files'],
@@ -175,6 +190,18 @@ const CreateUploadJobSchema = z
       }
     }
   });
+
+/**
+ * Rejects an oversized request before any code reads its body. The authz
+ * wrapper resolves the schema with `fromBody`, which clones and fully parses
+ * the request, so this has to run ahead of the wrapper — not inside the handler
+ * it guards.
+ */
+function oversizedRequestResponse(request: NextRequest): NextResponse | null {
+  const declaredLength = Number(request.headers.get('content-length'));
+  if (!Number.isFinite(declaredLength) || declaredLength <= MAX_UPLOAD_JOB_REQUEST_BYTES) return null;
+  return NextResponse.json({ error: `Upload job request exceeds the ${MAX_UPLOAD_JOB_REQUEST_BYTES}-byte limit` }, { status: HTTPResponses.PAYLOAD_TOO_LARGE });
+}
 
 function validationErrorResponse(error: z.ZodError) {
   return NextResponse.json(
@@ -214,7 +241,7 @@ async function postHandler(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid schema' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  let authorizedScope: { plotCensusNumber: number };
+  let authorizedScope: { plotCensusNumber: number | null };
   try {
     authorizedScope = await assertCanEditMeasurementScope(ConnectionManager.getInstance(), session!, {
       schema: input.schema,
@@ -243,6 +270,18 @@ async function postHandler(request: NextRequest) {
           `received formType="${input.formType}" sourceFormat="${input.sourceFormat}"`
       },
       { status: HTTPResponses.FORBIDDEN }
+    );
+  }
+
+  // Blob containers are named after the plot census number, so THIS route
+  // cannot proceed without one. The scope guard deliberately does not reject
+  // such a census — routes that only need "does this scope exist and is it
+  // mine" (edits, revisions, upload sessions) must keep working for censuses
+  // whose nullable PlotCensusNumber was never populated.
+  if (authorizedScope.plotCensusNumber === null) {
+    return NextResponse.json(
+      { error: `Census ${input.censusID} has no plot census number; async uploads need one to address blob storage` },
+      { status: HTTPResponses.INVALID_REQUEST }
     );
   }
 
@@ -344,5 +383,12 @@ async function getHandler(request: NextRequest) {
   return NextResponse.json({ jobs }, { status: HTTPResponses.OK });
 }
 
-export const POST = withRouteAuthz('uploadjobs', postHandler, { schema: fromBody('schema') });
+const authorizedPost = withRouteAuthz('uploadjobs', postHandler, { schema: fromBody('schema') });
+
+export async function POST(request: NextRequest, context: RouteContext): Promise<Response> {
+  const oversized = oversizedRequestResponse(request);
+  if (oversized) return oversized;
+  return authorizedPost(request, context);
+}
+
 export const GET = withRouteAuthz('uploadjobs', getHandler, { schema: fromQuery('schema') });
