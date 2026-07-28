@@ -2988,7 +2988,7 @@ BEGIN
     -- silently forking a second tree (pinned by ingestion-invariants "preserves an incoming
     -- correction...").
     -- STRAIGHT_JOIN forces the only safe execution order, rbr -> trees -> stems -> cm:
-    -- one indexed lookup per stage (ux_trees_treetag_speciesid_censusid,
+    -- one indexed lookup per stage (idx_trees_tag_census_active,
     -- ux_stems_treeid_stemtag_census, ux_measure_unique), bounded by batch size no matter
     -- how large trees/coremeasurements grow. Left to itself the optimizer can (and in the
     -- 2026-07-28 Harvard census upload did) start from a trees x coremeasurements pair

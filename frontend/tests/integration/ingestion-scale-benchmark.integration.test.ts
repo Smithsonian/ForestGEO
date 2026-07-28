@@ -22,7 +22,7 @@
  * write if the host is not local, so this can never touch a real database.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Connection, RowDataPacket } from 'mysql2/promise';
+import { createConnection, type Connection, type RowDataPacket } from 'mysql2/promise';
 import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
 
 const LOCAL_HOSTS = ['127.0.0.1', 'localhost'] as const;
@@ -35,12 +35,24 @@ const STAGING_CHUNK_SIZE = 2000;
 // Healthy observed ratio is ~1x-1.5x; the pathological plan is 10x-100x.
 const RATIO_LIMIT = 5;
 const MIN_ALLOWED_MS = 30000;
+const MAX_BATCH_DURATION_MS = 30000;
+const CALL_TIMEOUT_MS = 45000;
 const DATE_SPREAD_DAYS = 90;
-const TEST_TIMEOUT_MS = 360000;
+const TEST_TIMEOUT_MS = CALL_TIMEOUT_MS * BATCH_COUNT + 60000;
 
 let connection: Connection;
 let testData: TestData;
 let config: TestDatabaseConfig;
+
+type ThreadedConnection = Connection & { threadId?: number };
+type ProcedureResults = RowDataPacket[] | RowDataPacket[][];
+
+class BenchmarkCallTimeoutError extends Error {
+  constructor(batchID: string) {
+    super(`bulkingestionprocess timed out after ${CALL_TIMEOUT_MS}ms for ${batchID}`);
+    this.name = 'BenchmarkCallTimeoutError';
+  }
+}
 
 function assertLocalHostOrRefuse(): void {
   const host = process.env.AZURE_SQL_SERVER;
@@ -112,6 +124,51 @@ async function successfulRowCount(batchID: string): Promise<number> {
   return Number(rows[0].total);
 }
 
+/**
+ * Runs one CALL on a disposable connection. If the incident regresses and the
+ * statement hangs, abort it from a second connection before failing the test;
+ * a Vitest timeout alone cannot cancel server-side MySQL work.
+ */
+async function runBulkIngestionWithTimeout(fileID: string, batchID: string): Promise<ProcedureResults> {
+  const ingestConnection = await createConnection(config);
+  const threadID = (ingestConnection as ThreadedConnection).threadId;
+  if (!Number.isInteger(threadID)) {
+    await ingestConnection.end();
+    throw new Error(`MySQL connection for ${batchID} did not expose a numeric thread id`);
+  }
+
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  let destroyed = false;
+  const callPromise = ingestConnection.query('CALL bulkingestionprocess(?, ?)', [fileID, batchID]) as Promise<[ProcedureResults, unknown]>;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new BenchmarkCallTimeoutError(batchID)), CALL_TIMEOUT_MS);
+  });
+
+  try {
+    const [results] = await Promise.race([callPromise, timeoutPromise]);
+    return results;
+  } catch (error) {
+    if (error instanceof BenchmarkCallTimeoutError) {
+      // Attach before KILL so ER_QUERY_INTERRUPTED can never become an unhandled rejection.
+      void callPromise.catch(() => undefined);
+      let killConnection: Connection | undefined;
+      try {
+        killConnection = await createConnection(config);
+        await killConnection.query(`KILL QUERY ${threadID}`);
+      } finally {
+        await killConnection?.end().catch(() => undefined);
+        // Never reuse a connection that may still have a statement settling.
+        ingestConnection.destroy();
+        destroyed = true;
+      }
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+    if (!destroyed) await ingestConnection.end();
+  }
+}
+
 beforeAll(async () => {
   assertLocalHostOrRefuse();
   const setup = await setupTestDatabase();
@@ -135,7 +192,7 @@ describe('Ingestion scale benchmark (0 / 10k / 20k existing measurements)', () =
         const { fileID, batchID } = await stageBatch(batchIndex);
 
         const startedAt = Date.now();
-        const [results] = await connection.query<RowDataPacket[]>('CALL bulkingestionprocess(?, ?)', [fileID, batchID]);
+        const results = await runBulkIngestionWithTimeout(fileID, batchID);
         const elapsedMs = Date.now() - startedAt;
         durationsMs.push(elapsedMs);
 
@@ -146,14 +203,13 @@ describe('Ingestion scale benchmark (0 / 10k / 20k existing measurements)', () =
         // its rows would be fast for the wrong reason.
         const succeeded = await successfulRowCount(batchID);
         expect(succeeded, `batch ${batchID} fully ingested`).toBe(BATCH_SIZE);
+        expect(elapsedMs, `batch ${batchID} exceeded the ${MAX_BATCH_DURATION_MS}ms absolute latency ceiling`).toBeLessThan(MAX_BATCH_DURATION_MS);
 
-        // eslint-disable-next-line no-console
         console.log(`[scale-benchmark] batch ${batchIndex + 1}/${BATCH_COUNT} (${existingBefore} existing): ${elapsedMs}ms, ${succeeded} rows ingested`);
       }
 
       const [firstBatchMs, ...laterBatchesMs] = durationsMs;
       const allowedMs = Math.max(RATIO_LIMIT * firstBatchMs, MIN_ALLOWED_MS);
-      // eslint-disable-next-line no-console
       console.log(`[scale-benchmark] durations ${durationsMs.map(d => `${d}ms`).join(' -> ')}; bound for later batches: ${allowedMs}ms`);
 
       for (const [i, later] of laterBatchesMs.entries()) {

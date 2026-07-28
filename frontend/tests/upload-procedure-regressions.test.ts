@@ -50,19 +50,32 @@ describe('upload procedure regressions', () => {
 
   it('surfaces cross-batch TreeTag/StemTag conflicts instead of inserting a second success', () => {
     const canonicalSql = readSql('db/sql/storedprocedures.sql');
+    const tableStructuresSql = readSql('db/sql/tablestructures.sql');
+    const collisionSql = extractSqlSegment(
+      canonicalSql,
+      'CREATE TEMPORARY TABLE existing_tag_stemtag_collision_failures',
+      'DROP TEMPORARY TABLE IF EXISTS existing_tag_stemtag_collision_failures'
+    );
 
-    expect(canonicalSql).toContain("'DUPLICATE_TAG_CONFLICT_EXISTING'");
+    expect(collisionSql).toContain("'DUPLICATE_TAG_CONFLICT_EXISTING'");
     // STRAIGHT_JOIN (not INNER JOIN) is load-bearing: it pins the batch-driven join order
     // so the optimizer can never flip to the trees x coremeasurements pair explosion that
     // stalled the 2026-07-28 Harvard census upload (8s -> 1,500s+ per sub-batch).
-    expect(canonicalSql).toContain('STRAIGHT_JOIN trees t_existing');
-    expect(canonicalSql).toContain('STRAIGHT_JOIN stems s_existing');
-    expect(canonicalSql).toContain('STRAIGHT_JOIN coremeasurements cm_existing_stem');
+    expect(collisionSql).toMatch(
+      /FROM resolved_batch_rows rbr STRAIGHT_JOIN trees t_existing[\s\S]*STRAIGHT_JOIN stems s_existing[\s\S]*STRAIGHT_JOIN coremeasurements cm_existing_stem/
+    );
+    expect(collisionSql).not.toContain('INNER JOIN trees t_existing');
+    expect(collisionSql).not.toContain('INNER JOIN stems s_existing');
+    expect(collisionSql).not.toContain('INNER JOIN coremeasurements cm_existing_stem');
     expect(canonicalSql).toContain('CREATE TEMPORARY TABLE prior_core_insert_failure_rows');
-    expect(canonicalSql).toContain('LEFT JOIN prior_core_insert_failure_rows prior_failure');
-    expect(canonicalSql).toContain('CREATE TEMPORARY TABLE existing_tag_stemtag_collision_failures');
-    expect(canonicalSql).toContain('incoming row preserved for review');
+    expect(collisionSql).toContain('LEFT JOIN prior_core_insert_failure_rows prior_failure');
+    expect(collisionSql).toContain('incoming row preserved for review');
     expect(canonicalSql).toContain('SELECT COUNT(*) FROM existing_tag_stemtag_collision_failures');
+
+    // Pin the permanent indexes that make the forced batch-driven order one lookup per stage.
+    expect(tableStructuresSql).toContain('create index idx_trees_tag_census_active on trees (TreeTag, CensusID, IsActive)');
+    expect(tableStructuresSql).toContain('constraint ux_stems_treeid_stemtag_census unique (TreeID, StemTag, CensusID)');
+    expect(tableStructuresSql).toContain('constraint ux_measure_unique unique (StemGUID, CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM)');
   });
 
   it('cleans up stale failed sub-batches before retrying the same batch id', () => {
