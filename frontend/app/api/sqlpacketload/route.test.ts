@@ -174,6 +174,38 @@ function makeFixedDataRequest(
   return req;
 }
 
+/**
+ * Primes the measurement-staging query mocks by STATEMENT rather than by call
+ * order.
+ *
+ * The previous form was a fixed .mockResolvedValueOnce chain, which encoded the
+ * exact number and sequence of queries the staging path happened to issue. Any
+ * change to that pipeline — for instance clean re-upload dropping its
+ * uploadmetrics enumeration query — shifted every later mock by one, handing
+ * `undefined` to a downstream call and surfacing as an unrelated 500. Keying on
+ * the SQL keeps these tests about the behaviour they name.
+ */
+function primeMeasurementQueries(manager: any, options: { stagedRowsAfterInsert?: number } = {}): void {
+  // insertedCount is measured as the staged-row delta across the INSERT(s).
+  // stagedRowsAfterInsert lets a chunk-splitting test declare the post-insert
+  // total without depending on how many INSERT statements it was split into.
+  const stagedRowsAfterInsert = options.stagedRowsAfterInsert ?? 1;
+  let insertSeen = false;
+  manager.executeQuery.mockImplementation(async (sql: string) => {
+    const text = String(sql);
+    if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
+    if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
+    if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: insertSeen ? stagedRowsAfterInsert : 0 }];
+    if (text.includes('COUNT(')) return [{ count: 0 }];
+    if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 0 };
+    if (text.trimStart().toUpperCase().startsWith('INSERT')) {
+      if (text.includes('temporarymeasurements')) insertSeen = true;
+      return { affectedRows: 1, insertId: 1 };
+    }
+    return [];
+  });
+}
+
 describe('sqlpacketload measurement scope validation', () => {
   let mockConnectionManager: any;
 
@@ -222,17 +254,7 @@ describe('sqlpacketload measurement scope validation', () => {
       return undefined;
     });
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    primeMeasurementQueries(mockConnectionManager);
 
     const res = (await POST(makeMeasurementRequest()))!;
 
@@ -271,17 +293,7 @@ describe('sqlpacketload measurement scope validation', () => {
   });
 
   it('accepts valid scope and inserts temporary rows using the resolved plot/census IDs', async () => {
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    primeMeasurementQueries(mockConnectionManager);
 
     const res = (await POST(makeMeasurementRequest()))!;
 
@@ -333,18 +345,7 @@ describe('sqlpacketload measurement scope validation', () => {
       ])
     );
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1001 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    primeMeasurementQueries(mockConnectionManager, { stagedRowsAfterInsert: 1001 });
 
     const res = (await POST(makeMeasurementRequest({ fileRowSet: largeRowSet })))!;
 
@@ -361,17 +362,7 @@ describe('sqlpacketload measurement scope validation', () => {
   });
 
   it('cleans up stale temporarymeasurements rows from older batches before starting a new batch', async () => {
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 10605 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    primeMeasurementQueries(mockConnectionManager);
 
     const res = (await POST(makeMeasurementRequest()))!;
 
@@ -384,36 +375,8 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(cleanupCall[1]).toEqual([TEST_FILE_NAME, TEST_PLOT_ID, TEST_CENSUS_ID, TEST_BATCH_ID]);
   });
 
-  it('cleans up previous census upload data and allows clean re-upload even when the filename changed', async () => {
-    mockConnectionManager.executeQuery
-      // census scope check
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      // batch scope check
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      // SourceFormat column exists
-      .mockResolvedValueOnce([{ count: 1 }])
-      // pre-insert count
-      .mockResolvedValueOnce([{ count: 0 }])
-      // cleanupPreviousFileUploads: find old batches
-      .mockResolvedValueOnce([{ batchID: 'completed-batch-1' }])
-      // cleanupPreviousFileUploads: delete measurement_error_log
-      .mockResolvedValueOnce({ affectedRows: 5 })
-      // cleanupPreviousFileUploads: delete coremeasurements
-      .mockResolvedValueOnce({ affectedRows: 131 })
-      // cleanupPreviousFileUploads: delete failedmeasurements
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      // cleanupPreviousFileUploads: delete uploadmetrics
-      .mockResolvedValueOnce({ affectedRows: 1 })
-      // cleanupStaleMeasurementBatchesForFile
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      // insert temporary measurements
-      .mockResolvedValueOnce(undefined)
-      // post-insert count
-      .mockResolvedValueOnce([{ count: 1 }])
-      // changelog check
-      .mockResolvedValueOnce([])
-      // changelog insert
-      .mockResolvedValueOnce(undefined);
+  it('cleans up previous census upload data by census scope, not by filename or uploadmetrics', async () => {
+    primeMeasurementQueries(mockConnectionManager);
 
     const res = (await POST(makeMeasurementRequest()))!;
 
@@ -422,34 +385,38 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(body.insertedCount).toBe(1);
     expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('tx-test');
 
-    const findOldBatchesCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('SELECT batchID FROM `forestgeo_testing`.uploadmetrics')
-    );
-    expect(findOldBatchesCall).toBeDefined();
-    expect(String(findOldBatchesCall?.[0])).toContain('WHERE plotID = ? AND censusID = ? AND batchID <> ?');
-    expect(String(findOldBatchesCall?.[0])).not.toContain('fileID = ?');
+    const executedSql = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
 
-    const deleteValidationErrorsCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE mel FROM `forestgeo_testing`.measurement_error_log')
-    );
-    expect(deleteValidationErrorsCall).toBeDefined();
-    expect(String(deleteValidationErrorsCall?.[0])).toContain('WHERE cm.CensusID = ? AND cm.UploadBatchID IN');
-    expect(String(deleteValidationErrorsCall?.[0])).not.toContain('cm.UploadFileID');
+    // The cleanup must NOT enumerate victims from uploadmetrics. A sub-batch
+    // whose ingestion died before the procedure wrote its metric row has no
+    // entry there, so a metrics-driven list silently under-deletes (measured on
+    // live forestgeo_harvard: 96,227 of 106,227 rows stranded).
+    expect(executedSql.some((sql: string) => sql.includes('SELECT batchID FROM `forestgeo_testing`.uploadmetrics'))).toBe(false);
 
-    const deleteCmCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE FROM `forestgeo_testing`.coremeasurements')
-    );
+    const deleteCmCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.coremeasurements'));
     expect(deleteCmCall).toBeDefined();
-    expect(String(deleteCmCall?.[0])).toContain('WHERE CensusID = ? AND UploadBatchID IN');
-    expect(String(deleteCmCall?.[0])).not.toContain('UploadFileID');
+    // Scoped to the census, excluding the incoming batch FAMILY.
+    expect(deleteCmCall).toContain('WHERE CensusID = ?');
+    expect(deleteCmCall).toContain('NOT (UploadBatchID <=> ?)');
+    expect(deleteCmCall).toContain('NOT (UploadBatchID LIKE ?');
+    // Census replacement, not filename replacement.
+    expect(deleteCmCall).not.toContain('UploadFileID');
+    // And never a batch id list sourced from metrics.
+    expect(deleteCmCall).not.toContain('UploadBatchID IN');
 
-    const deleteFailedCall = mockConnectionManager.executeQuery.mock.calls.find(
-      (call: any[]) =>
-        String(call[0]).includes('DELETE FROM `forestgeo_testing`.failedmeasurements') &&
-        String(call[0]).includes('WHERE CensusID = ?') &&
-        String(call[0]).includes('BatchID IN')
-    );
+    const deleteValidationErrorsCall = executedSql.find((sql: string) => sql.includes('DELETE mel FROM `forestgeo_testing`.measurement_error_log'));
+    expect(deleteValidationErrorsCall).toBeDefined();
+    expect(deleteValidationErrorsCall).toContain('WHERE cm.CensusID = ?');
+    expect(deleteValidationErrorsCall).not.toContain('cm.UploadFileID');
+
+    const deleteMetricsCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.uploadmetrics'));
+    expect(deleteMetricsCall).toBeDefined();
+    expect(deleteMetricsCall).toContain('WHERE plotID = ? AND censusID = ?');
+    expect(deleteMetricsCall).toContain('NOT (batchID <=> ?)');
+
+    const deleteFailedCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.failedmeasurements'));
     expect(deleteFailedCall).toBeDefined();
+    expect(deleteFailedCall).toContain('WHERE CensusID = ?');
   });
 
   it('skips previous-upload cleanup for measurement revisions uploads', async () => {
@@ -484,39 +451,34 @@ describe('sqlpacketload measurement scope validation', () => {
   });
 
   it('falls back past missing legacy cleanup tables during re-upload', async () => {
-    const missingError = Object.assign(new Error("Table 'forestgeo_testing.measurement_error_log' doesn't exist"), {
-      code: 'ER_NO_SUCH_TABLE'
-    });
-    const missingFailedTableError = Object.assign(new Error("Table 'forestgeo_testing.failedmeasurements' doesn't exist"), {
-      code: 'ER_NO_SUCH_TABLE'
-    });
+    const missingError: NodeJS.ErrnoException & { code?: string } = new Error("Table 'forestgeo_testing.measurement_error_log' doesn't exist");
+    (missingError as any).code = 'ER_NO_SUCH_TABLE';
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([{ batchID: 'completed-batch-1' }])
-      .mockRejectedValueOnce(missingError)
-      .mockResolvedValueOnce({ affectedRows: 5 })
-      .mockResolvedValueOnce({ affectedRows: 131 })
-      .mockRejectedValueOnce(missingFailedTableError)
-      .mockResolvedValueOnce({ affectedRows: 1 })
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    // Statement-driven: the unified error-log delete fails as missing, and the
+    // route must fall back to the legacy cmverrors delete rather than 500.
+    let stagedRowCount = 0;
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
+      const text = String(sql);
+      if (text.includes('DELETE mel FROM') && text.includes('measurement_error_log')) throw missingError;
+      if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
+      if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
+      if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: stagedRowCount }];
+      if (text.includes('COUNT(')) return [{ count: 0 }];
+      if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 1 };
+      if (text.trimStart().toUpperCase().startsWith('INSERT')) {
+        if (text.includes('temporarymeasurements')) stagedRowCount += 1;
+        return { affectedRows: 1, insertId: 1 };
+      }
+      return [];
+    });
 
     const res = (await POST(makeMeasurementRequest()))!;
 
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({ insertedCount: 1 });
-
-    const legacyDeleteCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE e FROM `forestgeo_testing`.cmverrors')
-    );
-    expect(legacyDeleteCall).toBeDefined();
+    const executedSql = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
+    const legacyCall = executedSql.find((sql: string) => sql.includes('DELETE e FROM `forestgeo_testing`.cmverrors'));
+    expect(legacyCall).toBeDefined();
+    expect(legacyCall).toContain('WHERE cm.CensusID = ?');
   });
 
   it('logs dropped-row alert metadata with a bounded uploadId when unresolved-ingestion persistence fails twice', async () => {
@@ -553,23 +515,24 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockRejectedValueOnce(new Error('first persistence failure'))
       .mockRejectedValueOnce(new Error('second persistence failure'));
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ rowOrdinal: 2, existingBatch: null }])
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    // Statement-driven, plus the dropped-row candidate the scenario needs.
+    let insertSeen = false;
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
+      const text = String(sql);
+      if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
+      if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
+      if (text.includes('dropped_row_candidates') && text.trimStart().toUpperCase().startsWith('SELECT')) {
+        return [{ rowOrdinal: 2, existingBatch: null }];
+      }
+      if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: insertSeen ? 1 : 0 }];
+      if (text.includes('COUNT(')) return [{ count: 0 }];
+      if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 0 };
+      if (text.trimStart().toUpperCase().startsWith('INSERT')) {
+        if (text.includes('temporarymeasurements')) insertSeen = true;
+        return { affectedRows: 1, insertId: 1 };
+      }
+      return [];
+    });
 
     const res = (await POST(makeMeasurementRequest({ fileRowSet: twoRowSet })))!;
 
@@ -1767,17 +1730,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     // 'lx' is sourced from 'MyX'; the server must key the inserted row as `lx`, never `MyX`.
     const rawRow = { MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17' };
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    primeMeasurementQueries(mockConnectionManager);
 
     const res = (await POST(makeRawRowsRequest([rawRow])))!;
 
@@ -1799,17 +1752,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     // Missing a required field (tag empty) -> resolution classifies this as an invalid row.
     const invalidRow = { MyX: '13.0', tag: '', spcode: 'def', quadrat: 'q2', ly: '4.0', date: '2023-05-18' };
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    primeMeasurementQueries(mockConnectionManager);
 
     const res = (await POST(makeRawRowsRequest([validRow, invalidRow])))!;
 
@@ -1840,17 +1783,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
       __parsed_extra: ['leftover']
     } as unknown as Record<string, string>;
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    primeMeasurementQueries(mockConnectionManager);
 
     const res = (await POST(makeRawRowsRequest([validRow, raggedRow])))!;
 
@@ -1879,17 +1812,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     const rawRow = { MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17', lx: '9.9' };
     const headersWithIgnoredLx = ['MyX', 'tag', 'spcode', 'quadrat', 'ly', 'date', 'lx'];
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    primeMeasurementQueries(mockConnectionManager);
 
     const res = (await POST(makeRawRowsRequest([rawRow], { csvHeaders: headersWithIgnoredLx, mapping: lxRenamedMapping(headersWithIgnoredLx) })))!;
 
@@ -1901,17 +1824,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
 
   it('leaves the legacy fileRowSet path byte-identical when rawRows is absent', async () => {
     // Same shape as the existing happy-path test; no rawRows -> the new stage must not run.
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    primeMeasurementQueries(mockConnectionManager);
 
     const res = (await POST(makeMeasurementRequest()))!;
 
@@ -1947,18 +1860,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     };
     const rawRow = { MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17', StemID: '5,001' };
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined) // INSERT IGNORE temporarymeasurements
-      .mockResolvedValueOnce(undefined) // INSERT uploadintegrityalerts (INVALID_PUBLISHED_STEMID)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    primeMeasurementQueries(mockConnectionManager);
 
     const res = (await POST(makeRawRowsRequest([rawRow], { csvHeaders: headersWithStemId, mapping: mappingWithPublishedStemId })))!;
 

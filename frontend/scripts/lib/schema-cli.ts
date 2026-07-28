@@ -74,13 +74,24 @@ export interface SchemaConnectionOptions {
   multipleStatements?: boolean;
 }
 
-/** Opens a mysql2 connection, adding SSL only for the Azure host. */
+/**
+ * Opens a mysql2 connection, adding SSL only for the Azure host.
+ *
+ * `timezone: 'Z'` is load-bearing, not cosmetic. Without it mysql2 interprets
+ * DATETIME columns in the Node process's LOCAL zone, so `toISOString()` on a
+ * returned Date silently shifts every timestamp by the local UTC offset. On a
+ * PDT machine that reads a 2026-07-27 18:28 UTC row back as "01:28Z" the next
+ * day — which during the Harvard triage looked like an unexplained overnight
+ * writer until the skew was measured. The runtime pool already pins 'Z' (see
+ * lib/db/poolmonitorsingleton.ts); the CLI path must match it.
+ */
 export async function createSchemaCliConnection(settings: ConnectionSettings, options: SchemaConnectionOptions = {}): Promise<mysql.Connection> {
   return mysql.createConnection({
     host: settings.host,
     user: settings.user,
     password: settings.password,
     port: settings.port,
+    timezone: 'Z',
     multipleStatements: options.multipleStatements ?? false,
     ...(options.database !== undefined && { database: options.database }),
     ...(settings.host === AZURE_HOST && { ssl: { rejectUnauthorized: true } })
