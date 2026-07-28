@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getContainerClient, uploadValidFileAsBufferWithMetadata } from '@/config/macros/azurestorage';
+import { getContainerClient, uploadValidFileAsBufferWithMetadata, type FileRowErrors } from '@/config/macros/azurestorage';
 import { BlobSASPermissions, BlobServiceClient, generateBlobSASQueryParameters, StorageSharedKeyCredential } from '@azure/storage-blob';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
@@ -173,7 +173,17 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
 
   const { fileName, formType, sourceFormat } = params;
   const file = formData.get(fileName ?? 'file') as File | null;
-  const fileRowErrors = formData.get('fileRowErrors') ? JSON.parse(formData.get('fileRowErrors') as string) : [];
+  let fileRowErrors: FileRowErrors[] = [];
+  const rawFileRowErrors = formData.get('fileRowErrors');
+  if (rawFileRowErrors !== null) {
+    try {
+      const parsedFileRowErrors = JSON.parse(String(rawFileRowErrors));
+      if (!Array.isArray(parsedFileRowErrors)) throw new Error('fileRowErrors must be an array');
+      fileRowErrors = parsedFileRowErrors as FileRowErrors[];
+    } catch {
+      return new NextResponse(JSON.stringify({ error: 'fileRowErrors must be a valid JSON array' }), { status: HTTPResponses.INVALID_REQUEST });
+    }
+  }
 
   // Validate required parameters for upload
   if (!file || !fileName || !formType) {

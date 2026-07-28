@@ -138,21 +138,22 @@ export async function sweepOnce(catalogPool: Pool, deps: SweepDeps = defaultSwee
  * guard), otherwise runs a sweep pass. Used by the interval and exported for
  * direct use in tests.
  */
-export async function runSweepTick(catalogPool: Pool, deps: SweepDeps = defaultSweepDeps): Promise<void> {
+export async function runSweepTick(catalogPool: Pool, deps: SweepDeps = defaultSweepDeps): Promise<SweepResult | null> {
   const sweeperGlobal = globalThis as SweeperGlobal;
   const sentinel = sweeperGlobal[SWEEPER_SENTINEL];
   if (sentinel?.inFlight) {
     ailogger.info('upload.sweeper.tick_skipped_in_flight');
-    return;
+    return null;
   }
   if (sentinel) sentinel.inFlight = true;
   try {
-    await sweepOnce(catalogPool, deps);
+    return await sweepOnce(catalogPool, deps);
   } catch (error: unknown) {
     // A failed pass must never kill the interval — the next tick retries.
     ailogger.warn('upload.sweeper.pass_failed', {
       errorMessage: error instanceof Error ? error.message : String(error)
     });
+    return null;
   } finally {
     const afterSentinel = (globalThis as SweeperGlobal)[SWEEPER_SENTINEL];
     if (afterSentinel) afterSentinel.inFlight = false;

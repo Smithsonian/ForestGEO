@@ -1,6 +1,6 @@
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { ensureBackgroundJobCatalogTables } from './catalog';
-import { JobFileNotFoundError, WorkerLeaseLostError } from './errors';
+import { IdempotencyKeyConflictError, JobFileNotFoundError, WorkerLeaseLostError } from './errors';
 import type {
   BackgroundJobEventRecord,
   BackgroundJobFileRecord,
@@ -123,6 +123,48 @@ function parseJsonObject(value: unknown): Record<string, unknown> | null {
     }
   }
   return null;
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+function idempotentRequestMatches(existing: BackgroundJobRow, existingFiles: BackgroundJobFileRow[], input: CreateUploadJobInput): boolean {
+  if (
+    existing.SchemaName !== input.schema ||
+    Number(existing.PlotID) !== input.plotID ||
+    Number(existing.CensusID) !== input.censusID ||
+    (existing.UploadMode ?? null) !== (input.uploadMode ?? null) ||
+    (existing.SourceFormat ?? null) !== (input.sourceFormat ?? null) ||
+    (existing.FormType ?? null) !== (input.formType ?? null) ||
+    stableJson(parseJsonObject(existing.Payload)) !== stableJson(input.payload ?? null) ||
+    existingFiles.length !== input.files.length
+  ) {
+    return false;
+  }
+
+  return existingFiles.every((file, index) => {
+    const requested = input.files[index];
+    return (
+      file.FileName === requested.fileName &&
+      file.BlobContainer === requested.blobContainer &&
+      file.BlobName === requested.blobName &&
+      (file.ContentType ?? null) === (requested.contentType ?? null) &&
+      (file.ByteSize === null ? null : Number(file.ByteSize)) === (requested.byteSize ?? null) &&
+      (file.ChecksumSHA256 ?? null) === (requested.checksumSha256 ?? null) &&
+      (file.SourceFormat ?? null) === (requested.sourceFormat ?? input.sourceFormat ?? null) &&
+      (file.FormType ?? null) === (requested.formType ?? input.formType ?? null) &&
+      (file.ExpectedRows === null ? null : Number(file.ExpectedRows)) === (requested.expectedRows ?? null)
+    );
+  });
 }
 
 function toDate(value: unknown): Date | null {
@@ -267,7 +309,16 @@ export async function createUploadBackgroundJob(catalogPool: Pool, input: Create
           `SELECT * FROM catalog.background_jobs WHERE CreatedBy = ? AND IdempotencyKey = ? LIMIT 1`,
           [createdBy, input.idempotencyKey]
         );
-        if (existingRows.length > 0) return mapJob(existingRows[0]);
+        if (existingRows.length > 0) {
+          const existing = existingRows[0];
+          const [existingFiles] = await conn.query<BackgroundJobFileRow[]>(`SELECT * FROM catalog.background_job_files WHERE JobID = ? ORDER BY JobFileID`, [
+            existing.JobID
+          ]);
+          if (!idempotentRequestMatches(existing, existingFiles, input)) {
+            throw new IdempotencyKeyConflictError(input.idempotencyKey);
+          }
+          return mapJob(existing);
+        }
       }
       throw err;
     }

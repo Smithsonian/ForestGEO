@@ -14,14 +14,20 @@ import { SUPPORTED_DELIMITERS } from '@/lib/uploads/detect-delimiter';
 import { isAsyncUploadEnabledFor } from '@/lib/background-jobs/feature-gate';
 import { isAllowedAsyncPipeline } from '@/lib/background-jobs/types';
 import { createUploadBackgroundJob, listBackgroundJobs } from '@/lib/background-jobs/repository';
+import { IdempotencyKeyConflictError } from '@/lib/background-jobs/errors';
 import { isPrivilegedSession, parseOptionalPositiveInteger } from '@/lib/background-jobs/route-helpers';
 import { runJobIfClaimable } from '@/lib/background-jobs/worker';
 import { fromBody, fromQuery, withRouteAuthz } from '@/lib/route-authz';
+import { getContainerName, SchemaContainerNameError } from '@/config/macros/containernames';
 import ailogger from '@/ailogger';
 
 export const runtime = 'nodejs';
 
 const ASYNC_UPLOADS_DISABLED_MESSAGE = 'Async uploads are not enabled for this form/site/user';
+const MAX_UPLOAD_JOB_FILES = 100;
+const MAX_UPLOAD_JOB_PAYLOAD_BYTES = 1024 * 1024;
+const MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024;
+const MYSQL_SIGNED_INT_MAX = 2_147_483_647;
 
 const SUPPORTED_DELIMITER_SET = new Set<string>(SUPPORTED_DELIMITERS);
 
@@ -64,7 +70,7 @@ const UploadJobFileSchema = z.object({
   blobContainer: z.string().trim().min(1).max(255),
   blobName: z.string().trim().min(1).max(1024),
   contentType: z.string().trim().max(255).nullable().optional(),
-  byteSize: z.number().int().nonnegative().nullable().optional(),
+  byteSize: z.number().int().nonnegative().max(MAX_UPLOAD_FILE_BYTES).nullable().optional(),
   checksumSha256: z
     .string()
     .trim()
@@ -73,13 +79,13 @@ const UploadJobFileSchema = z.object({
     .optional(),
   sourceFormat: z.enum(SourceFormat).nullable().optional(),
   formType: z.enum(FormType).nullable().optional(),
-  expectedRows: z.number().int().nonnegative().nullable().optional()
+  expectedRows: z.number().int().nonnegative().max(MYSQL_SIGNED_INT_MAX).nullable().optional()
 });
 
 const ArcgisImportSessionSchema = z.object({
-  importSessionId: z.string().trim().min(1),
-  fileName: z.string().trim().min(1),
-  rowCount: z.number().int().nonnegative()
+  importSessionId: z.string().trim().min(1).max(255),
+  fileName: z.string().trim().min(1).max(512),
+  rowCount: z.number().int().nonnegative().max(MYSQL_SIGNED_INT_MAX)
 });
 
 const UploadJobPayloadSchema = z.record(z.string(), z.unknown()).superRefine((payload, ctx) => {
@@ -105,19 +111,68 @@ const CreateUploadJobSchema = z
       .optional(),
     sourceFormat: z.enum(SourceFormat),
     formType: z.enum(FormType),
-    idempotencyKey: z.string().trim().max(255).nullable().optional(),
+    idempotencyKey: z.string().trim().min(1).max(255).nullable().optional(),
     payload: UploadJobPayloadSchema.optional(),
-    files: z.array(UploadJobFileSchema).min(1)
+    files: z.array(UploadJobFileSchema).min(1).max(MAX_UPLOAD_JOB_FILES)
   })
   .superRefine((input, ctx) => {
-    if (input.sourceFormat !== SourceFormat.arcgis_xlsx) return;
-    const arcgisSession = ArcgisImportSessionSchema.safeParse(input.payload?.arcgisImportSession);
-    if (!arcgisSession.success) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['payload', 'arcgisImportSession'],
-        message: 'ArcGIS uploads require payload.arcgisImportSession with importSessionId, fileName, and rowCount'
-      });
+    const fileNames = new Set<string>();
+    const blobIdentities = new Set<string>();
+    let expectedRowTotal = 0;
+    for (const [index, file] of input.files.entries()) {
+      const normalizedFileName = file.fileName.toLowerCase();
+      if (fileNames.has(normalizedFileName)) {
+        ctx.addIssue({ code: 'custom', path: ['files', index, 'fileName'], message: 'File names must be unique within an upload job' });
+      }
+      fileNames.add(normalizedFileName);
+
+      const blobIdentity = `${file.blobContainer.toLowerCase()}\n${file.blobName.toLowerCase()}`;
+      if (blobIdentities.has(blobIdentity)) {
+        ctx.addIssue({ code: 'custom', path: ['files', index, 'blobName'], message: 'Blob references must be unique within an upload job' });
+      }
+      blobIdentities.add(blobIdentity);
+
+      if (file.formType !== undefined && file.formType !== null && file.formType !== input.formType) {
+        ctx.addIssue({ code: 'custom', path: ['files', index, 'formType'], message: 'Per-file formType must match the job formType' });
+      }
+      if (file.sourceFormat !== undefined && file.sourceFormat !== null && file.sourceFormat !== input.sourceFormat) {
+        ctx.addIssue({ code: 'custom', path: ['files', index, 'sourceFormat'], message: 'Per-file sourceFormat must match the job sourceFormat' });
+      }
+      expectedRowTotal += file.expectedRows ?? 0;
+    }
+    if (expectedRowTotal > MYSQL_SIGNED_INT_MAX) {
+      ctx.addIssue({ code: 'custom', path: ['files'], message: 'Combined expectedRows exceeds the supported job total' });
+    }
+
+    if (Buffer.byteLength(JSON.stringify(input.payload ?? {}), 'utf8') > MAX_UPLOAD_JOB_PAYLOAD_BYTES) {
+      ctx.addIssue({ code: 'custom', path: ['payload'], message: 'Upload job payload exceeds the 1 MiB limit' });
+    }
+
+    for (const payloadKey of ['columnMappings', 'selectedDelimiters'] as const) {
+      const record = input.payload?.[payloadKey];
+      if (!isPlainRecord(record)) continue;
+      for (const fileName of Object.keys(record)) {
+        if (!fileNames.has(fileName.toLowerCase())) {
+          ctx.addIssue({ code: 'custom', path: ['payload', payloadKey, fileName], message: `${payloadKey} contains an unknown file name` });
+        }
+      }
+    }
+
+    if (input.sourceFormat === SourceFormat.arcgis_xlsx) {
+      const arcgisSession = ArcgisImportSessionSchema.safeParse(input.payload?.arcgisImportSession);
+      if (!arcgisSession.success) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['payload', 'arcgisImportSession'],
+          message: 'ArcGIS uploads require payload.arcgisImportSession with importSessionId, fileName, and rowCount'
+        });
+      } else if (input.files.length !== 1 || input.files[0]?.fileName !== arcgisSession.data.fileName) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['files'],
+          message: 'ArcGIS uploads require exactly one file matching payload.arcgisImportSession.fileName'
+        });
+      }
     }
   });
 
@@ -159,8 +214,9 @@ async function postHandler(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid schema' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
+  let authorizedScope: { plotCensusNumber: number };
   try {
-    await assertCanEditMeasurementScope(ConnectionManager.getInstance(), session!, {
+    authorizedScope = await assertCanEditMeasurementScope(ConnectionManager.getInstance(), session!, {
       schema: input.schema,
       plotID: input.plotID,
       censusID: input.censusID
@@ -190,22 +246,43 @@ async function postHandler(request: NextRequest) {
     );
   }
 
+  let authorizedContainer: string;
+  try {
+    authorizedContainer = getContainerName(input.schema, input.plotID, authorizedScope.plotCensusNumber);
+  } catch (error) {
+    if (error instanceof SchemaContainerNameError) {
+      return NextResponse.json({ error: error.message }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+    throw error;
+  }
+  if (input.files.some(file => file.blobContainer.toLowerCase() !== authorizedContainer.toLowerCase())) {
+    return NextResponse.json({ error: 'Blob container does not match the authorized upload scope' }, { status: HTTPResponses.FORBIDDEN });
+  }
+
   const catalogPool = getPoolMonitorInstance().pool;
-  const job = await createUploadBackgroundJob(
-    catalogPool,
-    {
-      schema: input.schema,
-      plotID: input.plotID,
-      censusID: input.censusID,
-      uploadMode: input.uploadMode ?? null,
-      sourceFormat: input.sourceFormat,
-      formType: input.formType,
-      idempotencyKey: input.idempotencyKey ?? null,
-      payload: input.payload,
-      files: input.files
-    },
-    userID
-  );
+  let job;
+  try {
+    job = await createUploadBackgroundJob(
+      catalogPool,
+      {
+        schema: input.schema,
+        plotID: input.plotID,
+        censusID: input.censusID,
+        uploadMode: input.uploadMode ?? null,
+        sourceFormat: input.sourceFormat,
+        formType: input.formType,
+        idempotencyKey: input.idempotencyKey ?? null,
+        payload: input.payload,
+        files: input.files
+      },
+      userID
+    );
+  } catch (error) {
+    if (error instanceof IdempotencyKeyConflictError) {
+      return NextResponse.json({ error: error.message }, { status: HTTPResponses.CONFLICT });
+    }
+    throw error;
+  }
 
   // Kick-on-create: start the worker without awaiting it. runJobIfClaimable is
   // designed to never throw for job-level failures, but a claim-time
@@ -233,11 +310,26 @@ async function getHandler(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid schema' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const plotID = parseOptionalPositiveInteger(searchParams.get('plotID'));
-  const censusID = parseOptionalPositiveInteger(searchParams.get('censusID'));
-  const activeOnly = searchParams.get('activeOnly') !== 'false';
-  const includeAllUsers = searchParams.get('allUsers') === 'true' && isPrivilegedSession(session!);
-  const limit = parseOptionalPositiveInteger(searchParams.get('limit'));
+  const rawPlotID = searchParams.get('plotID');
+  const rawCensusID = searchParams.get('censusID');
+  const rawLimit = searchParams.get('limit');
+  const plotID = parseOptionalPositiveInteger(rawPlotID);
+  const censusID = parseOptionalPositiveInteger(rawCensusID);
+  const limit = parseOptionalPositiveInteger(rawLimit);
+  if ((rawPlotID !== null && plotID === undefined) || (rawCensusID !== null && censusID === undefined) || (rawLimit !== null && limit === undefined)) {
+    return NextResponse.json({ error: 'plotID, censusID, and limit must be positive integers when provided' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  const rawActiveOnly = searchParams.get('activeOnly');
+  const rawAllUsers = searchParams.get('allUsers');
+  if (
+    (rawActiveOnly !== null && rawActiveOnly !== 'true' && rawActiveOnly !== 'false') ||
+    (rawAllUsers !== null && rawAllUsers !== 'true' && rawAllUsers !== 'false')
+  ) {
+    return NextResponse.json({ error: 'activeOnly and allUsers must be true or false when provided' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+  const activeOnly = rawActiveOnly !== 'false';
+  const includeAllUsers = rawAllUsers === 'true' && isPrivilegedSession(session!);
 
   const jobs = await listBackgroundJobs(getPoolMonitorInstance().pool, {
     userID,

@@ -7,10 +7,13 @@ import ErrorOutline from '@mui/icons-material/ErrorOutline';
 import ailogger from '@/ailogger';
 
 const JOB_POLL_INTERVAL_MS = 10_000;
+const TERMINAL_JOB_VISIBILITY_MS = 24 * 60 * 60 * 1000;
 
 const CANCELLABLE_JOB_STATUSES = new Set(['queued', 'running', 'waiting_retry']);
+const ACTIVE_JOB_STATUSES = new Set(['queued', 'running', 'cancel_requested', 'waiting_retry']);
+const TERMINAL_JOB_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 
-interface UploadJobSummary {
+export interface UploadJobSummary {
   jobID: number;
   status: string;
   phase: string;
@@ -19,6 +22,16 @@ interface UploadJobSummary {
   processedRows: number;
   failedRows: number;
   lastError: string | null;
+  updatedAt: string;
+}
+
+export function selectVisibleJobs(jobs: UploadJobSummary[], nowMs: number = Date.now()): UploadJobSummary[] {
+  return jobs.filter(job => {
+    if (ACTIVE_JOB_STATUSES.has(job.status)) return true;
+    if (!TERMINAL_JOB_STATUSES.has(job.status)) return false;
+    const updatedAtMs = new Date(job.updatedAt).getTime();
+    return Number.isFinite(updatedAtMs) && nowMs - updatedAtMs <= TERMINAL_JOB_VISIBILITY_MS;
+  });
 }
 
 function formatPhase(phase: string): string {
@@ -90,23 +103,30 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
     }
 
     let cancelled = false;
+    let requestInFlight = false;
     const schemaName = schema;
 
     async function fetchJobs() {
+      if (requestInFlight) return;
+      requestInFlight = true;
       try {
         const params = new URLSearchParams({
           schema: schemaName,
           plotID: String(plotID),
-          censusID: String(censusID)
+          censusID: String(censusID),
+          activeOnly: 'false',
+          limit: '25'
         });
         const response = await fetch(`/api/uploadjobs?${params.toString()}`);
         if (!response.ok) return;
         const payload = (await response.json()) as { jobs?: UploadJobSummary[] };
         if (!cancelled) {
-          setJobs(payload.jobs ?? []);
+          setJobs(selectVisibleJobs(payload.jobs ?? []));
         }
       } catch (error) {
         ailogger.warn('[UploadJobStatusBadge] Failed to poll upload jobs:', error instanceof Error ? error : new Error(String(error)));
+      } finally {
+        requestInFlight = false;
       }
     }
 
@@ -161,7 +181,7 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
               Upload job {primaryJob.jobID}: {describeJobStatus(primaryJob.status) ?? formatPhase(primaryJob.phase)}
             </Typography>
             <Chip variant="soft" color={color} size="sm">
-              {jobs.length} active
+              {jobs.length} recent
             </Chip>
             <Typography level="body-xs">{progressValue}%</Typography>
           </Stack>
