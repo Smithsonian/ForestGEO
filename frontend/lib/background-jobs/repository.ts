@@ -1,4 +1,4 @@
-import type { Pool, PoolConnection, ResultSetHeader } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { ensureBackgroundJobCatalogTables } from './catalog';
 import { JobFileNotFoundError, WorkerLeaseLostError } from './errors';
 import type {
@@ -6,6 +6,7 @@ import type {
   BackgroundJobFileRecord,
   BackgroundJobRecord,
   BackgroundJobStatus,
+  BackgroundJobType,
   BackgroundJobWithDetails,
   CreateUploadJobInput,
   UploadJobPhase
@@ -21,6 +22,95 @@ const ACTIVE_JOB_STATUSES: BackgroundJobStatus[] = ['queued', 'running', 'cancel
 
 // MySQL error number for duplicate key violations (ER_DUP_ENTRY).
 const MYSQL_ERRNO_DUPLICATE_ENTRY = 1062;
+
+// Row shapes for the three catalog.background_job* tables. mysql2 hands back a
+// DATETIME as a Date and a JSON column as either a parsed object or a string
+// depending on driver settings, so the timestamp/JSON columns stay wide and the
+// map* helpers below narrow them.
+type SqlTimestamp = Date | string | null;
+
+interface BackgroundJobRow extends RowDataPacket {
+  JobID: number;
+  JobType: BackgroundJobType;
+  Status: BackgroundJobStatus;
+  Phase: UploadJobPhase;
+  SchemaName: string;
+  PlotID: number;
+  CensusID: number;
+  UploadMode: string | null;
+  SourceFormat: string | null;
+  FormType: string | null;
+  CreatedBy: string;
+  IdempotencyKey: string | null;
+  PercentComplete: number | null;
+  TotalFiles: number | null;
+  TotalRows: number | null;
+  ProcessedRows: number | null;
+  FailedRows: number | null;
+  RetryCount: number | null;
+  MaxRetries: number | null;
+  NextAttemptAt: SqlTimestamp;
+  LastError: string | null;
+  WorkerID: string | null;
+  WorkerHeartbeatAt: SqlTimestamp;
+  Payload: unknown;
+  CreatedAt: SqlTimestamp;
+  UpdatedAt: SqlTimestamp;
+  StartedAt: SqlTimestamp;
+  FinishedAt: SqlTimestamp;
+}
+
+interface BackgroundJobFileRow extends RowDataPacket {
+  JobFileID: number;
+  JobID: number;
+  FileName: string;
+  BlobContainer: string;
+  BlobName: string;
+  ContentType: string | null;
+  ByteSize: number | null;
+  ChecksumSHA256: string | null;
+  SourceFormat: string | null;
+  FormType: string | null;
+  BatchID: string | null;
+  ExpectedRows: number | null;
+  ProcessedRows: number | null;
+  FailedRows: number | null;
+  Status: BackgroundJobFileRecord['status'];
+  ErrorMessage: string | null;
+  CreatedAt: SqlTimestamp;
+  UpdatedAt: SqlTimestamp;
+}
+
+interface BackgroundJobEventRow extends RowDataPacket {
+  EventID: number;
+  JobID: number;
+  EventType: string;
+  Message: string | null;
+  Details: unknown;
+  CreatedAt: SqlTimestamp;
+}
+
+interface StaleRunningJobRow extends RowDataPacket {
+  JobID: number;
+  RetryCount: number | null;
+  MaxRetries: number | null;
+}
+
+interface JobIDRow extends RowDataPacket {
+  JobID: number;
+}
+
+interface FileBatchIDRow extends RowDataPacket {
+  BatchID: string | null;
+}
+
+/**
+ * mysql2 rejects a duplicate-key INSERT with an Error carrying a numeric
+ * `errno`. Narrows the unknown catch binding without asserting `any`.
+ */
+function isDuplicateEntryError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { errno?: number }).errno === MYSQL_ERRNO_DUPLICATE_ENTRY;
+}
 
 function parseJsonObject(value: unknown): Record<string, unknown> | null {
   if (!value) return null;
@@ -40,7 +130,7 @@ function toDate(value: unknown): Date | null {
   return value instanceof Date ? value : new Date(String(value));
 }
 
-function mapJob(row: any): BackgroundJobRecord {
+function mapJob(row: BackgroundJobRow): BackgroundJobRecord {
   return {
     jobID: Number(row.JobID),
     jobType: row.JobType,
@@ -73,7 +163,7 @@ function mapJob(row: any): BackgroundJobRecord {
   };
 }
 
-function mapFile(row: any): BackgroundJobFileRecord {
+function mapFile(row: BackgroundJobFileRow): BackgroundJobFileRecord {
   return {
     jobFileID: Number(row.JobFileID),
     jobID: Number(row.JobID),
@@ -96,7 +186,7 @@ function mapFile(row: any): BackgroundJobFileRecord {
   };
 }
 
-function mapEvent(row: any): BackgroundJobEventRecord {
+function mapEvent(row: BackgroundJobEventRow): BackgroundJobEventRecord {
   return {
     eventID: Number(row.EventID),
     jobID: Number(row.JobID),
@@ -133,11 +223,11 @@ async function addJobEvent(conn: Pool | PoolConnection, jobID: number, eventType
  *       mis-routed file record.
  */
 async function isLeaseIntact(conn: Pool | PoolConnection, jobID: number, workerID: string): Promise<boolean> {
-  const [rows]: any = await conn.query(
+  const [rows] = await conn.query<RowDataPacket[]>(
     `SELECT 1 FROM catalog.background_jobs WHERE JobID = ? AND WorkerID = ? AND Status IN (${FENCED_WRITE_STATUSES.map(() => '?').join(', ')}) LIMIT 1`,
     [jobID, workerID, ...FENCED_WRITE_STATUSES]
   );
-  return (rows as unknown[]).length > 0;
+  return rows.length > 0;
 }
 
 export async function createUploadBackgroundJob(catalogPool: Pool, input: CreateUploadJobInput, createdBy: string): Promise<BackgroundJobRecord> {
@@ -170,13 +260,13 @@ export async function createUploadBackgroundJob(catalogPool: Pool, input: Create
         ]
       );
       jobID = Number(insertResult.insertId);
-    } catch (err: any) {
-      if (err?.errno === MYSQL_ERRNO_DUPLICATE_ENTRY && input.idempotencyKey) {
+    } catch (err) {
+      if (isDuplicateEntryError(err) && input.idempotencyKey) {
         await conn.rollback();
-        const [existingRows]: any = await conn.query(`SELECT * FROM catalog.background_jobs WHERE CreatedBy = ? AND IdempotencyKey = ? LIMIT 1`, [
-          createdBy,
-          input.idempotencyKey
-        ]);
+        const [existingRows] = await conn.query<BackgroundJobRow[]>(
+          `SELECT * FROM catalog.background_jobs WHERE CreatedBy = ? AND IdempotencyKey = ? LIMIT 1`,
+          [createdBy, input.idempotencyKey]
+        );
         if (existingRows.length > 0) return mapJob(existingRows[0]);
       }
       throw err;
@@ -222,7 +312,7 @@ export async function createUploadBackgroundJob(catalogPool: Pool, input: Create
 
 export async function getBackgroundJob(catalogPool: Pool, jobID: number): Promise<BackgroundJobRecord | null> {
   await ensureBackgroundJobCatalogTables(catalogPool);
-  const [rows]: any = await catalogPool.query(`SELECT * FROM catalog.background_jobs WHERE JobID = ?`, [jobID]);
+  const [rows] = await catalogPool.query<BackgroundJobRow[]>(`SELECT * FROM catalog.background_jobs WHERE JobID = ?`, [jobID]);
   return rows.length > 0 ? mapJob(rows[0]) : null;
 }
 
@@ -230,8 +320,11 @@ export async function getBackgroundJobWithDetails(catalogPool: Pool, jobID: numb
   const job = await getBackgroundJob(catalogPool, jobID);
   if (!job) return null;
 
-  const [fileRows]: any = await catalogPool.query(`SELECT * FROM catalog.background_job_files WHERE JobID = ? ORDER BY JobFileID`, [jobID]);
-  const [eventRows]: any = await catalogPool.query(`SELECT * FROM catalog.background_job_events WHERE JobID = ? ORDER BY EventID DESC LIMIT 100`, [jobID]);
+  const [fileRows] = await catalogPool.query<BackgroundJobFileRow[]>(`SELECT * FROM catalog.background_job_files WHERE JobID = ? ORDER BY JobFileID`, [jobID]);
+  const [eventRows] = await catalogPool.query<BackgroundJobEventRow[]>(
+    `SELECT * FROM catalog.background_job_events WHERE JobID = ? ORDER BY EventID DESC LIMIT 100`,
+    [jobID]
+  );
 
   return {
     ...job,
@@ -280,7 +373,7 @@ export async function listBackgroundJobs(catalogPool: Pool, options: ListBackgro
   const limit = Math.min(Math.max(options.limit ?? 25, 1), 100);
   params.push(limit);
 
-  const [rows]: any = await catalogPool.query(
+  const [rows] = await catalogPool.query<BackgroundJobRow[]>(
     `SELECT * FROM catalog.background_jobs
      ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
      ORDER BY UpdatedAt DESC, JobID DESC
@@ -584,14 +677,14 @@ export interface StaleRunningJob {
  */
 export async function findStaleRunningJobs(catalogPool: Pool, staleSeconds: number): Promise<StaleRunningJob[]> {
   await ensureBackgroundJobCatalogTables(catalogPool);
-  const [rows]: any = await catalogPool.query(
+  const [rows] = await catalogPool.query<StaleRunningJobRow[]>(
     `SELECT JobID, RetryCount, MaxRetries FROM catalog.background_jobs
      WHERE Status = 'running'
        AND (WorkerHeartbeatAt IS NULL OR WorkerHeartbeatAt < NOW() - INTERVAL ? SECOND)
      ORDER BY JobID`,
     [staleSeconds]
   );
-  return rows.map((row: any) => ({
+  return rows.map(row => ({
     jobID: Number(row.JobID),
     retryCount: Number(row.RetryCount ?? 0),
     maxRetries: Number(row.MaxRetries ?? UPLOAD_JOB_MAX_RETRIES)
@@ -605,7 +698,7 @@ export async function findStaleRunningJobs(catalogPool: Pool, staleSeconds: numb
  */
 export async function findRunnableJobIDs(catalogPool: Pool, limit: number): Promise<number[]> {
   await ensureBackgroundJobCatalogTables(catalogPool);
-  const [rows]: any = await catalogPool.query(
+  const [rows] = await catalogPool.query<JobIDRow[]>(
     `SELECT JobID FROM catalog.background_jobs
      WHERE Status = 'queued'
         OR (Status = 'waiting_retry' AND (NextAttemptAt IS NULL OR NextAttemptAt <= NOW()))
@@ -613,7 +706,7 @@ export async function findRunnableJobIDs(catalogPool: Pool, limit: number): Prom
      LIMIT ?`,
     [limit]
   );
-  return rows.map((row: any) => Number(row.JobID));
+  return rows.map(row => Number(row.JobID));
 }
 
 export async function updateBackgroundJobFileStatus(
@@ -649,8 +742,11 @@ export async function updateBackgroundJobFileStatus(
     //     affectedRows reverts to "changed rows" semantics (no-op write) → accept silently
     const leaseIntact = await isLeaseIntact(catalogPool, jobID, workerID);
     if (!leaseIntact) throw new WorkerLeaseLostError(jobID, workerID);
-    const [fileRows]: any = await catalogPool.query(`SELECT 1 FROM catalog.background_job_files WHERE JobFileID = ? AND JobID = ?`, [jobFileID, jobID]);
-    if ((fileRows as unknown[]).length === 0) throw new JobFileNotFoundError(jobID, jobFileID);
+    const [fileRows] = await catalogPool.query<RowDataPacket[]>(`SELECT 1 FROM catalog.background_job_files WHERE JobFileID = ? AND JobID = ?`, [
+      jobFileID,
+      jobID
+    ]);
+    if (fileRows.length === 0) throw new JobFileNotFoundError(jobID, jobFileID);
     // File exists and lease is intact — genuine no-op (only reachable if pool flags change).
   }
 }
@@ -664,7 +760,9 @@ export async function assignFileBatchID(catalogPool: Pool, jobFileID: number, ba
   await ensureBackgroundJobCatalogTables(catalogPool);
   // Only update when no BatchID has been assigned yet (first assignment wins).
   await catalogPool.query(`UPDATE catalog.background_job_files SET BatchID = ? WHERE JobFileID = ? AND BatchID IS NULL`, [batchID, jobFileID]);
-  const [rows]: any = await catalogPool.query(`SELECT BatchID FROM catalog.background_job_files WHERE JobFileID = ?`, [jobFileID]);
+  const [rows] = await catalogPool.query<FileBatchIDRow[]>(`SELECT BatchID FROM catalog.background_job_files WHERE JobFileID = ?`, [jobFileID]);
   if (rows.length === 0) throw new Error(`background_job_files row ${jobFileID} not found`);
-  return rows[0].BatchID as string;
+  const assignedBatchID = rows[0].BatchID;
+  if (assignedBatchID === null) throw new Error(`background_job_files row ${jobFileID} has no BatchID after assignment`);
+  return assignedBatchID;
 }

@@ -159,7 +159,7 @@ export async function updateValidationRunRecord(
   update: ValidationRunUpdate
 ): Promise<void> {
   const setClauses: string[] = [];
-  const params: any[] = [];
+  const params: unknown[] = [];
 
   if (update.completedSteps !== undefined) {
     setClauses.push('CompletedSteps = ?');

@@ -127,8 +127,8 @@ export async function recordFailedMeasurementRows(
     codes: row.codes ?? null,
     comments: row.description ?? null,
     failureReason: row.failureReasons ?? 'Unknown error',
-    fileID: (row as any).fileID ?? fileID,
-    batchID: (row as any).batchID ?? batchID,
+    fileID: row.fileID ?? fileID,
+    batchID: row.batchID ?? batchID,
     sourceRowIndex: idx + 1
   }));
 
@@ -171,6 +171,6 @@ export async function deleteUnresolvedRowsForBatch(
        AND StemGUID IS NULL`
   );
 
-  const result: any = await connectionManager.executeQuery(deleteSQL, [fileID, batchID, censusID], transactionID);
+  const result: { affectedRows?: number } = await connectionManager.executeQuery(deleteSQL, [fileID, batchID, censusID], transactionID);
   return result?.affectedRows ?? 0;
 }
