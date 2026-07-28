@@ -11,7 +11,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import mysql, { type Pool } from 'mysql2/promise';
-import { ensureBackgroundJobCatalogTables } from '@/lib/background-jobs/catalog';
+import { applyCatalogMigrationsForTests } from '../setup/catalog-migrations';
 import { JobFileNotFoundError, WorkerLeaseLostError } from '@/lib/background-jobs/errors';
 import {
   assignFileBatchID,
@@ -80,7 +80,7 @@ beforeAll(async () => {
   });
 
   // Bootstrap tables (idempotent — safe to call on a clean or existing DB).
-  await ensureBackgroundJobCatalogTables(pool);
+  await applyCatalogMigrationsForTests();
 
   console.log('[background-jobs-repository] catalog tables ensured');
 });

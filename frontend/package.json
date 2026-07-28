@@ -37,6 +37,7 @@
     "stress:workshop:smoke": "node tests/stress/workshop-stress.mjs --duration=15s --vus-per-site=1 --max-sites=2 --min-sites=1 --profile=smoke",
     "db:seed:e2e": "npx tsx tests/setup/e2e-seed.ts",
     "apply-schema-migrations": "npx tsx scripts/apply-schema-migrations.ts",
+    "apply-catalog-migrations": "npx tsx scripts/apply-catalog-migrations.ts",
     "check:schema-contract": "npx tsx scripts/check-schema-contract.ts",
     "deploy:validations": "npx tsx scripts/deploy-validations-to-all-schemas.ts",
     "deploy:taxonomy-views": "npx tsx scripts/deploy-taxonomy-views-to-all-schemas.ts",

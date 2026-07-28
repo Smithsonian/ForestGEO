@@ -1,106 +1,76 @@
+/**
+ * Catalog contract readiness for the background-job tables.
+ *
+ * This module used to carry a second copy of the background-job DDL and create
+ * the tables from the deployed app bundle. That is gone on purpose: two
+ * executable copies of the same schema (here and in the SQL file) drift, and the
+ * app silently defining production DDL means a deploy can invent a table shape
+ * nobody reviewed.
+ *
+ * The tables are now owned by exactly one artifact —
+ * db/migrations/catalog/2026-07-27-01-background-job-tables.sql, applied through
+ * scripts/apply-catalog-migrations.ts before the app deploys. All this module
+ * does is assert the contract exists and fail with an actionable message when it
+ * does not.
+ */
+
 import type { Pool } from 'mysql2/promise';
+import { CATALOG_DATABASE_NAME } from '@/db/migrations/catalog-manifest';
 
-// NOTE: This feature is UNRELEASED. No production data exists.
-// Any pre-existing catalog.background_jobs, catalog.background_job_files, or
-// catalog.background_job_events tables in dev/test databases must be manually
-// dropped before this bootstrap runs if they were created from an older version
-// of this file (they will have stale ENUM values such as 'created', 'dead_lettered',
-// 'blob_received', or a LastMessageID column).
-// Example: DROP TABLE IF EXISTS catalog.background_job_events, catalog.background_job_files, catalog.background_jobs;
-//
-// SCHEMA SYNC: Keep this file in sync with
-// sqlscripting/catalog-background-job-tables.sql — that file is the authoritative
-// DDL reference; this file bootstraps the same tables from the deployed app bundle.
+/** Tables the background-job repository requires. Must match the catalog migration. */
+export const REQUIRED_BACKGROUND_JOB_TABLES = ['background_jobs', 'background_job_files', 'background_job_events'] as const;
 
-const BACKGROUND_JOB_BOOTSTRAP_STATEMENTS: readonly string[] = [
-  `CREATE DATABASE IF NOT EXISTS catalog CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
-  `CREATE TABLE IF NOT EXISTS catalog.background_jobs (
-     JobID BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-     JobType ENUM('upload_validation') NOT NULL,
-     Status ENUM('queued','running','cancel_requested','waiting_retry','completed','failed','cancelled') NOT NULL DEFAULT 'queued',
-     Phase ENUM('queued','staging','ingestion','collapsing','validation','refreshing_views','completed','failed','cancelled') NOT NULL DEFAULT 'queued',
-     SchemaName VARCHAR(64) NOT NULL,
-     PlotID INT NOT NULL,
-     CensusID INT NOT NULL,
-     UploadMode VARCHAR(32) NULL,
-     SourceFormat VARCHAR(32) NULL,
-     FormType VARCHAR(32) NULL,
-     CreatedBy VARCHAR(255) NOT NULL,
-     IdempotencyKey VARCHAR(255) NULL,
-     PercentComplete DECIMAL(5,2) NOT NULL DEFAULT 0,
-     TotalFiles INT NOT NULL DEFAULT 0,
-     TotalRows INT NOT NULL DEFAULT 0,
-     ProcessedRows INT NOT NULL DEFAULT 0,
-     FailedRows INT NOT NULL DEFAULT 0,
-     RetryCount INT NOT NULL DEFAULT 0,
-     MaxRetries INT NOT NULL DEFAULT 3,
-     NextAttemptAt DATETIME NULL,
-     LastError TEXT NULL,
-     WorkerID VARCHAR(128) NULL,
-     WorkerHeartbeatAt DATETIME NULL,
-     Payload JSON NULL,
-     CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-     UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-     StartedAt DATETIME NULL,
-     FinishedAt DATETIME NULL,
-     KEY idx_background_jobs_user_status (CreatedBy, Status, UpdatedAt),
-     KEY idx_background_jobs_scope_status (SchemaName, PlotID, CensusID, Status),
-     KEY idx_background_jobs_retry (Status, NextAttemptAt),
-     UNIQUE KEY uq_background_jobs_user_idempotency (CreatedBy, IdempotencyKey)
-   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`,
-  `CREATE TABLE IF NOT EXISTS catalog.background_job_files (
-     JobFileID BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-     JobID BIGINT NOT NULL,
-     FileName VARCHAR(512) NOT NULL,
-     BlobContainer VARCHAR(255) NOT NULL,
-     BlobName VARCHAR(1024) NOT NULL,
-     ContentType VARCHAR(255) NULL,
-     ByteSize BIGINT NULL,
-     ChecksumSHA256 CHAR(64) NULL,
-     SourceFormat VARCHAR(32) NULL,
-     FormType VARCHAR(32) NULL,
-     BatchID VARCHAR(36) NULL,
-     ExpectedRows INT NULL,
-     ProcessedRows INT NOT NULL DEFAULT 0,
-     FailedRows INT NOT NULL DEFAULT 0,
-     Status ENUM('pending','staged','processed','failed','skipped') NOT NULL DEFAULT 'pending',
-     ErrorMessage TEXT NULL,
-     CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-     UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-     CONSTRAINT fk_background_job_files_job
-       FOREIGN KEY (JobID) REFERENCES catalog.background_jobs(JobID) ON DELETE CASCADE,
-     KEY idx_background_job_files_job_status (JobID, Status),
-     UNIQUE KEY uq_background_job_files_blob (JobID, BlobContainer, BlobName(255))
-   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`,
-  `CREATE TABLE IF NOT EXISTS catalog.background_job_events (
-     EventID BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-     JobID BIGINT NOT NULL,
-     EventType VARCHAR(64) NOT NULL,
-     Message TEXT NULL,
-     Details JSON NULL,
-     CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-     CONSTRAINT fk_background_job_events_job
-       FOREIGN KEY (JobID) REFERENCES catalog.background_jobs(JobID) ON DELETE CASCADE,
-     KEY idx_background_job_events_job_created (JobID, CreatedAt)
-   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
-];
+export const CATALOG_MIGRATION_COMMAND = 'npm run apply-catalog-migrations -- --apply';
 
-const catalogBootstrapPromises = new WeakMap<Pool, Promise<void>>();
+export class BackgroundJobCatalogNotMigratedError extends Error {
+  readonly missingTables: string[];
 
-async function runBackgroundJobCatalogBootstrap(catalogPool: Pool): Promise<void> {
-  for (const statement of BACKGROUND_JOB_BOOTSTRAP_STATEMENTS) {
-    await catalogPool.query(statement);
+  constructor(missingTables: string[]) {
+    super(
+      `Background-job catalog tables are missing from the "${CATALOG_DATABASE_NAME}" database: ${missingTables.join(', ')}. ` +
+        `Run the catalog migration gate before starting the app: ${CATALOG_MIGRATION_COMMAND}`
+    );
+    this.name = 'BackgroundJobCatalogNotMigratedError';
+    this.missingTables = missingTables;
   }
 }
 
+/**
+ * Cached per pool: the assertion is a read-only information_schema probe, and
+ * repeating it on every repository call would add a round trip to each job read.
+ * A failed probe is evicted so a later call re-checks once the migration lands.
+ */
+const catalogAssertions = new WeakMap<Pool, Promise<void>>();
+
+async function readMissingTables(catalogPool: Pool): Promise<string[]> {
+  const placeholders = REQUIRED_BACKGROUND_JOB_TABLES.map(() => '?').join(', ');
+  const [rows] = await catalogPool.query(
+    `SELECT TABLE_NAME AS tableName FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN (${placeholders})`,
+    [CATALOG_DATABASE_NAME, ...REQUIRED_BACKGROUND_JOB_TABLES]
+  );
+  const present = new Set((rows as Array<{ tableName: string }>).map(row => String(row.tableName).toLowerCase()));
+  return REQUIRED_BACKGROUND_JOB_TABLES.filter(table => !present.has(table.toLowerCase()));
+}
+
+async function runCatalogAssertion(catalogPool: Pool): Promise<void> {
+  const missing = await readMissingTables(catalogPool);
+  if (missing.length > 0) throw new BackgroundJobCatalogNotMigratedError(missing);
+}
+
+/**
+ * Asserts the migrated background-job contract is present. Creates nothing.
+ *
+ * Kept under the original name so every repository call site reads the same, but
+ * the semantics changed from "ensure by creating" to "assert by checking".
+ */
 export async function ensureBackgroundJobCatalogTables(catalogPool: Pool): Promise<void> {
-  const cached = catalogBootstrapPromises.get(catalogPool);
+  const cached = catalogAssertions.get(catalogPool);
   if (cached) return cached;
 
-  const promise = runBackgroundJobCatalogBootstrap(catalogPool).catch(err => {
-    catalogBootstrapPromises.delete(catalogPool);
-    throw err;
+  const promise = runCatalogAssertion(catalogPool).catch(error => {
+    catalogAssertions.delete(catalogPool);
+    throw error;
   });
-  catalogBootstrapPromises.set(catalogPool, promise);
+  catalogAssertions.set(catalogPool, promise);
   return promise;
 }

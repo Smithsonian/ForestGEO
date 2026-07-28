@@ -166,7 +166,7 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
-import { ensureBackgroundJobCatalogTables } from '@/lib/background-jobs/catalog';
+import { applyCatalogMigrationsForTests } from '../setup/catalog-migrations';
 import {
   claimBackgroundJobForWorker,
   createUploadBackgroundJob,
@@ -257,7 +257,7 @@ describe('runJobIfClaimable — integration', () => {
       connectionLimit: 5
     });
     sharedState.catalogPool = catalogPool;
-    await ensureBackgroundJobCatalogTables(catalogPool);
+    await applyCatalogMigrationsForTests();
 
     // validation_runs is defined in tablestructures.sql but loadSchema's
     // semicolon-split filter silently skips it (the statement chunk begins

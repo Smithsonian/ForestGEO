@@ -156,7 +156,7 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
-import { ensureBackgroundJobCatalogTables } from '@/lib/background-jobs/catalog';
+import { applyCatalogMigrationsForTests } from '../setup/catalog-migrations';
 import { createUploadBackgroundJob, getBackgroundJob } from '@/lib/background-jobs/repository';
 import { runJobIfClaimable, type WorkerDeps } from '@/lib/background-jobs/worker';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
@@ -274,7 +274,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
       connectionLimit: 5
     });
     sharedState.catalogPool = catalogPool;
-    await ensureBackgroundJobCatalogTables(catalogPool);
+    await applyCatalogMigrationsForTests();
 
     // Scope B: second plot with the same quadrat names and an own census so the
     // worker run is fully independent of scope A inside the same schema.

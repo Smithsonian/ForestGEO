@@ -12,7 +12,7 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import mysql, { type Pool } from 'mysql2/promise';
-import { ensureBackgroundJobCatalogTables } from '@/lib/background-jobs/catalog';
+import { applyCatalogMigrationsForTests } from '../setup/catalog-migrations';
 import { createUploadBackgroundJob, getBackgroundJob, getBackgroundJobWithDetails } from '@/lib/background-jobs/repository';
 import { runSweepTick, startUploadJobSweeper, stopUploadJobSweeper, sweepOnce, SWEEP_DISPATCH_LIMIT, type SweepDeps } from '@/lib/background-jobs/sweeper';
 import type { CreateUploadJobInput } from '@/lib/background-jobs/types';
@@ -74,7 +74,7 @@ beforeAll(async () => {
     password: TEST_DB_PASSWORD,
     connectionLimit: 5
   });
-  await ensureBackgroundJobCatalogTables(pool);
+  await applyCatalogMigrationsForTests();
   console.log('[upload-sweeper] catalog tables ensured');
 });
 
