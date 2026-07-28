@@ -46,8 +46,25 @@ const INGESTION_ERROR_MESSAGES: Record<string, string> = {
   INVALID_COORDINATE: 'Coordinate value is negative',
   FIELD_TOO_LONG: 'One or more fields exceed column length limits',
   MISSING_MEASUREMENT_DATA: 'Missing measurement data',
+  INTERRUPTED_UPLOAD: 'Upload was interrupted before this row was processed (server timeout or cancelled session) — the row itself was not rejected',
   SQL_EXCEPTION: 'Ingestion SQL exception'
 };
+
+/**
+ * Reason fragments that mean "the upload was cut off", not "this row is bad".
+ * Rows carrying these were never judged by the ingestion procedure, so grouping
+ * them under SQL_EXCEPTION misreports clean data as defective — the failure mode
+ * behind the 2026-07-27 Harvard Forest incident, where an Azure front-end
+ * timeout parked 106,227 rows as if each one had a data error.
+ */
+const INTERRUPTION_REASON_FRAGMENTS = [
+  'gatewaytimeout',
+  'gateway timeout',
+  'server error 504',
+  'cleaned up after abandonment',
+  'client disconnected',
+  'batch cancelled before completion'
+];
 
 export function inferIngestionErrorCode(reason?: string | null): string {
   const codes = inferAllIngestionErrorCodes(reason);
@@ -80,6 +97,10 @@ export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
   if (text.includes('invalid localx') || text.includes('invalid localy') || text.includes('invalid local')) codes.push('INVALID_COORDINATE');
   if (text.includes('exceeds maximum length') || text.includes('field too long')) codes.push('FIELD_TOO_LONG');
   if (text.includes('missing measurement data')) codes.push('MISSING_MEASUREMENT_DATA');
+
+  if (codes.length === 0 && INTERRUPTION_REASON_FRAGMENTS.some(fragment => text.includes(fragment))) {
+    codes.push('INTERRUPTED_UPLOAD');
+  }
 
   if (codes.length === 0) {
     ailogger.warn(`inferAllIngestionErrorCodes: unmapped error pattern defaulting to SQL_EXCEPTION: "${reason}"`);

@@ -226,6 +226,8 @@ export const INGESTION_ERROR_FIELD_MAP: Record<string, string[]> = {
   INVALID_COORDINATE: ['stemLocalX', 'stemLocalY'],
   FIELD_TOO_LONG: [],
   MISSING_MEASUREMENT_DATA: ['measuredDBH', 'measuredHOM'],
+  // No field is at fault — the upload was cut off before the row was judged.
+  INTERRUPTED_UPLOAD: [],
   SQL_EXCEPTION: [],
   SAME_BATCH_SPECIES_CONFLICT: ['treeTag', 'speciesCode']
 };
