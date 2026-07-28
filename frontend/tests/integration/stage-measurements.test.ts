@@ -159,8 +159,12 @@ function fixtureRow(overrides: Partial<FixtureRowSpec> & Pick<FixtureRowSpec, 't
 /**
  * Six-row fixture chunk:
  * - rows 1–4: clean rows across two quadrats/species
- * - row 5:    unparseable date (passes row validation — date is non-empty —
- *             and stages with a zero MeasurementDate via INSERT IGNORE coercion)
+ * - row 5:    unparseable date → rejected by row validation and surfaced
+ *             through invalidRows, never inserted. Dev commit e3a49bd3
+ *             (2026-06-16) made this a hard reject: a date that stays an
+ *             unparseable string after transform must not be staged, because
+ *             the previous behaviour coerced it to a zero MeasurementDate and
+ *             silently ingested bad input.
  * - row 6:    missing required field `quadrat` → rejected by row validation
  *             and surfaced through invalidRows, never inserted
  */
@@ -175,8 +179,10 @@ function buildFixtureChunk(): Record<string, string>[] {
   ];
 }
 
-const EXPECTED_STAGED_ROW_COUNT = 5; // 6 fixture rows minus the missing-quadrat reject
-const EXPECTED_INVALID_ROW_COUNT = 1;
+const EXPECTED_STAGED_ROW_COUNT = 4; // 6 fixture rows minus the unparseable-date and missing-quadrat rejects
+const EXPECTED_INVALID_ROW_COUNT = 2;
+const EXPECTED_INVALID_ROW_TREETAGS = ['T0005', 'T0006'] as const;
+const EXPECTED_STAGED_TREETAGS = ['T0001', 'T0002', 'T0003', 'T0004'] as const;
 
 // ---------------------------------------------------------------------------
 // Suite lifecycle
@@ -270,10 +276,14 @@ describe('stageMeasurementChunk — integration', () => {
     expect(result.droppedCount).toBe(0);
     expect(result.stagedRows).toHaveLength(EXPECTED_STAGED_ROW_COUNT);
 
-    // The missing-quadrat row is a parse reject, surfaced for caller-side recording.
+    // The unparseable-date and missing-quadrat rows are parse rejects, surfaced
+    // for caller-side recording rather than staged.
     expect(result.invalidRows).toHaveLength(EXPECTED_INVALID_ROW_COUNT);
-    expect(String(result.invalidRows[0].tag)).toBe('T0006');
-    expect(String(result.invalidRows[0].failureReason)).toContain('Missing required fields: quadrat');
+    expect(result.invalidRows.map(row => String(row.tag))).toEqual([...EXPECTED_INVALID_ROW_TREETAGS]);
+
+    const invalidReasonByTag = new Map(result.invalidRows.map(row => [String(row.tag), String(row.failureReason)]));
+    expect(invalidReasonByTag.get('T0005')).toContain(`Unparseable date value: ${UNPARSEABLE_DATE}`);
+    expect(invalidReasonByTag.get('T0006')).toContain('Missing required fields: quadrat');
 
     const staged = await fetchStagedRows();
     for (const row of staged) {
@@ -331,17 +341,13 @@ describe('stageMeasurementChunk — integration', () => {
     expect(row4.SpeciesCode).toBe('FAGUGR');
     expect(Number(row4.HOMText)).toBeCloseTo(1.45, 2);
 
-    // Row 5 — unparseable date: row validation does NOT reject it (date is
-    // non-empty), so it stages; MySQL coerces the bad date to the zero date
-    // under INSERT IGNORE rather than dropping the row.
-    const row5 = staged[4];
-    expect(row5.TreeTag).toBe('T0005');
-    expect(row5.SpeciesCode).toBe('BETUAL');
-    expect(row5.MeasurementDateText).toBe(ZERO_DATE_TEXT);
-
-    // The reject (T0006) must never reach the database.
+    // Neither reject (T0005 unparseable date, T0006 missing quadrat) may reach
+    // the database — a bad date is refused outright rather than coerced to the
+    // zero date and staged.
     const stagedTags = staged.map(row => row.TreeTag);
-    expect(stagedTags).not.toContain('T0006');
+    for (const rejectedTag of EXPECTED_INVALID_ROW_TREETAGS) {
+      expect(stagedTags).not.toContain(rejectedTag);
+    }
 
     // unifiedchangelog tracking — one file_upload row carrying the staged counts.
     const [changelog] = await connection.query<RowDataPacket[]>(
@@ -410,7 +416,7 @@ describe('stageMeasurementChunk — integration', () => {
       return acc;
     }, {});
     console.log(`[re-stage] per-tag counts: ${JSON.stringify(tagCounts)}`);
-    for (const tag of ['T0001', 'T0002', 'T0003', 'T0004', 'T0005']) {
+    for (const tag of EXPECTED_STAGED_TREETAGS) {
       expect(tagCounts[tag]).toBe(2);
     }
 

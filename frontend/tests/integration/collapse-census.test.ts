@@ -317,9 +317,10 @@ describe('collapseCensus — integration', () => {
   }
 
   async function fetchIntegrityAlerts(): Promise<RowDataPacket[]> {
-    const [rows] = await connection.query<RowDataPacket[]>(`SELECT type, message, failedRecords FROM uploadintegrityalerts WHERE censusID = ? ORDER BY id`, [
-      censusID
-    ]);
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT type, message, severity, sourceRecords, processedRecords, failedRecords FROM uploadintegrityalerts WHERE censusID = ? ORDER BY id`,
+      [censusID]
+    );
     return rows;
   }
 
@@ -442,24 +443,31 @@ describe('collapseCensus — integration', () => {
 
     const afterCount = await countCensusMeasurements();
     console.log(`[tag-dedup] After collapse: ${afterCount} rows`);
-    // Duplicate must be removed — back to the clean count.
-    expect(afterCount).toBe(EXPECTED_CLEAN_ROW_COUNT);
+    // Detection-only contract (dev commit a5626b04, 2026-07-16): the census-wide
+    // collapser must NOT choose a winner between persisted measurements. Both rows
+    // stay so a user can review the conflict.
+    expect(afterCount).toBe(EXPECTED_CLEAN_ROW_COUNT + 1);
 
-    // Original (lower-ID) row must survive; injected (higher-ID) row must be gone.
+    // BOTH rows must survive — the collapser is forbidden from deleting either.
     const [survivorCheck] = await connection.query<RowDataPacket[]>(`SELECT CoreMeasurementID FROM coremeasurements WHERE CoreMeasurementID = ?`, [survivorID]);
     const [duplicateCheck] = await connection.query<RowDataPacket[]>(`SELECT CoreMeasurementID FROM coremeasurements WHERE CoreMeasurementID = ?`, [
       duplicateID
     ]);
-    console.log(`[tag-dedup] Survivor present: ${survivorCheck.length === 1}, Duplicate removed: ${duplicateCheck.length === 0}`);
+    console.log(`[tag-dedup] Original present: ${survivorCheck.length === 1}, Duplicate preserved: ${duplicateCheck.length === 1}`);
     expect(survivorCheck).toHaveLength(1);
-    expect(duplicateCheck).toHaveLength(0);
+    expect(duplicateCheck).toHaveLength(1);
 
-    // A COLLAPSER_DEDUPLICATION alert with the TreeTag+StemTag marker must exist.
+    // The conflict must be surfaced as a warning alert instead of a silent delete.
     const alerts = await fetchIntegrityAlerts();
     console.log(`[tag-dedup] Integrity alerts: ${JSON.stringify(alerts)}`);
-    const tagDedupAlerts = alerts.filter(a => a.type === 'COLLAPSER_DEDUPLICATION' && a.message.includes('same TreeTag+StemTag in census'));
-    expect(tagDedupAlerts.length).toBeGreaterThan(0);
-    expect(tagDedupAlerts[0].failedRecords).toBe(1);
+    const tagConflictAlerts = alerts.filter(a => a.type === 'COLLAPSER_TREE_STEM_TAG_CONFLICT');
+    expect(tagConflictAlerts.length).toBe(1);
+    expect(tagConflictAlerts[0].message).toContain('same TreeTag+StemTag in the census');
+    expect(tagConflictAlerts[0].message).toContain('preserved for user review');
+    expect(tagConflictAlerts[0].severity).toBe('warning');
+    // One extra row beyond the first in the conflicting group.
+    expect(Number(tagConflictAlerts[0].sourceRecords)).toBe(1);
+    expect(Number(tagConflictAlerts[0].failedRecords)).toBe(0);
   }, 60000);
 
   // -------------------------------------------------------------------------
@@ -536,10 +544,10 @@ describe('collapseCensus — integration', () => {
   //
   // Ingest one batch normally, then manually insert a coremeasurements row that
   // shares (StemGUID, MeasurementDate) with an existing row. The collapser must
-  // remove the duplicate (keeping the lower CoreMeasurementID).
+  // preserve both rows and raise a COLLAPSER_STEM_DATE_CONFLICT warning.
   // -------------------------------------------------------------------------
 
-  it('deduplicates coremeasurements rows with the same StemGUID+MeasurementDate, logging an integrity alert', async () => {
+  it('preserves coremeasurements rows with the same StemGUID+MeasurementDate, logging a conflict alert', async () => {
     await stageAndIngestFixtureRows();
 
     // Pick any ingested row to duplicate.
@@ -573,25 +581,29 @@ describe('collapseCensus — integration', () => {
 
     const afterCount = await countCensusMeasurements();
     console.log(`[dedup] After collapse: ${afterCount} rows`);
-    // Duplicate must be gone — back to the clean row set.
-    expect(afterCount).toBe(EXPECTED_CLEAN_ROW_COUNT);
+    // Detection-only contract (dev commit a5626b04, 2026-07-16): historical
+    // StemGUID+MeasurementDate conflicts stay available for user review.
+    expect(afterCount).toBe(EXPECTED_CLEAN_ROW_COUNT + 1);
 
-    // The original (lower ID) row must survive.
+    // BOTH rows must survive — the collapser is forbidden from deleting either.
     const [survivorRows] = await connection.query<RowDataPacket[]>(`SELECT CoreMeasurementID FROM coremeasurements WHERE StemGUID = ? AND CensusID = ?`, [
       targetStemGUID,
       censusID
     ]);
     const survivorIDs = survivorRows.map(r => Number(r.CoreMeasurementID));
-    console.log(`[dedup] Survivor IDs for StemGUID ${targetStemGUID}: ${JSON.stringify(survivorIDs)}`);
+    console.log(`[dedup] Surviving IDs for StemGUID ${targetStemGUID}: ${JSON.stringify(survivorIDs)}`);
     expect(survivorIDs).toContain(originalID);
-    expect(survivorIDs).not.toContain(duplicateID);
+    expect(survivorIDs).toContain(duplicateID);
 
-    // Integrity alert must have been logged.
+    // The conflict must be surfaced as a warning alert instead of a silent delete.
     const alerts = await fetchIntegrityAlerts();
     console.log(`[dedup] Integrity alerts: ${JSON.stringify(alerts)}`);
-    const dedupAlerts = alerts.filter(a => a.type === 'COLLAPSER_DEDUPLICATION');
-    expect(dedupAlerts.length).toBeGreaterThan(0);
-    expect(dedupAlerts[0].failedRecords).toBe(1);
-    expect(dedupAlerts[0].message).toContain('StemGUID+MeasurementDate');
+    const stemDateConflictAlerts = alerts.filter(a => a.type === 'COLLAPSER_STEM_DATE_CONFLICT');
+    expect(stemDateConflictAlerts.length).toBe(1);
+    expect(stemDateConflictAlerts[0].message).toContain('same StemGUID+MeasurementDate');
+    expect(stemDateConflictAlerts[0].message).toContain('preserved for user review');
+    expect(stemDateConflictAlerts[0].severity).toBe('warning');
+    expect(Number(stemDateConflictAlerts[0].sourceRecords)).toBe(1);
+    expect(Number(stemDateConflictAlerts[0].failedRecords)).toBe(0);
   }, 60000);
 });
