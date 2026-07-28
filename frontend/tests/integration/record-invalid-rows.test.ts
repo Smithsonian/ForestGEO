@@ -1,5 +1,5 @@
 /**
- * recordInvalidRows / deleteUnresolvedRowsForBatch — Integration Tests
+ * recordInvalidRows / deleteUnresolvedRowsForBatchFamily — Integration Tests
  *
  * Exercises the shared invalid-row recording mechanism
  * (lib/uploads/record-invalid-rows.ts) against a real local MySQL instance
@@ -92,7 +92,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { recordInvalidRows, deleteUnresolvedRowsForBatch, type InvalidRowContext } from '@/lib/uploads/record-invalid-rows';
+import { recordInvalidRows, deleteUnresolvedRowsForBatchFamily, type InvalidRowContext } from '@/lib/uploads/record-invalid-rows';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -106,7 +106,7 @@ const OTHER_BATCH_ID = 'invalid-batch-9999';
 // Suite lifecycle
 // ---------------------------------------------------------------------------
 
-describe('recordInvalidRows / deleteUnresolvedRowsForBatch — integration', () => {
+describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration', () => {
   let connection: Connection;
   let testData: TestData;
   let config: { database: string };
@@ -285,10 +285,10 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatch — integration', () 
   });
 
   // -------------------------------------------------------------------------
-  // Test 2: deleteUnresolvedRowsForBatch scoped delete behavior.
+  // Test 2: deleteUnresolvedRowsForBatchFamily scoped delete behavior.
   // -------------------------------------------------------------------------
 
-  it('deleteUnresolvedRowsForBatch: returns count, clears unresolved rows, does not delete resolved or different-batch rows', async () => {
+  it('deleteUnresolvedRowsForBatchFamily: returns count, clears unresolved rows, does not delete resolved or different-batch rows', async () => {
     // Pre-condition: record 2 unresolved rows under BATCH_ID.
     const ctx: InvalidRowContext = { schema, plotID, censusID, fileName: FILE_NAME, batchID: BATCH_ID };
     const txInsert = await connectionManager.beginTransaction();
@@ -343,13 +343,28 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatch — integration', () 
     await connectionManager.commitTransaction(txOther);
     console.log('[test2] seeded 1 unresolved row under OTHER_BATCH_ID');
 
+    // And 1 unresolved row under a SUB-BATCH of BATCH_ID — this one MUST be
+    // deleted. An interrupted split leaves rows under `__subNNN`; a delete that
+    // only matched the unsuffixed ID would strand them and the retry would then
+    // show the same source row twice.
+    const SUB_BATCH_ID = `${BATCH_ID}__sub001`;
+    const txSub = await connectionManager.beginTransaction();
+    await recordInvalidRows(connectionManager, { ...ctx, batchID: SUB_BATCH_ID }, [{ tag: 'T0298', failureReason: 'Sub-batch reject' }], txSub);
+    await connectionManager.commitTransaction(txSub);
+    console.log(`[test2] seeded 1 unresolved row under ${SUB_BATCH_ID}`);
+
     // Run the delete.
     const txDelete = await connectionManager.beginTransaction();
-    const deletedCount = await deleteUnresolvedRowsForBatch(connectionManager, schema, FILE_NAME, BATCH_ID, censusID, txDelete);
+    const deletedCount = await deleteUnresolvedRowsForBatchFamily(connectionManager, schema, FILE_NAME, BATCH_ID, censusID, txDelete);
     await connectionManager.commitTransaction(txDelete);
 
-    console.log(`[test2] deleteUnresolvedRowsForBatch returned deletedCount=${deletedCount}`);
-    expect(deletedCount).toBe(2);
+    console.log(`[test2] deleteUnresolvedRowsForBatchFamily returned deletedCount=${deletedCount}`);
+    // 2 under the original ID + 1 under its sub-batch.
+    expect(deletedCount).toBe(3);
+
+    const remainingSubBatch = await fetchRecordedRows(SUB_BATCH_ID);
+    console.log(`[test2] remaining rows under ${SUB_BATCH_ID} after delete: ${remainingSubBatch.length}`);
+    expect(remainingSubBatch).toHaveLength(0);
 
     // Verify the unresolved BATCH_ID rows are gone.
     const remainingBatch = await fetchRecordedRows(BATCH_ID);
@@ -400,7 +415,7 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatch — integration', () 
 
     // Retry cleanup: delete the first-attempt rows.
     const txCleanup = await connectionManager.beginTransaction();
-    const cleanedCount = await deleteUnresolvedRowsForBatch(connectionManager, schema, FILE_NAME, BATCH_ID, censusID, txCleanup);
+    const cleanedCount = await deleteUnresolvedRowsForBatchFamily(connectionManager, schema, FILE_NAME, BATCH_ID, censusID, txCleanup);
     await connectionManager.commitTransaction(txCleanup);
     console.log(`[test3] cleanup deleted count=${cleanedCount}`);
     expect(cleanedCount).toBe(2);

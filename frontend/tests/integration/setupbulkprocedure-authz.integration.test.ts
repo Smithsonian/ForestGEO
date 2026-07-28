@@ -42,7 +42,8 @@ vi.mock('@/ailogger', () => ({
 
 vi.mock('@/lib/db/sqlsecurity', () => ({
   safeFormatQuery: vi.fn((schema: string, sql: string) => sql.replace(/\?\?/g, schema)),
-  isValidSchema: vi.fn(() => true)
+  isValidSchema: vi.fn(() => true),
+  validateSchemaOrThrow: vi.fn()
 }));
 
 const { requireUploadSessionOwnershipMock, MockUploadSessionOwnershipError } = vi.hoisted(() => {

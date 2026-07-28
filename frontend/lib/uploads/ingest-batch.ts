@@ -28,10 +28,27 @@ import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
+import { buildSubBatchID, discoverBatchFamily, highestSubBatchOrdinal } from '@/lib/uploads/batch-family';
 
 // Sub-batches of 10K rows keep transaction duration ~6.5s (benchmarked),
 // well under the 50s innodb_lock_wait_timeout on Azure MySQL.
 const INGESTION_BATCH_SIZE = 10_000;
+
+/**
+ * Split threshold, overridable so tests can force a multi-sub-batch split
+ * without staging 10K rows. The production default is unchanged; only an
+ * explicit positive integer in INGESTION_SUB_BATCH_ROWS overrides it.
+ */
+function getIngestionBatchSize(): number {
+  const raw = process.env.INGESTION_SUB_BATCH_ROWS;
+  if (raw === undefined || raw === '') return INGESTION_BATCH_SIZE;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    ailogger.warn(`INGESTION_SUB_BATCH_ROWS="${raw}" is not a positive integer; using default ${INGESTION_BATCH_SIZE}`);
+    return INGESTION_BATCH_SIZE;
+  }
+  return parsed;
+}
 
 const MAX_ATTEMPTS_PER_SUBBATCH = 5;
 const SETUP_PHASE_TIMEOUT_MS = 2 * 60 * 1000;
@@ -115,6 +132,11 @@ export interface IngestBatchResult {
   totalDurationMs: number;
   /** Per-sub-batch detail for callers that shape HTTP responses or job metrics. */
   subBatchResults: SubBatchResult[];
+  /**
+   * Sub-batches adopted from an interrupted prior attempt rather than created by
+   * this run's split. Non-zero means this call recovered orphaned work.
+   */
+  resumedSubBatchCount: number;
 }
 
 function toCount(value: unknown): number {
@@ -330,21 +352,25 @@ async function splitIntoSubBatches(
   fileID: string,
   originalBatchID: string,
   totalRows: number,
-  transactionID: string
+  transactionID: string,
+  startOrdinal: number = 0
 ): Promise<string[]> {
-  if (totalRows <= INGESTION_BATCH_SIZE) {
+  const batchSize = getIngestionBatchSize();
+  if (totalRows <= batchSize && startOrdinal === 0) {
     return [originalBatchID];
   }
 
-  const subBatchCount = Math.ceil(totalRows / INGESTION_BATCH_SIZE);
+  const subBatchCount = Math.ceil(totalRows / batchSize);
   const subBatchIDs: string[] = [];
 
-  ailogger.info(`Splitting ${totalRows} rows into ${subBatchCount} sub-batches of ~${INGESTION_BATCH_SIZE} rows each for ${fileID}`);
+  ailogger.info(`Splitting ${totalRows} rows into ${subBatchCount} sub-batches of ~${batchSize} rows each for ${fileID}`);
 
   for (let i = 0; i < subBatchCount; i++) {
-    const subBatchID = `${originalBatchID}__sub${String(i + 1).padStart(3, '0')}`;
+    // Continue past any sub-batch left by an interrupted prior attempt so a
+    // resumed split cannot reuse an ordinal that already holds rows.
+    const subBatchID = buildSubBatchID(originalBatchID, startOrdinal + i + 1);
     // LIMIT cannot be parameterized in mysql2 prepared statements, so inline the constant
-    const updateSQL = safeFormatQuery(schema, `UPDATE ??.temporarymeasurements SET BatchID = ? WHERE FileID = ? AND BatchID = ? LIMIT ${INGESTION_BATCH_SIZE}`);
+    const updateSQL = safeFormatQuery(schema, `UPDATE ??.temporarymeasurements SET BatchID = ? WHERE FileID = ? AND BatchID = ? LIMIT ${batchSize}`);
     const updateResult = await connectionManager.executeQuery(updateSQL, [subBatchID, fileID, originalBatchID], transactionID);
     const affectedRows = toCount(updateResult?.affectedRows);
 
@@ -493,20 +519,26 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
     async tx => {
       const lockTimeoutMs = SETUP_PHASE_TIMEOUT_MS;
 
-      // Get plot/census and row count
-      const infoSQL = safeFormatQuery(
-        schema,
-        'SELECT PlotID, CensusID, COUNT(*) AS rowCount FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ? GROUP BY PlotID, CensusID LIMIT 1'
-      );
-      const infoRows = await tx.query(infoSQL, [fileID, batchID]);
+      // Resolve the WHOLE family (original ID + any `__subNNN` left by an
+      // interrupted prior attempt). Looking up only the unsuffixed ID here is
+      // what let the Harvard incident report "No data found" over 106,227
+      // still-staged rows.
+      const family = await discoverBatchFamily((sql, sqlParams) => tx.query(sql, sqlParams), schema, fileID, batchID);
 
-      if (!infoRows || infoRows.length === 0) {
-        return { plotID: null as number | null, censusID: null as number | null, totalRows: 0, subBatchIDs: [] as string[], recovered: false };
+      if (!family) {
+        return {
+          plotID: null as number | null,
+          censusID: null as number | null,
+          totalRows: 0,
+          subBatchIDs: [] as string[],
+          recovered: false,
+          resumedSubBatchCount: 0
+        };
       }
 
-      const currentPlotID = Number(infoRows[0].PlotID);
-      const currentCensusID = Number(infoRows[0].CensusID);
-      const totalRows = toCount(infoRows[0].rowCount);
+      const currentPlotID = family.plotID;
+      const currentCensusID = family.censusID;
+      const totalRows = family.totalRows;
 
       // Acquire lock for setup phase
       const lockKey = `upload:file:${fileID}:plot:${currentPlotID}:census:${currentCensusID}`;
@@ -522,12 +554,39 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       // unresolved ingestion rows that exactly match the currently staged rows.
       await cleanupMatchedUnresolvedIngestionFailuresForBatch(connectionManager, schema, fileID, batchID, currentCensusID, tx.id);
 
-      // Split into sub-batches if needed (UPDATE within same transaction)
-      const ids = await splitIntoSubBatches(connectionManager, schema, fileID, batchID, totalRows, tx.id);
+      // Resume orphans first, then split whatever is still under the original
+      // ID, numbering past the orphans so ordinals cannot collide.
+      const ids = [...family.orphanedSubBatchIDs];
+      if (family.orphanedSubBatchIDs.length > 0) {
+        ailogger.warn(
+          `Resuming ${family.orphanedSubBatchIDs.length} orphaned sub-batch(es) for ${fileID}-${batchID} ` +
+            `left by an interrupted prior attempt (${family.totalRows} row(s) total)`
+        );
+      }
+      if (family.originalRowCount > 0) {
+        ids.push(
+          ...(await splitIntoSubBatches(
+            connectionManager,
+            schema,
+            fileID,
+            batchID,
+            family.originalRowCount,
+            tx.id,
+            highestSubBatchOrdinal(family.orphanedSubBatchIDs, batchID)
+          ))
+        );
+      }
 
       ailogger.info(`Setup complete for ${fileID}: ${totalRows} rows → ${ids.length} batch(es), plot=${currentPlotID}, census=${currentCensusID}`);
 
-      return { plotID: currentPlotID, censusID: currentCensusID, totalRows, subBatchIDs: ids, recovered };
+      return {
+        plotID: currentPlotID,
+        censusID: currentCensusID,
+        totalRows,
+        subBatchIDs: ids,
+        recovered,
+        resumedSubBatchCount: family.orphanedSubBatchIDs.length
+      };
     },
     { timeoutMs: SETUP_PHASE_TIMEOUT_MS }
   );
@@ -540,11 +599,12 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       recovered: setupResult.recovered,
       noDataFound: true,
       totalDurationMs: 0,
-      subBatchResults: []
+      subBatchResults: [],
+      resumedSubBatchCount: 0
     };
   }
 
-  const { totalRows, subBatchIDs, recovered } = setupResult;
+  const { totalRows, subBatchIDs, recovered, resumedSubBatchCount } = setupResult;
 
   // --- Phase 2: Process each sub-batch sequentially ---
   const results: SubBatchResult[] = [];
@@ -635,6 +695,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
     recovered,
     noDataFound: false,
     totalDurationMs: overallDuration,
-    subBatchResults: results
+    subBatchResults: results,
+    resumedSubBatchCount
   };
 }

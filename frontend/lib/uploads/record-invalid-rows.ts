@@ -10,7 +10,7 @@
  *                        to insertIngestionFailureRows. Used by the worker.
  * recordFailedMeasurementRows — thin passthrough for already-shaped FailedMeasurementsRDS
  *                        rows. Used by the batchedupload HTTP route.
- * deleteUnresolvedRowsForBatch — scoped DELETE for retry cleanup.
+ * deleteUnresolvedRowsForBatchFamily — family-scoped DELETE for retry cleanup.
  */
 
 import moment from 'moment/moment';
@@ -19,6 +19,7 @@ import { insertIngestionFailureRows, toFiniteNumber } from '@/config/measurement
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { FileRow } from '@/config/macros/formdetails';
 import { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
+import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 
 export interface InvalidRowContext {
   schema: string;
@@ -152,9 +153,15 @@ export async function recordFailedMeasurementRows(
  * completed batch skips ingestion entirely and never regenerates them. Callers
  * must probe uploadmetrics first and skip completed batches.
  *
+ * Scope is the whole batch FAMILY: rows recorded under the original BatchID AND
+ * under any `<batchID>__subNNN` a prior split created. Cleaning only the
+ * unsuffixed ID would leave the sub-batches' unresolved rows behind, so the
+ * re-run's rows land alongside stale ones and the same source row appears twice
+ * in the failed-measurements view.
+ *
  * Returns the count of rows deleted.
  */
-export async function deleteUnresolvedRowsForBatch(
+export async function deleteUnresolvedRowsForBatchFamily(
   connectionManager: ConnectionManager,
   schema: string,
   fileID: string,
@@ -166,11 +173,15 @@ export async function deleteUnresolvedRowsForBatch(
     schema,
     `DELETE FROM ??.coremeasurements
      WHERE UploadFileID = ?
-       AND UploadBatchID = ?
        AND CensusID = ?
-       AND StemGUID IS NULL`
+       AND StemGUID IS NULL
+       AND (UploadBatchID = ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`
   );
 
-  const result: { affectedRows?: number } = await connectionManager.executeQuery(deleteSQL, [fileID, batchID, censusID], transactionID);
+  const result: { affectedRows?: number } = await connectionManager.executeQuery(
+    deleteSQL,
+    [fileID, censusID, batchID, buildSubBatchPattern(batchID)],
+    transactionID
+  );
   return result?.affectedRows ?? 0;
 }

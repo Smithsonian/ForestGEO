@@ -38,7 +38,7 @@
  * Run in isolation:
  *   npx vitest run --config vitest.integration.config.mts tests/integration/upload-worker.test.ts
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import mysql, { type Connection, type Pool, type RowDataPacket } from 'mysql2/promise';
 import { cleanupTestMeasurements, setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 
@@ -833,4 +833,216 @@ describe('runJobIfClaimable — integration', () => {
     // uploadmetrics: file 1's batch is completed again, exactly once.
     expect(await fetchUploadMetricsStatus(batch1)).toEqual([UPLOADMETRICS_STATUS_COMPLETED]);
   }, 180000);
+
+  // -------------------------------------------------------------------------
+  // 9. Split-batch recycle recovery (2026-07-27 Harvard Forest incident)
+  //
+  // A file large enough to split is ingested as `<batchID>__subNNN`. Everything
+  // keyed on the unsuffixed BatchID — the uploadmetrics completion probe and the
+  // retry cleanup — then looks at an ID that owns no rows and no metrics. These
+  // tests force a split with a low threshold and prove the worker reasons about
+  // the whole family.
+  //
+  // Measured scope of each test (verified by reverting buildSubBatchPattern to
+  // bare-ID semantics and re-running):
+  //   - 'recycled after every sub-batch completed' FAILS without the
+  //     family-scoped completion probe. This is the load-bearing regression:
+  //     a fully-ingested split file is otherwise re-staged and re-ingested.
+  //   - 'recycled mid-family' still passes under bare-ID semantics, because
+  //     stageMeasurementChunk's own stale-batch cleanup and the procedure's
+  //     per-sub-batch idempotency already cover that path. It is kept as an
+  //     end-to-end guard, not as proof of the family-cleanup change; the
+  //     discriminating cover for family-scoped unresolved-row deletion lives in
+  //     tests/integration/record-invalid-rows.test.ts.
+  // -------------------------------------------------------------------------
+
+  describe('split-batch recycle recovery', () => {
+    /** Forces FILE1's 5 valid rows into 3 sub-batches (2 + 2 + 1). */
+    const SPLIT_THRESHOLD_ROWS = 2;
+    const EXPECTED_SUB_BATCH_COUNT = Math.ceil(FILE1_VALID_ROW_COUNT / SPLIT_THRESHOLD_ROWS);
+
+    let previousThreshold: string | undefined;
+
+    beforeEach(() => {
+      previousThreshold = process.env.INGESTION_SUB_BATCH_ROWS;
+      process.env.INGESTION_SUB_BATCH_ROWS = String(SPLIT_THRESHOLD_ROWS);
+    });
+
+    afterEach(() => {
+      if (previousThreshold === undefined) delete process.env.INGESTION_SUB_BATCH_ROWS;
+      else process.env.INGESTION_SUB_BATCH_ROWS = previousThreshold;
+    });
+
+    async function createSingleFileJob(): Promise<number> {
+      const job = await createUploadBackgroundJob(
+        catalogPool,
+        {
+          schema,
+          plotID,
+          censusID,
+          uploadMode: UploadMode.CLEAN_REUPLOAD,
+          sourceFormat: SourceFormat.csv,
+          formType: FormType.measurements,
+          payload: { selectedDelimiters: { [FILE1_NAME]: ',' } },
+          files: [{ fileName: FILE1_NAME, blobContainer: BLOB_CONTAINER, blobName: `uploads/${FILE1_NAME}`, expectedRows: 6 }]
+        },
+        TEST_USER
+      );
+      return job.jobID;
+    }
+
+    /** Every uploadmetrics row in the batch family, keyed by batch ID. */
+    async function fetchFamilyMetrics(batchID: string): Promise<Record<string, string>> {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT batchID, status FROM uploadmetrics WHERE batchID = ? OR batchID LIKE ? ESCAPE '\\\\' ORDER BY batchID`,
+        [batchID, `${batchID}\\_\\_sub%`]
+      );
+      return Object.fromEntries(rows.map(row => [String(row.batchID), String(row.status)]));
+    }
+
+    async function countFamilyTempRows(batchID: string): Promise<number> {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS count FROM temporarymeasurements WHERE BatchID = ? OR BatchID LIKE ? ESCAPE '\\\\'`,
+        [batchID, `${batchID}\\_\\_sub%`]
+      );
+      return Number(rows[0].count);
+    }
+
+    async function requeueJob(jobID: number): Promise<void> {
+      await catalogPool.query(
+        `UPDATE catalog.background_jobs SET Status = 'queued', NextAttemptAt = NULL, WorkerID = NULL, WorkerHeartbeatAt = NULL WHERE JobID = ?`,
+        [jobID]
+      );
+    }
+
+    async function fetchIngestedTags(): Promise<string[]> {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT t.TreeTag FROM coremeasurements cm
+         JOIN stems s ON s.StemGUID = cm.StemGUID
+         JOIN trees t ON t.TreeID = s.TreeID
+         WHERE cm.UploadFileID = ? AND cm.CensusID = ?
+         ORDER BY t.TreeTag`,
+        [FILE1_NAME, censusID]
+      );
+      return rows.map(row => String(row.TreeTag));
+    }
+
+    it('splits the file and records one completed uploadmetrics row per sub-batch', async () => {
+      const jobID = await createSingleFileJob();
+
+      await runJobIfClaimable(jobID, healthyDeps());
+
+      const batchID = await batchIDForFile(jobID, FILE1_NAME);
+      const familyMetrics = await fetchFamilyMetrics(batchID);
+      console.log(`[split] batchID=${batchID} familyMetrics=${JSON.stringify(familyMetrics)}`);
+
+      // Precondition for the recycle tests below: the split really happened, so
+      // the unsuffixed ID owns no metric of its own.
+      expect(Object.keys(familyMetrics)).toHaveLength(EXPECTED_SUB_BATCH_COUNT);
+      expect(familyMetrics[batchID]).toBeUndefined();
+      expect(Object.values(familyMetrics).every(status => status === UPLOADMETRICS_STATUS_COMPLETED)).toBe(true);
+      expect(await countFamilyTempRows(batchID)).toBe(0);
+      expect(await fetchIngestedIDs(FILE1_NAME)).toHaveLength(FILE1_VALID_ROW_COUNT);
+    }, 180000);
+
+    it('recycled mid-family: resumes the staged sub-batches without duplicating the completed one', async () => {
+      const jobID = await createSingleFileJob();
+      await runJobIfClaimable(jobID, healthyDeps());
+      const batchID = await batchIDForFile(jobID, FILE1_NAME);
+
+      const subBatchIDs = Object.keys(await fetchFamilyMetrics(batchID)).sort();
+      expect(subBatchIDs).toHaveLength(EXPECTED_SUB_BATCH_COUNT);
+      const [firstSubBatch, ...remainingSubBatches] = subBatchIDs;
+
+      // Rewrite history into "attempt died after the first sub-batch": only
+      // that sub-batch's metric survives as completed, the later sub-batches
+      // never finished, and their rows are still staged.
+      //
+      // The stranded rows carry tags that appear NOWHERE in the fixture CSV.
+      // That makes the family cleanup observable: if the retry only cleans the
+      // unsuffixed BatchID, these rows survive under `__subNNN`, get swept up
+      // when the re-split reuses those same sub-batch names, and show up as
+      // extra ingested tags. Family-scoped cleanup removes them first.
+      const ingestedBefore = await fetchIngestedTags();
+      const STRANDED_TAGS = ['W1091', 'W1092', 'W1093'];
+      await connection.query(`DELETE FROM uploadmetrics WHERE batchID IN (?)`, [remainingSubBatches]);
+      await connection.query(
+        `DELETE cm FROM coremeasurements cm
+         JOIN stems s ON s.StemGUID = cm.StemGUID
+         JOIN trees t ON t.TreeID = s.TreeID
+         WHERE cm.UploadFileID = ? AND cm.CensusID = ? AND t.TreeTag IN ('W1003', 'W1004', 'W1005')`,
+        [FILE1_NAME, censusID]
+      );
+      await insertStagedTempRow(FILE1_NAME, remainingSubBatches[0], STRANDED_TAGS[0], 'Q02', 30.1);
+      await insertStagedTempRow(FILE1_NAME, remainingSubBatches[0], STRANDED_TAGS[1], 'Q02', 15.2);
+      await insertStagedTempRow(FILE1_NAME, remainingSubBatches[1] ?? remainingSubBatches[0], STRANDED_TAGS[2], 'Q03', 25.8);
+      await requeueJob(jobID);
+      console.log(
+        `[split-recycle] simulated death after ${firstSubBatch}; ${remainingSubBatches.length} sub-batch(es) left staged ` +
+          `(${await countFamilyTempRows(batchID)} temp rows), ingestedBefore=${JSON.stringify(ingestedBefore)}`
+      );
+
+      // The completion probe must NOT declare this family finished, and the
+      // retry must clean and resume the whole family rather than the bare ID.
+      await runJobIfClaimable(jobID, healthyDeps());
+
+      const job = await getBackgroundJob(catalogPool, jobID);
+      const familyMetricsAfter = await fetchFamilyMetrics(batchID);
+      const ingestedAfter = await fetchIngestedTags();
+      console.log(
+        `[split-recycle] status=${job?.status} familyMetrics=${JSON.stringify(familyMetricsAfter)} ` +
+          `tempRows=${await countFamilyTempRows(batchID)} ingestedAfter=${JSON.stringify(ingestedAfter)}`
+      );
+
+      expect(job!.status).toBe('completed');
+      // No family rows may be stranded in staging.
+      expect(await countFamilyTempRows(batchID)).toBe(0);
+      expect(await countTempRows()).toBe(0);
+      // The dead attempt's stranded sub-batch rows were cleaned, not ingested.
+      for (const strandedTag of STRANDED_TAGS) {
+        expect(ingestedAfter).not.toContain(strandedTag);
+      }
+      // Exactly one clean row set — every source tag present exactly once.
+      expect(ingestedAfter).toEqual(ingestedBefore);
+      expect(new Set(ingestedAfter).size).toBe(ingestedAfter.length);
+      expect(ingestedAfter).toHaveLength(FILE1_VALID_ROW_COUNT);
+      // Every family metric ends completed; none left processing/failed.
+      expect(Object.values(familyMetricsAfter).every(status => status === UPLOADMETRICS_STATUS_COMPLETED)).toBe(true);
+    }, 180000);
+
+    it('recycled after every sub-batch completed: recognizes family completion and does not re-ingest', async () => {
+      const jobID = await createSingleFileJob();
+      await runJobIfClaimable(jobID, healthyDeps());
+      const batchID = await batchIDForFile(jobID, FILE1_NAME);
+
+      const ingestedIDsBefore = await fetchIngestedIDs(FILE1_NAME);
+      const rejectIDsBefore = await fetchRejectIDs(FILE1_NAME);
+      const familyMetricsBefore = await fetchFamilyMetrics(batchID);
+      expect(Object.keys(familyMetricsBefore)).toHaveLength(EXPECTED_SUB_BATCH_COUNT);
+
+      // The worker died AFTER ingestion drained every sub-batch but BEFORE the
+      // post-ingestion phases, so the job is runnable again with the whole
+      // family already complete.
+      await requeueJob(jobID);
+
+      const fetchedFiles: string[] = [];
+      await runJobIfClaimable(jobID, healthyDeps(fetchedFiles));
+
+      const job = await getBackgroundJob(catalogPool, jobID);
+      const ingestedIDsAfter = await fetchIngestedIDs(FILE1_NAME);
+      console.log(
+        `[split-complete-recycle] status=${job?.status} refetchedFiles=${JSON.stringify(fetchedFiles)} ` +
+          `idsBefore=${JSON.stringify(ingestedIDsBefore)} idsAfter=${JSON.stringify(ingestedIDsAfter)}`
+      );
+
+      expect(job!.status).toBe('completed');
+      // Identical CoreMeasurementIDs prove the rows were never deleted and
+      // re-inserted — the completed family was skipped, not redone.
+      expect(ingestedIDsAfter).toEqual(ingestedIDsBefore);
+      expect(await fetchRejectIDs(FILE1_NAME)).toEqual(rejectIDsBefore);
+      // No re-staging, and no extra uploadmetrics rows appeared.
+      expect(await countFamilyTempRows(batchID)).toBe(0);
+      expect(await fetchFamilyMetrics(batchID)).toEqual(familyMetricsBefore);
+    }, 180000);
+  });
 });

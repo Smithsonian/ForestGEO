@@ -44,7 +44,8 @@ import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { detectDelimiter } from '@/lib/uploads/detect-delimiter';
 import { ingestBatch, IngestBatchAbortedError } from '@/lib/uploads/ingest-batch';
-import { deleteUnresolvedRowsForBatch, recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
+import { deleteUnresolvedRowsForBatchFamily, recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
+import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { countStagedRows, MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
 import { runCensusValidations } from '@/lib/uploads/validation-orchestrator';
 import { NonRetryableJobError, WorkerLeaseLostError } from './errors';
@@ -337,7 +338,7 @@ function collectCancellationCleanupTargets(ctx: WorkerRunContext): Array<{ fileN
  */
 async function finalizeCancelledJob(ctx: WorkerRunContext): Promise<void> {
   for (const { fileName, batchID } of collectCancellationCleanupTargets(ctx)) {
-    if (await isBatchCompleted(ctx, batchID)) continue; // completed-batch guard: never clean
+    if (await isBatchCompleted(ctx, fileName, batchID)) continue; // completed-batch guard: never clean
     await cleanupBatchArtifacts(ctx, fileName, batchID);
   }
   await setBackgroundJobStatus(ctx.catalogPool, ctx.job.jobID, ctx.workerID, {
@@ -512,23 +513,67 @@ function getRecordPayload<T>(payload: Record<string, unknown> | null, key: strin
  * uploadmetrics recovery probe: true when this batch already completed
  * ingestion. Completed batches are skipped ENTIRELY (no cleanup, no staging,
  * no ingest) — see module docs for why this order is load-bearing.
+ *
+ * The probe spans the batch FAMILY. Once ingestBatch splits a file, the
+ * procedure records uploadmetrics per `<batchID>__subNNN` and the unsuffixed ID
+ * never reaches 'completed' on its own. Probing the bare ID would therefore
+ * declare a fully-ingested 106K-row file "incomplete" and re-stage it, which on
+ * a Harvard-sized recycle means duplicate work over already-ingested rows.
+ *
+ * Completion requires that a family metric completed AND that nothing is still
+ * in flight: no family metric left in 'processing'/'failed', and no family rows
+ * left staged.
  */
-async function isBatchCompleted(ctx: WorkerRunContext, batchID: string): Promise<boolean> {
-  const probeSQL = safeFormatQuery(ctx.job.schemaName, `SELECT 1 FROM ??.uploadmetrics WHERE batchID = ? AND censusID = ? AND status = 'completed' LIMIT 1`);
-  const rows = await ctx.connectionManager.executeQuery(probeSQL, [batchID, ctx.job.censusID]);
-  return Array.isArray(rows) && rows.length > 0;
+async function isBatchCompleted(ctx: WorkerRunContext, fileName: string, batchID: string): Promise<boolean> {
+  const { schemaName, censusID } = ctx.job;
+  const subBatchPattern = buildSubBatchPattern(batchID);
+
+  const metricsSQL = safeFormatQuery(
+    schemaName,
+    `SELECT
+       SUM(status = 'completed') AS completedCount,
+       SUM(status IN ('processing', 'failed')) AS unfinishedCount
+     FROM ??.uploadmetrics
+     WHERE censusID = ?
+       AND (batchID = ? OR batchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`
+  );
+  const metricRows = await ctx.connectionManager.executeQuery(metricsSQL, [censusID, batchID, subBatchPattern]);
+  const completedCount = Number(metricRows?.[0]?.completedCount ?? 0);
+  const unfinishedCount = Number(metricRows?.[0]?.unfinishedCount ?? 0);
+  if (completedCount === 0 || unfinishedCount > 0) return false;
+
+  const stagedSQL = safeFormatQuery(
+    schemaName,
+    `SELECT 1 FROM ??.temporarymeasurements
+     WHERE FileID = ? AND CensusID = ?
+       AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
+     LIMIT 1`
+  );
+  const stagedRows = await ctx.connectionManager.executeQuery(stagedSQL, [fileName, censusID, batchID, subBatchPattern]);
+  return !(Array.isArray(stagedRows) && stagedRows.length > 0);
 }
 
 /**
  * Retry hygiene for a NON-completed batch: drops any temporarymeasurements
  * left by an interrupted attempt and the parse rejects it recorded, so the
  * re-run starts from a clean slate without accumulating duplicates.
+ *
+ * Operates on the batch family for the same reason as the probe: an
+ * interrupted split leaves rows under `__subNNN`, and deleting only the
+ * unsuffixed ID would leave them staged to be ingested a second time.
  */
 async function cleanupBatchArtifacts(ctx: WorkerRunContext, fileName: string, batchID: string): Promise<void> {
   const { schemaName, plotID, censusID } = ctx.job;
-  const deleteTempSQL = safeFormatQuery(schemaName, `DELETE FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ? AND PlotID = ? AND CensusID = ?`);
-  await ctx.connectionManager.executeQuery(deleteTempSQL, [fileName, batchID, plotID, censusID]);
-  await deleteUnresolvedRowsForBatch(ctx.connectionManager, schemaName, fileName, batchID, censusID);
+  const subBatchPattern = buildSubBatchPattern(batchID);
+
+  const deleteTempSQL = safeFormatQuery(
+    schemaName,
+    `DELETE FROM ??.temporarymeasurements
+     WHERE FileID = ? AND PlotID = ? AND CensusID = ?
+       AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`
+  );
+  await ctx.connectionManager.executeQuery(deleteTempSQL, [fileName, plotID, censusID, batchID, subBatchPattern]);
+  await deleteUnresolvedRowsForBatchFamily(ctx.connectionManager, schemaName, fileName, batchID, censusID);
 }
 
 // ---------------------------------------------------------------------------
@@ -571,7 +616,7 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
     const batchID = await assignFileBatchID(ctx.catalogPool, file.jobFileID, generateShortBatchID());
     ctx.assignedBatches.set(file.jobFileID, { file, batchID });
 
-    if (await isBatchCompleted(ctx, batchID)) {
+    if (await isBatchCompleted(ctx, file.fileName, batchID)) {
       // Recovery skip — the batch already completed on a previous attempt.
       // No cleanup, no staging, no ingest: see module docs.
       ailogger.info(`[UploadWorker] Skipping ${file.fileName} (batch ${batchID}): uploadmetrics already 'completed'`);

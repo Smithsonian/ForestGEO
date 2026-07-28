@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
 import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
+import { BatchFamilyScopeError, discoverBatchFamily } from '@/lib/uploads/batch-family';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -45,9 +46,8 @@ async function handler(request: NextRequest, context: RouteContext) {
 
   // Validate the schema name up front so an invalid schema surfaces as
   // INVALID_REQUEST instead of a setup failure deeper in the pipeline.
-  let temporaryInfoSQL: string;
   try {
-    temporaryInfoSQL = safeFormatQuery(schema, 'SELECT PlotID, CensusID FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ? LIMIT 1');
+    validateSchemaOrThrow(schema);
   } catch (error: any) {
     ailogger.error(`Invalid schema in setupbulkprocedure: ${schema}`);
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
@@ -57,24 +57,43 @@ async function handler(request: NextRequest, context: RouteContext) {
 
   // Upload-session ownership is a route-only concern: derive the plot/census
   // scope from the staged rows, then verify this session owns that scope.
+  //
+  // The scope must come from the whole batch FAMILY, not just the unsuffixed
+  // BatchID. Once a prior attempt split this batch, every row lives under
+  // `<batchID>__subNNN` and an exact-match lookup finds nothing — which is how
+  // the 2026-07-27 Harvard retry returned 200 "No data found" in 31ms while
+  // 106,227 rows were still staged. Only a genuinely empty family may return
+  // early; otherwise authorize the discovered scope and let ingestBatch resume.
   try {
-    const infoRows = await connectionManager.executeQuery(temporaryInfoSQL, [fileID, batchID]);
-    if (!infoRows || infoRows.length === 0) {
-      ailogger.warn(`No temporary rows found for ${fileID}-${batchID}`);
+    const family = await discoverBatchFamily((sql, sqlParams) => connectionManager.executeQuery(sql, sqlParams), schema, fileID, batchID);
+
+    if (!family) {
+      ailogger.warn(`No temporary rows found for ${fileID}-${batchID} (original ID or sub-batch family)`);
       return noDataFoundResponse();
+    }
+
+    if (family.orphanedSubBatchIDs.length > 0) {
+      ailogger.warn(
+        `Found ${family.orphanedSubBatchIDs.length} orphaned sub-batch(es) for ${fileID}-${batchID} ` +
+          `holding ${family.totalRows} row(s); authorizing their scope and resuming`
+      );
     }
 
     await requireUploadSessionOwnership({
       schema,
       sessionId,
-      plotId: Number(infoRows[0].PlotID),
-      censusId: Number(infoRows[0].CensusID),
+      plotId: family.plotID,
+      censusId: family.censusID,
       allowedStates: [UploadSessionState.UPLOADED, UploadSessionState.PROCESSING],
       contextLabel: `batch processing for ${fileID}-${batchID}`
     });
   } catch (setupError: any) {
     if (setupError instanceof UploadSessionOwnershipError) {
       return new NextResponse(JSON.stringify({ error: setupError.message, fileID, batchID }), { status: setupError.status });
+    }
+    if (setupError instanceof BatchFamilyScopeError) {
+      ailogger.error(`Ambiguous batch family for ${fileID}-${batchID}: ${setupError.message}`);
+      return new NextResponse(JSON.stringify({ error: setupError.message, fileID, batchID }), { status: HTTPResponses.CONFLICT });
     }
     ailogger.error(`Setup phase failed for ${fileID}-${batchID}: ${setupError.message}`, setupError);
     return new NextResponse(JSON.stringify({ error: `Setup failed: ${setupError.message}`, fileID, batchID }), { status: HTTPResponses.SERVICE_UNAVAILABLE });
