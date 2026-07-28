@@ -45,7 +45,10 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function handleCancelJob(jobID: number) {
-    if (!schema) return;
+    if (!schema) {
+      ailogger.warn(`[UploadJobStatusBadge] Cannot cancel job ${jobID}: no schema in scope`);
+      return;
+    }
     setCancellingJobIDs(prev => new Set(prev).add(jobID));
     try {
       const params = new URLSearchParams({ schema });

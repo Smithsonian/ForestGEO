@@ -130,6 +130,20 @@ describe('GET /api/uploadjobs/[jobId]', () => {
     expect(body).not.toHaveProperty('job');
   });
 
+  it('matches the authorized schema case-insensitively, mirroring hasSchemaAccess', async () => {
+    // withRouteAuthz's assertSchemaAccess/hasSchemaAccess is case-insensitive,
+    // so a job stored with a differently-cased SchemaName than the query
+    // param must still resolve — otherwise a membership-valid request would
+    // pass authz and then get a spurious 404 from the schema-match check.
+    const differentlyCasedJob = { ...ownedJob, schemaName: 'Forestgeo_Testing' };
+    mocks.getBackgroundJobWithDetails.mockResolvedValueOnce(differentlyCasedJob);
+
+    const response = await GET(makeGetRequest(`?schema=${AUTHORIZED_SCHEMA}`), jobProps());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ job: differentlyCasedJob });
+  });
+
   it('grants an admin session access even when the schema is not in their sites list', async () => {
     mocks.auth.mockResolvedValue({ user: { ...session.user, userStatus: 'global', sites: [] } });
 

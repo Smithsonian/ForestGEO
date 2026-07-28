@@ -18,9 +18,14 @@ export const runtime = 'nodejs';
  * must be checked against it before any details are returned or a mutation
  * runs. A mismatch is reported as 404 (not 403) to avoid confirming the job
  * exists in a schema the caller didn't ask about.
+ *
+ * Case-insensitive to match lib/authz.ts:hasSchemaAccess, which is the check
+ * withRouteAuthz already ran to authorize `authorizedSchema` — a
+ * differently-cased but membership-valid schema must not fail this
+ * secondary check after already clearing that one.
  */
 function jobBelongsToAuthorizedSchema(job: BackgroundJobWithDetails, authorizedSchema: string): boolean {
-  return job.schemaName === authorizedSchema;
+  return job.schemaName?.toLowerCase() === authorizedSchema.toLowerCase();
 }
 
 async function getHandler(request: NextRequest, context: RouteContext) {
@@ -28,11 +33,15 @@ async function getHandler(request: NextRequest, context: RouteContext) {
   const authError = requireSession(session);
   if (authError) return authError;
 
-  const schema = request.nextUrl.searchParams.get('schema')!;
+  // withRouteAuthz already resolved and authorized `schema` before this
+  // handler ran; re-checked here (rather than asserted with `!`) purely as
+  // defense-in-depth, matching the sibling-route idiom (e.g.
+  // setupbulkcollapser/[censusID]/route.ts).
+  const schema = request.nextUrl.searchParams.get('schema');
   const { jobId } = (await context.params) as { jobId: string };
   const parsedJobID = parseJobID(jobId);
-  if (parsedJobID === null) {
-    return NextResponse.json({ error: 'Invalid job ID' }, { status: HTTPResponses.INVALID_REQUEST });
+  if (!schema || parsedJobID === null) {
+    return NextResponse.json({ error: 'Missing or invalid parameters' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
   const job = await getBackgroundJobWithDetails(getPoolMonitorInstance().pool, parsedJobID);
@@ -51,11 +60,15 @@ async function postHandler(request: NextRequest, context: RouteContext) {
   const authError = requireSession(session);
   if (authError) return authError;
 
-  const schema = request.nextUrl.searchParams.get('schema')!;
+  // withRouteAuthz already resolved and authorized `schema` before this
+  // handler ran; re-checked here (rather than asserted with `!`) purely as
+  // defense-in-depth, matching the sibling-route idiom (e.g.
+  // setupbulkcollapser/[censusID]/route.ts).
+  const schema = request.nextUrl.searchParams.get('schema');
   const { jobId } = (await context.params) as { jobId: string };
   const parsedJobID = parseJobID(jobId);
-  if (parsedJobID === null) {
-    return NextResponse.json({ error: 'Invalid job ID' }, { status: HTTPResponses.INVALID_REQUEST });
+  if (!schema || parsedJobID === null) {
+    return NextResponse.json({ error: 'Missing or invalid parameters' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
   const job = await getBackgroundJobWithDetails(getPoolMonitorInstance().pool, parsedJobID);

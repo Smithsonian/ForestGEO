@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { HTTPResponses } from '@/config/macros';
 import { GET } from './route';
 
 // GET is wrapped by withRouteAuthz, whose Handler type requires a
@@ -57,7 +58,7 @@ describe('GET /api/features/async-upload', () => {
   it('reports enablement for a member schema', async () => {
     const response = await callGet(makeRequest(`?schema=${AUTHORIZED_SCHEMA}&formType=measurements`));
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(HTTPResponses.OK);
     await expect(response.json()).resolves.toEqual({ enabled: true });
     expect(mocks.isAsyncUploadEnabledFor).toHaveBeenCalledWith({
       schema: AUTHORIZED_SCHEMA,
@@ -71,14 +72,14 @@ describe('GET /api/features/async-upload', () => {
 
     const response = await callGet(makeRequest(`?schema=${AUTHORIZED_SCHEMA}&formType=measurements`));
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(HTTPResponses.OK);
     await expect(response.json()).resolves.toEqual({ enabled: false });
   });
 
   it('rejects a probe with a missing schema with 400 before evaluating the feature gate', async () => {
     const response = await callGet(makeRequest('?formType=measurements'));
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(HTTPResponses.BAD_REQUEST);
     await expect(response.json()).resolves.toMatchObject({ code: 'INVALID_SCHEMA' });
     expect(mocks.isAsyncUploadEnabledFor).not.toHaveBeenCalled();
   });
@@ -86,14 +87,14 @@ describe('GET /api/features/async-upload', () => {
   it('rejects a probe with an invalid schema with 400 before evaluating the feature gate', async () => {
     const response = await callGet(makeRequest('?schema=not a schema&formType=measurements'));
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(HTTPResponses.BAD_REQUEST);
     expect(mocks.isAsyncUploadEnabledFor).not.toHaveBeenCalled();
   });
 
   it('rejects a probe for a schema outside the caller session scope with 403 and never evaluates the feature gate', async () => {
     const response = await callGet(makeRequest('?schema=forestgeo_other&formType=measurements'));
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(HTTPResponses.FORBIDDEN);
     expect(mocks.isAsyncUploadEnabledFor).not.toHaveBeenCalled();
   });
 
@@ -102,7 +103,7 @@ describe('GET /api/features/async-upload', () => {
 
     const response = await callGet(makeRequest('?schema=forestgeo_other&formType=measurements'));
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(HTTPResponses.OK);
     expect(mocks.isAsyncUploadEnabledFor).toHaveBeenCalledWith(expect.objectContaining({ schema: 'forestgeo_other', formType: 'measurements' }));
   });
 });
