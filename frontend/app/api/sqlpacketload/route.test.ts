@@ -398,16 +398,23 @@ describe('sqlpacketload measurement scope validation', () => {
     // Scoped to the census, excluding the incoming batch FAMILY.
     expect(deleteCmCall).toContain('WHERE CensusID = ?');
     expect(deleteCmCall).toContain('NOT (UploadBatchID <=> ?)');
-    expect(deleteCmCall).toContain('NOT (UploadBatchID LIKE ?');
+    // Both arms NULL-safe: a bare `NOT (col LIKE ?)` yields NULL for the
+    // nullable UploadBatchID, which would spare every CTFS-migrated row.
+    expect(deleteCmCall).toContain('(UploadBatchID IS NULL OR UploadBatchID NOT LIKE ?');
+    // Bounded so one statement never locks a whole 100k-row census.
+    expect(deleteCmCall).toContain('LIMIT');
     // Census replacement, not filename replacement.
     expect(deleteCmCall).not.toContain('UploadFileID');
     // And never a batch id list sourced from metrics.
     expect(deleteCmCall).not.toContain('UploadBatchID IN');
 
-    const deleteValidationErrorsCall = executedSql.find((sql: string) => sql.includes('DELETE mel FROM `forestgeo_testing`.measurement_error_log'));
+    const deleteValidationErrorsCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.measurement_error_log'));
     expect(deleteValidationErrorsCall).toBeDefined();
     expect(deleteValidationErrorsCall).toContain('WHERE cm.CensusID = ?');
     expect(deleteValidationErrorsCall).not.toContain('cm.UploadFileID');
+    // Single-table DELETE over a subquery: MySQL rejects LIMIT on a
+    // multi-table DELETE ... JOIN, and this delete must stay bounded too.
+    expect(deleteValidationErrorsCall).toContain('LIMIT');
 
     const deleteMetricsCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.uploadmetrics'));
     expect(deleteMetricsCall).toBeDefined();
@@ -459,7 +466,7 @@ describe('sqlpacketload measurement scope validation', () => {
     let stagedRowCount = 0;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
-      if (text.includes('DELETE mel FROM') && text.includes('measurement_error_log')) throw missingError;
+      if (text.includes('DELETE FROM') && text.includes('measurement_error_log')) throw missingError;
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
       if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
       if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: stagedRowCount }];
@@ -476,7 +483,7 @@ describe('sqlpacketload measurement scope validation', () => {
 
     expect(res.status).toBe(200);
     const executedSql = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
-    const legacyCall = executedSql.find((sql: string) => sql.includes('DELETE e FROM `forestgeo_testing`.cmverrors'));
+    const legacyCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.cmverrors'));
     expect(legacyCall).toBeDefined();
     expect(legacyCall).toContain('WHERE cm.CensusID = ?');
   });

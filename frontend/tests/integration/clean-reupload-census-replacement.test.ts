@@ -71,7 +71,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
 vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { cleanupPreviousFileUploads } from '@/lib/ingestion/temporary-measurements';
+import { CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE, cleanupPreviousFileUploads } from '@/lib/ingestion/temporary-measurements';
 
 // ---------------------------------------------------------------------------
 // Fixture vocabulary
@@ -95,6 +95,9 @@ const PRIOR_BATCH_DIFFERENT_NAME = 'other-file-batch-0001';
 const ORPHAN_BASE_BATCH = 'ms3k5wnm-oc4mjrino5h';
 const ORPHAN_SUB_BATCHES = [`${ORPHAN_BASE_BATCH}__sub003`, `${ORPHAN_BASE_BATCH}__sub004`];
 const ORPHAN_FILE = 'harvard2014b.TXT';
+
+/** CTFS-migrated rows: real data, but no UploadBatchID was ever recorded. */
+const LEGACY_MIGRATED_FILE = 'ctfs-migration';
 
 const CONTROL_FILE = 'control.csv';
 
@@ -187,6 +190,23 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     return Number(cmResult.insertId);
   }
 
+  /**
+   * Rows with a NULL UploadBatchID. `coremeasurements.UploadBatchID` is
+   * nullable and the CTFS migration inserts never populate it, so any census
+   * assembled from a legacy import is entirely this shape.
+   */
+  async function seedNullBatchRows(fileID: string, censusID: number, count: number): Promise<void> {
+    for (let i = 0; i < count; i++) {
+      rowIndexCounter += 1;
+      await connection.query(
+        `INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+           UploadFileID, UploadBatchID, RawTreeTag, SourceRowIndex, IsActive)
+         VALUES (?, NULL, FALSE, '2024-03-15', 1.0, 1.0, ?, NULL, ?, ?, 1)`,
+        [censusID, fileID, `L${rowIndexCounter}`, rowIndexCounter]
+      );
+    }
+  }
+
   async function seedMetric(fileID: string, batchID: string, forPlotID: number, censusID: number, status = 'completed'): Promise<void> {
     await connection.query(
       `INSERT INTO uploadmetrics (uploadId, fileID, batchID, schema_name, plotID, censusID, sourceRecords, processedRecords, failedRecords, status, startTime)
@@ -266,6 +286,9 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     // filename replacement, so this must go too.
     await seedParkedRows(PRIOR_FILE_DIFFERENT_NAME, PRIOR_BATCH_DIFFERENT_NAME, targetCensusID, 2);
 
+    // Legacy CTFS-migrated rows with a NULL UploadBatchID.
+    await seedNullBatchRows(LEGACY_MIGRATED_FILE, targetCensusID, 3);
+
     // The incoming upload's own metric row — must SURVIVE (it is the new upload).
     await seedMetric(INCOMING_FILE, INCOMING_BATCH, plotID, targetCensusID, 'processing');
 
@@ -311,7 +334,7 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     const beforeParked = await countRows(targetCensusID, 'parked');
     const beforeIngested = await countRows(targetCensusID, 'ingested');
     console.log(`[target] before: total=${before} parked=${beforeParked} ingested=${beforeIngested}`);
-    expect(before).toBe(3 + 1 + ORPHAN_SUB_BATCHES.length * 4 + 2); // 14
+    expect(before).toBe(3 + 1 + ORPHAN_SUB_BATCHES.length * 4 + 2 + 3); // 17
 
     await runCleanReupload();
 
@@ -336,6 +359,57 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     console.log(`[orphans] surviving: ${JSON.stringify(orphanRows)}`);
     expect(orphanRows).toHaveLength(0);
   }, 120000);
+
+  /**
+   * `NOT (col <=> ?) AND NOT (col LIKE ?)` looks NULL-safe because of the <=>,
+   * but the LIKE arm returns NULL for a NULL column, and `TRUE AND NULL` is
+   * NULL — so every legacy row silently survived a replacement that reported
+   * success, leaving the census duplicated with no way to ever clean it.
+   */
+  it('removes legacy rows whose UploadBatchID is NULL', async () => {
+    await seedFixture();
+
+    const [before] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS count FROM coremeasurements WHERE CensusID = ? AND UploadBatchID IS NULL`, [
+      targetCensusID
+    ]);
+    console.log(`[null-batch] before: ${before[0].count} row(s) with UploadBatchID IS NULL`);
+    expect(Number(before[0].count)).toBe(3);
+
+    await runCleanReupload();
+
+    const [after] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS count FROM coremeasurements WHERE CensusID = ? AND UploadBatchID IS NULL`, [
+      targetCensusID
+    ]);
+    console.log(`[null-batch] after: ${after[0].count}`);
+    expect(Number(after[0].count)).toBe(0);
+  }, 120000);
+
+  /**
+   * The deletes are issued as `DELETE ... LIMIT n` in a loop so no single
+   * statement locks an entire 100k-row census. The loop has to keep going past
+   * the first window — a seeded set larger than one chunk proves it does, and
+   * that it terminates.
+   */
+  it('deletes a census larger than one delete chunk, not just the first window', async () => {
+    const overOneChunk = CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE + 137;
+    // Generated set-wise: 5137 single-row INSERTs would dominate the suite.
+    // The server default caps recursive CTEs at 1000 iterations.
+    await connection.query(`SET SESSION cte_max_recursion_depth = ?`, [overOneChunk + 1]);
+    await connection.query(
+      `INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+         UploadFileID, UploadBatchID, RawTreeTag, SourceRowIndex, IsActive)
+       WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
+       SELECT ?, NULL, FALSE, '2024-03-15', 1.0, 1.0, ?, 'bulk-prior-batch', CONCAT('B', n), n, 1 FROM seq`,
+      [overOneChunk, targetCensusID, PRIOR_FILE_WITH_METRICS]
+    );
+    expect(await countRows(targetCensusID, 'all')).toBe(overOneChunk);
+
+    await runCleanReupload();
+
+    const surviving = await countRows(targetCensusID, 'all');
+    console.log(`[chunked-delete] seeded=${overOneChunk} chunk=${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE} surviving=${surviving}`);
+    expect(surviving).toBe(0);
+  }, 180000);
 
   it('removes prior rows under a DIFFERENT UploadFileID (census replacement, not filename replacement)', async () => {
     await seedFixture();
