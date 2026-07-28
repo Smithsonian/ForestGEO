@@ -38,11 +38,11 @@ function hasSchemaAccess(session: Session, schema: string): boolean {
   return (session.user?.sites ?? []).some(site => site.schemaName === schema);
 }
 
-async function assertPlotCensusExists(cm: ConnectionManager, schema: string, plotID: number, censusID: number): Promise<void> {
+async function resolvePlotCensusNumber(cm: ConnectionManager, schema: string, plotID: number, censusID: number): Promise<number> {
   const rows = await cm.executeQuery(
     safeFormatQuery(
       schema,
-      `SELECT 1 AS ok
+      `SELECT c.PlotCensusNumber
        FROM ??.census c
        WHERE c.PlotID = ?
          AND c.CensusID = ?
@@ -55,6 +55,11 @@ async function assertPlotCensusExists(cm: ConnectionManager, schema: string, plo
   if (!Array.isArray(rows) || rows.length === 0) {
     throw new ScopeAccessError('plot/census scope is not available');
   }
+  const plotCensusNumber = Number(rows[0].PlotCensusNumber);
+  if (!Number.isSafeInteger(plotCensusNumber) || plotCensusNumber <= 0) {
+    throw new ScopeAccessError('plot/census scope has an invalid census number');
+  }
+  return plotCensusNumber;
 }
 
 async function probeActiveUploadSession(cm: ConnectionManager, schema: string, plotID: number, censusID: number, transactionID?: string): Promise<void> {
@@ -135,12 +140,16 @@ async function probeActiveValidationRun(cm: ConnectionManager, schema: string, p
  * CoreMeasurementID + CensusID + PlotID + StemGUID shape and translates a
  * missed lookup to TargetNotFoundError (→ 404).
  */
-export async function assertCanEditMeasurementScope(cm: ConnectionManager, session: Session, input: MeasurementScopeInput): Promise<void> {
+export async function assertCanEditMeasurementScope(
+  cm: ConnectionManager,
+  session: Session,
+  input: MeasurementScopeInput
+): Promise<{ plotCensusNumber: number }> {
   if (!hasSchemaAccess(session, input.schema)) {
     throw new ScopeAccessError();
   }
 
-  await assertPlotCensusExists(cm, input.schema, input.plotID, input.censusID);
+  return { plotCensusNumber: await resolvePlotCensusNumber(cm, input.schema, input.plotID, input.censusID) };
 }
 
 /**

@@ -13,7 +13,7 @@ import type { ArcgisImportReference } from '@/lib/arcgis/types';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import ailogger from '@/ailogger';
 
-interface BlobUploadResult {
+export interface BlobUploadResult {
   fileName: string;
   blobContainer: string;
   blobName: string;
@@ -21,6 +21,12 @@ interface BlobUploadResult {
   byteSize: number;
   formType: string;
   sourceFormat: string;
+}
+
+export interface UploadStorageScope {
+  schema: string;
+  plotID: number;
+  plotCensusNumber: number;
 }
 
 interface UploadJobResponse {
@@ -75,6 +81,34 @@ async function readErrorMessage(response: Response): Promise<string> {
   }
 }
 
+export async function cleanupUploadedFiles(files: BlobUploadResult[], scope: UploadStorageScope): Promise<void> {
+  const results = await Promise.allSettled(
+    files.map(file => {
+      const params = new URLSearchParams({
+        schema: scope.schema,
+        plotID: String(scope.plotID),
+        census: String(scope.plotCensusNumber),
+        container: file.blobContainer,
+        filename: file.blobName
+      });
+      return fetch(`/api/files/delete?${params.toString()}`, { method: 'DELETE' }).then(response => {
+        if (!response.ok && response.status !== 404) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+      });
+    })
+  );
+
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      ailogger.warn(
+        `[UploadAsyncJob] Failed to clean uploaded blob ${files[index].blobName}:`,
+        result.reason instanceof Error ? result.reason : new Error(String(result.reason))
+      );
+    }
+  });
+}
+
 export default function UploadAsyncJob({
   acceptedFiles,
   parsedData,
@@ -106,6 +140,9 @@ export default function UploadAsyncJob({
     let cancelled = false;
 
     async function runAsyncUpload() {
+      const uploadedFiles: BlobUploadResult[] = [];
+      let cleanupAllowed = true;
+      let cleanupScope: UploadStorageScope | null = null;
       try {
         const schema = currentSite?.schemaName;
         const plotID = currentPlot?.plotID;
@@ -118,7 +155,7 @@ export default function UploadAsyncJob({
           throw new Error('Missing required context for async upload job');
         }
 
-        const uploadedFiles: BlobUploadResult[] = [];
+        cleanupScope = { schema, plotID, plotCensusNumber };
         const totalSteps = acceptedFiles.length + 1;
 
         for (let index = 0; index < acceptedFiles.length; index++) {
@@ -155,6 +192,10 @@ export default function UploadAsyncJob({
         if (cancelled) return;
         setCurrentStep('Queueing background processing job...');
 
+        // Once the queue request is on the wire, a network failure is ambiguous:
+        // the server may already have committed the job. Do not delete blobs in
+        // that case; an accepted worker could be reading them.
+        cleanupAllowed = false;
         const jobResponse = await fetch('/api/uploadjobs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -192,6 +233,8 @@ export default function UploadAsyncJob({
         // kicks the worker immediately, so processing may already be running.
         const jobPayload = (await jobResponse.json().catch(() => ({}))) as UploadJobResponse;
         if (!jobResponse.ok || !jobPayload.job?.jobID) {
+          // A definitive HTTP rejection means no job owns these blobs.
+          cleanupAllowed = !jobResponse.ok;
           throw new Error(jobPayload.error || jobPayload.details || `Failed to queue background upload job: HTTP ${jobResponse.status}`);
         }
 
@@ -205,6 +248,10 @@ export default function UploadAsyncJob({
         setUploadError(err);
         setErrorComponent('UploadAsyncJob');
         setReviewState(ReviewStates.ERRORS);
+      } finally {
+        if (cleanupAllowed && cleanupScope && uploadedFiles.length > 0) {
+          await cleanupUploadedFiles(uploadedFiles, cleanupScope);
+        }
       }
     }
 

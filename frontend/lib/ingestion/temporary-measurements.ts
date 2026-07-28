@@ -1,6 +1,7 @@
 import { format } from 'mysql2/promise';
 import moment from 'moment/moment';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { FileRow, SourceFormat } from '@/config/macros/formdetails';
@@ -255,60 +256,67 @@ export async function cleanupPreviousFileUploads(
   censusID: number,
   transactionID: string
 ): Promise<number> {
-  const findBatchesSQL = format(
-    `SELECT batchID FROM ??.uploadmetrics
-     WHERE plotID = ? AND censusID = ? AND batchID <> ?`,
-    [schema]
-  );
-  const previousBatches = await connectionManager.executeQuery(findBatchesSQL, [plotID, censusID, currentBatchID], transactionID);
+  // SCOPE: the whole target census, minus the incoming batch family.
+  //
+  // This deliberately does NOT enumerate batches from uploadmetrics. A batch
+  // whose ingestion died before the stored procedure recorded its metric row
+  // has no uploadmetrics entry, so a metrics-driven delete list cannot see it:
+  // on live forestgeo_harvard (measured 2026-07-28) only 2 of 12 sub-batches
+  // had metrics, and a metrics-driven cleanup stranded 96,227 of 106,227 rows
+  // permanently, with no later mechanism that would ever remove them.
+  //
+  // It also does NOT filter on UploadFileID. Clean re-upload is CENSUS
+  // replacement, not filename replacement — restricting to the same file would
+  // preserve stale data whenever the replacement file was renamed or the census
+  // was previously assembled from several files.
+  //
+  // The incoming batch is excluded as a FAMILY (`batch` and `batch__subNNN`),
+  // not just by exact id, so a re-entrant call after this upload has already
+  // split cannot delete its own in-flight rows.
+  const incomingSubBatchPattern = buildSubBatchPattern(currentBatchID);
+  const notIncomingFamily = `NOT (%COL% <=> ?) AND NOT (%COL% LIKE ? ${LIKE_ESCAPE_CLAUSE})`;
+  const familyParams = [currentBatchID, incomingSubBatchPattern];
 
-  if (!Array.isArray(previousBatches) || previousBatches.length === 0) return 0;
-
-  const oldBatchIDs = previousBatches.map((row: { batchID: string }) => row.batchID);
-  const placeholders = oldBatchIDs.map(() => '?').join(', ');
-
-  // Delete validation error links linked to old coremeasurements from previous uploads
-  // in the same census scope, regardless of the original filename.
-  // Prefer the unified measurement_error_log table, but fall back to cmverrors in legacy schemas.
-  const deleteValidationErrorsSQL = format(
+  // Error links first. The FK is ON DELETE CASCADE in current schemas, but
+  // legacy schemas may lack it, and an explicit scoped delete is cheap.
+  const deleteValidationErrorsSQL = safeFormatQuery(
+    schema,
     `DELETE mel FROM ??.measurement_error_log mel
      INNER JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
-     WHERE cm.CensusID = ? AND cm.UploadBatchID IN (${placeholders})`,
-    [schema, schema]
+     WHERE cm.CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'cm.UploadBatchID')}`
   );
   try {
-    await connectionManager.executeQuery(deleteValidationErrorsSQL, [censusID, ...oldBatchIDs], transactionID);
+    await connectionManager.executeQuery(deleteValidationErrorsSQL, [censusID, ...familyParams], transactionID);
   } catch (error: unknown) {
     if (!isMissingTableError(error, 'measurement_error_log')) {
       throw error;
     }
 
-    const deleteLegacyValidationErrorsSQL = format(
+    const deleteLegacyValidationErrorsSQL = safeFormatQuery(
+      schema,
       `DELETE e FROM ??.cmverrors e
        INNER JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = e.CoreMeasurementID
-       WHERE cm.CensusID = ? AND cm.UploadBatchID IN (${placeholders})`,
-      [schema, schema]
+       WHERE cm.CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'cm.UploadBatchID')}`
     );
-    await connectionManager.executeQuery(deleteLegacyValidationErrorsSQL, [censusID, ...oldBatchIDs], transactionID);
+    await connectionManager.executeQuery(deleteLegacyValidationErrorsSQL, [censusID, ...familyParams], transactionID);
   }
 
-  // Delete old coremeasurements
-  const deleteCmSQL = format(
+  // Every prior measurement in the census — ingested and unresolved alike.
+  const deleteCmSQL = safeFormatQuery(
+    schema,
     `DELETE FROM ??.coremeasurements
-     WHERE CensusID = ? AND UploadBatchID IN (${placeholders})`,
-    [schema]
+     WHERE CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'UploadBatchID')}`
   );
-  const cmResult = await connectionManager.executeQuery(deleteCmSQL, [censusID, ...oldBatchIDs], transactionID);
+  const cmResult = await connectionManager.executeQuery(deleteCmSQL, [censusID, ...familyParams], transactionID);
   const deletedCmRows = Number((cmResult as { affectedRows?: number })?.affectedRows ?? 0);
 
-  // Delete old failedmeasurements
-  const deleteFailedSQL = format(
+  const deleteFailedSQL = safeFormatQuery(
+    schema,
     `DELETE FROM ??.failedmeasurements
-     WHERE CensusID = ? AND BatchID IN (${placeholders})`,
-    [schema]
+     WHERE CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'BatchID')}`
   );
   try {
-    await connectionManager.executeQuery(deleteFailedSQL, [censusID, ...oldBatchIDs], transactionID);
+    await connectionManager.executeQuery(deleteFailedSQL, [censusID, ...familyParams], transactionID);
   } catch (error: unknown) {
     if (!isMissingTableError(error, 'failedmeasurements')) {
       throw error;
@@ -316,18 +324,20 @@ export async function cleanupPreviousFileUploads(
     ailogger.info(`Skipping failedmeasurements cleanup for ${fileName}: legacy table does not exist in ${schema}`);
   }
 
-  // Delete old uploadmetrics so the stored procedure won't skip the new batch
-  const deleteMetricsSQL = format(
+  // Prior metric rows for this scope must go too, or the stored procedure's
+  // idempotency guard would skip re-ingestion. The incoming upload keeps its
+  // own metrics — those belong to the replacement, not the thing replaced.
+  const deleteMetricsSQL = safeFormatQuery(
+    schema,
     `DELETE FROM ??.uploadmetrics
-     WHERE plotID = ? AND censusID = ? AND batchID IN (${placeholders})`,
-    [schema]
+     WHERE plotID = ? AND censusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'batchID')}`
   );
-  await connectionManager.executeQuery(deleteMetricsSQL, [plotID, censusID, ...oldBatchIDs], transactionID);
+  await connectionManager.executeQuery(deleteMetricsSQL, [plotID, censusID, ...familyParams], transactionID);
 
   if (deletedCmRows > 0) {
     ailogger.info(
-      `Clean re-upload for ${fileName}: removed ${deletedCmRows} coremeasurement(s) and associated errors ` +
-        `from ${oldBatchIDs.length} previous batch(es) for census ${censusID}`
+      `Clean re-upload for ${fileName}: removed ${deletedCmRows} prior coremeasurement(s) and associated errors ` +
+        `from census ${censusID} (plot ${plotID}), excluding the incoming batch family ${currentBatchID}`
     );
   }
 

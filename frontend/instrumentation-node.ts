@@ -18,7 +18,7 @@
  */
 import ailogger from '@/ailogger';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
-import { installUploadSweeperShutdown, startUploadJobSweeper, sweepOnce } from '@/lib/background-jobs/sweeper';
+import { installUploadSweeperShutdown, runSweepTick, startUploadJobSweeper } from '@/lib/background-jobs/sweeper';
 import { ensureCatalogTables } from '@/lib/provisioning/orchestrator';
 import { installShutdownHandler, pickupStaleRuns } from '@/lib/provisioning/worker';
 
@@ -59,9 +59,9 @@ void (async () => {
     // Both shutdown hooks (provisioning's installShutdownHandler and this one)
     // coexist via separate process.once registrations.
     installUploadSweeperShutdown();
-    const { reclaimed, dispatched } = await sweepOnce(pool);
-    if (reclaimed.length > 0 || dispatched.length > 0) {
-      ailogger.info('upload.sweeper.startup', { reclaimed, dispatched });
+    const result = await runSweepTick(pool);
+    if (result && (result.reclaimed.length > 0 || result.dispatched.length > 0)) {
+      ailogger.info('upload.sweeper.startup', result);
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

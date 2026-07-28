@@ -18,6 +18,13 @@ export class JobFileNotFoundError extends Error {
   }
 }
 
+export class IdempotencyKeyConflictError extends Error {
+  constructor(public readonly idempotencyKey: string) {
+    super(`Idempotency key "${idempotencyKey}" was already used for a different upload job request`);
+    this.name = 'IdempotencyKeyConflictError';
+  }
+}
+
 /**
  * Thrown by the worker when a job can never succeed no matter how many times it
  * is retried (unsupported form-type routing, malformed file content, validation

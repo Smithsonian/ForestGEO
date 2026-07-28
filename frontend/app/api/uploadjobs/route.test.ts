@@ -19,14 +19,16 @@ const mocks = vi.hoisted(() => ({
   getSessionUserId: vi.fn(() => 'mason@example.com'),
   getSessionUserIds: vi.fn(() => ['mason@example.com', 'Mason']),
   isValidSchema: vi.fn(() => true),
-  assertCanEditMeasurementScope: vi.fn(async () => undefined),
+  assertCanEditMeasurementScope: vi.fn(async () => ({ plotCensusNumber: 2 })),
+  getContainerName: vi.fn(() => 'forestgeo-testing-storage'),
   getPoolMonitorInstance: vi.fn(() => ({ pool: 'catalog-pool' })),
   createUploadBackgroundJob: vi.fn(),
   listBackgroundJobs: vi.fn(),
   isAsyncUploadEnabledFor: vi.fn(() => true),
   runJobIfClaimable: vi.fn(async () => undefined),
   executeQuery: vi.fn(),
-  loggerError: vi.fn()
+  loggerError: vi.fn(),
+  IdempotencyKeyConflictError: class IdempotencyKeyConflictError extends Error {}
 }));
 
 vi.mock('@/auth', () => ({
@@ -61,6 +63,15 @@ vi.mock('@/lib/db/poolmonitorsingleton', () => ({
 vi.mock('@/lib/background-jobs/repository', () => ({
   createUploadBackgroundJob: mocks.createUploadBackgroundJob,
   listBackgroundJobs: mocks.listBackgroundJobs
+}));
+
+vi.mock('@/lib/background-jobs/errors', () => ({
+  IdempotencyKeyConflictError: mocks.IdempotencyKeyConflictError
+}));
+
+vi.mock('@/config/macros/containernames', () => ({
+  getContainerName: mocks.getContainerName,
+  SchemaContainerNameError: class SchemaContainerNameError extends Error {}
 }));
 
 vi.mock('@/lib/background-jobs/feature-gate', () => ({
@@ -322,6 +333,38 @@ describe('POST /api/uploadjobs', () => {
     expect(mocks.runJobIfClaimable).not.toHaveBeenCalled();
   });
 
+  it('rejects a client-selected blob container outside the authorized plot/census scope', async () => {
+    const response = await callPost(makeCreateRequest(makeCreateBody({ files: [{ ...makeCreateBody().files[0], blobContainer: 'other-site' }] })));
+
+    expect(response.status).toBe(403);
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate file names before batch bookkeeping can collide', async () => {
+    const file = makeCreateBody().files[0];
+    const response = await callPost(makeCreateRequest(makeCreateBody({ files: [file, { ...file, blobName: 'uploads/job-1/copy.csv' }] })));
+
+    expect(response.status).toBe(400);
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  it('rejects more than 100 files', async () => {
+    const file = makeCreateBody().files[0];
+    const files = Array.from({ length: 101 }, (_, index) => ({ ...file, fileName: `file-${index}.csv`, blobName: `uploads/file-${index}.csv` }));
+    const response = await callPost(makeCreateRequest(makeCreateBody({ files })));
+
+    expect(response.status).toBe(400);
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 when an idempotency key belongs to a different request', async () => {
+    mocks.createUploadBackgroundJob.mockRejectedValueOnce(new mocks.IdempotencyKeyConflictError('conflict'));
+    const response = await callPost(makeCreateRequest(makeCreateBody()));
+
+    expect(response.status).toBe(409);
+    expect(mocks.runJobIfClaimable).not.toHaveBeenCalled();
+  });
+
   it('rejects arcgis_xlsx jobs that are missing the pre-flight import session', async () => {
     const response = await callPost(
       makeCreateRequest(
@@ -343,6 +386,7 @@ describe('POST /api/uploadjobs', () => {
       makeCreateRequest(
         makeCreateBody({
           sourceFormat: 'arcgis_xlsx',
+          files: [{ ...makeCreateBody().files[0], fileName: 'survey.xlsx', blobName: 'survey.xlsx', sourceFormat: 'arcgis_xlsx' }],
           payload: {
             arcgisImportSession: { importSessionId: 'import-1', fileName: 'survey.xlsx', rowCount: 100 }
           }
@@ -352,6 +396,25 @@ describe('POST /api/uploadjobs', () => {
 
     expect(response.status).toBe(202);
     expect(mocks.runJobIfClaimable).toHaveBeenCalledWith(42);
+  });
+
+  it('rejects an ArcGIS job with more than one file', async () => {
+    const file = makeCreateBody().files[0];
+    const response = await callPost(
+      makeCreateRequest(
+        makeCreateBody({
+          sourceFormat: 'arcgis_xlsx',
+          files: [
+            { ...file, fileName: 'survey.xlsx', blobName: 'survey.xlsx', sourceFormat: 'arcgis_xlsx' },
+            { ...file, fileName: 'other.xlsx', blobName: 'other.xlsx', sourceFormat: 'arcgis_xlsx' }
+          ],
+          payload: { arcgisImportSession: { importSessionId: 'import-1', fileName: 'survey.xlsx', rowCount: 100 } }
+        })
+      )
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
   });
 });
 
@@ -410,5 +473,19 @@ describe('GET /api/uploadjobs', () => {
     expect(response.status).toBe(403);
     expect(mocks.listBackgroundJobs).not.toHaveBeenCalled();
     expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed numeric filters instead of silently broadening the list', async () => {
+    const response = await callGet(makeListRequest('?schema=forestgeo_testing&plotID=not-a-number'));
+
+    expect(response.status).toBe(400);
+    expect(mocks.listBackgroundJobs).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed boolean filters', async () => {
+    const response = await callGet(makeListRequest('?schema=forestgeo_testing&activeOnly=0'));
+
+    expect(response.status).toBe(400);
+    expect(mocks.listBackgroundJobs).not.toHaveBeenCalled();
   });
 });

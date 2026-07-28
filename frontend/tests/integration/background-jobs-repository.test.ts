@@ -12,7 +12,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import mysql, { type Pool } from 'mysql2/promise';
 import { applyCatalogMigrationsForTests } from '../setup/catalog-migrations';
-import { JobFileNotFoundError, WorkerLeaseLostError } from '@/lib/background-jobs/errors';
+import { IdempotencyKeyConflictError, JobFileNotFoundError, WorkerLeaseLostError } from '@/lib/background-jobs/errors';
 import {
   assignFileBatchID,
   cancelBackgroundJob,
@@ -251,6 +251,15 @@ describe('createUploadBackgroundJob — duplicate idempotency key', () => {
 
     const [rows]: any = await pool.query(`SELECT COUNT(*) AS cnt FROM catalog.background_jobs WHERE IdempotencyKey = ?`, [idempotencyKey]);
     expect(Number(rows[0].cnt)).toBe(2);
+  });
+
+  it('rejects reuse of a key for a different request instead of returning an unrelated job', async () => {
+    const idempotencyKey = 'conflicting-request-key';
+    await createUploadBackgroundJob(pool, makeJobInput({ idempotencyKey }), TEST_USER_A);
+
+    await expect(createUploadBackgroundJob(pool, makeJobInput({ idempotencyKey, schema: 'forestgeo_other', plotID: 99 }), TEST_USER_A)).rejects.toBeInstanceOf(
+      IdempotencyKeyConflictError
+    );
   });
 });
 

@@ -170,17 +170,27 @@ describe('POST /api/sqlpacketload authz', () => {
   it('allows a non-admin member with a valid token to reach the temporarymeasurements insert path (200)', async () => {
     authMock.mockResolvedValue({ user: { email: MEMBER_EMAIL, userStatus: 'field crew', sites: [{ schemaName: MEMBER_SCHEMA }] } });
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
+    // SQL-aware rather than positional. A fixed mockResolvedValueOnce chain
+    // encodes the exact number and order of queries the staging path happens to
+    // issue, so any pipeline refactor desynchronizes it and a later call reads
+    // `undefined` — which surfaces as an unrelated-looking 500 in an authz test.
+    // Keying on the statement keeps this suite about authorization.
+    // Staging measures insertedCount as the row-count delta across its INSERT,
+    // so the staged-row count must read 0 before and 1 after.
+    let stagedRowCount = 0;
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
+      const text = String(sql);
+      if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
+      if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
+      if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: stagedRowCount }];
+      if (text.includes('COUNT(')) return [{ count: 0 }];
+      if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 0 };
+      if (text.trimStart().toUpperCase().startsWith('INSERT')) {
+        if (text.includes('temporarymeasurements')) stagedRowCount += 1;
+        return { affectedRows: 1, insertId: 1 };
+      }
+      return [];
+    });
 
     const { POST } = await import('@/app/api/sqlpacketload/route');
     const res = (await POST(makeMeasurementRequest(MEMBER_SCHEMA)))!;

@@ -45,7 +45,7 @@ describe('assertCanEditMeasurementScope', () => {
 
   it('allows global users after the plot/census existence check passes', async () => {
     const cm = makeConnectionManager();
-    cm.executeQuery.mockResolvedValueOnce([{ ok: 1 }]);
+    cm.executeQuery.mockResolvedValueOnce([{ PlotCensusNumber: 7 }]);
 
     await expect(
       assertCanEditMeasurementScope(cm, makeSession({ userStatus: 'global', sites: [] }), {
@@ -53,7 +53,7 @@ describe('assertCanEditMeasurementScope', () => {
         plotID: 1,
         censusID: 2
       })
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ plotCensusNumber: 7 });
 
     expect(cm.executeQuery).toHaveBeenCalledTimes(1);
     expect(cm.executeQuery.mock.calls[0][0]).toContain('FROM `forestgeo_testing`.census');
@@ -62,6 +62,19 @@ describe('assertCanEditMeasurementScope', () => {
   it('rejects unavailable plot/census scopes', async () => {
     const cm = makeConnectionManager();
     cm.executeQuery.mockResolvedValueOnce([]);
+
+    await expect(
+      assertCanEditMeasurementScope(cm, makeSession(), {
+        schema: 'forestgeo_testing',
+        plotID: 1,
+        censusID: 2
+      })
+    ).rejects.toBeInstanceOf(ScopeAccessError);
+  });
+
+  it('rejects a census row whose storage census number is invalid', async () => {
+    const cm = makeConnectionManager();
+    cm.executeQuery.mockResolvedValueOnce([{ PlotCensusNumber: null }]);
 
     await expect(
       assertCanEditMeasurementScope(cm, makeSession(), {

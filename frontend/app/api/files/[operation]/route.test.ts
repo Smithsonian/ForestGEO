@@ -287,6 +287,23 @@ describe('/api/files/[operation]', () => {
     );
   });
 
+  it('returns 400 for malformed fileRowErrors metadata', async () => {
+    const formData = new FormData();
+    const file = new File(['TreeTag\n1'], 'measurements.csv', { type: 'text/csv' });
+    formData.append('measurements.csv', file);
+    formData.append('fileRowErrors', '{not-json');
+    const request = makeRequest(
+      'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&census=2&fileName=measurements.csv&formType=measurements',
+      { method: 'POST' }
+    ) as any;
+    request.formData = vi.fn(async () => formData);
+
+    const response = await POST(request, props('upload'));
+
+    expect(response.status).toBe(400);
+    expect(mocks.uploadValidFileAsBufferWithMetadata).not.toHaveBeenCalled();
+  });
+
   it('uploads using the sanitized filename that passed route validation', async () => {
     const formData = new FormData();
     const file = new File(['TreeTag\n1'], 'bad/name.csv', { type: 'text/csv' });

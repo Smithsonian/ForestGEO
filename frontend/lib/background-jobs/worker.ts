@@ -144,6 +144,16 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
     heartbeatTimer: null
   };
 
+  const runStartedAt = Date.now();
+  ailogger.info('upload.worker.started', {
+    jobID,
+    workerID,
+    schema: job.schemaName,
+    plotID: job.plotID,
+    censusID: job.censusID,
+    fileCount: job.files.length,
+    retryCount: job.retryCount
+  });
   startHeartbeat(ctx);
   let completed = false;
   try {
@@ -166,6 +176,16 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
   } finally {
     stopHeartbeat(ctx);
     await releaseUploadSession(ctx, completed);
+    ailogger.info('upload.worker.finished', {
+      jobID,
+      workerID,
+      completed,
+      leaseLost: ctx.leaseLost,
+      cancelRequested: ctx.cancelRequested,
+      processedRows: ctx.processedRows,
+      failedRows: ctx.failedRows,
+      durationMs: Date.now() - runStartedAt
+    });
   }
 }
 
