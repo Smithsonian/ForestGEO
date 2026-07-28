@@ -193,6 +193,170 @@ describe('Ingestion invariants (bulkingestionprocess)', () => {
       expect(String(preservedRows[1].Description)).toContain('incoming row preserved for review');
     });
 
+    it('allows a same-stem remeasurement on a DIFFERENT date across batches (the reingestion contract)', async () => {
+      // The conflict check is scoped to the collapser's key (StemGUID + MeasurementDate):
+      // a same-stem measurement on a different date is a legitimate remeasurement, and the
+      // reingestion flow depends on it never being flagged as DUPLICATE_TAG_CONFLICT_EXISTING.
+      const censusID = testData.census[0].censusID;
+      const remeasureDate = '2024-09-20';
+      const original: ScenarioMeasurement = {
+        treeTag: 'REMEASURE_OK',
+        stemTag: '1',
+        speciesCode: testData.species[0].SpeciesCode,
+        quadratName: testData.quadrats[0].QuadratName,
+        x: 6,
+        y: 6,
+        dbh: 10,
+        hom: 1.3,
+        date: MEASUREMENT_DATE
+      };
+
+      const first = await insertTestMeasurements(connection, testData, [original], {
+        censusID,
+        fileID: 'remeasure_original.csv',
+        batchID: 'remeasure_original'
+      });
+      const firstResult = await runBulkIngestion(connection, first.fileID, first.batchID);
+      expect(firstResult.batch_failed, firstResult.message).toBe(false);
+
+      const second = await insertTestMeasurements(connection, testData, [{ ...original, dbh: 12, date: remeasureDate }], {
+        censusID,
+        fileID: 'remeasure_followup.csv',
+        batchID: 'remeasure_followup'
+      });
+      const secondResult = await runBulkIngestion(connection, second.fileID, second.batchID);
+      expect(secondResult.batch_failed, secondResult.message).toBe(false);
+
+      const outcome = await readIngestionOutcome(connection, { ...second, censusID });
+      assertOutcome(
+        outcome,
+        {
+          sourceRecords: 1,
+          successfulRows: 1,
+          failedRows: 0,
+          remainingTemporaryRows: 0,
+          metricProcessedRecords: 1,
+          metricFailedRecords: 0,
+          metricMissingRecords: 0,
+          errorCodes: [],
+          alertTypes: []
+        },
+        secondResult,
+        1
+      );
+
+      // Both measurements live on the SAME stem — a remeasurement, not a forked stem.
+      const [stemRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(DISTINCT cm.StemGUID) AS stems, COUNT(*) AS measurements
+         FROM coremeasurements cm
+         WHERE cm.CensusID = ? AND cm.UploadFileID IN (?, ?) AND cm.StemGUID IS NOT NULL`,
+        [censusID, first.fileID, second.fileID]
+      );
+      expect(Number(stemRows[0].stems), 'one shared stem across both batches').toBe(1);
+      expect(Number(stemRows[0].measurements), 'two measurements on that stem').toBe(2);
+    });
+
+    it('flags an incoming row when ANY same-TreeTag tree has a same-date measurement — the conflict is tag-scoped, not resolved-stem-scoped', async () => {
+      // SEMANTIC PIN, decided deliberately: the conflict predicate re-derives the stem
+      // through trees(TreeTag) -> stems(StemTag) WITHOUT species, so it fires even when the
+      // incoming row's OWN resolved stem (a different tree of another species, since
+      // ux_trees_treetag_speciesid_censusid scopes tags per species) has no measurement on
+      // the date. That wider net is what preserves species-corrected re-uploads for review
+      // instead of silently forking a second tree. A StemGUID-scoped join here would let
+      // this row through — do NOT "simplify" the query to one without re-ratifying that
+      // trade-off (it also flags legitimately recurring tags across species, as below).
+      const censusID = testData.census[0].censusID;
+      const sharedTag = 'DIV_TAG';
+      const conflictDate = '2024-09-20';
+
+      // Tree A (species[0]): ingested normally, measurement on the ORIGINAL date only.
+      const original: ScenarioMeasurement = {
+        treeTag: sharedTag,
+        stemTag: '1',
+        speciesCode: testData.species[0].SpeciesCode,
+        quadratName: testData.quadrats[0].QuadratName,
+        x: 7,
+        y: 7,
+        dbh: 10,
+        hom: 1.3,
+        date: MEASUREMENT_DATE
+      };
+      const first = await insertTestMeasurements(connection, testData, [original], {
+        censusID,
+        fileID: 'divtag_original.csv',
+        batchID: 'divtag_original'
+      });
+      const firstResult = await runBulkIngestion(connection, first.fileID, first.batchID);
+      expect(firstResult.batch_failed, firstResult.message).toBe(false);
+
+      // Tree B: same TreeTag, DIFFERENT species, its own stem '1', with a measurement on
+      // conflictDate — the bait the tag rematch used to bite on.
+      const [speciesRows] = await connection.query<RowDataPacket[]>(`SELECT SpeciesID FROM species WHERE SpeciesCode = ? AND IsActive = 1`, [
+        testData.species[1].SpeciesCode
+      ]);
+      const [quadratRows] = await connection.query<RowDataPacket[]>(`SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND IsActive = 1 LIMIT 1`, [
+        testData.quadrats[0].QuadratName
+      ]);
+      const [treeInsert] = await connection.query<ResultSetHeader>(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`, [
+        sharedTag,
+        speciesRows[0].SpeciesID,
+        censusID
+      ]);
+      const [stemInsert] = await connection.query<ResultSetHeader>(
+        `INSERT INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, IsActive)
+         VALUES (?, ?, ?, NULL, '1', 99.9, 99.9, 1)`,
+        [treeInsert.insertId, quadratRows[0].QuadratID, censusID]
+      );
+      await connection.query(
+        `INSERT INTO coremeasurements
+           (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+            UploadFileID, UploadBatchID, SourceRowIndex, IsActive)
+         VALUES (?, ?, FALSE, ?, 33, 1.3, 'divtag_other_species.csv', 'divtag_other_species', 1, 1)`,
+        [censusID, stemInsert.insertId, conflictDate]
+      );
+
+      // Incoming row: resolves to tree A's stem (species[0]), which has NO measurement on
+      // conflictDate — but tree B (same tag, other species) does. The tag-scoped predicate
+      // must flag it and preserve the raw values for review.
+      const incoming = await insertTestMeasurements(connection, testData, [{ ...original, dbh: 22, date: conflictDate }], {
+        censusID,
+        fileID: 'divtag_incoming.csv',
+        batchID: 'divtag_incoming'
+      });
+      const incomingResult = await runBulkIngestion(connection, incoming.fileID, incoming.batchID);
+      expect(incomingResult.batch_failed, incomingResult.message).toBe(false);
+
+      const outcome = await readIngestionOutcome(connection, { ...incoming, censusID });
+      assertOutcome(
+        outcome,
+        {
+          sourceRecords: 1,
+          successfulRows: 0,
+          failedRows: 1,
+          remainingTemporaryRows: 0,
+          metricProcessedRecords: 0,
+          metricFailedRecords: 1,
+          metricMissingRecords: 0,
+          errorCodes: [INGESTION_ERROR_CODE.DUPLICATE_TAG_CONFLICT_EXISTING],
+          alertTypes: [INGESTION_ALERT_TYPE.DUPLICATE_TAG_CONFLICT_EXISTING]
+        },
+        incomingResult,
+        1
+      );
+
+      // The incoming values are preserved as an unresolved row, not silently dropped.
+      const [preservedRows] = await connection.query<RowDataPacket[]>(
+        `SELECT StemGUID, MeasuredDBH, RawTreeTag, Description FROM coremeasurements
+         WHERE UploadFileID = ? AND CensusID = ?`,
+        [incoming.fileID, censusID]
+      );
+      expect(preservedRows, 'exactly one preserved row for the incoming batch').toHaveLength(1);
+      expect(preservedRows[0].StemGUID, 'preserved as unresolved (StemGUID NULL)').toBeNull();
+      expect(Number(preservedRows[0].MeasuredDBH)).toBe(22);
+      expect(preservedRows[0].RawTreeTag).toBe(sharedTag);
+      expect(String(preservedRows[0].Description)).toContain('incoming row preserved for review');
+    });
+
     it('does not delete historical successful conflicts during the collapser pass', async () => {
       const censusID = testData.census[0].censusID;
       const original: ScenarioMeasurement = {

@@ -52,9 +52,12 @@ describe('upload procedure regressions', () => {
     const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain("'DUPLICATE_TAG_CONFLICT_EXISTING'");
-    expect(canonicalSql).toContain('INNER JOIN trees t_existing');
-    expect(canonicalSql).toContain('INNER JOIN stems s_existing');
-    expect(canonicalSql).toContain('INNER JOIN coremeasurements cm_existing_stem');
+    // STRAIGHT_JOIN (not INNER JOIN) is load-bearing: it pins the batch-driven join order
+    // so the optimizer can never flip to the trees x coremeasurements pair explosion that
+    // stalled the 2026-07-28 Harvard census upload (8s -> 1,500s+ per sub-batch).
+    expect(canonicalSql).toContain('STRAIGHT_JOIN trees t_existing');
+    expect(canonicalSql).toContain('STRAIGHT_JOIN stems s_existing');
+    expect(canonicalSql).toContain('STRAIGHT_JOIN coremeasurements cm_existing_stem');
     expect(canonicalSql).toContain('CREATE TEMPORARY TABLE prior_core_insert_failure_rows');
     expect(canonicalSql).toContain('LEFT JOIN prior_core_insert_failure_rows prior_failure');
     expect(canonicalSql).toContain('CREATE TEMPORARY TABLE existing_tag_stemtag_collision_failures');

@@ -2981,22 +2981,34 @@ BEGIN
         FailureReason  VARCHAR(255)    NOT NULL
     );
 
+    -- The tag-level rematch (rather than a join on the row's resolved StemGUID) is
+    -- deliberate and load-bearing: the conflict is scoped to the TreeTag/StemTag PAIR, so a
+    -- species-corrected re-upload of an existing pair — which resolves to a freshly created
+    -- tree/stem with no measurements of its own — is still preserved for review instead of
+    -- silently forking a second tree (pinned by ingestion-invariants "preserves an incoming
+    -- correction...").
+    -- STRAIGHT_JOIN forces the only safe execution order, rbr -> trees -> stems -> cm:
+    -- one indexed lookup per stage (ux_trees_treetag_speciesid_censusid,
+    -- ux_stems_treeid_stemtag_census, ux_measure_unique), bounded by batch size no matter
+    -- how large trees/coremeasurements grow. Left to itself the optimizer can (and in the
+    -- 2026-07-28 Harvard census upload did) start from a trees x coremeasurements pair
+    -- explosion instead: sub-batch ingestion went 8s -> 8s -> 1500s+ as the census filled.
     INSERT IGNORE INTO existing_tag_stemtag_collision_failures (SourceRowIndex, FailureReason)
     SELECT DISTINCT rbr.id,
            LEFT(CONCAT('TreeTag/StemTag "', rbr.TreeTag, '"/"', rbr.StemTag,
                        '" already has a successful measurement for this date in this census; incoming row preserved for review.'),
                 255)
     FROM resolved_batch_rows rbr
-    INNER JOIN trees t_existing
+    STRAIGHT_JOIN trees t_existing
         ON t_existing.CensusID = rbr.CensusID
        AND t_existing.TreeTag = rbr.TreeTag
        AND t_existing.IsActive = 1
-    INNER JOIN stems s_existing
+    STRAIGHT_JOIN stems s_existing
         ON s_existing.TreeID = t_existing.TreeID
        AND s_existing.CensusID = t_existing.CensusID
        AND s_existing.StemTag = rbr.StemTag
        AND s_existing.IsActive = 1
-    INNER JOIN coremeasurements cm_existing_stem
+    STRAIGHT_JOIN coremeasurements cm_existing_stem
         ON cm_existing_stem.StemGUID = s_existing.StemGUID
        AND cm_existing_stem.CensusID = rbr.CensusID
        AND cm_existing_stem.StemGUID IS NOT NULL
