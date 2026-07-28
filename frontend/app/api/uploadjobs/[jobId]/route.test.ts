@@ -138,6 +138,34 @@ describe('GET /api/uploadjobs/[jobId]', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ job: ownedJob });
   });
+
+  // The above admin test reuses ownedJob, whose createdBy matches the mocked
+  // session user — it proves withRouteAuthz's schema-membership admin bypass
+  // (assertSchemaAccess), not requireJobAccess's OWNERSHIP bypass. These two
+  // tests keep the caller's sites membership intact (normal schema access)
+  // and instead vary only userStatus + createdBy, isolating the ownership
+  // bypass in lib/background-jobs/route-helpers.ts:requireJobAccess.
+  it('grants a global-status caller access to a job owned by a different user (ownership bypass)', async () => {
+    mocks.auth.mockResolvedValue({ user: { ...session.user, userStatus: 'global' } });
+    const otherUsersJob = { ...ownedJob, createdBy: 'other@example.com' };
+    mocks.getBackgroundJobWithDetails.mockResolvedValueOnce(otherUsersJob);
+
+    const response = await GET(makeGetRequest(), jobProps());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ job: otherUsersJob });
+  });
+
+  it('grants a db-admin-status caller access to a job owned by a different user (ownership bypass)', async () => {
+    mocks.auth.mockResolvedValue({ user: { ...session.user, userStatus: 'db admin' } });
+    const otherUsersJob = { ...ownedJob, createdBy: 'other@example.com' };
+    mocks.getBackgroundJobWithDetails.mockResolvedValueOnce(otherUsersJob);
+
+    const response = await GET(makeGetRequest(), jobProps());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ job: otherUsersJob });
+  });
 });
 
 describe('POST /api/uploadjobs/[jobId]', () => {
@@ -252,5 +280,32 @@ describe('POST /api/uploadjobs/[jobId]', () => {
     expect(mocks.getBackgroundJobWithDetails).toHaveBeenCalledTimes(1);
     expect(mocks.cancelBackgroundJob).not.toHaveBeenCalled();
     expect(mocks.requestBackgroundJobCancel).not.toHaveBeenCalled();
+  });
+
+  // Isolates requireJobAccess's OWNERSHIP bypass (distinct from
+  // withRouteAuthz's schema-membership admin bypass): the caller keeps
+  // normal site membership, only userStatus + the job's createdBy differ, so
+  // a passing cancel here can only be explained by the privileged-session
+  // ownership check in lib/background-jobs/route-helpers.ts.
+  it('allows a global-status caller to cancel a job owned by a different user (ownership bypass)', async () => {
+    mocks.auth.mockResolvedValue({ user: { ...session.user, userStatus: 'global' } });
+    mocks.getBackgroundJobWithDetails.mockResolvedValueOnce({ ...ownedJob, createdBy: 'other@example.com' });
+
+    const response = await POST(makeCancelRequest(), jobProps());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true });
+    expect(mocks.cancelBackgroundJob).toHaveBeenCalledWith('catalog-pool', 42, 'mason@example.com');
+  });
+
+  it('allows a db-admin-status caller to cancel a job owned by a different user (ownership bypass)', async () => {
+    mocks.auth.mockResolvedValue({ user: { ...session.user, userStatus: 'db admin' } });
+    mocks.getBackgroundJobWithDetails.mockResolvedValueOnce({ ...ownedJob, createdBy: 'other@example.com' });
+
+    const response = await POST(makeCancelRequest(), jobProps());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true });
+    expect(mocks.cancelBackgroundJob).toHaveBeenCalledWith('catalog-pool', 42, 'mason@example.com');
   });
 });
