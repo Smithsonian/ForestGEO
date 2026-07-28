@@ -72,6 +72,30 @@ function getExpectedRows(fileName: string, parsedData: FileCollectionRowSet, arc
   return rows ? Object.keys(rows).length : null;
 }
 
+/** An uploaded blob paired with the browser file name every wizard map is keyed by. */
+export interface UploadedFileReference {
+  originalFileName: string;
+  blob: BlobUploadResult;
+}
+
+/**
+ * Re-keys a wizard map from raw browser file names to the names the upload
+ * route actually stored. The job route validates payload keys against
+ * `files[].fileName` and the worker looks delimiters/mappings up by the same
+ * value, so a raw-keyed map is rejected outright (and, before it was
+ * validated, silently ignored). Entries with no uploaded counterpart are
+ * dropped rather than sent as unknown file names.
+ */
+export function rekeyByStoredFileName<T>(source: Record<string, T>, uploadedFiles: UploadedFileReference[]): Record<string, T> {
+  const storedNames = new Map(uploadedFiles.map(entry => [entry.originalFileName, entry.blob.fileName]));
+  return Object.fromEntries(
+    Object.entries(source).flatMap(([originalFileName, value]) => {
+      const storedFileName = storedNames.get(originalFileName);
+      return storedFileName ? [[storedFileName, value] as const] : [];
+    })
+  );
+}
+
 async function readErrorMessage(response: Response): Promise<string> {
   try {
     const payload = await response.json();
@@ -137,10 +161,22 @@ export default function UploadAsyncJob({
     if (hasStartedRef.current) return;
     hasStartedRef.current = true;
 
+    // Teardown only stops this run from writing THIS component's own progress
+    // state. It must NEVER abort the run: hasStartedRef makes the effect
+    // one-shot for the component instance, so an aborted run has no restart
+    // path — it would strand the dialog mid-progress and (via the cleanup
+    // below) delete blobs the user already uploaded. A re-render with new
+    // dependency identities, and React StrictMode's double-invoke in dev, both
+    // take this path. The outcome setters the parent owns (upload error, review
+    // state, unsaved flag) are always called: the parent outlives this dialog
+    // and a swallowed failure would leave the wizard reporting nothing at all.
     let cancelled = false;
+    const setStepIfLive = (step: string) => {
+      if (!cancelled) setCurrentStep(step);
+    };
 
     async function runAsyncUpload() {
-      const uploadedFiles: BlobUploadResult[] = [];
+      const uploadedFiles: UploadedFileReference[] = [];
       let cleanupAllowed = true;
       let cleanupScope: UploadStorageScope | null = null;
       try {
@@ -159,9 +195,8 @@ export default function UploadAsyncJob({
         const totalSteps = acceptedFiles.length + 1;
 
         for (let index = 0; index < acceptedFiles.length; index++) {
-          if (cancelled) return;
           const file = acceptedFiles[index];
-          setCurrentStep(`Uploading ${file.name} to cloud storage...`);
+          setStepIfLive(`Uploading ${file.name} to cloud storage...`);
 
           const params = new URLSearchParams({
             fileName: file.name,
@@ -185,12 +220,11 @@ export default function UploadAsyncJob({
             throw new Error(`Failed to upload ${file.name}: ${await readErrorMessage(response)}`);
           }
 
-          uploadedFiles.push((await response.json()) as BlobUploadResult);
-          setProgress(Math.round(((index + 1) / totalSteps) * 100));
+          uploadedFiles.push({ originalFileName: file.name, blob: (await response.json()) as BlobUploadResult });
+          if (!cancelled) setProgress(Math.round(((index + 1) / totalSteps) * 100));
         }
 
-        if (cancelled) return;
-        setCurrentStep('Queueing background processing job...');
+        setStepIfLive('Queueing background processing job...');
 
         // Once the queue request is on the wire, a network failure is ambiguous:
         // the server may already have committed the job. Do not delete blobs in
@@ -212,19 +246,19 @@ export default function UploadAsyncJob({
               plotName,
               plotCensusNumber,
               usesSubquadrats: currentPlot?.usesSubquadrats === true,
-              selectedDelimiters,
-              columnMappings: columnMappings ?? {},
+              selectedDelimiters: rekeyByStoredFileName(selectedDelimiters, uploadedFiles),
+              columnMappings: rekeyByStoredFileName(columnMappings ?? {}, uploadedFiles),
               arcgisImportSession: arcgisImportSession ?? null
             },
-            files: uploadedFiles.map(file => ({
-              fileName: file.fileName,
-              blobContainer: file.blobContainer,
-              blobName: file.blobName,
-              contentType: file.contentType,
-              byteSize: file.byteSize,
-              sourceFormat: file.sourceFormat,
-              formType: file.formType,
-              expectedRows: getExpectedRows(file.fileName, parsedData, arcgisImportSession)
+            files: uploadedFiles.map(({ originalFileName, blob }) => ({
+              fileName: blob.fileName,
+              blobContainer: blob.blobContainer,
+              blobName: blob.blobName,
+              contentType: blob.contentType,
+              byteSize: blob.byteSize,
+              sourceFormat: blob.sourceFormat,
+              formType: blob.formType,
+              expectedRows: getExpectedRows(originalFileName, parsedData, arcgisImportSession)
             }))
           })
         });
@@ -238,10 +272,11 @@ export default function UploadAsyncJob({
           throw new Error(jobPayload.error || jobPayload.details || `Failed to queue background upload job: HTTP ${jobResponse.status}`);
         }
 
+        setIsDataUnsaved(false);
+        if (cancelled) return;
         setQueuedJobID(jobPayload.job.jobID);
         setProgress(100);
         setCurrentStep('Background processing accepted.');
-        setIsDataUnsaved(false);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ailogger.error('[UploadAsyncJob] Failed to start async upload:', err);
@@ -250,7 +285,10 @@ export default function UploadAsyncJob({
         setReviewState(ReviewStates.ERRORS);
       } finally {
         if (cleanupAllowed && cleanupScope && uploadedFiles.length > 0) {
-          await cleanupUploadedFiles(uploadedFiles, cleanupScope);
+          await cleanupUploadedFiles(
+            uploadedFiles.map(entry => entry.blob),
+            cleanupScope
+          );
         }
       }
     }

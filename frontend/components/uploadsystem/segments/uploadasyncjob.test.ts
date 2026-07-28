@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ailogger from '@/ailogger';
-import { cleanupUploadedFiles, type BlobUploadResult } from './uploadasyncjob';
+import { cleanupUploadedFiles, rekeyByStoredFileName, type BlobUploadResult, type UploadedFileReference } from './uploadasyncjob';
 
 vi.mock('@/ailogger', () => ({
   default: { warn: vi.fn(), error: vi.fn(), info: vi.fn() }
@@ -15,6 +15,43 @@ const file: BlobUploadResult = {
   formType: 'measurements',
   sourceFormat: 'csv'
 };
+
+describe('rekeyByStoredFileName', () => {
+  // /api/files/upload replaces every character outside [a-zA-Z0-9._-] with '_'
+  // and stores the blob under that name. The wizard keys its delimiter and
+  // column-mapping maps by the raw browser File.name, so without re-keying the
+  // job route rejects the whole request with "unknown file name" and the worker
+  // would never find the mapping for the file it is processing.
+  const uploadedFiles: UploadedFileReference[] = [
+    {
+      originalFileName: 'Harvard Forest 2014.csv',
+      blob: { ...file, fileName: 'Harvard_Forest_2014.csv', blobName: 'Harvard_Forest_2014.csv' }
+    },
+    {
+      originalFileName: 'plain.csv',
+      blob: { ...file, fileName: 'plain.csv', blobName: 'plain.csv' }
+    }
+  ];
+
+  it('re-keys wizard maps from the browser file name to the stored blob file name', () => {
+    const delimiters = { 'Harvard Forest 2014.csv': ',', 'plain.csv': '\t' };
+
+    expect(rekeyByStoredFileName(delimiters, uploadedFiles)).toEqual({
+      'Harvard_Forest_2014.csv': ',',
+      'plain.csv': '\t'
+    });
+  });
+
+  it('drops entries for files that were never uploaded rather than sending unknown names', () => {
+    const mappings = { 'Harvard Forest 2014.csv': { version: 1 }, 'removed-by-user.csv': { version: 1 } };
+
+    expect(rekeyByStoredFileName(mappings, uploadedFiles)).toEqual({ 'Harvard_Forest_2014.csv': { version: 1 } });
+  });
+
+  it('returns an empty map when nothing was uploaded', () => {
+    expect(rekeyByStoredFileName({ 'Harvard Forest 2014.csv': ',' }, [])).toEqual({});
+  });
+});
 
 describe('cleanupUploadedFiles', () => {
   afterEach(() => {

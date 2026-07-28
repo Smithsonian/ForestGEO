@@ -222,7 +222,9 @@ describe('stageMeasurementChunk — integration', () => {
     }
     await connection.query('DELETE FROM temporarymeasurements');
     await connection.query('DELETE FROM unifiedchangelog');
-    console.log('[beforeEach] cleared temporarymeasurements + unifiedchangelog');
+    await connection.query('DELETE FROM coremeasurements');
+    await connection.query('DELETE FROM uploadmetrics');
+    console.log('[beforeEach] cleared temporarymeasurements + unifiedchangelog + coremeasurements + uploadmetrics');
   });
 
   function baseParams(transactionID: string, overrides: Partial<StageMeasurementChunkParams> = {}): StageMeasurementChunkParams {
@@ -427,6 +429,72 @@ describe('stageMeasurementChunk — integration', () => {
     console.log(`[re-stage] changelog metadata: ${JSON.stringify(metadata)}`);
     expect(metadata.rowCount).toBe(EXPECTED_STAGED_ROW_COUNT * 2);
     expect(metadata.batchCount).toBe(2);
+  });
+
+  // -------------------------------------------------------------------------
+  // CLEAN_REUPLOAD census replacement runs ONCE per upload session
+  // -------------------------------------------------------------------------
+
+  const SECOND_FILE_NAME = 'stage-measurements-fixture-b.csv';
+  const SECOND_BATCH_ID = 'stage-batch-0002';
+
+  /**
+   * Stands in for the failure rows an earlier file of the same upload already
+   * wrote to coremeasurements — insertIngestionFailureRows uses the file's own
+   * batch id, and /api/batchedupload mints a fresh one. Neither is in the next
+   * file's batch family, and neither has an uploadmetrics row yet.
+   */
+  async function seedEarlierFileFailureRow(uploadBatchID: string): Promise<void> {
+    await connection.query(
+      `INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+         UploadFileID, UploadBatchID, RawTreeTag, SourceRowIndex, IsActive)
+       VALUES (?, NULL, FALSE, ?, 1.0, 1.0, ?, ?, 'T0005', 1, 1)`,
+      [censusID, VALID_DATE, FILE_NAME, uploadBatchID]
+    );
+  }
+
+  async function countCensusMeasurements(): Promise<number> {
+    const [rows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS count FROM coremeasurements WHERE CensusID = ?`, [censusID]);
+    return Number(rows[0].count);
+  }
+
+  it('keeps the failure rows an earlier file of the SAME upload session recorded', async () => {
+    // File A of the upload stages and records two rejected rows.
+    const firstTransactionID = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(connectionManager, baseParams(firstTransactionID));
+    await connectionManager.commitTransaction(firstTransactionID);
+    await seedEarlierFileFailureRow('stage-batch-0001-fail');
+    await seedEarlierFileFailureRow('batchedupload-fresh-id');
+    expect(await countCensusMeasurements()).toBe(2);
+
+    // File B of the SAME upload stages next. The synchronous route stages every
+    // file before any ingestion, so file A has no uploadmetrics row yet and its
+    // batches are outside file B's family — a second census-wide replacement
+    // here would destroy the only record of what file A rejected.
+    const secondTransactionID = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(
+      connectionManager,
+      baseParams(secondTransactionID, { fileName: SECOND_FILE_NAME, batchID: SECOND_BATCH_ID, uploadSessionID: UPLOAD_SESSION_ID })
+    );
+    await connectionManager.commitTransaction(secondTransactionID);
+
+    const surviving = await countCensusMeasurements();
+    console.log(`[same-session] failure rows surviving file B's staging: ${surviving}`);
+    expect(surviving).toBe(2);
+  });
+
+  it('still replaces the census when a NEW upload session starts', async () => {
+    // Rows left behind by a genuinely previous upload.
+    await seedEarlierFileFailureRow('previous-upload-batch');
+    expect(await countCensusMeasurements()).toBe(1);
+
+    const transactionID = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(connectionManager, baseParams(transactionID, { uploadSessionID: 'a-different-upload-session' }));
+    await connectionManager.commitTransaction(transactionID);
+
+    const surviving = await countCensusMeasurements();
+    console.log(`[new-session] prior rows surviving the census replacement: ${surviving}`);
+    expect(surviving).toBe(0);
   });
 
   it('rolling back the caller-owned transaction leaves no staged rows behind', async () => {

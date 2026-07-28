@@ -31,6 +31,7 @@ import {
   findDroppedMeasurementCandidates,
   insertTemporaryMeasurementsInBatches,
   isUnsignedIntFieldInvalid,
+  uploadSessionHasStagedRows,
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
 
@@ -208,7 +209,18 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     if (uploadMode === UploadMode.CLEAN_REUPLOAD && !params.suppressCensusReplacementCleanup) {
       // Clean up data from any previous uploads for this census.
       // Clean re-upload is census replacement, not filename replacement.
-      await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
+      //
+      // Exactly ONCE per upload session, though: the synchronous route stages
+      // every file before any ingestion, so a second file re-running the
+      // census-wide cleanup would delete the failure rows the earlier files of
+      // this same upload just recorded (their batch IDs are outside the
+      // incoming family, and no uploadmetrics row exists yet to identify them
+      // as ours). Rows already staged under this session are that first pass.
+      const sessionAlreadyReplacedCensus =
+        uploadSessionID !== null && (await uploadSessionHasStagedRows(connectionManager, schema, uploadSessionID, plotID, censusID, transactionID));
+      if (!sessionAlreadyReplacedCensus) {
+        await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
+      }
     }
 
     await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);

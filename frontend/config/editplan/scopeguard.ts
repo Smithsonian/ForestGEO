@@ -38,7 +38,15 @@ function hasSchemaAccess(session: Session, schema: string): boolean {
   return (session.user?.sites ?? []).some(site => site.schemaName === schema);
 }
 
-async function resolvePlotCensusNumber(cm: ConnectionManager, schema: string, plotID: number, censusID: number): Promise<number> {
+/**
+ * Existence check that also reports the scope's PlotCensusNumber. A missing or
+ * unusable number is NOT an authorization failure: `census.PlotCensusNumber` is
+ * nullable and legacy/ctfsweb-imported rows carry NULL, and most callers only
+ * need to know the plot/census exists and belongs to the user. Callers that
+ * genuinely require the number (blob container naming) reject the null
+ * themselves.
+ */
+async function resolvePlotCensusNumber(cm: ConnectionManager, schema: string, plotID: number, censusID: number): Promise<number | null> {
   const rows = await cm.executeQuery(
     safeFormatQuery(
       schema,
@@ -56,10 +64,7 @@ async function resolvePlotCensusNumber(cm: ConnectionManager, schema: string, pl
     throw new ScopeAccessError('plot/census scope is not available');
   }
   const plotCensusNumber = Number(rows[0].PlotCensusNumber);
-  if (!Number.isSafeInteger(plotCensusNumber) || plotCensusNumber <= 0) {
-    throw new ScopeAccessError('plot/census scope has an invalid census number');
-  }
-  return plotCensusNumber;
+  return Number.isSafeInteger(plotCensusNumber) && plotCensusNumber > 0 ? plotCensusNumber : null;
 }
 
 async function probeActiveUploadSession(cm: ConnectionManager, schema: string, plotID: number, censusID: number, transactionID?: string): Promise<void> {
@@ -144,7 +149,7 @@ export async function assertCanEditMeasurementScope(
   cm: ConnectionManager,
   session: Session,
   input: MeasurementScopeInput
-): Promise<{ plotCensusNumber: number }> {
+): Promise<{ plotCensusNumber: number | null }> {
   if (!hasSchemaAccess(session, input.schema)) {
     throw new ScopeAccessError();
   }
