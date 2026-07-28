@@ -7,8 +7,8 @@
  * zero HTTP — every step is a direct function call so the in-process upload
  * worker can run post-ingestion validation without a browser.
  */
-import type ConnectionManager from '@/config/connectionmanager';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import type ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import {
   runCombinedCrossCensusLocationValidations,

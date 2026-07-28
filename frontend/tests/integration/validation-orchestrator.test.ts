@@ -65,7 +65,7 @@ const sharedState = vi.hoisted(() => ({
 // Routes every DB call to the shared real MySQL connection. The orchestrator's
 // validation primitives (runValidation, runCombinedDBHValidations, ...) call
 // ConnectionManager.getInstance() internally, so they land here too.
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
@@ -130,7 +130,7 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
 import { ingestBatch } from '@/lib/uploads/ingest-batch';
 import {

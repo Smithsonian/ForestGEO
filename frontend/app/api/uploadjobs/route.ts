@@ -5,10 +5,10 @@ import { requireSession, getSessionUserId, getSessionUserIds } from '@/lib/auth-
 import { HTTPResponses } from '@/config/macros';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode, normalizeUploadMode } from '@/config/uploadmodes';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
-import ConnectionManager from '@/config/connectionmanager';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { assertCanEditMeasurementScope, ScopeAccessError } from '@/config/editplan/scopeguard';
-import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import { SUPPORTED_DELIMITERS } from '@/lib/uploads/detect-delimiter';
 import { isAsyncUploadEnabledFor } from '@/lib/background-jobs/feature-gate';

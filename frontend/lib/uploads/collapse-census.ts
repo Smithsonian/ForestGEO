@@ -33,9 +33,9 @@
  * subsequent calls. The zero/null fixups are likewise no-ops once applied.
  */
 
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 // The collapser can be slow on large censuses (dedup queries with ROW_NUMBER + JOINs).
 // 5 minutes gives plenty of headroom while still catching genuine hangs.

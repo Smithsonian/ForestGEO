@@ -14,11 +14,11 @@
  */
 
 import moment from 'moment/moment';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { insertIngestionFailureRows, toFiniteNumber } from '@/config/measurementerrors';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { FileRow } from '@/config/macros/formdetails';
-import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
+import { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
 
 export interface InvalidRowContext {
   schema: string;

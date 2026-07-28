@@ -76,7 +76,7 @@ const sharedState = vi.hoisted(() => ({
   catalogPool: null as import('mysql2/promise').Pool | null
 }));
 
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
@@ -136,7 +136,7 @@ vi.mock('@/config/connectionmanager', () => {
   return { default: { getInstance: () => manager } };
 });
 
-vi.mock('@/config/poolmonitorsingleton', () => ({
+vi.mock('@/lib/db/poolmonitorsingleton', () => ({
   getPoolMonitorInstance: () => {
     if (!sharedState.catalogPool) throw new Error('Test catalog pool not initialized');
     const pool = sharedState.catalogPool;
@@ -163,13 +163,13 @@ import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { FormType, SourceFormat, type FileRow } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { generateShortBatchID } from '@/config/utils';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { detectDelimiter } from '@/lib/uploads/detect-delimiter';
 import { stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
 import { ingestBatch } from '@/lib/uploads/ingest-batch';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { recordFailedMeasurementRows } from '@/lib/uploads/record-invalid-rows';
-import type { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
+import type { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
 
 // ---------------------------------------------------------------------------
 // Fixture — ONE CSV through both pipelines.

@@ -13,12 +13,12 @@
 
 import moment from 'moment';
 import ailogger from '@/ailogger';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import {
   ArcgisImportSessionError,
   claimArcgisImportSessionForCommit,

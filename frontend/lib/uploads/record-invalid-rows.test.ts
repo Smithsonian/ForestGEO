@@ -28,11 +28,11 @@ vi.mock('@/config/measurementerrors', () => ({
   }
 }));
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: { getInstance: () => ({}) }
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   safeFormatQuery: (_schema: string, sql: string) => sql
 }));
 

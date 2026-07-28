@@ -21,13 +21,13 @@ import { randomUUID } from 'node:crypto';
 import Papa from 'papaparse';
 import type { Pool } from 'mysql2/promise';
 import ailogger from '@/ailogger';
-import ConnectionManager from '@/config/connectionmanager';
-import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { getContainerClient } from '@/config/macros/azurestorage';
 import { FileRow, SourceFormat } from '@/config/macros/formdetails';
 import { generateShortBatchID } from '@/config/utils';
 import { normalizeUploadMode } from '@/config/uploadmodes';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import {
   createUploadSession,
   ensureUploadSessionsTable,

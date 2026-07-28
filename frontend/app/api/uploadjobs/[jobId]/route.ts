@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { requireSession, getSessionUserId } from '@/lib/auth-helpers';
 import { HTTPResponses } from '@/config/macros';
-import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { cancelBackgroundJob, getBackgroundJobWithDetails, requestBackgroundJobCancel } from '@/lib/background-jobs/repository';
 import { parseJobID, requireJobAccess } from '@/lib/background-jobs/route-helpers';
 

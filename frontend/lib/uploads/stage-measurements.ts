@@ -15,12 +15,12 @@
 
 import crypto from 'crypto';
 import moment from 'moment/moment';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { ColumnMapping } from '@/lib/column-mapping/types';
 import { resolveMeasurementChunk } from '@/lib/column-mapping/measurement-rows';
 import {
@@ -187,9 +187,7 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     invalidRows.push(...resolved.invalidRows);
     diagnostics = resolved.diagnostics;
     if (diagnostics.ignoredColumnCount > 0) {
-      ailogger.warn(
-        `Column mapping for ${fileName}-${batchID} dropped ${diagnostics.ignoredColumnCount} unmatched column(s); they will not be ingested.`
-      );
+      ailogger.warn(`Column mapping for ${fileName}-${batchID} dropped ${diagnostics.ignoredColumnCount} unmatched column(s); they will not be ingested.`);
     }
   }
 

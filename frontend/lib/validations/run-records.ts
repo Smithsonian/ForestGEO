@@ -5,8 +5,8 @@
  * upload worker can create and update run records without HTTP. The route is
  * now a thin wrapper over these functions; its GET handler is untouched.
  */
-import type ConnectionManager from '@/config/connectionmanager';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import type ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import ailogger from '@/ailogger';
 

@@ -44,7 +44,7 @@ const sharedState = vi.hoisted(() => ({
 
 // ConnectionManager mock — routes every staging DB call to the shared real
 // MySQL connection so commits/rollbacks operate on actual transactions.
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
@@ -89,7 +89,7 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { countStagedRows, stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
 
 // ---------------------------------------------------------------------------

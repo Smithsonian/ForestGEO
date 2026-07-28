@@ -80,7 +80,7 @@ const sharedState = vi.hoisted(() => ({
 
 // ConnectionManager mock — mirrors the ingest-batch/collapse-census pattern.
 // Routes every schema-side DB call to the shared real MySQL connection.
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
@@ -146,7 +146,7 @@ vi.mock('@/config/connectionmanager', () => {
 // path acquires pooled connections from the same monitor. Both are routed to
 // the local catalog pool (no default database; all session queries are
 // schema-qualified).
-vi.mock('@/config/poolmonitorsingleton', () => ({
+vi.mock('@/lib/db/poolmonitorsingleton', () => ({
   getPoolMonitorInstance: () => {
     if (!sharedState.catalogPool) throw new Error('Test catalog pool not initialized');
     const pool = sharedState.catalogPool;
@@ -179,7 +179,7 @@ import { UPLOAD_JOB_MAX_RETRIES, type BackgroundJobFileRecord } from '@/lib/back
 import { createUploadSession, ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { FormType, SourceFormat, type FileRow } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
 
 // ---------------------------------------------------------------------------

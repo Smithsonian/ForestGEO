@@ -130,7 +130,7 @@ vi.mock('@/config/uploadsessiontracker', async () => {
 
 // Route handler + session loader imported AFTER vi.mock so the mocks are wired.
 import { POST as commitPOST } from '@/app/api/arcgis/commit/route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
 import { createArcgisImportSession } from '@/lib/arcgis/import-session';
 import { UploadMode } from '@/config/uploadmodes';

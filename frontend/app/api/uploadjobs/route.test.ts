@@ -26,7 +26,7 @@ vi.mock('@/lib/auth-helpers', () => ({
   getSessionUserIds: mocks.getSessionUserIds
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: mocks.isValidSchema
 }));
 
@@ -35,13 +35,13 @@ vi.mock('@/config/editplan/scopeguard', () => ({
   ScopeAccessError: class ScopeAccessError extends Error {}
 }));
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({})
   }
 }));
 
-vi.mock('@/config/poolmonitorsingleton', () => ({
+vi.mock('@/lib/db/poolmonitorsingleton', () => ({
   getPoolMonitorInstance: mocks.getPoolMonitorInstance
 }));
 

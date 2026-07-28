@@ -20,7 +20,7 @@ vi.mock('@/lib/auth-helpers', () => ({
   getSessionUserId: mocks.getSessionUserId
 }));
 
-vi.mock('@/config/poolmonitorsingleton', () => ({
+vi.mock('@/lib/db/poolmonitorsingleton', () => ({
   getPoolMonitorInstance: mocks.getPoolMonitorInstance
 }));
 
