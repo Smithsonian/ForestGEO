@@ -24,18 +24,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createConnection, type Connection, type RowDataPacket } from 'mysql2/promise';
 import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
+import { laterBatchBoundMs, MAX_BATCH_DURATION_MS, MIN_ALLOWED_MS, ratioBoundCanBind, RATIO_LIMIT } from '../benchmarks/scale-benchmark-bounds';
 
 const LOCAL_HOSTS = ['127.0.0.1', 'localhost'] as const;
 
 const BATCH_SIZE = 10000;
 const BATCH_COUNT = 3;
 const STAGING_CHUNK_SIZE = 2000;
-// A later batch may cost at most RATIO_LIMIT x the first (empty-census) batch,
-// with an absolute floor so a fast first batch cannot make the bound flaky.
-// Healthy observed ratio is ~1x-1.5x; the pathological plan is 10x-100x.
-const RATIO_LIMIT = 5;
-const MIN_ALLOWED_MS = 30000;
-const MAX_BATCH_DURATION_MS = 30000;
 const CALL_TIMEOUT_MS = 45000;
 const DATE_SPREAD_DAYS = 90;
 const TEST_TIMEOUT_MS = CALL_TIMEOUT_MS * BATCH_COUNT + 60000;
@@ -209,8 +204,27 @@ describe('Ingestion scale benchmark (0 / 10k / 20k existing measurements)', () =
       }
 
       const [firstBatchMs, ...laterBatchesMs] = durationsMs;
-      const allowedMs = Math.max(RATIO_LIMIT * firstBatchMs, MIN_ALLOWED_MS);
-      console.log(`[scale-benchmark] durations ${durationsMs.map(d => `${d}ms`).join(' -> ')}; bound for later batches: ${allowedMs}ms`);
+      const allowedMs = laterBatchBoundMs(firstBatchMs);
+      console.log(
+        `[scale-benchmark] durations ${durationsMs.map(d => `${d}ms`).join(' -> ')}; ` +
+          `ratio bound ${RATIO_LIMIT}x first = ${RATIO_LIMIT * firstBatchMs}ms, floor ${MIN_ALLOWED_MS}ms, ` +
+          `applied bound ${allowedMs}ms, absolute ceiling ${MAX_BATCH_DURATION_MS}ms`
+      );
+
+      // A bound at or above the absolute ceiling is the ceiling restated: the
+      // ratio gate cannot fail anything the per-batch assertion did not already
+      // catch. That is a property of the host's speed, not of the code under
+      // test, so it is reported rather than failed — a slow CI runner must not
+      // turn into a red build. The gate's ability to bind at representative
+      // durations is proven without a database in
+      // tests/benchmarks/scale-benchmark-bounds.test.ts.
+      if (!ratioBoundCanBind(firstBatchMs)) {
+        console.warn(
+          `[scale-benchmark] SCALING ASSERTION INERT: a ${firstBatchMs}ms first batch puts the ratio bound at ` +
+            `${allowedMs}ms, at or above the ${MAX_BATCH_DURATION_MS}ms ceiling. This run only proves the absolute ` +
+            `ceiling held; it says nothing about scaling. Rerun on a less loaded host to exercise the ratio gate.`
+        );
+      }
 
       for (const [i, later] of laterBatchesMs.entries()) {
         expect(
