@@ -238,6 +238,59 @@ describe('createUploadBackgroundJob — duplicate idempotency key', () => {
     expect(rowCount).toBe(1);
   });
 
+  /**
+   * A retry that lists the same files in a different order is the SAME request.
+   * The stored rows come back ORDER BY JobFileID while the request carries
+   * whatever order the client built, and the comparison used to be pairwise by
+   * position — so a genuinely identical retry was judged a mismatch and got a
+   * 409 instead of the replay idempotency exists to provide.
+   */
+  it('replays an identical retry whose files are listed in a different order', async () => {
+    const idempotencyKey = 'reordered-identical-retry';
+    const original = makeJobInput({ idempotencyKey });
+    const first = await createUploadBackgroundJob(pool, original, TEST_USER_A);
+
+    const reordered = { ...original, files: [...original.files].reverse() };
+    expect(
+      reordered.files.map(file => file.fileName),
+      'the retry must actually be reordered'
+    ).not.toEqual(original.files.map(file => file.fileName));
+
+    const replayed = await createUploadBackgroundJob(pool, reordered, TEST_USER_A);
+    console.log(`[reordered-idempotency] first jobID=${first.jobID} replayed jobID=${replayed.jobID}`);
+
+    expect(replayed.jobID).toBe(first.jobID);
+    const [rows]: any = await pool.query(`SELECT COUNT(*) AS cnt FROM catalog.background_jobs WHERE IdempotencyKey = ?`, [idempotencyKey]);
+    expect(Number(rows[0].cnt), 'a replay must not create a second job').toBe(1);
+  });
+
+  it('still rejects a reordered retry whose file CONTENT differs', async () => {
+    // Order-insensitivity must not become blindness: same names, different blob.
+    const idempotencyKey = 'reordered-but-different';
+    const original = makeJobInput({ idempotencyKey });
+    await createUploadBackgroundJob(pool, original, TEST_USER_A);
+
+    const tampered = {
+      ...original,
+      files: [...original.files].reverse().map((file, index) => (index === 0 ? { ...file, blobName: 'uploads/somewhere-else/measurements.csv' } : file))
+    };
+
+    await expect(createUploadBackgroundJob(pool, tampered, TEST_USER_A)).rejects.toBeInstanceOf(IdempotencyKeyConflictError);
+  });
+
+  it('rejects a retry that renames a file, even with the same file count', async () => {
+    const idempotencyKey = 'renamed-file-retry';
+    const original = makeJobInput({ idempotencyKey });
+    await createUploadBackgroundJob(pool, original, TEST_USER_A);
+
+    const renamed = {
+      ...original,
+      files: original.files.map((file, index) => (index === 0 ? { ...file, fileName: 'renamed.csv' } : file))
+    };
+
+    await expect(createUploadBackgroundJob(pool, renamed, TEST_USER_A)).rejects.toBeInstanceOf(IdempotencyKeyConflictError);
+  });
+
   it('creates separate jobs for different users sharing the same idempotency key', async () => {
     const idempotencyKey = 'shared-key-different-users';
     const input = makeJobInput({ idempotencyKey });

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET, POST } from './route';
+import { MAX_UPLOAD_JOB_REQUEST_BYTES } from '@/lib/background-jobs/route-helpers';
 
 // GET/POST are wrapped by withRouteAuthz, whose Handler type requires a
 // RouteContext second argument even though this route never reads
@@ -126,11 +127,24 @@ function makeCreateBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * The route requires Content-Length. The WHATWG Request constructor does not set
+ * it — that header is added by the HTTP transport when a request is actually
+ * sent — so these unit-level requests set it themselves, exactly as the browser
+ * would for a string body. tests/integration/uploadjobs-content-length.test.ts
+ * proves the real transport does supply it.
+ */
+/** Comfortably past the limit, for the "declared oversize" path. */
+const OVERSIZED_CONTENT_LENGTH = MAX_UPLOAD_JOB_REQUEST_BYTES * 2;
+
 function makeCreateRequest(body: Record<string, unknown>) {
-  return new Request('http://localhost/api/uploadjobs', {
+  const serialized = JSON.stringify(body);
+  const request = new Request('http://localhost/api/uploadjobs', {
     method: 'POST',
-    body: JSON.stringify(body)
+    body: serialized
   }) as any;
+  request.headers.set('content-length', String(Buffer.byteLength(serialized, 'utf8')));
+  return request;
 }
 
 function makeListRequest(query: string) {
@@ -495,7 +509,7 @@ describe('POST /api/uploadjobs', () => {
 
   it('rejects an oversized request before anything reads or parses the body', async () => {
     const request = makeCreateRequest(makeCreateBody());
-    request.headers.set('content-length', String(8 * 1024 * 1024));
+    request.headers.set('content-length', String(OVERSIZED_CONTENT_LENGTH));
     const jsonSpy = vi.spyOn(request, 'json');
 
     const response = await callPost(request);
@@ -505,6 +519,118 @@ describe('POST /api/uploadjobs', () => {
     expect(mocks.auth).not.toHaveBeenCalled();
     expect(mocks.assertCanEditMeasurementScope).not.toHaveBeenCalled();
     expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The bound is only a bound if it cannot be skipped. The old check read the
+   * header, coerced it with Number(), and passed anything that was not a finite
+   * number over the limit: a missing header became Number(null) = 0 and a
+   * malformed one became NaN. A chunked / header-less POST therefore skipped the
+   * check entirely, and fromBody('schema') still cloned and parsed the whole body
+   * to resolve the schema.
+   */
+  describe('Content-Length is mandatory', () => {
+    it.each([
+      { label: 'missing', header: null },
+      { label: 'empty', header: '' },
+      { label: 'non-numeric', header: 'not-a-number' },
+      { label: 'fractional', header: '12.5' },
+      { label: 'negative', header: '-1' }
+    ])('rejects a $label Content-Length with 411, before authz or body parsing', async ({ header }) => {
+      const request = makeCreateRequest(makeCreateBody());
+      if (header === null) request.headers.delete('content-length');
+      else request.headers.set('content-length', header);
+      const jsonSpy = vi.spyOn(request, 'json');
+
+      const response = await callPost(request);
+
+      expect(response.status).toBe(411);
+      expect(jsonSpy).not.toHaveBeenCalled();
+      expect(mocks.auth).not.toHaveBeenCalled();
+      expect(mocks.assertCanEditMeasurementScope).not.toHaveBeenCalled();
+      expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    });
+
+    it('accepts a declared length at exactly the limit', async () => {
+      const request = makeCreateRequest(makeCreateBody());
+      request.headers.set('content-length', String(MAX_UPLOAD_JOB_REQUEST_BYTES));
+
+      const response = await callPost(request);
+
+      expect(response.status).toBe(202);
+    });
+
+    it('rejects one byte over the limit', async () => {
+      const request = makeCreateRequest(makeCreateBody());
+      request.headers.set('content-length', String(MAX_UPLOAD_JOB_REQUEST_BYTES + 1));
+
+      expect((await callPost(request)).status).toBe(413);
+    });
+
+    it('accepts a zero-length declaration and lets validation reject the empty body', async () => {
+      // 0 is a legitimate declared length, not the "missing header" sentinel it
+      // used to be conflated with. It must reach the parser, which rejects it.
+      const request = makeCreateRequest(makeCreateBody());
+      request.headers.set('content-length', '0');
+
+      expect((await callPost(request)).status).not.toBe(411);
+    });
+  });
+
+  /**
+   * The worker reads columnMappings[file.fileName] and
+   * selectedDelimiters[file.fileName] — plain, case-sensitive property access.
+   * Validation used to accept a key that matched only case-insensitively, so the
+   * lookup then missed and the file processed with default aliasing and auto
+   * delimiter detection instead of the mapping the caller supplied. Silently.
+   */
+  describe('payload keys must match files[].fileName exactly', () => {
+    const EXACT_FILE_NAME = 'measurements.csv';
+    const CASE_MISMATCHED_FILE_NAME = 'Measurements.CSV';
+
+    it('accepts keys that match exactly', async () => {
+      const response = await callPost(
+        makeCreateRequest(
+          makeCreateBody({
+            payload: {
+              columnMappings: { [EXACT_FILE_NAME]: VALID_COLUMN_MAPPING },
+              selectedDelimiters: { [EXACT_FILE_NAME]: ',' }
+            }
+          })
+        )
+      );
+
+      expect(response.status).toBe(202);
+    });
+
+    it.each(['columnMappings', 'selectedDelimiters'] as const)('rejects a case-only mismatch in %s before creating the job', async payloadKey => {
+      const payload =
+        payloadKey === 'columnMappings'
+          ? { columnMappings: { [CASE_MISMATCHED_FILE_NAME]: VALID_COLUMN_MAPPING } }
+          : { selectedDelimiters: { [CASE_MISMATCHED_FILE_NAME]: ',' } };
+
+      const response = await callPost(makeCreateRequest(makeCreateBody({ payload })));
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: `payload.${payloadKey}.${CASE_MISMATCHED_FILE_NAME}`,
+            message: expect.stringContaining('differs in case')
+          })
+        ])
+      );
+      expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    });
+
+    it('still reports a genuinely unknown file name as unknown, not as a case problem', async () => {
+      const response = await callPost(makeCreateRequest(makeCreateBody({ payload: { selectedDelimiters: { 'some-other-file.csv': ',' } } })));
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.errors).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('unknown file name') })]));
+    });
   });
 
   it('rejects an ArcGIS job with more than one file', async () => {

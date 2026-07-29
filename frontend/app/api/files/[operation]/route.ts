@@ -12,6 +12,7 @@ import { sanitizeUploadFileName as sanitizeFileName } from '@/lib/uploads/file-n
 import path from 'path';
 import type { Session } from 'next-auth';
 import { FormType, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
+import { z } from 'zod';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -32,6 +33,27 @@ function isValidMimeType(mimeType: string): boolean {
 }
 
 const READ_ONLY_CONTAINER_OPTIONS = { createIfMissing: false } as const;
+
+/**
+ * Mirrors FileRowErrors. These elements are written into blob metadata and read
+ * back as trusted values, so the shape is checked rather than asserted.
+ */
+const FileRowErrorsArraySchema = z.array(
+  z.object({
+    stemtag: z.string(),
+    tag: z.string(),
+    validationErrorID: z.number().int()
+  })
+);
+
+/** JSON.parse that reports failure as a value, so the caller does one check. */
+function safeJsonParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
 
 type FileOperation = 'upload' | 'download' | 'delete' | 'list';
 
@@ -170,13 +192,17 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
   let fileRowErrors: FileRowErrors[] = [];
   const rawFileRowErrors = formData.get('fileRowErrors');
   if (rawFileRowErrors !== null) {
-    try {
-      const parsedFileRowErrors = JSON.parse(String(rawFileRowErrors));
-      if (!Array.isArray(parsedFileRowErrors)) throw new Error('fileRowErrors must be an array');
-      fileRowErrors = parsedFileRowErrors as FileRowErrors[];
-    } catch {
-      return new NextResponse(JSON.stringify({ error: 'fileRowErrors must be a valid JSON array' }), { status: HTTPResponses.INVALID_REQUEST });
+    // Element shape is VALIDATED, not asserted. The old `as FileRowErrors[]`
+    // checked only that the JSON was an array, so arbitrary caller-controlled
+    // objects were written straight into blob metadata under a type the rest of
+    // the code trusts.
+    const parsed = FileRowErrorsArraySchema.safeParse(safeJsonParse(String(rawFileRowErrors)));
+    if (!parsed.success) {
+      return new NextResponse(JSON.stringify({ error: 'fileRowErrors must be a JSON array of { tag, stemtag, validationErrorID } objects' }), {
+        status: HTTPResponses.INVALID_REQUEST
+      });
     }
+    fileRowErrors = parsed.data;
   }
 
   // Validate required parameters for upload

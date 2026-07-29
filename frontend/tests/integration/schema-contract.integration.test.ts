@@ -27,6 +27,8 @@ import { setupTestDatabase, teardownTestDatabase, type TestData } from '../setup
 import {
   loadCanonicalSchemaContract,
   readLiveSchemaContract,
+  CONTRACT_READ_TABLES,
+  REQUIRED_COLUMNS_BY_TABLE,
   compareSchemaContracts,
   formatContractFailures,
   CRITICAL_TABLES,
@@ -67,7 +69,7 @@ describe('Schema Contract Parity', () => {
     };
 
     canonicalContract = loadCanonicalSchemaContract();
-    liveContract = await readLiveSchemaContract(exec, config.database, CRITICAL_TABLES);
+    liveContract = await readLiveSchemaContract(exec, config.database, CONTRACT_READ_TABLES);
   }, 90000);
 
   afterAll(async () => {
@@ -161,6 +163,28 @@ describe('Schema Contract Parity', () => {
         const index = liveIndexes[indexName.toLowerCase()];
         expect(index, `required index missing from ${table}: ${indexName}`).toBeDefined();
         expect(index.columns.length, `required index has no columns in ${table}: ${indexName}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('has every presence-only required column, on tables outside the critical set', () => {
+    // upload_sessions is intentionally not a critical table — live schemas carry
+    // pre-existing default/collation drift on it that this contract must not
+    // start failing on — but census_replacement_completed_at is load-bearing:
+    // without it a CLEAN_REUPLOAD replaces the census on EVERY file of a
+    // session, destroying the failure rows earlier files recorded.
+    for (const [table, columnNames] of Object.entries(REQUIRED_COLUMNS_BY_TABLE)) {
+      const liveTable = liveContract.tables[table];
+      const tableExists = liveTable !== undefined && Object.keys(liveTable.columns).length > 0;
+      if (!tableExists) {
+        // Created on demand by ensureUploadSessionsTable, so a schema that has
+        // never run an upload legitimately does not have it. The canonical-DDL
+        // and runtime-DDL sides of this contract are pinned in the unit tests.
+        console.info(`[required-columns] ${table} is not provisioned in this schema; presence-only check skipped`);
+        continue;
+      }
+      for (const columnName of columnNames) {
+        expect(liveTable.columns[columnName.toLowerCase()], `required column missing from ${table}: ${columnName}`).toBeDefined();
       }
     }
   });

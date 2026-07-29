@@ -11,8 +11,10 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  CONTRACT_READ_TABLES,
   CRITICAL_TABLES,
   loadCanonicalSchemaContract,
+  REQUIRED_COLUMNS_BY_TABLE,
   parseCanonicalSchemaContract,
   compareSchemaContracts,
   REQUIRED_INDEXES_BY_TABLE,
@@ -395,5 +397,81 @@ describe('collision-check index contract', () => {
     const { failures } = compareAgainstCanonical(live);
 
     expect(failures).toContainEqual(expect.objectContaining({ table, object: index, category: 'index', kind: 'uniqueness' }));
+  });
+});
+
+describe('presence-only required columns', () => {
+  const canonical = loadCanonicalSchemaContract();
+
+  function liveContractWith(tableName: string, columns: Record<string, unknown>): SchemaContract {
+    return {
+      defaultCollation: TARGET_COLLATION,
+      tables: { [tableName]: { name: tableName, columns: columns as never, indexes: {} } }
+    };
+  }
+
+  it('declares every required column in the canonical DDL', () => {
+    for (const [table, columnNames] of Object.entries(REQUIRED_COLUMNS_BY_TABLE)) {
+      const canonicalTable = canonical.tables[table];
+      expect(canonicalTable, `${table} is not defined in tablestructures.sql`).toBeDefined();
+      for (const columnName of columnNames) {
+        expect(canonicalTable.columns[columnName.toLowerCase()], `${table}.${columnName} missing from tablestructures.sql`).toBeDefined();
+      }
+    }
+  });
+
+  it('includes required-column tables in the set a contract read must fetch', () => {
+    // Reading only CRITICAL_TABLES would leave these tables absent from the live
+    // contract, and the requirement silently unenforceable.
+    for (const table of Object.keys(REQUIRED_COLUMNS_BY_TABLE)) {
+      expect(CONTRACT_READ_TABLES).toContain(table);
+    }
+  });
+
+  it('fails when the table exists but the required column does not', () => {
+    const live = liveContractWith('upload_sessions', {
+      session_id: {
+        name: 'session_id',
+        typeSignature: 'varchar(64)',
+        dataType: 'varchar',
+        nullable: false,
+        defaultValue: null,
+        extra: '',
+        collation: TARGET_COLLATION,
+        isText: true
+      }
+    });
+
+    const { failures } = compareSchemaContracts(canonical, live, { tables: [], requiredIndexesByTable: {} });
+
+    expect(failures).toContainEqual(
+      expect.objectContaining({ table: 'upload_sessions', object: 'census_replacement_completed_at', category: 'column', kind: 'missing' })
+    );
+  });
+
+  it('passes when the table exists and carries the column', () => {
+    const live = liveContractWith('upload_sessions', {
+      census_replacement_completed_at: {
+        name: 'census_replacement_completed_at',
+        typeSignature: 'timestamp',
+        dataType: 'timestamp',
+        nullable: true,
+        defaultValue: null,
+        extra: '',
+        collation: null,
+        isText: false
+      }
+    });
+
+    expect(compareSchemaContracts(canonical, live, { tables: [], requiredIndexesByTable: {} }).failures).toEqual([]);
+  });
+
+  it('treats an entirely absent table as not-yet-provisioned, not a violation', () => {
+    // upload_sessions is created on demand by ensureUploadSessionsTable, and
+    // readLiveSchemaContract reports a non-existent table as one with zero
+    // columns. A schema that has never run an upload must not fail the gate.
+    const live = liveContractWith('upload_sessions', {});
+
+    expect(compareSchemaContracts(canonical, live, { tables: [], requiredIndexesByTable: {} }).failures).toEqual([]);
   });
 });
