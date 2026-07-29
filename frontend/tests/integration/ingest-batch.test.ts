@@ -148,6 +148,12 @@ const EXPECTED_ROW_COUNT = 5;
 const UPLOADMETRICS_STATUS_COMPLETED = 'completed';
 const UPLOADMETRICS_STATUS_PROCESSING = 'processing';
 
+/** The error MySQL raises on the client whose statement was aborted by KILL QUERY. */
+const MYSQL_CODE_QUERY_INTERRUPTED = 'ER_QUERY_INTERRUPTED';
+const MYSQL_ERRNO_QUERY_INTERRUPTED = 1317;
+const MYSQL_SQLSTATE_QUERY_INTERRUPTED = '70100';
+const MYSQL_QUERY_INTERRUPTED_MESSAGE = 'Query execution was interrupted';
+
 /**
  * Five clean fixture rows: valid species, quadrats, attribute codes, and dates
  * inside the seeded census window — the procedure should ingest all of them.
@@ -579,12 +585,15 @@ describe('ingestBatch — integration', () => {
     await stageFixtureRows();
     expect(await countTemporaryRows()).toBe(EXPECTED_ROW_COUNT);
 
-    // Reject ONLY the procedure CALL with the exact error shape mysql2 raises
-    // for a KILL QUERY; every other statement passes through to the real DB.
-    const interruptError = Object.assign(new Error('Query execution was interrupted'), {
-      code: 'ER_QUERY_INTERRUPTED',
-      errno: 1317,
-      sqlState: '70100'
+    // Reject ONLY the procedure CALL with the error shape mysql2 raises for a
+    // KILL QUERY; every other statement passes through to the real DB. The
+    // shape is asserted for real — against an actual KILL — in
+    // tests/integration/ingest-batch-kill-boundary.test.ts; this one keeps the
+    // classifier covered without needing a slow statement.
+    const interruptError = Object.assign(new Error(MYSQL_QUERY_INTERRUPTED_MESSAGE), {
+      code: MYSQL_CODE_QUERY_INTERRUPTED,
+      errno: MYSQL_ERRNO_QUERY_INTERRUPTED,
+      sqlState: MYSQL_SQLSTATE_QUERY_INTERRUPTED
     });
     const realExecuteQuery = connectionManager.executeQuery.bind(connectionManager);
     const executeQuerySpy = vi
