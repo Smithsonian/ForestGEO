@@ -30,7 +30,7 @@
  * regresses.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Connection, PoolConnection } from 'mysql2/promise';
+import { createConnection, type Connection, type PoolConnection } from 'mysql2/promise';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { getConn, QueryTimeoutError, runQuery } from '@/lib/db/primitives';
 import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type TestDatabaseConfig } from '../setup/local-db-setup';
@@ -66,16 +66,22 @@ const TRANSACTIONAL_PROCEDURE = 'runquery_timeout_probe_txn';
 const PROBE_TABLE = 'runquery_timeout_probe_rows';
 const PROBE_ROW_ID = 1;
 /**
- * Rows in the self-join the transactional probe grinds on. KILL QUERY must
- * produce a real ER_QUERY_INTERRUPTED, which rules out SLEEP() and BENCHMARK():
- * both notice the kill flag and return a VALUE, letting the procedure sail on to
- * COMMIT (measured 2026-07-29). A genuine join does abort with 1317. 700 rows is
- * a ~13s three-way self-join locally — long enough to kill mid-flight, short
- * enough that a missed kill ends on its own and fails the test instead of
- * hanging the suite.
+ * The row the probe procedure blocks on.
+ *
+ * The procedure has to sit mid-transaction, holding its own row lock, long
+ * enough to be killed — and the kill must surface as a real
+ * ER_QUERY_INTERRUPTED. That rules out the obvious waits: SLEEP() and
+ * BENCHMARK() both notice the kill flag and return a VALUE, so the procedure
+ * sails on to COMMIT (measured 2026-07-29). A CPU grind does abort with 1317,
+ * but its duration is a property of the host — CI ran a 700-row three-way
+ * self-join to completion inside a 25ms poll while the same join took seconds
+ * locally, so the test raced and failed having killed nothing.
+ *
+ * An InnoDB row-lock wait has neither problem: it is interrupted with 1317, and
+ * it lasts until innodb_lock_wait_timeout no matter how fast the machine is.
+ * The test holds the lock, so the window is deterministic rather than measured.
  */
-const GRIND_TABLE = 'runquery_timeout_probe_grind';
-const GRIND_ROW_COUNT = 700;
+const BLOCKING_ROW_ID = 2;
 /** A follow-up statement blocked by a zombie transaction would wait innodb_lock_wait_timeout, not this. */
 const FOLLOW_UP_MAX_MS = 5_000;
 
@@ -194,27 +200,18 @@ beforeAll(async () => {
   await setupConnection.query(`CREATE TABLE \`${schema}\`.${PROBE_TABLE} (id INT PRIMARY KEY, note VARCHAR(64) NOT NULL)`);
   await setupConnection.query(`INSERT INTO \`${schema}\`.${PROBE_TABLE} (id, note) VALUES (?, 'initial')`, [PROBE_ROW_ID]);
 
-  await setupConnection.query(`DROP TABLE IF EXISTS \`${schema}\`.${GRIND_TABLE}`);
-  await setupConnection.query(`CREATE TABLE \`${schema}\`.${GRIND_TABLE} (v INT NOT NULL)`);
-  await setupConnection.query(`SET SESSION cte_max_recursion_depth = ?`, [GRIND_ROW_COUNT + 1]);
-  await setupConnection.query(
-    `INSERT INTO \`${schema}\`.${GRIND_TABLE} (v)
-     WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
-     SELECT n FROM seq`,
-    [GRIND_ROW_COUNT]
-  );
+  await setupConnection.query(`INSERT INTO \`${schema}\`.${PROBE_TABLE} (id, note) VALUES (?, 'blocking-row')`, [BLOCKING_ROW_ID]);
 
   await setupConnection.query(`DROP PROCEDURE IF EXISTS \`${schema}\`.${TRANSACTIONAL_PROCEDURE}`);
   await setupConnection.query(
     `CREATE PROCEDURE \`${schema}\`.${TRANSACTIONAL_PROCEDURE}()
      BEGIN
-       DECLARE ignored INT;
+       DECLARE ignored VARCHAR(64);
        START TRANSACTION;
        UPDATE \`${schema}\`.${PROBE_TABLE} SET note = 'locked-by-procedure' WHERE id = ${PROBE_ROW_ID};
-       SELECT COUNT(*) INTO ignored
-         FROM \`${schema}\`.${GRIND_TABLE} a
-         JOIN \`${schema}\`.${GRIND_TABLE} b ON a.v <> b.v
-         JOIN \`${schema}\`.${GRIND_TABLE} c ON c.v <> a.v;
+       -- Blocks on a row the test holds, so the procedure is parked
+       -- mid-transaction for as long as the test needs, on any machine.
+       SELECT note INTO ignored FROM \`${schema}\`.${PROBE_TABLE} WHERE id = ${BLOCKING_ROW_ID} FOR UPDATE;
        COMMIT;
      END`
   );
@@ -296,9 +293,15 @@ describe('runQuery timeout — server-side kill + pool quarantine (real MySQL)',
    * the next pool borrower silently joined an uncommitted transaction.
    */
   it('quarantines a connection KILLed mid-transaction so the next statement does not lock-wait', async () => {
+    // A dedicated connection holds BLOCKING_ROW_ID so the procedure parks on it.
+    // Not from the pool: this connection stays in an open transaction for the
+    // duration and must never be handed to anything else.
+    const blocker = await createConnection({ ...config, database: schema });
+    await blocker.beginTransaction();
+    await blocker.query(`UPDATE \`${schema}\`.${PROBE_TABLE} SET note = 'held-by-test' WHERE id = ?`, [BLOCKING_ROW_ID]);
+
     // Acquire the killer BEFORE launching the CALL. Acquiring afterwards put a
-    // pool round-trip inside the race: on a slow runner the grind could finish
-    // before the first poll even ran, and the test failed having killed nothing.
+    // pool round-trip inside the race.
     const killer = (await getConn()) as QuarantinedConnection;
 
     let callSettled = false;
@@ -348,12 +351,16 @@ describe('runQuery timeout — server-side kill + pool quarantine (real MySQL)',
     expect(
       killedThreadId,
       callSettled
-        ? `the ${GRIND_ROW_COUNT}-row grind finished before it could be killed — this host runs it too fast for the ` +
-            `${PROCESSLIST_POLL_MS}ms poll; raise GRIND_ROW_COUNT rather than accepting a vacuous pass`
+        ? `the ${TRANSACTIONAL_PROCEDURE} CALL settled before it could be killed — it should have been parked on ` +
+            `row ${BLOCKING_ROW_ID}'s lock, so either the lock was not held or the procedure never reached the wait`
         : `never saw the ${TRANSACTIONAL_PROCEDURE} CALL executing within ${KILL_CONFIRM_DEADLINE_MS}ms — nothing was killed`
     ).not.toBeNull();
 
     const callError = await callPromise;
+    // The killed procedure is gone; release the row so the follow-up write below
+    // measures the ZOMBIE's lock, not the test's own.
+    await blocker.rollback();
+    await blocker.end();
     // eslint-disable-next-line no-console
     console.log(`[runquery-timeout] killed thread ${killedThreadId}; CALL rejected with: ${(callError as Error | null)?.message}`);
     expect(callError, 'the KILLed CALL must reject, not resolve').toBeInstanceOf(Error);
