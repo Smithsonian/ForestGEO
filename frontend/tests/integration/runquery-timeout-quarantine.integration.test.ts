@@ -46,7 +46,7 @@ const MAX_SETTLE_MS = RUNQUERY_TIMEOUT_MS + 3500;
 // The killed statement must be gone from the processlist well before its
 // natural completion at SLEEP_SECONDS.
 const KILL_CONFIRM_DEADLINE_MS = 8000;
-const PROCESSLIST_POLL_MS = 250;
+const PROCESSLIST_POLL_MS = 25;
 const POOL_SWEEP_ACQUISITIONS = 3;
 const SLEEPY_PROCEDURE = 'runquery_timeout_probe_sleepy';
 
@@ -69,13 +69,13 @@ const PROBE_ROW_ID = 1;
  * Rows in the self-join the transactional probe grinds on. KILL QUERY must
  * produce a real ER_QUERY_INTERRUPTED, which rules out SLEEP() and BENCHMARK():
  * both notice the kill flag and return a VALUE, letting the procedure sail on to
- * COMMIT (measured 2026-07-29). A genuine join does abort with 1317. 500 rows is
- * a ~4s three-way self-join locally — long enough to kill mid-flight, short
+ * COMMIT (measured 2026-07-29). A genuine join does abort with 1317. 700 rows is
+ * a ~13s three-way self-join locally — long enough to kill mid-flight, short
  * enough that a missed kill ends on its own and fails the test instead of
  * hanging the suite.
  */
 const GRIND_TABLE = 'runquery_timeout_probe_grind';
-const GRIND_ROW_COUNT = 500;
+const GRIND_ROW_COUNT = 700;
 /** A follow-up statement blocked by a zombie transaction would wait innodb_lock_wait_timeout, not this. */
 const FOLLOW_UP_MAX_MS = 5_000;
 
@@ -296,17 +296,24 @@ describe('runQuery timeout — server-side kill + pool quarantine (real MySQL)',
    * the next pool borrower silently joined an uncommitted transaction.
    */
   it('quarantines a connection KILLed mid-transaction so the next statement does not lock-wait', async () => {
+    // Acquire the killer BEFORE launching the CALL. Acquiring afterwards put a
+    // pool round-trip inside the race: on a slow runner the grind could finish
+    // before the first poll even ran, and the test failed having killed nothing.
+    const killer = (await getConn()) as QuarantinedConnection;
+
+    let callSettled = false;
     const callPromise = connectionManager
       .executeQuery(`CALL \`${schema}\`.${TRANSACTIONAL_PROCEDURE}()`)
       .then(() => null)
-      .catch((error: unknown) => error);
+      .catch((error: unknown) => error)
+      .finally(() => {
+        callSettled = true;
+      });
 
-    // Kill the CALL once it is genuinely executing (and therefore holding the row).
-    const killer = (await getConn()) as QuarantinedConnection;
     let killedThreadId: number | null = null;
     try {
       const deadline = Date.now() + KILL_CONFIRM_DEADLINE_MS;
-      while (Date.now() < deadline && killedThreadId === null) {
+      while (Date.now() < deadline && killedThreadId === null && !callSettled) {
         // `ID <> CONNECTION_ID()` is load-bearing: this probe's own statement
         // carries the procedure name inside its LIKE parameter, so without the
         // exclusion the killer matches — and kills — itself.
@@ -323,7 +330,13 @@ describe('runQuery timeout — server-side kill + pool quarantine (real MySQL)',
     } finally {
       killer.release();
     }
-    expect(killedThreadId, 'never saw the transactional procedure executing — nothing was killed').not.toBeNull();
+    expect(
+      killedThreadId,
+      callSettled
+        ? `the ${GRIND_ROW_COUNT}-row grind finished before it could be killed — this host runs it too fast for the ` +
+            `${PROCESSLIST_POLL_MS}ms poll; raise GRIND_ROW_COUNT rather than accepting a vacuous pass`
+        : `never saw the ${TRANSACTIONAL_PROCEDURE} CALL executing within ${KILL_CONFIRM_DEADLINE_MS}ms — nothing was killed`
+    ).not.toBeNull();
 
     const callError = await callPromise;
     // eslint-disable-next-line no-console
