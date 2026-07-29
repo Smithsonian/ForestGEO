@@ -241,10 +241,19 @@ export async function cleanupStaleMeasurementBatchesForFile(
 }
 
 /**
- * Rows removed per statement by the census-replacement deletes. A single
- * unbounded DELETE over a large census (Harvard: 106,227 rows) locks the whole
- * row set in one statement and can exceed innodb_lock_wait_timeout, failing the
- * staging chunk that owns the transaction and re-running on every retry.
+ * Rows removed per statement by the census-replacement deletes.
+ *
+ * What chunking DOES bound: per-statement execution time and per-statement
+ * rollback size. A single unbounded DELETE over a large census (Harvard: 116,227
+ * rows) runs as one statement that can outlive the 660s JS-side KILL in
+ * lib/db/primitives.ts, and a KILL mid-statement forces the server to roll back
+ * everything that one statement had removed.
+ *
+ * What chunking does NOT bound: the lock footprint at commit. Every chunk runs
+ * inside the SAME caller-owned transaction, so InnoDB holds every row lock this
+ * loop takes until that transaction commits — the total is identical to the
+ * unbounded DELETE. Do not treat lock contention against a concurrent writer as
+ * mitigated by this constant.
  */
 export const CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE = 5000;
 
@@ -263,6 +272,26 @@ function buildNotIncomingFamilyPredicate(column: string): string {
 }
 
 /**
+ * The loop below terminates ONLY on the row count the server reports, so an
+ * unreadable count is not a value to paper over with a default. Coercing a
+ * missing `affectedRows` to 0 stops the loop after one window and silently
+ * leaves the rest of the census in place; coercing an unparseable one to NaN
+ * makes `deleted < CHUNK_SIZE` permanently false and the loop never ends.
+ * Both are failures the caller must see.
+ */
+function requireAffectedRows(result: unknown, deleteSQL: string): number {
+  const affectedRows = (result as { affectedRows?: unknown })?.affectedRows;
+  const parsed = Number(affectedRows);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(
+      `Bounded delete could not read a row count from the server: affectedRows=${JSON.stringify(affectedRows)} ` +
+        `is not a non-negative integer. Statement: ${deleteSQL.replace(/\s+/g, ' ').trim().slice(0, 200)}`
+    );
+  }
+  return parsed;
+}
+
+/**
  * Runs a `DELETE ... LIMIT n` until it stops filling the limit, returning the
  * total rows removed. The statement is re-issued verbatim: each pass deletes a
  * fresh window because the previous window's rows no longer match.
@@ -271,7 +300,7 @@ async function deleteInBoundedChunks(connectionManager: ConnectionManager, delet
   let totalDeleted = 0;
   for (;;) {
     const result = await connectionManager.executeQuery(deleteSQL, params, transactionID);
-    const deleted = Number((result as { affectedRows?: number })?.affectedRows ?? 0);
+    const deleted = requireAffectedRows(result, deleteSQL);
     totalDeleted += deleted;
     if (deleted < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return totalDeleted;
   }

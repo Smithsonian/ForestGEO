@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
-import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests, TEMP_MEASUREMENT_INSERT_BATCH_SIZE } from '@/lib/ingestion/temporary-measurements';
+import {
+  CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
+  resetTemporaryMeasurementsSourceFormatColumnCacheForTests,
+  TEMP_MEASUREMENT_INSERT_BATCH_SIZE
+} from '@/lib/ingestion/temporary-measurements';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { headerSignature } from '@/lib/column-mapping/mapping';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
@@ -13,6 +17,14 @@ import {
   QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
   validateQuadratCollectionDetailed
 } from '@/lib/provisioning/quadrat-collection-validation';
+
+/**
+ * Matches the chunk LIMIT only when it terminates the whole statement — i.e. it
+ * bounds the DELETE itself rather than an inner subquery.
+ */
+function outerLimitPattern(): RegExp {
+  return new RegExp(`LIMIT\\s+${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}\\s*$`);
+}
 
 const { getCookieMock, authMock, handleUpsertMock } = vi.hoisted(() => ({
   getCookieMock: vi.fn(),
@@ -401,8 +413,11 @@ describe('sqlpacketload measurement scope validation', () => {
     // Both arms NULL-safe: a bare `NOT (col LIKE ?)` yields NULL for the
     // nullable UploadBatchID, which would spare every CTFS-migrated row.
     expect(deleteCmCall).toContain('(UploadBatchID IS NULL OR UploadBatchID NOT LIKE ?');
-    // Bounded so one statement never locks a whole 100k-row census.
-    expect(deleteCmCall).toContain('LIMIT');
+    // Bounded so one statement never runs long enough to be KILLed mid-delete.
+    // Pinned to the END of the statement: a bare toContain('LIMIT') also passes
+    // when the LIMIT sits inside a subquery, where it bounds the wrong thing and
+    // leaves the outer DELETE unbounded.
+    expect(deleteCmCall).toMatch(outerLimitPattern());
     // Census replacement, not filename replacement.
     expect(deleteCmCall).not.toContain('UploadFileID');
     // And never a batch id list sourced from metrics.
@@ -413,8 +428,13 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(deleteValidationErrorsCall).toContain('WHERE cm.CensusID = ?');
     expect(deleteValidationErrorsCall).not.toContain('cm.UploadFileID');
     // Single-table DELETE over a subquery: MySQL rejects LIMIT on a
-    // multi-table DELETE ... JOIN, and this delete must stay bounded too.
-    expect(deleteValidationErrorsCall).toContain('LIMIT');
+    // multi-table DELETE ... JOIN, and this delete must stay bounded too. The
+    // LIMIT has to bound the OUTER delete — inside the IN-subquery it would cap
+    // the victim list instead and the delete itself would stay unbounded.
+    expect(deleteValidationErrorsCall).toMatch(outerLimitPattern());
+    expect(deleteValidationErrorsCall!.indexOf('LIMIT'), 'LIMIT must follow the subquery, not sit inside it').toBeGreaterThan(
+      deleteValidationErrorsCall!.lastIndexOf(')')
+    );
 
     const deleteMetricsCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.uploadmetrics'));
     expect(deleteMetricsCall).toBeDefined();

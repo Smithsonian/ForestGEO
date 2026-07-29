@@ -39,13 +39,16 @@ if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
 const sharedState = vi.hoisted(() => ({
   connection: null as import('mysql2/promise').Connection | null,
   activeTransactionID: null as string | null,
-  counter: 0
+  counter: 0,
+  /** Every statement the code under test issued, so chunk-loop iteration counts are observable. */
+  statements: [] as string[]
 }));
 
 vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (sql: string, params?: unknown[]) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      sharedState.statements.push(sql);
       const [rows] = await sharedState.connection.query(sql, params ?? []);
       return rows;
     },
@@ -100,6 +103,21 @@ const ORPHAN_FILE = 'harvard2014b.TXT';
 const LEGACY_MIGRATED_FILE = 'ctfs-migration';
 
 const CONTROL_FILE = 'control.csv';
+
+/** NULL-UploadBatchID legacy rows seeded into each CONTROL census. */
+const CONTROL_NULL_BATCH_ROW_COUNT = 2;
+
+/** NULL-UploadBatchID legacy rows seeded into the TARGET census. */
+const TARGET_NULL_BATCH_ROW_COUNT = 3;
+
+/**
+ * Rows the incoming upload has already written for itself before a re-entrant
+ * cleanup call: some under the bare batch id, some under split children.
+ */
+const INCOMING_OWN_PARKED_ROWS = 2;
+const INCOMING_OWN_SUB_BATCH = `${INCOMING_BATCH}__sub001`;
+const INCOMING_OWN_SUB_BATCH_PARKED_ROWS = 3;
+const INCOMING_OWN_INGESTED_SUB_BATCH = `${INCOMING_BATCH}__sub002`;
 
 describe('CLEAN_REUPLOAD census replacement — integration', () => {
   let connection: Connection;
@@ -287,7 +305,7 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     await seedParkedRows(PRIOR_FILE_DIFFERENT_NAME, PRIOR_BATCH_DIFFERENT_NAME, targetCensusID, 2);
 
     // Legacy CTFS-migrated rows with a NULL UploadBatchID.
-    await seedNullBatchRows(LEGACY_MIGRATED_FILE, targetCensusID, 3);
+    await seedNullBatchRows(LEGACY_MIGRATED_FILE, targetCensusID, TARGET_NULL_BATCH_ROW_COUNT);
 
     // The incoming upload's own metric row — must SURVIVE (it is the new upload).
     await seedMetric(INCOMING_FILE, INCOMING_BATCH, plotID, targetCensusID, 'processing');
@@ -296,10 +314,16 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     await seedMetric(CONTROL_FILE, 'control1-batch', plotID, samePlotOtherCensusID);
     await seedParkedRows(CONTROL_FILE, 'control1-batch', samePlotOtherCensusID, 3);
     await seedParkedRows(CONTROL_FILE, 'control1-orphan__sub001', samePlotOtherCensusID, 2);
+    // NULL-batch legacy rows OUTSIDE the target census. The NULL-safety fix
+    // makes a NULL UploadBatchID "belongs to no incoming family" — which is only
+    // half the contract. The census predicate still has to keep that from
+    // reaching another census's legacy rows.
+    await seedNullBatchRows(LEGACY_MIGRATED_FILE, samePlotOtherCensusID, CONTROL_NULL_BATCH_ROW_COUNT);
 
     // --- CONTROL 2: different plot and census ---
     await seedMetric(CONTROL_FILE, 'control2-batch', otherPlotID, otherPlotCensusID);
     await seedParkedRows(CONTROL_FILE, 'control2-batch', otherPlotCensusID, 3);
+    await seedNullBatchRows(LEGACY_MIGRATED_FILE, otherPlotCensusID, CONTROL_NULL_BATCH_ROW_COUNT);
 
     return { control1: await scopeDigest(samePlotOtherCensusID), control2: await scopeDigest(otherPlotCensusID) };
   }
@@ -321,6 +345,7 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     await connection.query(`DELETE FROM trees`);
     await connection.query(`DELETE FROM uploadmetrics`);
     rowIndexCounter = 0;
+    sharedState.statements.length = 0;
   });
 
   // -------------------------------------------------------------------------
@@ -334,7 +359,7 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     const beforeParked = await countRows(targetCensusID, 'parked');
     const beforeIngested = await countRows(targetCensusID, 'ingested');
     console.log(`[target] before: total=${before} parked=${beforeParked} ingested=${beforeIngested}`);
-    expect(before).toBe(3 + 1 + ORPHAN_SUB_BATCHES.length * 4 + 2 + 3); // 17
+    expect(before).toBe(3 + 1 + ORPHAN_SUB_BATCHES.length * 4 + 2 + TARGET_NULL_BATCH_ROW_COUNT); // 17
 
     await runCleanReupload();
 
@@ -373,7 +398,7 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
       targetCensusID
     ]);
     console.log(`[null-batch] before: ${before[0].count} row(s) with UploadBatchID IS NULL`);
-    expect(Number(before[0].count)).toBe(3);
+    expect(Number(before[0].count)).toBe(TARGET_NULL_BATCH_ROW_COUNT);
 
     await runCleanReupload();
 
@@ -382,6 +407,73 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     ]);
     console.log(`[null-batch] after: ${after[0].count}`);
     expect(Number(after[0].count)).toBe(0);
+  }, 120000);
+
+  /**
+   * The other half of the NULL-batch contract. A NULL UploadBatchID matches no
+   * incoming family, so the family predicate alone would happily delete every
+   * legacy row in the database — only the census/plot scope stops it. Without a
+   * control-census NULL row, a regression that widened the scope would still
+   * pass every assertion above.
+   */
+  it('leaves NULL-UploadBatchID rows in OTHER censuses untouched', async () => {
+    await seedFixture();
+
+    async function countNullBatchRows(censusID: number): Promise<number> {
+      const [rows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS count FROM coremeasurements WHERE CensusID = ? AND UploadBatchID IS NULL`, [
+        censusID
+      ]);
+      return Number(rows[0].count);
+    }
+
+    expect(await countNullBatchRows(samePlotOtherCensusID)).toBe(CONTROL_NULL_BATCH_ROW_COUNT);
+    expect(await countNullBatchRows(otherPlotCensusID)).toBe(CONTROL_NULL_BATCH_ROW_COUNT);
+
+    await runCleanReupload();
+
+    const survivingSamePlot = await countNullBatchRows(samePlotOtherCensusID);
+    const survivingOtherPlot = await countNullBatchRows(otherPlotCensusID);
+    console.log(`[null-batch controls] samePlotOtherCensus=${survivingSamePlot} otherPlotCensus=${survivingOtherPlot}`);
+    expect(survivingSamePlot).toBe(CONTROL_NULL_BATCH_ROW_COUNT);
+    expect(survivingOtherPlot).toBe(CONTROL_NULL_BATCH_ROW_COUNT);
+    // And the target's own NULL rows are still gone — the scope narrowed, it did not stop working.
+    expect(await countNullBatchRows(targetCensusID)).toBe(0);
+  }, 120000);
+
+  /**
+   * The "spare the incoming family" arm of the delete predicate exists for the
+   * RE-ENTRANT case: this upload already split into `batch__subNNN` and wrote
+   * rows of its own, and cleanup runs again (a chunk retry, a worker recycle).
+   * Deleting those rows would destroy the in-flight upload's own work. Until
+   * this test, the arm was pinned only by textual SQL assertions — no DB row
+   * ever exercised it.
+   */
+  it('spares coremeasurements already written under the INCOMING batch family', async () => {
+    await seedFixture();
+
+    await seedParkedRows(INCOMING_FILE, INCOMING_BATCH, targetCensusID, INCOMING_OWN_PARKED_ROWS);
+    await seedParkedRows(INCOMING_FILE, INCOMING_OWN_SUB_BATCH, targetCensusID, INCOMING_OWN_SUB_BATCH_PARKED_ROWS);
+    const incomingIngestedID = await seedIngestedRow(INCOMING_FILE, INCOMING_OWN_INGESTED_SUB_BATCH, targetCensusID, plotID, 'INCOMING-INGESTED');
+    await seedErrorLink(incomingIngestedID);
+
+    const expectedSurvivors = INCOMING_OWN_PARKED_ROWS + INCOMING_OWN_SUB_BATCH_PARKED_ROWS + 1;
+
+    await runCleanReupload();
+
+    const [survivors] = await connection.query<RowDataPacket[]>(
+      `SELECT UploadBatchID, COUNT(*) AS count FROM coremeasurements WHERE CensusID = ? GROUP BY UploadBatchID ORDER BY UploadBatchID`,
+      [targetCensusID]
+    );
+    console.log(`[incoming-family] survivors: ${JSON.stringify(survivors)}`);
+
+    expect(survivors.map(row => [String(row.UploadBatchID), Number(row.count)])).toEqual([
+      [INCOMING_BATCH, INCOMING_OWN_PARKED_ROWS],
+      [INCOMING_OWN_SUB_BATCH, INCOMING_OWN_SUB_BATCH_PARKED_ROWS],
+      [INCOMING_OWN_INGESTED_SUB_BATCH, 1]
+    ]);
+    expect(await countRows(targetCensusID, 'all')).toBe(expectedSurvivors);
+    // The incoming row's error link rides along with the row it belongs to.
+    expect(await errorLinkCount(targetCensusID)).toBe(1);
   }, 120000);
 
   /**
@@ -409,6 +501,56 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     const surviving = await countRows(targetCensusID, 'all');
     console.log(`[chunked-delete] seeded=${overOneChunk} chunk=${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE} surviving=${surviving}`);
     expect(surviving).toBe(0);
+  }, 180000);
+
+  /**
+   * The coremeasurements delete and the error-link delete are different SQL
+   * shapes: the latter is a single-table DELETE over an IN-subquery, and its
+   * LIMIT bounds the outer delete while the subquery re-evaluates every pass.
+   * Only exercising the coremeasurements arm past one window leaves that shape's
+   * loop — the one that could re-select the same victims forever, or stop early —
+   * entirely unproven.
+   */
+  it('drives the error-link delete past one window too (the IN-subquery arm)', async () => {
+    const overOneChunk = CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE + 137;
+    await connection.query(`SET SESSION cte_max_recursion_depth = ?`, [overOneChunk + 1]);
+    await connection.query(
+      `INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+         UploadFileID, UploadBatchID, RawTreeTag, SourceRowIndex, IsActive)
+       WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
+       SELECT ?, NULL, FALSE, '2024-03-15', 1.0, 1.0, ?, 'bulk-prior-batch', CONCAT('E', n), n, 1 FROM seq`,
+      [overOneChunk, targetCensusID, PRIOR_FILE_WITH_METRICS]
+    );
+
+    await connection.query(
+      `INSERT INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage) VALUES ('ingestion','SQL_EXCEPTION','Ingestion SQL exception')
+       ON DUPLICATE KEY UPDATE ErrorID = LAST_INSERT_ID(ErrorID)`
+    );
+    const [errRows] = await connection.query<RowDataPacket[]>(
+      `SELECT ErrorID FROM measurement_errors WHERE ErrorSource='ingestion' AND ErrorCode='SQL_EXCEPTION' LIMIT 1`
+    );
+    await connection.query(
+      `INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved, CreatedAt)
+       SELECT CoreMeasurementID, ?, FALSE, NOW() FROM coremeasurements WHERE CensusID = ?`,
+      [errRows[0].ErrorID, targetCensusID]
+    );
+    expect(await errorLinkCount(targetCensusID)).toBe(overOneChunk);
+
+    sharedState.statements.length = 0;
+    await runCleanReupload();
+
+    const errorLinkDeleteStatements = sharedState.statements.filter(sql => /DELETE\s+FROM\s+`[^`]+`\.measurement_error_log/.test(sql));
+    // 5137 links = one full 5000-row window plus a short 137-row window that
+    // ends the loop. A single statement would mean the loop gave up early and
+    // left 137 links behind; more than two would mean it re-selected victims.
+    const expectedWindows = Math.ceil(overOneChunk / CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE);
+    console.log(
+      `[error-link chunking] seeded=${overOneChunk} chunk=${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE} ` +
+        `statements=${errorLinkDeleteStatements.length} expected=${expectedWindows}`
+    );
+    expect(errorLinkDeleteStatements.length).toBe(expectedWindows);
+    expect(await errorLinkCount(targetCensusID)).toBe(0);
+    expect(await countRows(targetCensusID, 'all')).toBe(0);
   }, 180000);
 
   it('removes prior rows under a DIFFERENT UploadFileID (census replacement, not filename replacement)', async () => {
