@@ -144,14 +144,16 @@ export async function recordFailedMeasurementRows(
  * Called before retrying a crashed upload job to prevent duplicate failure rows
  * accumulating across retry attempts.
  *
- * PRECONDITION — never call this for a batch whose uploadmetrics row is
- * status='completed'. Under the same (UploadFileID, UploadBatchID), completed
- * batches hold BOTH the worker-recorded parse rejects AND the failure rows the
- * bulkingestionprocess stored procedure recorded during ingestion — all with
- * StemGUID NULL and indistinguishable here. Deleting them would permanently
- * destroy the procedure's recorded failures: the idempotent re-run of a
- * completed batch skips ingestion entirely and never regenerates them. Callers
- * must probe uploadmetrics first and skip completed batches.
+ * PRECONDITION — never delete rows belonging to a batch (or sub-batch) whose
+ * uploadmetrics row is status='completed'. Under the same
+ * (UploadFileID, UploadBatchID), completed batches hold BOTH the
+ * worker-recorded parse rejects AND the failure rows the bulkingestionprocess
+ * stored procedure recorded during ingestion — all with StemGUID NULL and
+ * indistinguishable here. Deleting them would permanently destroy the
+ * procedure's recorded failures: the idempotent re-run of a completed batch
+ * skips ingestion entirely and never regenerates them. Callers enforce this by
+ * passing the family's completed batch/sub-batch IDs as `preserveBatchIDs`
+ * (or by skipping fully-completed families outright).
  *
  * Scope is the whole batch FAMILY: rows recorded under the original BatchID AND
  * under any `<batchID>__subNNN` a prior split created. Cleaning only the
@@ -167,20 +169,23 @@ export async function deleteUnresolvedRowsForBatchFamily(
   fileID: string,
   batchID: string,
   censusID: number,
-  transactionID?: string
+  transactionID?: string,
+  preserveBatchIDs: string[] = []
 ): Promise<number> {
+  const preserveClause = preserveBatchIDs.length > 0 ? `AND UploadBatchID NOT IN (${preserveBatchIDs.map(() => '?').join(', ')})` : '';
   const deleteSQL = safeFormatQuery(
     schema,
     `DELETE FROM ??.coremeasurements
      WHERE UploadFileID = ?
        AND CensusID = ?
        AND StemGUID IS NULL
-       AND (UploadBatchID = ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`
+       AND (UploadBatchID = ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
+       ${preserveClause}`
   );
 
   const result: { affectedRows?: number } = await connectionManager.executeQuery(
     deleteSQL,
-    [fileID, censusID, batchID, buildSubBatchPattern(batchID)],
+    [fileID, censusID, batchID, buildSubBatchPattern(batchID), ...preserveBatchIDs],
     transactionID
   );
   return result?.affectedRows ?? 0;

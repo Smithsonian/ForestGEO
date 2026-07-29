@@ -28,7 +28,7 @@ import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
-import { buildSubBatchID, discoverBatchFamily, highestSubBatchOrdinal } from '@/lib/uploads/batch-family';
+import { buildSubBatchID, buildSubBatchPattern, discoverBatchFamily, highestSubBatchOrdinal, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 
 // Sub-batches of 10K rows keep transaction duration ~6.5s (benchmarked),
 // well under the 50s innodb_lock_wait_timeout on Azure MySQL.
@@ -270,16 +270,28 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
   censusID: number,
   transactionID: string
 ): Promise<number> {
+  // Spare the CURRENT batch FAMILY (bare ID + its __subNNN members), not just
+  // the bare ID: on a worker retry the batch ID is reused, and the completed
+  // sub-batches' proc-recorded failure rows live under suffixed IDs — deleting
+  // them here would permanently destroy recorded failures the idempotent
+  // re-run never regenerates. Non-completed members' stale rows were already
+  // removed by the worker's sub-batch-aware cleanup before re-staging. A
+  // same-file re-upload under a NEW batch ID still cleans the old family
+  // (a different family never matches the new one's pattern).
   const sameFileDeleteSQL = safeFormatQuery(
     schema,
     `DELETE FROM ??.coremeasurements
      WHERE CensusID = ?
        AND StemGUID IS NULL
        AND UploadFileID = ?
-       AND NOT (UploadBatchID <=> ?)`
+       AND NOT (UploadBatchID <=> ? OR UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`
   );
 
-  const sameFileDeleteResult = await connectionManager.executeQuery(sameFileDeleteSQL, [censusID, fileID, batchID], transactionID);
+  const sameFileDeleteResult = await connectionManager.executeQuery(
+    sameFileDeleteSQL,
+    [censusID, fileID, batchID, buildSubBatchPattern(batchID)],
+    transactionID
+  );
   const sameFileDeletedRows = toCount(sameFileDeleteResult?.affectedRows);
 
   if (sameFileDeletedRows > 0) {
@@ -329,10 +341,14 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
       AND tm.Comments <=> cm.RawComments
      WHERE cm.CensusID = ?
        AND cm.StemGUID IS NULL
-       AND NOT (cm.UploadFileID <=> ? AND cm.UploadBatchID <=> ?)`
+       AND NOT (cm.UploadFileID <=> ? AND (cm.UploadBatchID <=> ? OR cm.UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}))`
   );
 
-  const deleteResult = await connectionManager.executeQuery(deleteSQL, [fileID, batchID, censusID, fileID, batchID], transactionID);
+  const deleteResult = await connectionManager.executeQuery(
+    deleteSQL,
+    [fileID, batchID, censusID, fileID, batchID, buildSubBatchPattern(batchID)],
+    transactionID
+  );
   const deletedRows = toCount(deleteResult?.affectedRows);
 
   if (deletedRows > 0) {
@@ -370,8 +386,17 @@ async function splitIntoSubBatches(
     // Continue past any sub-batch left by an interrupted prior attempt so a
     // resumed split cannot reuse an ordinal that already holds rows.
     const subBatchID = buildSubBatchID(originalBatchID, startOrdinal + i + 1);
+    // ORDER BY id pins sub-batch membership to staging order (= file order,
+    // since chunks insert sequentially). Without it the LIMIT takes rows in
+    // unspecified InnoDB scan order, and a crash-retry that re-stages and
+    // re-splits could partition rows differently than the dead attempt — the
+    // proc's idempotency skip would then silently delete never-ingested rows
+    // re-staged under an already-completed sub-batch ID.
     // LIMIT cannot be parameterized in mysql2 prepared statements, so inline the constant
-    const updateSQL = safeFormatQuery(schema, `UPDATE ??.temporarymeasurements SET BatchID = ? WHERE FileID = ? AND BatchID = ? LIMIT ${batchSize}`);
+    const updateSQL = safeFormatQuery(
+      schema,
+      `UPDATE ??.temporarymeasurements SET BatchID = ? WHERE FileID = ? AND BatchID = ? ORDER BY id LIMIT ${batchSize}`
+    );
     const updateResult = await connectionManager.executeQuery(updateSQL, [subBatchID, fileID, originalBatchID], transactionID);
     const affectedRows = toCount(updateResult?.affectedRows);
 

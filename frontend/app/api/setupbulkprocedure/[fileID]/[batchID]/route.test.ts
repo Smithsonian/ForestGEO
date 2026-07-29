@@ -224,7 +224,10 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
         normalizedSql.includes('DELETE FROM forestgeo_testing.coremeasurements') &&
         normalizedSql.includes('StemGUID IS NULL') &&
         normalizedSql.includes('UploadFileID = ?') &&
-        normalizedSql.includes('NOT (UploadBatchID <=> ?)')
+        // Family-sparing exclusion: on a worker retry the batch ID is reused
+        // and completed sub-batches' proc-recorded failure rows live under
+        // suffixed IDs — a bare-ID exclusion would delete them permanently.
+        normalizedSql.includes('NOT (UploadBatchID <=> ? OR UploadBatchID LIKE ?')
       );
     });
 
@@ -259,7 +262,8 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
         normalizedSql.includes('JOIN forestgeo_testing.temporarymeasurements tm') &&
         normalizedSql.includes('tm.FileID = ?') &&
         normalizedSql.includes('tm.BatchID = ?') &&
-        normalizedSql.includes('NOT (cm.UploadFileID <=> ? AND cm.UploadBatchID <=> ?)')
+        // Family-sparing (see the same-file cleanup test above).
+        normalizedSql.includes('NOT (cm.UploadFileID <=> ? AND (cm.UploadBatchID <=> ? OR cm.UploadBatchID LIKE ?')
       );
     });
 
