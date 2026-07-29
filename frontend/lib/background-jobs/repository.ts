@@ -151,10 +151,17 @@ function idempotentRequestMatches(existing: BackgroundJobRow, existingFiles: Bac
     return false;
   }
 
-  return existingFiles.every((file, index) => {
-    const requested = input.files[index];
+  // Compared as a NAME-KEYED SET, not pairwise by position. The stored rows come
+  // back `ORDER BY JobFileID` while the request carries whatever order the
+  // caller sent, so a genuinely identical retry that listed its files in a
+  // different order was judged a mismatch and got a 409 instead of the replay
+  // idempotency exists to provide. File names are already unique within a job.
+  const requestedByName = new Map(input.files.map(file => [file.fileName, file]));
+
+  return existingFiles.every(file => {
+    const requested = requestedByName.get(file.FileName);
+    if (!requested) return false;
     return (
-      file.FileName === requested.fileName &&
       file.BlobContainer === requested.blobContainer &&
       file.BlobName === requested.blobName &&
       (file.ContentType ?? null) === (requested.contentType ?? null) &&
