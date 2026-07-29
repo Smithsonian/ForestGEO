@@ -620,7 +620,7 @@ These are the original 19 separate files. Use the consolidated scripts above ins
 | `10_validation_queries.sql` | `02_validate_migration.sql` |
 | `10a_critical_validation.sql` | `02_validate_migration.sql` |
 | `11-14_*.sql` | `03_apply_schema_changes.sql` |
-| `15_deploy_bulkingestionprocess.sql` | `storedprocedures.sql` |
+| `15_deploy_bulkingestionprocess.sql` | `db/sql/storedprocedures.sql` — **retired 2026-07-29**; the file now installs nothing |
 
 </details>
 
