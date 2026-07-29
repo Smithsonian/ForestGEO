@@ -34,5 +34,9 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-07-29-01-add-upload-session-census-replacement-marker',
     file: 'schema-contract-repair/2026-07-29-01-add-upload-session-census-replacement-marker.sql'
+  },
+  {
+    id: '2026-07-29-02-add-stem-published-stemid',
+    file: 'schema-contract-repair/2026-07-29-02-add-stem-published-stemid.sql'
   }
 ] as const;
