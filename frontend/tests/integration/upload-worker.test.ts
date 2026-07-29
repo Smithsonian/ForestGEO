@@ -174,7 +174,7 @@ import {
   getBackgroundJob,
   getBackgroundJobWithDetails
 } from '@/lib/background-jobs/repository';
-import { runJobIfClaimable, SESSION_CONFLICT_RETRY_DELAY_SECONDS, type WorkerDeps } from '@/lib/background-jobs/worker';
+import { cleanupCancelledUnclaimedJobArtifacts, runJobIfClaimable, SESSION_CONFLICT_RETRY_DELAY_SECONDS, type WorkerDeps } from '@/lib/background-jobs/worker';
 import { UPLOAD_JOB_MAX_RETRIES, type BackgroundJobFileRecord } from '@/lib/background-jobs/types';
 import { createUploadSession, ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { FormType, SourceFormat, type FileRow } from '@/config/macros/formdetails';
@@ -1043,6 +1043,185 @@ describe('runJobIfClaimable — integration', () => {
       // No re-staging, and no extra uploadmetrics rows appeared.
       expect(await countFamilyTempRows(batchID)).toBe(0);
       expect(await fetchFamilyMetrics(batchID)).toEqual(familyMetricsBefore);
+    }, 180000);
+
+    /** StemGUID-NULL rows for one family batch ID, with identifying fields. */
+    async function fetchUnresolvedRowsForBatch(subBatchID: string): Promise<Array<{ tag: string; sourceRowIndex: number; description: string }>> {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT RawTreeTag, SourceRowIndex, Description FROM coremeasurements
+         WHERE UploadFileID = ? AND CensusID = ? AND UploadBatchID = ? AND StemGUID IS NULL
+         ORDER BY SourceRowIndex`,
+        [FILE1_NAME, censusID, subBatchID]
+      );
+      return rows.map(row => ({ tag: String(row.RawTreeTag), sourceRowIndex: Number(row.SourceRowIndex), description: String(row.Description) }));
+    }
+
+    it('recycled mid-family: the completed sub-batch keeps its proc-recorded failure rows through the retry', async () => {
+      // THE A1 DEFECT: retry cleanup deleted StemGUID-NULL rows for the WHOLE
+      // family, destroying failure rows the proc recorded for already-completed
+      // sub-batches — which the idempotent re-run then skips and never
+      // regenerates. Net silent loss of recorded failures.
+      const PRESERVED_FAILURE_TAG = 'W1PRESERVE';
+      const PRESERVED_FAILURE_INDEX = 424242; // positive = proc-keyed namespace
+      const PRESERVED_FAILURE_REASON = 'Planted proc-recorded failure: must survive family retry cleanup';
+
+      const jobID = await createSingleFileJob();
+      await runJobIfClaimable(jobID, healthyDeps());
+      const batchID = await batchIDForFile(jobID, FILE1_NAME);
+
+      const subBatchIDs = Object.keys(await fetchFamilyMetrics(batchID)).sort();
+      const [firstSubBatch, ...remainingSubBatches] = subBatchIDs;
+
+      // Plant a failure row AS IF bulkingestionprocess recorded it while
+      // completing the first sub-batch (StemGUID NULL, positive proc-style
+      // SourceRowIndex, under the COMPLETED sub-batch's ID).
+      await connection.query(
+        `INSERT INTO coremeasurements
+           (CensusID, StemGUID, MeasurementDate, UploadFileID, UploadBatchID, RawTreeTag, SourceRowIndex, Description, IsActive)
+         VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 1)`,
+        [censusID, MEASUREMENT_DATE, FILE1_NAME, firstSubBatch, PRESERVED_FAILURE_TAG, PRESERVED_FAILURE_INDEX, PRESERVED_FAILURE_REASON]
+      );
+
+      // Simulate the attempt dying after the first sub-batch: later sub-batch
+      // metrics gone, their ingested rows gone, their rows back in staging.
+      await connection.query(`DELETE FROM uploadmetrics WHERE batchID IN (?)`, [remainingSubBatches]);
+      await connection.query(
+        `DELETE cm FROM coremeasurements cm
+         JOIN stems s ON s.StemGUID = cm.StemGUID
+         JOIN trees t ON t.TreeID = s.TreeID
+         WHERE cm.UploadFileID = ? AND cm.CensusID = ? AND t.TreeTag IN ('W1003', 'W1004', 'W1005')`,
+        [FILE1_NAME, censusID]
+      );
+      await insertStagedTempRow(FILE1_NAME, remainingSubBatches[0], 'W1003', 'Q02', 30.1);
+      await requeueJob(jobID);
+
+      await runJobIfClaimable(jobID, healthyDeps());
+
+      const job = await getBackgroundJob(catalogPool, jobID);
+      const preservedRows = await fetchUnresolvedRowsForBatch(firstSubBatch);
+      console.log(`[a1-preserve] status=${job?.status} preservedRows=${JSON.stringify(preservedRows)}`);
+
+      expect(job!.status).toBe('completed');
+      // The planted failure row survived the retry byte-for-byte — the family
+      // cleanup excluded the completed sub-batch instead of wiping it.
+      const survivor = preservedRows.find(row => row.sourceRowIndex === PRESERVED_FAILURE_INDEX);
+      expect(survivor, `completed sub-batch ${firstSubBatch} lost its proc-recorded failure row`).toBeDefined();
+      expect(survivor!.tag).toBe(PRESERVED_FAILURE_TAG);
+      expect(survivor!.description).toBe(PRESERVED_FAILURE_REASON);
+      // And the resumed sub-batches still ingested to a clean, complete set.
+      expect(await countFamilyTempRows(batchID)).toBe(0);
+      expect(await fetchIngestedTags()).toHaveLength(FILE1_VALID_ROW_COUNT);
+    }, 180000);
+
+    it('assigns sub-batch membership in staging order (deterministic split canary)', async () => {
+      // A2: the split UPDATE now carries ORDER BY id, so sub-batch membership
+      // is pinned to staging order (= file order). Contiguous, ordered
+      // SourceRowIndex ranges per sub-batch are the observable consequence —
+      // an unordered LIMIT that ever returns could interleave them.
+      const jobID = await createSingleFileJob();
+      await runJobIfClaimable(jobID, healthyDeps());
+      const batchID = await batchIDForFile(jobID, FILE1_NAME);
+
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT UploadBatchID, MIN(SourceRowIndex) AS minIdx, MAX(SourceRowIndex) AS maxIdx, COUNT(*) AS n
+         FROM coremeasurements
+         WHERE UploadFileID = ? AND CensusID = ? AND StemGUID IS NOT NULL
+         GROUP BY UploadBatchID ORDER BY UploadBatchID`,
+        [FILE1_NAME, censusID]
+      );
+      console.log(`[a2-split-order] ${JSON.stringify(rows)}`);
+      expect(rows.length).toBeGreaterThan(1);
+      let previousMax = -Infinity;
+      for (const row of rows) {
+        const minIdx = Number(row.minIdx);
+        const maxIdx = Number(row.maxIdx);
+        expect(maxIdx - minIdx + 1, `sub-batch ${row.UploadBatchID} rows must be contiguous in staging order`).toBe(Number(row.n));
+        expect(minIdx, `sub-batch ${row.UploadBatchID} must start after the previous sub-batch ends`).toBeGreaterThan(previousMax);
+        previousMax = maxIdx;
+      }
+      void batchID;
+    }, 180000);
+
+    it('surfaces exhausted-retry moved rows on the job record instead of finalizing as a clean success', async () => {
+      // A3: a sub-batch that exhausts every attempt moves its rows to
+      // unresolved coremeasurements; the job must NOT read as a clean success.
+      const jobID = await createSingleFileJob();
+
+      // Fail every CALL for the first sub-batch with a plain retryable error so
+      // the loop exhausts all attempts and moves that sub-batch's rows.
+      const FIRST_SUB_SUFFIX = '__sub001';
+      sharedState.onSchemaQuery = (query, params) => {
+        if (query.includes('bulkingestionprocess') && String(params?.[1] ?? '').endsWith(FIRST_SUB_SUFFIX)) {
+          throw new Error('Injected deterministic procedure failure for A3');
+        }
+      };
+      try {
+        await runJobIfClaimable(jobID, healthyDeps());
+      } finally {
+        sharedState.onSchemaQuery = null;
+      }
+
+      const job = await getBackgroundJob(catalogPool, jobID);
+      const jobDetails = await getBackgroundJobWithDetails(catalogPool, jobID);
+      const fileRecord = jobDetails!.files.find(file => file.fileName === FILE1_NAME)!;
+      const [events] = await catalogPool.query<RowDataPacket[]>(
+        `SELECT Message FROM catalog.background_job_events WHERE JobID = ? AND EventType = 'completed' ORDER BY EventID DESC LIMIT 1`,
+        [jobID]
+      );
+      console.log(`[a3-surface] status=${job?.status} jobFailedRows=${job?.failedRows} fileFailedRows=${fileRecord.failedRows} event=${events[0]?.Message}`);
+
+      expect(job!.status).toBe('completed');
+      // The two moved rows of sub001 (SPLIT_THRESHOLD_ROWS) count on the job
+      // and file records, on top of the fixture's parse reject.
+      expect(job!.failedRows).toBe(FILE1_REJECT_ROW_COUNT + SPLIT_THRESHOLD_ROWS);
+      expect(fileRecord.failedRows).toBe(FILE1_REJECT_ROW_COUNT + SPLIT_THRESHOLD_ROWS);
+      expect(String(events[0]?.Message)).toContain('unresolved');
+    }, 180000);
+
+    it('cancel-path cleanup preserves completed sub-batch failure rows and removes abandoned-sub residue', async () => {
+      // A4/A5 shared logic (cleanupCancelledUnclaimedJobArtifacts): a family
+      // that LOOKS completed can hide unresolved rows under sub-batch IDs that
+      // never earned a metric (mid-batch abort residue). Cleanup must remove
+      // exactly those while preserving completed sub-batches' failure rows —
+      // and must not touch a genuinely completed family at all.
+      const PRESERVED_TAG = 'W1KEEPME';
+      const ABANDONED_TAG = 'W1RESIDUE';
+
+      const jobID = await createSingleFileJob();
+      await runJobIfClaimable(jobID, healthyDeps());
+      const batchID = await batchIDForFile(jobID, FILE1_NAME);
+      const subBatchIDs = Object.keys(await fetchFamilyMetrics(batchID)).sort();
+      const [firstSubBatch, secondSubBatch] = subBatchIDs;
+      const jobDetails = await getBackgroundJobWithDetails(catalogPool, jobID);
+
+      // Genuinely completed family: cleanup is a no-op.
+      const rejectIDsBefore = await fetchRejectIDs(FILE1_NAME);
+      await cleanupCancelledUnclaimedJobArtifacts(ConnectionManager.getInstance(), jobDetails!);
+      expect(await fetchRejectIDs(FILE1_NAME), 'completed family must be untouched').toEqual(rejectIDsBefore);
+
+      // Now craft the A5 state: the second sub-batch's metric vanishes (as if
+      // it never completed) and it holds mid-abort unresolved residue, while
+      // the first (still completed) sub-batch holds a proc-recorded failure.
+      await connection.query(`DELETE FROM uploadmetrics WHERE batchID = ?`, [secondSubBatch]);
+      await connection.query(
+        `INSERT INTO coremeasurements
+           (CensusID, StemGUID, MeasurementDate, UploadFileID, UploadBatchID, RawTreeTag, SourceRowIndex, Description, IsActive)
+         VALUES (?, NULL, ?, ?, ?, ?, 515151, 'proc-recorded failure on completed sub-batch', 1),
+                (?, NULL, ?, ?, ?, ?, 626262, 'mid-abort residue on abandoned sub-batch', 1)`,
+        [censusID, MEASUREMENT_DATE, FILE1_NAME, firstSubBatch, PRESERVED_TAG, censusID, MEASUREMENT_DATE, FILE1_NAME, secondSubBatch, ABANDONED_TAG]
+      );
+
+      await cleanupCancelledUnclaimedJobArtifacts(ConnectionManager.getInstance(), jobDetails!);
+
+      const firstRows = await fetchUnresolvedRowsForBatch(firstSubBatch);
+      const secondRows = await fetchUnresolvedRowsForBatch(secondSubBatch);
+      console.log(`[a4a5-cleanup] first=${JSON.stringify(firstRows)} second=${JSON.stringify(secondRows)}`);
+
+      expect(
+        firstRows.some(row => row.tag === PRESERVED_TAG),
+        'completed sub-batch failure row must survive cancel cleanup'
+      ).toBe(true);
+      expect(secondRows, 'abandoned sub-batch residue must be removed').toHaveLength(0);
     }, 180000);
   });
 });

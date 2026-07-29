@@ -656,14 +656,21 @@ export async function markBackgroundJobWaitingRetryAsWorker(
   return job;
 }
 
-export async function markBackgroundJobCompleted(catalogPool: Pool, jobID: number, workerID: string): Promise<void> {
+export async function markBackgroundJobCompleted(
+  catalogPool: Pool,
+  jobID: number,
+  workerID: string,
+  outcome: { failedRows?: number; unresolvedRows?: number } = {}
+): Promise<void> {
+  const unresolvedRows = outcome.unresolvedRows ?? 0;
   await setBackgroundJobStatus(catalogPool, jobID, workerID, {
     status: 'completed',
     phase: 'completed',
     percentComplete: UPLOAD_JOB_PHASE_PROGRESS.completed,
+    ...(outcome.failedRows !== undefined ? { failedRows: outcome.failedRows } : {}),
     lastError: null,
     eventType: 'completed',
-    eventMessage: 'Upload job completed'
+    eventMessage: unresolvedRows > 0 ? `Upload job completed with ${unresolvedRows} row(s) preserved as unresolved failures for review` : 'Upload job completed'
   });
 }
 

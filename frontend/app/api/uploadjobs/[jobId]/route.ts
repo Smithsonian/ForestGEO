@@ -4,8 +4,11 @@ import { requireSession, getSessionUserId } from '@/lib/auth-helpers';
 import { HTTPResponses } from '@/config/macros';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { cancelBackgroundJob, getBackgroundJobWithDetails, requestBackgroundJobCancel } from '@/lib/background-jobs/repository';
+import { cleanupCancelledUnclaimedJobArtifacts } from '@/lib/background-jobs/worker';
 import { parseJobID, requireJobAccess } from '@/lib/background-jobs/route-helpers';
 import type { BackgroundJobWithDetails } from '@/lib/background-jobs/types';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import ailogger from '@/ailogger';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 export const runtime = 'nodejs';
@@ -104,6 +107,18 @@ async function postHandler(request: NextRequest, context: RouteContext) {
   // queued/waiting_retry jobs have no worker and are cancelled directly.
   const cancelled = await cancelBackgroundJob(catalogPool, parsedJobID, userID);
   if (cancelled) {
+    // A waiting_retry job's dead attempt may have left staged rows and parse
+    // rejects behind; with no worker to finalize this cancel, clean them here.
+    // Best-effort: the cancel itself is already durable, and the cleanup is
+    // idempotent hygiene — a failure here must not turn the cancel into a 500.
+    try {
+      await cleanupCancelledUnclaimedJobArtifacts(ConnectionManager.getInstance(), job);
+    } catch (cleanupError) {
+      ailogger.warn(
+        `[uploadjobs] Cancelled job ${parsedJobID} but artifact cleanup failed (residue remains until next attempt): ` +
+          `${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`
+      );
+    }
     return NextResponse.json({ success: true }, { status: HTTPResponses.OK });
   }
 

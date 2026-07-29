@@ -44,7 +44,7 @@ import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { detectDelimiter } from '@/lib/uploads/detect-delimiter';
 import { sanitizeUploadFileName } from '@/lib/uploads/file-names';
-import { ingestBatch, IngestBatchAbortedError } from '@/lib/uploads/ingest-batch';
+import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
 import { deleteUnresolvedRowsForBatchFamily, recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { countStagedRows, MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
@@ -139,6 +139,7 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
     cancelRequested: false,
     processedRows: 0,
     failedRows: 0,
+    unresolvedIngestRows: 0,
     lastPercent: 0,
     assignedBatches: new Map(),
     deferredInvalidRows: [],
@@ -170,7 +171,10 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
     await runPostIngestionPhases(ctx);
 
     await assertStillOwned(ctx);
-    await markBackgroundJobCompleted(catalogPool, jobID, workerID);
+    await markBackgroundJobCompleted(catalogPool, jobID, workerID, {
+      failedRows: ctx.failedRows,
+      unresolvedRows: ctx.unresolvedIngestRows
+    });
     completed = true;
   } catch (error) {
     await handleRunFailure(ctx, error);
@@ -229,6 +233,13 @@ interface WorkerRunContext {
   cancelRequested: boolean;
   processedRows: number;
   failedRows: number;
+  /**
+   * Rows the ingest phase preserved as unresolved failures (proc-recorded
+   * per-row failures + rows moved after exhausted/abandoned sub-batch
+   * attempts). Counted into failedRows too; tracked separately so job
+   * completion can say so instead of reading as a clean success.
+   */
+  unresolvedIngestRows: number;
   lastPercent: number;
   assignedBatches: Map<number, { file: BackgroundJobFileRecord; batchID: string }>;
   /** Parse rejects from zero-valid-row files, recorded after the last ingest (see runMeasurementsPipeline). */
@@ -359,7 +370,18 @@ function collectCancellationCleanupTargets(ctx: WorkerRunContext): Array<{ fileN
  */
 async function finalizeCancelledJob(ctx: WorkerRunContext): Promise<void> {
   for (const { fileName, batchID } of collectCancellationCleanupTargets(ctx)) {
-    if (await isBatchCompleted(ctx, fileName, batchID)) continue; // completed-batch guard: never clean
+    if (await isBatchCompleted(ctx, fileName, batchID)) {
+      // A family can LOOK completed (a metric completed, nothing processing,
+      // nothing staged) while a mid-batch abort left other sub-batches' rows
+      // parked as unresolved with no metric at all. Only skip when no such
+      // residue exists; otherwise fall through — cleanup preserves the
+      // completed members' rows and removes only the abandoned ones.
+      const abandonedSubBatchIDs = await findAbandonedUnresolvedSubBatchIDs(ctx, fileName, batchID);
+      if (abandonedSubBatchIDs.length === 0) continue;
+      ailogger.info(
+        `[UploadWorker] Cancelled family ${batchID} looks completed but holds unresolved rows from abandoned sub-batch(es) ${abandonedSubBatchIDs.join(', ')}; cleaning those`
+      );
+    }
     await cleanupBatchArtifacts(ctx, fileName, batchID);
   }
   await setBackgroundJobStatus(ctx.catalogPool, ctx.job.jobID, ctx.workerID, {
@@ -545,7 +567,7 @@ function getRecordPayload<T>(payload: Record<string, unknown> | null, key: strin
  * in flight: no family metric left in 'processing'/'failed', and no family rows
  * left staged.
  */
-async function isBatchCompleted(ctx: WorkerRunContext, fileName: string, batchID: string): Promise<boolean> {
+async function isBatchCompleted(ctx: BatchScopeContext, fileName: string, batchID: string): Promise<boolean> {
   const { schemaName, censusID } = ctx.job;
   const subBatchPattern = buildSubBatchPattern(batchID);
 
@@ -575,6 +597,93 @@ async function isBatchCompleted(ctx: WorkerRunContext, fileName: string, batchID
 }
 
 /**
+ * The slice of worker context the batch-hygiene helpers actually need. Lets
+ * the cancel API route (which has no running worker) reuse the same
+ * completed-family probe and sub-batch-aware cleanup as the worker itself.
+ */
+type BatchScopeContext = Pick<WorkerRunContext, 'connectionManager' | 'job'>;
+
+/**
+ * Cleanup for a job cancelled while UNCLAIMED (queued/waiting_retry): a prior
+ * failed attempt may have left staged temporarymeasurements rows and recorded
+ * parse rejects behind, and with no worker to finalize the cancel they would
+ * otherwise be orphaned forever. Applies the same completed-family guard and
+ * sub-batch-aware cleanup as the worker's own cancel finalization.
+ */
+export async function cleanupCancelledUnclaimedJobArtifacts(connectionManager: ConnectionManager, job: BackgroundJobWithDetails): Promise<void> {
+  const ctx: BatchScopeContext = { connectionManager, job };
+  for (const file of job.files) {
+    if (!file.batchID) continue;
+    if (await isBatchCompleted(ctx, file.fileName, file.batchID)) {
+      const abandonedSubBatchIDs = await findAbandonedUnresolvedSubBatchIDs(ctx, file.fileName, file.batchID);
+      if (abandonedSubBatchIDs.length === 0) continue;
+    }
+    await cleanupBatchArtifacts(ctx, file.fileName, file.batchID);
+  }
+}
+
+/**
+ * Batch/sub-batch IDs in the family whose uploadmetrics row is 'completed'.
+ * These sub-batches' StemGUID-NULL rows are the PROC's recorded failures — the
+ * idempotent re-run skips completed sub-batches and never regenerates them, so
+ * cleanup must preserve those rows (see deleteUnresolvedRowsForBatchFamily's
+ * precondition).
+ */
+async function getCompletedSubBatchIDs(ctx: BatchScopeContext, batchID: string): Promise<string[]> {
+  const { schemaName, censusID } = ctx.job;
+  const sql = safeFormatQuery(
+    schemaName,
+    `SELECT batchID FROM ??.uploadmetrics
+     WHERE censusID = ?
+       AND (batchID = ? OR batchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
+       AND status = 'completed'`
+  );
+  const rows = await ctx.connectionManager.executeQuery(sql, [censusID, batchID, buildSubBatchPattern(batchID)]);
+  return Array.isArray(rows) ? rows.map((row: { batchID: string }) => String(row.batchID)) : [];
+}
+
+/** Per-row failures the procedure recorded across the batch family's metrics. */
+async function sumFamilyFailedRecords(ctx: BatchScopeContext, batchID: string): Promise<number> {
+  const { schemaName, censusID } = ctx.job;
+  const sql = safeFormatQuery(
+    schemaName,
+    `SELECT COALESCE(SUM(failedRecords), 0) AS failedTotal FROM ??.uploadmetrics
+     WHERE censusID = ?
+       AND (batchID = ? OR batchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`
+  );
+  const rows = await ctx.connectionManager.executeQuery(sql, [censusID, batchID, buildSubBatchPattern(batchID)]);
+  return Number(rows?.[0]?.failedTotal ?? 0);
+}
+
+/**
+ * Sub-batch IDs that hold unresolved (StemGUID IS NULL) rows but have NO
+ * 'completed' uploadmetrics row. These are the residue of a dead or aborted
+ * attempt — e.g. a mid-batch cancel moved staged rows to unresolved without a
+ * metric ever completing. A family carrying such IDs can satisfy the
+ * completed-family probe (some metric completed, nothing processing, nothing
+ * staged) while still holding attempt residue that must be cleaned.
+ */
+async function findAbandonedUnresolvedSubBatchIDs(ctx: BatchScopeContext, fileName: string, batchID: string): Promise<string[]> {
+  const { schemaName, censusID } = ctx.job;
+  const sql = safeFormatQuery(
+    schemaName,
+    `SELECT DISTINCT cm.UploadBatchID AS batchID
+     FROM ??.coremeasurements cm
+     LEFT JOIN ??.uploadmetrics um
+       ON um.batchID = cm.UploadBatchID
+      AND um.censusID = cm.CensusID
+      AND um.status = 'completed'
+     WHERE cm.UploadFileID = ?
+       AND cm.CensusID = ?
+       AND cm.StemGUID IS NULL
+       AND cm.UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}
+       AND um.batchID IS NULL`
+  );
+  const rows = await ctx.connectionManager.executeQuery(sql, [fileName, censusID, buildSubBatchPattern(batchID)]);
+  return Array.isArray(rows) ? rows.map((row: { batchID: string }) => String(row.batchID)) : [];
+}
+
+/**
  * Retry hygiene for a NON-completed batch: drops any temporarymeasurements
  * left by an interrupted attempt and the parse rejects it recorded, so the
  * re-run starts from a clean slate without accumulating duplicates.
@@ -582,8 +691,13 @@ async function isBatchCompleted(ctx: WorkerRunContext, fileName: string, batchID
  * Operates on the batch family for the same reason as the probe: an
  * interrupted split leaves rows under `__subNNN`, and deleting only the
  * unsuffixed ID would leave them staged to be ingested a second time.
+ *
+ * SUB-BATCH AWARE: within a mixed family (some sub-batches completed, others
+ * not), the completed members' StemGUID-NULL rows are the proc's recorded
+ * failures and MUST survive — the idempotent re-run skips those sub-batches
+ * and never regenerates them. Only non-completed members' rows are deleted.
  */
-async function cleanupBatchArtifacts(ctx: WorkerRunContext, fileName: string, batchID: string): Promise<void> {
+async function cleanupBatchArtifacts(ctx: BatchScopeContext, fileName: string, batchID: string): Promise<void> {
   const { schemaName, plotID, censusID } = ctx.job;
   const subBatchPattern = buildSubBatchPattern(batchID);
 
@@ -594,7 +708,8 @@ async function cleanupBatchArtifacts(ctx: WorkerRunContext, fileName: string, ba
        AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})`
   );
   await ctx.connectionManager.executeQuery(deleteTempSQL, [fileName, plotID, censusID, batchID, subBatchPattern]);
-  await deleteUnresolvedRowsForBatchFamily(ctx.connectionManager, schemaName, fileName, batchID, censusID);
+  const completedSubBatchIDs = await getCompletedSubBatchIDs(ctx, batchID);
+  await deleteUnresolvedRowsForBatchFamily(ctx.connectionManager, schemaName, fileName, batchID, censusID, undefined, completedSubBatchIDs);
 }
 
 // ---------------------------------------------------------------------------
@@ -751,10 +866,26 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
     await assertStillOwned(ctx);
     await transitionSessionState(ctx, UploadSessionState.UPLOADED);
 
+    let fileUnresolvedRows = 0;
     if (fileInsertedRows > 0) {
       await setProgress(ctx, 'ingestion', UPLOAD_JOB_PHASE_PROGRESS.ingestion, `Ingesting ${file.fileName}`);
       await transitionSessionState(ctx, UploadSessionState.PROCESSING);
-      await runIngestForBatch(ctx, file.fileName, batchID);
+      const ingestResult = await runIngestForBatch(ctx, file.fileName, batchID);
+      // Surface what the ingest actually did: rows the retry loop moved to
+      // unresolved after abandoning a sub-batch, plus per-row failures the
+      // procedure recorded in uploadmetrics. Without this a sub-batch that
+      // exhausted every attempt still finalized the job as a clean success.
+      const movedRows = ingestResult.subBatchResults.reduce((total, sub) => total + sub.rowCount, 0);
+      const procFailedRecords = await sumFamilyFailedRecords(ctx, batchID);
+      fileUnresolvedRows = movedRows + procFailedRecords;
+      if (fileUnresolvedRows > 0) {
+        ctx.failedRows += fileUnresolvedRows;
+        ctx.unresolvedIngestRows += fileUnresolvedRows;
+        ailogger.warn(
+          `[UploadWorker] ${file.fileName} (batch ${batchID}) ingested with ${fileUnresolvedRows} unresolved failure row(s): ` +
+            `${movedRows} moved after abandoned sub-batch attempt(s), ${procFailedRecords} recorded by bulkingestionprocess`
+        );
+      }
     }
 
     if (fileInvalidRows.length > 0 && fileInsertedRows > 0) {
@@ -801,11 +932,13 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
     await updateBackgroundJobFileStatus(ctx.catalogPool, job.jobID, ctx.workerID, file.jobFileID, {
       status: fileInsertedRows > 0 ? 'processed' : fileInvalidRows.length + fileDroppedRows > 0 ? 'failed' : 'skipped',
       processedRows: fileInsertedRows,
-      failedRows: fileInvalidRows.length + fileDroppedRows,
+      failedRows: fileInvalidRows.length + fileDroppedRows + fileUnresolvedRows,
       errorMessage:
         fileInsertedRows === 0 && fileInvalidRows.length + fileDroppedRows > 0
           ? `No rows could be staged: ${fileInvalidRows.length} row(s) rejected during parsing, ${fileDroppedRows} row(s) dropped during column resolution`
-          : null
+          : fileUnresolvedRows > 0
+            ? `${fileUnresolvedRows} row(s) preserved as unresolved failures during ingestion`
+            : null
     });
   }
 
@@ -830,9 +963,9 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
  * surfaces as IngestBatchAbortedError; route it through assertStillOwned so it
  * is finalized as a cancellation or lease loss rather than a generic failure.
  */
-async function runIngestForBatch(ctx: WorkerRunContext, fileName: string, batchID: string): Promise<void> {
+async function runIngestForBatch(ctx: WorkerRunContext, fileName: string, batchID: string): Promise<IngestBatchResult> {
   try {
-    await ingestBatch(ctx.connectionManager, {
+    return await ingestBatch(ctx.connectionManager, {
       schema: ctx.job.schemaName,
       fileID: fileName,
       batchID,
