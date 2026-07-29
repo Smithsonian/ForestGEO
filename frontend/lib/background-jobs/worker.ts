@@ -788,6 +788,16 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
     // census replacement and the changelog tracking row still happen.
     const chunkCount = Math.max(1, Math.ceil(rawRows.length / chunkRows));
     for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
+      // Cancellation takes effect BETWEEN chunks, not only between files. A
+      // census-scale file stages over ~22 chunks, and probing only at the file
+      // boundary meant a cancel requested at chunk 2 still staged all 22 —
+      // minutes of work the user had already asked to stop, plus the rows to
+      // clean up afterwards. The heartbeat tick refreshes ctx.cancelRequested
+      // in the background, so the first chunk boundary after the request is
+      // enough; assertStillOwned re-reads the catalog to close the gap when the
+      // flag is not set yet.
+      if (chunkIndex > 0) await assertStillOwned(ctx);
+
       const chunk = rawRows.slice(chunkIndex * chunkRows, (chunkIndex + 1) * chunkRows);
 
       // The worker owns one transaction per chunk: begin/commit per chunk,

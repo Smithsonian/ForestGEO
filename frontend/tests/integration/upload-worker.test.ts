@@ -198,6 +198,10 @@ const MEASUREMENT_DATE = '2024-03-15';
 
 // File 1: 5 valid rows + 1 parse reject (missing required quadrat).
 const FILE1_VALID_ROW_COUNT = 5;
+/** One row per staging chunk, so a single fixture file spans several chunk boundaries. */
+const CANCEL_PROBE_CHUNK_ROWS = 1;
+/** Matches the bulk staging INSERT, not the many other temporarymeasurements statements. */
+const TEMPORARY_MEASUREMENTS_INSERT = /INSERT\s+(?:IGNORE\s+)?INTO\s+`?\w*`?\.?`?temporarymeasurements`?\s*\(/i;
 const FILE1_REJECT_ROW_COUNT = 1;
 const FILE1_CSV = [
   CSV_HEADER,
@@ -605,6 +609,54 @@ describe('runJobIfClaimable — integration', () => {
     const sessionStates = await fetchWorkerSessionStates(jobID);
     console.log(`[cancel] worker session states: ${JSON.stringify(sessionStates)}`);
     expect(sessionStates).toEqual(['failed']);
+  }, 180000);
+
+  /**
+   * Cancellation has to take effect BETWEEN CHUNKS, not only between files.
+   * A census-scale file stages over ~22 chunks; probing only at the file
+   * boundary meant a cancel requested during chunk 2 still staged all 22 —
+   * minutes of work the user had already asked to stop, and rows that then had
+   * to be cleaned up.
+   */
+  it('stops staging at the next chunk boundary when cancellation arrives mid-file', async () => {
+    const originalChunkRows = process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+    // One row per chunk, so FILE1's rows span several chunk boundaries.
+    process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = String(CANCEL_PROBE_CHUNK_ROWS);
+
+    const jobID = await createTwoFileJob();
+    let stagingInserts = 0;
+
+    sharedState.onSchemaQuery = async (query: string) => {
+      if (!TEMPORARY_MEASUREMENTS_INSERT.test(query)) return;
+      stagingInserts += 1;
+      if (stagingInserts === 1) {
+        // The user cancels while chunk 1 is still being written.
+        await catalogPool.query(`UPDATE catalog.background_jobs SET Status = 'cancel_requested' WHERE JobID = ? AND Status = 'running'`, [jobID]);
+        console.log('[cancel-mid-file] cancel_requested set during the first staging chunk');
+      }
+    };
+
+    try {
+      await runJobIfClaimable(jobID, healthyDeps());
+    } finally {
+      sharedState.onSchemaQuery = null;
+      if (originalChunkRows === undefined) delete process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+      else process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = originalChunkRows;
+    }
+
+    const job = await getBackgroundJob(catalogPool, jobID);
+    console.log(`[cancel-mid-file] status=${job?.status} stagingInserts=${stagingInserts} (file has ${FILE1_VALID_ROW_COUNT + FILE1_REJECT_ROW_COUNT} rows)`);
+
+    expect(job!.status).toBe('cancelled');
+    // The decisive assertion: staging stopped at the first chunk boundary
+    // instead of running the file out. Without the between-chunk probe this is
+    // one insert per row.
+    expect(stagingInserts, 'the chunk after the cancellation must never be staged').toBe(1);
+
+    // Nothing is left behind, and file 2 was never started.
+    expect(await countTempRows()).toBe(0);
+    expect(await fetchIngestedIDs(FILE1_NAME)).toHaveLength(0);
+    expect(await fetchIngestedIDs(FILE2_NAME)).toHaveLength(0);
   }, 180000);
 
   it('cancel during a retry attempt also cleans prior-attempt batches the attempt never reached', async () => {
