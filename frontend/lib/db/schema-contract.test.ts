@@ -11,8 +11,11 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  CRITICAL_TABLES,
+  loadCanonicalSchemaContract,
   parseCanonicalSchemaContract,
   compareSchemaContracts,
+  REQUIRED_INDEXES_BY_TABLE,
   normalizeTypeSignature,
   normalizeDefaultValue,
   normalizeExtraMetadata,
@@ -306,5 +309,91 @@ describe('robustness regressions', () => {
     const contract = parseCanonicalSchemaContract(ddl);
     expect(contract.defaultCollation).toBeNull();
     expect(contract.tables['counters'].columns['value'].collation).toBeNull();
+  });
+});
+
+/**
+ * The three lookups the collision check depends on.
+ *
+ * STRAIGHT_JOIN (storedprocedures.sql STAGE 8,
+ * existing_tag_stemtag_collision_failures) pins the JOIN ORDER so the optimizer
+ * cannot flip to the trees x coremeasurements pair explosion that took Harvard's
+ * sub-batches from 8s to 1500s+. It does NOT pin the ACCESS PATH: with the order
+ * fixed and one of these indexes gone, each batch row degrades to a scan and
+ * there is no optimizer escape left. A schema missing one is therefore slower
+ * than it was before the STRAIGHT_JOIN, which is exactly why presence and shape
+ * are contract-required rather than assumed.
+ */
+const COLLISION_CHECK_INDEXES = [
+  { table: 'trees', index: 'idx_trees_tag_census_active' },
+  { table: 'stems', index: 'ux_stems_treeid_stemtag_census' },
+  { table: 'coremeasurements', index: 'ux_measure_unique' }
+] as const;
+
+describe('collision-check index contract', () => {
+  const canonical = loadCanonicalSchemaContract();
+
+  function compareAgainstCanonical(live: SchemaContract) {
+    return compareSchemaContracts(canonical, live, { tables: CRITICAL_TABLES, requiredIndexesByTable: REQUIRED_INDEXES_BY_TABLE });
+  }
+
+  it('lists every collision-check index as required', () => {
+    for (const { table, index } of COLLISION_CHECK_INDEXES) {
+      expect(REQUIRED_INDEXES_BY_TABLE[table], `${table} has no required-index list`).toBeDefined();
+      expect(REQUIRED_INDEXES_BY_TABLE[table], `${index} is not contract-required`).toContain(index);
+    }
+  });
+
+  it('defines every collision-check index in the canonical DDL', () => {
+    for (const { table, index } of COLLISION_CHECK_INDEXES) {
+      expect(canonical.tables[table].indexes[index.toLowerCase()], `${table}.${index} missing from tablestructures.sql`).toBeDefined();
+    }
+  });
+
+  it('matches a live schema that carries all of them unchanged', () => {
+    expect(compareAgainstCanonical(clone(canonical)).failures).toEqual([]);
+  });
+
+  it.each(COLLISION_CHECK_INDEXES)('fails when $table.$index is absent', ({ table, index }) => {
+    const live = clone(canonical);
+    delete live.tables[table].indexes[index.toLowerCase()];
+
+    const { failures } = compareAgainstCanonical(live);
+
+    expect(failures).toContainEqual(expect.objectContaining({ table, object: index, category: 'index', kind: 'missing' }));
+  });
+
+  it.each(COLLISION_CHECK_INDEXES)('fails when $table.$index has lost a key column', ({ table, index }) => {
+    const live = clone(canonical);
+    const liveIndex = live.tables[table].indexes[index.toLowerCase()];
+    expect(liveIndex.columns.length, `${index} needs >1 column for this mutation to be meaningful`).toBeGreaterThan(1);
+    liveIndex.columns = liveIndex.columns.slice(0, -1);
+
+    const { failures } = compareAgainstCanonical(live);
+
+    expect(failures).toContainEqual(expect.objectContaining({ table, object: index, category: 'index', kind: 'columns' }));
+  });
+
+  it.each(COLLISION_CHECK_INDEXES)('fails when $table.$index has the wrong key-column ORDER', ({ table, index }) => {
+    // Same columns, different order: the leftmost-prefix rule means a reordered
+    // index cannot serve the same lookup, so a set comparison would wave this
+    // through while the optimizer still falls back to a scan.
+    const live = clone(canonical);
+    const liveIndex = live.tables[table].indexes[index.toLowerCase()];
+    liveIndex.columns = [...liveIndex.columns].reverse();
+
+    const { failures } = compareAgainstCanonical(live);
+
+    expect(failures).toContainEqual(expect.objectContaining({ table, object: index, category: 'index', kind: 'columns' }));
+  });
+
+  it.each(COLLISION_CHECK_INDEXES)('fails when $table.$index uniqueness flips', ({ table, index }) => {
+    const live = clone(canonical);
+    const liveIndex = live.tables[table].indexes[index.toLowerCase()];
+    liveIndex.unique = !liveIndex.unique;
+
+    const { failures } = compareAgainstCanonical(live);
+
+    expect(failures).toContainEqual(expect.objectContaining({ table, object: index, category: 'index', kind: 'uniqueness' }));
   });
 });
