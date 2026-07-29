@@ -18,7 +18,8 @@ import { IdempotencyKeyConflictError } from '@/lib/background-jobs/errors';
 import { isPrivilegedSession, MAX_UPLOAD_JOB_REQUEST_BYTES, parseOptionalPositiveInteger } from '@/lib/background-jobs/route-helpers';
 import { runJobIfClaimable } from '@/lib/background-jobs/worker';
 import { fromBody, fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
-import { sanitizeUploadFileName } from '@/lib/uploads/file-names';
+import { attemptScopedBlobName, isValidUploadAttemptID, sanitizeUploadFileName } from '@/lib/uploads/file-names';
+import { getContainerClient } from '@/config/macros/azurestorage';
 import { getContainerName, SchemaContainerNameError } from '@/config/macros/containernames';
 import ailogger from '@/ailogger';
 
@@ -113,6 +114,12 @@ const CreateUploadJobSchema = z
     sourceFormat: z.enum(SourceFormat),
     formType: z.enum(FormType),
     idempotencyKey: z.string().trim().min(1).max(255).nullable().optional(),
+    /**
+     * The upload attempt whose blobs this job references. Required to bind the
+     * job to blobs THIS user uploaded in THIS attempt — a caller-supplied
+     * blobName alone proves nothing about who put it there.
+     */
+    attemptID: z.string().trim().refine(isValidUploadAttemptID, { message: 'attemptID must be 8-64 characters of A-Z, a-z, 0-9, dash, or underscore' }),
     payload: UploadJobPayloadSchema.optional(),
     files: z.array(UploadJobFileSchema).min(1).max(MAX_UPLOAD_JOB_FILES)
   })
@@ -260,6 +267,57 @@ function validationErrorResponse(error: z.ZodError) {
   );
 }
 
+/**
+ * Requires every referenced blob to exist in the authorized container, carry
+ * this uploader's identity and this attempt's token in its metadata, and sit at
+ * the attempt-scoped path the canonical file name implies.
+ *
+ * Reading metadata is a HEAD per file — cheap next to the ingestion that
+ * follows, and the only thing standing between a guessed blobName and the
+ * worker ingesting a stranger's file.
+ */
+async function rejectUnownedBlobReferences(
+  input: z.infer<typeof CreateUploadJobSchema>,
+  uploaderID: string,
+  authorizedContainer: string
+): Promise<NextResponse | null> {
+  let containerClient;
+  try {
+    containerClient = await getContainerClient(authorizedContainer, { createIfMissing: false });
+  } catch (error) {
+    ailogger.error(`Could not open container ${authorizedContainer} to verify upload-job blobs`, error instanceof Error ? error : new Error(String(error)));
+    return NextResponse.json({ error: 'Upload storage is unavailable' }, { status: HTTPResponses.SERVICE_UNAVAILABLE });
+  }
+
+  for (const file of input.files) {
+    const expectedBlobName = attemptScopedBlobName(input.attemptID, sanitizeUploadFileName(file.fileName));
+    if (file.blobName !== expectedBlobName) {
+      return NextResponse.json(
+        { error: `Blob reference for "${file.fileName}" is not at this attempt's path for that file` },
+        { status: HTTPResponses.FORBIDDEN }
+      );
+    }
+
+    let properties;
+    try {
+      properties = await containerClient.getBlobClient(file.blobName).getProperties();
+    } catch {
+      return NextResponse.json({ error: `Uploaded blob for "${file.fileName}" was not found` }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+
+    const metadata = properties.metadata ?? {};
+    if (metadata.attemptid !== input.attemptID || metadata.user !== uploaderID) {
+      ailogger.warn(
+        `Rejected upload-job blob ${file.blobName}: metadata user="${metadata.user}" attempt="${metadata.attemptid}" ` +
+          `does not match requester "${uploaderID}" attempt "${input.attemptID}"`
+      );
+      return NextResponse.json({ error: `Uploaded blob for "${file.fileName}" was not uploaded by you in this attempt` }, { status: HTTPResponses.FORBIDDEN });
+    }
+  }
+
+  return null;
+}
+
 async function postHandler(request: NextRequest) {
   const session = await auth();
   const authError = requireSession(session);
@@ -341,6 +399,14 @@ async function postHandler(request: NextRequest) {
   if (input.files.some(file => file.blobContainer.toLowerCase() !== authorizedContainer.toLowerCase())) {
     return NextResponse.json({ error: 'Blob container does not match the authorized upload scope' }, { status: HTTPResponses.FORBIDDEN });
   }
+
+  // The container check above only proves the caller named a container it is
+  // allowed to read. It says nothing about WHO put the blob there, and the
+  // worker will happily ingest whatever the referenced blob contains. Each
+  // referenced blob must therefore be one this user wrote, in this attempt,
+  // under the canonical name the job claims.
+  const blobOwnershipError = await rejectUnownedBlobReferences(input, userID, authorizedContainer);
+  if (blobOwnershipError) return blobOwnershipError;
 
   const catalogPool = getPoolMonitorInstance().pool;
   let job;

@@ -283,7 +283,8 @@ describe('/api/files/[operation]', () => {
       'measurements',
       [],
       'measurements.csv',
-      'csv'
+      'csv',
+      undefined
     );
   });
 
@@ -337,7 +338,8 @@ describe('/api/files/[operation]', () => {
         'measurements',
         [VALID_ROW_ERROR],
         'measurements.csv',
-        'csv'
+        'csv',
+        undefined
       );
     });
 
@@ -372,7 +374,16 @@ describe('/api/files/[operation]', () => {
     const responseBody = await response.json();
     expect(response.status, JSON.stringify(responseBody)).toBe(200);
     expect(responseBody).toMatchObject({ blobName: 'name.csv', fileName: 'name.csv' });
-    expect(mocks.uploadValidFileAsBufferWithMetadata).toHaveBeenCalledWith(expect.anything(), file, 'mason@example.com', 'measurements', [], 'name.csv', 'csv');
+    expect(mocks.uploadValidFileAsBufferWithMetadata).toHaveBeenCalledWith(
+      expect.anything(),
+      file,
+      'mason@example.com',
+      'measurements',
+      [],
+      'name.csv',
+      'csv',
+      undefined
+    );
   });
 
   it('propagates the arcgis_xlsx sourceFormat so archived blob provenance is preserved', async () => {
@@ -400,7 +411,8 @@ describe('/api/files/[operation]', () => {
       'measurements',
       [],
       'arcgis-export.xlsx',
-      'arcgis_xlsx'
+      'arcgis_xlsx',
+      undefined
     );
   });
 

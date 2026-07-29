@@ -8,7 +8,7 @@ import { auth } from '@/auth';
 import { getSessionUserId } from '@/lib/auth-helpers';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
-import { sanitizeUploadFileName as sanitizeFileName } from '@/lib/uploads/file-names';
+import { attemptScopedBlobName, isValidUploadAttemptID, sanitizeUploadFileName as sanitizeFileName } from '@/lib/uploads/file-names';
 import path from 'path';
 import type { Session } from 'next-auth';
 import { FormType, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
@@ -73,6 +73,14 @@ interface FileOperationParams {
   user?: string;
   formType?: string;
   sourceFormat?: string;
+  /**
+   * Identifies one upload attempt. When present, the blob is written under an
+   * attempt-scoped path with create-only semantics instead of the
+   * probe-then-suffix search, and the attempt is recorded in blob metadata so
+   * job creation can require that the blob it is handed belongs to this
+   * uploader and this attempt.
+   */
+  attemptID?: string;
 }
 
 interface AuthorizedFileScope {
@@ -187,7 +195,7 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
     return new NextResponse(JSON.stringify({ error: 'File is required' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const { fileName, formType, sourceFormat } = params;
+  const { fileName, formType, sourceFormat, attemptID } = params;
   const file = formData.get(fileName ?? 'file') as File | null;
   let fileRowErrors: FileRowErrors[] = [];
   const rawFileRowErrors = formData.get('fileRowErrors');
@@ -260,6 +268,15 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
     ailogger.warn(`File name sanitized: ${fileName} -> ${sanitizedFileName}`);
   }
 
+  if (attemptID !== undefined && !isValidUploadAttemptID(attemptID)) {
+    return new NextResponse(JSON.stringify({ error: 'attemptID must be 8-64 characters of A-Z, a-z, 0-9, dash, or underscore' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
+  // Attempt-scoped path: two attempts can never contend for one blob name, so
+  // the exists()-then-write race disappears rather than being narrowed.
+  const targetBlobName = attemptID ? attemptScopedBlobName(attemptID, sanitizedFileName) : sanitizedFileName;
+
   try {
     // getContainerClient now throws with detailed error messages on failure
     const containerClient = await getContainerClient(scope.container);
@@ -271,8 +288,9 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
       scope.userId,
       formType,
       fileRowErrors,
-      sanitizedFileName,
-      normalizedSourceFormat
+      targetBlobName,
+      normalizedSourceFormat,
+      attemptID ? { attemptID } : undefined
     );
 
     // Verify the response status
@@ -285,8 +303,12 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
       JSON.stringify({
         message: 'File uploaded successfully',
         fileName: sanitizedFileName,
+        // Both names travel back: the canonical one is the job's file identity,
+        // the original is what the user recognizes in an error message.
+        originalFileName: fileName,
         blobContainer: scope.container,
         blobName: uploadResult.blobName,
+        attemptID: attemptID ?? null,
         contentType: file.type || null,
         byteSize: file.size,
         formType,
@@ -376,7 +398,8 @@ function extractParams(request: NextRequest): FileOperationParams & { fileName?:
     census: searchParams.get('census')?.trim() || undefined,
     user: searchParams.get('user')?.trim() || undefined,
     formType: searchParams.get('formType')?.trim() || undefined,
-    sourceFormat: searchParams.get('sourceFormat')?.trim() || undefined
+    sourceFormat: searchParams.get('sourceFormat')?.trim() || undefined,
+    attemptID: searchParams.get('attemptID')?.trim() || undefined
   };
 }
 
