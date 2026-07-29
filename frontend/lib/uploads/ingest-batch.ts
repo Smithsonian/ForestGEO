@@ -29,6 +29,7 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import { buildSubBatchID, buildSubBatchPattern, discoverBatchFamily, highestSubBatchOrdinal, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
+import { isKilledConnectionError, isKilledStatementError, QueryTimeoutError } from '@/lib/db/primitives';
 
 // Sub-batches of 10K rows keep transaction duration ~6.5s (benchmarked),
 // well under the 50s innodb_lock_wait_timeout on Azure MySQL.
@@ -56,8 +57,10 @@ const SETUP_PHASE_TIMEOUT_MS = 2 * 60 * 1000;
 // Retry / backoff constants for processSubBatch
 const INITIAL_RETRY_DELAY_MS = 100;
 
-// Give-up thresholds: once attempt count reaches these, stop retrying that class of error.
-const TIMEOUT_GIVE_UP_AFTER_ATTEMPTS = 3;
+// Give-up threshold: once the attempt count reaches this, stop retrying lock
+// contention. There is deliberately no timeout threshold — a timed-out call was
+// KILLed, and a killed call is abandoned on the first occurrence, not after a
+// budget (see the kill classification in processSubBatch).
 const LOCK_GIVE_UP_AFTER_ATTEMPTS = 2;
 
 // Backoff delays and caps per error class
@@ -67,14 +70,26 @@ const CONNECTION_BACKOFF_CAP_MS = 15_000;
 const DEADLOCK_BACKOFF_MULTIPLIER = 1.5;
 const DEADLOCK_BACKOFF_CAP_MS = 3_000;
 const DEFAULT_BACKOFF_MULTIPLIER = 2;
-const DEFAULT_BACKOFF_CAP_MS = 5_000; // timeout errors also fall into this bucket
+const DEFAULT_BACKOFF_CAP_MS = 5_000;
 const RETRY_JITTER_MAX_MS = 1_000;
 
 // MySQL error numbers for connection-loss and deadlock conditions
-const MYSQL_ERRNO_SERVER_GONE = 1927; // ER_SERVER_LOST — server closed the connection
 const MYSQL_ERRNO_TCP_LOST = 2013; // CR_SERVER_LOST — TCP connection lost during query
 const MYSQL_ERRNO_DEADLOCK = 1213; // ER_LOCK_DEADLOCK
-const MYSQL_ERRNO_QUERY_INTERRUPTED = 1317; // ER_QUERY_INTERRUPTED — statement was KILLed
+
+/**
+ * mysql2's code when the SERVER closed the connection underneath a running
+ * statement. Measured against MySQL 8.0.36 (2026-07-29): an operator's
+ * `KILL <id>` during a CALL surfaces here as `PROTOCOL_CONNECTION_LOST` with no
+ * errno at all — NOT as ER_CONNECTION_KILLED/1927, which is what the error
+ * catalog suggests. Classifying only on 1927 would have left the operator-kill
+ * path retrying exactly as it did during the Harvard incident.
+ *
+ * It is grouped with the kills rather than with transient loss because the
+ * server, not the network, ended the session — the same thing a KILL does.
+ * ECONNRESET and CR_SERVER_LOST/2013 (network-layer loss) stay retryable.
+ */
+const PROTOCOL_CONNECTION_LOST_CODE = 'PROTOCOL_CONNECTION_LOST';
 
 /**
  * Thrown when the caller's isAborted probe fires between sub-batches.
@@ -428,6 +443,8 @@ async function processSubBatch(
 ): Promise<SubBatchResult> {
   let attempt = 0;
   let delay = INITIAL_RETRY_DELAY_MS;
+  /** Set when the loop exits because the call was KILLed rather than because attempts ran out. */
+  let killReason: string | null = null;
 
   while (attempt < MAX_ATTEMPTS_PER_SUBBATCH) {
     if (isAborted()) {
@@ -474,12 +491,21 @@ async function processSubBatch(
       return result;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any) {
-      const isTimeout = e.message?.includes('timed out');
-      const isInterrupted = e.code === 'ER_QUERY_INTERRUPTED' || e.errno === MYSQL_ERRNO_QUERY_INTERRUPTED;
-      const isConnectionError =
-        e.code === 'ECONNRESET' || e.code === 'PROTOCOL_CONNECTION_LOST' || e.errno === MYSQL_ERRNO_SERVER_GONE || e.errno === MYSQL_ERRNO_TCP_LOST;
+      // Typed, not substring-matched. The DB layer's own timeout raises
+      // QueryTimeoutError, whose message merely happens to contain "timed out";
+      // matching on that text also swallowed unrelated errors and, worse, routed
+      // a KILLed CALL into the retry budget.
+      const isQueryTimeout = e instanceof QueryTimeoutError;
+      const isInterrupted = isKilledStatementError(e);
+      const isConnectionKilled = isKilledConnectionError(e) || e.code === PROTOCOL_CONNECTION_LOST_CODE;
+      const isConnectionError = e.code === 'ECONNRESET' || e.errno === MYSQL_ERRNO_TCP_LOST;
       const isDeadlock = e.code === 'ER_LOCK_DEADLOCK' || e.errno === MYSQL_ERRNO_DEADLOCK;
       const isLockContention = e.message?.includes('Failed to acquire application lock') || e.message?.includes('Another upload is in progress');
+
+      // Every shape of "this procedure call was deliberately aborted": the DB
+      // layer's timeout KILL (QueryTimeoutError), the ER_QUERY_INTERRUPTED that
+      // KILL QUERY produces, and an operator's KILL <id> on the connection.
+      const wasKilled = isQueryTimeout || isInterrupted || isConnectionKilled;
 
       ailogger.error(`Sub-batch ${subBatchID} attempt ${attempt} failed — MySQL error details:`, e, {
         message: e.message,
@@ -488,8 +514,9 @@ async function processSubBatch(
         sqlState: e.sqlState,
         sqlMessage: e.sqlMessage,
         sql: e.sql?.substring(0, 200),
-        isTimeout,
+        isQueryTimeout,
         isInterrupted,
+        isConnectionKilled,
         isConnectionError,
         isDeadlock,
         isLockContention,
@@ -499,13 +526,25 @@ async function processSubBatch(
         subBatchID
       });
 
-      // A KILLed statement (ER_QUERY_INTERRUPTED) is a deliberate abort — an
-      // operator's KILL QUERY or the DB layer's timeout kill — never blindly
-      // re-run it. During the 2026-07-28 Harvard incident an operator KILL of a
-      // pathological 25-minute statement landed here as generic-retryable and
-      // simply started the same statement over.
-      if (isInterrupted) break;
-      if (isTimeout && attempt >= TIMEOUT_GIVE_UP_AFTER_ATTEMPTS) break;
+      // A KILLed bulkingestionprocess call is NEVER replayed automatically.
+      //
+      // The kill is deliberate by definition — an operator's KILL QUERY, an
+      // operator's KILL <id>, or this application's own 660s statement timeout —
+      // and the procedure was interrupted mid-transaction with its EXIT HANDLER
+      // unfinished. Re-running it verbatim re-does the work that was just judged
+      // pathological. During the 2026-07-28 Harvard incident an operator KILL of
+      // a 25-minute statement landed here as generic-retryable and simply
+      // started the same statement over; the DB-layer timeout kill escaped the
+      // same way through the "timed out" substring branch, buying three more
+      // attempts of the same 11-minute statement (~33 minutes of churn).
+      if (wasKilled) {
+        killReason = isQueryTimeout
+          ? `statement timed out after ${e.timeoutMs}ms and was KILLed`
+          : isConnectionKilled
+            ? 'connection was KILLed by an operator'
+            : 'statement was KILLed';
+        break;
+      }
       if (isLockContention && attempt >= LOCK_GIVE_UP_AFTER_ATTEMPTS) break;
 
       if (isLockContention) {
@@ -522,16 +561,16 @@ async function processSubBatch(
     }
   }
 
-  // All retries exhausted for this sub-batch — move remaining rows to failed
-  ailogger.error(`All ${MAX_ATTEMPTS_PER_SUBBATCH} attempts exhausted for sub-batch ${subBatchID}`);
-  const movedRows = await moveTemporaryBatchToFailedMeasurements(
-    connectionManager,
-    schema,
-    fileID,
-    subBatchID,
-    `Sub-batch moved after ${MAX_ATTEMPTS_PER_SUBBATCH} failed attempts`
-  );
-  ailogger.warn(`Moved ${movedRows} rows from sub-batch ${subBatchID} to unresolved coremeasurements`);
+  // The loop ended for one of two very different reasons, and conflating them
+  // has already cost a diagnosis once: a sub-batch abandoned after ONE killed
+  // attempt was logged and recorded as "exhausted all 5 attempts".
+  const attemptSummary = killReason
+    ? `${killReason} on attempt ${attempt} of ${MAX_ATTEMPTS_PER_SUBBATCH}; not retried (a killed procedure call is never replayed)`
+    : `all ${MAX_ATTEMPTS_PER_SUBBATCH} attempts failed`;
+
+  ailogger.error(`Sub-batch ${subBatchID} giving up: ${attemptSummary}`);
+  const movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, subBatchID, `Sub-batch moved after ${attemptSummary}`);
+  ailogger.warn(`Moved ${movedRows} rows from sub-batch ${subBatchID} to unresolved coremeasurements (${attemptSummary})`);
 
   return {
     subBatchID,
@@ -539,7 +578,7 @@ async function processSubBatch(
     durationMs: 0,
     attemptsNeeded: attempt,
     batchFailedButHandled: true,
-    message: `Sub-batch exhausted retries, ${movedRows} rows moved to unresolved coremeasurements`
+    message: `Sub-batch abandoned — ${attemptSummary}; ${movedRows} rows moved to unresolved coremeasurements`
   };
 }
 

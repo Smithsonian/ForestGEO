@@ -10,10 +10,17 @@ const { getConnMock, runQueryMock, loggerMock } = vi.hoisted(() => ({
   }
 }));
 
-vi.mock('@/lib/db/primitives', () => ({
-  getConn: getConnMock,
-  runQuery: runQueryMock
-}));
+// QueryTimeoutError is the real class, not a stub: ConnectionManager branches on
+// `instanceof`, so a fake would make the branch untestable (and silently dead).
+vi.mock('@/lib/db/primitives', async () => {
+  const actual = await vi.importActual<typeof import('./primitives')>('./primitives');
+  return {
+    getConn: getConnMock,
+    runQuery: runQueryMock,
+    killQueryOnThread: vi.fn(),
+    QueryTimeoutError: actual.QueryTimeoutError
+  };
+});
 
 vi.mock('@/lib/connectionlogger', () => ({
   patchConnectionManager: vi.fn(),
@@ -437,5 +444,135 @@ describe('ConnectionManager transaction-slot accounting — beginTransaction is 
     } finally {
       resetSlotState(internals, [], grantedTxIds);
     }
+  });
+});
+
+/**
+ * A runQuery timeout inside a managed transaction destroys that transaction's
+ * connection (lib/db/primitives quarantines it so a statement still in flight can
+ * never re-enter the pool). The transaction is therefore over — the server rolls
+ * it back when the socket closes — but the map entry used to survive.
+ *
+ * The consequence was a misleading 500: the caller's `catch { rollbackTransaction }`
+ * found the entry, called rollback() on a closed connection, and threw
+ * "Can't add new command when connection is in closed state", REPLACING the
+ * QueryTimeoutError that explained what actually happened. (Verified NOT a slot
+ * leak — accounting was already correct; the error was the damage.)
+ */
+describe('ConnectionManager transaction finalization after a statement timeout', () => {
+  const TIMED_OUT_THREAD_ID = 909;
+  const STATEMENT_TIMEOUT_MS = 660000;
+
+  type TxInternals = {
+    transactionConnections: Map<string, unknown>;
+    transactionMeta: Map<string, unknown>;
+    transactionSlotQueue: Array<() => void>;
+    startingTransactions: number;
+  };
+
+  /** A connection that behaves like one mysql2 has already destroyed. */
+  function makeDestroyedConnection() {
+    return {
+      threadId: TIMED_OUT_THREAD_ID,
+      query: vi.fn().mockResolvedValue([[]]),
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockRejectedValue(new Error("Can't add new command when connection is in closed state")),
+      rollback: vi.fn().mockRejectedValue(new Error("Can't add new command when connection is in closed state")),
+      release: vi.fn()
+    };
+  }
+
+  beforeEach(() => {
+    getConnMock.mockReset();
+    runQueryMock.mockReset();
+    loggerMock.info.mockReset();
+    loggerMock.warn.mockReset();
+    loggerMock.error.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('preserves the QueryTimeoutError and makes the caller’s later rollback a no-op', async () => {
+    const primitives = await vi.importActual<typeof import('./primitives')>('./primitives');
+    const { default: ConnectionManager } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const cm = ConnectionManager.getInstance();
+    const internals = cm as unknown as TxInternals;
+
+    const occupancyBefore = internals.transactionConnections.size + internals.startingTransactions;
+    const queueLengthBefore = internals.transactionSlotQueue.length;
+
+    const connection = makeDestroyedConnection();
+    getConnMock.mockResolvedValueOnce(connection);
+    const transactionId = await cm.beginTransaction();
+
+    // The statement times out; primitives has already destroyed the connection.
+    const timeoutError = new primitives.QueryTimeoutError(STATEMENT_TIMEOUT_MS, TIMED_OUT_THREAD_ID);
+    runQueryMock.mockRejectedValueOnce(timeoutError);
+
+    const thrown = await cm.executeQuery('CALL forestgeo_test.bulkingestionprocess(?, ?)', ['f', 'b'], transactionId).then(
+      () => {
+        throw new Error('executeQuery resolved but runQuery rejected with a timeout');
+      },
+      (error: unknown) => error
+    );
+
+    // The original error survives, unwrapped.
+    expect(thrown).toBe(timeoutError);
+
+    // The transaction is already finalized, so the caller's rollback finds
+    // nothing to roll back and never touches the closed connection.
+    await expect(cm.rollbackTransaction(transactionId)).resolves.toBeUndefined();
+    expect(connection.rollback, 'rollback() on a destroyed connection is what threw the masking error').not.toHaveBeenCalled();
+
+    // Bookkeeping settled exactly once, back to baseline.
+    expect(internals.transactionConnections.has(transactionId)).toBe(false);
+    expect(internals.transactionMeta.has(transactionId)).toBe(false);
+    expect(internals.transactionConnections.size + internals.startingTransactions).toBe(occupancyBefore);
+    expect(internals.transactionSlotQueue.length).toBe(queueLengthBefore);
+  });
+
+  it('discards the rolled-back transaction’s buffered changelog entries', async () => {
+    const { discardTransactionChangelog, flushTransactionChangelog } = await import('@/lib/connectionlogger');
+    const primitives = await vi.importActual<typeof import('./primitives')>('./primitives');
+    const { default: ConnectionManager } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const cm = ConnectionManager.getInstance();
+
+    const connection = makeDestroyedConnection();
+    getConnMock.mockResolvedValueOnce(connection);
+    const transactionId = await cm.beginTransaction();
+    runQueryMock.mockRejectedValueOnce(new primitives.QueryTimeoutError(STATEMENT_TIMEOUT_MS, TIMED_OUT_THREAD_ID));
+
+    await expect(cm.executeQuery('UPDATE forestgeo_test.coremeasurements SET IsActive = 0', [], transactionId)).rejects.toBeInstanceOf(
+      primitives.QueryTimeoutError
+    );
+
+    // The writes were rolled back by the server; flushing them would record
+    // changelog entries for changes that never happened.
+    expect(vi.mocked(discardTransactionChangelog)).toHaveBeenCalledWith(transactionId);
+    expect(vi.mocked(flushTransactionChangelog)).not.toHaveBeenCalled();
+  });
+
+  it('leaves an ordinary query error’s transaction intact for the caller to roll back', async () => {
+    const { default: ConnectionManager } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const cm = ConnectionManager.getInstance();
+    const internals = cm as unknown as TxInternals;
+
+    const connection = makeDestroyedConnection();
+    connection.rollback = vi.fn().mockResolvedValue(undefined);
+    getConnMock.mockResolvedValueOnce(connection);
+    const transactionId = await cm.beginTransaction();
+
+    const sqlError = new Error("Table 'x.nonexistent' doesn't exist");
+    runQueryMock.mockRejectedValueOnce(sqlError);
+
+    await expect(cm.executeQuery('SELECT * FROM forestgeo_test.nonexistent', [], transactionId)).rejects.toBe(sqlError);
+
+    // Still owned by the caller: the connection is alive and the real ROLLBACK
+    // must still be issued.
+    expect(internals.transactionConnections.has(transactionId)).toBe(true);
+    await cm.rollbackTransaction(transactionId);
+    expect(connection.rollback).toHaveBeenCalledTimes(1);
   });
 });

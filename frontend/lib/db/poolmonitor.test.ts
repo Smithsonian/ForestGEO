@@ -203,4 +203,134 @@ describe('PoolMonitor', () => {
 
     await monitor.closeAllConnections();
   });
+
+  /**
+   * tryAcquireConnection exists for the out-of-band `KILL QUERY` that aborts a
+   * timed-out statement. Two hazards it must not have:
+   *
+   *  - waiting forever (createManagedPool forces queueLimit: 0, so a saturated
+   *    pool makes an ordinary acquisition unbounded — and a saturated pool is
+   *    precisely the state the kill path runs in), and
+   *  - leaking the connection that arrives after the caller gave up: mysql2 keeps
+   *    the losing acquisition queued and eventually hands it a real connection
+   *    that nothing would ever release.
+   */
+  describe('tryAcquireConnection', () => {
+    const ACQUIRE_TIMEOUT_MS = 5000;
+
+    async function makeMonitor(pool: ReturnType<typeof createFakePool>) {
+      const { PoolMonitor } = await vi.importActual<typeof import('./poolmonitor')>('./poolmonitor');
+      const monitor = new PoolMonitor({ connectionLimit: 2 }) as unknown as {
+        pool: ReturnType<typeof createFakePool>;
+        poolClosed: boolean;
+        tryAcquireConnection: (timeoutMs: number) => Promise<{ status: string; connection?: unknown; error?: unknown }>;
+        closeAllConnections: () => Promise<void>;
+      };
+      monitor.pool = pool;
+      monitor.poolClosed = false;
+      return monitor;
+    }
+
+    it('returns the connection when the pool answers before the deadline', async () => {
+      const connection = createFakeConnection();
+      const monitor = await makeMonitor(createFakePool({ getConnection: vi.fn().mockResolvedValue(connection) }));
+
+      const result = await monitor.tryAcquireConnection(ACQUIRE_TIMEOUT_MS);
+
+      expect(result).toEqual({ status: 'acquired', connection });
+      await monitor.closeAllConnections();
+    });
+
+    it('gives up at the deadline instead of queueing forever behind a saturated pool', async () => {
+      const monitor = await makeMonitor(createFakePool({ getConnection: vi.fn().mockReturnValue(new Promise(() => {})) }));
+
+      const pending = monitor.tryAcquireConnection(ACQUIRE_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(ACQUIRE_TIMEOUT_MS);
+
+      expect(await pending).toEqual({ status: 'timeout' });
+      await monitor.closeAllConnections();
+    });
+
+    it('releases a connection that arrives AFTER the deadline rather than leaking it', async () => {
+      let handOverConnection!: (connection: unknown) => void;
+      const lateConnection = { release: vi.fn(), destroy: vi.fn() };
+      const monitor = await makeMonitor(
+        createFakePool({
+          getConnection: vi.fn().mockReturnValue(
+            new Promise(resolve => {
+              handOverConnection = resolve;
+            })
+          )
+        })
+      );
+
+      const pending = monitor.tryAcquireConnection(ACQUIRE_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(ACQUIRE_TIMEOUT_MS);
+      expect(await pending).toEqual({ status: 'timeout' });
+
+      // The pool finally honours the queued acquisition. Nobody is waiting for
+      // it any more, so it must go straight back.
+      handOverConnection(lateConnection);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(lateConnection.release).toHaveBeenCalledTimes(1);
+      await monitor.closeAllConnections();
+    });
+
+    it('destroys a late arrival that cannot be released', async () => {
+      let handOverConnection!: (connection: unknown) => void;
+      const lateConnection = {
+        release: vi.fn(() => {
+          throw new Error('already returned');
+        }),
+        destroy: vi.fn()
+      };
+      const monitor = await makeMonitor(
+        createFakePool({
+          getConnection: vi.fn().mockReturnValue(
+            new Promise(resolve => {
+              handOverConnection = resolve;
+            })
+          )
+        })
+      );
+
+      const pending = monitor.tryAcquireConnection(ACQUIRE_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(ACQUIRE_TIMEOUT_MS);
+      await pending;
+
+      handOverConnection(lateConnection);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(lateConnection.destroy).toHaveBeenCalledTimes(1);
+      await monitor.closeAllConnections();
+    });
+
+    it('reports an acquisition failure without reinitializing the pool', async () => {
+      const acquisitionError = new Error('Too many connections');
+      const pool = createFakePool({ getConnection: vi.fn().mockRejectedValue(acquisitionError) });
+      const monitor = await makeMonitor(pool);
+      let reinitializeCalls = 0;
+      (monitor as unknown as { reinitializePool: () => Promise<void> }).reinitializePool = async () => {
+        reinitializeCalls += 1;
+      };
+
+      const result = await monitor.tryAcquireConnection(ACQUIRE_TIMEOUT_MS);
+
+      expect(result).toEqual({ status: 'failed', error: acquisitionError });
+      expect(reinitializeCalls, 'a best-effort kill acquisition must never tear down the whole pool').toBe(0);
+      await monitor.closeAllConnections();
+    });
+
+    it('refuses to acquire from a closed pool', async () => {
+      const pool = createFakePool();
+      const monitor = await makeMonitor(pool);
+      monitor.poolClosed = true;
+
+      const result = await monitor.tryAcquireConnection(ACQUIRE_TIMEOUT_MS);
+
+      expect(result.status).toBe('failed');
+      expect(pool.getConnection).not.toHaveBeenCalled();
+    });
+  });
 });
