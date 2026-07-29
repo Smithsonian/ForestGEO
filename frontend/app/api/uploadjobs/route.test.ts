@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET, POST } from './route';
+import { MAX_UPLOAD_JOB_REQUEST_BYTES } from '@/lib/background-jobs/route-helpers';
 
 // GET/POST are wrapped by withRouteAuthz, whose Handler type requires a
 // RouteContext second argument even though this route never reads
@@ -25,6 +26,9 @@ const mocks = vi.hoisted(() => ({
   createUploadBackgroundJob: vi.fn(),
   listBackgroundJobs: vi.fn(),
   isAsyncUploadEnabledFor: vi.fn(() => true),
+  getBlobProperties: vi.fn(),
+  loggerWarn: vi.fn(),
+  getContainerClient: vi.fn(),
   runJobIfClaimable: vi.fn(async () => undefined),
   executeQuery: vi.fn(),
   loggerError: vi.fn(),
@@ -78,13 +82,19 @@ vi.mock('@/lib/background-jobs/feature-gate', () => ({
   isAsyncUploadEnabledFor: mocks.isAsyncUploadEnabledFor
 }));
 
+vi.mock('@/config/macros/azurestorage', () => ({
+  getContainerClient: mocks.getContainerClient
+}));
+
 vi.mock('@/lib/background-jobs/worker', () => ({
   runJobIfClaimable: mocks.runJobIfClaimable
 }));
 
 vi.mock('@/ailogger', () => ({
   default: {
-    error: mocks.loggerError
+    error: mocks.loggerError,
+    warn: mocks.loggerWarn,
+    info: vi.fn()
   }
 }));
 
@@ -96,6 +106,10 @@ const session = {
     sites: [{ schemaName: 'forestgeo_testing' }]
   }
 };
+
+/** Matches isValidUploadAttemptID: 8-64 chars of A-Za-z0-9_- */
+const TEST_ATTEMPT_ID = 'attempt-0123456789ab';
+const TEST_UPLOADER = 'mason@example.com';
 
 const VALID_COLUMN_MAPPING = {
   version: 1,
@@ -112,11 +126,14 @@ function makeCreateBody(overrides: Record<string, unknown> = {}) {
     sourceFormat: 'csv',
     formType: 'measurements',
     idempotencyKey: 'upload-job-1',
+    attemptID: TEST_ATTEMPT_ID,
     files: [
       {
         fileName: 'measurements.csv',
         blobContainer: 'forestgeo-testing-storage',
-        blobName: 'uploads/job-1/measurements.csv',
+        // Must be the attempt-scoped path for the canonical file name; job
+        // creation verifies this and the blob's ownership metadata.
+        blobName: `${TEST_ATTEMPT_ID}/measurements.csv`,
         contentType: 'text/csv',
         byteSize: 128,
         expectedRows: 12
@@ -126,11 +143,24 @@ function makeCreateBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * The route requires Content-Length. The WHATWG Request constructor does not set
+ * it — that header is added by the HTTP transport when a request is actually
+ * sent — so these unit-level requests set it themselves, exactly as the browser
+ * would for a string body. tests/integration/uploadjobs-content-length.test.ts
+ * proves the real transport does supply it.
+ */
+/** Comfortably past the limit, for the "declared oversize" path. */
+const OVERSIZED_CONTENT_LENGTH = MAX_UPLOAD_JOB_REQUEST_BYTES * 2;
+
 function makeCreateRequest(body: Record<string, unknown>) {
-  return new Request('http://localhost/api/uploadjobs', {
+  const serialized = JSON.stringify(body);
+  const request = new Request('http://localhost/api/uploadjobs', {
     method: 'POST',
-    body: JSON.stringify(body)
+    body: serialized
   }) as any;
+  request.headers.set('content-length', String(Buffer.byteLength(serialized, 'utf8')));
+  return request;
 }
 
 function makeListRequest(query: string) {
@@ -140,9 +170,18 @@ function makeListRequest(query: string) {
   return req;
 }
 
+/** A blob whose metadata says this user uploaded it in this attempt. */
+function primeOwnedBlob(metadata: Record<string, string> = { user: TEST_UPLOADER, attemptid: TEST_ATTEMPT_ID }) {
+  mocks.getBlobProperties.mockResolvedValue({ metadata });
+  mocks.getContainerClient.mockResolvedValue({
+    getBlobClient: () => ({ getProperties: mocks.getBlobProperties })
+  });
+}
+
 describe('POST /api/uploadjobs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    primeOwnedBlob();
     mocks.auth.mockResolvedValue(session);
     mocks.createUploadBackgroundJob.mockResolvedValue({
       jobID: 42,
@@ -342,7 +381,7 @@ describe('POST /api/uploadjobs', () => {
 
   it('rejects duplicate file names before batch bookkeeping can collide', async () => {
     const file = makeCreateBody().files[0];
-    const response = await callPost(makeCreateRequest(makeCreateBody({ files: [file, { ...file, blobName: 'uploads/job-1/copy.csv' }] })));
+    const response = await callPost(makeCreateRequest(makeCreateBody({ files: [file, { ...file, blobName: `${TEST_ATTEMPT_ID}/copy.csv` }] })));
 
     expect(response.status).toBe(400);
     expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
@@ -386,7 +425,7 @@ describe('POST /api/uploadjobs', () => {
       makeCreateRequest(
         makeCreateBody({
           sourceFormat: 'arcgis_xlsx',
-          files: [{ ...makeCreateBody().files[0], fileName: 'survey.xlsx', blobName: 'survey.xlsx', sourceFormat: 'arcgis_xlsx' }],
+          files: [{ ...makeCreateBody().files[0], fileName: 'survey.xlsx', blobName: `${TEST_ATTEMPT_ID}/survey.xlsx`, sourceFormat: 'arcgis_xlsx' }],
           payload: {
             arcgisImportSession: { importSessionId: 'import-1', fileName: 'survey.xlsx', rowCount: 100 }
           }
@@ -407,7 +446,7 @@ describe('POST /api/uploadjobs', () => {
     const response = await callPost(
       makeCreateRequest(
         makeCreateBody({
-          files: [{ ...makeCreateBody().files[0], fileName: 'Harvard_Forest_2014.csv', blobName: 'uploads/job-1/Harvard_Forest_2014.csv' }],
+          files: [{ ...makeCreateBody().files[0], fileName: 'Harvard_Forest_2014.csv', blobName: `${TEST_ATTEMPT_ID}/Harvard_Forest_2014.csv` }],
           payload: {
             selectedDelimiters: { 'Harvard_Forest_2014.csv': ',' },
             columnMappings: { 'Harvard_Forest_2014.csv': VALID_COLUMN_MAPPING }
@@ -450,7 +489,14 @@ describe('POST /api/uploadjobs', () => {
       makeCreateRequest(
         makeCreateBody({
           sourceFormat: 'arcgis_xlsx',
-          files: [{ ...makeCreateBody().files[0], fileName: 'Harvard_Survey_2014.xlsx', blobName: 'Harvard_Survey_2014.xlsx', sourceFormat: 'arcgis_xlsx' }],
+          files: [
+            {
+              ...makeCreateBody().files[0],
+              fileName: 'Harvard_Survey_2014.xlsx',
+              blobName: `${TEST_ATTEMPT_ID}/Harvard_Survey_2014.xlsx`,
+              sourceFormat: 'arcgis_xlsx'
+            }
+          ],
           payload: {
             // The pre-flight session records the raw browser name.
             arcgisImportSession: { importSessionId: 'import-1', fileName: 'Harvard Survey 2014.xlsx', rowCount: 100 }
@@ -495,7 +541,7 @@ describe('POST /api/uploadjobs', () => {
 
   it('rejects an oversized request before anything reads or parses the body', async () => {
     const request = makeCreateRequest(makeCreateBody());
-    request.headers.set('content-length', String(8 * 1024 * 1024));
+    request.headers.set('content-length', String(OVERSIZED_CONTENT_LENGTH));
     const jsonSpy = vi.spyOn(request, 'json');
 
     const response = await callPost(request);
@@ -507,6 +553,192 @@ describe('POST /api/uploadjobs', () => {
     expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
   });
 
+  /**
+   * The bound is only a bound if it cannot be skipped. The old check read the
+   * header, coerced it with Number(), and passed anything that was not a finite
+   * number over the limit: a missing header became Number(null) = 0 and a
+   * malformed one became NaN. A chunked / header-less POST therefore skipped the
+   * check entirely, and fromBody('schema') still cloned and parsed the whole body
+   * to resolve the schema.
+   */
+  describe('Content-Length is mandatory', () => {
+    it.each([
+      { label: 'missing', header: null },
+      { label: 'empty', header: '' },
+      { label: 'non-numeric', header: 'not-a-number' },
+      { label: 'fractional', header: '12.5' },
+      { label: 'negative', header: '-1' }
+    ])('rejects a $label Content-Length with 411, before authz or body parsing', async ({ header }) => {
+      const request = makeCreateRequest(makeCreateBody());
+      if (header === null) request.headers.delete('content-length');
+      else request.headers.set('content-length', header);
+      const jsonSpy = vi.spyOn(request, 'json');
+
+      const response = await callPost(request);
+
+      expect(response.status).toBe(411);
+      expect(jsonSpy).not.toHaveBeenCalled();
+      expect(mocks.auth).not.toHaveBeenCalled();
+      expect(mocks.assertCanEditMeasurementScope).not.toHaveBeenCalled();
+      expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    });
+
+    it('accepts a declared length at exactly the limit', async () => {
+      const request = makeCreateRequest(makeCreateBody());
+      request.headers.set('content-length', String(MAX_UPLOAD_JOB_REQUEST_BYTES));
+
+      const response = await callPost(request);
+
+      expect(response.status).toBe(202);
+    });
+
+    it('rejects one byte over the limit', async () => {
+      const request = makeCreateRequest(makeCreateBody());
+      request.headers.set('content-length', String(MAX_UPLOAD_JOB_REQUEST_BYTES + 1));
+
+      expect((await callPost(request)).status).toBe(413);
+    });
+
+    it('accepts a zero-length declaration and lets validation reject the empty body', async () => {
+      // 0 is a legitimate declared length, not the "missing header" sentinel it
+      // used to be conflated with. It must reach the parser, which rejects it.
+      const request = makeCreateRequest(makeCreateBody());
+      request.headers.set('content-length', '0');
+
+      expect((await callPost(request)).status).not.toBe(411);
+    });
+  });
+
+  /**
+   * The worker reads columnMappings[file.fileName] and
+   * selectedDelimiters[file.fileName] — plain, case-sensitive property access.
+   * Validation used to accept a key that matched only case-insensitively, so the
+   * lookup then missed and the file processed with default aliasing and auto
+   * delimiter detection instead of the mapping the caller supplied. Silently.
+   */
+  describe('payload keys must match files[].fileName exactly', () => {
+    const EXACT_FILE_NAME = 'measurements.csv';
+    const CASE_MISMATCHED_FILE_NAME = 'Measurements.CSV';
+
+    it('accepts keys that match exactly', async () => {
+      const response = await callPost(
+        makeCreateRequest(
+          makeCreateBody({
+            payload: {
+              columnMappings: { [EXACT_FILE_NAME]: VALID_COLUMN_MAPPING },
+              selectedDelimiters: { [EXACT_FILE_NAME]: ',' }
+            }
+          })
+        )
+      );
+
+      expect(response.status).toBe(202);
+    });
+
+    it.each(['columnMappings', 'selectedDelimiters'] as const)('rejects a case-only mismatch in %s before creating the job', async payloadKey => {
+      const payload =
+        payloadKey === 'columnMappings'
+          ? { columnMappings: { [CASE_MISMATCHED_FILE_NAME]: VALID_COLUMN_MAPPING } }
+          : { selectedDelimiters: { [CASE_MISMATCHED_FILE_NAME]: ',' } };
+
+      const response = await callPost(makeCreateRequest(makeCreateBody({ payload })));
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: `payload.${payloadKey}.${CASE_MISMATCHED_FILE_NAME}`,
+            message: expect.stringContaining('differs in case')
+          })
+        ])
+      );
+      expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    });
+
+    it('still reports a genuinely unknown file name as unknown, not as a case problem', async () => {
+      const response = await callPost(makeCreateRequest(makeCreateBody({ payload: { selectedDelimiters: { 'some-other-file.csv': ',' } } })));
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.errors).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('unknown file name') })]));
+    });
+  });
+
+  /**
+   * A blobName is caller-supplied. The container check proves only that the
+   * caller named a container it may read — it says nothing about who put the
+   * blob there, and the worker will ingest whatever the referenced blob
+   * contains. Ownership is therefore established from the blob's own metadata.
+   */
+  describe('referenced blobs must belong to this uploader and this attempt', () => {
+    it('accepts a blob whose metadata matches the requester and attempt', async () => {
+      expect((await callPost(makeCreateRequest(makeCreateBody()))).status).toBe(202);
+    });
+
+    it('rejects a blob uploaded by a different user', async () => {
+      primeOwnedBlob({ user: 'someone.else@example.com', attemptid: TEST_ATTEMPT_ID });
+
+      const response = await callPost(makeCreateRequest(makeCreateBody()));
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining('not uploaded by you') });
+      expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    });
+
+    it('rejects a blob left over from a different attempt', async () => {
+      primeOwnedBlob({ user: TEST_UPLOADER, attemptid: 'attempt-some-other-run' });
+
+      const response = await callPost(makeCreateRequest(makeCreateBody()));
+
+      expect(response.status).toBe(403);
+      expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    });
+
+    it('rejects a blob carrying no ownership metadata at all', async () => {
+      primeOwnedBlob({});
+
+      expect((await callPost(makeCreateRequest(makeCreateBody()))).status).toBe(403);
+    });
+
+    it('rejects a blobName that is not this attempt’s path for that file', async () => {
+      const file = { ...makeCreateBody().files[0], blobName: 'someone-elses-attempt/measurements.csv' };
+
+      const response = await callPost(makeCreateRequest(makeCreateBody({ files: [file] })));
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining("attempt's path") });
+      // Rejected on the path alone — storage is never even consulted.
+      expect(mocks.getBlobProperties).not.toHaveBeenCalled();
+    });
+
+    it('rejects a referenced blob that does not exist', async () => {
+      mocks.getBlobProperties.mockRejectedValue(Object.assign(new Error('BlobNotFound'), { statusCode: 404 }));
+
+      const response = await callPost(makeCreateRequest(makeCreateBody()));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining('was not found') });
+      expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: 'missing', attemptID: undefined },
+      { label: 'too short', attemptID: 'short' },
+      { label: 'containing a path separator', attemptID: 'attempt/../../etc' }
+    ])('rejects a $label attemptID with 400 before touching storage', async ({ attemptID }) => {
+      const body = makeCreateBody();
+      if (attemptID === undefined) delete (body as Record<string, unknown>).attemptID;
+      else (body as Record<string, unknown>).attemptID = attemptID;
+
+      const response = await callPost(makeCreateRequest(body));
+
+      expect(response.status).toBe(400);
+      expect(mocks.getContainerClient).not.toHaveBeenCalled();
+      expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    });
+  });
+
   it('rejects an ArcGIS job with more than one file', async () => {
     const file = makeCreateBody().files[0];
     const response = await callPost(
@@ -514,7 +746,7 @@ describe('POST /api/uploadjobs', () => {
         makeCreateBody({
           sourceFormat: 'arcgis_xlsx',
           files: [
-            { ...file, fileName: 'survey.xlsx', blobName: 'survey.xlsx', sourceFormat: 'arcgis_xlsx' },
+            { ...file, fileName: 'survey.xlsx', blobName: `${TEST_ATTEMPT_ID}/survey.xlsx`, sourceFormat: 'arcgis_xlsx' },
             { ...file, fileName: 'other.xlsx', blobName: 'other.xlsx', sourceFormat: 'arcgis_xlsx' }
           ],
           payload: { arcgisImportSession: { importSessionId: 'import-1', fileName: 'survey.xlsx', rowCount: 100 } }

@@ -30,8 +30,10 @@ import {
   ensureTemporaryMeasurementsSourceFormatColumn,
   findDroppedMeasurementCandidates,
   insertTemporaryMeasurementsInBatches,
+  ensureUploadSessionCensusReplacementColumn,
   isUnsignedIntFieldInvalid,
-  uploadSessionHasStagedRows,
+  markUploadSessionCensusReplaced,
+  uploadSessionHasReplacedCensus,
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
 
@@ -196,6 +198,13 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
 
   await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, schema);
 
+  // Only the census-replacing path reads the marker, so only it pays for the
+  // column check — a revisions or append upload issues no extra statement.
+  const mayConsultCensusReplacementMarker = uploadSessionID !== null && uploadMode === UploadMode.CLEAN_REUPLOAD && !params.suppressCensusReplacementCleanup;
+  if (mayConsultCensusReplacementMarker) {
+    await ensureUploadSessionCensusReplacementColumn(connectionManager, schema);
+  }
+
   // Count rows BEFORE insert so we can measure the delta (important when
   // multiple chunks share a single BatchID under batch consolidation).
   const expectedRowCount = chunkRows.length;
@@ -215,11 +224,24 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
       // census-wide cleanup would delete the failure rows the earlier files of
       // this same upload just recorded (their batch IDs are outside the
       // incoming family, and no uploadmetrics row exists yet to identify them
-      // as ours). Rows already staged under this session are that first pass.
+      // as ours).
+      //
+      // "Has this session already replaced the census" is answered by a durable
+      // marker, not by "has this session staged any rows". The proxy was only
+      // almost equivalent: when every row of the first file dropped as an
+      // INSERT IGNORE duplicate, nothing was staged, and the second file re-ran
+      // the cleanup and destroyed the first file's failure rows.
+      //
+      // The marker is written in THIS transaction, alongside the cleanup, so the
+      // two always agree — a rollback loses both and the retry cleans again, a
+      // commit keeps both and later files skip.
       const sessionAlreadyReplacedCensus =
-        uploadSessionID !== null && (await uploadSessionHasStagedRows(connectionManager, schema, uploadSessionID, plotID, censusID, transactionID));
+        uploadSessionID !== null && (await uploadSessionHasReplacedCensus(connectionManager, schema, uploadSessionID, transactionID));
       if (!sessionAlreadyReplacedCensus) {
         await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
+        if (uploadSessionID !== null) {
+          await markUploadSessionCensusReplaced(connectionManager, schema, uploadSessionID, transactionID);
+        }
       }
     }
 

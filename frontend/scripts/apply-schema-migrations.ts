@@ -34,6 +34,7 @@ import { fileURLToPath } from 'url';
 import {
   loadCanonicalSchemaContract,
   readLiveSchemaContract,
+  CONTRACT_READ_TABLES,
   compareSchemaContracts,
   CRITICAL_TABLES,
   TARGET_TEXT_COLLATION,
@@ -346,7 +347,7 @@ export async function applyPendingMigrations(exec: SqlExecutor, schema: string, 
  */
 export async function auditSchemaContract(exec: SqlExecutor, schema: string, pendingMigrationIds: string[]): Promise<ContractAudit> {
   const canonical = loadCanonicalSchemaContract();
-  const live = await readLiveSchemaContract(exec, schema, CRITICAL_TABLES);
+  const live = await readLiveSchemaContract(exec, schema, CONTRACT_READ_TABLES);
   const comparison = compareSchemaContracts(canonical, live);
   // Collation drift remains visible below, but it is not an app-compatibility
   // failure and must not trigger table-wide rewrites during a deploy.

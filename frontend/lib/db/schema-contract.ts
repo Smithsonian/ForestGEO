@@ -36,6 +36,25 @@ export const CRITICAL_TABLES = [
 ] as const;
 
 /**
+ * Individual columns that must exist, on tables NOT in {@link CRITICAL_TABLES}.
+ *
+ * `upload_sessions` deliberately is not a critical table. A read-only all-site
+ * audit on 2026-07-29 found pre-existing, unrelated drift on it — forestgeo_mpala
+ * and forestgeo_serc are missing column DEFAULTs (state, total_chunks,
+ * uploaded_chunks, processed_batches, total_batches, last_heartbeat) and store
+ * their text columns as utf8mb3. Promoting the whole table would turn the deploy
+ * gate red for reasons this change did not cause and cannot automatically
+ * repair, so only the column whose absence is dangerous is required here.
+ *
+ * `census_replacement_completed_at` is that column: without it a CLEAN_REUPLOAD
+ * silently reverts to replacing the census on every file of a session, which is
+ * how a second file destroys the failure rows the first one recorded.
+ */
+export const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
+  upload_sessions: ['census_replacement_completed_at']
+};
+
+/**
  * Named indexes/constraints whose presence and shape are load-bearing for
  * ingestion (dedup, idempotency, upload lineage, published-stem lookup).
  * These are compared exactly; every other live index is reported as informational.
@@ -44,9 +63,27 @@ export const REQUIRED_INDEXES_BY_TABLE: Record<string, readonly string[]> = {
   species: ['uq_species_active_code'],
   quadrats: ['uq_quadrats_active_name'],
   temporarymeasurements: ['idx_tmpm_file_batch_census', 'ingest_temporarymeasurements_FBPC_index', 'idx_tmpm_plot_census_file_batch'],
-  coremeasurements: ['ux_cm_uploadbatch_rowindex', 'idx_cm_uploadbatch_census', 'idx_cm_uploadfile_batch_census_stem'],
-  stems: ['idx_stems_publishedstemid']
+  // ux_measure_unique and idx_cm_* — the first is the collision check's third
+  // STRAIGHT_JOIN lookup, the rest carry batch-scoped upload verification.
+  coremeasurements: ['ux_cm_uploadbatch_rowindex', 'idx_cm_uploadbatch_census', 'idx_cm_uploadfile_batch_census_stem', 'ux_measure_unique'],
+  stems: ['idx_stems_publishedstemid', 'ux_stems_treeid_stemtag_census'],
+  // STRAIGHT_JOIN pins the JOIN ORDER of the collision check
+  // (existing_tag_stemtag_collision_failures, storedprocedures.sql STAGE 8) but
+  // not the ACCESS PATH. Each of the three joined tables must still be reachable
+  // by an indexed lookup keyed on the batch row; without one, the pinned order
+  // degrades to a per-batch-row scan with no optimizer escape — the 8s -> 1500s
+  // shape the STRAIGHT_JOIN was added to prevent. This project has documented
+  // prod index drift, so the three lookups are contract-required, not assumed.
+  trees: ['idx_trees_tag_census_active']
 };
+
+/**
+ * Every table a contract read must fetch: the fully-compared critical tables
+ * plus the ones that only have presence-only column requirements. Reading the
+ * critical list alone would make {@link REQUIRED_COLUMNS_BY_TABLE} silently
+ * unenforceable — the table would simply be absent from the live contract.
+ */
+export const CONTRACT_READ_TABLES: readonly string[] = [...CRITICAL_TABLES, ...Object.keys(REQUIRED_COLUMNS_BY_TABLE)];
 
 const TEXT_DATA_TYPES = new Set(['char', 'varchar', 'text', 'tinytext', 'mediumtext', 'longtext', 'enum', 'set']);
 
@@ -116,6 +153,8 @@ export interface CompareOptions {
   tables?: readonly string[];
   /** Required named indexes per table; defaults to {@link REQUIRED_INDEXES_BY_TABLE}. */
   requiredIndexesByTable?: Record<string, readonly string[]>;
+  /** Presence-only column requirements outside `tables`; defaults to {@link REQUIRED_COLUMNS_BY_TABLE}. */
+  requiredColumnsByTable?: Record<string, readonly string[]>;
 }
 
 /** Minimal row shape returned by a query executor; sufficient for information_schema reads. */
@@ -555,6 +594,7 @@ function compareIndex(tableName: string, expected: IndexContract, actual: IndexC
 export function compareSchemaContracts(expected: SchemaContract, actual: SchemaContract, options: CompareOptions = {}): ContractComparison {
   const tables = options.tables ?? CRITICAL_TABLES;
   const requiredIndexesByTable = options.requiredIndexesByTable ?? REQUIRED_INDEXES_BY_TABLE;
+  const requiredColumnsByTable = options.requiredColumnsByTable ?? REQUIRED_COLUMNS_BY_TABLE;
 
   const failures: SchemaDifference[] = [];
   const extras: SchemaDifference[] = [];
@@ -616,6 +656,31 @@ export function compareSchemaContracts(expected: SchemaContract, actual: SchemaC
       if (!requiredSet.has(indexKey) && !expectedTable.indexes[indexKey]) {
         extras.push({ table: tableName, object: actualIndex.name, category: 'index', kind: 'missing', expected: null, actual: actualIndex.columns.join(',') });
       }
+    }
+  }
+
+  // Column-level requirements on tables outside the critical set: presence only,
+  // so pre-existing drift elsewhere in those tables cannot fail the gate.
+  for (const [tableName, columnNames] of Object.entries(requiredColumnsByTable)) {
+    const key = tableName.toLowerCase();
+    if (tables.some(table => table.toLowerCase() === key)) continue; // already fully compared above
+    const actualTable = actual.tables[key];
+    // The table itself is optional: upload_sessions is created on demand by
+    // ensureUploadSessionsTable, so a schema that has never run an upload simply
+    // does not have it yet. readLiveSchemaContract returns an entry with zero
+    // columns for a table that does not exist, which is how absence looks here.
+    // A table that DOES exist and is missing the column is the failure.
+    if (!actualTable || Object.keys(actualTable.columns).length === 0) continue;
+    for (const columnName of columnNames) {
+      if (actualTable.columns[columnName.toLowerCase()]) continue;
+      failures.push({
+        table: tableName,
+        object: columnName,
+        category: 'column',
+        kind: 'missing',
+        expected: 'column present in live schema',
+        actual: null
+      });
     }
   }
 

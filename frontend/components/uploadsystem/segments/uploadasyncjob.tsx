@@ -12,6 +12,7 @@ import type { FileWithStream } from '@/config/macros/uploadsystemmacros';
 import type { ArcgisImportReference } from '@/lib/arcgis/types';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import ailogger from '@/ailogger';
+import { describeUploadFileNameCollisions, findUploadFileNameCollisions } from '@/lib/uploads/file-names';
 
 export interface BlobUploadResult {
   fileName: string;
@@ -192,6 +193,18 @@ export default function UploadAsyncJob({
         }
 
         cleanupScope = { schema, plotID, plotCensusNumber };
+
+        // Canonicalize BEFORE anything is uploaded. Sanitizing is lossy — "a
+        // b.csv" and "a_b.csv" both become "a_b.csv" — and the canonical name is
+        // the job's file identity, so a clash is rejected at job creation. Left
+        // to that point, both files have already been uploaded to storage and
+        // the user is told only that the job has duplicate file names. Caught
+        // here, nothing is uploaded and the message names both of their files.
+        const nameCollisions = findUploadFileNameCollisions(acceptedFiles.map(file => file.name));
+        if (nameCollisions.length > 0) {
+          throw new Error(`Rename one of these files before uploading: ${describeUploadFileNameCollisions(nameCollisions)}.`);
+        }
+
         const totalSteps = acceptedFiles.length + 1;
 
         for (let index = 0; index < acceptedFiles.length; index++) {
@@ -205,7 +218,11 @@ export default function UploadAsyncJob({
             plotName,
             census: String(plotCensusNumber),
             formType: uploadForm,
-            sourceFormat: normalizedSourceFormat
+            sourceFormat: normalizedSourceFormat,
+            // Binds the blob to this attempt: it is stored under an
+            // attempt-scoped path, created atomically rather than after an
+            // exists() probe, and stamped with the attempt in blob metadata.
+            attemptID: attemptIDRef.current
           });
 
           const formData = new FormData();
@@ -241,6 +258,7 @@ export default function UploadAsyncJob({
             sourceFormat: normalizedSourceFormat,
             formType: uploadForm,
             idempotencyKey: `async-upload:${schema}:${plotID}:${censusID}:${attemptIDRef.current}`,
+            attemptID: attemptIDRef.current,
             payload: {
               asyncUploadVersion: 1,
               plotName,

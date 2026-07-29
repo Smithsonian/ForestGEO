@@ -16,16 +16,38 @@ function extractSqlSegment(sql: string, startMarker: string, endMarker: string):
   return sql.slice(start, end);
 }
 
-describe('upload procedure regressions', () => {
-  it('uses bounded hashed upload ids in bulkingestionprocess sources', () => {
-    const canonicalSql = readSql('db/sql/storedprocedures.sql');
-    const migrationSql = readSql('db/migrations/ctfs-migrations/15_deploy_bulkingestionprocess.sql');
+/**
+ * The retired legacy deployment copy. It used to DROP+CREATE its own
+ * `bulkingestionprocess`, kept in sync by hand — and drifted, ending up without
+ * the STRAIGHT_JOIN join-order fix or the DUPLICATE_TAG_CONFLICT_EXISTING
+ * feature. Nothing in the repo ran it, but sourcing it by hand would have
+ * installed that obsolete procedure over a current one.
+ *
+ * The contract is not "keep the second copy in sync" — it is that there is no
+ * second copy.
+ */
+const RETIRED_LEGACY_DEPLOYMENT_SQL = 'db/migrations/ctfs-migrations/15_deploy_bulkingestionprocess.sql';
 
-    for (const sql of [canonicalSql, migrationSql]) {
-      expect(sql).toContain("SET vUploadId = LEFT( SHA2( CONCAT_WS( '#', DATABASE()");
-      expect(sql).not.toContain("SET vUploadId = CONCAT(vFileID, '-', vBatchID);");
-      expect(sql).not.toContain("SET vUploadId = CONCAT(vFileIDSafe, '-', vBatchIDSafe);");
-    }
+describe('upload procedure regressions', () => {
+  it('uses bounded hashed upload ids in bulkingestionprocess', () => {
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+
+    expect(canonicalSql).toContain("SET vUploadId = LEFT( SHA2( CONCAT_WS( '#', DATABASE()");
+    expect(canonicalSql).not.toContain("SET vUploadId = CONCAT(vFileID, '-', vBatchID);");
+    expect(canonicalSql).not.toContain("SET vUploadId = CONCAT(vFileIDSafe, '-', vBatchIDSafe);");
+  });
+
+  it('keeps bulkingestionprocess deployable from exactly one file', () => {
+    const legacySql = readSql(RETIRED_LEGACY_DEPLOYMENT_SQL);
+
+    expect(legacySql, 'the retired legacy migration must not be able to create the procedure').not.toMatch(
+      /CREATE\s+(OR REPLACE\s+)?(DEFINER\s*=\s*\S+\s+)?PROCEDURE/i
+    );
+    expect(legacySql, 'nor drop the live one').not.toMatch(/DROP\s+PROCEDURE/i);
+    expect(legacySql, 'it must point at the canonical source instead').toContain('db/sql/storedprocedures.sql');
+
+    // And the canonical file is still the thing that creates it.
+    expect(readSql('db/sql/storedprocedures.sql')).toMatch(/CREATE[\s\S]{0,120}PROCEDURE bulkingestionprocess/i);
   });
 
   it('preserves collapser duplicate conflicts and writes complete alerts', () => {
@@ -195,9 +217,7 @@ describe('upload procedure regressions', () => {
 
   it('ignores empty code tokens created by doubled or trailing semicolons', () => {
     const canonicalSql = readSql('db/sql/storedprocedures.sql');
-    const ctfsMigrationSql = readSql('db/migrations/ctfs-migrations/15_deploy_bulkingestionprocess.sql');
 
     expect(canonicalSql).toContain("WHERE rcm.Codes IS NOT NULL AND TRIM(rcm.Codes) != '' AND TRIM(jt.code) != '';");
-    expect(ctfsMigrationSql).toContain("WHERE f.Codes is not null AND trim(f.Codes) != '' AND trim(jt.code) != '';");
   });
 });

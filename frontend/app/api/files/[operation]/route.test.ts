@@ -283,7 +283,8 @@ describe('/api/files/[operation]', () => {
       'measurements',
       [],
       'measurements.csv',
-      'csv'
+      'csv',
+      undefined
     );
   });
 
@@ -304,6 +305,59 @@ describe('/api/files/[operation]', () => {
     expect(mocks.uploadValidFileAsBufferWithMetadata).not.toHaveBeenCalled();
   });
 
+  /**
+   * fileRowErrors elements go into blob metadata and are read back as a trusted
+   * FileRowErrors[]. The old code checked only "is it an array" and then cast,
+   * so any caller-shaped objects were written through under a type nothing
+   * re-validates.
+   */
+  describe('fileRowErrors element shape is validated, not asserted', () => {
+    const VALID_ROW_ERROR = { tag: 'T1', stemtag: 'S1', validationErrorID: 7 };
+
+    async function postWithFileRowErrors(rawFileRowErrors: string) {
+      const formData = new FormData();
+      const file = new File(['TreeTag\n1'], 'measurements.csv', { type: 'text/csv' });
+      formData.append('measurements.csv', file);
+      formData.append('fileRowErrors', rawFileRowErrors);
+      const request = makeRequest(
+        'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&census=2&fileName=measurements.csv&formType=measurements',
+        { method: 'POST' }
+      ) as any;
+      request.formData = vi.fn(async () => formData);
+      return POST(request, props('upload'));
+    }
+
+    it('accepts a well-formed array and passes it through', async () => {
+      const response = await postWithFileRowErrors(JSON.stringify([VALID_ROW_ERROR]));
+
+      expect(response.status).toBe(200);
+      expect(mocks.uploadValidFileAsBufferWithMetadata).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        'mason@example.com',
+        'measurements',
+        [VALID_ROW_ERROR],
+        'measurements.csv',
+        'csv',
+        undefined
+      );
+    });
+
+    it.each([
+      { label: 'a non-array', raw: JSON.stringify({ tag: 'T1' }) },
+      { label: 'elements that are not objects', raw: JSON.stringify(['not-an-object']) },
+      { label: 'a missing field', raw: JSON.stringify([{ tag: 'T1', stemtag: 'S1' }]) },
+      { label: 'a wrongly-typed field', raw: JSON.stringify([{ tag: 'T1', stemtag: 'S1', validationErrorID: 'seven' }]) },
+      { label: 'a fractional validationErrorID', raw: JSON.stringify([{ tag: 'T1', stemtag: 'S1', validationErrorID: 1.5 }]) },
+      { label: 'a null element', raw: JSON.stringify([null]) }
+    ])('rejects $label with 400 and uploads nothing', async ({ raw }) => {
+      const response = await postWithFileRowErrors(raw);
+
+      expect(response.status).toBe(400);
+      expect(mocks.uploadValidFileAsBufferWithMetadata).not.toHaveBeenCalled();
+    });
+  });
+
   it('uploads using the sanitized filename that passed route validation', async () => {
     const formData = new FormData();
     const file = new File(['TreeTag\n1'], 'bad/name.csv', { type: 'text/csv' });
@@ -320,7 +374,16 @@ describe('/api/files/[operation]', () => {
     const responseBody = await response.json();
     expect(response.status, JSON.stringify(responseBody)).toBe(200);
     expect(responseBody).toMatchObject({ blobName: 'name.csv', fileName: 'name.csv' });
-    expect(mocks.uploadValidFileAsBufferWithMetadata).toHaveBeenCalledWith(expect.anything(), file, 'mason@example.com', 'measurements', [], 'name.csv', 'csv');
+    expect(mocks.uploadValidFileAsBufferWithMetadata).toHaveBeenCalledWith(
+      expect.anything(),
+      file,
+      'mason@example.com',
+      'measurements',
+      [],
+      'name.csv',
+      'csv',
+      undefined
+    );
   });
 
   it('propagates the arcgis_xlsx sourceFormat so archived blob provenance is preserved', async () => {
@@ -348,7 +411,8 @@ describe('/api/files/[operation]', () => {
       'measurements',
       [],
       'arcgis-export.xlsx',
-      'arcgis_xlsx'
+      'arcgis_xlsx',
+      undefined
     );
   });
 

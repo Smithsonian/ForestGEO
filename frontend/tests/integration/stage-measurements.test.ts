@@ -91,6 +91,8 @@ vi.mock('@/ailogger', () => ({
 
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { countStagedRows, stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
+import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
+import { resetUploadSessionCensusReplacementColumnCacheForTests } from '@/lib/ingestion/temporary-measurements';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -207,6 +209,14 @@ describe('stageMeasurementChunk — integration', () => {
     plotID = testData.plots[0].plotID;
     censusID = testData.census[0].censusID;
     sharedState.connection = connection;
+
+    // The census-replacement marker lives on upload_sessions, which the app
+    // creates on demand (local-db-setup does not provision it). Production
+    // always has it by the time staging runs: a session must exist for a
+    // session id to be passed at all.
+    // Uses the production DDL, so this also proves ensureUploadSessionsTable
+    // declares the marker column rather than only tablestructures.sql doing so.
+    await ensureUploadSessionsTable(schema);
     console.log(`[setup] schema=${schema} plotID=${plotID} censusID=${censusID}`);
   }, 90000);
 
@@ -224,8 +234,26 @@ describe('stageMeasurementChunk — integration', () => {
     await connection.query('DELETE FROM unifiedchangelog');
     await connection.query('DELETE FROM coremeasurements');
     await connection.query('DELETE FROM uploadmetrics');
-    console.log('[beforeEach] cleared temporarymeasurements + unifiedchangelog + coremeasurements + uploadmetrics');
+    await connection.query('DELETE FROM upload_sessions');
+    resetUploadSessionCensusReplacementColumnCacheForTests();
+    console.log('[beforeEach] cleared temporarymeasurements + unifiedchangelog + coremeasurements + uploadmetrics + upload_sessions');
   });
+
+  /** Inserts the session row the marker is written to, as the upload route would. */
+  async function seedUploadSession(sessionID: string): Promise<void> {
+    await connection.query(
+      `INSERT INTO upload_sessions (session_id, schema_name, plot_id, census_id, user_id, state)
+       VALUES (?, ?, ?, ?, 'stage-measurements-test@forestgeo.test', 'uploading')`,
+      [sessionID, schema, plotID, censusID]
+    );
+  }
+
+  async function censusReplacementMarker(sessionID: string): Promise<string | null> {
+    const [rows] = await connection.query<RowDataPacket[]>(`SELECT census_replacement_completed_at AS marker FROM upload_sessions WHERE session_id = ?`, [
+      sessionID
+    ]);
+    return rows.length === 0 || rows[0].marker === null ? null : String(rows[0].marker);
+  }
 
   function baseParams(transactionID: string, overrides: Partial<StageMeasurementChunkParams> = {}): StageMeasurementChunkParams {
     return {
@@ -459,10 +487,13 @@ describe('stageMeasurementChunk — integration', () => {
   }
 
   it('keeps the failure rows an earlier file of the SAME upload session recorded', async () => {
+    await seedUploadSession(UPLOAD_SESSION_ID);
+
     // File A of the upload stages and records two rejected rows.
     const firstTransactionID = await connectionManager.beginTransaction();
     await stageMeasurementChunk(connectionManager, baseParams(firstTransactionID));
     await connectionManager.commitTransaction(firstTransactionID);
+    expect(await censusReplacementMarker(UPLOAD_SESSION_ID), 'file A must record that it replaced the census').not.toBeNull();
     await seedEarlierFileFailureRow('stage-batch-0001-fail');
     await seedEarlierFileFailureRow('batchedupload-fresh-id');
     expect(await countCensusMeasurements()).toBe(2);
@@ -484,17 +515,107 @@ describe('stageMeasurementChunk — integration', () => {
   });
 
   it('still replaces the census when a NEW upload session starts', async () => {
+    const newSessionID = 'a-different-upload-session';
+    await seedUploadSession(newSessionID);
     // Rows left behind by a genuinely previous upload.
     await seedEarlierFileFailureRow('previous-upload-batch');
     expect(await countCensusMeasurements()).toBe(1);
 
     const transactionID = await connectionManager.beginTransaction();
-    await stageMeasurementChunk(connectionManager, baseParams(transactionID, { uploadSessionID: 'a-different-upload-session' }));
+    await stageMeasurementChunk(connectionManager, baseParams(transactionID, { uploadSessionID: newSessionID }));
     await connectionManager.commitTransaction(transactionID);
 
     const surviving = await countCensusMeasurements();
     console.log(`[new-session] prior rows surviving the census replacement: ${surviving}`);
     expect(surviving).toBe(0);
+  });
+
+  /**
+   * The zero-staged edge the staged-row proxy could not see.
+   *
+   * "Has this session already replaced the census" used to be answered by "has
+   * this session staged any rows". When every row of file A drops as an INSERT
+   * IGNORE duplicate, nothing is staged — so file B read "no staged rows",
+   * re-ran the census-wide cleanup, and deleted the failure rows file A had just
+   * recorded. The durable marker records the replacement itself, so it is right
+   * even when the staging produced nothing.
+   */
+  it('skips the second file’s cleanup even when the first file staged ZERO rows', async () => {
+    await seedUploadSession(UPLOAD_SESSION_ID);
+
+    // File A: every row is dropped before insert, so nothing is staged. Its
+    // rejects still land in coremeasurements, which is what must survive.
+    const firstTransactionID = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(connectionManager, baseParams(firstTransactionID, { rawRows: [] }));
+    await connectionManager.commitTransaction(firstTransactionID);
+
+    const stagedByFileA = await countStagedRows(connectionManager, schema, FILE_NAME, BATCH_ID, plotID, censusID);
+    console.log(`[zero-staged] file A staged ${stagedByFileA} row(s); marker=${await censusReplacementMarker(UPLOAD_SESSION_ID)}`);
+    expect(stagedByFileA, 'this test is only meaningful if file A staged nothing').toBe(0);
+    expect(await censusReplacementMarker(UPLOAD_SESSION_ID), 'a zero-row file still performed the census replacement').not.toBeNull();
+
+    await seedEarlierFileFailureRow('stage-batch-0001-fail');
+    expect(await countCensusMeasurements()).toBe(1);
+
+    // File B of the same session must NOT replace the census again.
+    const secondTransactionID = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(
+      connectionManager,
+      baseParams(secondTransactionID, { fileName: SECOND_FILE_NAME, batchID: SECOND_BATCH_ID, uploadSessionID: UPLOAD_SESSION_ID })
+    );
+    await connectionManager.commitTransaction(secondTransactionID);
+
+    const surviving = await countCensusMeasurements();
+    console.log(`[zero-staged] file A's failure rows surviving file B: ${surviving}`);
+    expect(surviving).toBe(1);
+  });
+
+  it('loses the marker with the cleanup when the transaction rolls back, so the retry cleans again', async () => {
+    await seedUploadSession(UPLOAD_SESSION_ID);
+    await seedEarlierFileFailureRow('previous-upload-batch');
+    expect(await countCensusMeasurements()).toBe(1);
+
+    // Attempt 1: cleanup + marker both happen, then the caller rolls back.
+    const abortedTransactionID = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(connectionManager, baseParams(abortedTransactionID));
+    await connectionManager.rollbackTransaction(abortedTransactionID);
+
+    // Neither survives — the marker cannot claim a cleanup that was undone.
+    console.log(`[rollback] marker after rollback=${await censusReplacementMarker(UPLOAD_SESSION_ID)} priorRows=${await countCensusMeasurements()}`);
+    expect(await censusReplacementMarker(UPLOAD_SESSION_ID)).toBeNull();
+    expect(await countCensusMeasurements(), 'the rolled-back cleanup must not have removed the prior row').toBe(1);
+
+    // Attempt 2 therefore performs the replacement it owes.
+    const retryTransactionID = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(connectionManager, baseParams(retryTransactionID));
+    await connectionManager.commitTransaction(retryTransactionID);
+
+    console.log(`[rollback] after retry: marker=${await censusReplacementMarker(UPLOAD_SESSION_ID)} priorRows=${await countCensusMeasurements()}`);
+    expect(await censusReplacementMarker(UPLOAD_SESSION_ID)).not.toBeNull();
+    expect(await countCensusMeasurements()).toBe(0);
+  });
+
+  it('does not re-run cleanup for later chunks of the same file once the marker is committed', async () => {
+    await seedUploadSession(UPLOAD_SESSION_ID);
+
+    const firstChunkTransactionID = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(connectionManager, baseParams(firstChunkTransactionID));
+    await connectionManager.commitTransaction(firstChunkTransactionID);
+    const markerAfterFirstChunk = await censusReplacementMarker(UPLOAD_SESSION_ID);
+    expect(markerAfterFirstChunk).not.toBeNull();
+
+    // Rows an earlier file of this upload rejected, recorded between chunks.
+    await seedEarlierFileFailureRow('stage-batch-0001-fail');
+
+    // A later chunk of the SAME file and session: same batch id, so it is not
+    // even the multi-file case — it must still not clean.
+    const secondChunkTransactionID = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(connectionManager, baseParams(secondChunkTransactionID));
+    await connectionManager.commitTransaction(secondChunkTransactionID);
+
+    console.log(`[later-chunk] marker unchanged=${(await censusReplacementMarker(UPLOAD_SESSION_ID)) === markerAfterFirstChunk}`);
+    expect(await countCensusMeasurements(), 'a later chunk must not re-run the census replacement').toBe(1);
+    expect(await censusReplacementMarker(UPLOAD_SESSION_ID), 'the marker is set once, not rewritten').toBe(markerAfterFirstChunk);
   });
 
   it('rolling back the caller-owned transaction leaves no staged rows behind', async () => {

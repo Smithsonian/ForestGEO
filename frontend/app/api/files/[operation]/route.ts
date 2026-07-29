@@ -8,10 +8,11 @@ import { auth } from '@/auth';
 import { getSessionUserId } from '@/lib/auth-helpers';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
-import { sanitizeUploadFileName as sanitizeFileName } from '@/lib/uploads/file-names';
+import { attemptScopedBlobName, isValidUploadAttemptID, sanitizeUploadFileName as sanitizeFileName } from '@/lib/uploads/file-names';
 import path from 'path';
 import type { Session } from 'next-auth';
 import { FormType, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
+import { z } from 'zod';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -33,6 +34,27 @@ function isValidMimeType(mimeType: string): boolean {
 
 const READ_ONLY_CONTAINER_OPTIONS = { createIfMissing: false } as const;
 
+/**
+ * Mirrors FileRowErrors. These elements are written into blob metadata and read
+ * back as trusted values, so the shape is checked rather than asserted.
+ */
+const FileRowErrorsArraySchema = z.array(
+  z.object({
+    stemtag: z.string(),
+    tag: z.string(),
+    validationErrorID: z.number().int()
+  })
+);
+
+/** JSON.parse that reports failure as a value, so the caller does one check. */
+function safeJsonParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 type FileOperation = 'upload' | 'download' | 'delete' | 'list';
 
 const VALID_OPERATIONS: Record<string, FileOperation> = {
@@ -51,6 +73,14 @@ interface FileOperationParams {
   user?: string;
   formType?: string;
   sourceFormat?: string;
+  /**
+   * Identifies one upload attempt. When present, the blob is written under an
+   * attempt-scoped path with create-only semantics instead of the
+   * probe-then-suffix search, and the attempt is recorded in blob metadata so
+   * job creation can require that the blob it is handed belongs to this
+   * uploader and this attempt.
+   */
+  attemptID?: string;
 }
 
 interface AuthorizedFileScope {
@@ -165,18 +195,22 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
     return new NextResponse(JSON.stringify({ error: 'File is required' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const { fileName, formType, sourceFormat } = params;
+  const { fileName, formType, sourceFormat, attemptID } = params;
   const file = formData.get(fileName ?? 'file') as File | null;
   let fileRowErrors: FileRowErrors[] = [];
   const rawFileRowErrors = formData.get('fileRowErrors');
   if (rawFileRowErrors !== null) {
-    try {
-      const parsedFileRowErrors = JSON.parse(String(rawFileRowErrors));
-      if (!Array.isArray(parsedFileRowErrors)) throw new Error('fileRowErrors must be an array');
-      fileRowErrors = parsedFileRowErrors as FileRowErrors[];
-    } catch {
-      return new NextResponse(JSON.stringify({ error: 'fileRowErrors must be a valid JSON array' }), { status: HTTPResponses.INVALID_REQUEST });
+    // Element shape is VALIDATED, not asserted. The old `as FileRowErrors[]`
+    // checked only that the JSON was an array, so arbitrary caller-controlled
+    // objects were written straight into blob metadata under a type the rest of
+    // the code trusts.
+    const parsed = FileRowErrorsArraySchema.safeParse(safeJsonParse(String(rawFileRowErrors)));
+    if (!parsed.success) {
+      return new NextResponse(JSON.stringify({ error: 'fileRowErrors must be a JSON array of { tag, stemtag, validationErrorID } objects' }), {
+        status: HTTPResponses.INVALID_REQUEST
+      });
     }
+    fileRowErrors = parsed.data;
   }
 
   // Validate required parameters for upload
@@ -234,6 +268,15 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
     ailogger.warn(`File name sanitized: ${fileName} -> ${sanitizedFileName}`);
   }
 
+  if (attemptID !== undefined && !isValidUploadAttemptID(attemptID)) {
+    return new NextResponse(JSON.stringify({ error: 'attemptID must be 8-64 characters of A-Z, a-z, 0-9, dash, or underscore' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
+  // Attempt-scoped path: two attempts can never contend for one blob name, so
+  // the exists()-then-write race disappears rather than being narrowed.
+  const targetBlobName = attemptID ? attemptScopedBlobName(attemptID, sanitizedFileName) : sanitizedFileName;
+
   try {
     // getContainerClient now throws with detailed error messages on failure
     const containerClient = await getContainerClient(scope.container);
@@ -245,8 +288,9 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
       scope.userId,
       formType,
       fileRowErrors,
-      sanitizedFileName,
-      normalizedSourceFormat
+      targetBlobName,
+      normalizedSourceFormat,
+      attemptID ? { attemptID } : undefined
     );
 
     // Verify the response status
@@ -259,8 +303,12 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
       JSON.stringify({
         message: 'File uploaded successfully',
         fileName: sanitizedFileName,
+        // Both names travel back: the canonical one is the job's file identity,
+        // the original is what the user recognizes in an error message.
+        originalFileName: fileName,
         blobContainer: scope.container,
         blobName: uploadResult.blobName,
+        attemptID: attemptID ?? null,
         contentType: file.type || null,
         byteSize: file.size,
         formType,
@@ -350,7 +398,8 @@ function extractParams(request: NextRequest): FileOperationParams & { fileName?:
     census: searchParams.get('census')?.trim() || undefined,
     user: searchParams.get('user')?.trim() || undefined,
     formType: searchParams.get('formType')?.trim() || undefined,
-    sourceFormat: searchParams.get('sourceFormat')?.trim() || undefined
+    sourceFormat: searchParams.get('sourceFormat')?.trim() || undefined,
+    attemptID: searchParams.get('attemptID')?.trim() || undefined
   };
 }
 
