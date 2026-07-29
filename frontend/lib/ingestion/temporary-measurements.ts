@@ -306,27 +306,105 @@ async function deleteInBoundedChunks(connectionManager: ConnectionManager, delet
   }
 }
 
+/** Column recording that a session's census replacement has run. */
+export const CENSUS_REPLACEMENT_MARKER_COLUMN = 'census_replacement_completed_at';
+
+const verifiedCensusReplacementMarkerSchemas = new Set<string>();
+
 /**
- * True when the given upload session has already staged measurement rows for
- * this plot/census — i.e. the session's census replacement already ran on an
- * earlier file or chunk.
+ * Self-heals a live schema whose upload_sessions predates the marker column, the
+ * same way SourceFormat is handled for temporarymeasurements: the repair
+ * migration is the durable fix, this keeps a not-yet-migrated schema working.
+ *
+ * Runs OUTSIDE the caller's transaction on purpose — ALTER TABLE causes an
+ * implicit commit in MySQL, so issuing it on the transaction's connection would
+ * silently commit the caller's in-progress work.
  */
-export async function uploadSessionHasStagedRows(
+export async function ensureUploadSessionCensusReplacementColumn(connectionManager: ConnectionManager, schema: string): Promise<void> {
+  if (verifiedCensusReplacementMarkerSchemas.has(schema)) return;
+
+  // Both facts in one read: whether the table exists at all, and whether it has
+  // the column. upload_sessions is created on demand by ensureUploadSessionsTable,
+  // so "no table yet" is a legitimate state, not something to repair here.
+  const stateSQL = `
+    SELECT
+      (SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'upload_sessions') AS tableCount,
+      (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'upload_sessions' AND COLUMN_NAME = ?) AS columnCount
+  `;
+  const state = await connectionManager.executeQuery(stateSQL, [schema, schema, CENSUS_REPLACEMENT_MARKER_COLUMN]);
+  const tableExists = Number(state?.[0]?.tableCount ?? 0) > 0;
+  const columnExists = Number(state?.[0]?.columnCount ?? 0) > 0;
+
+  if (tableExists && !columnExists) {
+    const alterSQL = format(`ALTER TABLE ??.upload_sessions ADD COLUMN ${CENSUS_REPLACEMENT_MARKER_COLUMN} TIMESTAMP NULL DEFAULT NULL`, [schema]);
+    await connectionManager.executeQuery(alterSQL);
+  }
+
+  // Only memoize a settled state. A schema without the table yet must be
+  // re-checked, or the column would never be added once it appears.
+  if (tableExists) verifiedCensusReplacementMarkerSchemas.add(schema);
+}
+
+/** Test seam: the per-process memo would otherwise hide a dropped column between suites. */
+export function resetUploadSessionCensusReplacementColumnCacheForTests(): void {
+  verifiedCensusReplacementMarkerSchemas.clear();
+}
+
+/**
+ * True when this upload session has already performed its census replacement.
+ *
+ * This used to be inferred from "the session has staged rows", which is only
+ * ALMOST the same thing: if every row of the session's first file dropped as an
+ * INSERT IGNORE duplicate, nothing was staged, and the next file read "no staged
+ * rows" and re-ran the census-wide cleanup — deleting the failure rows the first
+ * file had just recorded. That is the exact defect class #384 fixed, surviving in
+ * the zero-staged edge.
+ *
+ * The marker is written in the SAME caller-owned transaction as the cleanup, so
+ * the two cannot disagree: a rollback loses both, a commit keeps both.
+ */
+export async function uploadSessionHasReplacedCensus(
   connectionManager: ConnectionManager,
   schema: string,
   uploadSessionID: string,
-  plotID: number,
-  censusID: number,
   transactionID: string
 ): Promise<boolean> {
-  const probeSQL = safeFormatQuery(
-    schema,
-    `SELECT 1 FROM ??.temporarymeasurements
-     WHERE SessionID = ? AND PlotID = ? AND CensusID = ?
-     LIMIT 1`
-  );
-  const rows = await connectionManager.executeQuery(probeSQL, [uploadSessionID, plotID, censusID], transactionID);
-  return Array.isArray(rows) && rows.length > 0;
+  const probeSQL = safeFormatQuery(schema, `SELECT ${CENSUS_REPLACEMENT_MARKER_COLUMN} FROM ??.upload_sessions WHERE session_id = ? LIMIT 1`);
+  try {
+    const rows = await connectionManager.executeQuery(probeSQL, [uploadSessionID], transactionID);
+    return Array.isArray(rows) && rows.length > 0 && rows[0][CENSUS_REPLACEMENT_MARKER_COLUMN] !== null;
+  } catch (error: unknown) {
+    if (!isMissingTableError(error, 'upload_sessions')) throw error;
+    // No session table in this schema: fall back to "has not replaced", which
+    // reproduces the pre-marker behaviour (clean on every file) rather than
+    // failing the upload outright.
+    ailogger.warn(`No upload_sessions table in ${schema}; census replacement cannot be tracked per session for ${uploadSessionID}.`);
+    return false;
+  }
+}
+
+/** Records that this session's census replacement has run. Same transaction as the cleanup. */
+export async function markUploadSessionCensusReplaced(
+  connectionManager: ConnectionManager,
+  schema: string,
+  uploadSessionID: string,
+  transactionID: string
+): Promise<void> {
+  const markSQL = safeFormatQuery(schema, `UPDATE ??.upload_sessions SET ${CENSUS_REPLACEMENT_MARKER_COLUMN} = CURRENT_TIMESTAMP WHERE session_id = ?`);
+  try {
+    const result = await connectionManager.executeQuery(markSQL, [uploadSessionID], transactionID);
+    if (Number((result as { affectedRows?: number })?.affectedRows ?? 0) === 0) {
+      // The marker lives on the session row, so a session id with no row cannot
+      // be marked — and the next file of that "session" would replace the census
+      // again. Never silent: this is the shape of the bug the marker replaced.
+      ailogger.warn(
+        `Upload session ${uploadSessionID} has no row in ${schema}.upload_sessions; its census replacement could not be recorded, ` +
+          `so a later file in the same session will replace the census again.`
+      );
+    }
+  } catch (error: unknown) {
+    if (!isMissingTableError(error, 'upload_sessions')) throw error;
+  }
 }
 
 /**

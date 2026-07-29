@@ -30,5 +30,9 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-07-16-02-normalize-temporarymeasurements-ids',
     file: 'schema-contract-repair/2026-07-16-02-normalize-temporarymeasurements-ids.sql'
+  },
+  {
+    id: '2026-07-29-01-add-upload-session-census-replacement-marker',
+    file: 'schema-contract-repair/2026-07-29-01-add-upload-session-census-replacement-marker.sql'
   }
 ] as const;

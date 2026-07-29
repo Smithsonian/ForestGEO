@@ -1165,6 +1165,9 @@ create table if not exists upload_sessions
     error_message     text                                                                                                                                       null,
     idempotency_key   varchar(255)                                                                                                                               null,
     mode              varchar(32)                                                                                                                                null,
+    -- Set once, in the same transaction as the census-wide cleanup, so a second
+    -- file in the same session never re-runs a replacement that already happened.
+    census_replacement_completed_at timestamp                                                                                                     default null  null,
     active_scope_key  varchar(255) as (case
                                            when (`state` in ('initialized', 'uploading', 'uploaded', 'processing', 'collapsing'))
                                                then concat_ws('#', `schema_name`, `plot_id`, `census_id`)
