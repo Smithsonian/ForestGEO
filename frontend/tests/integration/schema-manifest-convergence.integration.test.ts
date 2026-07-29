@@ -31,6 +31,7 @@ import path from 'path';
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import { splitSqlFile } from '@/lib/provisioning/sql-runner';
 import { applyPendingMigrations, loadMigrationSources, type SqlExecutor } from '@/scripts/apply-schema-migrations';
+import { deployTaxonomyViewsToSchema, extractViewStatements } from '@/scripts/deploy-taxonomy-views-to-all-schemas';
 import { SCHEMA_MIGRATION_MANIFEST } from '@/db/migrations/manifest';
 
 const BASELINE_SCHEMA = 'convergence_baseline';
@@ -136,9 +137,22 @@ describe('Migration manifest converges an old-release schema to canonical', () =
 
   afterAll(async () => {
     if (!connection) return;
-    await connection.query(`DROP DATABASE IF EXISTS \`${BASELINE_SCHEMA}\``);
-    await connection.query(`DROP DATABASE IF EXISTS \`${CANONICAL_SCHEMA}\``);
-    await connection.end();
+    const cleanupErrors: unknown[] = [];
+    for (const schema of [BASELINE_SCHEMA, CANONICAL_SCHEMA]) {
+      try {
+        await connection.query(`DROP DATABASE IF EXISTS \`${schema}\``);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    try {
+      await connection.end();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, 'Failed to fully clean up schema-manifest convergence fixtures.');
+    }
   });
 
   it('the baseline genuinely predates canonical, so the assertions below have something to prove', () => {
@@ -173,15 +187,11 @@ describe('Migration manifest converges an old-release schema to canonical', () =
       expect(viewsAfterManifest.tables.has(view), `${view} unexpectedly created by a migration — update this test's split of responsibilities`).toBe(false);
     }
 
-    // Same extraction the deploy step uses, applied here to prove the step actually
-    // closes the gap the manifest deliberately leaves open.
+    // Invoke the production extraction + per-schema deployment helpers so this
+    // proof fails if the workflow's deploy script regresses.
     const canonicalSQL = fs.readFileSync(CANONICAL_DDL_PATH, 'utf-8');
     await connection.query(`USE \`${BASELINE_SCHEMA}\``);
-    for (const view of TAXONOMY_VIEWS) {
-      const match = canonicalSQL.match(new RegExp(`CREATE\\s+OR\\s+REPLACE\\s+VIEW\\s+${view}\\b[\\s\\S]*?;`, 'i'));
-      expect(match, `no CREATE OR REPLACE VIEW ${view} found in tablestructures.sql`).not.toBeNull();
-      await connection.query(match![0]);
-    }
+    await deployTaxonomyViewsToSchema(connection, extractViewStatements(canonicalSQL));
 
     const viewsAfterDeploy = await readObjectSets(connection, BASELINE_SCHEMA, VIEW_TYPE);
     for (const view of TAXONOMY_VIEWS) {
