@@ -559,4 +559,67 @@ describe('ingestBatch — integration', () => {
     console.log(`[abort-mid] unresolved coremeasurements rows=${unresolvedRows[0].count}`);
     expect(Number(unresolvedRows[0].count)).toBe(EXPECTED_ROW_COUNT);
   }, 60000);
+
+  // -------------------------------------------------------------------------
+  // 7. KILLed procedure call: ER_QUERY_INTERRUPTED is a deliberate abort
+  //
+  // During the 2026-07-28 Harvard incident, an operator KILL QUERY of a
+  // pathological 25-minute bulkingestionprocess call surfaced here as a
+  // generic-retryable error, and the retry loop immediately started the same
+  // statement over. An interrupted statement means someone (an operator, or the
+  // DB layer's timeout kill) deliberately stopped it — re-running it verbatim
+  // is never right.
+  //
+  // Expected outcome: exactly ONE procedure attempt (no retries, no backoff),
+  // the sub-batch's rows moved to unresolved coremeasurements, and ingestBatch
+  // returns normally.
+  // -------------------------------------------------------------------------
+
+  it('abandons a sub-batch after a single attempt when the procedure call is KILLed (ER_QUERY_INTERRUPTED)', async () => {
+    await stageFixtureRows();
+    expect(await countTemporaryRows()).toBe(EXPECTED_ROW_COUNT);
+
+    // Reject ONLY the procedure CALL with the exact error shape mysql2 raises
+    // for a KILL QUERY; every other statement passes through to the real DB.
+    const interruptError = Object.assign(new Error('Query execution was interrupted'), {
+      code: 'ER_QUERY_INTERRUPTED',
+      errno: 1317,
+      sqlState: '70100'
+    });
+    const realExecuteQuery = connectionManager.executeQuery.bind(connectionManager);
+    const executeQuerySpy = vi
+      .spyOn(connectionManager, 'executeQuery')
+      .mockImplementation(async (query: string, params?: unknown[], transactionId?: string) => {
+        if (query.includes('bulkingestionprocess')) {
+          console.log('[kill-interrupt] rejecting procedure CALL with ER_QUERY_INTERRUPTED');
+          throw interruptError;
+        }
+        return realExecuteQuery(query, params, transactionId);
+      });
+
+    try {
+      const result = await runIngestBatch();
+
+      const procedureAttempts = executeQuerySpy.mock.calls.filter(([query]) => typeof query === 'string' && query.includes('bulkingestionprocess')).length;
+      console.log(`[kill-interrupt] procedure CALL attempts=${procedureAttempts}`);
+      expect(procedureAttempts, 'a KILLed statement must never be re-run').toBe(1);
+
+      expect(result.subBatchResults).toHaveLength(1);
+      const subResult = result.subBatchResults[0];
+      expect(subResult.attemptsNeeded, 'gave up after the first interrupted attempt').toBe(1);
+      expect(subResult.batchFailedButHandled).toBe(true);
+      expect(subResult.rowCount, 'all staged rows moved to unresolved').toBe(EXPECTED_ROW_COUNT);
+
+      // temporarymeasurements drained; rows preserved as unresolved, not lost.
+      expect(await countTemporaryRows()).toBe(0);
+      const [unresolvedRows] = await connection.query<RowDataPacket[]>(
+        'SELECT COUNT(*) AS count FROM coremeasurements WHERE UploadFileID = ? AND StemGUID IS NULL',
+        [FILE_NAME]
+      );
+      console.log(`[kill-interrupt] unresolved coremeasurements rows=${unresolvedRows[0].count}`);
+      expect(Number(unresolvedRows[0].count)).toBe(EXPECTED_ROW_COUNT);
+    } finally {
+      executeQuerySpy.mockRestore();
+    }
+  }, 60000);
 });

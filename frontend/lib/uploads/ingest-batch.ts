@@ -74,6 +74,7 @@ const RETRY_JITTER_MAX_MS = 1_000;
 const MYSQL_ERRNO_SERVER_GONE = 1927; // ER_SERVER_LOST — server closed the connection
 const MYSQL_ERRNO_TCP_LOST = 2013; // CR_SERVER_LOST — TCP connection lost during query
 const MYSQL_ERRNO_DEADLOCK = 1213; // ER_LOCK_DEADLOCK
+const MYSQL_ERRNO_QUERY_INTERRUPTED = 1317; // ER_QUERY_INTERRUPTED — statement was KILLed
 
 /**
  * Thrown when the caller's isAborted probe fires between sub-batches.
@@ -449,6 +450,7 @@ async function processSubBatch(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any) {
       const isTimeout = e.message?.includes('timed out');
+      const isInterrupted = e.code === 'ER_QUERY_INTERRUPTED' || e.errno === MYSQL_ERRNO_QUERY_INTERRUPTED;
       const isConnectionError =
         e.code === 'ECONNRESET' || e.code === 'PROTOCOL_CONNECTION_LOST' || e.errno === MYSQL_ERRNO_SERVER_GONE || e.errno === MYSQL_ERRNO_TCP_LOST;
       const isDeadlock = e.code === 'ER_LOCK_DEADLOCK' || e.errno === MYSQL_ERRNO_DEADLOCK;
@@ -462,6 +464,7 @@ async function processSubBatch(
         sqlMessage: e.sqlMessage,
         sql: e.sql?.substring(0, 200),
         isTimeout,
+        isInterrupted,
         isConnectionError,
         isDeadlock,
         isLockContention,
@@ -471,6 +474,12 @@ async function processSubBatch(
         subBatchID
       });
 
+      // A KILLed statement (ER_QUERY_INTERRUPTED) is a deliberate abort — an
+      // operator's KILL QUERY or the DB layer's timeout kill — never blindly
+      // re-run it. During the 2026-07-28 Harvard incident an operator KILL of a
+      // pathological 25-minute statement landed here as generic-retryable and
+      // simply started the same statement over.
+      if (isInterrupted) break;
       if (isTimeout && attempt >= TIMEOUT_GIVE_UP_AFTER_ATTEMPTS) break;
       if (isLockContention && attempt >= LOCK_GIVE_UP_AFTER_ATTEMPTS) break;
 
