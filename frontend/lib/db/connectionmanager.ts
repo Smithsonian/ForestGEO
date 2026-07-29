@@ -2,7 +2,7 @@
 import '@/lib/connectionlogger';
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
-import { getConn, killQueryOnThread, runQuery } from '@/lib/db/primitives';
+import { getConn, killQueryOnThread, QueryTimeoutError, runQuery } from '@/lib/db/primitives';
 import { v4 as uuidv4 } from 'uuid';
 import { patchConnectionManager, flushTransactionChangelog, discardTransactionChangelog } from '@/lib/connectionlogger';
 import ailogger from '@/ailogger';
@@ -201,6 +201,16 @@ class ConnectionManager {
       queryMs = queryMs || Date.now() - startedAt - acquireMs - schemaUseMs;
       const errMsg = error instanceof Error ? error.message : String(error);
       ailogger.error(chalk.red(`Error executing query: ${errMsg}`));
+      if (transactionId && error instanceof QueryTimeoutError) {
+        // runQuery destroyed this connection, so the transaction is over: the
+        // server rolls it back when the socket closes. Without finalizing here,
+        // the caller's `rollbackTransaction` in its catch/finally would find the
+        // map entry still present, call rollback() on a closed connection, and
+        // throw "closed state" — replacing the QueryTimeoutError in the route's
+        // 500 with a misleading one. Finalize now so that later rollback takes
+        // the existing already-finalized no-op path.
+        this.finalizeTransactionAfterConnectionLoss(transactionId, `statement timed out after ${error.timeoutMs}ms`);
+      }
       throw error;
     } finally {
       this.logQueryTiming({
@@ -397,6 +407,46 @@ class ConnectionManager {
       // Release a waiting transaction slot (race condition fix)
       this.releaseTransactionSlot();
     }
+  }
+
+  /**
+   * Finalize a managed transaction whose connection is already gone (destroyed
+   * by the DB layer after a statement timeout). There is nothing left to
+   * ROLLBACK over the wire — the server rolled the transaction back when the
+   * socket closed — so this only settles the bookkeeping:
+   *
+   *   - drop the map entry and metadata (clearing its timers),
+   *   - discard buffered changelog entries, which describe writes that were
+   *     rolled back and must never be flushed,
+   *   - release the transaction slot so a queued waiter is woken.
+   *
+   * Runs exactly once per transaction: the map entry is the guard, and every
+   * other exit path (commit/rollback) deletes it too. Callers that later invoke
+   * rollbackTransaction land on its "already finalized" no-op branch.
+   *
+   * Application locks are NOT released here: they are session-scoped MySQL
+   * GET_LOCKs, and the session is gone, so the server has already dropped them.
+   */
+  private finalizeTransactionAfterConnectionLoss(transactionId: string, reason: string): void {
+    if (!this.transactionConnections.has(transactionId)) return;
+
+    ailogger.warn(
+      chalk.yellow(
+        `Transaction ${transactionId} finalized without ROLLBACK — its connection was destroyed (${reason}). The server rolled it back on socket close.`
+      )
+    );
+
+    this.transactionConnections.delete(transactionId);
+    discardTransactionChangelog(transactionId);
+
+    const meta = this.transactionMeta.get(transactionId);
+    if (meta) {
+      if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
+      if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
+      this.transactionMeta.delete(transactionId);
+    }
+
+    this.releaseTransactionSlot();
   }
 
   // Close connection method (no-op for compatibility)
