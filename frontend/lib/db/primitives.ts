@@ -77,6 +77,40 @@ export async function getConn() {
   return conn;
 }
 
+/** ER_QUERY_INTERRUPTED — the statement was KILLed (KILL QUERY, or our own timeout kill). */
+export const MYSQL_ERRNO_QUERY_INTERRUPTED = 1317;
+
+/** ER_CONNECTION_KILLED — the whole connection was KILLed; the session is gone. */
+export const MYSQL_ERRNO_CONNECTION_KILLED = 1927;
+
+/**
+ * Deadline for acquiring the out-of-band connection that issues KILL QUERY.
+ * The kill is best-effort: waiting longer than this for a spare connection
+ * would reintroduce the unbounded wait this bound exists to prevent, and the
+ * timed-out connection has already been destroyed by then anyway.
+ */
+const KILL_CONNECTION_ACQUIRE_TIMEOUT_MS = 5_000;
+
+export type KillQueryOutcome =
+  /** KILL QUERY was accepted by the server. */
+  | { status: 'killed' }
+  /** The server rejected the KILL — almost always because the statement had just finished. */
+  | { status: 'statement_already_settled'; message: string }
+  /** No connection was available to issue the KILL from; the statement runs on server-side. */
+  | { status: 'no_kill_connection'; reason: 'timeout' | 'failed'; message: string };
+
+/** True for the error MySQL reports on the client whose statement was KILLed. */
+export function isKilledStatementError(error: unknown): boolean {
+  const mysqlError = error as { code?: string; errno?: number } | null;
+  return mysqlError?.code === 'ER_QUERY_INTERRUPTED' || mysqlError?.errno === MYSQL_ERRNO_QUERY_INTERRUPTED;
+}
+
+/** True for the error MySQL reports when the whole CONNECTION was KILLed. */
+export function isKilledConnectionError(error: unknown): boolean {
+  const mysqlError = error as { code?: string; errno?: number } | null;
+  return mysqlError?.code === 'ER_CONNECTION_KILLED' || mysqlError?.errno === MYSQL_ERRNO_CONNECTION_KILLED;
+}
+
 /**
  * Abort the statement running on `threadId` by issuing KILL QUERY from a
  * SEPARATE pooled connection. Destroying the client socket alone is not
@@ -84,23 +118,50 @@ export async function getConn() {
  * finishes on its own (and, inside a CALL, commits its work). KILL QUERY stops
  * only the active statement and leaves the thread alive.
  *
+ * The connection comes from PoolMonitor.tryAcquireConnection, not getConnection:
+ * this path runs precisely when the pool may be saturated by stuck statements,
+ * where an unbounded acquisition would hang forever and a failed one would
+ * pointlessly reinitialize the whole pool.
+ *
  * KILL is not preparable in MySQL, so this uses the text protocol with a
  * numeric thread id (never user input) rather than a bound parameter.
  */
-export async function killQueryOnThread(threadId: number, context: string): Promise<void> {
-  if (!Number.isInteger(threadId)) return;
-  let killConnection: PoolConnection | null = null;
+export async function killQueryOnThread(threadId: number, context: string): Promise<KillQueryOutcome> {
+  if (!Number.isInteger(threadId)) {
+    const message = `Refusing to KILL: thread id ${threadId} is not an integer (${context})`;
+    ailogger.error(message);
+    return { status: 'no_kill_connection', reason: 'failed', message };
+  }
+
+  const acquisition = await getPoolMonitorInstance().tryAcquireConnection(KILL_CONNECTION_ACQUIRE_TIMEOUT_MS);
+
+  if (acquisition.status !== 'acquired') {
+    // Operationally serious: the statement keeps running server-side and keeps
+    // holding its locks. This is an error, distinct from the benign "KILL raced
+    // a statement that had already finished" case below.
+    const detail =
+      acquisition.status === 'timeout'
+        ? `no pooled connection became available within ${KILL_CONNECTION_ACQUIRE_TIMEOUT_MS}ms`
+        : `pool could not supply a connection: ${acquisition.error instanceof Error ? acquisition.error.message : String(acquisition.error)}`;
+    const message =
+      `Could not KILL QUERY thread ${threadId} (${context}): ${detail}. ` + `The statement is still executing on the server and still holds its locks.`;
+    ailogger.error(chalk.red(message));
+    return { status: 'no_kill_connection', reason: acquisition.status, message };
+  }
+
+  const killConnection: PoolConnection = acquisition.connection;
   try {
-    killConnection = await getPoolMonitorInstance().getConnection();
     await killConnection.query(`KILL QUERY ${threadId}`);
     ailogger.warn(chalk.yellow(`KILL QUERY issued for thread ${threadId} (${context})`));
+    return { status: 'killed' };
   } catch (killError: unknown) {
-    // The statement may have just finished (thread no longer running a query)
-    // — KILL then errors harmlessly. Log and let the caller proceed regardless.
+    // Expected race, not a failure: the statement finished between the timeout
+    // firing and the KILL landing, so the thread is no longer running a query.
     const message = killError instanceof Error ? killError.message : String(killError);
-    ailogger.warn(`KILL QUERY for thread ${threadId} failed (may have already completed): ${message}`);
+    ailogger.info(`KILL QUERY for thread ${threadId} was rejected — the statement had already settled (${context}): ${message}`);
+    return { status: 'statement_already_settled', message };
   } finally {
-    killConnection?.release();
+    killConnection.release();
   }
 }
 
@@ -125,19 +186,43 @@ export async function runQuery(connection: PoolConnection, query: string, params
   } catch (error: any) {
     if (error instanceof QueryTimeoutError) {
       // The raced statement is still executing server-side. Log its eventual
-      // settlement (expected: ER_QUERY_INTERRUPTED from the KILL below) so it
-      // can never surface as an unhandled rejection.
-      inFlight?.catch((orphanError: unknown) => {
-        const message = orphanError instanceof Error ? orphanError.message : String(orphanError);
-        ailogger.warn(`Orphaned statement settled after query timeout (expected after KILL): ${message}`);
-      });
+      // settlement either way, so it can never surface as an unhandled
+      // rejection AND so the killed-too-late case is visible.
+      inFlight?.then(
+        () => {
+          ailogger.warn(
+            chalk.yellow(
+              `Orphaned statement COMPLETED after query timeout — the KILL landed too late and the server ` +
+                `committed its work (thread ${threadId ?? 'unknown'}). Anything that treats the timeout as ` +
+                `"did not happen" is wrong for this statement. Query: ${query}`
+            )
+          );
+        },
+        (orphanError: unknown) => {
+          const message = orphanError instanceof Error ? orphanError.message : String(orphanError);
+          ailogger.warn(`Orphaned statement settled after query timeout (expected after KILL): ${message}`);
+        }
+      );
+      // Quarantine BEFORE the kill, not after. destroy() frees this connection's
+      // pool slot, so the KILL acquisition below is not competing with the very
+      // saturation that produced the timeout — and the poisoned connection can
+      // never re-enter the pool even if the KILL path throws. A later release()
+      // on a destroyed connection is a safe no-op.
+      connection.destroy();
       if (typeof threadId === 'number') {
         await killQueryOnThread(threadId, 'query timeout');
       }
-      // Quarantine: a connection with a statement in flight must never re-enter
-      // the pool — the next borrower's commands would queue behind it. destroy()
-      // removes it from the pool; a later release() on it is a safe no-op.
+    } else if (isKilledStatementError(error) || isKilledConnectionError(error)) {
+      // A KILLed statement leaves the session in an unknown state: a stored
+      // procedure's EXIT HANDLER did not complete, so its internal
+      // START TRANSACTION may still be open and holding locks. Releasing that
+      // connection would hand the next borrower an uncommitted transaction and
+      // make the caller's very next statement lock-wait on the zombie. Quarantine
+      // it here, at the DB boundary, so ConnectionManager's finally-release
+      // becomes a no-op and no caller ever has to manage the raw connection.
+      // A killed CONNECTION (1927) is already gone; destroying makes that explicit.
       connection.destroy();
+      ailogger.warn(chalk.yellow(`Destroyed a connection whose statement was KILLed (thread ${threadId ?? 'unknown'}); it will not return to the pool.`));
     }
     ailogger.error(chalk.red(`Error executing query: ${query}`));
     ailogger.error(chalk.red('Error message:', error.message));

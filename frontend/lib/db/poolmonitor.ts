@@ -3,6 +3,17 @@ import { createPool, Pool, PoolConnection, PoolOptions } from 'mysql2/promise';
 import chalk from 'chalk';
 import ailogger from '@/ailogger';
 
+/** Sentinel the acquisition race resolves with when the deadline wins. */
+const ACQUISITION_DEADLINE = Symbol('acquisition-deadline');
+
+/**
+ * Result of {@link PoolMonitor.tryAcquireConnection}. `timeout` and `failed` are
+ * kept distinct because they mean different things operationally: a timeout is
+ * the pool being saturated (expected under the very conditions the kill path
+ * runs in), a failure is the pool being unable to hand out connections at all.
+ */
+export type BoundedAcquisition = { status: 'acquired'; connection: PoolConnection } | { status: 'timeout' } | { status: 'failed'; error: unknown };
+
 export class PoolMonitor {
   public pool: Pool;
   private readonly config: PoolOptions;
@@ -59,6 +70,78 @@ export class PoolMonitor {
 
       connection = await this.acquireConnectionFromCurrentPool();
       return connection;
+    }
+  }
+
+  /**
+   * Acquire a connection for an OUT-OF-BAND statement — today, the `KILL QUERY`
+   * that aborts a timed-out statement — under a hard deadline, and deliberately
+   * WITHOUT {@link getConnection}'s recovery behaviour.
+   *
+   * Two properties this has and getConnection does not:
+   *
+   *  - **Bounded.** `createManagedPool` forces `queueLimit: 0` (unlimited wait),
+   *    so when every pooled connection is checked out on stuck statements — the
+   *    exact regime the kill path exists for — `getConnection()` queues forever
+   *    and the caller hangs with it.
+   *  - **No pool reinitialization.** getConnection() treats an acquisition
+   *    failure as pool sickness and reinitializes the whole pool. Failing to get
+   *    a spare connection for a best-effort KILL is an expected outcome under
+   *    saturation, not evidence that the pool is broken; tearing it down would
+   *    punish every healthy in-flight query.
+   *
+   * A losing acquisition is NOT abandoned: mysql2 keeps it queued and will hand
+   * it a real connection later, which nothing would ever release. The late
+   * arrival is returned to the pool instead.
+   */
+  public async tryAcquireConnection(timeoutMs: number): Promise<BoundedAcquisition> {
+    if (this.poolClosed) {
+      return { status: 'failed', error: new Error('Pool is closed; not acquiring an out-of-band connection.') };
+    }
+
+    let deadlinePassed = false;
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const acquisition = this.pool.getConnection();
+
+    // Attached BEFORE the race so this handler runs first when the acquisition
+    // wins: deadlinePassed is still false then, and the connection is handed to
+    // the caller rather than released out from under it.
+    void acquisition.then(
+      connection => {
+        if (deadlinePassed) this.disposeLateAcquisition(connection);
+      },
+      () => undefined // a rejection after the deadline is already reported below
+    );
+
+    try {
+      const timer = new Promise<typeof ACQUISITION_DEADLINE>(resolve => {
+        timeoutHandle = setTimeout(() => resolve(ACQUISITION_DEADLINE), timeoutMs);
+      });
+      const winner = await Promise.race([acquisition, timer]);
+      if (winner === ACQUISITION_DEADLINE) {
+        deadlinePassed = true;
+        return { status: 'timeout' };
+      }
+      return { status: 'acquired', connection: winner };
+    } catch (error: unknown) {
+      deadlinePassed = true;
+      return { status: 'failed', error };
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  }
+
+  private disposeLateAcquisition(connection: PoolConnection): void {
+    try {
+      connection.release();
+      ailogger.info(chalk.cyan('Released an out-of-band connection that arrived after its acquisition deadline.'));
+    } catch (releaseError: unknown) {
+      ailogger.warn(chalk.yellow(`Could not release a late out-of-band connection; destroying it: ${releaseError}`));
+      try {
+        connection.destroy();
+      } catch {
+        // Nothing further to do: the connection is unreachable either way.
+      }
     }
   }
 
