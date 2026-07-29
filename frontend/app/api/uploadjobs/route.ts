@@ -15,7 +15,7 @@ import { isAsyncUploadEnabledFor } from '@/lib/background-jobs/feature-gate';
 import { isAllowedAsyncPipeline } from '@/lib/background-jobs/types';
 import { createUploadBackgroundJob, listBackgroundJobs } from '@/lib/background-jobs/repository';
 import { IdempotencyKeyConflictError } from '@/lib/background-jobs/errors';
-import { isPrivilegedSession, parseOptionalPositiveInteger } from '@/lib/background-jobs/route-helpers';
+import { isPrivilegedSession, MAX_UPLOAD_JOB_REQUEST_BYTES, parseOptionalPositiveInteger } from '@/lib/background-jobs/route-helpers';
 import { runJobIfClaimable } from '@/lib/background-jobs/worker';
 import { fromBody, fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { sanitizeUploadFileName } from '@/lib/uploads/file-names';
@@ -27,14 +27,6 @@ export const runtime = 'nodejs';
 const ASYNC_UPLOADS_DISABLED_MESSAGE = 'Async uploads are not enabled for this form/site/user';
 const MAX_UPLOAD_JOB_FILES = 100;
 const MAX_UPLOAD_JOB_PAYLOAD_BYTES = 1024 * 1024;
-/**
- * Whole-request ceiling, checked against Content-Length before anything reads
- * the body. The payload cap below can only be measured after parsing, so it
- * cannot stop an oversized request from being buffered — this can. The headroom
- * over the payload cap covers the envelope and up to MAX_UPLOAD_JOB_FILES file
- * descriptors.
- */
-const MAX_UPLOAD_JOB_REQUEST_BYTES = 4 * 1024 * 1024;
 const MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024;
 const MYSQL_SIGNED_INT_MAX = 2_147_483_647;
 
@@ -125,7 +117,12 @@ const CreateUploadJobSchema = z
     files: z.array(UploadJobFileSchema).min(1).max(MAX_UPLOAD_JOB_FILES)
   })
   .superRefine((input, ctx) => {
+    // Two sets, two jobs: `fileNames` (lower-cased) enforces uniqueness, which
+    // must stay case-insensitive because the job's file identity is the
+    // sanitized name. `exactFileNames` is what payload keys are checked against,
+    // because the worker's lookups are case-sensitive property access.
     const fileNames = new Set<string>();
+    const exactFileNames = new Set<string>();
     const blobIdentities = new Set<string>();
     let expectedRowTotal = 0;
     for (const [index, file] of input.files.entries()) {
@@ -134,6 +131,7 @@ const CreateUploadJobSchema = z
         ctx.addIssue({ code: 'custom', path: ['files', index, 'fileName'], message: 'File names must be unique within an upload job' });
       }
       fileNames.add(normalizedFileName);
+      exactFileNames.add(file.fileName);
 
       const blobIdentity = `${file.blobContainer.toLowerCase()}\n${file.blobName.toLowerCase()}`;
       if (blobIdentities.has(blobIdentity)) {
@@ -160,13 +158,27 @@ const CreateUploadJobSchema = z
       ctx.addIssue({ code: 'custom', path: ['payload'], message: 'Upload job payload exceeds the 1 MiB limit' });
     }
 
+    // EXACT-case, deliberately stricter than the duplicate-name check above.
+    // The worker looks these up as columnMappings[file.fileName] /
+    // selectedDelimiters[file.fileName] — plain property access, case-sensitive.
+    // A case-insensitive check here let a key differing only in case pass
+    // validation and then miss every lookup, so the file processed with default
+    // aliasing and auto delimiter detection instead of the mapping the caller
+    // supplied, silently. The wizard always rekeys exactly; this only affects
+    // direct API callers, who now get a 400 instead of wrong results.
     for (const payloadKey of ['columnMappings', 'selectedDelimiters'] as const) {
       const record = input.payload?.[payloadKey];
       if (!isPlainRecord(record)) continue;
       for (const fileName of Object.keys(record)) {
-        if (!fileNames.has(fileName.toLowerCase())) {
-          ctx.addIssue({ code: 'custom', path: ['payload', payloadKey, fileName], message: `${payloadKey} contains an unknown file name` });
-        }
+        if (exactFileNames.has(fileName)) continue;
+        const caseInsensitiveMatch = fileNames.has(fileName.toLowerCase());
+        ctx.addIssue({
+          code: 'custom',
+          path: ['payload', payloadKey, fileName],
+          message: caseInsensitiveMatch
+            ? `${payloadKey} key "${fileName}" differs in case from the file it refers to; keys must match files[].fileName exactly`
+            : `${payloadKey} contains an unknown file name`
+        });
       }
     }
 
@@ -192,15 +204,47 @@ const CreateUploadJobSchema = z
   });
 
 /**
- * Rejects an oversized request before any code reads its body. The authz
- * wrapper resolves the schema with `fromBody`, which clones and fully parses
- * the request, so this has to run ahead of the wrapper — not inside the handler
- * it guards.
+ * Rejects an unmeasurable or oversized request before any code reads its body.
+ * The authz wrapper resolves the schema with `fromBody`, which clones and fully
+ * parses the request, so this has to run ahead of the wrapper — not inside the
+ * handler it guards.
+ *
+ * Content-Length is MANDATORY here, not merely honoured when present. The old
+ * check read the header, coerced it with `Number()`, and let anything that was
+ * not a finite number over the limit through: a missing header became
+ * `Number(null)` = 0 and a malformed one became NaN, both of which passed. A
+ * `Transfer-Encoding: chunked` POST therefore skipped the bound entirely and the
+ * full body was still buffered and parsed downstream.
+ *
+ * This is safe for the supported client path: the wizard POSTs a string body via
+ * fetch, and a string body has a known length, so the browser sets
+ * Content-Length and never chunks it. The route test pins that. If a deployed
+ * proxy is ever found stripping the header, the fix is a single-read byte-capped
+ * parser — NOT relaxing this back to "optional", which is the bypass.
  */
-function oversizedRequestResponse(request: NextRequest): NextResponse | null {
-  const declaredLength = Number(request.headers.get('content-length'));
-  if (!Number.isFinite(declaredLength) || declaredLength <= MAX_UPLOAD_JOB_REQUEST_BYTES) return null;
-  return NextResponse.json({ error: `Upload job request exceeds the ${MAX_UPLOAD_JOB_REQUEST_BYTES}-byte limit` }, { status: HTTPResponses.PAYLOAD_TOO_LARGE });
+function unmeasurableOrOversizedRequestResponse(request: NextRequest): NextResponse | null {
+  const rawLength = request.headers.get('content-length');
+  if (rawLength === null) {
+    return NextResponse.json({ error: 'Upload job requests must declare a Content-Length' }, { status: HTTPResponses.LENGTH_REQUIRED });
+  }
+
+  // Digits only, matched explicitly rather than via Number(): the coercions are
+  // all traps here — Number('') and Number(' ') are both 0, Number('12.5') is a
+  // finite non-integer, and Number('0x10') is 16.
+  const trimmedLength = rawLength.trim();
+  if (!/^\d+$/.test(trimmedLength)) {
+    return NextResponse.json({ error: `Invalid Content-Length: "${rawLength}"` }, { status: HTTPResponses.LENGTH_REQUIRED });
+  }
+  const declaredLength = Number(trimmedLength);
+
+  if (declaredLength > MAX_UPLOAD_JOB_REQUEST_BYTES) {
+    return NextResponse.json(
+      { error: `Upload job request exceeds the ${MAX_UPLOAD_JOB_REQUEST_BYTES}-byte limit` },
+      { status: HTTPResponses.PAYLOAD_TOO_LARGE }
+    );
+  }
+
+  return null;
 }
 
 function validationErrorResponse(error: z.ZodError) {
@@ -386,8 +430,11 @@ async function getHandler(request: NextRequest) {
 const authorizedPost = withRouteAuthz('uploadjobs', postHandler, { schema: fromBody('schema') });
 
 export async function POST(request: NextRequest, context: RouteContext): Promise<Response> {
-  const oversized = oversizedRequestResponse(request);
-  if (oversized) return oversized;
+  // Runs before authz on purpose: withRouteAuthz's fromBody('schema') clones and
+  // parses the whole body to resolve the schema, which is exactly the work an
+  // unbounded request must not be able to trigger.
+  const rejected = unmeasurableOrOversizedRequestResponse(request);
+  if (rejected) return rejected;
   return authorizedPost(request, context);
 }
 

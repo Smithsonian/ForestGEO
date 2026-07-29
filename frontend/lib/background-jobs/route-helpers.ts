@@ -6,6 +6,18 @@ import type { BackgroundJobRecord } from './types';
 
 const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/;
 
+/**
+ * Whole-request ceiling for POST /api/uploadjobs, checked against Content-Length
+ * before anything reads the body. The per-payload cap can only be measured after
+ * parsing, so it cannot stop an oversized request from being buffered — this
+ * can. The headroom over the payload cap covers the envelope and up to
+ * MAX_UPLOAD_JOB_FILES file descriptors.
+ *
+ * Lives here rather than in the route because a Next.js route module may only
+ * export the framework's recognized fields.
+ */
+export const MAX_UPLOAD_JOB_REQUEST_BYTES = 4 * 1024 * 1024;
+
 export function parseJobID(raw: string): number | null {
   if (!POSITIVE_INTEGER_PATTERN.test(raw)) return null;
   const parsed = Number(raw);
