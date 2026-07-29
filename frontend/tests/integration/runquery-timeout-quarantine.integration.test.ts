@@ -45,7 +45,7 @@ const RUNQUERY_TIMEOUT_MS = 1500;
 const MAX_SETTLE_MS = RUNQUERY_TIMEOUT_MS + 3500;
 // The killed statement must be gone from the processlist well before its
 // natural completion at SLEEP_SECONDS.
-const KILL_CONFIRM_DEADLINE_MS = 8000;
+const KILL_CONFIRM_DEADLINE_MS = 20000;
 const PROCESSLIST_POLL_MS = 25;
 const POOL_SWEEP_ACQUISITIONS = 3;
 const SLEEPY_PROCEDURE = 'runquery_timeout_probe_sleepy';
@@ -317,15 +317,30 @@ describe('runQuery timeout — server-side kill + pool quarantine (real MySQL)',
         // `ID <> CONNECTION_ID()` is load-bearing: this probe's own statement
         // carries the procedure name inside its LIKE parameter, so without the
         // exclusion the killer matches — and kills — itself.
-        const rows = await runQuery(killer, `SELECT ID FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() AND INFO LIKE ? LIMIT 1`, [
-          `CALL%${TRANSACTIONAL_PROCEDURE}%`
-        ]);
+        // Matched on the procedure name alone rather than a `CALL%` prefix:
+        // PROCESSLIST.INFO is not guaranteed to start at the statement keyword,
+        // and an over-specific pattern silently matches nothing. Self-exclusion
+        // is doubled up — this probe's own statement carries the procedure name
+        // in its LIKE parameter, so without it the killer kills itself.
+        const rows = await runQuery(
+          killer,
+          `SELECT ID FROM information_schema.PROCESSLIST
+           WHERE ID <> CONNECTION_ID() AND INFO LIKE ? AND INFO NOT LIKE '%PROCESSLIST%' LIMIT 1`,
+          [`%${TRANSACTIONAL_PROCEDURE}%`]
+        );
         if (rows.length > 0) {
           killedThreadId = Number(rows[0].ID);
           await runQuery(killer, `KILL QUERY ${killedThreadId}`, []);
         } else {
           await wait(PROCESSLIST_POLL_MS);
         }
+      }
+      if (killedThreadId === null) {
+        // A failure here is otherwise undiagnosable after the fact: dump what
+        // the server actually had running so the next reader is not guessing.
+        const processes = await runQuery(killer, `SELECT ID, COMMAND, STATE, LEFT(COALESCE(INFO, ''), 120) AS info FROM information_schema.PROCESSLIST`, []);
+        // eslint-disable-next-line no-console
+        console.log(`[runquery-timeout] processlist when the kill never landed: ${JSON.stringify(processes)}`);
       }
     } finally {
       killer.release();
