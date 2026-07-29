@@ -104,9 +104,11 @@ async function deployTaxonomyViewsToAllSchemas() {
        ORDER BY SCHEMA_NAME`
     );
 
+    // A discovery failure must never read as "nothing to deploy" — this runs as a
+    // deploy gate, where exiting 0 on zero schemas is a silent false green.
     if (schemas.length === 0) {
-      console.log('No forestgeo_* schemas found!');
-      return;
+      console.error('No forestgeo_* schemas found. Refusing to report success against zero schemas.');
+      process.exit(1);
     }
 
     console.log(`Found ${schemas.length} ForestGEO schemas.\n`);

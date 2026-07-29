@@ -9,6 +9,19 @@
  *
  * `id` is a stable, human-readable identifier (date-ordinal-slug). It is the
  * ledger primary key, so it must never change after first release.
+ *
+ * An entry may point at any file under db/migrations/, not only
+ * schema-contract-repair/. Listing a file here FREEZES it: the ledger stores a
+ * checksum of its contents, so editing a listed file after it has been applied
+ * anywhere throws TamperedMigrationError and blocks every deploy. That applies
+ * equally to files under unified-measurements-migrations/, which are otherwise
+ * hand-run and look editable — see the banner in 60_add_published_stemid.sql.
+ *
+ * Every object the schema contract REQUIRES must be reachable from this manifest.
+ * A requirement with no migration behind it is a deadlock, not a gap: on 2026-07-29
+ * a newly provisioned schema failed the post-apply audit on stems.PublishedStemID
+ * with no automated remedy, and took the whole dev pipeline down until the columns
+ * were added by hand.
  */
 
 export interface MigrationManifestEntry {
@@ -37,6 +50,14 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   },
   {
     id: '2026-07-29-02-add-stem-published-stemid',
-    file: 'schema-contract-repair/2026-07-29-02-add-stem-published-stemid.sql'
+    file: 'unified-measurements-migrations/60_add_published_stemid.sql'
+  },
+  {
+    id: '2026-07-29-03-create-arcgis-import-staging',
+    file: 'unified-measurements-migrations/59_create_arcgis_import_sessions.sql'
+  },
+  {
+    id: '2026-07-29-04-scope-postvalidation-last-run',
+    file: 'unified-measurements-migrations/61_scope_postvalidation_last_run.sql'
   }
 ] as const;
