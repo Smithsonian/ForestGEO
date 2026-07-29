@@ -171,8 +171,8 @@ interface RenderedGridProps {
   slots?: any;
 }
 
-// What the mocked grid rendered most recently. Written during render so the
-// trigger hooks below can never act on a stale row set — see StyledDataGridMock.
+// What the mocked grid most recently committed. Updated from a layout effect so
+// trigger hooks cannot observe either a stale passive effect or an aborted render.
 let latestGridProps: RenderedGridProps | null = null;
 
 // These two report the grid's state instead of returning undefined. A trigger
@@ -292,44 +292,46 @@ vi.mock('@/config/styleddatagrid', async () => {
     const rows = (props.rows || []) as Array<Record<string, unknown>>;
     const columns = props.columns || [];
 
-    // Publish the grid's current props during render, NOT from a useEffect.
-    // Tests wait on the rendered DOM before firing a trigger, and waitFor
-    // resolves on the commit that mutates the DOM — passive effects flush
-    // afterwards, on a later scheduler tick. An effect-registered trigger was
-    // therefore still closed over the first render's empty row set when it
-    // fired under CI load: it found no row, silently did nothing, and the test
-    // timed out waiting for an edit that never ran. Assigning during render
-    // keeps the triggers in step with the rows the test just observed.
-    latestGridProps = { rows, columns, processRowUpdate: props.processRowUpdate, slots: props.slots };
+    React.useLayoutEffect(() => {
+      // Layout effects run in the same commit as the DOM mutation. Unlike the old
+      // passive effect they are visible before waitFor can react to that commit;
+      // unlike a render-time assignment they never publish speculative props.
+      const committedProps = { rows, columns, processRowUpdate: props.processRowUpdate, slots: props.slots };
+      latestGridProps = committedProps;
 
-    // Expose test hooks for both direct processRowUpdate coverage and the
-    // valueGetter/valueSetter transformations MUI performs in row-edit mode.
-    (globalThis as any).__triggerRowUpdate = async (rowID: number, newRow: Record<string, unknown>) => {
-      const { rows: currentRows, processRowUpdate } = requireGridProps();
-      return processRowUpdate(newRow, findGridRow(currentRows, rowID));
-    };
-    (globalThis as any).__triggerMuiRowUpdate = async (rowID: number, changes: Record<string, unknown>) => {
-      const { rows: currentRows, columns: currentColumns, processRowUpdate } = requireGridProps();
-      const oldRow = findGridRow(currentRows, rowID);
+      // Expose test hooks for both direct processRowUpdate coverage and the
+      // valueGetter/valueSetter transformations MUI performs in row-edit mode.
+      (globalThis as any).__triggerRowUpdate = async (rowID: number, newRow: Record<string, unknown>) => {
+        const { rows: currentRows, processRowUpdate } = requireGridProps();
+        return processRowUpdate(newRow, findGridRow(currentRows, rowID));
+      };
+      (globalThis as any).__triggerMuiRowUpdate = async (rowID: number, changes: Record<string, unknown>) => {
+        const { rows: currentRows, columns: currentColumns, processRowUpdate } = requireGridProps();
+        const oldRow = findGridRow(currentRows, rowID);
 
-      const editableColumns = currentColumns.filter((column: any) => column.editable);
-      const editValues = Object.fromEntries(
-        editableColumns.map((column: any) => [
-          column.field,
-          column.valueGetter ? column.valueGetter(oldRow[column.field], oldRow, column) : oldRow[column.field]
-        ])
-      );
-      Object.assign(editValues, changes);
+        const editableColumns = currentColumns.filter((column: any) => column.editable);
+        const editValues = Object.fromEntries(
+          editableColumns.map((column: any) => [
+            column.field,
+            column.valueGetter ? column.valueGetter(oldRow[column.field], oldRow, column) : oldRow[column.field]
+          ])
+        );
+        Object.assign(editValues, changes);
 
-      const newRow = editableColumns.reduce((row: Record<string, unknown>, column: any) => {
-        const value = editValues[column.field];
-        return column.valueSetter ? column.valueSetter(value, row, column) : { ...row, [column.field]: value };
-      }, oldRow);
-      return processRowUpdate(newRow, oldRow);
-    };
-    (globalThis as any).__triggerInfiniteToggle = (next: boolean) => {
-      requireGridProps().slots?.pagination?.infiniteScroll?.onToggle?.(next);
-    };
+        const newRow = editableColumns.reduce((row: Record<string, unknown>, column: any) => {
+          const value = editValues[column.field];
+          return column.valueSetter ? column.valueSetter(value, row, column) : { ...row, [column.field]: value };
+        }, oldRow);
+        return processRowUpdate(newRow, oldRow);
+      };
+      (globalThis as any).__triggerInfiniteToggle = (next: boolean) => {
+        requireGridProps().slots?.pagination?.infiniteScroll?.onToggle?.(next);
+      };
+
+      return () => {
+        if (latestGridProps === committedProps) latestGridProps = null;
+      };
+    }, [rows, columns, props.processRowUpdate, props.slots]);
 
     return (
       <div data-testid="styled-grid">
