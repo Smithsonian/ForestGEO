@@ -44,8 +44,18 @@ export const REQUIRED_INDEXES_BY_TABLE: Record<string, readonly string[]> = {
   species: ['uq_species_active_code'],
   quadrats: ['uq_quadrats_active_name'],
   temporarymeasurements: ['idx_tmpm_file_batch_census', 'ingest_temporarymeasurements_FBPC_index', 'idx_tmpm_plot_census_file_batch'],
-  coremeasurements: ['ux_cm_uploadbatch_rowindex', 'idx_cm_uploadbatch_census', 'idx_cm_uploadfile_batch_census_stem'],
-  stems: ['idx_stems_publishedstemid']
+  // ux_measure_unique and idx_cm_* — the first is the collision check's third
+  // STRAIGHT_JOIN lookup, the rest carry batch-scoped upload verification.
+  coremeasurements: ['ux_cm_uploadbatch_rowindex', 'idx_cm_uploadbatch_census', 'idx_cm_uploadfile_batch_census_stem', 'ux_measure_unique'],
+  stems: ['idx_stems_publishedstemid', 'ux_stems_treeid_stemtag_census'],
+  // STRAIGHT_JOIN pins the JOIN ORDER of the collision check
+  // (existing_tag_stemtag_collision_failures, storedprocedures.sql STAGE 8) but
+  // not the ACCESS PATH. Each of the three joined tables must still be reachable
+  // by an indexed lookup keyed on the batch row; without one, the pinned order
+  // degrades to a per-batch-row scan with no optimizer escape — the 8s -> 1500s
+  // shape the STRAIGHT_JOIN was added to prevent. This project has documented
+  // prod index drift, so the three lookups are contract-required, not assumed.
+  trees: ['idx_trees_tag_census_active']
 };
 
 const TEXT_DATA_TYPES = new Set(['char', 'varchar', 'text', 'tinytext', 'mediumtext', 'longtext', 'enum', 'set']);
