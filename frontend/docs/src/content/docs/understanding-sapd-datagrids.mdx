@@ -1,6 +1,6 @@
 ---
-title: Understanding SAPD Datagrids
-description: Learn how to use the datagrids for Stem & Plot Details in the ForestGEO application.
+title: Understanding the Data Grids
+description: How the editable data grids work - filtering, searching, editing, exporting, and the controls shared across every grid.
 ---
 
 The datagrids are a key component of the app's user interface. They manage everything from data review to editing to insertion. This guide explains how to use the datagrids effectively.
@@ -22,9 +22,7 @@ Datagrids are used throughout the application for:
 
 The Stem Codes datagrid can be considered a "default" representation of the datagrid system. It should look something like this after you've added data to it:
 
-![baseline stem codes](../../assets/stem-codes-base.png)
-
-![NEW: baseline stem codes](../../assets/new-stem-codes-base.png)
+![baseline stem codes](../../assets/new-stem-codes-base.png)
 
 ---
 
@@ -32,9 +30,7 @@ The Stem Codes datagrid can be considered a "default" representation of the data
 
 Similar to what's present in the upload cycle, there is an accordion dropdown presenting an explanation of the columns displayed in the datagrid:
 
-![stem codes understanding headers](../../assets/stem-codes-understanding-headers.png)
-
-![NEW: stem codes understanding headers](../../assets/new-stem-codes-understanding-headers.png)
+![stem codes understanding headers](../../assets/new-stem-codes-understanding-headers.png)
 
 :::note
 These headers are **not the same** as those present in the upload cycle/form requirements!
@@ -48,9 +44,7 @@ The datagrid may show additional metadata columns that aren't part of the upload
 
 The Edit Toolbar appears at the top of every datagrid and provides controls for working with your data:
 
-![edit toolbar stem codes](../../assets/stem-codes-edit-toolbar.png)
-
-![NEW: edit toolbar stem codes](../../assets/new-stem-codes-edit-toolbar.png)
+![edit toolbar stem codes](../../assets/new-stem-codes-edit-toolbar.png)
 
 :::caution
 All the components described here are present across **all** datagrid implementations in the application.
@@ -64,7 +58,7 @@ All the components described here are present across **all** datagrid implementa
 | Filter Button     | Left      | Add data filters               |
 | Search Box        | Center    | Quick search across all fields |
 | Refresh Button    | Center    | Reload grid data               |
-| Manual Entry      | Right     | Open bulk entry form           |
+| Add record        | Right     | Open the bulk entry form       |
 | Upload Button     | Right     | Upload data from file          |
 | Ancillary Actions | Far Right | Grid-specific actions          |
 
@@ -78,9 +72,7 @@ The columns and filtering buttons on the left side of the Edit Toolbar allow you
 
 The column dropdown allows you to choose which columns are displayed:
 
-![stem codes column dropdown](../../assets/stem-codes-column-dropdown.png)
-
-![NEW: stem codes column dropdown](../../assets/new-stem-codes-column-dropdown.png)
+![stem codes column dropdown](../../assets/new-stem-codes-column-dropdown.png)
 
 - **Check** a column name to show it
 - **Uncheck** a column name to hide it
@@ -94,9 +86,7 @@ The columns selectable include **metadata columns** (like IDs and timestamps). T
 
 The filter dropdown provides a customizable filtering system to narrow the data displayed:
 
-![stem codes filter dropdown](../../assets/stem-codes-filter-dropdown.png)
-
-![NEW: stem codes filter dropdown](../../assets/new-stem-codes-filter-dropdown.png)
+![stem codes filter dropdown](../../assets/new-stem-codes-filter-dropdown.png)
 
 Each filter row requires **three selections**:
 
@@ -130,7 +120,8 @@ Each filter will only trigger after all **three** categories of the filter row a
 The `Search All Fields` textbox is a **quick filter** alternative to the Filter dropdown:
 
 - Enter text to search across **all columns and all rows**
-- Results update as you type
+- **Press Enter to apply the filter** — results do not update as you type
+- Clear the box and press Enter again to restore the full view
 - Use for quick lookups when you don't need precise filtering
 
 #### Refresh Button
@@ -142,7 +133,7 @@ The `Refresh` button triggers a **local** reload of the grid view:
 - Clears any unsaved local state
 
 :::caution
-**Local vs Global Refresh**: In the View Data grid (measurements), there's a distinction between local refresh (grid only) and global refresh (entire application state). This difference is not relevant for Fixed Data grids.
+**Local vs Global Refresh**: In the View Data grid (measurements), there's a distinction between local refresh (grid only) and global refresh (entire application state). This difference is not relevant for the supporting-data grids.
 :::
 
 ---
@@ -163,15 +154,13 @@ See [Upload Process Breakdown](/ForestGEO/upload-process-breakdown/) for detaile
 
 #### The Manual Entry Form
 
-The Manual Entry Form allows for bulk form input of data. Click the **Manual Entry** button to open it:
+The manual entry form allows for bulk form input of data. Click **Add record** to open it (on the measurements grid the same button reads **Manual entry**):
 
-![stem codes manual entry form view](../../assets/stem-codes-mef.png)
-
-![NEW: stem codes manual entry form view](../../assets/new-stem-codes-mef.png)
+![stem codes manual entry form view](../../assets/new-stem-codes-mef.png)
 
 **How to use the Manual Entry Form:**
 
-1. Click **Add Row** to create a new empty row
+1. Click **New Row** to create a new empty row
 2. Fill in the field values
 3. Click **Save** to save your changes locally
 4. Repeat for additional rows
@@ -185,16 +174,17 @@ The `Understanding the Headers` accordion is available here too - use it to unde
 
 The Actions column in the Manual Entry Form provides row-level operations:
 
-- **Delete Row** - Remove a row before submission
-- **Duplicate Row** - Copy an existing row
+- **Discard changes** - Roll a row back to its last saved state
+- **Delete** - Remove a row before submission
 
 #### CSV Export
 
-Click the **Export** button (if available) to download the current grid data as a CSV file. The export includes:
+Click the cloud-download icon in the toolbar (tooltip: **Export as CSV**) to download the grid data. Worth knowing before you rely on it:
 
-- All visible columns
-- All rows matching current filters
-- Properly formatted for re-import
+- The file contains the **upload-form columns** for that data type, not whatever columns you currently have visible — so hiding columns does not shrink the export
+- It is formatted for re-import, which is what makes export-edit-reupload a practical way to fix many rows at once
+- Whether your active filters carry through depends on the grid; the Species List and Stem Codes grids pass them, the Quadrats grid exports everything
+- The historical-data view has no export button
 
 ---
 
@@ -204,10 +194,10 @@ To the right of the Upload button are additional action buttons. These vary by g
 
 #### Toggle Empty Columns
 
-The **Hamburger icon** (☰) toggles visibility of empty columns:
+The **expand/collapse icon** (a stacked pair of chevrons) toggles visibility of columns that hold no data in any row.
 
-- **Hidden by default**: Columns with no data in any row are automatically collapsed
-- **Click to show**: Reveals all columns including empty ones
+- On the supporting-data grids, empty columns start out **visible** — click to hide them
+- On the Species List and the measurements grid, they start out **hidden** — click to reveal them
 
 :::tip
 This helps focus on relevant data when many optional columns exist.
@@ -217,14 +207,10 @@ This helps focus on relevant data when many optional columns exist.
 
 | Grid             | Additional Actions                                     |
 | ---------------- | ------------------------------------------------------ |
-| **Stem Codes**   | None                                                   |
-| **Personnel**    | None                                                   |
-| **Quadrats**     | None                                                   |
-| **Species List** | **RESET Table** - Clears all species data (admin only) |
-
-:::caution
-The RESET Table action is destructive and cannot be undone! Use with extreme caution.
-:::
+| **Stem Codes**   | None                                                                        |
+| **Quadrats**     | None                                                                        |
+| **Personnel**    | **Edit Roles** - opens the roles list, where role names and descriptions live |
+| **Species List** | **Limits** on each row - opens that species's DBH bounds used by validation |
 
 ---
 
@@ -250,16 +236,16 @@ Each row may have an Actions column with:
 
 ### The Unified Edit Pipeline (April–May 2026)
 
-Edits to measurement rows — whether you start in View Data, View Errors, or the Failed Measurements view — all flow through one shared pipeline. The pieces you'll see:
+Edits to measurement rows — whether you start in View Data or View Errors — all flow through one shared pipeline. The pieces you'll see:
 
-- **Impact Summary dialog.** Before any write, a dialog shows exactly which fields will change, how many other rows are affected (some edits cascade), and any validation warnings the change would raise. The preview is **tamper-proof** — what you see is what gets applied.
-- **Typed confirmation for destructive edits.** Deletes and mass changes ask you to type `APPLY N` (where N is the row count) as a guard against accidental clicks.
-- **Per-row revert.** After Apply, the row menu offers a Revert action that rolls back the last change on that row.
+- **Impact Summary dialog.** For edits that raise a warning or are destructive, a dialog shows exactly which fields will change, how many other rows are affected (some edits cascade), and any validation warnings the change would raise. The preview is **tamper-proof** — what you see is what gets applied.
+- **Typed confirmation for destructive edits.** A destructive single-row edit asks you to type `APPLY`. The bulk revision screen asks for `APPLY` followed by the row count instead, e.g. `APPLY 42`. Routine edits apply straight away with no dialog.
+- **Undo toast.** Immediately after Apply, an Undo toast appears for about 12 seconds. That is the only one-click way back — once it disappears, correct the row with another edit.
 - **Auto-refresh.** The grid re-fetches affected rows after Apply — no page reload needed.
 - **Clearing a field actually persists.** Earlier versions silently dropped empty edits in some columns; that bug is fixed.
 
 :::note
-Most Fixed Data grids (Stem Codes, Personnel, Quadrats, Species List) still use the simpler immediate-save flow — there's no Impact Summary because each row stands alone. The unified pipeline applies to **measurement** edits, where one change can ripple through validations and other rows.
+Most supporting-data grids (Stem Codes, Personnel, Quadrats, Species List) still use the simpler immediate-save flow — there's no Impact Summary because each row stands alone. The unified pipeline applies to **measurement** edits, where one change can ripple through validations and other rows.
 :::
 
 ---
@@ -286,8 +272,9 @@ Most Fixed Data grids (Stem Codes, Personnel, Quadrats, Species List) still use 
 |--------|-------------|----------|
 | FirstName | Staff member's first name | Yes |
 | LastName | Staff member's last name | Yes |
-| Role | Job function during census | Yes |
-| RoleDescription | Detailed role explanation | No |
+| Role | Job function during census, chosen from a dropdown of defined roles | Yes |
+
+Role *descriptions* are not a column here — they live in the roles list, which you reach through the **Edit Roles** button on this grid.
 
 ### Quadrats Grid
 

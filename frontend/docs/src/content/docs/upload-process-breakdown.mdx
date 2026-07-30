@@ -12,20 +12,16 @@ The file upload system is a multi-stage process that handles data parsing, valid
 The upload cycle follows this general flow:
 
 ```
-[Select File] → [Parse & Preview] → [Upload to Database] → [Validate] → [Azure Backup] → [Complete]
-                                          ↓
-                             [Failed Rows] → [Review & Fix] → [Reingest]
-
-[Select File]
-      ↓
-[Parse & Preview]
-      ↓
-[Upload to Database]
-      ↓
-[Azure Backup]
-      ↓
-[Complete]
+[Choose Mode] → [Select File] → [Upload to Database] → [Azure Backup] → [Complete]
+                                         ↓
+                          [Validations run in the background]
+                                         ↓
+                       [Unresolved rows → Census Hub → View Errors]
 ```
+
+Validation no longer blocks the upload: once your rows are written, the validation pass is
+started in the background and the upload proceeds to backup and completion. Anything it finds
+waits for you under View Errors.
 
 The core cycle is the same for all data types, but **measurements** have additional processing steps due to their complexity.
 
@@ -41,7 +37,7 @@ upload anything into a census that already holds data.
 
 1. **Choose your upload mode deliberately**: Every upload begins by asking you to pick a mode. **Clean Re-Upload** replaces existing data by deleting it first. **Revisions Upload** corrects specific rows and leaves everything else alone. See [Stage 0](#stage-0-choosing-an-upload-mode) below.
 
-2. **Don't navigate away**: The upload cycle triggers system updates. **Do not** navigate away, reload the page, or close the browser while an upload is in progress!
+2. **Don't navigate away**: The upload cycle triggers system updates. **Do not** navigate away, reload the page, or close the browser while an upload is in progress! (Sites enabled for background uploads are the exception — see [Background uploads](#background-uploads) below.)
 
 3. **Large files**: A single file may be up to 500 MB, and one upload may total up to 1 GB across all selected files. Large files take several minutes — monitor the progress bar.
 
@@ -90,17 +86,13 @@ is covered in detail under [Revision Upload](#revision-upload-correcting-an-inge
 
 Once you have chosen a mode, you'll see the file upload interface:
 
-![upload stage 1](../../assets/uploadstage1.png)
-
-![NEW: upload stage 1](../../assets/new-uploadstage1.png)
+![upload stage 1](../../assets/new-uploadstage1.png)
 
 ### Understanding the Headers Accordion
 
 Click on **Understanding the Headers** to see the column requirements for the form type:
 
-![stem codes headers](../../assets/stemcodesheaders.png)
-
-![NEW: stem codes headers](../../assets/new-stemcodesheaders.png)
+![stem codes headers](../../assets/new-stemcodesheaders.png)
 
 This accordion shows:
 
@@ -123,31 +115,37 @@ You have two options:
 The system automatically detects:
 
 - **File format** (CSV, TSV, TXT)
-- **Delimiter** (comma, tab, semicolon)
-- **Encoding** (UTF-8, etc.)
+- **Delimiter** — comma, tab, semicolon, or pipe
 
----
+:::note
+Encoding is **not** detected. Save your file as UTF-8 before uploading, or accented characters in
+species names and comments may arrive corrupted.
+:::
 
-## Stage 2: Data Preview & Processing
+### Matching your headers
 
-After selecting a file, you'll see:
+Parsing and header checking happen on this same screen — there is no separate preview step to
+click through. Your headers are matched leniently: capitalisation, spaces, underscores and
+hyphens are ignored, and common alternatives are recognised (`species` or `sp` for `spcode`,
+`diameter` for `dbh`, `quad` for `quadrat`, and so on).
 
-1. **Parsing progress** - The file is read and parsed
-2. **Data preview** - A sample of parsed rows is displayed
-3. **Header validation** - The system checks for required headers
+For measurements files, if any header still cannot be matched, a **column mapping dialog** opens
+and asks you to pair each unmatched column with a field by hand. **Continue Upload** stays
+disabled until every required field is accounted for, so a greyed-out button here means the
+mapping is still incomplete rather than that something has gone wrong.
 
-If there are parsing issues, you'll see warnings here. Common issues:
-
-- Missing required headers
-- Malformed rows
-- Encoding problems
+:::caution
+A CSV column whose name merely resembles a field is **not** adopted automatically — if you do not
+map it, it is ignored. Check the mapping rather than assuming a near-miss header was understood.
+:::
 
 ### Large File Handling
 
 For large files, the system:
 
-- Splits the file into **32KB chunks**
-- Processes chunks in parallel
+- Splits the file into **256KB chunks**
+- Processes those chunks **one at a time**, deliberately — running them concurrently caused
+  duplicate insertions, so the sequential path is a correctness guarantee rather than a limitation
 - Shows a progress bar with **ETC** (Estimated Time to Completion)
 
 ---
@@ -166,39 +164,44 @@ The parsed data is uploaded to the database. During this stage:
 
 ---
 
-## Stage 4: Pre-processing Error Review
+## Stage 4: Rows That Could Not Be Resolved
 
 After upload completes, you'll see the completion view:
 
 ![upload complete view](../../assets/upload-complete-view.png)
 
-### Understanding Pre-processing Errors
+The completion screen reports the outcome and refreshes the application's data; it does not list
+individual problem rows. Reviewing those is a separate step.
 
-This view shows rows that **failed pre-processing**:
+### What "could not be resolved" means
 
-| Error Type             | Cause                             | Example               |
-| ---------------------- | --------------------------------- | --------------------- |
-| Missing required field | A required column is empty        | Empty `tag` value     |
-| Invalid data type      | Value doesn't match expected type | Text in numeric field |
-| Parsing failure        | Row couldn't be parsed            | Malformed CSV syntax  |
+Some rows are written but cannot be attached to a stem — a species code that isn't in your
+Species List, a quadrat name that matches nothing, missing coordinates. These are **not** thrown
+away. They stay in the census with their original CSV values preserved, waiting for you under
+**Census Hub → View Errors**.
+
+| Cause                     | Example                                        |
+| ------------------------- | ---------------------------------------------- |
+| Missing required field    | Empty `tag`, `lx`, or `ly` value                |
+| Unknown reference         | Species code or quadrat name not defined yet    |
+| Ambiguous reference       | A quadrat name matching two active quadrats     |
+| Duplicate tags in the file | The same tree/stem tag pair appearing twice     |
 
 :::note
-Pre-processing errors are different from **validation errors**. Pre-processing errors prevent the row from being uploaded at all.
+These are different from **validation findings**. A row that fails validation was still resolved
+and ingested; a row here was not, and shows `StemGUID = NULL` if you query the database directly.
 :::
 
-### Downloading Failed Rows
+### Fixing them
 
-Click **Download All Rows as CSV** to get:
+1. Open **Census Hub → View Errors** and read the consolidated reason on each row.
+2. Add whatever was missing — usually a species, quadrat, or stem code.
+3. Correct the rows inline in the grid, or re-submit just those rows as a **Revisions** upload.
 
-- All failed rows in a form-friendly format
-- An additional **Error Description** column explaining each failure
-
-To fix and re-upload:
-
-1. Download the failed rows
-2. Fix the issues in the CSV
-3. Remove the Error Description column
-4. Re-upload the corrected file
+:::caution
+If the reason is `INTERRUPTED_UPLOAD`, the row was never actually rejected — the upload timed out
+or was cancelled before reaching it. Re-run the upload rather than editing the data.
+:::
 
 ---
 
@@ -224,13 +227,14 @@ Navigate to **Census Hub → Uploaded Files** to:
 
 ## Stage 6: System Refresh
 
-After clicking **Confirm**, the system:
+The refresh starts on its own as soon as the completion screen appears — there is nothing to
+click to begin it. A progress indicator tracks it while the system:
 
 1. Refreshes application state
 2. Updates cached data
-3. Redirects you back to the data grid
 
-You should see your newly uploaded data in the grid.
+When it finishes, click **Close** to dismiss the upload window. You are returned to the grid you
+started from, with your newly uploaded data in place.
 
 ---
 
@@ -288,16 +292,49 @@ You'll see additional progress indicators during ingestion.
 
 ---
 
-### Stage 2.5: Automatic Validation
+### Background uploads
 
-After measurements are ingested, **validation procedures run automatically**:
+By default an upload runs while you watch it, which is why the warning above tells you not to
+navigate away.
 
-1. Growth validations (DBH change limits)
-2. Species validations (valid codes, consistency)
-3. Location validations (coordinates within plot)
-4. Duplicate detection
+Some sites are enabled for **background uploads** instead. Where that applies, your file is handed
+to a job that continues on the server, and the page shows the job's progress rather than the
+upload's — you can leave the page and come back to it. Whether you get this path depends on
+configuration set by an administrator, per site and per account, so it is normal for one colleague
+to see it and another not to.
 
-You'll see validation progress bars during this stage.
+If you are unsure which applies to you, treat the warning above as authoritative and stay on the
+page until the upload completes. Nothing is lost either way.
+
+---
+
+### Importing from ArcGIS Field Maps
+
+If your crews collect in ArcGIS Field Maps, you do not need to flatten the export to CSV first.
+The measurements grid has a separate **Import ArcGIS** button that accepts the workbook directly.
+
+- It takes **exactly one `.xlsx` workbook** — not a CSV, and not several files at once.
+- The workbook is expected to hold two sheets: a **trees** sheet and a **stems** sheet. Each stem
+  links back to its tree by GlobalID, which is how multi-stemmed trees survive the import.
+- Coordinates on the trees sheet are read verbatim, so they must already be quadrat-local.
+- A **preflight** step runs before anything is written, reporting what it found in each sheet and
+  which required columns are missing, so you can correct the workbook and try again.
+
+Like a CSV upload, an ArcGIS import asks you to choose a mode first — and Clean Re-Upload here
+means the same thing it means everywhere else: the census's existing measurements are deleted
+before the workbook is inserted.
+
+---
+
+### Automatic Validation
+
+Once measurements are ingested, the configurable validation procedures are started **in the
+background**. They cover growth and shrinkage limits, species and attribute codes, coordinates
+and cross-census position, duplicate tags, and species-specific DBH bounds.
+
+Because they no longer sit in the upload's path, there is no validation screen and no progress
+bar for this — the upload moves straight on to backup and completion. Check **Census Hub → View
+Errors** afterwards to see what the pass turned up.
 
 :::note
 Validation errors do **not** prevent data from being saved. Data is saved but flagged for review.
@@ -438,15 +475,15 @@ the change through inline editing in the grid.
 ### For Measurements (initial upload)
 
 ```
-1. Select File
-2. Parse & Preview
+1. Choose Upload Mode
+2. Select File (headers matched; column mapping if needed)
 3. Upload to Staging Table
 4. SQL Ingestion Processing
-5. Automatic Validation
-6. Review Pre-processing Errors
-7. Review Failed Measurements (in coremeasurements with StemGUID=NULL)
-8. Azure Backup
-9. Complete
+5. Validation started in the background
+6. Azure Backup
+7. Complete
+8. Review unresolved rows under Census Hub → View Errors
+   (they sit in coremeasurements with StemGUID = NULL)
 ```
 
 ### For Measurements (Revision Upload)

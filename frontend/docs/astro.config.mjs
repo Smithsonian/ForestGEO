@@ -45,7 +45,7 @@ export default defineConfig({
           items: [
             { label: 'Upload Process Breakdown', slug: 'upload-process-breakdown' },
             { label: 'Publishing a Census to the Smithsonian DB', slug: 'publishing-census-to-smithsonian-db' },
-            { label: 'Understanding SAPD Datagrids', slug: 'understanding-sapd-datagrids' }
+            { label: 'Understanding the Data Grids', slug: 'understanding-sapd-datagrids' }
           ]
         },
         {
