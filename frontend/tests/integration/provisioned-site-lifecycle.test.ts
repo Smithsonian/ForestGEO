@@ -269,9 +269,6 @@ const PARKED_JOB_FILE_NAME = 'lifecycle-parked.csv';
 const BLOB_CONTAINER = 'lifecycle-test-container';
 const WRONG_CONFIRMATION = 'forestgeo_not_the_target';
 
-/** Matches the hardcoded definer in db/sql/storedprocedures.sql. */
-const PROCEDURE_DEFINER = "'azureroot'@'%'";
-
 const BASE_TABLE_TYPE = 'BASE TABLE';
 const VIEW_TYPE = 'VIEW';
 const COMPLETED_STATUS = 'completed';
@@ -364,7 +361,6 @@ describe('provisioned-site lifecycle', () => {
 
     sharedState.catalogPool = catalogPool;
 
-    await ensureProcedureDefinerExists();
     await seedCatalogTables(catalogPool);
     await applyCatalogMigrationsForTests();
     await clearLifecycleState(catalogPool);
@@ -519,25 +515,6 @@ describe('provisioned-site lifecycle', () => {
     }
   }
 
-  /**
-   * `db/sql/storedprocedures.sql` hardcodes `definer = azureroot@'%'` on every
-   * procedure, and the production deploy path (`executeSqlFile` via
-   * `deployProceduresStep`) runs that DDL verbatim. Calling a procedure whose
-   * definer does not exist fails with ER_NO_SUCH_USER at CALL time, not at
-   * CREATE time — so provisioning reports success and the site is broken.
-   *
-   * `tests/setup/local-db-setup.ts:417` strips the clause, which is why no
-   * other suite has ever seen this. Stripping it here would mean not testing
-   * the production path, so instead the test makes the server look like Azure,
-   * where `azureroot` is the admin account. Local-only: the host guard above
-   * has already refused anything but localhost.
-   */
-  async function ensureProcedureDefinerExists(): Promise<void> {
-    await catalogPool.query(`CREATE USER IF NOT EXISTS ${PROCEDURE_DEFINER} IDENTIFIED BY ?`, [TEST_DB_PASSWORD]);
-    await catalogPool.query(`GRANT ALL PRIVILEGES ON *.* TO ${PROCEDURE_DEFINER} WITH GRANT OPTION`);
-    await catalogPool.query(`FLUSH PRIVILEGES`);
-  }
-
   /** Blob access is dependency-injected, so no Azure call happens. */
   function measurementFixtureDeps(): WorkerDeps {
     return {
@@ -666,14 +643,21 @@ describe('provisioned-site lifecycle', () => {
       }
     });
 
-    it('deploys every required stored procedure', async () => {
+    it('deploys every required stored procedure under the authenticated deployment account', async () => {
       const [procedures] = await siteConnection.query<RowDataPacket[]>(
-        `SELECT ROUTINE_NAME FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'PROCEDURE'`,
+        `SELECT ROUTINE_NAME, LOWER(DEFINER) AS DEFINER, LOWER(CURRENT_USER()) AS DEPLOYMENT_ACCOUNT
+           FROM information_schema.ROUTINES
+          WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'PROCEDURE'`,
         [SCHEMA_NAME]
       );
       const deployed = procedures.map(row => String(row.ROUTINE_NAME).toLowerCase());
       for (const procedure of REQUIRED_PROCEDURES) {
         expect(deployed, `provisioning did not deploy ${procedure}`).toContain(procedure.toLowerCase());
+      }
+
+      const expectedDefiner = String(procedures[0].DEPLOYMENT_ACCOUNT).toLowerCase();
+      for (const procedure of procedures) {
+        expect(String(procedure.DEFINER).toLowerCase(), `${procedure.ROUTINE_NAME} has a stale or environment-specific definer`).toBe(expectedDefiner);
       }
     });
 
