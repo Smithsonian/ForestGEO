@@ -33,6 +33,14 @@ export default defineConfig({
           ]
         },
         {
+          label: 'Understanding Your Data',
+          items: [
+            { label: 'Supporting Data', slug: 'starting/understanding-supporting-data' },
+            { label: 'Species', slug: 'starting/understanding-species' },
+            { label: 'Glossary of Terms', slug: 'framework/glossary-of-terms' }
+          ]
+        },
+        {
           label: 'Walking Through the Application',
           items: [
             { label: 'Upload Process Breakdown', slug: 'upload-process-breakdown' },
@@ -70,16 +78,9 @@ export default defineConfig({
           ]
         },
         {
-          label: 'Documentation Framework',
+          label: 'Reference',
           collapsed: true,
-          items: [
-            { label: 'Framework Overview', slug: 'framework/documentation-framework-overview' },
-            { label: 'Table of Contents Outline', slug: 'framework/documentation-toc-outline' },
-            { label: 'Glossary of Terms', slug: 'framework/glossary-of-terms' },
-            { label: 'Process Flows Reference', slug: 'framework/process-flows-reference' },
-            { label: 'Non-Technical User Guide', slug: 'framework/non-technical-user-guide-outline' },
-            { label: 'Core Systems Reference', slug: 'framework/core-systems-reference' }
-          ]
+          items: [{ label: 'Non-Technical User Guide', slug: 'framework/non-technical-user-guide-outline' }]
         }
       ],
       head: [
