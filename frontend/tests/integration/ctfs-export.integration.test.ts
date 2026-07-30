@@ -18,7 +18,7 @@
  * Prerequisites: docker compose up -d mysql
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -230,10 +230,36 @@ async function executeCtfsSql(ctfsConn: mysql.Connection, sql: string): Promise<
 // Test suites
 // ---------------------------------------------------------------------------
 
+// Every database created by this file, so the file-level afterAll can prove
+// each one was dropped. This tripwire exists because a teardown that passed
+// `connection.config.database` (undefined after `USE` — mysql2 never updates
+// it) silently executed DROP DATABASE `undefined` and leaked 26 schemas per
+// green run, bloating information_schema and slowing every later run.
+const createdDatabases: string[] = [];
+
+afterAll(async () => {
+  if (createdDatabases.length === 0) return;
+  const conn = await mysql.createConnection({
+    host: DEFAULT_TEST_CONFIG.host,
+    user: DEFAULT_TEST_CONFIG.user,
+    password: DEFAULT_TEST_CONFIG.password,
+    port: DEFAULT_TEST_CONFIG.port
+  });
+  try {
+    const [rows] = await conn.query<mysql.RowDataPacket[]>('SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN (?)', [createdDatabases]);
+    const leaked = rows.map(r => r.SCHEMA_NAME as string);
+    expect(leaked, `Databases leaked by this file (teardown failed to drop them): ${leaked.join(', ')}`).toEqual([]);
+  } finally {
+    await conn.end();
+  }
+});
+
 describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
   let appConn: mysql.Connection;
   let ctfsConn: mysql.Connection;
   let appSchema: string;
+  let appDbName: string;
+  let ctfsDbName: string;
 
   // Each beforeEach builds two fresh databases with unique names so test
   // collisions are impossible even when vitest retries or reruns.
@@ -241,8 +267,9 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
     // Schema names must match safeFormatQuery's forestgeo_/catalog allowlist —
     // selectMeasurements validates the schema through the project-wide helper.
     const stamp = `${process.pid}_${Date.now()}`;
-    const appDbName = `forestgeo_cte_app_${stamp}`;
-    const ctfsDbName = `forestgeo_cte_ctfs_${stamp}`;
+    appDbName = `forestgeo_cte_app_${stamp}`;
+    ctfsDbName = `forestgeo_cte_ctfs_${stamp}`;
+    createdDatabases.push(appDbName, ctfsDbName);
 
     const appCfg = { ...DEFAULT_TEST_CONFIG, database: appDbName };
     const ctfsCfg = { ...DEFAULT_TEST_CONFIG, database: ctfsDbName };
@@ -260,14 +287,14 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
   afterEach(async () => {
     if (appConn) {
       try {
-        await teardownTestDatabase(appConn, { database: appConn.config.database as string });
+        await teardownTestDatabase(appConn, { database: appDbName });
       } catch {
         // best-effort cleanup
       }
     }
     if (ctfsConn) {
       try {
-        await teardownTestDatabase(ctfsConn, { database: ctfsConn.config.database as string });
+        await teardownTestDatabase(ctfsConn, { database: ctfsDbName });
       } catch {
         // best-effort cleanup
       }
@@ -615,11 +642,14 @@ describe('ctfs-export perf baseline', () => {
   let appConn: mysql.Connection;
   let ctfsConn: mysql.Connection;
   let appSchema: string;
+  let appDbName: string;
+  let ctfsDbName: string;
 
   beforeEach(async () => {
     const stamp = `${process.pid}_${Date.now()}`;
-    const appDbName = `forestgeo_perf_app_${stamp}`;
-    const ctfsDbName = `forestgeo_perf_ctfs_${stamp}`;
+    appDbName = `forestgeo_perf_app_${stamp}`;
+    ctfsDbName = `forestgeo_perf_ctfs_${stamp}`;
+    createdDatabases.push(appDbName, ctfsDbName);
 
     appConn = await createTestDatabase({ ...DEFAULT_TEST_CONFIG, database: appDbName });
     ctfsConn = await createTestDatabase({ ...DEFAULT_TEST_CONFIG, database: ctfsDbName });
@@ -633,14 +663,14 @@ describe('ctfs-export perf baseline', () => {
   afterEach(async () => {
     if (appConn) {
       try {
-        await teardownTestDatabase(appConn, { database: appConn.config.database as string });
+        await teardownTestDatabase(appConn, { database: appDbName });
       } catch {
         /* best-effort */
       }
     }
     if (ctfsConn) {
       try {
-        await teardownTestDatabase(ctfsConn, { database: ctfsConn.config.database as string });
+        await teardownTestDatabase(ctfsConn, { database: ctfsDbName });
       } catch {
         /* best-effort */
       }
