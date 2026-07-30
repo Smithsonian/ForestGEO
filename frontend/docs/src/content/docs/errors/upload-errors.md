@@ -95,6 +95,14 @@ This guide covers errors that may occur during the file upload and processing st
 | "Missing required field: SpeciesCode"     | SpeciesCode column is empty | Provide SpeciesCode value for all rows |
 | "Missing required field: QuadratName"     | QuadratName column is empty | Provide QuadratName value for all rows |
 | "Missing required field: MeasurementDate" | Date column is empty        | Provide date value for all rows        |
+| "Missing required field: LocalX"          | `lx` column is empty        | Provide the quadrat-local X coordinate |
+| "Missing required field: LocalY"          | `ly` column is empty        | Provide the quadrat-local Y coordinate |
+
+:::note
+The two coordinate columns are the ones most often left out, because they read like optional
+detail. They are required. `StemTag` by contrast is **not** required, despite appearing above —
+that message only fires if the column is present but blank on a row where it is needed.
+:::
 
 ### Field Length Errors
 
@@ -141,7 +149,56 @@ Duplicates surface in two places, depending on the upload mode:
 | "Invalid species code: '[code]' not found in database" | Species not in Species List | Add the species in Stem & Plot Details > Species List before uploading |
 
 :::caution
-These errors will cause measurements to fail. Always ensure all quadrats and species exist in Fixed Data BEFORE uploading measurements.
+These errors will cause measurements to fail. Always ensure all quadrats and species exist before uploading measurements.
+:::
+
+### Ambiguous references
+
+A reference can also fail because it matches **too many** records rather than none:
+
+| Error code          | What it means                                                        | How to fix                                                                 |
+| ------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `AMBIGUOUS_QUADRAT` | The quadrat name matches more than one active quadrat in the plot     | Find and remove the duplicate quadrat, then re-submit the affected rows     |
+| `AMBIGUOUS_SPECIES` | The species code matches more than one active species record          | Merge or retire the duplicate species record                                |
+
+These usually mean your supporting data has duplicates — often a placeholder quadrat grid left in
+place alongside a real uploaded layout. Fixing the reference data resolves every affected row at
+once.
+
+---
+
+## Identity and Matching Errors
+
+These arise when a row cannot be tied to a specific tree or stem. The row is kept with your
+original values and listed under **Census Hub → View Errors**.
+
+| Error code                                                        | What it means                                                             |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `DUPLICATE_TAG_STEMTAG`                                            | The same TreeTag/StemTag pair appears more than once in your file          |
+| `DUPLICATE_TAG_CONFLICT`                                           | Those repeated rows disagree with each other on some value                 |
+| `DUPLICATE_TAG_CONFLICT_EXISTING`                                  | A repeated row conflicts with a measurement already in this census         |
+| `AMBIGUOUS_PREVIOUS_MATCH`                                         | The tag matches more than one candidate in the previous census             |
+| `PUBLISHED_STEMID_CONFLICT`                                        | The supplied PublishedStemID belongs to a different stem identity          |
+| `TREE_RESOLUTION_FAILED`, `STEM_RESOLUTION_FAILED`, `STEM_TREE_RESOLUTION_FAILED` | The tree or stem could not be created or found even after the earlier steps |
+| `MISSING_CENSUS_FOR_TREE`, `MISSING_SPECIES_FOR_TREE`              | A tree could not be created because its census or species was missing      |
+| `MEASUREMENT_INSERT_SKIPPED`                                       | The measurement was skipped while the tree/stem records were being built   |
+| `SQL_EXCEPTION`                                                    | The database raised an error on that row — report this one                 |
+
+---
+
+## Interrupted Uploads
+
+| Error code           | What it means                                                                       |
+| -------------------- | ----------------------------------------------------------------------------------- |
+| `INTERRUPTED_UPLOAD` | The upload timed out or the session was cancelled before this row was ever processed |
+
+:::danger
+**This is not a data error.** The row was never examined, let alone rejected — so there is
+nothing in it to fix. Editing these rows wastes effort and can introduce mistakes into data that
+was correct. Re-run the upload instead.
+
+A single interrupted run can produce tens of thousands of these at once. If you see a very large
+number of failures appear together, check for this code before assuming a data problem.
 :::
 
 ---

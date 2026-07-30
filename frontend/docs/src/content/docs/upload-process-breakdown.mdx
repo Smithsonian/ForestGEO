@@ -35,7 +35,7 @@ system falls back to if a mode is not explicitly chosen. Read the next section b
 upload anything into a census that already holds data.
 :::
 
-1. **Choose your upload mode deliberately**: Every upload begins by asking you to pick a mode. **Clean Re-Upload** replaces existing data by deleting it first. **Revisions Upload** corrects specific rows and leaves everything else alone. See [Stage 0](#stage-0-choosing-an-upload-mode) below.
+1. **Choose your upload mode deliberately**: Every upload begins by asking you to pick a mode. **Clean Re-Upload** replaces existing data by deleting it first. **Revisions Upload** corrects specific rows and leaves everything else alone. See [Stage 1](#stage-1-choosing-an-upload-mode) below.
 
 2. **Don't navigate away**: The upload cycle triggers system updates. **Do not** navigate away, reload the page, or close the browser while an upload is in progress! (Sites enabled for background uploads are the exception — see [Background uploads](#background-uploads) below.)
 
@@ -45,7 +45,7 @@ upload anything into a census that already holds data.
 
 ---
 
-## Stage 0: Choosing an Upload Mode
+## Stage 1: Choosing an Upload Mode
 
 Every upload — for measurements and for every other data type — opens with a **Choose Upload
 Mode** screen. You cannot skip it, and the choice determines whether existing data survives.
@@ -82,7 +82,7 @@ is covered in detail under [Revision Upload](#revision-upload-correcting-an-inge
 
 ---
 
-## Stage 1: Reviewing Headers & File Dropzone
+## Stage 2: Reviewing Headers & File Dropzone
 
 Once you have chosen a mode, you'll see the file upload interface:
 
@@ -243,7 +243,7 @@ started from, with your newly uploaded data in place.
 Measurements uploads follow the same cycle but include **additional stages** due to their complexity.
 
 :::caution
-Remember: You can **only** upload measurements after adding at least one record to each Fixed Data type (Stem Codes, Personnel, Quadrats, Species).
+Remember: you can **only** upload measurements after adding at least one Stem Code, one Species, and one Quadrat. Personnel are optional.
 :::
 
 ### Why Measurements Are Different
