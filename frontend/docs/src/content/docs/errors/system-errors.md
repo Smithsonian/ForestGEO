@@ -97,7 +97,7 @@ When you see a foreign key error:
 ### General Recovery Steps
 
 1. **Note the error message** - Copy or screenshot the exact text
-2. **Note the error ID** - If shown (e.g., "Error ID: abc123")
+2. **Note the Error ID** - shown on the full-page error screen as a long hex string
 3. **Retry the operation** - Many errors are temporary
 4. **Refresh the page** - Clears stale state
 5. **Log out and back in** - Resets your session
@@ -139,7 +139,7 @@ When reporting an error, include:
 
 ### Q: What does "Error ID" mean?
 
-**A:** It's a unique identifier for your specific error instance. Providing this to administrators helps them find detailed logs to diagnose the issue.
+**A:** It is a unique identifier for one specific error, shown on the full-page error screen as a long hex string. Quoting it lets an administrator find the matching server log. Errors that appear inline in a grid or as a toast do not carry one — describe what you were doing instead.
 
 ### Q: Can I continue working if I see an error?
 

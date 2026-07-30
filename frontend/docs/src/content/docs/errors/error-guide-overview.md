@@ -15,7 +15,7 @@ This guide provides comprehensive information about errors you may encounter whi
 4. **Contact support if needed** - Use the GitHub Feedback button for unresolved issues
 
 :::tip
-Most errors include an error message and sometimes an **Error ID**. Make note of both when troubleshooting or reporting issues.
+Most errors show a message. If the whole page is replaced by an error screen, it also carries an **Error ID** — a long hex string. Quote it when reporting. Errors shown inline in a grid or a toast do not have one.
 :::
 
 ---
@@ -81,7 +81,7 @@ Technical errors related to database and server issues.
 | Error                             | Cause                       | Quick Fix                    |
 | --------------------------------- | --------------------------- | ---------------------------- |
 | "Species code not found"          | Species not in Species List | Add species before uploading |
-| "Invalid quadrat name"            | Quadrat not defined         | Add quadrat in Fixed Data    |
+| "Invalid quadrat name"            | Quadrat not defined         | Add it under Stem & Plot Details → Quadrats |
 | "Duplicate tree/stem combination" | Same tags recorded twice    | Remove duplicate from file   |
 | "Missing required field"          | Empty required column       | Fill in the missing data     |
 | "DBH growth exceeds maximum"      | Growth > 65mm               | Verify both measurements     |
@@ -102,7 +102,7 @@ Technical errors related to database and server issues.
 | **Info**     | 🔵 Blue   | Informational only       | No action required           |
 
 :::note
-**Validation errors** are typically warnings - your data is saved but flagged for review. **Upload errors** are typically critical - the data was not saved.
+**Validation errors** are warnings — your data is saved and flagged for review. **Upload errors** vary: a file that fails to parse never reaches the database, but a row that parses and then cannot be matched to a stem **is still saved**, with your original values intact, and listed under Census Hub → View Errors.
 :::
 
 ---
@@ -132,7 +132,7 @@ Most error messages include:
 | ----------------- | ------------------------------ | ----------------------------- |
 | **Error Type**    | "Validation Error"             | Categorizes the error         |
 | **Error Message** | "Species code ABCDE not found" | Describes what went wrong     |
-| **Error ID**      | "err-abc123"                   | Unique identifier for support |
+| **Error ID**      | a long hex string, e.g. "3f9a2c1b8e04..." | Shown on the full-page error screen only; quote it when reporting |
 | **Affected Data** | "Row 45, Column 'spcode'"      | Location of the problem       |
 
 ### Interpreting HTTP Error Codes
@@ -190,7 +190,7 @@ For issues they can help with:
 **A:** Usually no. The system is designed to preserve data:
 
 - Validation errors: Data is saved but flagged
-- Upload errors: Data may not be saved - check Failed Measurements
+- Upload errors: rows that could not be resolved are still saved — check Census Hub → View Errors
 - System errors: Completed operations are saved; interrupted ones can be retried
 
 ### Q: Why do I see different error messages for the same problem?

@@ -98,10 +98,15 @@ This guide covers errors that may occur during the file upload and processing st
 | "Missing required field: LocalX"          | `lx` column is empty        | Provide the quadrat-local X coordinate |
 | "Missing required field: LocalY"          | `ly` column is empty        | Provide the quadrat-local Y coordinate |
 
-:::note
-The two coordinate columns are the ones most often left out, because they read like optional
-detail. They are required. `StemTag` by contrast is **not** required, despite appearing above —
-that message only fires if the column is present but blank on a row where it is needed.
+:::caution
+**The upload screen and the ingestion check disagree about two columns, so trust this list.**
+
+The header guide marks `stemtag` optional, but ingestion rejects any row whose StemTag is blank.
+Give every row a stem tag — most sites use `0` for a single-stemmed tree.
+
+Conversely, the missing-coordinate checks above only fire for **ArcGIS workbook imports**. A CSV
+row with no coordinates will ingest — but it will then be flagged by the plot-boundary and
+coordinate-drift validations, and it cannot be placed on the plot. Supply `lx` and `ly`.
 :::
 
 ### Field Length Errors
@@ -208,7 +213,7 @@ number of failures appear together, check for this code before assuming a data p
 ### If your upload fails partway through:
 
 1. **Don't panic** - Your data is not lost
-2. **Check Failed Measurements** - Successfully parsed rows that failed validation are stored there
+2. **Check Census Hub → View Errors** — rows that parsed but could not be resolved are listed there
 3. **Fix the issues** - Correct your source file based on error messages
 4. **Re-upload** - Upload the corrected file
 
@@ -240,10 +245,10 @@ number of failures appear together, check for this code before assuming a data p
    - Same date format (YYYY-MM-DD recommended)
    - No special characters in tag fields
 
-3. **Check Fixed Data first**
+3. **Check your supporting data first**
    - Verify all species codes exist
    - Verify all quadrat names exist
-   - Add any missing Fixed Data before uploading
+   - Add any missing species, quadrats or stem codes before uploading
 
 4. **Upload in reasonable batches**
    - Very large files (>100,000 rows) may timeout

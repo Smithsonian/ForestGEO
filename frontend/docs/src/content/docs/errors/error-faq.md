@@ -44,7 +44,7 @@ This page provides answers to frequently asked questions about errors and a comp
 **A:** Data processed before the failure is saved. Check:
 
 1. **Census Hub** - Some data may have been successfully uploaded
-2. **Failed Measurements** - Problem rows are stored here
+2. **Census Hub → View Errors** — problem rows are listed here
 3. **Temporary Measurements** - Data may be waiting for reprocessing
 
 ### Q: Can I upload the same file again after an error?
@@ -177,8 +177,8 @@ If you're stuck, work through this checklist:
 
 | If you see...            | It usually means...        | Try...                    |
 | ------------------------ | -------------------------- | ------------------------- |
-| "Species code not found" | Species not in database    | Add species to Fixed Data |
-| "Invalid quadrat"        | Quadrat not defined        | Add quadrat to Fixed Data |
+| "Species code not found" | Species not in database    | Add it under Stem & Plot Details → Species List |
+| "Invalid quadrat"        | Quadrat not defined        | Add it under Stem & Plot Details → Quadrats |
 | "Duplicate"              | Same data uploaded twice   | Remove duplicate          |
 | "Timeout"                | Took too long              | Wait and retry            |
 | "Unauthorized"           | Need to log in             | Log in again              |

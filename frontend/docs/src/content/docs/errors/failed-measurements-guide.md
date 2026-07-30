@@ -34,14 +34,20 @@ Each failed row carries a **consolidated failure reason** built from one or more
 
 | Reason | Field | How to fix |
 |---|---|---|
-| **SpCode missing** | Species Code | Add a valid species code |
-| **Quadrat missing** | Quadrat | Add a valid quadrat name |
-| **Missing X / Missing Y** | Coordinates | Provide coordinates (a value of `-1` is treated as missing) |
-| **Missing Date** | Date | Provide a valid date (`YYYY-MM-DD`) |
-| **Missing Codes and DBH** | Codes, DBH | A row must carry either attribute codes or a diameter — supply one |
-| **Missing Codes and HOM** | Codes, HOM | As above, for height of measurement |
-| **SpCode invalid** | Species Code | Add the species to the Species List, then re-upload the row |
-| **Quadrat invalid** | Quadrat | Add the quadrat under **Stem & Plot Details → Quadrats**, then re-upload the row |
+| **Missing required field: TreeTag** | Tree Tag | Give every row a tree tag |
+| **Missing required field: StemTag** | Stem Tag | Give every row a stem tag — most sites use `0` for a single-stemmed tree |
+| **Missing required field: SpeciesCode** | Species Code | Supply a species code |
+| **Missing required field: QuadratName** | Quadrat | Supply a quadrat name |
+| **Missing required field: MeasurementDate** | Date | Provide a valid date (`YYYY-MM-DD`) |
+| **Invalid species code: "X" not found in database** | Species Code | Add the species under **Stem & Plot Details → Species List**, then re-submit the row |
+| **Invalid quadrat name: "X" not found in database** | Quadrat | Add the quadrat under **Stem & Plot Details → Quadrats**, then re-submit the row |
+| **Invalid LocalX / Invalid LocalY** | Coordinates | A negative coordinate is rejected outright — correct it to a position inside the quadrat |
+| **Missing measurement data: DBH and HOM both 0 with no codes** | DBH, HOM, Codes | A row must carry a measurement or at least one attribute code — supply one |
+
+Cross-census position problems are hard failures too, not warnings: a quadrat that disagrees with
+the previous census, or coordinates that have drifted beyond the allowed threshold, will stop a
+row resolving. So will duplicate tag pairs within your file. See
+[Upload Errors](/ForestGEO/errors/upload-errors/) for the full list of codes.
 
 :::note
 **`INTERRUPTED_UPLOAD` is not a data problem.** If you see it, the upload timed out or the
@@ -54,7 +60,7 @@ Do not edit the data. Re-run the upload instead.
 | Reason | What it means |
 |---|---|
 | **Invalid Codes** | One or more attribute codes weren't recognised. **As of April 2026 these are soft warnings, not hard rejections** — the row still goes into the database but the unknown codes are surfaced so you can either add them to the Attributes list or correct the value. |
-| Cross-census growth / shrinkage warnings | DBH, HOM, or status changes that look implausible compared with the previous census. Reviewed and accepted or corrected case-by-case. |
+| Cross-census growth / shrinkage findings | DBH or HOM changes that look implausible against the previous census. Reviewed and accepted or corrected case-by-case. |
 
 See **[Validation Errors](/ForestGEO/errors/validation-errors/)** for the full validation reference.
 
@@ -79,7 +85,7 @@ Best when many rows fail because the **app doesn't know about something yet** (a
 
 Best for typos and one-off corrections in a handful of rows.
 
-The grid uses the **unified row-editing pipeline** (rolled out in April–May 2026). Every edit — whether you initiated it from View Data, View Errors, or the Failed Measurements view — goes through the same flow:
+The grid uses the **unified row-editing pipeline** (rolled out in April–May 2026). Every edit — whether you started from View Data or View Errors — goes through the same flow:
 
 1. Open the grid and click a row's edit action.
 2. Make your changes.
@@ -96,7 +102,8 @@ Best when you have **many rows to fix** and prefer to work in a spreadsheet.
 Export the data, fix the offending values, and submit as a **Revisions** upload. This is a separate upload mode from the original ingest — the app matches your file against existing rows and updates only the columns you changed.
 
 - **Editable through Revisions:** DBH, HOM, Measurement Date, Codes (`RawCodes`), Comments.
-- **Restricted to administrators:** Species Code, Tree Tag, Stem Tag, Quadrat, and Coordinates identify the stem, so only **global** and **database administrator** accounts can change them through a Revision Upload. If your account lacks the role, the review screen blocks the upload and names the row and field rather than applying part of it.
+- **Also editable, but identity-bearing:** Tree Tag, Stem Tag, Quadrat, and the Coordinates. Changing these re-points the measurement at a different tree or place, so check them carefully.
+- **Restricted by role:** Species Code can only be changed by **global** and **database administrator** accounts. If your account lacks that role, the review screen blocks the upload and names the row and field rather than applying part of it.
 
 See **[Upload Process Breakdown](/ForestGEO/upload-process-breakdown/)** for the full Revision Upload walkthrough.
 
@@ -135,7 +142,7 @@ The underlying reference data wasn't actually fixed. Common causes:
 - Quadrat was added under a different plot.
 - An edit didn't save because the Impact Summary dialog was cancelled.
 
-Open one of the failed rows in the grid and check exactly what the app sees vs. what's in Fixed Data.
+Open one of the failed rows in the grid and check exactly what the app sees vs. what your supporting data actually holds.
 
 ### A code I've used for years is suddenly flagged
 

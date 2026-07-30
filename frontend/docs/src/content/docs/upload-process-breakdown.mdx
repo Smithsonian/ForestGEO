@@ -428,17 +428,18 @@ A Revision Upload can change eleven fields. Five of them anyone with upload acce
 - **Codes** (`RawCodes` / `codes`)
 - **Comments** (`Description` / `comments`)
 
-The remaining six identify the stem, so they are restricted to **global** and **database
-administrator** accounts:
+Six more identify the stem, and changing them re-points a measurement at a different tree or
+place, so treat them with more care:
 
-- **Species Code** (`spcode`)
 - **Quadrat Name** (`quadrat`)
 - **Local X** and **Local Y** (`lx`, `ly`)
 - **Tree Tag** and **Stem Tag** (`tag`, `stemtag`)
+- **Species Code** (`spcode`)
 
-If your account lacks the role, the review screen blocks the upload with a message naming the
-row and field rather than applying part of it. Ask an administrator to run the revision, or make
-the change through inline editing in the grid.
+Of these, only **Species Code** is restricted by role: it can be changed by **global** and
+**database administrator** accounts only. If your account lacks that role, the review screen
+blocks the upload with a message naming the row and field rather than applying part of it — ask
+an administrator to run it. The other five are editable by anyone with upload access.
 
 ### Common pitfalls
 

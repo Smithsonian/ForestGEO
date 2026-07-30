@@ -124,11 +124,13 @@ If you're a new user and cannot access the application:
 
 ### Role-Related Issues
 
-| Role              | Can Do             | Cannot Do                                |
-| ----------------- | ------------------ | ---------------------------------------- |
-| **Viewer**        | View data          | Edit data, upload files, admin functions |
-| **Site User**     | View, edit, upload | Admin functions, user management         |
-| **Administrator** | Everything         | N/A                                      |
+| Role | Notes |
+| --- | --- |
+| **global** | Full access, including the administration pages and site provisioning |
+| **db admin** | Full data access, including the Validations page and species-code edits |
+| **lead technician** | Day-to-day data work: upload, edit, and review |
+| **field crew** | Day-to-day data work |
+| **pending** | Signed in through Microsoft but not yet registered — cannot edit anything until an administrator assigns a role |
 
 If you need additional permissions, contact your administrator.
 
@@ -136,7 +138,7 @@ If you need additional permissions, contact your administrator.
 
 ## Security Best Practices
 
-1. **Don't share login credentials** - Each user should have their own account
+1. **Don't share your Microsoft account** - Each user should sign in as themselves
 2. **Log out when done** - Especially on shared computers
 3. **Report suspicious activity** - Contact administrator if you notice unauthorized access
 4. **Keep browser updated** - Security updates help protect your session
