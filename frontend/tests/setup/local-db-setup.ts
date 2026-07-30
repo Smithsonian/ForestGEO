@@ -201,7 +201,11 @@ export async function createTestDatabase(config: TestDatabaseConfig = DEFAULT_TE
 
     await connection.query(`DROP DATABASE IF EXISTS \`${config.database}\``);
     await connection.query(`CREATE DATABASE \`${config.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
-    await connection.query(`USE \`${config.database}\``);
+    // changeUser (not `USE`) so mysql2 records the database on
+    // connection.config.database — a plain USE query switches the session
+    // server-side but leaves config.database undefined, which let callers
+    // tear down against `undefined` and leak the real database.
+    await connection.changeUser({ database: config.database });
 
     log.debug(` Test database created: ${config.database}`);
 
@@ -763,6 +767,22 @@ export async function teardownTestDatabase(
   if (!connection) {
     log.warn('No connection to clean up');
     return;
+  }
+
+  // A missing name means DROP DATABASE IF EXISTS `undefined` — which succeeds,
+  // drops nothing, and leaks the real database. Close the connection so the
+  // throw itself doesn't leak, then fail loudly. The 'undefined' literal
+  // catches names built by string-interpolating an undefined value.
+  if (!config.database || config.database === 'undefined') {
+    try {
+      await connection.end();
+    } catch {
+      // connection may already be closed; the error below is the signal
+    }
+    throw new Error(
+      `teardownTestDatabase requires an explicit database name; received ${JSON.stringify(config.database)}. ` +
+        `Pass the name used at createTestDatabase time.`
+    );
   }
 
   try {
