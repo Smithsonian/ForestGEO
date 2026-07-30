@@ -127,7 +127,7 @@ This guide covers errors that may occur during the file upload and processing st
 :::note
 Duplicates surface in two places, depending on the upload mode:
 
-- **Initial upload:** flagged rows stay in `coremeasurements` with `StemGUID = NULL` and the original CSV codes preserved. Review via View Errors or the Failed Measurements modal.
+- **Initial upload:** flagged rows stay in `coremeasurements` with `StemGUID = NULL` and the original CSV codes preserved. Review them under Census Hub → View Errors.
 - **Revision Upload:** any rows in the database that match multiple measurements for the same stem appear in the **Duplicate Cleanup** tab on the review screen. On Apply, the highest-ID row wins and the others are deleted in a single transaction. See [Revision Upload](/ForestGEO/upload-process-breakdown/#revision-upload-correcting-an-ingested-census).
 :::
 
@@ -137,8 +137,8 @@ Duplicates surface in two places, depending on the upload mode:
 
 | Error Message                                          | Cause                       | How to Fix                                                    |
 | ------------------------------------------------------ | --------------------------- | ------------------------------------------------------------- |
-| "Invalid quadrat name: '[name]' not found in database" | Quadrat doesn't exist       | Add the quadrat in Fixed Data > Quadrats before uploading     |
-| "Invalid species code: '[code]' not found in database" | Species not in Species List | Add the species in Fixed Data > Species List before uploading |
+| "Invalid quadrat name: '[name]' not found in database" | Quadrat doesn't exist       | Add the quadrat in Stem & Plot Details > Quadrats before uploading     |
+| "Invalid species code: '[code]' not found in database" | Species not in Species List | Add the species in Stem & Plot Details > Species List before uploading |
 
 :::caution
 These errors will cause measurements to fail. Always ensure all quadrats and species exist in Fixed Data BEFORE uploading measurements.

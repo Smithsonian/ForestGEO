@@ -43,7 +43,7 @@ This page provides answers to frequently asked questions about errors and a comp
 
 **A:** Data processed before the failure is saved. Check:
 
-1. **Measurements Hub** - Some data may have been successfully uploaded
+1. **Census Hub** - Some data may have been successfully uploaded
 2. **Failed Measurements** - Problem rows are stored here
 3. **Temporary Measurements** - Data may be waiting for reprocessing
 
@@ -61,7 +61,7 @@ This page provides answers to frequently asked questions about errors and a comp
 
 - Progress bar reaches 100%
 - "Upload Complete" message appears
-- Data appears in Measurements Hub
+- Data appears in Census Hub
 - No error messages displayed
 
 ---
@@ -88,7 +88,7 @@ These are checks to help ensure data accuracy.
 
 **A:**
 
-1. Go to Measurements Hub > View Data
+1. Go to Census Hub > View Data
 2. Filter to show only rows with errors
 3. Click on a row to see the error details
 4. Edit the values directly
@@ -98,7 +98,7 @@ These are checks to help ensure data accuracy.
 
 **A:** Yes, administrators can enable/disable validations:
 
-1. Go to Measurements Hub > Validations
+1. Go to Census Hub > Validations
 2. Find the validation in the list
 3. Toggle it off
 
@@ -122,8 +122,8 @@ Disabling validations may allow data quality issues to go undetected.
 **A:**
 
 1. Fix the underlying issue (e.g., add missing species)
-2. Open the Failed Measurements modal
-3. Click "Reingest All" or reingest individual records
+2. Open **Census Hub → View Errors** to confirm which rows are still failing
+3. Re-submit those rows as a **Revisions** upload, or correct them inline in the grid
 
 ### Q: Should I clear failed measurements or reingest them?
 
