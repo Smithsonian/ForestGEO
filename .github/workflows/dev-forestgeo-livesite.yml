@@ -244,6 +244,18 @@ jobs:
           npx tsx scripts/deploy-validations-to-all-schemas.ts
         continue-on-error: false
 
+      # Views are CREATE OR REPLACE artifacts, not migrations: they are redeployed
+      # from tablestructures.sql on every deploy, the same way procedures are. A site
+      # provisioned by an older release of the app has no taxonomy views at all,
+      # which makes the species viewer fail with "error fetching data".
+      - name: Deploy taxonomy views to all schemas
+        env:
+          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+        run: |
+          cd frontend/
+          npx tsx scripts/deploy-taxonomy-views-to-all-schemas.ts
+        continue-on-error: false
+
   deploy-app-development:
     needs: [build-app-development, migrate-and-verify-development]
     runs-on: ubuntu-latest

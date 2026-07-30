@@ -3,10 +3,12 @@
  *
  * Provisions a throwaway schema from the canonical DDL, intentionally regresses it
  * to the known live-schema drift (drops temporarymeasurements.PublishedStemID and
- * SourceFormat; downgrades representative VARCHAR/TEXT columns to utf8mb3; no
- * migration ledger), then proves the migrate + verify pipeline repairs the
- * application write contract end to end without rebuilding unrelated tables and
- * remains idempotent:
+ * SourceFormat, stems.PublishedStemID and its lookup index, and
+ * coremeasurements.RawPublishedStemID — the exact shape of a site provisioned by a
+ * deployment that predates the PublishedStemID work; downgrades representative
+ * VARCHAR/TEXT columns to utf8mb3; no migration ledger), then proves the migrate +
+ * verify pipeline repairs the application write contract end to end without
+ * rebuilding unrelated tables and remains idempotent:
  *
  *   (1) the read-only contract audit FAILS, naming both the missing columns and
  *       the legacy-collation columns as maintenance warnings;
@@ -48,6 +50,8 @@ import { SourceFormat, type FileRow } from '@/config/macros/formdetails';
 const REPRESENTATIVE_TEXT_COLUMN = 'Comments';
 const LEGACY_CHARSET = 'utf8mb3';
 const LEGACY_COLLATION = 'utf8mb3_general_ci';
+const PUBLISHED_STEMID_INDEX = 'idx_stems_publishedstemid';
+const PUBLISHED_STEMID_CONFLICT_CODE = 'PUBLISHED_STEMID_CONFLICT';
 
 describe('Stale-schema migrate + verify pipeline', () => {
   let connection: Connection;
@@ -74,6 +78,11 @@ describe('Stale-schema migrate + verify pipeline', () => {
     // Regress the freshly-provisioned schema to the known drift.
     await connection.query('ALTER TABLE temporarymeasurements DROP COLUMN PublishedStemID');
     await connection.query('ALTER TABLE temporarymeasurements DROP COLUMN SourceFormat');
+    // A site provisioned by a deployment older than the PublishedStemID work also
+    // lacks the storage columns, their lookup index, and the conflict error code.
+    await connection.query('ALTER TABLE stems DROP COLUMN PublishedStemID');
+    await connection.query('ALTER TABLE coremeasurements DROP COLUMN RawPublishedStemID');
+    await connection.query('DELETE FROM measurement_errors WHERE ErrorSource = ? AND ErrorCode = ?', ['ingestion', PUBLISHED_STEMID_CONFLICT_CODE]);
     await connection.query(
       `ALTER TABLE temporarymeasurements MODIFY COLUMN ${REPRESENTATIVE_TEXT_COLUMN} varchar(255) CHARACTER SET ${LEGACY_CHARSET} COLLATE ${LEGACY_COLLATION} NULL`
     );
@@ -104,6 +113,14 @@ describe('Stale-schema migrate + verify pipeline', () => {
     const missingColumns = audit.contractFailures.filter(f => f.kind === 'missing' && f.category === 'column').map(f => f.object);
     expect(missingColumns).toContain('PublishedStemID');
     expect(missingColumns).toContain('SourceFormat');
+    expect(missingColumns).toContain('RawPublishedStemID');
+    // stems.PublishedStemID is dropped from a different table than the
+    // temporarymeasurements column of the same name — assert the table too.
+    expect(audit.contractFailures.some(f => f.kind === 'missing' && f.category === 'column' && f.table === 'stems' && f.object === 'PublishedStemID')).toBe(
+      true
+    );
+    const missingIndexes = audit.contractFailures.filter(f => f.kind === 'missing' && f.category === 'index').map(f => f.object);
+    expect(missingIndexes).toContain(PUBLISHED_STEMID_INDEX);
     expect(audit.collationViolations.some(v => v.startsWith(`temporarymeasurements.${REPRESENTATIVE_TEXT_COLUMN}`))).toBe(true);
     // The generated-column table's non-generated text column is flagged too.
     expect(audit.collationViolations.some(v => v.startsWith('species.SpeciesName'))).toBe(true);
@@ -155,6 +172,15 @@ describe('Stale-schema migrate + verify pipeline', () => {
     }
     expect(audit.ok).toBe(true);
     expect(audit.collationViolations.some(v => v.includes(LEGACY_COLLATION))).toBe(true);
+
+    // The error catalog is outside the structural contract, so audit.ok cannot
+    // speak for it — but bulkingestionprocess writes this code, so a repair that
+    // restored the columns without the catalog row would log conflicts to nothing.
+    const [conflictCode] = await connection.query<RowDataPacket[]>(`SELECT ErrorID FROM measurement_errors WHERE ErrorSource = ? AND ErrorCode = ?`, [
+      'ingestion',
+      PUBLISHED_STEMID_CONFLICT_CODE
+    ]);
+    expect(conflictCode.length).toBe(1);
   });
 
   it('(5) a production keyed insert + one-row bulkingestionprocess succeed against the repaired schema', async () => {

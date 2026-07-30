@@ -3,10 +3,12 @@ import { act, configure, fireEvent, render, screen, waitFor } from '@testing-lib
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The row-edit flow drives beginEdit/UndoToast through an async chain
-// (__triggerRowUpdate -> processRowUpdate -> flow.beginEdit). Under CI load that
-// chain can exceed waitFor's 1000ms default, causing intermittent "spy called 0
-// times" timeouts. Give async assertions in this file a wider margin; it only
-// lengthens the polling window and never affects a passing assertion.
+// (__triggerRowUpdate -> processRowUpdate -> flow.beginEdit) whose fetches and
+// view refreshes are slower under CI load than waitFor's 1000ms default. This
+// margin only lengthens the polling window and never affects a passing
+// assertion. It is NOT what makes this file's row-edit tests reliable: the
+// timeouts this once tried to paper over came from a trigger bound to a stale
+// row set, fixed in StyledDataGridMock.
 configure({ asyncUtilTimeout: 5000 });
 
 import { getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorsexplorer';
@@ -162,6 +164,37 @@ const mockCancelDialog = vi.fn();
 let currentDialogState: UseEditPreviewFlowReturn['dialogState'] = { open: false, plan: null, busy: false, wasRefreshed: false };
 let lastEditFlowArgs: Record<string, unknown> | null = null;
 
+interface RenderedGridProps {
+  rows: Array<Record<string, unknown>>;
+  columns: any[];
+  processRowUpdate?: (newRow: Record<string, unknown>, oldRow: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
+  slots?: any;
+}
+
+// What the mocked grid most recently committed. Updated from a layout effect so
+// trigger hooks cannot observe either a stale passive effect or an aborted render.
+let latestGridProps: RenderedGridProps | null = null;
+
+// These two report the grid's state instead of returning undefined. A trigger
+// that quietly no-ops turns every downstream assertion into an unexplained
+// waitFor timeout; naming the missing piece is the difference between a
+// five-second mystery and a one-line diagnosis.
+function requireGridProps(): RenderedGridProps & { processRowUpdate: NonNullable<RenderedGridProps['processRowUpdate']> } {
+  if (!latestGridProps) throw new Error('The grid has not rendered yet — no row-update trigger is available.');
+  if (!latestGridProps.processRowUpdate) {
+    throw new Error('The grid rendered without processRowUpdate — row editing is gated off for this session.');
+  }
+  return latestGridProps as RenderedGridProps & { processRowUpdate: NonNullable<RenderedGridProps['processRowUpdate']> };
+}
+
+function findGridRow(rows: Array<Record<string, unknown>>, rowID: number): Record<string, unknown> {
+  const row = rows.find(candidate => Number(candidate.id) === Number(rowID));
+  if (!row) {
+    throw new Error(`No rendered row with id ${rowID}. The grid currently holds: ${JSON.stringify(rows.map(candidate => candidate.id))}`);
+  }
+  return row;
+}
+
 function setDialogState(nextState: UseEditPreviewFlowReturn['dialogState']) {
   currentDialogState = nextState;
 }
@@ -255,25 +288,28 @@ vi.mock('@/app/hooks/useEditPreviewFlow', () => ({
 }));
 
 vi.mock('@/config/styleddatagrid', async () => {
-  const ReactModule = await import('react');
-
   function StyledDataGridMock(props: any) {
     const rows = (props.rows || []) as Array<Record<string, unknown>>;
     const columns = props.columns || [];
 
-    // Expose test hooks for both direct processRowUpdate coverage and the
-    // valueGetter/valueSetter transformations MUI performs in row-edit mode.
-    ReactModule.useEffect(() => {
+    React.useLayoutEffect(() => {
+      // Layout effects run in the same commit as the DOM mutation. Unlike the old
+      // passive effect they are visible before waitFor can react to that commit;
+      // unlike a render-time assignment they never publish speculative props.
+      const committedProps = { rows, columns, processRowUpdate: props.processRowUpdate, slots: props.slots };
+      latestGridProps = committedProps;
+
+      // Expose test hooks for both direct processRowUpdate coverage and the
+      // valueGetter/valueSetter transformations MUI performs in row-edit mode.
       (globalThis as any).__triggerRowUpdate = async (rowID: number, newRow: Record<string, unknown>) => {
-        const oldRow = rows.find(row => Number(row.id) === Number(rowID));
-        if (!oldRow || !props.processRowUpdate) return undefined;
-        return props.processRowUpdate(newRow, oldRow);
+        const { rows: currentRows, processRowUpdate } = requireGridProps();
+        return processRowUpdate(newRow, findGridRow(currentRows, rowID));
       };
       (globalThis as any).__triggerMuiRowUpdate = async (rowID: number, changes: Record<string, unknown>) => {
-        const oldRow = rows.find(row => Number(row.id) === Number(rowID));
-        if (!oldRow || !props.processRowUpdate) return undefined;
+        const { rows: currentRows, columns: currentColumns, processRowUpdate } = requireGridProps();
+        const oldRow = findGridRow(currentRows, rowID);
 
-        const editableColumns = columns.filter((column: any) => column.editable);
+        const editableColumns = currentColumns.filter((column: any) => column.editable);
         const editValues = Object.fromEntries(
           editableColumns.map((column: any) => [
             column.field,
@@ -286,12 +322,16 @@ vi.mock('@/config/styleddatagrid', async () => {
           const value = editValues[column.field];
           return column.valueSetter ? column.valueSetter(value, row, column) : { ...row, [column.field]: value };
         }, oldRow);
-        return props.processRowUpdate(newRow, oldRow);
+        return processRowUpdate(newRow, oldRow);
       };
       (globalThis as any).__triggerInfiniteToggle = (next: boolean) => {
-        props.slots?.pagination?.infiniteScroll?.onToggle?.(next);
+        requireGridProps().slots?.pagination?.infiniteScroll?.onToggle?.(next);
       };
-    }, [rows, props.processRowUpdate, props.slots]);
+
+      return () => {
+        if (latestGridProps === committedProps) latestGridProps = null;
+      };
+    }, [rows, columns, props.processRowUpdate, props.slots]);
 
     return (
       <div data-testid="styled-grid">
@@ -385,6 +425,9 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
   afterEach(() => {
     delete (globalThis as any).__triggerRowUpdate;
     delete (globalThis as any).__triggerMuiRowUpdate;
+    delete (globalThis as any).__triggerInfiniteToggle;
+    // Drop the unmounted grid's props so the next test cannot act on them.
+    latestGridProps = null;
   });
 
   it('configures the edit flow with the current scope and default data type', async () => {
@@ -558,7 +601,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     expect(options).toEqual({ dataType: 'failedmeasurements' });
   });
 
-  it('shows the UndoToast after a successful edit and no-ops if the edit returned no operation ID', async () => {
+  it('shows the UndoToast after a successful edit', async () => {
     mockBeginEdit.mockResolvedValueOnce({
       updatedIDs: { coreMeasurementID: TEST_CORE_MEASUREMENT_ID },
       applyErrors: [],
@@ -573,7 +616,32 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
       await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, { ...GRID_ROW, measuredDBH: 12 });
     });
 
+    await waitFor(() => expect(mockBeginEdit).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByTestId(`undo-toast-${TEST_EDIT_OPERATION_ID}`)).toBeInTheDocument());
+  });
+
+  // The undo affordance is only honest when there is an operation to revert.
+  // A writer that reports no editOperationID (nothing was recorded as undoable)
+  // must leave the toast off rather than offer an undo that cannot resolve.
+  it('leaves the UndoToast off when the edit returned no operation ID', async () => {
+    mockBeginEdit.mockResolvedValueOnce({
+      updatedIDs: { coreMeasurementID: TEST_CORE_MEASUREMENT_ID },
+      applyErrors: [],
+      editOperationID: null,
+      validationPending: false
+    });
+
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+
+    await act(async () => {
+      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, { ...GRID_ROW, measuredDBH: 12 });
+    });
+
+    await waitFor(() => expect(mockBeginEdit).toHaveBeenCalledTimes(1));
+    // No toast under ANY operation ID: a toast rendered with a null/undefined ID
+    // would offer an undo that /api/edits/revert cannot resolve.
+    expect(screen.queryAllByTestId(/^undo-toast-/)).toHaveLength(0);
   });
 
   it('renders the PreviewDialog using the current dialogState and refreshes the fresh plan on 409 drift', async () => {

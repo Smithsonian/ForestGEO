@@ -19,13 +19,11 @@
  * Usage: npx tsx scripts/deploy-taxonomy-views-to-all-schemas.ts
  */
 
-import mysql from 'mysql2/promise';
 import fs from 'fs';
 import path from 'path';
-
-const AZURE_HOST = 'forestgeo-mysqldataserver.mysql.database.azure.com';
-const AZURE_USER = 'azureroot';
-const AZURE_PORT = 3306;
+import { fileURLToPath } from 'url';
+import type { Connection, RowDataPacket } from 'mysql2/promise';
+import { assertExpectedHost, createSchemaCliConnection, discoverSiteSchemas, resolveConnectionSettings } from './lib/schema-cli';
 
 const TAXONOMY_VIEWS = ['alltaxonomiesview', 'stemtaxonomiesview'] as const;
 const REQUIRED_BASE_TABLES = ['species', 'genus', 'family', 'trees', 'stems'] as const;
@@ -41,7 +39,7 @@ interface SchemaResult {
  * view from tablestructures.sql. The view bodies contain no inner semicolons, so
  * a non-greedy match up to the first `;` captures exactly one statement.
  */
-function extractViewStatements(tablestructuresSQL: string): Map<string, string> {
+export function extractViewStatements(tablestructuresSQL: string): Map<string, string> {
   const statements = new Map<string, string>();
   for (const viewName of TAXONOMY_VIEWS) {
     const pattern = new RegExp(`CREATE\\s+OR\\s+REPLACE\\s+VIEW\\s+${viewName}\\b[\\s\\S]*?;`, 'i');
@@ -54,28 +52,38 @@ function extractViewStatements(tablestructuresSQL: string): Map<string, string> 
   return statements;
 }
 
-async function hasRequiredBaseTables(conn: mysql.Connection, schema: string): Promise<{ ready: boolean; missing: string[] }> {
-  const [rows] = await conn.query<mysql.RowDataPacket[]>(
+async function hasRequiredBaseTables(conn: Connection, schema: string): Promise<{ ready: boolean; missing: string[] }> {
+  const [rows] = await conn.query<RowDataPacket[]>(
     `SELECT TABLE_NAME as table_name
      FROM INFORMATION_SCHEMA.TABLES
      WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME IN (?)`,
     [schema, [...REQUIRED_BASE_TABLES]]
   );
-  const found = new Set(rows.map((r: any) => r.table_name));
+  const found = new Set(rows.map(row => String(row.table_name)));
   const missing = REQUIRED_BASE_TABLES.filter(t => !found.has(t));
   return { ready: missing.length === 0, missing };
 }
 
-async function deployTaxonomyViewsToAllSchemas() {
+export async function deployTaxonomyViewsToSchema(
+  connection: Connection,
+  viewStatements: ReadonlyMap<string, string>,
+  onApplied: (viewName: string) => void = () => undefined
+): Promise<void> {
+  for (const [name, statement] of viewStatements) {
+    await connection.query(statement);
+    onApplied(name);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export async function deployTaxonomyViewsToAllSchemas(): Promise<void> {
   console.log('Backfilling taxonomy views into all ForestGEO schemas...\n');
 
-  if (!process.env.AZURE_SQL_PASSWORD) {
-    console.error('Error: AZURE_SQL_PASSWORD environment variable not set');
-    console.error('Please set the password in your environment or .env.local file');
-    process.exit(1);
-  }
-
-  const azurePassword = process.env.AZURE_SQL_PASSWORD;
+  const settings = resolveConnectionSettings(true);
+  assertExpectedHost(settings.host, settings.allowedHosts);
 
   const scriptingDir = path.join(process.cwd(), 'db/sql');
   const tablestructuresPath = path.join(scriptingDir, 'tablestructures.sql');
@@ -87,26 +95,19 @@ async function deployTaxonomyViewsToAllSchemas() {
   for (const name of viewStatements.keys()) console.log(`  - ${name}`);
   console.log();
 
-  const discoveryConnection = await mysql.createConnection({
-    host: AZURE_HOST,
-    user: AZURE_USER,
-    password: azurePassword,
-    port: AZURE_PORT,
-    multipleStatements: false
-  });
+  // Use the shared schema CLI connection path so this production deploy gets the
+  // same Azure host allow-list, TLS certificate validation, and UTC handling as
+  // the migration and contract gates that run immediately before it.
+  const discoveryConnection = await createSchemaCliConnection(settings, { multipleStatements: false });
 
   try {
     console.log('[Step 1] Finding all ForestGEO schemas...');
-    const [schemas] = await discoveryConnection.query<mysql.RowDataPacket[]>(
-      `SELECT SCHEMA_NAME as schema_name
-       FROM INFORMATION_SCHEMA.SCHEMATA
-       WHERE SCHEMA_NAME LIKE 'forestgeo_%'
-       ORDER BY SCHEMA_NAME`
-    );
+    const schemas = await discoverSiteSchemas(discoveryConnection);
 
+    // A discovery failure must never read as "nothing to deploy" — this runs as a
+    // deploy gate, where exiting 0 on zero schemas is a silent false green.
     if (schemas.length === 0) {
-      console.log('No forestgeo_* schemas found!');
-      return;
+      throw new Error('No forestgeo_* schemas found. Refusing to report success against zero schemas.');
     }
 
     console.log(`Found ${schemas.length} ForestGEO schemas.\n`);
@@ -114,8 +115,7 @@ async function deployTaxonomyViewsToAllSchemas() {
 
     const results: SchemaResult[] = [];
 
-    for (const row of schemas) {
-      const schema = (row as any).schema_name;
+    for (const schema of schemas) {
       console.log(`Processing: ${schema}`);
 
       try {
@@ -128,28 +128,19 @@ async function deployTaxonomyViewsToAllSchemas() {
           continue;
         }
 
-        const schemaConnection = await mysql.createConnection({
-          host: AZURE_HOST,
-          user: AZURE_USER,
-          password: azurePassword,
-          database: schema,
-          port: AZURE_PORT,
-          multipleStatements: false
-        });
+        const schemaConnection = await createSchemaCliConnection(settings, { database: schema, multipleStatements: false });
 
         try {
-          for (const [name, stmt] of viewStatements) {
-            await schemaConnection.query(stmt);
-            console.log(`  ${name} applied`);
-          }
+          await deployTaxonomyViewsToSchema(schemaConnection, viewStatements, name => console.log(`  ${name} applied`));
         } finally {
           await schemaConnection.end();
         }
 
         results.push({ schema, status: 'deployed', detail: `${viewStatements.size} views applied` });
-      } catch (error: any) {
-        console.log(`  FAILED: ${error.message}`);
-        results.push({ schema, status: 'failed', detail: error.message });
+      } catch (error: unknown) {
+        const detail = errorMessage(error);
+        console.log(`  FAILED: ${detail}`);
+        results.push({ schema, status: 'failed', detail });
       }
 
       console.log();
@@ -172,24 +163,31 @@ async function deployTaxonomyViewsToAllSchemas() {
     if (failed.length > 0) {
       console.log('Failed:');
       failed.forEach(r => console.log(`  x ${r.schema}: ${r.detail}`));
-      process.exit(1);
+      throw new Error(`Taxonomy view deployment failed for ${failed.length} schema(s).`);
     }
 
     console.log('Taxonomy views backfilled successfully!');
-  } catch (error: any) {
-    console.error('Fatal error:', error.message);
-    throw error;
   } finally {
     await discoveryConnection.end();
   }
 }
 
-deployTaxonomyViewsToAllSchemas()
-  .then(() => {
-    console.log('\nBackfill complete!');
-    process.exit(0);
-  })
-  .catch(error => {
-    console.error('\nBackfill failed:', error);
-    process.exit(1);
-  });
+function isMainModule(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    return fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
+  void deployTaxonomyViewsToAllSchemas()
+    .then(() => {
+      console.log('\nBackfill complete!');
+    })
+    .catch(error => {
+      console.error('\nBackfill failed:', error);
+      process.exitCode = 1;
+    });
+}
