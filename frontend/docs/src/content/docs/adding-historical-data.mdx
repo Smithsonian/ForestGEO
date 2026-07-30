@@ -51,10 +51,16 @@ Each form accepts specific headers. **Headers in bold are required.**
 | personnel    | **firstname** | **lastname** | **role**   | roledescription |            |          |              |                     |          |       |          |
 | quadrats     | **quadrat**   | **startx**   | **starty** | **dimx**        | **dimy**   | **area** | quadratshape |                     |          |       |          |
 | species      | **spcode**    | family       | genus      | **species**     | subspecies | idlevel  | authority    | subspeciesauthority |          |       |          |
-| measurements | **tag**       | stemtag      | **spcode** | **quadrat**     | **lx**     | **ly**   | dbh          | hom                 | **date** | codes | comments |
+| measurements | **tag**       | **stemtag**  | **spcode** | **quadrat**     | lx         | ly       | dbh          | hom                 | **date** | codes | comments |
 
 :::caution
-Files that do not contain the required headers will be rejected!
+Files missing a required header will be rejected.
+
+Two columns behave differently from what the upload screen implies. **`stemtag` is required** — a
+row with a blank stem tag is rejected during ingestion, even though the header guide marks it
+optional. Most sites use `0` for a single-stemmed tree. Conversely `lx` and `ly` are only
+*enforced* on ArcGIS workbook imports; a CSV without them will ingest, but the stem cannot be
+placed on the plot and will be flagged by the boundary and coordinate-drift checks. Supply them.
 :::
 
 ---
@@ -127,11 +133,11 @@ Files that do not contain the required headers will be rejected!
 | Header     | Required | Type          | Description                               |
 | ---------- | -------- | ------------- | ----------------------------------------- |
 | `tag`      | Yes      | String/Number | Tree tag identifier                       |
-| `stemtag`  | No       | String/Number | Stem identifier (default: 0)              |
+| `stemtag`  | Yes      | String/Number | Stem identifier — use `0` for a single-stemmed tree |
 | `spcode`   | Yes      | String        | Species code (must exist in Species List) |
 | `quadrat`  | Yes      | String        | Quadrat name (must exist in Quadrats)     |
-| `lx`       | Yes      | Decimal       | X-coordinate within quadrat               |
-| `ly`       | Yes      | Decimal       | Y-coordinate within quadrat               |
+| `lx`       | Strongly recommended | Decimal | X-coordinate within quadrat — see the note below |
+| `ly`       | Strongly recommended | Decimal | Y-coordinate within quadrat — see the note below |
 | `dbh`      | No       | Decimal       | Diameter at breast height                 |
 | `hom`      | No       | Decimal       | Height of measurement                     |
 | `date`     | Yes      | Date          | Measurement date (YYYY-MM-DD)             |
