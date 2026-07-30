@@ -1,0 +1,171 @@
+---
+title: Preparing Your Data File
+description: What your measurement file needs to contain, what the fields mean, and the mistakes that most often cause an upload to be rejected.
+---
+
+Most upload problems are decided before you open the application, in how the file was put
+together. This page covers what to get right beforehand. It assumes you already know your way
+around the interface — if not, start with [Getting Started](/ForestGEO/getting-started/).
+
+---
+
+## Before you begin
+
+Three kinds of supporting data must already exist for the plot, because every measurement row
+points at them:
+
+- At least one **Stem Code**
+- At least one **Species**
+- At least one **Quadrat**
+
+Add them under **Stem & Plot Details**. Until all three exist, the measurements destinations stay
+visible in the sidebar but disabled.
+
+:::note
+**Personnel are not part of this.** Recording who collected the data is good practice, but an
+empty personnel list will not stop an upload.
+:::
+
+Species, stem codes and quadrats belong to the **plot**, so you define them once and every census
+in that plot uses them. Only personnel and the measurements themselves are recorded per census.
+
+---
+
+## How your data is organised
+
+```
+Site (e.g., "Panama")
+└── Plot (e.g., "BCI 50-hectare plot")
+    └── Quadrat (e.g., "0322")
+        └── Tree (Tree Tag: 12345)
+            └── Stem (Stem Tag: 0, 1, 2...)
+                └── Measurement (DBH, HOM, Date, Codes)
+```
+
+One row of your file is one **measurement**: a single stem, measured once, on one date. A
+multi-stemmed tree therefore contributes several rows to the same census, sharing a tree tag but
+differing in stem tag.
+
+### What the fields mean
+
+**Tree Tag** — the physical tag number on the tree. Unique within the plot. The tag itself stays
+with the tree across censuses, which is how the application recognises the same tree over time.
+(Internally each census gets its own tree record, so the numeric ID behind the tag changes — this
+matters only if you are querying the database directly.)
+
+**Stem Tag** — distinguishes multiple stems on one tree. Most sites use `0` for the main stem and
+`1`, `2`, … for the rest. Give every row a stem tag; a blank one is rejected.
+
+**Species Code** — the short code identifying the species. It must already exist in your Species
+List. Codes are **not case-sensitive**, so `CRUD2` and `crud2` are the same code — you cannot use
+capitalisation to tell two species apart.
+
+**Quadrat Name** — the subplot the stem sits in. Must already exist.
+
+**Local X / Local Y** — the stem's position *within its quadrat*, not within the plot. These are
+what let the application place a stem on the map and check it against the plot boundary.
+
+**DBH (Diameter at Breast Height)** — the primary measurement, taken at a standard 1.3 m. Units
+depend on the site. Leave it blank for a dead stem rather than entering zero.
+
+**HOM (Height of Measure)** — where you actually measured, when that differs from 1.3 m (buttress
+roots, irregular stems). Recording it keeps the next census comparable.
+
+**Codes** — attribute codes describing the stem's condition. Separate several with **semicolons**,
+as in `LI;DY`.
+
+---
+
+## What your file must contain
+
+| Column | Required | Notes |
+| ------ | -------- | ----- |
+| `tag` | **Yes** | Tree tag |
+| `stemtag` | **Yes** | Use `0` for a single-stemmed tree |
+| `spcode` | **Yes** | Must exist in the Species List |
+| `quadrat` | **Yes** | Must exist in Quadrats |
+| `date` | **Yes** | `YYYY-MM-DD` |
+| `lx`, `ly` | Strongly recommended | Only *enforced* on ArcGIS imports, but without them the stem cannot be placed |
+| `dbh`, `hom`, `codes`, `comments` | No | Leave blank rather than entering zero |
+
+Save as CSV, TSV or TXT. The delimiter is detected for you — comma, tab, semicolon or pipe — but
+encoding is not, so save as UTF-8 or accented species names will arrive corrupted.
+
+:::tip
+Header names are matched leniently. Capitalisation, spaces, underscores and hyphens are ignored,
+and common alternatives are recognised — `species` or `sp` for `spcode`, `diameter` for `dbh`,
+`quad` for `quadrat`. If a header still cannot be matched, the upload screen asks you to map it by
+hand before letting you continue.
+:::
+
+For the full column specifications, including the other upload forms, see
+[Adding Historical Data](/ForestGEO/adding-historical-data/).
+
+---
+
+## Mistakes that cause rejections
+
+| Problem | Why it happens | Fix |
+| ------- | -------------- | --- |
+| Species code not in the Species List | The code is a typo, or the species was never added | Add it under **Stem & Plot Details → Species List**, or correct the code |
+| Blank stem tag | The upload screen's header guide implies `stemtag` is optional; ingestion rejects a blank one | Put `0` in every row that has no separate stem tag |
+| Quadrat name doesn't exist | Leading zeros stripped by a spreadsheet, or a different naming convention | Compare against **Stem & Plot Details → Quadrats** |
+| Attribute codes separated by commas | Codes are semicolon-separated | Use `LI;DY`, not `LI,LI` |
+| Duplicate tree tag + stem tag in one file | The same stem recorded twice | Each tree/stem pair must appear once per census |
+| Dates in a spreadsheet's default format | Excel reformats dates on save | Use `YYYY-MM-DD`, and check after saving |
+| DBH containing text or units | A value like `12.5 cm` | DBH must be numeric only |
+| Missing coordinates | They look optional | Supply `lx` and `ly` |
+
+:::caution
+**The comma-versus-semicolon one is the quietest.** An unrecognised attribute code is only a soft
+warning, so a file using commas will upload apparently cleanly while the codes are silently
+dropped. Check a few rows after your first upload.
+:::
+
+:::tip
+Spreadsheet applications strip leading zeros from tags and quadrat names. If your identifiers
+have them, open the file in a plain text editor to confirm they survived the save.
+:::
+
+---
+
+## What happens next
+
+Once your file is ready, the upload itself asks you to choose a mode first — and one of them
+deletes the census's existing measurements before inserting yours. Read
+[the upload walkthrough](/ForestGEO/upload-process-breakdown/) before your first upload into a
+census that already holds data.
+
+Afterwards, rows that could not be matched to a stem are kept with your original values and listed
+under **Census Hub → View Errors**. They are not lost, and correcting them does not mean starting
+over — see the [Failed Measurements Guide](/ForestGEO/errors/failed-measurements-guide/).
+
+Automated checks run in the background once your rows are in, flagging things like implausible
+growth or a stem that has moved since the last census. They never block a row. The full list is in
+[Validations & Statistics](/ForestGEO/validations-statistics/).
+
+---
+
+## Common questions
+
+### Can I edit data after uploading?
+
+Yes. Use **Census Hub → View Data** to edit individual measurements, or submit a Revisions upload
+for many rows at once. Every change is recorded in the audit trail.
+
+### Can I delete a census?
+
+Only the most recent one, and only with a global or database-administrator account. Earlier
+censuses are preserved as historical data.
+
+### My upload seems stuck. What should I do?
+
+Large files legitimately take several minutes — watch the progress bar and the estimated time
+rather than the clock. Don't close the browser. If there is genuinely no movement, reload and
+retry, then check **View Errors**: rows marked `INTERRUPTED_UPLOAD` were never processed rather
+than rejected, so re-run the upload instead of editing them.
+
+### What happens to my file after upload?
+
+It is backed up automatically to cloud storage, and you can download the original later from
+**Census Hub → Uploaded Files**.

@@ -29,15 +29,15 @@ export default defineConfig({
             { label: 'Quick Start', slug: 'quick-start' },
             { label: 'Getting Started', slug: 'getting-started' },
             { label: 'Navigation, Dashboard & Tools', slug: 'navigation-dashboard-tools' },
+            { label: 'Preparing Your Data File', slug: 'preparing-your-data' },
             { label: 'Adding Historical Data', slug: 'adding-historical-data' }
           ]
         },
         {
-          label: 'Understanding Your Data',
+          label: 'Supporting Data',
           items: [
-            { label: 'Supporting Data', slug: 'starting/understanding-supporting-data' },
-            { label: 'Species', slug: 'starting/understanding-species' },
-            { label: 'Glossary of Terms', slug: 'framework/glossary-of-terms' }
+            { label: 'Overview', slug: 'starting/understanding-supporting-data' },
+            { label: 'Species List', slug: 'starting/understanding-species' }
           ]
         },
         {
@@ -78,9 +78,8 @@ export default defineConfig({
           ]
         },
         {
-          label: 'Reference',
-          collapsed: true,
-          items: [{ label: 'Non-Technical User Guide', slug: 'framework/non-technical-user-guide-outline' }]
+          label: 'Glossary of Terms',
+          slug: 'framework/glossary-of-terms'
         }
       ],
       head: [
