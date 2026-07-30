@@ -14,7 +14,7 @@ import { SUPPORTED_DELIMITERS } from '@/lib/uploads/detect-delimiter';
 import { isAsyncUploadEnabledFor } from '@/lib/background-jobs/feature-gate';
 import { isAllowedAsyncPipeline } from '@/lib/background-jobs/types';
 import { createUploadBackgroundJob, listBackgroundJobs } from '@/lib/background-jobs/repository';
-import { IdempotencyKeyConflictError } from '@/lib/background-jobs/errors';
+import { BackgroundJobScopeUnavailableError, IdempotencyKeyConflictError } from '@/lib/background-jobs/errors';
 import { isPrivilegedSession, MAX_UPLOAD_JOB_REQUEST_BYTES, parseOptionalPositiveInteger } from '@/lib/background-jobs/route-helpers';
 import { runJobIfClaimable } from '@/lib/background-jobs/worker';
 import { fromBody, fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
@@ -427,7 +427,7 @@ async function postHandler(request: NextRequest) {
       userID
     );
   } catch (error) {
-    if (error instanceof IdempotencyKeyConflictError) {
+    if (error instanceof IdempotencyKeyConflictError || error instanceof BackgroundJobScopeUnavailableError) {
       return NextResponse.json({ error: error.message }, { status: HTTPResponses.CONFLICT });
     }
     throw error;

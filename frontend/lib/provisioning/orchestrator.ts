@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { z } from 'zod';
 import type { Pool, PoolConnection, ResultSetHeader } from 'mysql2/promise';
 import type { ProvisioningInput, ProvisioningRunRecord, ProvisioningStepRecord, StepContext, RunStatus, StepStatus } from './types';
@@ -9,6 +8,7 @@ import { dispatchRun, getWorkerPid, HEARTBEAT_STALE_MS, isRunOwnedByCurrentWorke
 import { ProvisioningInputSchema } from './input-schema';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
+import { releaseSchemaOperationLock, tryAcquireSchemaOperationLock } from './schema-operation-lock';
 import ailogger from '@/ailogger';
 
 // Bootstrap DDL inlined so the catalog tables can be created without any
@@ -364,20 +364,14 @@ const SCHEMA_PATTERN = /^forestgeo_[a-z0-9_]+$/;
 export const STUCK_THRESHOLD_MS = 5 * 60 * 1000;
 const STALLED_RUN_ERROR_MESSAGE = 'Run stalled without an active provisioning worker';
 
-function lockNameForSchema(schemaName: string): string {
-  return `provisioning:${createHash('sha256').update(schemaName).digest('hex').slice(0, 48)}`;
-}
-
 async function acquireSchemaLock(conn: PoolConnection, schemaName: string): Promise<void> {
-  const [rows]: any = await conn.query(`SELECT GET_LOCK(?, 10) AS gotLock`, [lockNameForSchema(schemaName)]);
-  const gotLock = Number(rows[0]?.gotLock ?? rows[0]?.gotlock ?? 0);
-  if (gotLock !== 1) {
+  if (!(await tryAcquireSchemaOperationLock(conn, schemaName))) {
     throw new ProvisioningError(`Could not acquire provisioning lock for schema ${schemaName}`, 'conflict', { schemaName });
   }
 }
 
 async function releaseSchemaLock(conn: PoolConnection, schemaName: string): Promise<void> {
-  await conn.query(`SELECT RELEASE_LOCK(?)`, [lockNameForSchema(schemaName)]).catch(() => {});
+  await releaseSchemaOperationLock(conn, schemaName);
 }
 
 export async function startRun(args: StartRunArgs): Promise<{ runId: number }> {

@@ -157,6 +157,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 import { applyCatalogMigrationsForTests } from '../setup/catalog-migrations';
+import { seedCatalogTables } from './admin-provision/_shared';
 import { createUploadBackgroundJob, getBackgroundJob } from '@/lib/background-jobs/repository';
 import { runJobIfClaimable, type WorkerDeps } from '@/lib/background-jobs/worker';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
@@ -274,7 +275,15 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
       connectionLimit: 5
     });
     sharedState.catalogPool = catalogPool;
+    await seedCatalogTables(catalogPool);
     await applyCatalogMigrationsForTests();
+    await catalogPool.query(`DELETE FROM catalog.sites WHERE SchemaName = ?`, [schema]);
+    await catalogPool.query(
+      `INSERT INTO catalog.sites
+         (SiteName, SchemaName, SQDimX, SQDimY, DefaultUOMDBH, DefaultUOMHOM, DoubleDataEntry)
+       VALUES ('Upload Equivalence Test Site', ?, 20, 20, 'cm', 'm', 0)`,
+      [schema]
+    );
 
     // Scope B: second plot with the same quadrat names and an own census so the
     // worker run is fully independent of scope A inside the same schema.
@@ -330,7 +339,10 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
 
   afterAll(async () => {
     sharedState.catalogPool = null;
-    if (catalogPool) await catalogPool.end();
+    if (catalogPool) {
+      await catalogPool.query(`DELETE FROM catalog.sites WHERE SchemaName = ?`, [schema]);
+      await catalogPool.end();
+    }
     sharedState.connection = null;
     await teardownTestDatabase(connection, config);
   });

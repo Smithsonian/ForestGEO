@@ -12,7 +12,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import mysql, { type Pool } from 'mysql2/promise';
 import { applyCatalogMigrationsForTests } from '../setup/catalog-migrations';
-import { IdempotencyKeyConflictError, JobFileNotFoundError, WorkerLeaseLostError } from '@/lib/background-jobs/errors';
+import { BackgroundJobScopeUnavailableError, IdempotencyKeyConflictError, JobFileNotFoundError, WorkerLeaseLostError } from '@/lib/background-jobs/errors';
 import {
   assignFileBatchID,
   cancelBackgroundJob,
@@ -29,6 +29,8 @@ import {
 } from '@/lib/background-jobs/repository';
 import type { CreateUploadJobInput } from '@/lib/background-jobs/types';
 import { UPLOAD_JOB_MAX_RETRIES } from '@/lib/background-jobs/types';
+import { releaseSchemaOperationLock, tryAcquireSchemaOperationLock } from '@/lib/provisioning/schema-operation-lock';
+import { seedCatalogTables } from './admin-provision/_shared';
 
 // ---------------------------------------------------------------------------
 // Safety guard — this suite DELETEs from the shared `catalog` schema and must
@@ -56,6 +58,10 @@ const TEST_USER_A = 'user-a@forestgeo.test';
 const TEST_USER_B = 'user-b@forestgeo.test';
 
 const TEST_SCHEMA = 'forestgeo_testing_bgjobs';
+const OTHER_TEST_SCHEMA = 'forestgeo_other';
+const FILTER_TEST_SCHEMA_A = 'forestgeo_site_alpha';
+const FILTER_TEST_SCHEMA_B = 'forestgeo_site_beta';
+const REGISTERED_TEST_SCHEMAS = [TEST_SCHEMA, OTHER_TEST_SCHEMA, FILTER_TEST_SCHEMA_A, FILTER_TEST_SCHEMA_B] as const;
 const TEST_PLOT_ID = 1;
 const TEST_CENSUS_ID = 2;
 
@@ -80,6 +86,7 @@ beforeAll(async () => {
   });
 
   // Bootstrap tables (idempotent — safe to call on a clean or existing DB).
+  await seedCatalogTables(pool);
   await applyCatalogMigrationsForTests();
 
   console.log('[background-jobs-repository] catalog tables ensured');
@@ -98,6 +105,15 @@ beforeEach(async () => {
   await pool.query(`DELETE FROM catalog.background_job_events`);
   await pool.query(`DELETE FROM catalog.background_job_files`);
   await pool.query(`DELETE FROM catalog.background_jobs`);
+  await pool.query(`DELETE FROM catalog.sites WHERE SchemaName IN (?)`, [[...REGISTERED_TEST_SCHEMAS]]);
+  for (const schemaName of REGISTERED_TEST_SCHEMAS) {
+    await pool.query(
+      `INSERT INTO catalog.sites
+         (SiteName, SchemaName, SQDimX, SQDimY, DefaultUOMDBH, DefaultUOMHOM, DoubleDataEntry)
+       VALUES (?, ?, 20, 20, 'cm', 'm', 0)`,
+      [`Background Job Test Site (${schemaName})`, schemaName]
+    );
+  }
   console.log('[background-jobs-repository] catalog rows cleared');
 });
 
@@ -211,6 +227,43 @@ describe('createUploadBackgroundJob — create and fetch roundtrip', () => {
     expect(details!.events).toHaveLength(1);
     expect(details!.events[0].eventType).toBe('queued');
     console.log(`[roundtrip] event: type=${details!.events[0].eventType} message="${details!.events[0].message}"`);
+  });
+});
+
+describe('createUploadBackgroundJob — schema lifecycle exclusion', () => {
+  it('rechecks site registration after waiting for teardown to release the schema lock', async () => {
+    const teardownConnection = await pool.getConnection();
+    expect(await tryAcquireSchemaOperationLock(teardownConnection, TEST_SCHEMA, 1)).toBe(true);
+
+    try {
+      const creation = createUploadBackgroundJob(pool, makeJobInput(), TEST_USER_A);
+
+      const earlyOutcome = await Promise.race([
+        creation.then(
+          () => 'settled',
+          () => 'settled'
+        ),
+        new Promise<'blocked'>(resolve => setTimeout(() => resolve('blocked'), 50))
+      ]);
+      expect(earlyOutcome, 'job creation did not wait for the schema lifecycle lock').toBe('blocked');
+
+      // Model teardown's catalog phase while creation is excluded by the same
+      // connection-scoped lock. Once released, creation must observe the delete
+      // instead of inserting a queued job for a schema that is disappearing.
+      await teardownConnection.query(`DELETE FROM catalog.sites WHERE SchemaName = ?`, [TEST_SCHEMA]);
+      await releaseSchemaOperationLock(teardownConnection, TEST_SCHEMA);
+
+      await expect(creation).rejects.toMatchObject({
+        name: 'BackgroundJobScopeUnavailableError',
+        reason: 'site_not_registered'
+      } satisfies Partial<BackgroundJobScopeUnavailableError>);
+
+      const [rows]: any = await pool.query(`SELECT COUNT(*) AS count FROM catalog.background_jobs WHERE SchemaName = ?`, [TEST_SCHEMA]);
+      expect(Number(rows[0].count)).toBe(0);
+    } finally {
+      await releaseSchemaOperationLock(teardownConnection, TEST_SCHEMA);
+      teardownConnection.release();
+    }
   });
 });
 

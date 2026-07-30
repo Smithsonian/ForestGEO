@@ -32,7 +32,8 @@ const mocks = vi.hoisted(() => ({
   runJobIfClaimable: vi.fn(async () => undefined),
   executeQuery: vi.fn(),
   loggerError: vi.fn(),
-  IdempotencyKeyConflictError: class IdempotencyKeyConflictError extends Error {}
+  IdempotencyKeyConflictError: class IdempotencyKeyConflictError extends Error {},
+  BackgroundJobScopeUnavailableError: class BackgroundJobScopeUnavailableError extends Error {}
 }));
 
 vi.mock('@/auth', () => ({
@@ -70,7 +71,8 @@ vi.mock('@/lib/background-jobs/repository', () => ({
 }));
 
 vi.mock('@/lib/background-jobs/errors', () => ({
-  IdempotencyKeyConflictError: mocks.IdempotencyKeyConflictError
+  IdempotencyKeyConflictError: mocks.IdempotencyKeyConflictError,
+  BackgroundJobScopeUnavailableError: mocks.BackgroundJobScopeUnavailableError
 }));
 
 vi.mock('@/config/macros/containernames', () => ({
@@ -398,6 +400,14 @@ describe('POST /api/uploadjobs', () => {
 
   it('returns 409 when an idempotency key belongs to a different request', async () => {
     mocks.createUploadBackgroundJob.mockRejectedValueOnce(new mocks.IdempotencyKeyConflictError('conflict'));
+    const response = await callPost(makeCreateRequest(makeCreateBody()));
+
+    expect(response.status).toBe(409);
+    expect(mocks.runJobIfClaimable).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 when teardown removes the site before the job can be created', async () => {
+    mocks.createUploadBackgroundJob.mockRejectedValueOnce(new mocks.BackgroundJobScopeUnavailableError('site disappeared'));
     const response = await callPost(makeCreateRequest(makeCreateBody()));
 
     expect(response.status).toBe(409);
