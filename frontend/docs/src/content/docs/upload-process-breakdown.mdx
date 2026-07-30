@@ -33,23 +33,62 @@ The core cycle is the same for all data types, but **measurements** have additio
 
 ## Important Notes Before Uploading
 
-:::caution
-**Read before uploading!**
+:::danger
+**Clean Re-Upload deletes data.** It is one of the two upload modes, and it is the mode the
+system falls back to if a mode is not explicitly chosen. Read the next section before you
+upload anything into a census that already holds data.
 :::
 
-1. **Update-forward behavior**: The system ALWAYS tries to update existing data rather than ignoring duplicates. If you upload a file with existing records, those records will be updated.
+1. **Choose your upload mode deliberately**: Every upload begins by asking you to pick a mode. **Clean Re-Upload** replaces existing data by deleting it first. **Revisions Upload** corrects specific rows and leaves everything else alone. See [Stage 0](#stage-0-choosing-an-upload-mode) below.
 
 2. **Don't navigate away**: The upload cycle triggers system updates. **Do not** navigate away, reload the page, or close the browser while an upload is in progress!
 
-3. **Large files**: Files with 50,000+ rows may take several minutes. Monitor the progress bar and estimated time.
+3. **Large files**: A single file may be up to 500 MB, and one upload may total up to 1 GB across all selected files. Large files take several minutes — monitor the progress bar.
 
-4. **File format**: Only CSV, TSV, and TXT files are accepted. UTF-8 encoding is recommended.
+4. **File format**: CSV, TSV, and TXT files are accepted, and the delimiter is detected automatically (comma, tab, semicolon, or pipe). Save your file as UTF-8. ArcGIS Field Maps workbooks (`.xlsx`) use a separate import path with its own preflight check.
+
+---
+
+## Stage 0: Choosing an Upload Mode
+
+Every upload — for measurements and for every other data type — opens with a **Choose Upload
+Mode** screen. You cannot skip it, and the choice determines whether existing data survives.
+
+### Clean Re-Upload
+
+Marked **Destructive** in the application, and shown with a red warning for good reason.
+
+The uploaded file becomes the new source of truth for whatever you are uploading. Before
+inserting your rows, the system **deletes the data already there**:
+
+- For **measurements**, every prior measurement in the selected census is removed — both
+  successfully ingested rows and unresolved failed rows — along with their recorded errors and
+  upload metrics.
+- For **fixed data** such as species or stem codes, all currently active records of that type
+  are removed.
+
+Use this when you are loading a census for the first time, or when you genuinely intend to
+replace a census wholesale and have confirmed nothing else depends on the current rows.
+
+:::caution
+Clean Re-Upload cannot be undone from the interface. If you are correcting a handful of rows in
+a census that is already loaded, this is **not** the mode you want.
+:::
+
+### Revisions Upload
+
+Marked **Recommended**. You supply a small file containing only the rows you want to change.
+The system matches each row against the existing census, shows you exactly what would change,
+and writes nothing until you confirm. Nothing outside your file is touched.
+
+This is the right mode for correcting mistakes in a census that has already been ingested. It
+is covered in detail under [Revision Upload](#revision-upload-correcting-an-ingested-census) below.
 
 ---
 
 ## Stage 1: Reviewing Headers & File Dropzone
 
-When you click the Upload button, you'll see the file upload interface:
+Once you have chosen a mode, you'll see the file upload interface:
 
 ![upload stage 1](../../assets/uploadstage1.png)
 
@@ -288,19 +327,19 @@ Rows that fail ingestion are **not silently dropped**. They are written into the
 
 ### Where to see failed rows
 
-- **View Data → Measurements** — inline alongside successful rows, with a status filter for "failed only".
-- **View Errors** — every row with a consolidated failure reason and the original CSV codes side-by-side.
-- **Failed Measurements modal** — pops up automatically right after an upload if anything failed.
+- **Census Hub → View Errors** — the main place to work: every row with a consolidated failure reason and the original CSV codes side-by-side.
+- **Census Hub → View Data** — failed rows inline alongside successful ones, with a status filter for "failed only".
 
-### Reingesting failed rows
+### Correcting failed rows
 
-1. **Review** the failure reasons in the modal or View Errors.
-2. **Fix** the underlying issue (add missing reference data, or correct the row).
-3. Click **Reingest All** to push everything back through `bulkingestionprocess`, or use the row-level reingest for one-offs.
-4. Rows that now pass move out of the failed state; rows that still fail come back with **updated** reasons.
+1. **Review** the failure reasons under View Errors.
+2. **Fix** the underlying issue — add the missing reference data, or correct the row.
+3. **Re-submit** the affected rows as a **Revisions** upload, or edit them inline in the grid.
+4. Rows that now pass move out of the failed state; rows that still fail reappear with **updated** reasons.
 
-:::tip
-Reingestion replays the data the app already has — you don't need to re-upload the file.
+:::note
+A row keeps its original ID through this loop, so its audit history survives however many
+correction passes it takes.
 :::
 
 See **[Failed Measurements Guide](/ForestGEO/errors/failed-measurements-guide/)** for the full triage workflow.
@@ -336,13 +375,15 @@ Review match screen (tabs) → Apply
 | **Changes** | Rows where one or more of the editable fields differs from the DB | Updated in place |
 | **Duplicate Cleanup** | Rows that match multiple measurements for the same stem (typically legacy) | Highest-ID row wins; others deleted |
 | **New Rows** | Rows that don't match anything in the census | Inserted **only if you explicitly confirm** |
-| **Ignored Edits** | Rows where you edited a column Revisions can't update yet | No DB write — surfaced so you don't think they succeeded |
 | **Unchanged** | Matched rows with no field differences | Skipped on Apply |
 | **Invalid** | Rows the app can't safely handle (missing match key, stem in a different plot, etc.) | Not touched |
 
-### Editable fields (Phase 1)
+Only **Changes** is always present. The other tabs appear only when they have something in them,
+so a clean revision file will show fewer tabs than this table lists.
 
-You can change these five fields through a Revision Upload:
+### Editable fields
+
+A Revision Upload can change eleven fields. Five of them anyone with upload access may edit:
 
 - **DBH** (`MeasuredDBH` / `dbh`)
 - **HOM** (`MeasuredHOM` / `hom`)
@@ -350,7 +391,17 @@ You can change these five fields through a Revision Upload:
 - **Codes** (`RawCodes` / `codes`)
 - **Comments** (`Description` / `comments`)
 
-Edits to `SpeciesCode`, `QuadratName`, `StemLocalX`, `StemLocalY`, `TreeTag`, or `StemTag` are **not** applied through Revisions — they appear in the **Ignored Edits** tab so you can see what wasn't written. To change those columns, use inline editing in the grid.
+The remaining six identify the stem, so they are restricted to **global** and **database
+administrator** accounts:
+
+- **Species Code** (`spcode`)
+- **Quadrat Name** (`quadrat`)
+- **Local X** and **Local Y** (`lx`, `ly`)
+- **Tree Tag** and **Stem Tag** (`tag`, `stemtag`)
+
+If your account lacks the role, the review screen blocks the upload with a message naming the
+row and field rather than applying part of it. Ask an administrator to run the revision, or make
+the change through inline editing in the grid.
 
 ### Common pitfalls
 
@@ -363,8 +414,8 @@ Edits to `SpeciesCode`, `QuadratName`, `StemLocalX`, `StemLocalY`, `TreeTag`, or
 
 - The correct **plot and census** are selected in the app.
 - The **Changes** tab lists only the edits you intended.
-- The **Ignored Edits** tab is empty, or you've accepted every entry.
 - The **New Rows** tab is empty, or every entry is something you genuinely want created.
+- The **Duplicate Cleanup** tab is empty, or you accept that the highest-ID row wins in each group.
 - The **Invalid** tab is empty, or you understand why each row is rejected.
 
 ---
@@ -404,7 +455,7 @@ Edits to `SpeciesCode`, `QuadratName`, `StemLocalX`, `StemLocalY`, `TreeTag`, or
 1. Export current data from grid
 2. Edit only the fields you want changed
 3. Upload as Measurements → Revisions
-4. Review tabs: Changes / Duplicates / New Rows / Ignored Edits / Invalid
+4. Review tabs: Changes / Duplicate Cleanup / New Rows / Unchanged / Invalid
 5. Apply (single transaction)
 6. Validations re-run on affected rows
 7. Grid refreshes automatically
