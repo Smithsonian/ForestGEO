@@ -297,98 +297,130 @@ describe('runQuery timeout — server-side kill + pool quarantine (real MySQL)',
     // Not from the pool: this connection stays in an open transaction for the
     // duration and must never be handed to anything else.
     const blocker = await createConnection({ ...config, database: schema });
-    await blocker.beginTransaction();
-    await blocker.query(`UPDATE \`${schema}\`.${PROBE_TABLE} SET note = 'held-by-test' WHERE id = ?`, [BLOCKING_ROW_ID]);
+    // The blocker's open transaction holds row AND metadata locks on this
+    // schema. If it outlives the test — which is exactly what happened when an
+    // assertion above the old inline rollback threw — this worker process keeps
+    // the transaction open across every later test file, and each file's
+    // DROP DATABASE in createTestDatabase waits on the metadata lock until its
+    // beforeAll times out. Measured in CI: three 35-minute runs, each a chain
+    // of ~90s hook timeouts downstream of exactly this leak. Every exit path
+    // must run releaseBlocker.
+    let blockerReleased = false;
+    const releaseBlocker = async () => {
+      if (blockerReleased) return;
+      blockerReleased = true;
+      try {
+        await blocker.rollback();
+      } catch {
+        // the connection is already dead — end/destroy below still frees the server thread
+      }
+      try {
+        await blocker.end();
+      } catch {
+        blocker.destroy();
+      }
+    };
 
-    // Acquire the killer BEFORE launching the CALL. Acquiring afterwards put a
-    // pool round-trip inside the race.
-    const killer = (await getConn()) as QuarantinedConnection;
-
-    let callSettled = false;
-    const callPromise = connectionManager
-      .executeQuery(`CALL \`${schema}\`.${TRANSACTIONAL_PROCEDURE}()`)
-      .then(() => null)
-      .catch((error: unknown) => error)
-      .finally(() => {
-        callSettled = true;
-      });
-
-    let killedThreadId: number | null = null;
     try {
-      const deadline = Date.now() + KILL_CONFIRM_DEADLINE_MS;
-      while (Date.now() < deadline && killedThreadId === null && !callSettled) {
-        // `ID <> CONNECTION_ID()` is load-bearing: this probe's own statement
-        // carries the procedure name inside its LIKE parameter, so without the
-        // exclusion the killer matches — and kills — itself.
-        // Matched on the procedure name alone rather than a `CALL%` prefix:
-        // PROCESSLIST.INFO is not guaranteed to start at the statement keyword,
-        // and an over-specific pattern silently matches nothing. Self-exclusion
-        // is doubled up — this probe's own statement carries the procedure name
-        // in its LIKE parameter, so without it the killer kills itself.
-        const rows = await runQuery(
-          killer,
-          `SELECT ID FROM information_schema.PROCESSLIST
-           WHERE ID <> CONNECTION_ID() AND INFO LIKE ? AND INFO NOT LIKE '%PROCESSLIST%' LIMIT 1`,
-          [`%${TRANSACTIONAL_PROCEDURE}%`]
-        );
-        if (rows.length > 0) {
-          killedThreadId = Number(rows[0].ID);
-          await runQuery(killer, `KILL QUERY ${killedThreadId}`, []);
-        } else {
-          await wait(PROCESSLIST_POLL_MS);
+      await blocker.beginTransaction();
+      await blocker.query(`UPDATE \`${schema}\`.${PROBE_TABLE} SET note = 'held-by-test' WHERE id = ?`, [BLOCKING_ROW_ID]);
+
+      // Acquire the killer BEFORE launching the CALL. Acquiring afterwards put a
+      // pool round-trip inside the race.
+      const killer = (await getConn()) as QuarantinedConnection;
+
+      let callSettled = false;
+      const callPromise = connectionManager
+        .executeQuery(`CALL \`${schema}\`.${TRANSACTIONAL_PROCEDURE}()`)
+        .then(() => null)
+        .catch((error: unknown) => error)
+        .finally(() => {
+          callSettled = true;
+        });
+
+      let killedThreadId: number | null = null;
+      try {
+        const deadline = Date.now() + KILL_CONFIRM_DEADLINE_MS;
+        while (Date.now() < deadline && killedThreadId === null && !callSettled) {
+          // PROCESSLIST.INFO shows the CALL text only during dispatch; once the
+          // procedure reaches its inner statements, INFO is the innermost
+          // statement, and while parked on the row lock that is the
+          // `... FOR UPDATE` SELECT — which does not contain the procedure
+          // name. Matching the procedure name alone therefore races the
+          // dispatch window: fast machines usually win it, the 2-core CI
+          // runner deterministically lost it (measured 2026-07-30 via this
+          // test's own processlist dump). The second pattern matches the
+          // parked statement, which stays visible for the entire lock wait.
+          // `ID <> CONNECTION_ID()` and the PROCESSLIST exclusion are
+          // load-bearing: this probe's own statement carries both LIKE
+          // parameters, so without them the killer matches — and kills —
+          // itself.
+          const rows = await runQuery(
+            killer,
+            `SELECT ID FROM information_schema.PROCESSLIST
+             WHERE ID <> CONNECTION_ID() AND (INFO LIKE ? OR INFO LIKE ?) AND INFO NOT LIKE '%PROCESSLIST%' LIMIT 1`,
+            [`%${TRANSACTIONAL_PROCEDURE}%`, `%${PROBE_TABLE}%FOR UPDATE%`]
+          );
+          if (rows.length > 0) {
+            killedThreadId = Number(rows[0].ID);
+            await runQuery(killer, `KILL QUERY ${killedThreadId}`, []);
+          } else {
+            await wait(PROCESSLIST_POLL_MS);
+          }
         }
+        if (killedThreadId === null) {
+          // A failure here is otherwise undiagnosable after the fact: dump what
+          // the server actually had running so the next reader is not guessing.
+          const processes = await runQuery(killer, `SELECT ID, COMMAND, STATE, LEFT(COALESCE(INFO, ''), 120) AS info FROM information_schema.PROCESSLIST`, []);
+          // eslint-disable-next-line no-console
+          console.log(`[runquery-timeout] processlist when the kill never landed: ${JSON.stringify(processes)}`);
+        }
+      } finally {
+        killer.release();
       }
-      if (killedThreadId === null) {
-        // A failure here is otherwise undiagnosable after the fact: dump what
-        // the server actually had running so the next reader is not guessing.
-        const processes = await runQuery(killer, `SELECT ID, COMMAND, STATE, LEFT(COALESCE(INFO, ''), 120) AS info FROM information_schema.PROCESSLIST`, []);
-        // eslint-disable-next-line no-console
-        console.log(`[runquery-timeout] processlist when the kill never landed: ${JSON.stringify(processes)}`);
-      }
+      expect(
+        killedThreadId,
+        callSettled
+          ? `the ${TRANSACTIONAL_PROCEDURE} CALL settled before it could be killed — it should have been parked on ` +
+              `row ${BLOCKING_ROW_ID}'s lock, so either the lock was not held or the procedure never reached the wait`
+          : `never saw the ${TRANSACTIONAL_PROCEDURE} CALL executing within ${KILL_CONFIRM_DEADLINE_MS}ms — nothing was killed`
+      ).not.toBeNull();
+
+      const callError = await callPromise;
+      // The killed procedure is gone; release the row so the follow-up write below
+      // measures the ZOMBIE's lock, not the test's own.
+      await releaseBlocker();
+      // eslint-disable-next-line no-console
+      console.log(`[runquery-timeout] killed thread ${killedThreadId}; CALL rejected with: ${(callError as Error | null)?.message}`);
+      expect(callError, 'the KILLed CALL must reject, not resolve').toBeInstanceOf(Error);
+      expect((callError as { errno?: number }).errno, 'the kill must reach the client as ER_QUERY_INTERRUPTED').toBe(1317);
+
+      // The row the dead procedure had written is writable immediately. Measured
+      // 2026-07-29: with the quarantine removed this particular row lock is NOT
+      // retained (MySQL rolls back the interrupted statement), so this assertion
+      // alone does not catch the defect — the open-transaction probe below is what
+      // does. It is kept because a zombie holding a lock is the worse variant of
+      // the same failure, and nothing else would notice it.
+      const followUpStartedAt = Date.now();
+      await connectionManager.executeQuery(`UPDATE \`${schema}\`.${PROBE_TABLE} SET note = 'after-kill' WHERE id = ?`, [PROBE_ROW_ID]);
+      const followUpMs = Date.now() - followUpStartedAt;
+      // eslint-disable-next-line no-console
+      console.log(`[runquery-timeout] follow-up UPDATE completed in ${followUpMs}ms (budget ${FOLLOW_UP_MAX_MS}ms)`);
+      expect(followUpMs).toBeLessThan(FOLLOW_UP_MAX_MS);
+
+      // The decisive assertion. Pre-fix, the KILLed connection was RELEASED back
+      // to the pool with the procedure's START TRANSACTION still open — verified
+      // by removing the quarantine, which leaves exactly one row here. The next
+      // borrower of that connection would have silently joined an uncommitted
+      // transaction.
+      const openTransactions = await connectionManager.executeQuery(
+        `SELECT trx_id, trx_mysql_thread_id, trx_started FROM information_schema.innodb_trx WHERE trx_mysql_thread_id = ?`,
+        [killedThreadId]
+      );
+      expect(openTransactions, `thread ${killedThreadId} still carries an open transaction`).toHaveLength(0);
     } finally {
-      killer.release();
+      await releaseBlocker();
     }
-    expect(
-      killedThreadId,
-      callSettled
-        ? `the ${TRANSACTIONAL_PROCEDURE} CALL settled before it could be killed — it should have been parked on ` +
-            `row ${BLOCKING_ROW_ID}'s lock, so either the lock was not held or the procedure never reached the wait`
-        : `never saw the ${TRANSACTIONAL_PROCEDURE} CALL executing within ${KILL_CONFIRM_DEADLINE_MS}ms — nothing was killed`
-    ).not.toBeNull();
-
-    const callError = await callPromise;
-    // The killed procedure is gone; release the row so the follow-up write below
-    // measures the ZOMBIE's lock, not the test's own.
-    await blocker.rollback();
-    await blocker.end();
-    // eslint-disable-next-line no-console
-    console.log(`[runquery-timeout] killed thread ${killedThreadId}; CALL rejected with: ${(callError as Error | null)?.message}`);
-    expect(callError, 'the KILLed CALL must reject, not resolve').toBeInstanceOf(Error);
-    expect((callError as { errno?: number }).errno, 'the kill must reach the client as ER_QUERY_INTERRUPTED').toBe(1317);
-
-    // The row the dead procedure had written is writable immediately. Measured
-    // 2026-07-29: with the quarantine removed this particular row lock is NOT
-    // retained (MySQL rolls back the interrupted statement), so this assertion
-    // alone does not catch the defect — the open-transaction probe below is what
-    // does. It is kept because a zombie holding a lock is the worse variant of
-    // the same failure, and nothing else would notice it.
-    const followUpStartedAt = Date.now();
-    await connectionManager.executeQuery(`UPDATE \`${schema}\`.${PROBE_TABLE} SET note = 'after-kill' WHERE id = ?`, [PROBE_ROW_ID]);
-    const followUpMs = Date.now() - followUpStartedAt;
-    // eslint-disable-next-line no-console
-    console.log(`[runquery-timeout] follow-up UPDATE completed in ${followUpMs}ms (budget ${FOLLOW_UP_MAX_MS}ms)`);
-    expect(followUpMs).toBeLessThan(FOLLOW_UP_MAX_MS);
-
-    // The decisive assertion. Pre-fix, the KILLed connection was RELEASED back
-    // to the pool with the procedure's START TRANSACTION still open — verified
-    // by removing the quarantine, which leaves exactly one row here. The next
-    // borrower of that connection would have silently joined an uncommitted
-    // transaction.
-    const openTransactions = await connectionManager.executeQuery(
-      `SELECT trx_id, trx_mysql_thread_id, trx_started FROM information_schema.innodb_trx WHERE trx_mysql_thread_id = ?`,
-      [killedThreadId]
-    );
-    expect(openTransactions, `thread ${killedThreadId} still carries an open transaction`).toHaveLength(0);
   }, 90000);
 
   it('leaves the connection pooled and reusable after an ordinary (non-timeout) query error', async () => {
