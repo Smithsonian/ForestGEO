@@ -138,12 +138,13 @@ Disabling validations may allow data quality issues to go undetected.
 
 ### Q: Why can't I log in?
 
-**A:** Check:
+**A:** ForestGEO does not hold a password of its own — signing in hands you to Microsoft, so
+there is nothing to mistype on the ForestGEO side. Check:
 
-1. Credentials are correct (case-sensitive)
-2. Caps lock is off
-3. Browser cookies are enabled
-4. Your account is active (ask administrator)
+1. You are signing in with the Microsoft account an administrator invited to the tenant
+2. Browser cookies are enabled
+3. An administrator has assigned you to at least one site
+4. If the sign-in itself succeeds but the app reports permissions are unavailable, the site directory is temporarily unreachable — retry shortly, and tell an administrator if it persists
 
 ### Q: Why did I get logged out?
 
