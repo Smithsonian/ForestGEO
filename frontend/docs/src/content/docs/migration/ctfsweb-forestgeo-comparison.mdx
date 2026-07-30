@@ -36,10 +36,10 @@ This document provides a detailed comparison between the legacy CTFSWeb system a
     - **Authentication**: Basic PHP sessions
   </TabItem>
   <TabItem label="ForestGEO">
-    - **Frontend**: Next.js 14, React, TypeScript
-    - **Backend**: Next.js API routes, Azure Functions
+    - **Frontend**: Next.js 15, React 19, TypeScript
+    - **Backend**: Next.js API routes, with long-running work handled in-process
     - **Database**: Azure MySQL with SSL
-    - **Deployment**: Azure App Service, containerized
+    - **Deployment**: Azure App Service
     - **Authentication**: Microsoft Entra ID (Azure AD)
     - **Storage**: Azure Blob Storage for file backups
   </TabItem>
@@ -71,7 +71,7 @@ Site                              Plot
                 └── Stem                          └── Stem
                      └── DBH                           └── CoreMeasurement
                                                             ├── CMAttributes
-                                                            └── CMVErrors
+                                                            └── measurement_error_log
 ```
 
 ### Key Structural Changes
@@ -95,7 +95,7 @@ Site                              Plot
   <Card title="Validation Errors" icon="warning">
     **CTFSWeb**: Errors stored in screening reports, separate from data
 
-    **ForestGEO**: CMVErrors table links validation failures directly to measurements.
+    **ForestGEO**: the measurement_error_log table links validation failures directly to measurements.
   </Card>
 </CardGrid>
 
@@ -132,7 +132,8 @@ These tables are entirely new to ForestGEO:
 | Table | Purpose |
 |-------|---------|
 | `cmattributes` | Many-to-many: Links measurements to attribute codes |
-| `cmverrors` | Many-to-many: Links measurements to validation errors |
+| `measurement_errors` | Catalogue of every error and validation code |
+| `measurement_error_log` | Many-to-many: links measurements to the errors raised against them |
 | `sitespecificvalidations` | Configurable validation procedures per site |
 | `postvalidationqueries` | Custom post-validation SQL queries |
 | `validationchangelog` | Audit log of validation runs |
@@ -140,7 +141,6 @@ These tables are entirely new to ForestGEO:
 | `reference` | Literature references for taxonomy |
 | `specimens` | Herbarium specimen records |
 | `temporarymeasurements` | Staging table for file uploads |
-| `failedmeasurements` | Records that failed validation |
 | `upload_sessions` | Upload lifecycle tracking |
 | `uploadintegrityalerts` | Data quality alerts during ingestion |
 | `uploadmetrics` | Performance metrics for uploads |
@@ -202,7 +202,10 @@ ForestGEO maintains backward compatibility with CTFSWeb codes while adding struc
 
 ### ForestGEO Validations
 
-ForestGEO implements **13 configurable stored procedures** that run during ingestion:
+ForestGEO seeds **16 configurable validation procedures** (IDs 1–9, 11–15, 17 and 18; 10, 16 and
+19 are unused). They run as a separate pass *after* ingestion, not during it — a validation that
+doesn't pass records an entry against the row rather than blocking the write. Fourteen are
+enabled by default; 12 and 13 ship disabled.
 
 | ID | Procedure | Description |
 |----|-----------|-------------|
@@ -220,6 +223,8 @@ ForestGEO implements **13 configurable stored procedures** that run during inges
 | 13 | `ValidateScreenStemsWithMissingMeasurementsButLiveAttributes` | Live stem missing DBH |
 | 14 | `ValidateFindInvalidAttributeCodes` | Attribute code not in attributes table |
 | 15 | `ValidateFindAbnormallyHighDBH` | DBH > 3500mm absolute max |
+| 17 | `ValidateQuadratMismatchAcrossCensuses` | Tag's quadrat differs from the previous census |
+| 18 | `ValidateCoordinateDriftAcrossCensuses` | Tag moved more than 10m since the previous census |
 
 <Aside type="tip">
 Validations can be enabled/disabled per site via the `IsEnabled` flag. Sites can also add custom `postvalidationqueries` for site-specific rules.
@@ -254,12 +259,12 @@ Validations can be enabled/disabled per site via the `IsEnabled` flag. Sites can
 4. Automatic staging to temporarymeasurements
 5. Bulk ingestion via stored procedure
    └── bulkingestionprocess handles all logic
-6. Real-time validation during ingestion
-   └── Errors stored in cmverrors
-   └── Failed records → failedmeasurements
-7. Review failed measurements in-app
-8. Re-ingest failed rows without re-uploading
-   └── reingestfailedrows procedure
+   └── Rows it cannot resolve stay in coremeasurements with StemGUID = NULL
+6. Configurable validations run as a separate pass afterwards
+   └── Findings recorded in measurement_error_log -> measurement_errors
+7. Review unresolved rows and validation findings under Census Hub -> View Errors
+8. Correct them inline, or re-submit just those rows as a Revisions upload
+   └── Each row keeps its original ID, so audit history survives
 9. Post-validation queries for additional checks
 ```
 
@@ -361,7 +366,7 @@ CALL RefreshViewFullTable();
 | StemID (persistent) | StemTag + TreeTag combination |
 | Single DBH record | CoreMeasurement with CMAttributes |
 | Status field | Multiple CMAttributes records |
-| Screening errors | CMVErrors linked to measurements |
+| Screening errors | measurement_error_log linked to measurements |
 
 ### Breaking Changes
 
@@ -429,15 +434,19 @@ CALL RefreshViewFullTable();
     **ForestGEO**:
     ```sql
     SELECT cm.CoreMeasurementID,
-           s.StemTag, t.TreeTag,
-           ssv.ProcedureName, ssv.Description
-    FROM cmverrors cve
-    JOIN coremeasurements cm ON cve.CoreMeasurementID = cm.CoreMeasurementID
-    JOIN stems s ON cm.StemGUID = s.StemGUID
-    JOIN trees t ON s.TreeID = t.TreeID
-    JOIN sitespecificvalidations ssv ON cve.ValidationErrorID = ssv.ValidationID
-    WHERE cm.CensusID = 5;
+           cm.RawTreeTag, cm.RawStemTag,
+           me.ErrorSource, me.ErrorCode, me.ErrorMessage
+    FROM measurement_error_log mel
+    JOIN coremeasurements cm ON mel.MeasurementID = cm.CoreMeasurementID
+    JOIN measurement_errors me ON mel.ErrorID = me.ErrorID
+    WHERE cm.CensusID = 5
+      AND mel.IsResolved = 0;
     ```
+
+    `ErrorSource` separates the two kinds of problem: `ingestion` means the row could not be
+    resolved to a stem at all (it will have `StemGUID = NULL`), while `validation` means the row
+    was ingested and later flagged. Reading the raw tag columns rather than joining `stems` and
+    `trees` matters, because unresolved rows have nothing to join to.
   </TabItem>
 </Tabs>
 
