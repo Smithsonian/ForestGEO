@@ -19,14 +19,14 @@ const META_TABLE = '_provisioning_meta';
 
 const VALIDATIONS_TABLE = 'sitespecificvalidations';
 const REQUIRED_TABLES = ['plots', 'census', 'quadrats', 'coremeasurements', 'measurement_errors', 'uploadmetrics', 'validation_runs'] as const;
-const REQUIRED_VIEWS = ['uploaddatalossreport'] as const;
+export const REQUIRED_VIEWS = ['uploaddatalossreport'] as const;
 
 /**
  * Canonical list of stored procedures defined in storedprocedures.sql.
  * Discovered by grepping `DEFINER ... PROCEDURE <name>` declarations.
  * Names are case-insensitively compared against information_schema.routines.
  */
-const REQUIRED_PROCEDURES = [
+export const REQUIRED_PROCEDURES = [
   'bulkingestionprocess',
   'bulkingestioncollapser',
   'clearcensusfull',
