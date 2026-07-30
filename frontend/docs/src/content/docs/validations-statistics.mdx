@@ -58,8 +58,10 @@ The following table lists all validation checks and their default status:
 | **ValidateScreenMeasuredDiameterMinMax**                          | Flag DBH measurements outside species-defined min/max bounds             | Enabled       |
 | **ValidateScreenStemsWithMeasurementsButDeadAttributes**          | Flag stems marked as dead but still have measurements                    | **Disabled**  |
 | **ValidateScreenStemsWithMissingMeasurementsButLiveAttributes**   | Flag live stems that are missing measurements                            | **Disabled**  |
-| **ValidateDeadToAliveRegression** *(new V17)*                     | Flag stems that were dead in a prior census but appear alive again       | Enabled       |
-| **ValidateHOMChangeExceedsHalfMeter** *(new V18)*                 | Flag stems whose HOM has shifted more than 0.5 m between censuses        | Enabled       |
+| **ValidateFindInvalidAttributeCodes**                             | Flag attribute codes that don't exist in the Stem Codes list             | Enabled       |
+| **ValidateFindAbnormallyHighDBH**                                 | Flag DBH above the absolute maximum threshold (3500 mm / 350 cm)         | Enabled       |
+| **ValidateQuadratMismatchAcrossCensuses**                         | Flag a tag whose quadrat differs from the previous census                | Enabled       |
+| **ValidateCoordinateDriftAcrossCensuses**                         | Flag a tag whose coordinates moved more than 10 m since the last census  | Enabled       |
 
 ### Understanding Validation Categories
 
@@ -69,16 +71,26 @@ These check for biologically implausible growth patterns. **As of 2026, cross-ce
 
 - **Growth > 65mm**: Trees typically don't grow more than 65mm diameter between censuses
 - **Shrinkage > 5%**: Trees rarely shrink significantly; large shrinkage often indicates measurement error
-- **HOM change > 0.5 m** *(V18, new)*: A stem's measurement-height-of-measure shifting by more than half a metre between censuses usually means the field crew measured at a different point on the stem
-- **Dead → alive regression** *(V17, new)*: A stem recorded as dead in a prior census now showing as alive — almost always a tag or species error
-- **Validation 16 was removed in 2026** because it duplicated checks already run inline during ingestion.
+- **Abnormally high DBH** *(V15)*: A diameter above 3500 mm exceeds anything plausible and almost always means a unit or transcription error
+
+#### Cross-Census Position Validations
+
+These compare a tag against the same tag in the previous census:
+
+- **Quadrat mismatch** *(V17)*: The same TreeTag/StemTag was recorded in a different quadrat last census — usually a transcription or tag-reuse error
+- **Coordinate drift > 10 m** *(V18)*: The stem's recorded position moved more than ten metres between censuses
+
+:::note
+Validation IDs are not contiguous — 10, 16 and 19 are unused. Validation 16 was removed in 2026
+because it duplicated a check already run inline during ingestion.
+:::
 
 #### Reference Data Validations
 
-These ensure measurements reference valid Fixed Data:
+These ensure measurements reference valid supporting data:
 
-- **Invalid Species Codes**: Species must exist in Species List
-- **Invalid Quadrats**: Quadrat names must be defined
+- **Invalid Species Codes** *(V3)*: Species must exist in the Species List
+- **Invalid Attribute Codes** *(V14)*: Attribute codes must exist in the Stem Codes list
 
 #### Consistency Validations
 
