@@ -103,7 +103,7 @@ Trees rarely shrink significantly. Large shrinkage usually indicates measurement
 | ------------------ | -------------------------------------------------------------------------- |
 | **Validation ID**  | 14                                                                         |
 | **What it checks** | Attribute / stem codes (`L`, `Q`, `D2`, etc.) exist in the Attributes list |
-| **Severity**       | **Soft warning** (April 2026) — the row is saved, the unknown code is flagged |
+| **Outcome**        | The row is saved; the unknown code is flagged (soft warning since April 2026) |
 
 **Behavior change (April 2026):** Invalid attribute codes used to block ingestion. They are now **soft warnings** — the row goes into the database and the unknown code is surfaced in the row's flags. You can either add the missing code to the Attributes list or correct the value via inline edit or Revision Upload.
 
@@ -163,7 +163,7 @@ Coordinates outside plot boundaries indicate measurement or data entry errors.
 | ------------------ | ------------------------------------------- |
 | **Validation ID**  | 9                                           |
 | **What it checks** | All stems of a tree are in the same quadrat |
-| **Error message**  | "Different quadrats"                        |
+| **Error message**  | "Flagged;Flagged;Different quadrats"        |
 | **Outcome**        | The row is saved and flagged for review |
 
 **Why this validation exists:**
@@ -251,7 +251,7 @@ Each stem can only have one measurement per census. Duplicates indicate double-e
 | 9   | Stems in Different Quadrats | All stems on a tree share one quadrat                | Enabled       |
 | 11  | DBH Outside Species Bounds  | DBH within the species limits you defined            | Enabled       |
 | 12  | Measurements on Dead Stems  | No measurements if the stem is marked dead           | **Disabled**  |
-| 13  | Missing Measurements Live   | A live stem carries a DBH measurement                | **Disabled**  |
+| 13  | Missing Measurements Live   | A stem with a live attribute carries a measurement    | **Disabled**  |
 | 14  | Invalid Attribute Codes     | Attribute code exists in the Stem Codes list         | Enabled       |
 | 15  | Abnormally High DBH         | DBH below the absolute maximum (3500 mm / 350 cm)    | Enabled       |
 | 17  | Quadrat Mismatch            | Tag's quadrat matches the previous census            | Enabled       |
@@ -268,6 +268,22 @@ are rejected outright fail earlier, during ingestion, and are covered in the
 **Gaps in the numbering are expected.** IDs 10, 16 and 19 are unused. Validation 16 was retired
 in 2026 — its check duplicated logic already run inline during ingestion. If you see references
 to V16 in older notes, ignore them.
+:::
+
+### Species checks raised during ingestion
+
+Two further codes come from the ingestion process itself rather than from the configurable
+validation list, so they do not appear in the table above and cannot be disabled.
+
+| Code | What it means | What to do |
+| ---- | ------------- | ---------- |
+| **20** | **Species mismatch from previous census** — this tag was recorded as a different species last census | Decide which identification is correct. A genuine re-identification is fine; a mismatch on a tag you did not re-examine usually means a transcription error. |
+| **21** | **Same-batch species conflict** — the same tag appears twice in your file with different species codes | Correct your file. The first occurrence was treated as authoritative, so the census may now hold the wrong species for that tag. |
+
+:::caution
+Code 21 matters more than it looks. The ingestion did not stop — it picked the first row it saw
+and carried on, so the data is already in place and may be wrong. Check these before assuming
+the upload was clean.
 :::
 
 ---
