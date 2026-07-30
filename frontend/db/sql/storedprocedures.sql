@@ -16,8 +16,8 @@ drop procedure if exists reinsertdefaultpostvalidations;
 
 DELIMITER $$
 
-create
-    definer = azureroot@`%` procedure RefreshMeasurementsSummary()
+create procedure RefreshMeasurementsSummary()
+SQL SECURITY DEFINER
 BEGIN
     SET foreign_key_checks = 0;
     TRUNCATE measurementssummary;
@@ -107,8 +107,8 @@ BEGIN
     SET foreign_key_checks = 1;
 END $$
 
-create
-    definer = azureroot@`%` procedure RefreshViewFullTable()
+create procedure RefreshViewFullTable()
+SQL SECURITY DEFINER
 BEGIN
     -- Disable foreign key checks temporarily
     SET foreign_key_checks = 0;
@@ -245,8 +245,8 @@ BEGIN
     SET foreign_key_checks = 1;
 END $$
 
-create
-    definer = azureroot@`%` procedure bulkingestioncollapser(IN vCensusID int)
+create procedure bulkingestioncollapser(IN vCensusID int)
+SQL SECURITY DEFINER
 begin
     DECLARE vErrorMessage TEXT DEFAULT '';
     DECLARE vErrorCode VARCHAR(10) DEFAULT '';
@@ -402,8 +402,8 @@ begin
                   vTreeStemTagDupCount, ' TreeTag+StemTag additional rows.') as message;
 end $$
 
-create
-    definer = azureroot@`%` procedure clearcensusfull(IN targetCensusID int)
+create procedure clearcensusfull(IN targetCensusID int)
+SQL SECURITY DEFINER
 BEGIN
     declare vCountCensus int;
     -- Disable triggers to prevent changelog tracking during bulk census deletion
@@ -459,8 +459,8 @@ BEGIN
     set @disable_triggers = 0;
 END $$
 
-create
-    definer = azureroot@`%` procedure clearcensusmsmts(IN targetCensusID int)
+create procedure clearcensusmsmts(IN targetCensusID int)
+SQL SECURITY DEFINER
 BEGIN
     -- Disable triggers to prevent changelog tracking during bulk census deletion
     set @disable_triggers = 1;
@@ -504,8 +504,8 @@ END $$
 -- reingestfailedrows removed: operated on legacy failedmeasurements table.
 -- Reingestion now handled via API routes using coremeasurements (StemGUID=NULL) rows.
 
-create
-    definer = azureroot@`%` procedure reinsertdefaultpostvalidations()
+create procedure reinsertdefaultpostvalidations()
+SQL SECURITY DEFINER
 begin
     truncate postvalidationqueries; -- clear the table if re-running this script on accident
     insert into postvalidationqueries
@@ -770,13 +770,13 @@ end $$
 -- Single source of truth for the shared DBH change candidate logic used by ValidationIDs 1 and 2.
 -- Keep both validation definitions as CALLs to this helper. Do not duplicate or inline this SQL
 -- in future enhancements, or the growth/shrinkage semantics and dead-status handling will drift.
-create
-    definer = azureroot@`%` procedure RunSharedDBHChangeValidations(
+create procedure RunSharedDBHChangeValidations(
     IN p_CensusID int,
     IN p_PlotID int,
     IN p_RunGrowth tinyint,
     IN p_RunShrinkage tinyint
 )
+SQL SECURITY DEFINER
 shared_dbh:
 BEGIN
     DECLARE vRunGrowth tinyint DEFAULT 0;
@@ -945,13 +945,13 @@ END $$
 -- Single source of truth for the shared cross-census location candidate logic used by ValidationIDs 17 and 18.
 -- Keep both validation definitions as CALLs to this helper. Do not duplicate or inline this SQL
 -- in future enhancements, or quadrat-mismatch / coordinate-drift semantics can drift between paths.
-create
-    definer = azureroot@`%` procedure RunSharedCrossCensusLocationValidations(
+create procedure RunSharedCrossCensusLocationValidations(
     IN p_CensusID int,
     IN p_PlotID int,
     IN p_RunQuadratMismatch tinyint,
     IN p_RunCoordinateDrift tinyint
 )
+SQL SECURITY DEFINER
 shared_cross_census_location:
 BEGIN
     DECLARE vRunQuadratMismatch tinyint DEFAULT 0;
@@ -1180,8 +1180,8 @@ BEGIN
     DROP TEMPORARY TABLE IF EXISTS current_cross_census_previous_map;
 END $$
 
-create
-    definer = azureroot@`%` procedure reinsertdefaultvalidations()
+create procedure reinsertdefaultvalidations()
+SQL SECURITY DEFINER
 begin
     set foreign_key_checks = 0;
 
@@ -1527,8 +1527,8 @@ DELIMITER ;
 DROP PROCEDURE IF EXISTS bulkingestionprocess;
 DELIMITER $$
 
-CREATE
-    DEFINER = azureroot@`%` PROCEDURE bulkingestionprocess(IN vFileID varchar(36), IN vBatchID varchar(36))
+CREATE PROCEDURE bulkingestionprocess(IN vFileID varchar(36), IN vBatchID varchar(36))
+SQL SECURITY DEFINER
 main_proc:
 BEGIN
     DECLARE vCurrentCensusID int;

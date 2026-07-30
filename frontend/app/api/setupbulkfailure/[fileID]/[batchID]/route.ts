@@ -10,6 +10,11 @@ import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz'
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
+
+// Advisory only — see setupbulkprocedure for the full explanation. Next.js
+// records maxDuration in the build manifest but only Vercel enforces it; on
+// Azure App Service this non-streaming route is cut off with a 504 at the
+// load balancer's fixed ~240s idle timeout regardless of the value here.
 export const maxDuration = 900;
 
 // FAILURE PROCESS -- IF A BATCH EXCEEDS ALLOWED ATTEMPTS, MOVE IT TO FAILED & MOVE ON

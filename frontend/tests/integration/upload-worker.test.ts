@@ -167,6 +167,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 import { applyCatalogMigrationsForTests } from '../setup/catalog-migrations';
+import { seedCatalogTables } from './admin-provision/_shared';
 import {
   claimBackgroundJobForWorker,
   createUploadBackgroundJob,
@@ -261,7 +262,15 @@ describe('runJobIfClaimable — integration', () => {
       connectionLimit: 5
     });
     sharedState.catalogPool = catalogPool;
+    await seedCatalogTables(catalogPool);
     await applyCatalogMigrationsForTests();
+    await catalogPool.query(`DELETE FROM catalog.sites WHERE SchemaName = ?`, [schema]);
+    await catalogPool.query(
+      `INSERT INTO catalog.sites
+         (SiteName, SchemaName, SQDimX, SQDimY, DefaultUOMDBH, DefaultUOMHOM, DoubleDataEntry)
+       VALUES ('Upload Worker Test Site', ?, 20, 20, 'cm', 'm', 0)`,
+      [schema]
+    );
 
     // validation_runs is defined in tablestructures.sql but loadSchema's
     // semicolon-split filter silently skips it (the statement chunk begins
@@ -292,7 +301,10 @@ describe('runJobIfClaimable — integration', () => {
 
   afterAll(async () => {
     sharedState.catalogPool = null;
-    if (catalogPool) await catalogPool.end();
+    if (catalogPool) {
+      await catalogPool.query(`DELETE FROM catalog.sites WHERE SchemaName = ?`, [schema]);
+      await catalogPool.end();
+    }
     sharedState.connection = null;
     await teardownTestDatabase(connection, config);
   });

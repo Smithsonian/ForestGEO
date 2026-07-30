@@ -11,7 +11,12 @@ import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz'
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-// Next.js route segment config: allow up to 5 minutes for large censuses
+// Advisory only — see setupbulkprocedure. Next.js records maxDuration in the
+// build manifest but only Vercel enforces it; on Azure App Service the real
+// ceiling is the load balancer's fixed ~240s idle timeout. Note that
+// COLLAPSER_TIMEOUT_MS (5 min) therefore outlives what this non-streaming
+// request can survive on the deployed site: the collapse keeps running
+// server-side after the client has already been handed a 504.
 export const maxDuration = 300;
 
 // Phase-3: user→schema membership via guard; requireUploadSessionOwnership retains plot/census token ownership.

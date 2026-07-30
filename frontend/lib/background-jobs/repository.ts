@@ -1,6 +1,7 @@
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { ensureBackgroundJobCatalogTables } from './catalog';
-import { IdempotencyKeyConflictError, JobFileNotFoundError, WorkerLeaseLostError } from './errors';
+import { BackgroundJobScopeUnavailableError, IdempotencyKeyConflictError, JobFileNotFoundError, WorkerLeaseLostError } from './errors';
+import { releaseSchemaOperationLock, tryAcquireSchemaOperationLock } from '@/lib/provisioning/schema-operation-lock';
 import type {
   BackgroundJobEventRecord,
   BackgroundJobFileRecord,
@@ -283,8 +284,23 @@ export async function createUploadBackgroundJob(catalogPool: Pool, input: Create
   await ensureBackgroundJobCatalogTables(catalogPool);
 
   const conn = await catalogPool.getConnection();
+  let schemaLockHeld = false;
   try {
+    schemaLockHeld = await tryAcquireSchemaOperationLock(conn, input.schema);
+    if (!schemaLockHeld) {
+      throw new BackgroundJobScopeUnavailableError(input.schema, 'operation_in_progress');
+    }
+
     await conn.beginTransaction();
+
+    // Authorization happens before this repository call and can race with an
+    // admin teardown. Recheck after acquiring the same lock as teardown: if
+    // teardown won, its catalog-site delete is now visible and no runnable job
+    // may be inserted for the dropped schema.
+    const [siteRows] = await conn.query<RowDataPacket[]>(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ? LIMIT 1`, [input.schema]);
+    if (siteRows.length === 0) {
+      throw new BackgroundJobScopeUnavailableError(input.schema, 'site_not_registered');
+    }
 
     const totalRows = input.files.reduce((sum, file) => sum + Number(file.expectedRows ?? 0), 0);
     let jobID: number;
@@ -364,6 +380,7 @@ export async function createUploadBackgroundJob(catalogPool: Pool, input: Create
     await conn.rollback();
     throw err;
   } finally {
+    if (schemaLockHeld) await releaseSchemaOperationLock(conn, input.schema);
     conn.release();
   }
 }

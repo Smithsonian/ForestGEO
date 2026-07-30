@@ -13,6 +13,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import mysql, { type Pool } from 'mysql2/promise';
 import { applyCatalogMigrationsForTests } from '../setup/catalog-migrations';
+import { seedCatalogTables } from './admin-provision/_shared';
 import { createUploadBackgroundJob, getBackgroundJob, getBackgroundJobWithDetails } from '@/lib/background-jobs/repository';
 import {
   activeJobExecutionCount,
@@ -91,12 +92,23 @@ beforeAll(async () => {
     password: TEST_DB_PASSWORD,
     connectionLimit: 5
   });
+  await seedCatalogTables(pool);
   await applyCatalogMigrationsForTests();
+  await pool.query(`DELETE FROM catalog.sites WHERE SchemaName = ?`, [TEST_SCHEMA]);
+  await pool.query(
+    `INSERT INTO catalog.sites
+       (SiteName, SchemaName, SQDimX, SQDimY, DefaultUOMDBH, DefaultUOMHOM, DoubleDataEntry)
+     VALUES ('Upload Sweeper Test Site', ?, 20, 20, 'cm', 'm', 0)`,
+    [TEST_SCHEMA]
+  );
   console.log('[upload-sweeper] catalog tables ensured');
 });
 
 afterAll(async () => {
-  if (pool) await pool.end();
+  if (pool) {
+    await pool.query(`DELETE FROM catalog.sites WHERE SchemaName = ?`, [TEST_SCHEMA]);
+    await pool.end();
+  }
 });
 
 beforeEach(async () => {

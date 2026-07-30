@@ -11,6 +11,15 @@ import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz'
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
+
+// ADVISORY ONLY on Azure. Next.js merely records maxDuration in the build
+// manifest; Vercel is what enforces it, and we self-host. The real ceiling is
+// Azure App Service's ~240s load-balancer idle timeout, which is fixed at the
+// hardware layer and cannot be raised by any app setting. A non-streaming
+// response that takes longer is severed with a 504 no matter what this says —
+// exactly the 2026-07-27 Harvard incident, where a 106k-row ingest died at 240s
+// while this file claimed a 15-minute budget. Anything that can outrun 240s
+// belongs on the background-jobs path (app/api/uploadjobs), not this request.
 export const maxDuration = 900;
 
 // Non-standard nginx status code for "client closed request"; preserved from
