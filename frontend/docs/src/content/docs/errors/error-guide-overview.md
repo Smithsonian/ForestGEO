@@ -143,7 +143,7 @@ Most error messages include:
 | 401  | Unauthorized | Not logged in          | Log in and retry                     |
 | 403  | Forbidden    | No permission          | Contact administrator                |
 | 404  | Not Found    | Resource doesn't exist | Check if data was deleted            |
-| 408  | Timeout      | Request took too long  | Wait and retry                       |
+| 408  | SQL Connection Failure | The app could not reach the database (not a request timeout) | Retry; report if it persists |
 | 409  | Conflict     | Data conflict          | Resolve duplicate/conflict           |
 | 500  | Server Error | Internal error         | Wait and retry; report if persistent |
 | 503  | Unavailable  | Server overloaded      | Wait and try later                   |

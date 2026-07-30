@@ -50,8 +50,8 @@ This guide covers errors that may occur during the file upload and processing st
 
 | Error Message                            | Cause                            | How to Fix                      |
 | ---------------------------------------- | -------------------------------- | ------------------------------- |
-| "Unauthorized - authentication required" | Session expired or not logged in | Log out and log back in         |
-| "You must be logged in to upload data"   | Not authenticated                | Log in before attempting upload |
+| A **401 Unauthorized** response | Your sign-in is no longer valid | Reload the page and sign in again |
+| A **503** response mentioning permissions being unavailable | The app cannot currently read your site assignments | Wait and retry; tell an administrator if it persists |
 
 ---
 
