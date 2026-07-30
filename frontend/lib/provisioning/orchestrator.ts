@@ -8,6 +8,7 @@ import { auditAttempt, auditSuccess, auditFailure } from './audit';
 import { dispatchRun, getWorkerPid, HEARTBEAT_STALE_MS, isRunOwnedByCurrentWorker } from './worker';
 import { ProvisioningInputSchema } from './input-schema';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
+import { NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
 import ailogger from '@/ailogger';
 
 // Bootstrap DDL inlined so the catalog tables can be created without any
@@ -667,6 +668,44 @@ interface DeleteCatalogSiteRowsAndSchemaOptions {
   actor: string;
   ignoreUserRelationsDeleteError?: boolean;
   requireExactlyOneCatalogSite?: boolean;
+  /**
+   * Refuse when a background upload job for this schema can still run. Only
+   * teardown sets it: a failed provisioning run never reached a state where an
+   * upload job could exist, so abort deletes unconditionally.
+   */
+  blockOnActiveBackgroundJobs?: boolean;
+}
+
+/**
+ * Background jobs are keyed to a schema by name, and nothing re-checks that the
+ * schema exists before the sweeper dispatches them. Terminal rows are deleted
+ * with the site; live ones block the teardown so an admin cannot strand a
+ * running ingestion against a database that is about to disappear.
+ */
+async function settleBackgroundJobsForSchema(conn: PoolConnection, schemaName: string): Promise<void> {
+  const [liveRows]: any = await conn.query(
+    `SELECT JobID, Status FROM catalog.background_jobs
+      WHERE SchemaName = ? AND Status IN (?)
+      ORDER BY JobID`,
+    [schemaName, [...NON_TERMINAL_BACKGROUND_JOB_STATUSES]]
+  );
+  if (liveRows.length > 0) {
+    const described = liveRows.map((row: any) => `${row.JobID} (${row.Status})`).join(', ');
+    throw new ProvisioningError(
+      `Refusing to tear down ${schemaName}: ${liveRows.length} background upload job(s) can still run — ${described}. ` + `Cancel or let them finish first.`,
+      'conflict',
+      // ProvisioningError.meta is a deliberately narrow shape; the offending job
+      // IDs travel in the message, which errorToClientMessage passes through
+      // verbatim for 'conflict'.
+      { schemaName }
+    );
+  }
+
+  // FK-safe order: events -> files -> jobs.
+  const jobIdSubquery = `SELECT JobID FROM catalog.background_jobs WHERE SchemaName = ?`;
+  await conn.query(`DELETE FROM catalog.background_job_events WHERE JobID IN (${jobIdSubquery})`, [schemaName]);
+  await conn.query(`DELETE FROM catalog.background_job_files WHERE JobID IN (${jobIdSubquery})`, [schemaName]);
+  await conn.query(`DELETE FROM catalog.background_jobs WHERE SchemaName = ?`, [schemaName]);
 }
 
 async function deleteCatalogSiteRowsAndSchema(catalogPool: Pool, schemaName: string, options: DeleteCatalogSiteRowsAndSchemaOptions): Promise<void> {
@@ -686,6 +725,9 @@ async function deleteCatalogSiteRowsAndSchema(catalogPool: Pool, schemaName: str
       const [siteRows]: any = await conn.query(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ?`, [schemaName]);
       if (options.requireExactlyOneCatalogSite && siteRows.length !== 1) {
         throw new ProvisioningError(`Catalog state mismatch for schema: expected 1 site row, found ${siteRows.length}`, 'conflict', { schemaName });
+      }
+      if (options.blockOnActiveBackgroundJobs) {
+        await settleBackgroundJobsForSchema(conn, schemaName);
       }
       for (const row of siteRows) {
         const siteId = row.SiteID ?? row.siteid;
@@ -736,7 +778,8 @@ export async function teardownProvisionedSite(runId: number, confirmSchemaName: 
     await deleteCatalogSiteRowsAndSchema(catalogPool, run.schemaName, {
       actionLabel: 'teardown provisioned site',
       actor: startedBy,
-      requireExactlyOneCatalogSite: true
+      requireExactlyOneCatalogSite: true,
+      blockOnActiveBackgroundJobs: true
     });
     await setRunStatus(catalogPool, runId, 'aborted');
     auditSuccess({ action: 'teardown', user: startedBy, runId, schemaName: run.schemaName });

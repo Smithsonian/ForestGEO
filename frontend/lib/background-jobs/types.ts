@@ -6,6 +6,20 @@ export type BackgroundJobType = (typeof BACKGROUND_JOB_TYPES)[number];
 export const BACKGROUND_JOB_STATUSES = ['queued', 'running', 'cancel_requested', 'waiting_retry', 'completed', 'failed', 'cancelled'] as const;
 export type BackgroundJobStatus = (typeof BACKGROUND_JOB_STATUSES)[number];
 
+/**
+ * Statuses a job can still leave on its own. A job in any of these will be
+ * picked up again — `findRunnableJobIDs` selects on status and NextAttemptAt
+ * and never checks that the job's schema still exists — so dropping the site
+ * schema out from under one leaves the sweeper dispatching at a database that
+ * is gone. Provisioning teardown refuses while any of these remain.
+ */
+export const NON_TERMINAL_BACKGROUND_JOB_STATUSES = [
+  'queued',
+  'running',
+  'cancel_requested',
+  'waiting_retry'
+] as const satisfies readonly BackgroundJobStatus[];
+
 export const UPLOAD_JOB_PHASES = [
   'queued',
   'staging',
