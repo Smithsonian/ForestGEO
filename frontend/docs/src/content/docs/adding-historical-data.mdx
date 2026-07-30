@@ -12,31 +12,31 @@ When you first start using the application, you'll need to add historical data f
 Adding historical data involves:
 
 1. **Creating censuses** for each historical period
-2. **Uploading Fixed Data** (attributes, personnel, quadrats, species)
+2. **Uploading supporting data** (stem codes, quadrats, species — and personnel if you want them recorded)
 3. **Uploading Measurements** for each census
 
 :::note
-You must complete the Fixed Data uploads before you can upload measurements. The measurements form references Fixed Data records.
+Stem codes, species and quadrats must each hold at least one record before you can upload measurements, because measurement rows reference them. Personnel are optional.
 :::
 
 ---
 
 ## Understanding the Forms
 
-The app accepts file uploads (called `forms`) in either **CSV** or **TSV** format.
+The app accepts file uploads (called `forms`) as **CSV**, **TSV**, or **TXT**. The delimiter is detected for you — comma, tab, semicolon, or pipe. ArcGIS Field Maps workbooks (`.xlsx`) use a separate import on the measurements grid.
 
 A "complete" census comprises the following data types:
 
 | Form Type                   | Description                      | Census-Dependent   |
 | --------------------------- | -------------------------------- | ------------------ |
 | **Attributes** (Stem Codes) | Codes describing stem conditions | No                 |
-| **Personnel**               | Field staff for the census       | Yes (can rollover) |
-| **Quadrats**                | Plot subdivisions                | Yes (can rollover) |
+| **Personnel**               | Field staff for the census       | Yes                |
+| **Quadrats**                | Plot subdivisions                | No                 |
 | **Species**                 | Species inventory                | No                 |
 | **Measurements**            | DBH measurements and dates       | Yes                |
 
 :::caution
-**Measurements are locked** until at least one record exists in each of the other data types!
+**Measurements are locked** until at least one record exists in Stem Codes, Species, and Quadrats. Personnel are not part of that gate.
 :::
 
 ---
@@ -135,7 +135,7 @@ Files that do not contain the required headers will be rejected!
 | `dbh`      | No       | Decimal       | Diameter at breast height                 |
 | `hom`      | No       | Decimal       | Height of measurement                     |
 | `date`     | Yes      | Date          | Measurement date (YYYY-MM-DD)             |
-| `codes`    | No       | String        | Comma-separated attribute codes           |
+| `codes`    | No       | String        | Attribute codes, separated by semicolons (e.g. `LI;DY`) |
 | `comments` | No       | String        | Additional notes                          |
 
 ---
@@ -168,22 +168,27 @@ Start with the **oldest** census and work forward chronologically. This ensures:
 
 Repeat these steps for each census, starting with the oldest:
 
-1. **Create the census** via the Census dropdown
-2. **Add Personnel** for that census
-3. **Add Quadrats** for that census (or use Rollover from previous)
-4. **Upload Measurements** for that census
+1. **Create the census** from the dashed Start New Census card on the dashboard
+2. **Add Personnel** for that census, if you are recording who collected it
+3. **Upload Measurements** for that census
 
-### Using Census Rollover
+Quadrats, species and stem codes are defined once for the plot and do not need repeating per census.
 
-When creating a new census that shares data with a previous census:
+### What carries across censuses
 
-1. In the Census Creation popup, find the Rollover sections
-2. For **Personnel**: Select a previous census to copy personnel records
-3. For **Quadrats**: Select a previous census to copy quadrat definitions
-4. Click **Customize** to select specific records to copy
+Most of your supporting data does not need copying at all. Species, stem codes and quadrats are
+**not census-scoped** — they belong to the site and plot, so once defined they are available to
+every census automatically.
 
-:::tip
-Rollover saves significant time when the same field team and quadrat structure are used across multiple censuses.
+That leaves personnel, which is recorded per census. The census creation form asks only for a
+description and dates; there is no rollover step or record picker in it.
+
+:::caution
+**Personnel do not currently carry forward on their own.** If you want the same field team
+recorded against a new census, add them under **Stem & Plot Details → Personnel** after creating
+it. Any older instructions describing a rollover section with a **Customize** button in the
+creation popup are describing a feature that is not currently working — do not wait for it to
+populate your personnel list.
 :::
 
 ---
