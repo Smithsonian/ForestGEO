@@ -8,19 +8,19 @@ import ProcessFlow from '../../../components/ProcessFlow.astro';
 import ConceptCard from '../../../components/ConceptCard.astro';
 import Scenario from '../../../components/Scenario.astro';
 
-Standing up a new ForestGEO site used to be a sequence of manual SQL steps run against the database by an engineer. As of **May 2026**, provisioning happens entirely in the app through a guided wizard at **`/admin/provision`** — admins fill out four short forms and the system handles the schema creation, table seeding, validations, catalog registration, and quadrat generation in one transactional run.
+Standing up a new ForestGEO site used to be a sequence of manual SQL steps run against the database by an engineer. As of **May 2026**, provisioning happens entirely in the app through a guided wizard at **`/admin/provision`** — admins fill out four short forms and the system handles the schema creation, table seeding, validations, catalog registration, and quadrat generation as a sequence of resumable steps.
 
 :::note
-Site provisioning is restricted to users with the **global** role. If you don't see the option in the admin sidebar, you don't have access.
+Site provisioning is restricted to users with the **global** role. Reach it from the **gear icon at the bottom of the sidebar** and choose **Provisioning**. If that entry is not in the menu, you do not have access — the sidebar does not show an Administration section until you are already on an admin page.
 :::
 
 <ConceptCard
   title="What the wizard does for you"
   color="green"
-  description="One in-app run replaces what used to be ~14 manual SQL steps across two schemas, plus the table/procedure scripts and the unified-measurements migrations."
+  description="One in-app run replaces what used to be ~14 manual SQL steps across two schemas, plus the table and stored-procedure scripts."
   keyPoints={[
     'Creates the dedicated MySQL schema (forestgeo_<slug>)',
-    'Initialises all core tables, stored procedures, and current migrations',
+    'Initialises all core tables and stored procedures',
     'Seeds default validations and post-validation queries',
     'Registers the site in the catalog so it appears in the site selector',
     'Creates the first plot and the first census',
@@ -28,6 +28,19 @@ Site provisioning is restricted to users with the **global** role. If you don't 
     'Records the run for audit and supports retry / abort if anything fails'
   ]}
 />
+
+:::note
+**How the schema is built.** Provisioning applies the current table and stored-procedure scripts
+directly; it does **not** replay the numbered migration history. Those scripts already describe
+the finished shape of the schema, so replaying migrations on top would fail on objects that
+already exist.
+
+The practical consequence is that a freshly provisioned site is only as current as those scripts
+are. If a schema change has landed as a migration but has not yet been folded into them, a new
+site can come out missing it — which will surface as a schema-contract failure at deploy time
+rather than during provisioning. If you provision a site and a subsequent deploy complains about
+missing objects in it, that is the cause, and it needs engineering rather than a re-run.
+:::
 
 ## The four-step wizard
 
@@ -71,23 +84,39 @@ Define the first plot for the new site. You can always add more plots later — 
 | **Dimensions X × Y** | Plot size in metres (or whatever you set as the default coordinate unit) |
 | **Area** | Computed automatically from dimensions |
 | **Global X / Y / Z** | The plot's origin coordinates — used by location-based validations |
-| **Plot shape** | `square` by default; the only validated geometry today |
+| **Plot shape** | `square`, `rectangular`, or `irregular`; `square` is the default. The value is recorded for reference and does not change how the wizard validates geometry |
 | **Default units** | Dimension, coordinate, area, DBH, and HOM units. Defaults to metric |
 
 ### 3 · Quadrats
 
-Two modes are available:
+Three modes are available:
 
 <CardGrid>
   <Card title="Grid mode (regular plots)">
-    Specify a quadrat size (e.g. 20 × 20 m) and the wizard will tile the plot automatically. The plot dimensions must be evenly divisible by the quadrat size — if they aren't, switch to CSV mode.
+    Specify a quadrat size (e.g. 20 × 20 m) and the wizard will tile the plot automatically. The plot dimensions must be evenly divisible by the quadrat size — if they aren't, switch to CSV mode. A generated grid is capped at 10,000 quadrats.
   </Card>
   <Card title="CSV mode (irregular plots)">
-    Upload a CSV of quadrats with `startX`, `startY`, `dimensionX`, `dimensionY`, and `quadratName` columns. The wizard validates that no quadrats overlap and that all of them fall inside the plot.
+    Upload a CSV of quadrats with `startX`, `startY`, `dimensionX`, `dimensionY`, and `quadratName` columns.
+  </Card>
+  <Card title="None (add later)">
+    Create the site with no quadrats at all and load the real ones afterwards.
   </Card>
 </CardGrid>
 
-Both modes show a live preview of the layout and surface any geometric problems (overlaps, out-of-bounds rows, non-divisible plot dimensions) before you can advance.
+:::tip
+**If you are going to upload your real quadrats later, choose None.** Seeding a placeholder grid
+and then uploading the actual quadrats leaves the site holding both sets — which is how one site
+ended up reporting twice the quadrats it has. Pick None whenever the grid you would generate is a
+placeholder rather than the real layout.
+:::
+
+Grid and CSV mode both show a live preview of the layout and surface geometric problems before
+you can advance. Rows that fall outside the plot, or a plot whose dimensions are not divisible by
+the quadrat size, are hard errors and block the step.
+
+**Overlaps are not.** Real surveyed quadrats sometimes do overlap, so the wizard reports them as a
+warning and lets you acknowledge and proceed. Read the warning before accepting it — an
+unintended overlap is much easier to fix now than after measurements reference the quadrats.
 
 :::tip
 For most established ForestGEO sites the standard 20 × 20 m quadrat grid is correct — start with Grid mode. CSV mode exists for sites that already have an irregular historical layout you want to preserve.
@@ -103,11 +132,11 @@ The final step summarises everything you entered. Submit to start the run.
   cause="The wizard kicks off a server-side provisioning run. Each step is recorded so the system can resume or abort cleanly if anything goes wrong."
   steps={[
     'A run row is created with a unique runId; you can watch progress on /admin/provision/[runId].',
-    'The schema is created and tables, procedures, and migrations applied in order.',
+    'The schema is created, then tables and stored procedures are applied in order.',
     'Default validations and post-validation queries are seeded.',
     'The site is registered in catalog.sites and the first plot + census are inserted.',
     'Quadrats are generated from your layout.',
-    'The run is marked completed and the site appears in the selector for global users immediately.'
+    'The run is marked completed. The new site appears in the selector once your permissions refresh, which can take a few minutes — reload if it has not shown up.'
   ]}
   outcome="The new site is fully usable: select it from the sidebar, pick the plot and census, and you can begin uploading supporting data (taxonomy, personnel, attributes) and measurements."
 />
@@ -121,7 +150,7 @@ Visit **`/admin/provision/runs`** for a table of every provisioning run with its
 | **running** | Currently in progress — open the run page to watch step-by-step progress |
 | **completed** | Finished successfully; site is live |
 | **failed** | A step errored. Open the run to see which step and the error message |
-| **aborted** | A user clicked Abort during the run |
+| **aborted** | The run was torn down — either by aborting a failed run, or by deleting the site it created |
 
 A heartbeat worker keeps long-running provisioning alive even across app server restarts; if a run is mid-flight when the server bounces, it will be picked back up automatically.
 
@@ -129,7 +158,13 @@ A heartbeat worker keeps long-running provisioning alive even across app server 
 
 If a run **fails**, the failure detail tells you exactly which step errored. After fixing the underlying cause (e.g. a database connectivity blip), you can retry from the failed step rather than starting over — the steps that already succeeded are not re-run.
 
-**Abort** is available while a run is `running`. It tears down anything that was created in that run transactionally — there are no orphaned half-provisioned schemas left behind.
+**Abort** is only available once a run is `failed` — it drops the half-built schema and clears the
+catalog entry, so no orphaned schema is left behind. You cannot abort a run that is still
+`running`.
+
+If a run appears stuck, that is what **Mark failed & retry** is for. It becomes available once a
+step has been running for more than five minutes, and moves the run into `failed` so you can
+either retry it or abort it.
 
 ## Deleting a provisioned site
 
@@ -141,14 +176,16 @@ Deleting a site **destroys every measurement, plot, census, quadrat, and support
 
 ### What "Delete provisioned site" does
 
-1. Verifies the run is in **completed** status — you cannot tear down a run that's still `running`, `failed`, or `aborted` from this button. For those states, use **Abort** (running) or **Retry / Mark failed** as appropriate.
-2. Asks you to **type the exact schema name** (e.g. `forestgeo_rabi`) into the confirmation dialog. This is intentional — a single click can't trigger a teardown.
-3. Runs in a single transaction:
-   - DELETE the row from `catalog.sites`
+1. Verifies the run is in **completed** status — you cannot tear down a run that's still `running`, `failed`, or `aborted` from this button. For a failed run, use **Abort** instead.
+2. Checks that no **background upload jobs** for the schema can still run. If any are outstanding, the teardown is refused and tells you how many — wait for them to finish or cancel them first. This stops a job writing into a schema that is being dropped out from under it.
+3. Checks that `catalog.sites` holds exactly one row for the schema. If it holds none or several, the teardown stops rather than guessing which to remove.
+4. Asks you to **type the exact schema name** (e.g. `forestgeo_rabi`) into the confirmation dialog. This is intentional — a single click can't trigger a teardown.
+5. Removes the catalog entries in one transaction, foreign keys first:
    - DELETE any rows in `catalog.usersiterelations` that referenced the site
+   - DELETE the row from `catalog.sites`
    - COMMIT
-   - **DROP DATABASE** for the schema (only after the catalog commit succeeds)
-4. Logs the teardown to the provisioning audit trail with the username and run ID.
+6. **DROP DATABASE** for the schema, outside that transaction and only after the commit succeeds. `DROP DATABASE` cannot be rolled back, which is exactly why it runs last.
+7. Logs the teardown to the provisioning audit trail with the username and run ID, and marks the run `aborted`.
 
 Putting the `DROP DATABASE` after the catalog commit guarantees there is **never** a state where the catalog still references a missing schema (no orphans). If anything before the commit fails, nothing has changed and a retry is safe.
 

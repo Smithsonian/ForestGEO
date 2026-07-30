@@ -11,7 +11,7 @@ A key part of this application is the **Validations** and **Statistics** systems
 
 | System                     | Purpose                                          | When It Runs                            |
 | -------------------------- | ------------------------------------------------ | --------------------------------------- |
-| **Validations**            | Check data quality and flag potential errors     | Automatically after measurements upload |
+| **Validations**            | Check data quality and flag potential errors     | In the background, after measurements upload |
 | **Post-Census Statistics** | Analyze census data and generate summary reports | Manually triggered by user              |
 
 ---
@@ -22,7 +22,7 @@ The validation system performs automated checks on your measurement data to iden
 
 ### How Validations Work
 
-1. **During Upload**: When you upload measurements, validations run automatically
+1. **After Upload**: Once your measurements are ingested, the validation pass starts in the background — it does not hold up the upload
 2. **Error Flagging**: Records that fail validation are flagged but **still saved** to the database
 3. **Review & Fix**: You can review flagged records in the data grid and correct them
 4. **Re-validation**: Corrections are re-validated to clear the error flags
@@ -38,7 +38,14 @@ Navigate to **Census Hub → Validations** to:
 - View all available validation rules
 - See which validations are enabled or disabled
 - View the SQL query behind each validation
-- Enable or disable specific validations (if you have permissions)
+- Enable or disable specific validations
+- Add a new validation of your own
+
+:::caution
+**This page is restricted to database administrators and global users.** Everyone else gets a
+full-page "Access Denied" rather than a read-only view, so if you simply want to know why a row
+was flagged, use **Census Hub → View Errors** instead — that is available to everyone.
+:::
 
 ### Available Validations
 
@@ -119,7 +126,7 @@ This is useful for understanding exactly what conditions trigger each validation
 
 ### Enabling/Disabling Validations
 
-If you have sufficient permissions, you can enable or disable specific validations:
+As a database administrator or global user, you can enable or disable specific validations:
 
 1. Navigate to **Census Hub → Validations**
 2. Find the validation you want to modify
@@ -147,38 +154,51 @@ This page requires **manual triggering**. Unlike validations, statistics are not
 ### How to Run Statistics
 
 1. Navigate to **Census Hub → Post-Census Statistics**
-2. Review the available statistical queries
-3. Click on a query to execute it
+2. Review the available statistical queries — clicking a row expands it so you can read the SQL it will run
+3. **Tick the checkbox** beside each statistic you want, then click **Run Statistics**
 4. View the results in the expandable results panel
+
+:::note
+Selecting nothing and clicking Run Statistics does nothing except warn you to pick at least one.
+The checkboxes, not the row itself, are what queue a query.
+:::
 
 ### Available Statistics
 
-The Post-Census Statistics system can generate various summary reports, including:
+Twelve queries ship with every site. Each one is a saved SQL statement you can read before you
+run it, and sites can add their own alongside them.
 
-#### Census Summary Statistics
+#### Counts
 
-| Statistic                | Description                                  |
-| ------------------------ | -------------------------------------------- |
-| **Total Stems Measured** | Count of all stem measurements in the census |
-| **Total Trees**          | Count of unique trees (by TreeTag)           |
-| **Multi-Stem Trees**     | Count of trees with more than one stem       |
-| **New Recruits**         | Stems measured for the first time            |
-| **Mortality Rate**       | Percentage of stems marked as dead           |
+| Statistic                             | Description                                       |
+| ------------------------------------- | ------------------------------------------------- |
+| **Number of Records by Quadrat**      | How many measurements landed in each quadrat       |
+| **Number of ALL Stem Records**        | Every stem record in the census                    |
+| **Number of all LIVE stem records**   | Stems currently recorded as alive                  |
+| **Number of all trees**               | Distinct trees in the census                       |
 
-#### Species Statistics
+#### Mortality and survivorship
 
-| Statistic                | Description                            |
-| ------------------------ | -------------------------------------- |
-| **Species Count**        | Number of unique species in the census |
-| **Species Distribution** | Breakdown of stems by species          |
-| **Most Common Species**  | Top species by stem count              |
+| Statistic                                            | Description                                      |
+| ---------------------------------------------------- | ------------------------------------------------ |
+| **All dead or missing stems and count by census**     | Dead and missing stems, grouped by census        |
+| **Number of dead stems per quadrat**                  | Where mortality is concentrated spatially        |
+| **Number of dead stems by species**                   | Where mortality is concentrated taxonomically    |
+| **Checks that all trees from the last census are present** | Trees in the previous census with no record in this one |
 
-#### Quadrat Statistics
+#### Recruitment
 
-| Statistic              | Description                            |
-| ---------------------- | -------------------------------------- |
-| **Stems per Quadrat**  | Distribution of stems across quadrats  |
-| **Quadrat Completion** | Progress of data collection by quadrat |
+| Statistic                                                                       | Description                                  |
+| ------------------------------------------------------------------------------- | -------------------------------------------- |
+| **Number of new stems, grouped by quadrat, and then by census**                  | Where new stems appeared                     |
+| **Determining which quadrats have the most and least number of new stems for the current census** | The extremes of that distribution |
+
+#### Data checks
+
+| Statistic                                                    | Description                                             |
+| ------------------------------------------------------------ | ------------------------------------------------------- |
+| **All trees outside plot limits**                             | Trees whose coordinates fall outside the plot boundary   |
+| **Highest DBH measurement and HOM measurement by species**    | Useful for spotting unit errors and outliers per species |
 
 ### Interpreting Results
 
@@ -187,7 +207,10 @@ Statistics results are displayed in expandable panels showing:
 - **Query name and description**
 - **Result count**
 - **Tabular data** with sortable columns
-- **Export options** (where available)
+- **Download Statistics**, which saves the selected results as a JSON file
+- **Print Statistics**, which opens a printable view
+
+Both act only on the statistics you have ticked, not on everything on the page.
 
 ### When to Use Post-Census Statistics
 
