@@ -7,8 +7,11 @@ import ailogger from '@/ailogger';
 export const runtime = 'nodejs';
 
 // DBH growth/shrinkage validations JOIN across large tables and can take
-// several minutes on 200K+ row datasets.  Match the cross-census location
-// route's 10-minute ceiling so Azure doesn't kill the request early.
+// several minutes on 200K+ row datasets. streamWithHeartbeats below is what
+// keeps Azure from killing the request early — not this value. maxDuration is
+// advisory (Next.js records it in the build manifest; only Vercel enforces it)
+// and documents the intended 10-minute budget alongside the cross-census
+// location route.
 export const maxDuration = 600;
 
 async function handler(request: NextRequest) {
