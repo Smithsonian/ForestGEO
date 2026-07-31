@@ -19,7 +19,7 @@ vi.mock('chalk', () => ({
 
 vi.mock('@/ailogger', () => {
   const noop = vi.fn();
-  return { default: { info: noop, warn: noop, error: noop, debug: noop } };
+  return { default: { info: noop, warn: noop, error: noop, debug: noop, critical: noop, event: noop, metric: noop } };
 });
 
 // ---------------------------
