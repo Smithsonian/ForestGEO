@@ -3,6 +3,7 @@ import {
   getOrFetchPermissions,
   getCachedPermissions,
   invalidatePermissions,
+  UserNotProvisionedError,
   _clearCacheForTest,
   _seedCacheForTest,
   type CachedPermissions
@@ -114,6 +115,39 @@ describe('permissionscache', () => {
     const fetchMock = makeFetchErr(503, 'service unavailable');
     await expect(getOrFetchPermissions(EMAIL, fetchMock)).rejects.toThrow(/503/);
     expect(getCachedPermissions(EMAIL)).toBeNull();
+  });
+
+  it('upstream 404 (User not found) throws UserNotProvisionedError and does not cache', async () => {
+    const fetchMock = makeFetchErr(404, 'User not found');
+    await expect(getOrFetchPermissions(EMAIL, fetchMock)).rejects.toBeInstanceOf(UserNotProvisionedError);
+    // Not negatively cached: once an admin creates the catalog.users row, the
+    // very next poll must succeed without waiting out a TTL.
+    expect(getCachedPermissions(EMAIL)).toBeNull();
+  });
+
+  it('upstream 404 with the structured User not found payload throws UserNotProvisionedError', async () => {
+    const fetchMock = makeFetchErr(404, JSON.stringify({ error: 'User not found' }));
+    await expect(getOrFetchPermissions(EMAIL, fetchMock)).rejects.toBeInstanceOf(UserNotProvisionedError);
+  });
+
+  it('unrecognized 404 responses stay generic errors instead of misclassifying every user as unprovisioned', async () => {
+    for (const body of ['Not Found', '<html><body>Function route not found</body></html>', JSON.stringify({ error: 'Route not found' })]) {
+      _clearCacheForTest();
+      const fetchMock = makeFetchErr(404, body);
+      const error = await getOrFetchPermissions(EMAIL, fetchMock).catch(e => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(UserNotProvisionedError);
+    }
+  });
+
+  it('non-404 failures stay generic errors — outages must never be classified as unprovisioned users', async () => {
+    for (const status of [500, 502, 503]) {
+      _clearCacheForTest();
+      const fetchMock = makeFetchErr(status);
+      const error = await getOrFetchPermissions(EMAIL, fetchMock).catch(e => e);
+      expect(error, `status ${status}`).toBeInstanceOf(Error);
+      expect(error, `status ${status}`).not.toBeInstanceOf(UserNotProvisionedError);
+    }
   });
 
   it('missing AUTH_FUNCTIONS_POLL_URL is a configuration error, not a 500-from-upstream', async () => {

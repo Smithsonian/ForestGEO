@@ -32,6 +32,32 @@ interface AuthFunctionResponse {
   allSites: SitesResult[];
 }
 
+// The auth function uses a 404 with a "User not found" payload for an email
+// with no catalog.users row. Check both signals so a missing or misconfigured
+// function route is not mistaken for an unprovisioned user.
+const HTTP_NOT_FOUND = 404;
+
+function isUserNotFoundResponse(body: string): boolean {
+  const trimmedBody = body.trim();
+  if (trimmedBody.toLowerCase() === 'user not found') return true;
+
+  try {
+    const payload = JSON.parse(trimmedBody) as unknown;
+    if (!payload || typeof payload !== 'object') return false;
+    const error = (payload as { error?: unknown }).error;
+    return typeof error === 'string' && error.trim().toLowerCase() === 'user not found';
+  } catch {
+    return false;
+  }
+}
+
+export class UserNotProvisionedError extends Error {
+  constructor(email: string) {
+    super(`auth function has no user registered for ${email}`);
+    this.name = 'UserNotProvisionedError';
+  }
+}
+
 // 5 minutes default TTL — short enough that revocation propagates within a
 // reasonable window, long enough that the auth fetch is amortized across many
 // requests. Override with PERMISSIONS_CACHE_TTL_MS for tuning.
@@ -92,6 +118,9 @@ async function fetchAndShape(email: string, fetchImpl: typeof fetch): Promise<Ca
       statusText: response.statusText,
       body: body.slice(0, 500)
     });
+    if (response.status === HTTP_NOT_FOUND && isUserNotFoundResponse(body)) {
+      throw new UserNotProvisionedError(email);
+    }
     throw new Error(`auth function poll failed (${response.status})`);
   }
   const data = (await response.json()) as AuthFunctionResponse;

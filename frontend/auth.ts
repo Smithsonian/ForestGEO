@@ -1,7 +1,8 @@
 // auth.ts
 import NextAuth from 'next-auth';
 import authConfig from '@/auth.config';
-import { getOrFetchPermissions } from '@/lib/permissionscache';
+import { getOrFetchPermissions, UserNotProvisionedError } from '@/lib/permissionscache';
+import { LOGIN_FAILURE_REASONS } from '@/config/loginfailurereasons';
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET!,
@@ -72,6 +73,10 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         session.user.sites = [];
         session.user.allsites = [];
         session.user.permissionsUnavailable = true;
+        // A 404 means this login has no catalog.users row — retrying can never
+        // succeed, so the login-failure page must not present it as transient.
+        session.user.permissionsFailureReason =
+          error instanceof UserNotProvisionedError ? LOGIN_FAILURE_REASONS.USER_NOT_PROVISIONED : LOGIN_FAILURE_REASONS.PERMISSIONS_UNAVAILABLE;
       }
       return session;
     }

@@ -23,7 +23,10 @@ vi.mock('@/ailogger', () => {
       info: noop,
       warn: noop,
       error: noop,
-      debug: noop
+      debug: noop,
+      critical: noop,
+      event: noop,
+      metric: noop
     }
   };
 });

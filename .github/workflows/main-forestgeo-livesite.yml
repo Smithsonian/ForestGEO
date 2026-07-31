@@ -47,6 +47,10 @@ jobs:
           echo AZURE_SQL_CATALOG_SCHEMA=${{ secrets.AZURE_SQL_CATALOG_SCHEMA }} >> frontend/.env
           echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
           echo APP_INSIGHTS_CONNECTION_STRING=${{ secrets.APP_INSIGHTS_CONNECTION_STRING }} >> frontend/.env
+          # NEXT_PUBLIC_ variant is inlined into the client bundle at build time;
+          # without it the browser App Insights SDK never initializes (the
+          # connection string is a public telemetry identifier, not a secret).
+          echo NEXT_PUBLIC_APP_INSIGHTS_CONNECTION_STRING=${{ secrets.APP_INSIGHTS_CONNECTION_STRING }} >> frontend/.env
           echo NEXTAUTH_DEBUG=true >> frontend/.env
           echo NODE_ENV=production >> frontend/.env
           echo NEXT_RUNTIME=nodejs >> frontend/.env
