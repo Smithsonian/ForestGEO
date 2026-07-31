@@ -45,7 +45,7 @@ If anything fails, the modal returns a structured list of disqualifying `CoreMea
 ## Step by step
 
 1. Sign in and select a site, plot, and validated census.
-2. Navigate to **Measurements Hub -> Census Overview**.
+2. Navigate to **Census Hub -> Census Overview**.
 3. Click **Publish census** in the page header.
 4. The modal shows the source app context: schema, PlotID, CensusID, and PlotCensusNumber.
 5. Enter the destination Plot ID that this census should attach to in the Smithsonian database. The destination plot must already exist; the artifact will refuse to publish if it does not.
@@ -189,11 +189,11 @@ The modal returns a structured list of failure kinds with the first 20 disqualif
 | Kind | What to fix |
 |---|---|
 | `not-validated` | Re-run validation in the app for those rows. |
-| `unresolved-error` | Resolve the rows in **Measurements Hub -> Errors**. |
+| `unresolved-error` | Resolve the rows in **Census Hub -> Errors**. |
 | `no-stem-guid` | App-side failure marker. The row needs re-ingestion. |
 | `inactive-join` | The joined stem or tree is soft-deleted. Restore or remove the measurement. |
 | `unknown-attribute-code` | One or more `cmattributes.Code` values do not exist in `attributes`. Add the codes or fix the measurement. |
-| `missing-taxonomy-fields` | The species row is missing `SpeciesCode`, `SpeciesName`, `Genus`, or `Family`. Fix in **Fixed Data Input -> All Taxonomies**. |
+| `missing-taxonomy-fields` | The species row is missing `SpeciesCode`, `SpeciesName`, `Genus`, or `Family`. Fix in **Stem & Plot Details -> All Taxonomies**. |
 | `string-too-long` | A destination-bound value exceeds the Smithsonian DB column width. Shorten the offending field. |
 | `zero-exportable-rows` | No measurements remain after applying all filters. Verify the census, plot, and validated state. |
 

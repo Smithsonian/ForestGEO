@@ -1,6 +1,7 @@
 ---
 title: Custom Component Reference
 description: Usage guide for ForestGEO documentation custom components.
+draft: true
 ---
 
 import ErrorReference from '../../../components/ErrorReference.astro';
@@ -250,7 +251,7 @@ Displays troubleshooting case studies with title, cause, and solution steps.
   icon="warning"
   steps={[
     "Note the invalid species code(s) from the error message",
-    "Navigate to Fixed Data > Species List",
+    "Navigate to Stem & Plot Details > Species List",
     "Add the missing species with correct SpCode",
     "Return to Failed Measurements and click Reingest All"
   ]}
@@ -264,7 +265,7 @@ Displays troubleshooting case studies with title, cause, and solution steps.
   icon="warning"
   steps={[
     "Note the invalid species code(s) from the error message",
-    "Navigate to Fixed Data > Species List",
+    "Navigate to Stem & Plot Details > Species List",
     "Add the missing species with the correct SpCode",
     "Return to Failed Measurements and click Reingest All"
   ]}
@@ -391,8 +392,8 @@ Enhanced reference tables with search, sort, and sticky headers.
     { key: "path", label: "Navigation Path" }
   ]}
   data={[
-    { feature: "Species List", path: "Fixed Data > Species" },
-    { feature: "Quadrats", path: "Fixed Data > Quadrats" }
+    { feature: "Species List", path: "Stem & Plot Details > Species" },
+    { feature: "Quadrats", path: "Stem & Plot Details > Quadrats" }
   ]}
 />
 ```
@@ -407,9 +408,9 @@ Enhanced reference tables with search, sort, and sticky headers.
     { key: "access", label: "Access Level" }
   ]}
   data={[
-    { feature: "Species List", path: "Fixed Data > Species", access: "All Users" },
-    { feature: "Quadrats", path: "Fixed Data > Quadrats", access: "All Users" },
-    { feature: "Personnel", path: "Fixed Data > Personnel", access: "All Users" },
+    { feature: "Species List", path: "Stem & Plot Details > Species", access: "All Users" },
+    { feature: "Quadrats", path: "Stem & Plot Details > Quadrats", access: "All Users" },
+    { feature: "Personnel", path: "Stem & Plot Details > Personnel", access: "All Users" },
     { feature: "User Management", path: "Admin > Users", access: "Admin Only" },
     { feature: "Site Settings", path: "Admin > Sites", access: "Admin Only" }
   ]}

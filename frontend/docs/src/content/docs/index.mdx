@@ -39,13 +39,23 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
   </Card>
 </CardGrid>
 
-## Key Features
+## What the application does
 
-- **File Upload System** — CSV/TSV upload with auto-delimiter detection and per-header preview
-- **Measurement Revision Upload** *(new, April 2026)* — correct specific rows in an existing census via a small CSV; multi-tab review screen before any database write
-- **Unified Row Editing** *(new, May 2026)* — Impact Summary preview, typed `APPLY N` confirmation for destructive edits, per-row revert
-- **In-App Site Provisioning** *(new, May 2026)* — four-step wizard creates schema, plot, census, and quadrat grid with audit and retry support
-- **Automated Validation** — 14+ configurable data quality checks, including cross-census growth, dead-to-alive regression, and HOM-shift detection
-- **Hard-Failure Visibility** *(April 2026)* — failed rows are no longer silently dropped; they live in `coremeasurements` with original codes preserved
-- **Audit Trail** — complete change tracking; failed rows keep their ID through reingestion
-- **Azure Integration** — automatic cloud backup of uploaded files
+- **Flexible uploads** — CSV, TSV, and TXT files with the delimiter detected for you, plus a
+  guided column-mapping step when your headers don't match. ArcGIS Field Maps workbooks import
+  directly.
+- **Correct a census without reloading it** — a Revisions upload matches a small file of
+  corrections against the rows already there and shows you exactly what would change before
+  anything is written.
+- **Careful editing** — edits that carry a warning or destroy data show an impact preview and ask
+  you to confirm in writing; an undo appears immediately after any change.
+- **Set up a new site in the app** — a four-step wizard builds the site, its first plot and
+  census, and its quadrat layout, with an audit trail and retry if a step fails.
+- **Automated data-quality checks** — sixteen configurable validations covering growth and
+  shrinkage limits, species and attribute codes, plot boundaries, duplicate tags, and how far a
+  stem has moved since the last census.
+- **Nothing is silently dropped** — rows that can't be matched to a stem are kept with your
+  original values intact and listed for review, rather than discarded.
+- **Full audit trail** — every change is tracked, and a row keeps its identity through however
+  many correction passes it takes.
+- **Automatic cloud backup** — every uploaded file is preserved and downloadable later.

@@ -9,11 +9,16 @@ This guide covers errors related to logging in, session management, and access p
 
 ## Login Errors
 
-### Invalid Credentials
+### There is no ForestGEO password
 
-| Error Message                               | Cause                          | How to Fix                                                                             |
-| ------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------- |
-| "Failure caused due to invalid credentials" | Username or password incorrect | Verify your login credentials; contact administrator if you've forgotten your password |
+Signing in hands you to Microsoft Entra ID, so ForestGEO never sees a password and cannot reject
+one. If sign-in fails, the problem is with the Microsoft account or with what that account has
+been granted — not with credentials typed into this application.
+
+| Error Message | Cause | How to Fix |
+| --- | --- | --- |
+| "We could not reach the authentication service. This is usually temporary — please try again in a moment." | The permissions directory was briefly unreachable | Wait a moment and try again; tell an administrator if it persists |
+| "Login failure triggered without reason. Please speak to an administrator." | Sign-in failed for a reason the app could not identify | Contact an administrator |
 
 ### Generic Login Failure
 
@@ -25,19 +30,22 @@ This guide covers errors related to logging in, session management, and access p
 
 ## Session Errors
 
-### Session Expired
+### When your session stops working
 
-| Error Message                            | Cause                                   | How to Fix                        |
-| ---------------------------------------- | --------------------------------------- | --------------------------------- |
-| "Session expired"                        | Your login session has timed out        | Log out and log back in           |
-| "Unauthorized - authentication required" | Session is no longer valid              | Refresh the page and log in again |
-| "You must be logged in to upload data"   | Attempting action without valid session | Log in before proceeding          |
+| What you see | Cause | How to Fix |
+| --- | --- | --- |
+| A request fails with **401 Unauthorized** | Your sign-in is no longer valid | Reload the page and sign in again |
+| A request fails with **503** and mentions permissions being unavailable | The app cannot currently read which sites you may use | Wait and retry; this is usually temporary |
+
+:::note
+An "upload session" is a different thing from your login session. An upload session going stale
+affects only that upload, and you can start a new one — it does not sign you out.
+:::
 
 ### Cookie/Session Issues
 
-| Error Message               | Cause                             | How to Fix                             |
-| --------------------------- | --------------------------------- | -------------------------------------- |
-| "No email found in cookies" | Session data missing or corrupted | Clear browser cookies and log in again |
+If sign-in loops or the app behaves as though you are signed out, clearing cookies for the site
+and signing in again resolves most cases.
 
 **To clear cookies:**
 
@@ -54,8 +62,8 @@ This guide covers errors related to logging in, session management, and access p
 
 | Error Message   | Cause                                     | How to Fix                                  |
 | --------------- | ----------------------------------------- | ------------------------------------------- |
-| "Access denied" | You don't have permission for this action | Contact administrator to request access     |
-| "Unauthorized"  | Your role doesn't allow this operation    | Verify you have the correct role assignment |
+| "Access denied. This page is only accessible to global administrators." | The admin pages are restricted to the `global` role | Ask a global administrator to act for you |
+| A request fails with **403 Forbidden** | Your role or site assignments do not cover this action | Verify your role and that the site is assigned to you |
 
 ### Site Access Issues
 
@@ -116,11 +124,13 @@ If you're a new user and cannot access the application:
 
 ### Role-Related Issues
 
-| Role              | Can Do             | Cannot Do                                |
-| ----------------- | ------------------ | ---------------------------------------- |
-| **Viewer**        | View data          | Edit data, upload files, admin functions |
-| **Site User**     | View, edit, upload | Admin functions, user management         |
-| **Administrator** | Everything         | N/A                                      |
+| Role | Notes |
+| --- | --- |
+| **global** | Full access, including the administration pages and site provisioning |
+| **db admin** | Full data access, including the Validations page and species-code edits |
+| **lead technician** | Day-to-day data work: upload, edit, and review |
+| **field crew** | Day-to-day data work |
+| **pending** | Signed in through Microsoft but not yet registered — cannot edit anything until an administrator assigns a role |
 
 If you need additional permissions, contact your administrator.
 
@@ -128,7 +138,7 @@ If you need additional permissions, contact your administrator.
 
 ## Security Best Practices
 
-1. **Don't share login credentials** - Each user should have their own account
+1. **Don't share your Microsoft account** - Each user should sign in as themselves
 2. **Log out when done** - Especially on shared computers
 3. **Report suspicious activity** - Contact administrator if you notice unauthorized access
 4. **Keep browser updated** - Security updates help protect your session

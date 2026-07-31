@@ -43,8 +43,8 @@ This page provides answers to frequently asked questions about errors and a comp
 
 **A:** Data processed before the failure is saved. Check:
 
-1. **Measurements Hub** - Some data may have been successfully uploaded
-2. **Failed Measurements** - Problem rows are stored here
+1. **Census Hub** - Some data may have been successfully uploaded
+2. **Census Hub → View Errors** — problem rows are listed here
 3. **Temporary Measurements** - Data may be waiting for reprocessing
 
 ### Q: Can I upload the same file again after an error?
@@ -61,7 +61,7 @@ This page provides answers to frequently asked questions about errors and a comp
 
 - Progress bar reaches 100%
 - "Upload Complete" message appears
-- Data appears in Measurements Hub
+- Data appears in Census Hub
 - No error messages displayed
 
 ---
@@ -88,7 +88,7 @@ These are checks to help ensure data accuracy.
 
 **A:**
 
-1. Go to Measurements Hub > View Data
+1. Go to Census Hub > View Data
 2. Filter to show only rows with errors
 3. Click on a row to see the error details
 4. Edit the values directly
@@ -98,7 +98,7 @@ These are checks to help ensure data accuracy.
 
 **A:** Yes, administrators can enable/disable validations:
 
-1. Go to Measurements Hub > Validations
+1. Go to Census Hub > Validations
 2. Find the validation in the list
 3. Toggle it off
 
@@ -122,8 +122,8 @@ Disabling validations may allow data quality issues to go undetected.
 **A:**
 
 1. Fix the underlying issue (e.g., add missing species)
-2. Open the Failed Measurements modal
-3. Click "Reingest All" or reingest individual records
+2. Open **Census Hub → View Errors** to confirm which rows are still failing
+3. Re-submit those rows as a **Revisions** upload, or correct them inline in the grid
 
 ### Q: Should I clear failed measurements or reingest them?
 
@@ -138,12 +138,13 @@ Disabling validations may allow data quality issues to go undetected.
 
 ### Q: Why can't I log in?
 
-**A:** Check:
+**A:** ForestGEO does not hold a password of its own — signing in hands you to Microsoft, so
+there is nothing to mistype on the ForestGEO side. Check:
 
-1. Credentials are correct (case-sensitive)
-2. Caps lock is off
-3. Browser cookies are enabled
-4. Your account is active (ask administrator)
+1. You are signing in with the Microsoft account an administrator invited to the tenant
+2. Browser cookies are enabled
+3. An administrator has assigned you to at least one site
+4. If the sign-in itself succeeds but the app reports permissions are unavailable, the site directory is temporarily unreachable — retry shortly, and tell an administrator if it persists
 
 ### Q: Why did I get logged out?
 
@@ -176,8 +177,8 @@ If you're stuck, work through this checklist:
 
 | If you see...            | It usually means...        | Try...                    |
 | ------------------------ | -------------------------- | ------------------------- |
-| "Species code not found" | Species not in database    | Add species to Fixed Data |
-| "Invalid quadrat"        | Quadrat not defined        | Add quadrat to Fixed Data |
+| "Species code not found" | Species not in database    | Add it under Stem & Plot Details → Species List |
+| "Invalid quadrat"        | Quadrat not defined        | Add it under Stem & Plot Details → Quadrats |
 | "Duplicate"              | Same data uploaded twice   | Remove duplicate          |
 | "Timeout"                | Took too long              | Wait and retry            |
 | "Unauthorized"           | Need to log in             | Log in again              |

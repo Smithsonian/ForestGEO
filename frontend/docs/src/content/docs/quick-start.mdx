@@ -53,7 +53,7 @@ A two-page visual tour: stand up a **site → plot → census**, **import a cens
 
 ### Pick (or check) your site
 
-After login, the dashboard shows every site you've been granted access to. Use the **sidebar dropdown** to select one — the card view is informational only.
+After login, the dashboard shows every site you've been granted access to. Click a site's card to select it, or use the **sidebar dropdown** — both do the same thing. Plots and censuses work the same way.
 
 <Screenshot src={dashboardSites} alt="Sites overview cards on the dashboard" caption="Sites overview — each card shows schema name, entry mode, and subquadrat size." />
 
@@ -73,11 +73,16 @@ The plots view splits plots **with quadrats** from those **without**. Click the 
 
 ### Add a census
 
-You can add a census two ways: open the **Census** dropdown in the sidebar and click **Add New Census**, **or** click the **Start new census** action on the census overview card. Either path creates the same record — a census is just a date range you'll attach measurements to next.
+With a site and plot selected, the dashboard shows the censuses for that plot. Click the dashed
+**Start New Census** card to create one. The sidebar's Census dropdown only lets you switch
+between censuses that already exist — it has no create action.
 
-<Screenshot src={addCensus} alt="Add new census action in the dropdown" width={420} caption="Adding a census resets your selection — re-pick site and plot to land on the new census." />
+A short form asks for a **description**, a **start date**, and optionally an **end date**. A
+census is just a date range you'll attach measurements to next.
 
-<Screenshot src={censusOverview} alt="Census overview with numbered actions" caption="① Delete (partial only) · ② Start a new census from the overview." />
+<Screenshot src={addCensus} alt="Census dropdown in the sidebar" width={420} caption="The Census dropdown switches between existing censuses. To create one, use the dashed card on the dashboard." />
+
+<Screenshot src={censusOverview} alt="Census overview with numbered actions" caption="① Delete the most recent census · ② Start a new census from the overview." />
 
 :::caution
 You can't create a new census while the current one has **zero** measurements. Import (next section) before rolling forward.
@@ -99,14 +104,28 @@ You can't create a new census while the current one has **zero** measurements. I
   ]}
 />
 
-Navigate to the **Upload** page from the sidebar (the navigation menu unlocks once a census is selected). Drop a CSV/TSV/TXT file or browse to it.
+There is no Upload page in the sidebar. Uploading always starts from the grid you want to load
+data into — open **Census Hub → View Data** and click **Upload** on that grid's toolbar. The
+supporting-data grids under **Stem & Plot Details** each carry the same button.
 
-<Screenshot src={uploadStage} alt="Upload stage 1 — file dropzone" caption="Stage 1 — file selection. UTF-8 encoded files only." />
+The first screen asks you to choose an upload mode. For a census you are loading for the first
+time, choose **Clean Re-Upload**. For corrections to a census that already holds data, choose
+**Revisions Upload** — see the caution below.
 
-<Screenshot src={uploadHeaders} alt="Header guide accordion expanded" caption="Expand 'Understanding the Headers' to see required vs. optional columns and example values before you upload." />
+Then drop a CSV/TSV/TXT file or browse to it.
+
+<Screenshot src={uploadStage} alt="Upload stage 1 — file dropzone" caption="Stage 1 — file selection. Save your file as UTF-8; the delimiter is detected automatically." />
+
+<Screenshot src={uploadHeaders} alt="Header guide accordion expanded" caption="Click 'Show Header Guide' to see required vs. optional columns and example values before you upload." />
+
+:::danger
+**Clean Re-Upload deletes the census's existing measurements before inserting yours.** It does
+not merge, and it cannot be undone from the interface. If you only mean to correct some rows,
+go back and choose **Revisions Upload** instead.
+:::
 
 :::caution
-**Don't navigate away during upload.** Large files (50k+ rows) can take several minutes. The system **updates-forward**: existing records will be overwritten, not skipped.
+**Don't navigate away during upload.** A file may be up to 500 MB, and large files take several minutes.
 :::
 
 <Screenshot src={uploadComplete} alt="Upload complete view with summary" caption="Upload complete — successes land in coremeasurements; failures are surfaced for review." />
@@ -123,21 +142,27 @@ Open **View Data → Measurements** to see what landed. The grid is editable inl
 
 ### Fix anything that failed
 
-Rows that didn't pass validation appear in the **Failed Measurements** view with a structured reason. You have two ways to fix them: edit fields **in place** in the grid, or upload a CSV of corrected values as a **revision upload** — the same file format as the original import, scoped to the rows you're fixing. Either path ends with **Reingest**, which pushes the rows back through the validator.
+Rows that didn't pass validation are listed under **Census Hub → View Errors**, in the Errors
+Explorer. Each row keeps the original values from your CSV alongside the reason it was rejected,
+so you can see exactly what the file said.
 
-<Screenshot src={failedMods} alt="Failed measurements modal with reasons" caption="Each failed row carries its original CSV codes plus the consolidated failure reason." />
+You have two ways to fix them: edit the fields **in place** in the grid, or upload a CSV of
+corrected values as a **revision upload** — the same file format as the original import, scoped
+to just the rows you're fixing.
+
+<Screenshot src={failedMods} alt="Failed measurements listing with reasons" caption="Each failed row carries its original CSV codes plus the consolidated failure reason." />
 
 <Scenario
   icon="info"
   title="A row failed — what now?"
   cause="A measurement was rejected by a site-specific validation (e.g. DBH out of range, unknown species code, quadrat not found)."
   steps={[
-    'Open Failed Measurements from the sidebar.',
+    'Open Census Hub → View Errors.',
     'Read the consolidated reason; the raw codes from the CSV are preserved on the row.',
-    'Fix the values: edit fields inline in the grid, or — for many rows at once — export, correct in a spreadsheet, and submit as a revision upload.',
-    'Click Reingest. The row re-enters bulkingestionprocess; if it passes, it moves into coremeasurements.'
+    'If the reason is INTERRUPTED_UPLOAD, the row was never rejected on its merit — the upload timed out. Re-run the upload rather than editing the data.',
+    'Otherwise fix the values: edit fields inline in the grid, or — for many rows at once — export, correct in a spreadsheet, and submit as a revision upload.'
   ]}
-  outcome="Fixed rows disappear from Failed Measurements and appear in View Data with the rest of the census."
+  outcome="Corrected rows resolve against the census and appear in View Data with the rest of the measurements."
 />
 
 ---
@@ -147,6 +172,6 @@ Rows that didn't pass validation appear in the **Failed Measurements** view with
 <CardGrid stagger>
   <LinkCard title="Getting Started (full walkthrough)" href="/ForestGEO/getting-started/" description="Long-form tour of every selection screen and sidebar control." />
   <LinkCard title="Upload Process Breakdown" href="/ForestGEO/upload-process-breakdown/" description="Every stage of the upload pipeline in detail." />
-  <LinkCard title="Understanding SAPD Datagrids" href="/ForestGEO/understanding-sapd-datagrids/" description="How the editable grids work — filters, edits, validation feedback." />
-  <LinkCard title="Failed Measurements Guide" href="/ForestGEO/errors/failed-measurements-guide/" description="Reasons, codes, and the reingest loop in depth." />
+  <LinkCard title="Understanding the Data Grids" href="/ForestGEO/understanding-sapd-datagrids/" description="How the editable grids work — filters, edits, validation feedback." />
+  <LinkCard title="Failed Measurements Guide" href="/ForestGEO/errors/failed-measurements-guide/" description="Failure reasons, error codes, and how to correct rejected rows." />
 </CardGrid>

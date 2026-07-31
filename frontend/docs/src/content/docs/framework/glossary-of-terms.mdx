@@ -40,7 +40,7 @@ A defined time period during which field measurements are collected for a plot.
 - Defined by start and end dates
 - Multiple censuses can exist per plot (Census 1, Census 2, etc.)
 - Measurement dates establish census boundaries
-- Census-dependent data must be re-entered or rolled over for each new census
+- Personnel are recorded per census; species, stem codes and quadrats belong to the plot and carry across every census
 
 ### Census Hub
 
@@ -48,7 +48,9 @@ The main navigation section for working with measurement data.
 
 **Pages included:**
 
+- Census Overview
 - View Data
+- View Errors
 - Post-Census Statistics
 - Recent Changes
 - Uploaded Files
@@ -57,14 +59,13 @@ The main navigation section for working with measurement data.
 
 ### Census Rollover
 
-The process of copying unchanged data from a previous census to a new census.
+An intended shortcut for carrying data from one census into the next.
 
 **Key points:**
 
-- Saves data re-entry time
-- Available for: Personnel, Quadrats
-- User selects which items to copy
-- Accessed during census creation
+- **Not currently functioning** — the census creation form collects only a description and dates, and offers no rollover options
+- Most supporting data needs no rollover anyway: species, stem codes and quadrats belong to the plot
+- Personnel, which are census-scoped, must be re-added by hand under Stem & Plot Details → Personnel
 
 ### Core Measurements
 
@@ -131,10 +132,10 @@ Measurement records that could not be successfully processed during data ingesti
 
 **Key points:**
 
-- Stored in dedicated table for review
+- Kept in `coremeasurements` alongside successful rows, distinguished by having no resolved stem; the original values from your file are preserved
 - Common causes: invalid species codes, missing fields, duplicate records
 - Can be reviewed, edited, and re-ingested
-- Accessible from View Data page or upload completion notification
+- Reviewed under Census Hub → View Errors
 
 ### Fixed Data
 
@@ -250,7 +251,7 @@ Field staff and data collection team members.
 
 **Key points:**
 
-- Census-dependent (must be added for each census or rolled over)
+- Census-dependent: recorded separately for each census
 - Includes: first name, last name, role, role description
 - Managed in Stem & Plot Details → Personnel
 
@@ -300,7 +301,7 @@ A subdivision of a plot into smaller geographic sections.
 - Each has specific coordinates (startX, startY) and dimensions (dimX, dimY)
 - Named using codes (e.g., "0322")
 - All stems must be assigned to a quadrat
-- Census-dependent (can be rolled over)
+- Belong to the plot, not to a census — defined once and used by every census in that plot
 
 ---
 
@@ -324,7 +325,7 @@ Re-processing measurements that were previously failed or staged.
 
 - Allows retry without re-uploading files
 - Used after fixing underlying data errors (e.g., adding missing species)
-- Available from Failed Measurements modal
+- Reached from Census Hub → View Errors
 
 ---
 
@@ -488,8 +489,8 @@ Automatic checks that verify data quality and logical consistency.
 
 **Key points:**
 
-- Runs automatically during measurements upload
-- 12+ configurable rules
+- Runs in the background after a measurements upload, not as part of it
+- 16 configurable rules
 - Errors flagged but data still saved
 - Can be enabled/disabled per rule in Validations page
 

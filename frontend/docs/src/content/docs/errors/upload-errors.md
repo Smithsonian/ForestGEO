@@ -50,8 +50,8 @@ This guide covers errors that may occur during the file upload and processing st
 
 | Error Message                            | Cause                            | How to Fix                      |
 | ---------------------------------------- | -------------------------------- | ------------------------------- |
-| "Unauthorized - authentication required" | Session expired or not logged in | Log out and log back in         |
-| "You must be logged in to upload data"   | Not authenticated                | Log in before attempting upload |
+| A **401 Unauthorized** response | Your sign-in is no longer valid | Reload the page and sign in again |
+| A **503** response mentioning permissions being unavailable | The app cannot currently read your site assignments | Wait and retry; tell an administrator if it persists |
 
 ---
 
@@ -95,6 +95,19 @@ This guide covers errors that may occur during the file upload and processing st
 | "Missing required field: SpeciesCode"     | SpeciesCode column is empty | Provide SpeciesCode value for all rows |
 | "Missing required field: QuadratName"     | QuadratName column is empty | Provide QuadratName value for all rows |
 | "Missing required field: MeasurementDate" | Date column is empty        | Provide date value for all rows        |
+| "Missing required field: LocalX"          | `lx` column is empty        | Provide the quadrat-local X coordinate |
+| "Missing required field: LocalY"          | `ly` column is empty        | Provide the quadrat-local Y coordinate |
+
+:::caution
+**The upload screen and the ingestion check disagree about two columns, so trust this list.**
+
+The header guide marks `stemtag` optional, but ingestion rejects any row whose StemTag is blank.
+Give every row a stem tag — most sites use `0` for a single-stemmed tree.
+
+Conversely, the missing-coordinate checks above only fire for **ArcGIS workbook imports**. A CSV
+row with no coordinates will ingest — but it will then be flagged by the plot-boundary and
+coordinate-drift validations, and it cannot be placed on the plot. Supply `lx` and `ly`.
+:::
 
 ### Field Length Errors
 
@@ -127,7 +140,7 @@ This guide covers errors that may occur during the file upload and processing st
 :::note
 Duplicates surface in two places, depending on the upload mode:
 
-- **Initial upload:** flagged rows stay in `coremeasurements` with `StemGUID = NULL` and the original CSV codes preserved. Review via View Errors or the Failed Measurements modal.
+- **Initial upload:** flagged rows stay in `coremeasurements` with `StemGUID = NULL` and the original CSV codes preserved. Review them under Census Hub → View Errors.
 - **Revision Upload:** any rows in the database that match multiple measurements for the same stem appear in the **Duplicate Cleanup** tab on the review screen. On Apply, the highest-ID row wins and the others are deleted in a single transaction. See [Revision Upload](/ForestGEO/upload-process-breakdown/#revision-upload-correcting-an-ingested-census).
 :::
 
@@ -137,11 +150,60 @@ Duplicates surface in two places, depending on the upload mode:
 
 | Error Message                                          | Cause                       | How to Fix                                                    |
 | ------------------------------------------------------ | --------------------------- | ------------------------------------------------------------- |
-| "Invalid quadrat name: '[name]' not found in database" | Quadrat doesn't exist       | Add the quadrat in Fixed Data > Quadrats before uploading     |
-| "Invalid species code: '[code]' not found in database" | Species not in Species List | Add the species in Fixed Data > Species List before uploading |
+| "Invalid quadrat name: '[name]' not found in database" | Quadrat doesn't exist       | Add the quadrat in Stem & Plot Details > Quadrats before uploading     |
+| "Invalid species code: '[code]' not found in database" | Species not in Species List | Add the species in Stem & Plot Details > Species List before uploading |
 
 :::caution
-These errors will cause measurements to fail. Always ensure all quadrats and species exist in Fixed Data BEFORE uploading measurements.
+These errors will cause measurements to fail. Always ensure all quadrats and species exist before uploading measurements.
+:::
+
+### Ambiguous references
+
+A reference can also fail because it matches **too many** records rather than none:
+
+| Error code          | What it means                                                        | How to fix                                                                 |
+| ------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `AMBIGUOUS_QUADRAT` | The quadrat name matches more than one active quadrat in the plot     | Find and remove the duplicate quadrat, then re-submit the affected rows     |
+| `AMBIGUOUS_SPECIES` | The species code matches more than one active species record          | Merge or retire the duplicate species record                                |
+
+These usually mean your supporting data has duplicates — often a placeholder quadrat grid left in
+place alongside a real uploaded layout. Fixing the reference data resolves every affected row at
+once.
+
+---
+
+## Identity and Matching Errors
+
+These arise when a row cannot be tied to a specific tree or stem. The row is kept with your
+original values and listed under **Census Hub → View Errors**.
+
+| Error code                                                        | What it means                                                             |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `DUPLICATE_TAG_STEMTAG`                                            | The same TreeTag/StemTag pair appears more than once in your file          |
+| `DUPLICATE_TAG_CONFLICT`                                           | Those repeated rows disagree with each other on some value                 |
+| `DUPLICATE_TAG_CONFLICT_EXISTING`                                  | A repeated row conflicts with a measurement already in this census         |
+| `AMBIGUOUS_PREVIOUS_MATCH`                                         | The tag matches more than one candidate in the previous census             |
+| `PUBLISHED_STEMID_CONFLICT`                                        | The supplied PublishedStemID belongs to a different stem identity          |
+| `TREE_RESOLUTION_FAILED`, `STEM_RESOLUTION_FAILED`, `STEM_TREE_RESOLUTION_FAILED` | The tree or stem could not be created or found even after the earlier steps |
+| `MISSING_CENSUS_FOR_TREE`, `MISSING_SPECIES_FOR_TREE`              | A tree could not be created because its census or species was missing      |
+| `MEASUREMENT_INSERT_SKIPPED`                                       | The measurement was skipped while the tree/stem records were being built   |
+| `SQL_EXCEPTION`                                                    | The database raised an error on that row — report this one                 |
+
+---
+
+## Interrupted Uploads
+
+| Error code           | What it means                                                                       |
+| -------------------- | ----------------------------------------------------------------------------------- |
+| `INTERRUPTED_UPLOAD` | The upload timed out or the session was cancelled before this row was ever processed |
+
+:::danger
+**This is not a data error.** The row was never examined, let alone rejected — so there is
+nothing in it to fix. Editing these rows wastes effort and can introduce mistakes into data that
+was correct. Re-run the upload instead.
+
+A single interrupted run can produce tens of thousands of these at once. If you see a very large
+number of failures appear together, check for this code before assuming a data problem.
 :::
 
 ---
@@ -151,7 +213,7 @@ These errors will cause measurements to fail. Always ensure all quadrats and spe
 ### If your upload fails partway through:
 
 1. **Don't panic** - Your data is not lost
-2. **Check Failed Measurements** - Successfully parsed rows that failed validation are stored there
+2. **Check Census Hub → View Errors** — rows that parsed but could not be resolved are listed there
 3. **Fix the issues** - Correct your source file based on error messages
 4. **Re-upload** - Upload the corrected file
 
@@ -183,10 +245,10 @@ These errors will cause measurements to fail. Always ensure all quadrats and spe
    - Same date format (YYYY-MM-DD recommended)
    - No special characters in tag fields
 
-3. **Check Fixed Data first**
+3. **Check your supporting data first**
    - Verify all species codes exist
    - Verify all quadrat names exist
-   - Add any missing Fixed Data before uploading
+   - Add any missing species, quadrats or stem codes before uploading
 
 4. **Upload in reasonable batches**
    - Very large files (>100,000 rows) may timeout

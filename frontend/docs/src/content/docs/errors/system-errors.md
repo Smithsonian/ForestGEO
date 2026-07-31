@@ -25,7 +25,7 @@ This guide covers technical errors related to database connections, server issue
 | "Failed to start transaction after 30 seconds"  | Persistent database deadlock   | Wait and retry; report if it continues         |
 | "Transaction slot wait timeout"                 | Too many concurrent operations | Wait for other operations to complete          |
 | "Failed to start transaction after [N] retries" | Database under heavy load      | Wait and retry later                           |
-| "Transaction timed out after [N]ms"             | Operation took too long        | Contact administrator if processing large data |
+| A request that hangs and then fails during a large upload | The database query exceeded its time limit | Retry with a smaller file; report it if it recurs, and check View Errors for rows marked INTERRUPTED_UPLOAD before editing any data |
 
 ---
 
@@ -38,8 +38,13 @@ This guide covers technical errors related to database connections, server issue
 | **400** | Bad Request           | Invalid parameters sent          | Check your input; fix data format issues      |
 | **401** | Unauthorized          | Not logged in or session expired | Log in again                                  |
 | **404** | Not Found             | Requested resource doesn't exist | Check if data was deleted or wrong parameters |
-| **408** | Timeout               | Request took too long            | Wait and retry                                |
+| **403** | Forbidden             | You lack permission for this site or action | Ask an administrator for access            |
+| **408** | SQL Connection Failure | The app could not reach the database (a repurposed code, not a request timeout) | Retry; report if it persists |
 | **409** | Conflict              | Data conflict (duplicate, etc.)  | Resolve the conflict and retry                |
+| **412** | Precondition Failed   | A required precondition was not met | Read the message; it names what is missing |
+| **413** | Payload Too Large     | The file exceeds the size limit  | Split the file (500 MB per file, 1 GB per upload) |
+| **422** | Unprocessable Entity  | The request was understood but its contents were rejected | Correct the data described in the message |
+| **423** | Locked                | The resource is busy — usually another upload or job holds it | Wait for the other operation to finish |
 | **500** | Internal Server Error | Server-side error                | Wait and retry; report if persistent          |
 | **503** | Service Unavailable   | Server overloaded or maintenance | Wait and try again later                      |
 | **555** | Foreign Key Conflict  | Trying to delete referenced data | Remove references first                       |
@@ -70,8 +75,7 @@ This guide covers technical errors related to database connections, server issue
 
 | Error Message                  | Cause                                  | How to Fix                              |
 | ------------------------------ | -------------------------------------- | --------------------------------------- |
-| "Row is referenced" (HTTP 555) | Cannot delete - data is used elsewhere | Remove or update referencing data first |
-| "Foreign Key Conflict"         | Related data prevents operation        | See below                               |
+| "Foreign key conflict detected" (HTTP 555) | Cannot delete — the row is referenced elsewhere. The response names the referencing table | Remove or update the referencing data first |
 
 #### Handling Foreign Key Conflicts
 
@@ -93,7 +97,7 @@ When you see a foreign key error:
 ### General Recovery Steps
 
 1. **Note the error message** - Copy or screenshot the exact text
-2. **Note the error ID** - If shown (e.g., "Error ID: abc123")
+2. **Note the Error ID** - shown on the full-page error screen as a long hex string
 3. **Retry the operation** - Many errors are temporary
 4. **Refresh the page** - Clears stale state
 5. **Log out and back in** - Resets your session
@@ -135,7 +139,7 @@ When reporting an error, include:
 
 ### Q: What does "Error ID" mean?
 
-**A:** It's a unique identifier for your specific error instance. Providing this to administrators helps them find detailed logs to diagnose the issue.
+**A:** It is a unique identifier for one specific error, shown on the full-page error screen as a long hex string. Quoting it lets an administrator find the matching server log. Errors that appear inline in a grid or as a toast do not carry one — describe what you were doing instead.
 
 ### Q: Can I continue working if I see an error?
 

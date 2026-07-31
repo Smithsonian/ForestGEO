@@ -35,7 +35,7 @@ After selecting a site, the **Plot** dropdown becomes available.
 A plot is a specific geographic region within a site where data collection occurs. Plots have defined dimensions, coordinates, and are subdivided into quadrats.
 
 :::tip
-If you see a placeholder plot, use the **ellipsis button** (⋯) next to the dropdown to open the Plot Customization popup and configure your plot's properties.
+If a plot is missing its dimensions or coordinates, click the **pencil icon** on that plot's card in the plots overview to open the plot editor. Coordinates and units feed the validations, so change them deliberately.
 :::
 
 #### Census Selection
@@ -48,8 +48,14 @@ A census represents a time period during which measurements were collected. Each
 - **End date** - When data collection completed
 - **Census number** - Sequential identifier (Census 1, Census 2, etc.)
 
+In the dropdown these appear as **First Msmt** and **Last Msmt**, because the app shows the range
+your measurements actually span rather than the dates typed in at creation.
+
 :::note
-The navigation menu remains **disabled** until you select a census. This ensures you're always working within a specific census context.
+**Census Hub** stays disabled until you select a census. **Stem & Plot Details** does not — it
+becomes available as soon as you have a site and a plot, which is what lets you set up species,
+quadrats and stem codes before any census exists. Destinations you cannot reach yet are shown
+greyed out rather than hidden.
 :::
 
 ---
@@ -64,17 +70,19 @@ The home page showing census statistics and data health metrics. See the [Dashbo
 
 ### Stem & Plot Details
 
-This section contains interfaces for managing **Fixed Data** - reference data required before you can upload measurements.
+This section contains the supporting reference data that measurements point at.
 
-| Page             | Description                                                                           |
-| ---------------- | ------------------------------------------------------------------------------------- |
-| **Stem Codes**   | Attribute codes describing tree/stem conditions (e.g., "D" for dead, "L" for leaning) |
-| **Personnel**    | Field staff and data collection team members for the census                           |
-| **Quadrats**     | Geographic subdivisions of the plot                                                   |
-| **Species List** | Inventory of all species found in the plot with taxonomy information                  |
+| Page             | Description                                                                           | Required first? |
+| ---------------- | ------------------------------------------------------------------------------------- | --------------- |
+| **Stem Codes**   | Attribute codes describing tree/stem conditions (e.g., "D" for dead, "L" for leaning) | **Yes**         |
+| **Species List** | Inventory of all species found in the plot with taxonomy information                  | **Yes**         |
+| **Quadrats**     | Geographic subdivisions of the plot                                                   | **Yes**         |
+| **Personnel**    | Field staff and data collection team members for the census                           | No              |
 
 :::caution
-You must add at least **one record** to each of these data types before the **View Data** page becomes accessible!
+Stem Codes, Species List and Quadrats must each hold at least one record before you can upload
+measurements. **Personnel are not part of that gate** — worth filling in to record who collected
+the data, but an empty personnel list will not block an upload.
 :::
 
 ### Census Hub
@@ -83,7 +91,8 @@ This section contains interfaces for working with measurement data and census an
 
 | Page                         | Description                                                 |
 | ---------------------------- | ----------------------------------------------------------- |
-| **View Data**                | View and edit measurements for the current census; failed rows appear inline with successful rows |
+| **Census Overview**          | Summary of the selected census, where you delete it or start a new one |
+| **View Data**                              | View and edit measurements for the current census; failed rows appear inline with successful rows |
 | **View Errors**              | Every row with a validation error, with the consolidated reason and the original CSV codes |
 | **Post-Census Statistics**   | Run statistical analyses on your census data                |
 | **Recent Changes**           | Audit trail showing all data modifications                  |
@@ -93,15 +102,24 @@ This section contains interfaces for working with measurement data and census an
 
 ### Administration (global role)
 
-Users with the `global` role see an Administration section in the sidebar with these tools:
+The administration tools are reached from the **gear icon at the bottom of the sidebar**, next to
+your name — not from the main navigation menu. Its menu offers **User Settings**, **Site
+Settings**, **User-Site Assignments** and **Provisioning**.
+
+:::note
+The sidebar only grows an Administration section once you are already on an admin page, so if you
+are looking for it on the dashboard you will not find it. Start from the gear icon.
+:::
+
+Once you are in that section, the sidebar lists:
 
 | Page                       | Description                                                                          |
 | -------------------------- | ------------------------------------------------------------------------------------ |
-| **Sites**                  | Catalog of all sites the app knows about                                             |
 | **Users**                  | Manage user accounts and their roles                                                 |
-| **Users ↔ Sites**          | Grant or revoke site access for individual users                                     |
-| **Provision** *(new)*      | Stand up a brand-new site, plot, census, and quadrat grid through a 4-step wizard. See [Site Provisioning](/ForestGEO/admin/site-provisioning/) |
-| **Provisioning Runs**      | History and status of every provisioning attempt                                     |
+| **Sites**                  | Catalog of all sites the app knows about                                             |
+| **Assignments**            | Grant or revoke site access for individual users                                     |
+| **Provisioning**           | Stand up a brand-new site, plot, census, and quadrat grid through a 4-step wizard. See [Site Provisioning](/ForestGEO/admin/site-provisioning/) |
+| **Provisioning runs**      | History and status of every provisioning attempt                                     |
 
 ---
 
@@ -131,13 +149,13 @@ Key statistics about your census data:
 
 | Metric           | Description                                          |
 | ---------------- | ---------------------------------------------------- |
-| **Old Stems**    | Stems measured in previous censuses being remeasured |
+| **Old Trees**    | Trees carried over from a previous census and remeasured this one |
 | **Multi-Stems**  | Trees with more than one stem                        |
 | **New Recruits** | Stems being measured for the first time              |
 
 ### Data Validity Status
 
-The dashboard shows the status of your Fixed Data:
+The dashboard shows whether your supporting data is ready:
 
 - ✓ **Green checkmark** - Data is present and valid
 - ✗ **Red indicator** - Missing required data
@@ -166,7 +184,7 @@ The application enforces a specific workflow to ensure data integrity:
 ```
 Step 1: Select Site → Plot → Census
               ↓
-Step 2: Add Fixed Data (all four types)
+Step 2: Add supporting data (Stem Codes, Species, Quadrats)
               ↓
 Step 3: Upload/Enter Measurements
               ↓
@@ -199,6 +217,8 @@ If these references don't exist, measurements will fail validation. They are **n
 | View audit trail        | Census Hub → Recent Changes           |
 | Download uploaded files | Census Hub → Uploaded Files           |
 | See all historical data | Census Hub → View All Historical Data |
+| Review failed rows      | Census Hub → View Errors              |
+| Manage a census         | Census Hub → Census Overview          |
 | Configure validations   | Census Hub → Validations              |
 
 ---
