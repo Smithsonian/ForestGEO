@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import '@/tests/mocks/auth-mocks';
 import { __auth } from '@/tests/mocks/auth-mocks';
 import { loadRoute } from '@/tests/mocks/supportstruts';
+import { LOGIN_FAILURE_REASONS } from '@/config/loginfailurereasons';
 
 // If you keep shared types here, fine; otherwise inline:
 type RouteHandler = (req: Request, ctx?: { params?: { nextauth?: string[] } }) => Promise<Response>;
@@ -140,6 +141,22 @@ describe('NextAuth route (App Router compliant)', () => {
     expect(result.user.sites).toEqual([]);
     expect(result.user.allsites).toEqual([]);
     expect(result.user.permissionsUnavailable).toBe(true);
+  });
+
+  it('carries the user-not-provisioned reason through the session callback for a recognized 404', async () => {
+    await loadRoute<Record<string, unknown>>(ROUTE_PATH);
+    const cfg = __auth.getConfig();
+    expect(cfg?.callbacks?.session).toBeTypeOf('function');
+
+    __auth.pushFetchFail(404, { error: 'User not found' });
+
+    const result = await cfg.callbacks.session({
+      session: { user: { email: 'unprovisioned@example.com' } },
+      token: { email: 'unprovisioned@example.com', isE2ETestUser: false }
+    });
+
+    expect(result.user.permissionsUnavailable).toBe(true);
+    expect(result.user.permissionsFailureReason).toBe(LOGIN_FAILURE_REASONS.USER_NOT_PROVISIONED);
   });
 
   it('does NOT mark permissionsUnavailable on the success path', async () => {
