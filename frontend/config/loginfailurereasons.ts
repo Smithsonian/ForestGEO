@@ -8,3 +8,9 @@ export const LOGIN_FAILURE_REASONS = {
 } as const;
 
 export type LoginFailureReason = (typeof LOGIN_FAILURE_REASONS)[keyof typeof LOGIN_FAILURE_REASONS];
+
+// App Insights custom event emitted when the login-failure page is shown.
+// Queryable via: customEvents | where name == 'login-failure-displayed'
+// — the properties carry the reason slug and the exact email claim the
+// session presented, which is the string an admin must put in catalog.users.
+export const LOGIN_FAILURE_EVENT_NAME = 'login-failure-displayed';
