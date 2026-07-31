@@ -32,6 +32,18 @@ interface AuthFunctionResponse {
   allSites: SitesResult[];
 }
 
+// The auth function returns 404 exclusively for "User not found" — an email
+// with no catalog.users row. Surfacing that as a distinct error type lets the
+// session callback tell "you have no account yet" apart from a real outage.
+const HTTP_NOT_FOUND = 404;
+
+export class UserNotProvisionedError extends Error {
+  constructor(email: string) {
+    super(`auth function has no user registered for ${email}`);
+    this.name = 'UserNotProvisionedError';
+  }
+}
+
 // 5 minutes default TTL — short enough that revocation propagates within a
 // reasonable window, long enough that the auth fetch is amortized across many
 // requests. Override with PERMISSIONS_CACHE_TTL_MS for tuning.
@@ -92,6 +104,9 @@ async function fetchAndShape(email: string, fetchImpl: typeof fetch): Promise<Ca
       statusText: response.statusText,
       body: body.slice(0, 500)
     });
+    if (response.status === HTTP_NOT_FOUND) {
+      throw new UserNotProvisionedError(email);
+    }
     throw new Error(`auth function poll failed (${response.status})`);
   }
   const data = (await response.json()) as AuthFunctionResponse;

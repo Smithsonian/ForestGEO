@@ -20,6 +20,7 @@ import {
 } from '@/app/contexts/compat-hooks';
 import { useHasHydrated } from '@/config/store/appstore';
 import { DOCUMENTATION_URL, getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
+import { LOGIN_FAILURE_REASONS } from '@/config/loginfailurereasons';
 import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
@@ -224,9 +225,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (session?.user?.permissionsUnavailable) {
-      redirect('/loginfailed?reason=permissions-unavailable');
+      redirect(`/loginfailed?reason=${session.user.permissionsFailureReason ?? LOGIN_FAILURE_REASONS.PERMISSIONS_UNAVAILABLE}`);
     }
-  }, [session?.user?.permissionsUnavailable]);
+  }, [session?.user?.permissionsUnavailable, session?.user?.permissionsFailureReason]);
 
   // Fetch site list after hydration when session exists
   // IMPORTANT: Wait for Zustand hydration before fetching to avoid race conditions

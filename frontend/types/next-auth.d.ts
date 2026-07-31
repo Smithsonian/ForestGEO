@@ -1,6 +1,7 @@
 import 'next-auth';
 import { Profile } from 'next-auth';
 import { UserAuthRoles } from '@/config/macros';
+import { LoginFailureReason } from '@/config/loginfailurereasons';
 import { SitesRDS } from '@/lib/db/definitions/zones';
 
 declare module 'next-auth' {
@@ -19,6 +20,10 @@ declare module 'next-auth' {
        *  from the auth function (transient failure). The hub layout treats
        *  this as fail-closed and redirects instead of rendering a broken UI. */
       permissionsUnavailable?: boolean;
+      /** Why permissions failed: distinguishes a login with no catalog.users
+       *  row (auth function 404 — retrying can never succeed) from a transient
+       *  outage, so the login-failure page can show actionable guidance. */
+      permissionsFailureReason?: LoginFailureReason;
     };
   }
 

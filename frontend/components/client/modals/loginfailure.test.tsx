@@ -79,6 +79,20 @@ describe('LoginFailed - Functional Tests', () => {
       expect(screen.queryByText(/permissions-unavailable/i)).not.toBeInTheDocument();
     });
 
+    it('MUST display actionable non-transient message for user-not-provisioned slug', () => {
+      mockUseSearchParams.mockReturnValue({
+        get: vi.fn().mockReturnValue('user-not-provisioned')
+      });
+
+      render(<LoginFailed />);
+
+      expect(screen.getByText(/no forestgeo account has been set up/i)).toBeInTheDocument();
+      // Must NOT show the transient-outage message — an unprovisioned user
+      // retrying forever was exactly the bug this slug exists to fix.
+      expect(screen.queryByText(/could not reach the authentication service/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/user-not-provisioned/i)).not.toBeInTheDocument();
+    });
+
     it('MUST fall through to default message for unknown reason slug', () => {
       mockUseSearchParams.mockReturnValue({
         get: vi.fn().mockReturnValue('some-unmapped-slug')

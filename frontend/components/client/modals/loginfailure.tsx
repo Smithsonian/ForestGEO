@@ -4,11 +4,14 @@ import { Button, Stack, Typography } from '@mui/joy';
 import { signOut } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
 import ailogger from '@/ailogger';
+import { LOGIN_FAILURE_REASONS } from '@/config/loginfailurereasons';
 
 // Map known reason slugs to user-facing messages. Unknown slugs fall through
 // to a generic "contact administrator" message — never expose the raw slug.
 const REASON_MESSAGES: Record<string, string> = {
-  'permissions-unavailable': 'We could not reach the authentication service. This is usually temporary — please try again in a moment.'
+  [LOGIN_FAILURE_REASONS.PERMISSIONS_UNAVAILABLE]: 'We could not reach the authentication service. This is usually temporary — please try again in a moment.',
+  [LOGIN_FAILURE_REASONS.USER_NOT_PROVISIONED]:
+    'Your Microsoft sign-in worked, but no ForestGEO account has been set up for it yet. Retrying will not help — please ask a ForestGEO administrator to add your account.'
 };
 
 const DEFAULT_MESSAGE = 'Login failure triggered without reason. Please speak to an administrator.';
