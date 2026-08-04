@@ -254,20 +254,33 @@ export async function runSweepTick(catalogPool: Pool, deps: SweepDeps = defaultS
  * no-op (globalThis sentinel). The interval is unref()d so it never keeps the
  * process alive on its own.
  *
+ * Takes a pool RESOLVER, not a pool: the PoolMonitor's inactivity shutdown ends
+ * the underlying mysql2 pool after an idle hour, so a pool captured at process
+ * startup eventually goes permanently dead and every tick fails with "Pool is
+ * closed." (which is exactly what happened for days before 2026-08-04).
+ * Resolving per tick hands each pass a pool that is open at that moment.
+ *
  * Passes never stack: the in-flight guard in runSweepTick skips a tick while a
  * previous pass is still resolving. Job EXECUTIONS are bounded separately, by
  * MAX_CONCURRENT_JOB_EXECUTIONS, because a pass no longer waits for them.
  */
-export function startUploadJobSweeper(catalogPool: Pool): void {
+export function startUploadJobSweeper(getCatalogPool: () => Promise<Pool>): void {
   const sweeperGlobal = globalThis as SweeperGlobal;
   if (sweeperGlobal[SWEEPER_SENTINEL]) return;
 
   const interval = setInterval(() => {
-    void runSweepTick(catalogPool).then(outcome => {
-      if (outcome.status === 'failed') {
-        ailogger.warn('upload.sweeper.pass_failed', { errorMessage: outcome.error.message });
-      }
-    });
+    void getCatalogPool()
+      .then(catalogPool => runSweepTick(catalogPool))
+      .then(outcome => {
+        if (outcome.status === 'failed') {
+          ailogger.warn('upload.sweeper.pass_failed', { errorMessage: outcome.error.message });
+        }
+      })
+      .catch((error: unknown) => {
+        // The resolver itself failed (pool could not be [re]built) — report it
+        // the same way a failed pass is reported; the next tick retries.
+        ailogger.warn('upload.sweeper.pass_failed', { errorMessage: error instanceof Error ? error.message : String(error) });
+      });
   }, SWEEP_INTERVAL_MS);
   interval.unref?.();
   sweeperGlobal[SWEEPER_SENTINEL] = { interval, inFlight: false, shutdownInstalled: false };

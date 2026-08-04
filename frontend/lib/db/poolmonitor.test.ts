@@ -205,6 +205,68 @@ describe('PoolMonitor', () => {
   });
 
   /**
+   * getUsablePool exists because the inactivity timer closes the pool after an
+   * idle hour, and code that read the raw `pool` property (provisioning routes,
+   * uploadjobs routes, the background-job sweeper) then got a permanently dead
+   * mysql2 Pool: every query threw "Pool is closed." until unrelated
+   * getConnection() traffic happened to heal the monitor. This is the failure
+   * behind the 2026-08-04 "Internal provisioning error" incident.
+   */
+  describe('getUsablePool', () => {
+    async function makeMonitor(pool: ReturnType<typeof createFakePool>) {
+      const { PoolMonitor } = await vi.importActual<typeof import('./poolmonitor')>('./poolmonitor');
+      const monitor = new PoolMonitor({ connectionLimit: 2 }) as unknown as {
+        pool: ReturnType<typeof createFakePool>;
+        poolClosed: boolean;
+        createManagedPool: () => ReturnType<typeof createFakePool>;
+        getUsablePool: () => Promise<unknown>;
+        closeAllConnections: () => Promise<void>;
+        isPoolClosed: () => boolean;
+        reinitializePool: () => Promise<void>;
+      };
+      monitor.pool = pool;
+      monitor.poolClosed = false;
+      return monitor;
+    }
+
+    it('returns the current pool without reinitializing while the pool is open', async () => {
+      const openPool = createFakePool();
+      const monitor = await makeMonitor(openPool);
+      let reinitializeCalls = 0;
+      const originalReinitialize = monitor.reinitializePool.bind(monitor);
+      monitor.reinitializePool = async () => {
+        reinitializeCalls += 1;
+        await originalReinitialize();
+      };
+
+      const pool = await monitor.getUsablePool();
+
+      expect(pool).toBe(openPool);
+      expect(reinitializeCalls).toBe(0);
+      await monitor.closeAllConnections();
+    });
+
+    it('replaces a pool closed by the graceful shutdown instead of handing out the dead one', async () => {
+      const deadPool = createFakePool();
+      const freshPool = createFakePool();
+      const monitor = await makeMonitor(deadPool);
+      monitor.createManagedPool = () => freshPool;
+
+      // The inactivity timer's graceful shutdown runs exactly this.
+      await monitor.closeAllConnections();
+      expect(monitor.isPoolClosed()).toBe(true);
+      expect(deadPool.end).toHaveBeenCalledTimes(1);
+
+      const pool = await monitor.getUsablePool();
+
+      expect(pool, 'a caller must never receive the ended mysql2 pool').toBe(freshPool);
+      expect(monitor.isPoolClosed()).toBe(false);
+
+      await monitor.closeAllConnections();
+    });
+  });
+
+  /**
    * tryAcquireConnection exists for the out-of-band `KILL QUERY` that aborts a
    * timed-out statement. Two hazards it must not have:
    *

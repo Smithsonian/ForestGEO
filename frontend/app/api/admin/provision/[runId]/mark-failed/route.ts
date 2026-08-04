@@ -39,7 +39,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
 
   let catalogPool;
   try {
-    catalogPool = getPoolMonitorInstance().pool;
+    catalogPool = await getPoolMonitorInstance().getUsablePool();
   } catch (err) {
     return provisioningErrorResponse(new ProvisioningError('Database unavailable', 'database_unavailable', { cause: err }));
   }

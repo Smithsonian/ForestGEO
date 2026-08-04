@@ -117,7 +117,7 @@ export interface WorkerDeps {
  * the job row through the fenced repository writes.
  */
 export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promise<void> {
-  const catalogPool = getPoolMonitorInstance().pool;
+  const catalogPool = await getPoolMonitorInstance().getUsablePool();
   // REQUIRED claim invariant (see claimBackgroundJobForWorker): worker IDs must
   // be unique per claim attempt or the confirm-then-throw fencing is racy.
   const workerID = `${process.pid}:${randomUUID()}`;

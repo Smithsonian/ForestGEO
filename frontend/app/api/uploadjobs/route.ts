@@ -408,7 +408,7 @@ async function postHandler(request: NextRequest) {
   const blobOwnershipError = await rejectUnownedBlobReferences(input, userID, authorizedContainer);
   if (blobOwnershipError) return blobOwnershipError;
 
-  const catalogPool = getPoolMonitorInstance().pool;
+  const catalogPool = await getPoolMonitorInstance().getUsablePool();
   let job;
   try {
     job = await createUploadBackgroundJob(
@@ -480,7 +480,7 @@ async function getHandler(request: NextRequest) {
   const activeOnly = rawActiveOnly !== 'false';
   const includeAllUsers = rawAllUsers === 'true' && isPrivilegedSession(session!);
 
-  const jobs = await listBackgroundJobs(getPoolMonitorInstance().pool, {
+  const jobs = await listBackgroundJobs(await getPoolMonitorInstance().getUsablePool(), {
     userID,
     includeAllUsers,
     activeOnly,

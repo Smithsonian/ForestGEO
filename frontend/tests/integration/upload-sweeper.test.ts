@@ -23,6 +23,7 @@ import {
   stopUploadJobSweeper,
   sweepOnce,
   SWEEP_DISPATCH_LIMIT,
+  SWEEP_INTERVAL_MS,
   type SweepDeps
 } from '@/lib/background-jobs/sweeper';
 import type { CreateUploadJobInput } from '@/lib/background-jobs/types';
@@ -457,13 +458,13 @@ describe('startUploadJobSweeper / stopUploadJobSweeper — sentinel lifecycle', 
 
     expect(sweeperGlobal[SWEEPER_SENTINEL]).toBeUndefined();
 
-    startUploadJobSweeper(pool);
+    startUploadJobSweeper(async () => pool);
     const firstSentinel = sweeperGlobal[SWEEPER_SENTINEL];
     console.log(`[sentinel] after first start: sentinel present=${firstSentinel !== undefined}, inFlight=${firstSentinel?.inFlight}`);
     expect(firstSentinel).toBeDefined();
     expect(firstSentinel?.inFlight).toBe(false);
 
-    startUploadJobSweeper(pool);
+    startUploadJobSweeper(async () => pool);
     const secondSentinel = sweeperGlobal[SWEEPER_SENTINEL];
     console.log(`[sentinel] after double start: same object=${secondSentinel === firstSentinel}`);
     expect(secondSentinel).toBe(firstSentinel);
@@ -474,6 +475,45 @@ describe('startUploadJobSweeper / stopUploadJobSweeper — sentinel lifecycle', 
 
     // Stop is idempotent.
     expect(() => stopUploadJobSweeper()).not.toThrow();
+  });
+
+  /**
+   * Regression for the 2026-08-04 incident: the sweeper used to CAPTURE the
+   * catalog pool at process startup, so once the PoolMonitor's idle-hour
+   * shutdown ended that pool object, every subsequent tick failed with
+   * "Pool is closed." forever — even after other traffic rebuilt the pool.
+   * The interval must instead consult the resolver on EVERY tick, and a tick
+   * whose resolution fails must not kill the interval.
+   */
+  it('consults the pool resolver on every tick and survives a failed resolution', async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(ailogger, 'warn').mockImplementation(() => {});
+    const TICK_ERRORS = ['pool closed at tick 1', 'pool closed at tick 2'];
+    let resolverCalls = 0;
+
+    try {
+      startUploadJobSweeper(async () => {
+        const tickError = TICK_ERRORS[resolverCalls] ?? 'unexpected extra tick';
+        resolverCalls += 1;
+        throw new Error(tickError);
+      });
+
+      await vi.advanceTimersByTimeAsync(SWEEP_INTERVAL_MS);
+      console.log(`[resolver] after tick 1: resolverCalls=${resolverCalls}`);
+      expect(resolverCalls).toBe(1);
+      expect(warnSpy).toHaveBeenCalledWith('upload.sweeper.pass_failed', { errorMessage: TICK_ERRORS[0] });
+
+      // A captured-pool sweeper would never ask again; a failed tick must not
+      // stop the interval from re-resolving on the next one.
+      await vi.advanceTimersByTimeAsync(SWEEP_INTERVAL_MS);
+      console.log(`[resolver] after tick 2: resolverCalls=${resolverCalls}`);
+      expect(resolverCalls).toBe(2);
+      expect(warnSpy).toHaveBeenCalledWith('upload.sweeper.pass_failed', { errorMessage: TICK_ERRORS[1] });
+    } finally {
+      stopUploadJobSweeper();
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -549,7 +589,7 @@ describe('runSweepTick — in-flight guard', () => {
     console.log(`[in-flight] holding all ${heldConnections.length} pooled connections`);
 
     // Start the sweeper so the sentinel exists and runSweepTick can read inFlight.
-    startUploadJobSweeper(pool);
+    startUploadJobSweeper(async () => pool);
     const sweeperGlobal = globalThis as SweeperGlobal;
 
     const { deps: blockedDeps, calls: blockedCalls } = makeDispatchStub();

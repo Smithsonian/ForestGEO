@@ -47,7 +47,7 @@ async function getHandler(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: 'Missing or invalid parameters' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const job = await getBackgroundJobWithDetails(getPoolMonitorInstance().pool, parsedJobID);
+  const job = await getBackgroundJobWithDetails(await getPoolMonitorInstance().getUsablePool(), parsedJobID);
   if (!job || !jobBelongsToAuthorizedSchema(job, schema)) {
     return NextResponse.json({ error: 'Upload job not found' }, { status: HTTPResponses.NOT_FOUND });
   }
@@ -74,7 +74,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: 'Missing or invalid parameters' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const job = await getBackgroundJobWithDetails(getPoolMonitorInstance().pool, parsedJobID);
+  const job = await getBackgroundJobWithDetails(await getPoolMonitorInstance().getUsablePool(), parsedJobID);
   if (!job || !jobBelongsToAuthorizedSchema(job, schema)) {
     return NextResponse.json({ error: 'Upload job not found' }, { status: HTTPResponses.NOT_FOUND });
   }
@@ -102,7 +102,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
   }
 
   const userID = getSessionUserId(session!) ?? 'unknown';
-  const catalogPool = getPoolMonitorInstance().pool;
+  const catalogPool = await getPoolMonitorInstance().getUsablePool();
 
   // queued/waiting_retry jobs have no worker and are cancelled directly.
   const cancelled = await cancelBackgroundJob(catalogPool, parsedJobID, userID);

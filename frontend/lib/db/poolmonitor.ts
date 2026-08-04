@@ -39,6 +39,23 @@ export class PoolMonitor {
     this.resetInactivityTimer();
   }
 
+  /**
+   * Hand out a pool that is guaranteed open at the moment of the call.
+   *
+   * The inactivity timer closes the pool after an idle hour, and only
+   * {@link getConnection} used to recover from that — code reading the raw
+   * `pool` property got a permanently dead mysql2 Pool and every query threw
+   * "Pool is closed." until unrelated traffic happened to heal the monitor.
+   * Callers must resolve this per use and never cache the returned pool across
+   * idle periods, or they recreate that failure mode.
+   */
+  public async getUsablePool(): Promise<Pool> {
+    if (this.poolClosed) {
+      await this.reinitializePool();
+    }
+    return this.pool;
+  }
+
   public async getConnection(): Promise<PoolConnection> {
     let connection: PoolConnection | null = null;
     let connectionAcquired = false;

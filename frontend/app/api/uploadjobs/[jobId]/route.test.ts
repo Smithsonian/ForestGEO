@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   requireSession: vi.fn(() => null),
   getSessionUserId: vi.fn(() => 'mason@example.com'),
-  getPoolMonitorInstance: vi.fn(() => ({ pool: 'catalog-pool' })),
+  getPoolMonitorInstance: vi.fn(() => ({ getUsablePool: vi.fn(async () => 'catalog-pool') })),
   getBackgroundJobWithDetails: vi.fn(),
   cancelBackgroundJob: vi.fn(),
   requestBackgroundJobCancel: vi.fn(),

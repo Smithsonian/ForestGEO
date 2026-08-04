@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   isValidSchema: vi.fn(() => true),
   assertCanEditMeasurementScope: vi.fn(async () => ({ plotCensusNumber: 2 })),
   getContainerName: vi.fn(() => 'forestgeo-testing-storage'),
-  getPoolMonitorInstance: vi.fn(() => ({ pool: 'catalog-pool' })),
+  getPoolMonitorInstance: vi.fn(() => ({ getUsablePool: vi.fn(async () => 'catalog-pool') })),
   createUploadBackgroundJob: vi.fn(),
   listBackgroundJobs: vi.fn(),
   isAsyncUploadEnabledFor: vi.fn(() => true),
