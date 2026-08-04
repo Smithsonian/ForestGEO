@@ -59,5 +59,13 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-07-29-04-scope-postvalidation-last-run',
     file: 'unified-measurements-migrations/61_scope_postvalidation_last_run.sql'
+  },
+  {
+    id: '2026-08-04-01-widen-plot-global-coordinates',
+    file: 'schema-contract-repair/2026-08-04-01-widen-plot-global-coordinates.sql'
+  },
+  {
+    id: '2026-08-04-02-add-plot-coordinate-epsg',
+    file: 'schema-contract-repair/2026-08-04-02-add-plot-coordinate-epsg.sql'
   }
 ] as const;

@@ -13,7 +13,7 @@ const QUERIES_FILE = () => path.join(process.cwd(), 'db/sql/corequeries.sql');
  * DDL is not fully idempotent, so a procedure-only change must not make
  * initTablesStep replay tablestructures.sql against an existing schema.
  */
-const SCHEMA_VERSION = '2026-05-13';
+const SCHEMA_VERSION = '2026-08-04';
 const PROCEDURES_SCHEMA_VERSION = '2026-07-30';
 const META_TABLE = '_provisioning_meta';
 

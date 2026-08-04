@@ -7,6 +7,34 @@ import type { ProvisioningInput } from './types';
 const DimensionUnitSchema = z.enum(unitSelectionOptions);
 const AreaUnitSchema = z.enum(areaSelectionOptions);
 
+/**
+ * plots.GlobalX/Y/Z are DECIMAL(15,6); this is that column's exact ceiling. Values are
+ * linear coordinates in the plot's coordinate unit (projected meters such as UTM, not
+ * degrees-minutes-seconds) — the cross-census location validations add LocalX/StartX
+ * directly onto GlobalX. The bound exists so a too-large origin fails here with an
+ * explanation instead of as a MySQL out-of-range error mid-provisioning (run 5,
+ * forestgeo_ldw, 2026-08-04).
+ */
+export const GLOBAL_COORDINATE_ABS_MAX = 999_999_999.999999;
+
+/** IOGP assigns EPSG codes in this range; anything outside it is a typo, not a CRS. */
+export const EPSG_CODE_MIN = 1024;
+export const EPSG_CODE_MAX = 32767;
+
+function globalCoordinateSchema(axis: 'X' | 'Y' | 'Z') {
+  const message =
+    `Global ${axis} must be a plain linear coordinate in the plot's coordinate unit ` +
+    `(e.g. UTM meters, like a UTM ${axis === 'Y' ? 'northing' : axis === 'X' ? 'easting' : 'elevation'}), ` +
+    `with absolute value at most ${GLOBAL_COORDINATE_ABS_MAX}. Degrees-minutes-seconds is not supported.`;
+  return z.number({ error: message }).finite(message).min(-GLOBAL_COORDINATE_ABS_MAX, message).max(GLOBAL_COORDINATE_ABS_MAX, message);
+}
+
+const EpsgCodeSchema = z
+  .number()
+  .int()
+  .min(EPSG_CODE_MIN, `EPSG code must be between ${EPSG_CODE_MIN} and ${EPSG_CODE_MAX} (e.g. 26916 = NAD83 / UTM zone 16N).`)
+  .max(EPSG_CODE_MAX, `EPSG code must be between ${EPSG_CODE_MIN} and ${EPSG_CODE_MAX} (e.g. 26916 = NAD83 / UTM zone 16N).`);
+
 const LayoutSignatureSchema = z.string().regex(/^quadrat-layout-v1-[0-9a-f]{16}$/);
 const QuadratOverlapAcknowledgmentSchema = z.object({
   statement: z.literal(QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT),
@@ -30,9 +58,10 @@ export const ProvisioningPlotSchema = z.object({
   dimensionX: z.number().positive(),
   dimensionY: z.number().positive(),
   area: z.number().positive(),
-  globalX: z.number(),
-  globalY: z.number(),
-  globalZ: z.number(),
+  globalX: globalCoordinateSchema('X'),
+  globalY: globalCoordinateSchema('Y'),
+  globalZ: globalCoordinateSchema('Z'),
+  globalCoordinatesEPSG: EpsgCodeSchema.optional(),
   plotShape: z.enum(['square', 'rectangular', 'irregular']),
   description: z.string(),
   defaultDimensionUnits: DimensionUnitSchema,

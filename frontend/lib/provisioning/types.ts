@@ -88,6 +88,8 @@ export interface ProvisioningPlotInput {
   globalX: number;
   globalY: number;
   globalZ: number;
+  /** EPSG identifier of the system globalX/Y/Z are expressed in (e.g. 26916 = NAD83 / UTM zone 16N). Absent when not recorded. */
+  globalCoordinatesEPSG?: number;
   plotShape: 'square' | 'rectangular' | 'irregular';
   description: string;
   defaultDimensionUnits: DimensionUnit;
