@@ -65,6 +65,8 @@ export interface PlotRDS {
   globalX?: number;
   globalY?: number;
   globalZ?: number;
+  /** EPSG identifier of the system globalX/Y/Z are expressed in; undefined/null = not recorded. */
+  globalCoordinatesEPSG?: number | null;
   // default units
   defaultDimensionUnits?: string;
   defaultCoordinateUnits?: string;

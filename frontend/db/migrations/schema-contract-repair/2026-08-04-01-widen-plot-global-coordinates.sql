@@ -4,8 +4,9 @@
 -- Provisioning run 5 (forestgeo_ldw, 2026-08-04) failed at insert_plot with
 -- "Out of range value for column 'GlobalY' at row 1". The admin entered the plot
 -- origin as NAD83 / UTM zone 16N meters (567225 E, 4343000 N) — the correct kind
--- of value, since the cross-census location validations do linear arithmetic on
--- these columns (LocalX + StartX + GlobalX) — but a UTM northing cannot fit
+-- of value, since the 'All trees outside plot limits' post-validation query
+-- (seeded by reinsertdefaultpostvalidations) does linear arithmetic on these
+-- columns (LocalX + StartX + GlobalX) — but a UTM northing cannot fit
 -- DECIMAL(12,6)'s ±999,999.999999 ceiling, and viewfulltable's DECIMAL(10,6)
 -- copies cannot even hold a UTM easting.
 --

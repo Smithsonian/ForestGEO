@@ -206,6 +206,14 @@ describe('PlotForm', () => {
     cy.contains('Must be an integer between 1024 and 32767.').should('be.visible');
   });
 
+  it('rejects a geographic EPSG code (4326) with a pointer to projected systems', () => {
+    const onChangeSpy = cy.stub().as('onChangeSpy');
+    cy.mount(<StatefulPlotForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
+    cy.get('[aria-label="Coordinate system EPSG code"]').focus().type('4326').blur();
+    cy.contains('is a geographic (latitude/longitude) system').should('be.visible');
+    cy.contains('26916').should('be.visible');
+  });
+
   it('shows dimensionX error for zero value when showErrors is true', () => {
     const onChange = cy.stub();
     const onAreaModeChange = cy.stub();

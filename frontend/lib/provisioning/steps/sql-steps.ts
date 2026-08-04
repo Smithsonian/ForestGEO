@@ -12,9 +12,12 @@ const QUERIES_FILE = () => path.join(process.cwd(), 'db/sql/corequeries.sql');
  * Table/validation and procedure stamps are intentionally independent. Table
  * DDL is not fully idempotent, so a procedure-only change must not make
  * initTablesStep replay tablestructures.sql against an existing schema.
+ * _provisioning_meta keys rows on the version string, so when both are bumped
+ * for the same change the two constants must still differ or the stamps
+ * collapse into one row.
  */
 const SCHEMA_VERSION = '2026-08-04';
-const PROCEDURES_SCHEMA_VERSION = '2026-07-30';
+const PROCEDURES_SCHEMA_VERSION = '2026-08-04-procs';
 const META_TABLE = '_provisioning_meta';
 
 const VALIDATIONS_TABLE = 'sitespecificvalidations';

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Button, FormControl, FormHelperText, FormLabel, Input, Option, Select, Stack, Textarea, Typography } from '@mui/joy';
 import type { ProvisioningPlotInput } from '@/lib/provisioning/types';
 import type { AreaMode } from '@/lib/provisioning/area';
-import { EPSG_CODE_MAX, EPSG_CODE_MIN, GLOBAL_COORDINATE_ABS_MAX } from '@/lib/provisioning/input-schema';
+import { EPSG_CODE_MAX, EPSG_CODE_MIN, GEOGRAPHIC_EPSG_CODES, GLOBAL_COORDINATE_ABS_MAX } from '@/lib/provisioning/input-schema';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 
 const PLOT_SHAPE_OPTIONS: Array<{ value: ProvisioningPlotInput['plotShape']; label: string }> = [
@@ -36,9 +36,17 @@ function isGlobalCoordinateOutOfRange(n: number): boolean {
   return !Number.isFinite(n) || Math.abs(n) > GLOBAL_COORDINATE_ABS_MAX;
 }
 
-function isEpsgCodeInvalid(code: number | undefined): boolean {
+function isEpsgCodeOutOfRange(code: number | undefined): boolean {
   if (code === undefined) return false;
   return !Number.isInteger(code) || code < EPSG_CODE_MIN || code > EPSG_CODE_MAX;
+}
+
+function isEpsgCodeGeographic(code: number | undefined): boolean {
+  return code !== undefined && GEOGRAPHIC_EPSG_CODES.has(code);
+}
+
+function isEpsgCodeInvalid(code: number | undefined): boolean {
+  return isEpsgCodeOutOfRange(code) || isEpsgCodeGeographic(code);
 }
 
 // A numeric draft that is empty, a bare '-', or otherwise unparsable is mid-edit
@@ -299,7 +307,12 @@ export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, 
           onBlur={() => markTouched('globalCoordinatesEPSG')}
           slotProps={{ input: { min: EPSG_CODE_MIN, max: EPSG_CODE_MAX, step: 1 } }}
         />
-        {shouldShowError('globalCoordinatesEPSG') && isEpsgCodeInvalid(value.globalCoordinatesEPSG) ? (
+        {shouldShowError('globalCoordinatesEPSG') && isEpsgCodeGeographic(value.globalCoordinatesEPSG) ? (
+          <FormHelperText>
+            EPSG:{value.globalCoordinatesEPSG} is a geographic (latitude/longitude) system — enter the origin in a projected system instead, e.g. 26916 = NAD83
+            / UTM zone 16N.
+          </FormHelperText>
+        ) : shouldShowError('globalCoordinatesEPSG') && isEpsgCodeOutOfRange(value.globalCoordinatesEPSG) ? (
           <FormHelperText>
             Must be an integer between {EPSG_CODE_MIN} and {EPSG_CODE_MAX}.
           </FormHelperText>

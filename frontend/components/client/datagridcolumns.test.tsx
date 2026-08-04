@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { ViewFullTableGridColumns, VIEW_FULL_TABLE_COLUMN_WIDTHS } from './datagridcolumns';
 
-// The archive "All Historical Data" grid formerly gave every one of its 53 columns a
+// The archive "All Historical Data" grid formerly gave every one of its columns a
 // uniform `flex: 0.3` with no minWidth, which starved headers down to one or two visible
 // characters (M…, Pl…). These tests lock in that every column now carries a per-type width
-// preset with a legibility floor (minWidth).
+// preset with a legibility floor (minWidth). 54 = the original 53 + plotGlobalCoordinatesEPSG
+// (added alongside viewfulltable.PlotGlobalCoordinatesEPSG, 2026-08-04).
 const FORMER_UNIFORM_FLEX = 0.3;
-const EXPECTED_COLUMN_COUNT = 53;
+const EXPECTED_COLUMN_COUNT = 54;
 const SMALLEST_PRESET_MIN_WIDTH = VIEW_FULL_TABLE_COLUMN_WIDTHS.code.minWidth;
 
 const presetList = Object.values(VIEW_FULL_TABLE_COLUMN_WIDTHS);

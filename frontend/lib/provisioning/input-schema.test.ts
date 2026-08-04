@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   EPSG_CODE_MAX,
   EPSG_CODE_MIN,
+  GEOGRAPHIC_EPSG_CODES,
   GLOBAL_COORDINATE_ABS_MAX,
   ProvisioningInputSchema,
   ProvisioningPlotSchema,
@@ -141,6 +142,18 @@ describe('ProvisioningPlotSchema global coordinates', () => {
     expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, globalCoordinatesEPSG: EPSG_CODE_MIN - 1 }).success).toBe(false);
     expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, globalCoordinatesEPSG: EPSG_CODE_MAX + 1 }).success).toBe(false);
     expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, globalCoordinatesEPSG: 26916.5 }).success).toBe(false);
+  });
+
+  it('rejects geographic (lat/lon degree) EPSG codes for provisioning input, pointing at projected systems', () => {
+    for (const geographicCode of GEOGRAPHIC_EPSG_CODES) {
+      const result = ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, globalCoordinatesEPSG: geographicCode });
+      expect(result.success, `EPSG:${geographicCode} should be rejected`).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find(i => i.path.join('.') === 'globalCoordinatesEPSG');
+        expect(issue?.message).toContain('geographic');
+        expect(issue?.message).toContain('projected');
+      }
+    }
   });
 });
 

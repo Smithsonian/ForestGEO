@@ -83,7 +83,7 @@ describe('SQL-file steps', () => {
     );
     expect(rows).toHaveLength(2);
     const schemaRow = rows.find((row: any) => row.SchemaVersion === '2026-08-04');
-    const proceduresRow = rows.find((row: any) => row.SchemaVersion === '2026-07-30');
+    const proceduresRow = rows.find((row: any) => row.SchemaVersion === '2026-08-04-procs');
     expect(schemaRow.TablesDeployedAt).not.toBeNull();
     expect(schemaRow.ValidationsDeployedAt).not.toBeNull();
     expect(proceduresRow.ProceduresDeployedAt).not.toBeNull();

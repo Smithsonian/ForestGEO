@@ -130,7 +130,7 @@ describe('widen-plot-global-coordinates migration on a legacy narrow schema', ()
     await connection.end();
   });
 
-  it('widens all six columns to DECIMAL(15,6) and adds GlobalCoordinatesEPSG', async () => {
+  it('widens all six columns to DECIMAL(15,6) and adds both EPSG columns', async () => {
     await executeMigrationFile(connection, WIDEN_MIGRATION_PATH);
     await executeMigrationFile(connection, EPSG_MIGRATION_PATH);
 
@@ -142,11 +142,17 @@ describe('widen-plot-global-coordinates migration on a legacy narrow schema', ()
       GlobalCoordinatesEPSG: EPSG_COLUMN_TYPE
     });
 
-    const vftTypes = await readColumnTypes(connection, MIGRATION_SCHEMA, 'viewfulltable', ['PlotGlobalX', 'PlotGlobalY', 'PlotGlobalZ']);
+    const vftTypes = await readColumnTypes(connection, MIGRATION_SCHEMA, 'viewfulltable', [
+      'PlotGlobalX',
+      'PlotGlobalY',
+      'PlotGlobalZ',
+      'PlotGlobalCoordinatesEPSG'
+    ]);
     expect(vftTypes).toEqual({
       PlotGlobalX: WIDENED_COLUMN_TYPE,
       PlotGlobalY: WIDENED_COLUMN_TYPE,
-      PlotGlobalZ: WIDENED_COLUMN_TYPE
+      PlotGlobalZ: WIDENED_COLUMN_TYPE,
+      PlotGlobalCoordinatesEPSG: EPSG_COLUMN_TYPE
     });
   });
 
@@ -215,10 +221,13 @@ describe('provisioning a site whose origin is projected meters (forestgeo_ldw re
     ]);
     await catalogPool.query(`CALL \`${PROVISION_SCHEMA}\`.RefreshViewFullTable()`);
 
-    const [rows]: any = await catalogPool.query(`SELECT PlotGlobalX, PlotGlobalY, PlotGlobalZ FROM \`${PROVISION_SCHEMA}\`.viewfulltable`);
+    const [rows]: any = await catalogPool.query(
+      `SELECT PlotGlobalX, PlotGlobalY, PlotGlobalZ, PlotGlobalCoordinatesEPSG FROM \`${PROVISION_SCHEMA}\`.viewfulltable`
+    );
     expect(rows).toHaveLength(1);
     expect(Number(rows[0].PlotGlobalX)).toBe(UTM_EASTING);
     expect(Number(rows[0].PlotGlobalY)).toBe(UTM_NORTHING);
     expect(Number(rows[0].PlotGlobalZ)).toBe(ELEVATION_M);
+    expect(rows[0].PlotGlobalCoordinatesEPSG).toBe(NAD83_UTM_ZONE_16N_EPSG);
   });
 });

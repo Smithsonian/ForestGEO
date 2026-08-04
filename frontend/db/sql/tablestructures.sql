@@ -1101,6 +1101,7 @@ create table if not exists viewfulltable
     PlotGlobalX                decimal(15, 6)                                                      null,
     PlotGlobalY                decimal(15, 6)                                                      null,
     PlotGlobalZ                decimal(15, 6)                                                      null,
+    PlotGlobalCoordinatesEPSG  int unsigned                                                        null,
     PlotShape                  varchar(255)                                                        null,
     PlotDescription            varchar(255)                                                        null,
     PlotDefaultDimensionUnits  enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  not null,

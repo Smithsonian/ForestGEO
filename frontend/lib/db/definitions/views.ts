@@ -145,6 +145,7 @@ export interface ViewFullTableRDS {
   plotGlobalX?: number;
   plotGlobalY?: number;
   plotGlobalZ?: number;
+  plotGlobalCoordinatesEPSG?: number;
   plotShape?: string;
   plotDescription?: string;
   plotDefaultDimensionUnits?: string;

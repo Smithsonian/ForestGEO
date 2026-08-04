@@ -41,6 +41,7 @@ export default function ViewFullTableDataGrid() {
     plotGlobalX: 0,
     plotGlobalY: 0,
     plotGlobalZ: 0,
+    plotGlobalCoordinatesEPSG: 0,
     plotShape: '',
     plotDescription: '',
     plotDefaultDimensionUnits: '',

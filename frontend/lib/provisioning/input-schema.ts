@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
+import { areaSelectionOptions, EPSG_CODE_MAX, EPSG_CODE_MIN, unitSelectionOptions } from '@/config/macros';
 import { estimateGridQuadratCount, MAX_GENERATED_QUADRATS } from './grid-generator';
 import { acknowledgmentCoversLayout, QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, validateQuadratCollectionDetailed } from './quadrat-collection-validation';
 import type { ProvisioningInput } from './types';
@@ -10,16 +10,30 @@ const AreaUnitSchema = z.enum(areaSelectionOptions);
 /**
  * plots.GlobalX/Y/Z are DECIMAL(15,6); this is that column's exact ceiling. Values are
  * linear coordinates in the plot's coordinate unit (projected meters such as UTM, not
- * degrees-minutes-seconds) — the cross-census location validations add LocalX/StartX
- * directly onto GlobalX. The bound exists so a too-large origin fails here with an
- * explanation instead of as a MySQL out-of-range error mid-provisioning (run 5,
- * forestgeo_ldw, 2026-08-04).
+ * degrees-minutes-seconds) — the 'All trees outside plot limits' post-validation query
+ * (seeded by reinsertdefaultpostvalidations) adds LocalX/StartX directly onto GlobalX.
+ * The bound exists so a too-large origin fails here with an explanation instead of as
+ * a MySQL out-of-range error mid-provisioning (run 5, forestgeo_ldw, 2026-08-04).
  */
 export const GLOBAL_COORDINATE_ABS_MAX = 999_999_999.999999;
 
-/** IOGP assigns EPSG codes in this range; anything outside it is a typo, not a CRS. */
-export const EPSG_CODE_MIN = 1024;
-export const EPSG_CODE_MAX = 32767;
+export { EPSG_CODE_MIN, EPSG_CODE_MAX };
+
+/**
+ * The units/EPSG contract: DefaultCoordinateUnits describes the linear unit the
+ * arithmetic above consumes, and the EPSG code records which system the numbers came
+ * from. Provisioning input must be a LINEAR system, so the geographic (lat/lon degree)
+ * codes an admin is likely to type are rejected here with a pointer to their projected
+ * counterparts. This is a common-codes guard, not a registry: the app cannot classify
+ * arbitrary EPSG codes as geographic vs projected. Legacy rows whose coordinates
+ * already ARE degrees (e.g. forestgeo_niobrara) are deliberately still describable —
+ * the plot-edit path does not apply this rejection, only new provisioning input does.
+ */
+export const GEOGRAPHIC_EPSG_CODES: ReadonlySet<number> = new Set([
+  4326, // WGS 84
+  4269, // NAD83
+  4267 // NAD27
+]);
 
 function globalCoordinateSchema(axis: 'X' | 'Y' | 'Z') {
   const message =
@@ -33,7 +47,12 @@ const EpsgCodeSchema = z
   .number()
   .int()
   .min(EPSG_CODE_MIN, `EPSG code must be between ${EPSG_CODE_MIN} and ${EPSG_CODE_MAX} (e.g. 26916 = NAD83 / UTM zone 16N).`)
-  .max(EPSG_CODE_MAX, `EPSG code must be between ${EPSG_CODE_MIN} and ${EPSG_CODE_MAX} (e.g. 26916 = NAD83 / UTM zone 16N).`);
+  .max(EPSG_CODE_MAX, `EPSG code must be between ${EPSG_CODE_MIN} and ${EPSG_CODE_MAX} (e.g. 26916 = NAD83 / UTM zone 16N).`)
+  .refine(code => !GEOGRAPHIC_EPSG_CODES.has(code), {
+    message:
+      'This EPSG code is a geographic (latitude/longitude degree) system, but the plot origin must be entered as linear coordinates. ' +
+      'Enter the origin in a projected system and record that EPSG instead (e.g. 26916 = NAD83 / UTM zone 16N).'
+  });
 
 const LayoutSignatureSchema = z.string().regex(/^quadrat-layout-v1-[0-9a-f]{16}$/);
 const QuadratOverlapAcknowledgmentSchema = z.object({
