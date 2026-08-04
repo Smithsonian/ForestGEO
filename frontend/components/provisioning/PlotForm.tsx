@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button, FormControl, FormHelperText, FormLabel, Input, Option, Select, Stack, Textarea, Typography } from '@mui/joy';
 import type { ProvisioningPlotInput } from '@/lib/provisioning/types';
 import type { AreaMode } from '@/lib/provisioning/area';
+import { EPSG_CODE_MAX, EPSG_CODE_MIN, GEOGRAPHIC_EPSG_CODES, GLOBAL_COORDINATE_ABS_MAX } from '@/lib/provisioning/input-schema';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 
 const PLOT_SHAPE_OPTIONS: Array<{ value: ProvisioningPlotInput['plotShape']; label: string }> = [
@@ -29,6 +30,23 @@ interface PlotFormProps {
 
 function isPositiveNumber(n: number): boolean {
   return typeof n === 'number' && !isNaN(n) && n > 0;
+}
+
+function isGlobalCoordinateOutOfRange(n: number): boolean {
+  return !Number.isFinite(n) || Math.abs(n) > GLOBAL_COORDINATE_ABS_MAX;
+}
+
+function isEpsgCodeOutOfRange(code: number | undefined): boolean {
+  if (code === undefined) return false;
+  return !Number.isInteger(code) || code < EPSG_CODE_MIN || code > EPSG_CODE_MAX;
+}
+
+function isEpsgCodeGeographic(code: number | undefined): boolean {
+  return code !== undefined && GEOGRAPHIC_EPSG_CODES.has(code);
+}
+
+function isEpsgCodeInvalid(code: number | undefined): boolean {
+  return isEpsgCodeOutOfRange(code) || isEpsgCodeGeographic(code);
 }
 
 // A numeric draft that is empty, a bare '-', or otherwise unparsable is mid-edit
@@ -87,6 +105,7 @@ export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, 
     globalY: String(value.globalY ?? ''),
     globalZ: String(value.globalZ ?? '')
   }));
+  const [epsgDraft, setEpsgDraft] = useState<string>(String(value.globalCoordinatesEPSG ?? ''));
 
   function handleNumericChange(field: NumericPlotField, raw: string, requestedMode?: AreaMode) {
     setNumericDrafts(prev => ({ ...prev, [field]: raw }));
@@ -94,6 +113,20 @@ export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, 
       return;
     }
     onChange({ ...value, [field]: Number(raw) }, requestedMode);
+  }
+
+  // Unlike the required numeric fields, EPSG is optional: clearing the box must
+  // commit "not recorded" (undefined) rather than keeping the last valid value.
+  function handleEpsgChange(raw: string) {
+    setEpsgDraft(raw);
+    if (raw === '') {
+      onChange({ ...value, globalCoordinatesEPSG: undefined });
+      return;
+    }
+    if (isUncommittedNumericDraft(raw)) {
+      return;
+    }
+    onChange({ ...value, globalCoordinatesEPSG: Number(raw) });
   }
 
   function markTouched(field: keyof PlotValue) {
@@ -208,9 +241,13 @@ export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, 
       </Stack>
 
       <Typography level="title-sm">Global Coordinates</Typography>
+      <Typography level="body-sm">
+        The plot origin as plain linear coordinates in the coordinate unit below — for example UTM easting/northing in meters. Degrees-minutes-seconds is not
+        supported.
+      </Typography>
       <Stack direction="row" spacing={2}>
-        <FormControl sx={{ flex: 1 }}>
-          <FormLabel htmlFor="global-x-input">Global X</FormLabel>
+        <FormControl sx={{ flex: 1 }} error={shouldShowError('globalX') && isGlobalCoordinateOutOfRange(value.globalX)}>
+          <FormLabel htmlFor="global-x-input">Global X ({value.defaultCoordinateUnits})</FormLabel>
           <Input
             id="global-x-input"
             aria-label="Global X"
@@ -220,10 +257,13 @@ export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, 
             onBlur={() => markTouched('globalX')}
             slotProps={{ input: { step: 0.0001 } }}
           />
+          {shouldShowError('globalX') && isGlobalCoordinateOutOfRange(value.globalX) && (
+            <FormHelperText>Must be a finite coordinate with absolute value at most {GLOBAL_COORDINATE_ABS_MAX}.</FormHelperText>
+          )}
         </FormControl>
 
-        <FormControl sx={{ flex: 1 }}>
-          <FormLabel htmlFor="global-y-input">Global Y</FormLabel>
+        <FormControl sx={{ flex: 1 }} error={shouldShowError('globalY') && isGlobalCoordinateOutOfRange(value.globalY)}>
+          <FormLabel htmlFor="global-y-input">Global Y ({value.defaultCoordinateUnits})</FormLabel>
           <Input
             id="global-y-input"
             aria-label="Global Y"
@@ -233,10 +273,13 @@ export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, 
             onBlur={() => markTouched('globalY')}
             slotProps={{ input: { step: 0.0001 } }}
           />
+          {shouldShowError('globalY') && isGlobalCoordinateOutOfRange(value.globalY) && (
+            <FormHelperText>Must be a finite coordinate with absolute value at most {GLOBAL_COORDINATE_ABS_MAX}.</FormHelperText>
+          )}
         </FormControl>
 
-        <FormControl sx={{ flex: 1 }}>
-          <FormLabel htmlFor="global-z-input">Global Z</FormLabel>
+        <FormControl sx={{ flex: 1 }} error={shouldShowError('globalZ') && isGlobalCoordinateOutOfRange(value.globalZ)}>
+          <FormLabel htmlFor="global-z-input">Global Z ({value.defaultCoordinateUnits})</FormLabel>
           <Input
             id="global-z-input"
             aria-label="Global Z"
@@ -246,8 +289,37 @@ export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, 
             onBlur={() => markTouched('globalZ')}
             slotProps={{ input: { step: 0.0001 } }}
           />
+          {shouldShowError('globalZ') && isGlobalCoordinateOutOfRange(value.globalZ) && (
+            <FormHelperText>Must be a finite coordinate with absolute value at most {GLOBAL_COORDINATE_ABS_MAX}.</FormHelperText>
+          )}
         </FormControl>
       </Stack>
+
+      <FormControl sx={{ maxWidth: 360 }} error={shouldShowError('globalCoordinatesEPSG') && isEpsgCodeInvalid(value.globalCoordinatesEPSG)}>
+        <FormLabel htmlFor="global-epsg-input">Coordinate system (EPSG code)</FormLabel>
+        <Input
+          id="global-epsg-input"
+          aria-label="Coordinate system EPSG code"
+          type="number"
+          value={epsgDraft}
+          placeholder="e.g. 26916"
+          onChange={e => handleEpsgChange(e.target.value)}
+          onBlur={() => markTouched('globalCoordinatesEPSG')}
+          slotProps={{ input: { min: EPSG_CODE_MIN, max: EPSG_CODE_MAX, step: 1 } }}
+        />
+        {shouldShowError('globalCoordinatesEPSG') && isEpsgCodeGeographic(value.globalCoordinatesEPSG) ? (
+          <FormHelperText>
+            EPSG:{value.globalCoordinatesEPSG} is a geographic (latitude/longitude) system — enter the origin in a projected system instead, e.g. 26916 = NAD83
+            / UTM zone 16N.
+          </FormHelperText>
+        ) : shouldShowError('globalCoordinatesEPSG') && isEpsgCodeOutOfRange(value.globalCoordinatesEPSG) ? (
+          <FormHelperText>
+            Must be an integer between {EPSG_CODE_MIN} and {EPSG_CODE_MAX}.
+          </FormHelperText>
+        ) : (
+          <FormHelperText>The EPSG identifier of the system above — e.g. 26916 = NAD83 / UTM zone 16N. Leave blank if not recorded.</FormHelperText>
+        )}
+      </FormControl>
 
       <FormControl>
         <FormLabel htmlFor="description-input">Description</FormLabel>

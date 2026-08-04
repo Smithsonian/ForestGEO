@@ -22,6 +22,7 @@ import {
 import { PlotRDS } from '@/lib/db/definitions/zones';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
+import { parseEpsgForSave } from '@/components/client/modals/plot-epsg';
 import Grid from '@mui/joy/Grid';
 import { createPostPatchQuery } from '@/config/datagridhelpers';
 import { useSiteContext } from '@/app/contexts/compat-hooks';
@@ -54,6 +55,7 @@ export default function PlotCardModal(props: {
   const [submitting, setSubmitting] = useState(false);
   const [editablePlot, setEditablePlot] = useState<PlotRDS>({ ...emptyPlot, ...plot });
   const [validationError, setValidationError] = useState('');
+  const [epsgError, setEpsgError] = useState('');
   const [saveSucceeded, setSaveSucceeded] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const currentSite = useSiteContext();
@@ -63,6 +65,7 @@ export default function PlotCardModal(props: {
     setEditablePlot({ ...emptyPlot, ...plot });
     setIsEditing(!plot?.plotID);
     setValidationError('');
+    setEpsgError('');
     setSaveSucceeded(false);
     // The defaults are stable primitives; plot identity is the intended reset trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -79,6 +82,7 @@ export default function PlotCardModal(props: {
     const { name, value } = e.target;
     setEditablePlot({ ...editablePlot, [name]: value });
     if (name === 'plotName' && value.trim()) setValidationError('');
+    if (name === 'globalCoordinatesEPSG') setEpsgError('');
   };
 
   const handleSave = async () => {
@@ -86,11 +90,20 @@ export default function PlotCardModal(props: {
       setValidationError('Plot name is required.');
       return;
     }
+    const epsg = parseEpsgForSave(editablePlot.globalCoordinatesEPSG);
+    if (!epsg.ok) {
+      setEpsgError(epsg.error);
+      return;
+    }
     setSubmitting(true);
     setSaveSucceeded(false);
 
     try {
-      const { numQuadrats, usesSubquadrats, ...filteredPlot } = editablePlot;
+      const { numQuadrats, usesSubquadrats, ...restOfPlot } = editablePlot;
+      // Send an explicit null when cleared: JSON.stringify drops undefined keys, and the
+      // PATCH handler only updates the columns present in the payload, so a dropped key
+      // would silently leave a stale code in place instead of un-recording it.
+      const filteredPlot = { ...restOfPlot, globalCoordinatesEPSG: epsg.value };
       const fetchProcessQuery = createPostPatchQuery(currentSite?.schemaName ?? '', 'plots', 'plotID');
 
       const response = await fetch(fetchProcessQuery, {
@@ -269,6 +282,20 @@ export default function PlotCardModal(props: {
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />
+                    </FormControl>
+                  </Grid>
+                  <Grid xs={4}>
+                    <FormControl id={'global-coords-epsg'} error={Boolean(epsgError)}>
+                      <FormLabel htmlFor={'global-coords-epsg'}>Coordinate System (EPSG)</FormLabel>
+                      <Input
+                        aria-labelledby={'global-coords-epsg'}
+                        placeholder="e.g. 26916"
+                        name="globalCoordinatesEPSG"
+                        value={isEditing ? (editablePlot?.globalCoordinatesEPSG ?? '') : (editablePlot?.globalCoordinatesEPSG ?? 'Not recorded')}
+                        onChange={handleInputChange}
+                        disabled={!isEditing}
+                      />
+                      <FormHelperText>{epsgError || 'The EPSG identifier of the coordinate system — e.g. 26916 = NAD83 / UTM zone 16N.'}</FormHelperText>
                     </FormControl>
                   </Grid>
                   <Grid xs={12}>

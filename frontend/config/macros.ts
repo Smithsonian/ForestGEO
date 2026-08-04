@@ -102,6 +102,10 @@ export { bitToBoolean, booleanToBit } from './macros/bitconversion';
 export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'] as const;
 export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'] as const;
 
+/** IOGP assigns EPSG codes in this range; anything outside it is a typo, not a CRS. */
+export const EPSG_CODE_MIN = 1024;
+export const EPSG_CODE_MAX = 32767;
+
 export interface UnifiedValidityFlags {
   attributes: boolean;
   species: boolean;

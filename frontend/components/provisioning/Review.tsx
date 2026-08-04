@@ -67,6 +67,7 @@ export default function Review({ value }: ReviewProps) {
         </Typography>
         <Typography>
           <b>Global coordinates:</b> ({value.plot.globalX}, {value.plot.globalY}, {value.plot.globalZ}) {value.plot.defaultCoordinateUnits}
+          {value.plot.globalCoordinatesEPSG !== undefined && <> &mdash; EPSG:{value.plot.globalCoordinatesEPSG}</>}
         </Typography>
         <Typography>
           <b>DBH units:</b> {value.plot.defaultDBHUnits} &mdash; <b>HOM units:</b> {value.plot.defaultHOMUnits}

@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { ProvisioningInputSchema, ProvisioningPlotSchema, ProvisioningQuadratsSchema } from './input-schema';
+import {
+  EPSG_CODE_MAX,
+  EPSG_CODE_MIN,
+  GEOGRAPHIC_EPSG_CODES,
+  GLOBAL_COORDINATE_ABS_MAX,
+  ProvisioningInputSchema,
+  ProvisioningPlotSchema,
+  ProvisioningQuadratsSchema
+} from './input-schema';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import {
   buildQuadratOverlapAcknowledgment,
@@ -79,6 +87,72 @@ describe('ProvisioningPlotSchema unit vocabulary', () => {
     }
     for (const unit of areaSelectionOptions) {
       expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, defaultAreaUnits: unit }).success).toBe(true);
+    }
+  });
+});
+
+describe('ProvisioningPlotSchema global coordinates', () => {
+  // Provisioning run 5 (forestgeo_ldw, 2026-08-04): NAD83 / UTM zone 16N origin.
+  // GlobalY 4343000 overflowed the old DECIMAL(12,6) column mid-run; the widened
+  // DECIMAL(15,6) column and this schema must both accept it.
+  const UTM_ZONE_16N_ORIGIN = { globalX: 567225, globalY: 4343000, globalZ: 224 };
+  const NAD83_UTM_ZONE_16N_EPSG = 26916;
+
+  it('accepts a projected UTM origin (the forestgeo_ldw regression values)', () => {
+    const result = ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, ...UTM_ZONE_16N_ORIGIN });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts the extreme southern-hemisphere UTM northing of 10,000,000 m', () => {
+    expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, globalY: 10_000_000 }).success).toBe(true);
+  });
+
+  it('rejects a coordinate beyond the DECIMAL(15,6) column ceiling, explaining the expected units', () => {
+    const result = ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, globalY: GLOBAL_COORDINATE_ABS_MAX * 10 });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find(i => i.path.join('.') === 'globalY');
+      expect(issue?.message).toContain('linear coordinate');
+      expect(issue?.message).toContain('UTM');
+    }
+  });
+
+  it('rejects a non-finite coordinate', () => {
+    expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, globalX: Infinity }).success).toBe(false);
+    expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, globalX: NaN }).success).toBe(false);
+  });
+
+  it('accepts a recorded EPSG code and carries it through parsing', () => {
+    const result = ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, ...UTM_ZONE_16N_ORIGIN, globalCoordinatesEPSG: NAD83_UTM_ZONE_16N_EPSG });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.globalCoordinatesEPSG).toBe(NAD83_UTM_ZONE_16N_EPSG);
+    }
+  });
+
+  it('accepts an absent EPSG code as "not recorded"', () => {
+    const result = ProvisioningPlotSchema.safeParse(VALID_PLOT);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.globalCoordinatesEPSG).toBeUndefined();
+    }
+  });
+
+  it('rejects EPSG codes outside the registry range and non-integers', () => {
+    expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, globalCoordinatesEPSG: EPSG_CODE_MIN - 1 }).success).toBe(false);
+    expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, globalCoordinatesEPSG: EPSG_CODE_MAX + 1 }).success).toBe(false);
+    expect(ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, globalCoordinatesEPSG: 26916.5 }).success).toBe(false);
+  });
+
+  it('rejects geographic (lat/lon degree) EPSG codes for provisioning input, pointing at projected systems', () => {
+    for (const geographicCode of GEOGRAPHIC_EPSG_CODES) {
+      const result = ProvisioningPlotSchema.safeParse({ ...VALID_PLOT, globalCoordinatesEPSG: geographicCode });
+      expect(result.success, `EPSG:${geographicCode} should be rejected`).toBe(false);
+      if (!result.success) {
+        const issue = result.error.issues.find(i => i.path.join('.') === 'globalCoordinatesEPSG');
+        expect(issue?.message).toContain('geographic');
+        expect(issue?.message).toContain('projected');
+      }
     }
   });
 });

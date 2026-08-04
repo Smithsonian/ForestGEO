@@ -21,8 +21,8 @@ import { initTablesStep, deployProceduresStep, seedValidationsStep } from '@/lib
 import type { StepContext, ProvisioningInput } from '@/lib/provisioning/types';
 
 const TEST_SCHEMA = TEST_SCHEMA_PREFIX + 'meta';
-const CURRENT_SCHEMA_VERSION = '2026-05-13';
-const CURRENT_PROCEDURES_VERSION = '2026-07-30';
+const CURRENT_SCHEMA_VERSION = '2026-08-04';
+const CURRENT_PROCEDURES_VERSION = '2026-08-04-procs';
 const STALE_SCHEMA_VERSION = '2020-01-01';
 const META_TABLE = '_provisioning_meta';
 // Mirrors lib/provisioning/steps/sql-steps.ts:EXPECTED_VALIDATION_COUNT.

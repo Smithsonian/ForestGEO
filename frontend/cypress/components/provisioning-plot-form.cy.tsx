@@ -153,6 +153,67 @@ describe('PlotForm', () => {
     });
   });
 
+  it('emits a UTM-scale Global Y exactly (the forestgeo_ldw regression value)', () => {
+    const onChangeSpy = cy.stub().as('onChangeSpy');
+    cy.mount(<StatefulPlotForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
+    cy.get('[aria-label="Global Y"]').focus().type('{selectall}4343000');
+    cy.get('@onChangeSpy').then((stub: any) => {
+      const calls = stub.getCalls();
+      const emitted = calls[calls.length - 1].args[0] as PlotValue;
+      expect(emitted.globalY).to.equal(4343000);
+      expect(typeof emitted.globalY).to.equal('number');
+    });
+  });
+
+  it('labels the global coordinate inputs with the selected coordinate unit', () => {
+    const onChange = cy.stub();
+    const onAreaModeChange = cy.stub();
+    cy.mount(
+      <PlotForm value={{ ...DEFAULT_VALUE, defaultCoordinateUnits: 'cm' }} areaMode="derived" onAreaModeChange={onAreaModeChange} onChange={onChange} />
+    );
+    cy.contains('label', 'Global X (cm)').should('be.visible');
+    cy.contains('label', 'Global Y (cm)').should('be.visible');
+    cy.contains('label', 'Global Z (cm)').should('be.visible');
+  });
+
+  it('emits numeric globalCoordinatesEPSG when an EPSG code is typed', () => {
+    const onChangeSpy = cy.stub().as('onChangeSpy');
+    cy.mount(<StatefulPlotForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
+    cy.get('[aria-label="Coordinate system EPSG code"]').focus().type('26916');
+    cy.get('@onChangeSpy').then((stub: any) => {
+      const calls = stub.getCalls();
+      const emitted = calls[calls.length - 1].args[0] as PlotValue;
+      expect(emitted.globalCoordinatesEPSG).to.equal(26916);
+      expect(typeof emitted.globalCoordinatesEPSG).to.equal('number');
+    });
+  });
+
+  it('clearing the EPSG input commits "not recorded" (undefined), not the last value', () => {
+    const onChangeSpy = cy.stub().as('onChangeSpy');
+    cy.mount(<StatefulPlotForm initial={{ ...DEFAULT_VALUE, globalCoordinatesEPSG: 26916 }} onChangeSpy={onChangeSpy} />);
+    cy.get('[aria-label="Coordinate system EPSG code"]').focus().type('{selectall}{backspace}');
+    cy.get('@onChangeSpy').then((stub: any) => {
+      const calls = stub.getCalls();
+      const emitted = calls[calls.length - 1].args[0] as PlotValue;
+      expect(emitted.globalCoordinatesEPSG).to.equal(undefined);
+    });
+  });
+
+  it('shows an EPSG range error for an out-of-range code when the field is touched', () => {
+    const onChangeSpy = cy.stub().as('onChangeSpy');
+    cy.mount(<StatefulPlotForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
+    cy.get('[aria-label="Coordinate system EPSG code"]').focus().type('99999').blur();
+    cy.contains('Must be an integer between 1024 and 32767.').should('be.visible');
+  });
+
+  it('rejects a geographic EPSG code (4326) with a pointer to projected systems', () => {
+    const onChangeSpy = cy.stub().as('onChangeSpy');
+    cy.mount(<StatefulPlotForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
+    cy.get('[aria-label="Coordinate system EPSG code"]').focus().type('4326').blur();
+    cy.contains('is a geographic (latitude/longitude) system').should('be.visible');
+    cy.contains('26916').should('be.visible');
+  });
+
   it('shows dimensionX error for zero value when showErrors is true', () => {
     const onChange = cy.stub();
     const onAreaModeChange = cy.stub();

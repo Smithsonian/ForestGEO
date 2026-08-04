@@ -962,6 +962,13 @@ export const ViewFullTableGridColumns: GridColDef[] = standardizeGridColumns([
     filterable: false
   },
   {
+    field: 'plotGlobalCoordinatesEPSG',
+    headerName: 'PlotGlobalCoordinatesEPSG',
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
+    editable: false,
+    filterable: false
+  },
+  {
     field: 'plotShape',
     headerName: 'PlotShape',
     ...VIEW_FULL_TABLE_COLUMN_WIDTHS.code,
