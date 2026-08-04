@@ -142,6 +142,7 @@ vi.mock('@/lib/db/poolmonitorsingleton', () => ({
     const pool = sharedState.catalogPool;
     return {
       pool,
+      getUsablePool: async () => pool,
       getConnection: () => pool.getConnection(),
       signalActivity: () => undefined
     };

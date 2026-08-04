@@ -219,6 +219,8 @@ export async function sweepOnce(catalogPool: Pool, deps: SweepDeps = defaultSwee
  */
 export type SweepTickOutcome = { status: 'completed'; result: SweepResult } | { status: 'skipped_in_flight' } | { status: 'failed'; error: Error };
 
+type CatalogPoolSource = Pool | (() => Promise<Pool>);
+
 /**
  * One interval tick: skips when a previous pass hasn't resolved yet (in-flight
  * guard), otherwise runs a sweep pass. Never throws — a failed pass must not
@@ -230,7 +232,7 @@ export type SweepTickOutcome = { status: 'completed'; result: SweepResult } | { 
  * here and at the caller produced two events for one failure. Each caller emits
  * exactly one.
  */
-export async function runSweepTick(catalogPool: Pool, deps: SweepDeps = defaultSweepDeps): Promise<SweepTickOutcome> {
+export async function runSweepTick(catalogPoolSource: CatalogPoolSource, deps: SweepDeps = defaultSweepDeps): Promise<SweepTickOutcome> {
   const sweeperGlobal = globalThis as SweeperGlobal;
   const sentinel = sweeperGlobal[SWEEPER_SENTINEL];
   if (sentinel?.inFlight) {
@@ -239,6 +241,10 @@ export async function runSweepTick(catalogPool: Pool, deps: SweepDeps = defaultS
   }
   if (sentinel) sentinel.inFlight = true;
   try {
+    // Resolve inside the guard: rebuilding a pool is part of the tick and can
+    // itself take longer than SWEEP_INTERVAL_MS. Resolving before this point
+    // allowed multiple pending ticks to stack and later run back-to-back.
+    const catalogPool = typeof catalogPoolSource === 'function' ? await catalogPoolSource() : catalogPoolSource;
     return { status: 'completed', result: await sweepOnce(catalogPool, deps) };
   } catch (error: unknown) {
     // A failed pass must never kill the interval — the next tick retries.
@@ -254,18 +260,27 @@ export async function runSweepTick(catalogPool: Pool, deps: SweepDeps = defaultS
  * no-op (globalThis sentinel). The interval is unref()d so it never keeps the
  * process alive on its own.
  *
+ * Takes a pool RESOLVER, not a pool: the PoolMonitor's inactivity shutdown ends
+ * the underlying mysql2 pool after an idle hour, so a pool captured at process
+ * startup eventually goes permanently dead and every tick fails with "Pool is
+ * closed." (which is exactly what happened for days before 2026-08-04).
+ * Resolving per tick hands each pass a pool that is open at that moment.
+ *
  * Passes never stack: the in-flight guard in runSweepTick skips a tick while a
  * previous pass is still resolving. Job EXECUTIONS are bounded separately, by
  * MAX_CONCURRENT_JOB_EXECUTIONS, because a pass no longer waits for them.
  */
-export function startUploadJobSweeper(catalogPool: Pool): void {
+export function startUploadJobSweeper(getCatalogPool: () => Promise<Pool>): void {
   const sweeperGlobal = globalThis as SweeperGlobal;
   if (sweeperGlobal[SWEEPER_SENTINEL]) return;
 
   const interval = setInterval(() => {
-    void runSweepTick(catalogPool).then(outcome => {
+    void runSweepTick(getCatalogPool).then(outcome => {
       if (outcome.status === 'failed') {
-        ailogger.warn('upload.sweeper.pass_failed', { errorMessage: outcome.error.message });
+        // Includes resolver failures (pool could not be [re]built) and pass
+        // failures; the next interval retries either one.
+        const error = outcome.error;
+        ailogger.warn('upload.sweeper.pass_failed', { errorMessage: error instanceof Error ? error.message : String(error) });
       }
     });
   }, SWEEP_INTERVAL_MS);

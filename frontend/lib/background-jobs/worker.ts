@@ -117,7 +117,7 @@ export interface WorkerDeps {
  * the job row through the fenced repository writes.
  */
 export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promise<void> {
-  const catalogPool = getPoolMonitorInstance().pool;
+  const catalogPool = await getPoolMonitorInstance().getUsablePool();
   // REQUIRED claim invariant (see claimBackgroundJobForWorker): worker IDs must
   // be unique per claim attempt or the confirm-then-throw fencing is racy.
   const workerID = `${process.pid}:${randomUUID()}`;
@@ -281,6 +281,10 @@ function startHeartbeat(ctx: WorkerRunContext): void {
     if (tickInFlight) return; // a slow catalog round-trip must not stack ticks
     tickInFlight = true;
     try {
+      // This worker keeps a raw catalog Pool for the whole run. Its heartbeat
+      // therefore also keeps PoolMonitor's idle deadline alive for census-scale
+      // jobs that legitimately run longer than an hour.
+      getPoolMonitorInstance().signalActivity();
       const leaseAlive = await heartbeatBackgroundJob(ctx.catalogPool, ctx.job.jobID, ctx.workerID);
       if (!leaseAlive) {
         ctx.leaseLost = true;

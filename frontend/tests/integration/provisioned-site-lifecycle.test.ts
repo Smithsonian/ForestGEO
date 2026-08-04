@@ -151,7 +151,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
   return { default: { getInstance: () => manager } };
 });
 
-// The worker reads the catalog pool from getPoolMonitorInstance().pool, and the
+// The worker reads the catalog pool from getPoolMonitorInstance().getUsablePool(), and the
 // upload-session tracker acquires pooled connections from the same monitor.
 // Both are routed to the local catalog pool (no default database; every session
 // query is schema-qualified).
@@ -161,6 +161,7 @@ vi.mock('@/lib/db/poolmonitorsingleton', () => ({
     const pool = sharedState.catalogPool;
     return {
       pool,
+      getUsablePool: async () => pool,
       getConnection: () => pool.getConnection(),
       signalActivity: () => undefined
     };

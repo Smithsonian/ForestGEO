@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   isValidSchema: vi.fn(() => true),
   assertCanEditMeasurementScope: vi.fn(async () => ({ plotCensusNumber: 2 })),
   getContainerName: vi.fn(() => 'forestgeo-testing-storage'),
-  getPoolMonitorInstance: vi.fn(() => ({ pool: 'catalog-pool' })),
+  getPoolMonitorInstance: vi.fn(() => ({ getUsablePool: vi.fn(async () => 'catalog-pool') })),
   createUploadBackgroundJob: vi.fn(),
   listBackgroundJobs: vi.fn(),
   isAsyncUploadEnabledFor: vi.fn(() => true),
@@ -229,6 +229,18 @@ describe('POST /api/uploadjobs', () => {
       'mason@example.com'
     );
     expect(mocks.runJobIfClaimable).toHaveBeenCalledWith(42);
+  });
+
+  it('returns 503 and logs when the catalog pool cannot self-heal', async () => {
+    const failure = new Error('pool rebuild failed');
+    mocks.getPoolMonitorInstance.mockReturnValueOnce({ getUsablePool: vi.fn().mockRejectedValue(failure) });
+
+    const response = await callPost(makeCreateRequest(makeCreateBody()));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: 'Upload job database is unavailable' });
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    expect(mocks.loggerError).toHaveBeenCalledWith('uploadjobs.database_unavailable', failure);
   });
 
   it('still returns 202 when the worker kick rejects, and logs the kick failure', async () => {
@@ -774,6 +786,18 @@ describe('GET /api/uploadjobs', () => {
     vi.clearAllMocks();
     mocks.auth.mockResolvedValue(session);
     mocks.listBackgroundJobs.mockResolvedValue([{ jobID: 42, status: 'queued' }]);
+  });
+
+  it('returns 503 and logs when the catalog pool cannot self-heal', async () => {
+    const failure = new Error('pool rebuild failed');
+    mocks.getPoolMonitorInstance.mockReturnValueOnce({ getUsablePool: vi.fn().mockRejectedValue(failure) });
+
+    const response = await callGet(makeListRequest('?schema=forestgeo_testing'));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: 'Upload job database is unavailable' });
+    expect(mocks.listBackgroundJobs).not.toHaveBeenCalled();
+    expect(mocks.loggerError).toHaveBeenCalledWith('uploadjobs.database_unavailable', failure);
   });
 
   it('lists active jobs for the authenticated user and optional scope', async () => {

@@ -121,6 +121,12 @@ class MockPoolMonitor {
     return sharedConnection as unknown as PoolConnection;
   }
 
+  async getUsablePool(): Promise<any> {
+    // mirror the real semantics: hands out an open pool, reviving a closed one
+    this.closed = false;
+    return this.pool;
+  }
+
   async closeAllConnections(): Promise<void> {
     this.closed = true;
   }

@@ -28,7 +28,7 @@ vi.mock('@/auth', () => ({ auth: mocks.auth }));
 
 let testPool: Pool;
 vi.mock('@/lib/db/poolmonitorsingleton', () => ({
-  getPoolMonitorInstance: () => ({ pool: testPool })
+  getPoolMonitorInstance: () => ({ pool: testPool, getUsablePool: async () => testPool })
 }));
 
 import { POST } from '@/app/api/admin/provision/[runId]/abort/route';

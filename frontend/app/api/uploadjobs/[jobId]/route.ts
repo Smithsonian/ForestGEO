@@ -13,6 +13,20 @@ import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz'
 
 export const runtime = 'nodejs';
 
+async function resolveCatalogPool() {
+  try {
+    return await getPoolMonitorInstance().getUsablePool();
+  } catch (error: unknown) {
+    const normalized = error instanceof Error ? error : new Error(String(error));
+    ailogger.error('uploadjobs.database_unavailable', normalized);
+    return null;
+  }
+}
+
+function databaseUnavailableResponse() {
+  return NextResponse.json({ error: 'Upload job database is unavailable' }, { status: HTTPResponses.SERVICE_UNAVAILABLE });
+}
+
 /**
  * The `schema` query param authorizes the request (withRouteAuthz already
  * confirmed the caller is a member of it, or an admin). A job lookup by
@@ -47,7 +61,10 @@ async function getHandler(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: 'Missing or invalid parameters' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const job = await getBackgroundJobWithDetails(getPoolMonitorInstance().pool, parsedJobID);
+  const catalogPool = await resolveCatalogPool();
+  if (!catalogPool) return databaseUnavailableResponse();
+
+  const job = await getBackgroundJobWithDetails(catalogPool, parsedJobID);
   if (!job || !jobBelongsToAuthorizedSchema(job, schema)) {
     return NextResponse.json({ error: 'Upload job not found' }, { status: HTTPResponses.NOT_FOUND });
   }
@@ -74,7 +91,10 @@ async function postHandler(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: 'Missing or invalid parameters' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const job = await getBackgroundJobWithDetails(getPoolMonitorInstance().pool, parsedJobID);
+  const catalogPool = await resolveCatalogPool();
+  if (!catalogPool) return databaseUnavailableResponse();
+
+  const job = await getBackgroundJobWithDetails(catalogPool, parsedJobID);
   if (!job || !jobBelongsToAuthorizedSchema(job, schema)) {
     return NextResponse.json({ error: 'Upload job not found' }, { status: HTTPResponses.NOT_FOUND });
   }
@@ -102,8 +122,6 @@ async function postHandler(request: NextRequest, context: RouteContext) {
   }
 
   const userID = getSessionUserId(session!) ?? 'unknown';
-  const catalogPool = getPoolMonitorInstance().pool;
-
   // queued/waiting_retry jobs have no worker and are cancelled directly.
   const cancelled = await cancelBackgroundJob(catalogPool, parsedJobID, userID);
   if (cancelled) {
