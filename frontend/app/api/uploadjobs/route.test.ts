@@ -231,6 +231,18 @@ describe('POST /api/uploadjobs', () => {
     expect(mocks.runJobIfClaimable).toHaveBeenCalledWith(42);
   });
 
+  it('returns 503 and logs when the catalog pool cannot self-heal', async () => {
+    const failure = new Error('pool rebuild failed');
+    mocks.getPoolMonitorInstance.mockReturnValueOnce({ getUsablePool: vi.fn().mockRejectedValue(failure) });
+
+    const response = await callPost(makeCreateRequest(makeCreateBody()));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: 'Upload job database is unavailable' });
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+    expect(mocks.loggerError).toHaveBeenCalledWith('uploadjobs.database_unavailable', failure);
+  });
+
   it('still returns 202 when the worker kick rejects, and logs the kick failure', async () => {
     mocks.runJobIfClaimable.mockRejectedValueOnce(new Error('claim-time infrastructure outage'));
 
@@ -774,6 +786,18 @@ describe('GET /api/uploadjobs', () => {
     vi.clearAllMocks();
     mocks.auth.mockResolvedValue(session);
     mocks.listBackgroundJobs.mockResolvedValue([{ jobID: 42, status: 'queued' }]);
+  });
+
+  it('returns 503 and logs when the catalog pool cannot self-heal', async () => {
+    const failure = new Error('pool rebuild failed');
+    mocks.getPoolMonitorInstance.mockReturnValueOnce({ getUsablePool: vi.fn().mockRejectedValue(failure) });
+
+    const response = await callGet(makeListRequest('?schema=forestgeo_testing'));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: 'Upload job database is unavailable' });
+    expect(mocks.listBackgroundJobs).not.toHaveBeenCalled();
+    expect(mocks.loggerError).toHaveBeenCalledWith('uploadjobs.database_unavailable', failure);
   });
 
   it('lists active jobs for the authenticated user and optional scope', async () => {

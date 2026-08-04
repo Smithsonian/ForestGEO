@@ -515,6 +515,42 @@ describe('startUploadJobSweeper / stopUploadJobSweeper — sentinel lifecycle', 
       vi.useRealTimers();
     }
   });
+
+  it('includes a slow pool resolution in the in-flight guard', async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(ailogger, 'warn').mockImplementation(() => {});
+    let rejectResolution: ((error: Error) => void) | undefined;
+    const resolver = vi.fn(
+      () =>
+        new Promise<Pool>((_resolve, reject) => {
+          rejectResolution = reject;
+        })
+    );
+
+    try {
+      startUploadJobSweeper(resolver);
+
+      await vi.advanceTimersByTimeAsync(SWEEP_INTERVAL_MS);
+      expect(resolver).toHaveBeenCalledTimes(1);
+
+      // The first resolver is still pending. The next interval must skip the
+      // whole tick rather than queue another resolver behind it.
+      await vi.advanceTimersByTimeAsync(SWEEP_INTERVAL_MS);
+      expect(resolver).toHaveBeenCalledTimes(1);
+
+      rejectResolution?.(new Error('slow pool rebuild failed'));
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.advanceTimersByTimeAsync(SWEEP_INTERVAL_MS);
+      expect(resolver).toHaveBeenCalledTimes(2);
+    } finally {
+      rejectResolution?.(new Error('test cleanup'));
+      await vi.advanceTimersByTimeAsync(0);
+      stopUploadJobSweeper();
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

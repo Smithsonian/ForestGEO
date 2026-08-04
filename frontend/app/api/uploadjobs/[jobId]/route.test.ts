@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   getBackgroundJobWithDetails: vi.fn(),
   cancelBackgroundJob: vi.fn(),
   requestBackgroundJobCancel: vi.fn(),
-  executeQuery: vi.fn()
+  executeQuery: vi.fn(),
+  loggerError: vi.fn()
 }));
 
 vi.mock('@/auth', () => ({
@@ -35,6 +36,14 @@ vi.mock('@/lib/background-jobs/repository', () => ({
   getBackgroundJobWithDetails: mocks.getBackgroundJobWithDetails,
   cancelBackgroundJob: mocks.cancelBackgroundJob,
   requestBackgroundJobCancel: mocks.requestBackgroundJobCancel
+}));
+
+vi.mock('@/ailogger', () => ({
+  default: {
+    error: mocks.loggerError,
+    warn: vi.fn(),
+    info: vi.fn()
+  }
 }));
 
 const AUTHORIZED_SCHEMA = 'forestgeo_testing';
@@ -81,6 +90,18 @@ describe('GET /api/uploadjobs/[jobId]', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ job: ownedJob });
     expect(mocks.getBackgroundJobWithDetails).toHaveBeenCalledWith('catalog-pool', 42);
+  });
+
+  it('returns 503 and logs when the catalog pool cannot self-heal', async () => {
+    const failure = new Error('pool rebuild failed');
+    mocks.getPoolMonitorInstance.mockReturnValueOnce({ getUsablePool: vi.fn().mockRejectedValue(failure) });
+
+    const response = await GET(makeGetRequest(), jobProps());
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: 'Upload job database is unavailable' });
+    expect(mocks.getBackgroundJobWithDetails).not.toHaveBeenCalled();
+    expect(mocks.loggerError).toHaveBeenCalledWith('uploadjobs.database_unavailable', failure);
   });
 
   it('rejects access to another user job in the same schema with 403 after a single catalog read', async () => {

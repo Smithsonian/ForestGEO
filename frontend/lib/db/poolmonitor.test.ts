@@ -264,6 +264,47 @@ describe('PoolMonitor', () => {
 
       await monitor.closeAllConnections();
     });
+
+    it('waits for an in-progress close and returns the replacement pool', async () => {
+      let finishClose!: () => void;
+      const closingPool = createFakePool({
+        end: vi.fn(
+          () =>
+            new Promise<void>(resolve => {
+              finishClose = resolve;
+            })
+        )
+      });
+      const freshPool = createFakePool();
+      const monitor = await makeMonitor(closingPool);
+      monitor.createManagedPool = () => freshPool;
+
+      const close = monitor.closeAllConnections();
+      expect(monitor.isPoolClosed(), 'closing must be published before pool.end() settles').toBe(true);
+
+      const usablePool = monitor.getUsablePool();
+      await Promise.resolve();
+      expect(closingPool.end).toHaveBeenCalledTimes(1);
+
+      finishClose();
+      await close;
+      await expect(usablePool).resolves.toBe(freshPool);
+
+      await monitor.closeAllConnections();
+    });
+
+    it('treats raw-pool resolution as activity and moves the idle deadline', async () => {
+      const HOUR_MS = 3_600_000;
+      const openPool = createFakePool();
+      const monitor = await makeMonitor(openPool);
+
+      await vi.advanceTimersByTimeAsync(HOUR_MS - 1);
+      await monitor.getUsablePool();
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(openPool.end, 'the pre-resolution inactivity deadline must be invalidated').not.toHaveBeenCalled();
+      await monitor.closeAllConnections();
+    });
   });
 
   /**

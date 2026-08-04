@@ -281,6 +281,10 @@ function startHeartbeat(ctx: WorkerRunContext): void {
     if (tickInFlight) return; // a slow catalog round-trip must not stack ticks
     tickInFlight = true;
     try {
+      // This worker keeps a raw catalog Pool for the whole run. Its heartbeat
+      // therefore also keeps PoolMonitor's idle deadline alive for census-scale
+      // jobs that legitimately run longer than an hour.
+      getPoolMonitorInstance().signalActivity();
       const leaseAlive = await heartbeatBackgroundJob(ctx.catalogPool, ctx.job.jobID, ctx.workerID);
       if (!leaseAlive) {
         ctx.leaseLost = true;

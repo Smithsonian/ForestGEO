@@ -66,7 +66,7 @@ void (async () => {
     // runSweepTick reports rather than throws, so the startup sweep's own
     // failure is escalated here: this pass IS the deploy-recovery moment, and
     // missing it is louder news than a routine mid-life tick failure.
-    const outcome = await runSweepTick(pool);
+    const outcome = await runSweepTick(() => monitor.getUsablePool());
     if (outcome.status === 'failed') {
       ailogger.error('upload.sweeper.startup_failed', outcome.error);
     } else if (outcome.status === 'completed' && (outcome.result.reclaimed.length > 0 || outcome.result.dispatched.length > 0)) {

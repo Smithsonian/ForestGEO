@@ -22,6 +22,8 @@ export class PoolMonitor {
   private poolClosed = false;
   private reinitializePromise: Promise<void> | null = null;
   private closePromise: Promise<void> | null = null;
+  /** Invalidates an inactivity callback when newer work arrives while it awaits. */
+  private activityGeneration = 0;
   // mysql2 recycles physical PoolConnection objects across acquire/release, so guard
   // against re-attaching the same 'query'/'release' listeners on every acquire (which
   // would accumulate without bound -> MaxListenersExceededWarning + memory leak). A
@@ -46,13 +48,31 @@ export class PoolMonitor {
    * {@link getConnection} used to recover from that — code reading the raw
    * `pool` property got a permanently dead mysql2 Pool and every query threw
    * "Pool is closed." until unrelated traffic happened to heal the monitor.
-   * Callers must resolve this per use and never cache the returned pool across
-   * idle periods, or they recreate that failure mode.
+   * Short-lived callers must resolve this per use. Long-lived callers must also
+   * signal activity while they retain it (the background workers do so from
+   * their lease heartbeats), or they recreate that failure mode.
    */
   public async getUsablePool(): Promise<Pool> {
+    // poolClosed is set before pool.end() begins, but waiting explicitly also
+    // covers a close that failed: the reinitialization below can replace the
+    // now-unknown pool instead of handing it to the caller.
+    const closeInProgress = this.closePromise;
+    if (closeInProgress) {
+      try {
+        await closeInProgress;
+      } catch {
+        // _doCloseAllConnections logged the cause and left poolClosed=true.
+        // Reinitialize below so this access can still self-heal.
+      }
+    }
     if (this.poolClosed) {
+      ailogger.info('db.pool.self_heal', { reason: 'raw_pool_requested_after_close' });
       await this.reinitializePool();
     }
+    // Raw-pool consumers bypass getConnection(), so resolving the pool itself
+    // must count as activity. The generation also invalidates an inactivity
+    // callback that already fired and is awaiting its process-list query.
+    this.resetInactivityTimer();
     return this.pool;
   }
 
@@ -169,11 +189,13 @@ export class PoolMonitor {
       return;
     }
 
-    // Atomic check-and-set for poolClosed flag
+    // Atomic check-and-set: publish the closing state BEFORE pool.end() awaits.
+    // Otherwise getUsablePool() can return this pool while mysql2 is ending it.
     if (this.poolClosed) {
       ailogger.info(chalk.yellow('Pool already closed.'));
       return;
     }
+    this.poolClosed = true;
 
     // Store the close promise so concurrent calls wait
     this.closePromise = this._doCloseAllConnections();
@@ -219,7 +241,7 @@ export class PoolMonitor {
   }
 
   public signalActivity() {
-    this.resetInactivityTimer();
+    if (!this.poolClosed) this.resetInactivityTimer();
   }
 
   private async reinitializePool(): Promise<void> {
@@ -326,6 +348,7 @@ export class PoolMonitor {
   }
 
   private resetInactivityTimer(): void {
+    const scheduledGeneration = ++this.activityGeneration;
     if (this.inactivityTimer) {
       clearTimeout(this.inactivityTimer);
     }
@@ -344,6 +367,12 @@ export class PoolMonitor {
       } catch {
         // ConnectionManager not available — proceed with processlist check only.
       }
+
+      // clearTimeout cannot stop a callback that already began. If a raw-pool
+      // request or worker heartbeat arrived while either await above was in
+      // flight, the newer generation owns the deadline and this callback is
+      // stale; it must not close the pool underneath that work.
+      if (scheduledGeneration !== this.activityGeneration) return;
 
       if (live.length === 0 && !hasActiveTransactions) {
         ailogger.info(chalk.red('Inactivity period exceeded and no active connections found. Initiating graceful shutdown...'));

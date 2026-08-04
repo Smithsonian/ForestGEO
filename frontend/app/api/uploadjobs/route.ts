@@ -33,6 +33,20 @@ const MYSQL_SIGNED_INT_MAX = 2_147_483_647;
 
 const SUPPORTED_DELIMITER_SET = new Set<string>(SUPPORTED_DELIMITERS);
 
+async function resolveCatalogPool() {
+  try {
+    return await getPoolMonitorInstance().getUsablePool();
+  } catch (error: unknown) {
+    const normalized = error instanceof Error ? error : new Error(String(error));
+    ailogger.error('uploadjobs.database_unavailable', normalized);
+    return null;
+  }
+}
+
+function databaseUnavailableResponse() {
+  return NextResponse.json({ error: 'Upload job database is unavailable' }, { status: HTTPResponses.SERVICE_UNAVAILABLE });
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -408,7 +422,8 @@ async function postHandler(request: NextRequest) {
   const blobOwnershipError = await rejectUnownedBlobReferences(input, userID, authorizedContainer);
   if (blobOwnershipError) return blobOwnershipError;
 
-  const catalogPool = await getPoolMonitorInstance().getUsablePool();
+  const catalogPool = await resolveCatalogPool();
+  if (!catalogPool) return databaseUnavailableResponse();
   let job;
   try {
     job = await createUploadBackgroundJob(
@@ -480,7 +495,10 @@ async function getHandler(request: NextRequest) {
   const activeOnly = rawActiveOnly !== 'false';
   const includeAllUsers = rawAllUsers === 'true' && isPrivilegedSession(session!);
 
-  const jobs = await listBackgroundJobs(await getPoolMonitorInstance().getUsablePool(), {
+  const catalogPool = await resolveCatalogPool();
+  if (!catalogPool) return databaseUnavailableResponse();
+
+  const jobs = await listBackgroundJobs(catalogPool, {
     userID,
     includeAllUsers,
     activeOnly,
