@@ -78,7 +78,7 @@ describe('GET /api/export/ctfs-rebuild-view/:schema', () => {
     const res = await GET(makeRequest(), makeProps());
     expect(res.status).toBe(HTTPResponses.OK);
     expect(res.headers.get('Content-Type')).toMatch(/application\/sql/i);
-    expect(res.headers.get('Content-Disposition')).toMatch(/^attachment; filename=ctfs-rebuild-viewfulltable-\d+\.sql$/);
+    expect(res.headers.get('Content-Disposition')).toMatch(/^attachment; filename=smithsonian-rebuild-viewfulltable-\d+\.sql$/);
     expect(await res.text()).toBe('-- rebuild artifact --');
   });
 
@@ -91,7 +91,7 @@ describe('GET /api/export/ctfs-rebuild-view/:schema', () => {
 
   it('records destinationPlotID in the audit log and filename when supplied', async () => {
     const res = await GET(makeRequest(makeUrl({ destinationPlotID: '5' })), makeProps());
-    expect(res.headers.get('Content-Disposition')).toMatch(/^attachment; filename=ctfs-rebuild-viewfulltable-5-\d+\.sql$/);
+    expect(res.headers.get('Content-Disposition')).toMatch(/^attachment; filename=smithsonian-rebuild-viewfulltable-5-\d+\.sql$/);
     const [message, meta] = mocks.loggerInfo.mock.calls[0];
     expect(message).toMatch(/ctfs-viewfulltable rebuild generated/i);
     expect(meta.schema).toBe(VALID_SCHEMA);
@@ -101,7 +101,7 @@ describe('GET /api/export/ctfs-rebuild-view/:schema', () => {
 
   it('ignores a non-integer destinationPlotID (no header injection)', async () => {
     const res = await GET(makeRequest(makeUrl({ destinationPlotID: 'evil; rm -rf' })), makeProps());
-    expect(res.headers.get('Content-Disposition')).toMatch(/^attachment; filename=ctfs-rebuild-viewfulltable-\d+\.sql$/);
+    expect(res.headers.get('Content-Disposition')).toMatch(/^attachment; filename=smithsonian-rebuild-viewfulltable-\d+\.sql$/);
   });
 
   it('audits generatedAt even with no destinationPlotID', async () => {

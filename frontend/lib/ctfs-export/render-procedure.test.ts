@@ -77,7 +77,7 @@ describe('renderArtifact', () => {
     expect(sql).toMatch(/-- Generated: 2026-05-19T12:00:00\.000Z/);
     expect(sql).toMatch(/-- Source schema: forestgeo_test/);
     expect(sql).toMatch(/-- Source app PlotID: 5/);
-    expect(sql).toMatch(/-- Destination CTFS PlotID: 1/);
+    expect(sql).toMatch(/-- Destination Smithsonian PlotID: 1/);
     expect(sql).toMatch(/-- App CensusID: 7/);
     expect(sql).toMatch(/-- PlotCensusNumber: 2024/);
     expect(sql).toMatch(/-- Measurement rows: 1/);

@@ -43,7 +43,7 @@ function buildDownloadFilename(destinationPlotId: number, plotCensusNumber: stri
     .replace(/[^A-Za-z0-9_-]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
-  return `ctfs-export-${destinationPlotId}-${censusSlug}-${timestampMs}.sql`;
+  return `smithsonian-export-${destinationPlotId}-${censusSlug}-${timestampMs}.sql`;
 }
 
 // ---------------------------------------------------------------------------

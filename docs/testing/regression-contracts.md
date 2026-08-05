@@ -140,10 +140,10 @@ Two consequences of rounding at the 6-decimal boundary:
 Enforced by: `tests/integration/ingestion-invariants.integration.test.ts` → "DBH/HOM
 precision" block.
 
-### 8. CTFS publish gate warns on data-quality, blocks on destination-integrity
+### 8. Smithsonian publish gate warns on data-quality, blocks on destination-integrity
 
 **Ratified 2026-07-20 (interim of the full validation-tier feature).** "Publish census"
-(the CTFS `.sql` export loaded into the on-prem CTFS MySQL) runs 8 "Finished Census"
+(the `.sql` export loaded into the on-prem Smithsonian MySQL) runs 8 "Finished Census"
 preconditions, now split into two policies:
 
 - **Warnings (publish proceeds):** `not-validated`, `unresolved-error`, `no-stem-guid`,
@@ -152,8 +152,8 @@ preconditions, now split into two policies:
   the publish continues, surfacing the warnings in `X-CTFS-Precondition-Warnings`.
 - **Blocking (publish 400s):** `unknown-attribute-code`, `missing-taxonomy-fields`,
   `string-too-long`, `zero-exportable-rows`. Each would produce an artifact that fails to
-  load into, or silently truncates data in, the destination CTFS DB, so these still stop a
-  real publish. A dry run continues to surface everything (blockers included) as a
+  load into, or silently truncates data in, the destination Smithsonian DB, so these still
+  stop a real publish. A dry run continues to surface everything (blockers included) as a
   non-blocking preview.
 
 The "nothing left to export" check still runs even when only warnings are present, so a
@@ -162,8 +162,14 @@ validation-tier feature (authorized+audited override, server-side gate stale UI 
 bypass) remains a TODO in `lib/ctfs-export/precondition.ts`.
 
 Enforced by: `lib/ctfs-export/precondition.test.ts` (classification + warning-plus-zero-
-rows interaction) and the CTFS export route test (`app/api/export/ctfs-sql/.../route.test.ts`:
+rows interaction) and the publish route test (`app/api/export/ctfs-sql/.../route.test.ts`:
 quality warning → 200 + header; blocker → 400 with only blocking reasons).
+
+> **Naming note.** The module path `lib/ctfs-export/`, the route `export/ctfs-sql`, and the
+> `X-CTFS-Precondition-Warnings` header are historical misnomers kept for compatibility.
+> The destination is the **Smithsonian database**; its table shapes derive from the legacy
+> CTFS schema, but the database itself is not "CTFS" or "CTFSWeb". Prefer "Smithsonian DB"
+> in prose; only use the CTFS names when citing a literal identifier.
 
 ## Explicitly NOT yet contracted (blocked)
 

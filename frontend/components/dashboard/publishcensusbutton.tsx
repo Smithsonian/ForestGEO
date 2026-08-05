@@ -1,15 +1,16 @@
 'use client';
 
 /**
- * "Publish census" — UI affordance for the CTFS SQL export pipeline.
+ * "Publish census" — UI affordance for the Smithsonian SQL export pipeline.
  *
- * This is a separate operator workflow from the legacy CSV form download
- * (`CTFSWebForms` in the upload selector). Both remain available:
- *   - The legacy CSV export emits the historical 10-column ctfsweb measurement
- *     file. Keep using it for downstream consumers that still parse the CSV.
- *   - "Publish census" emits a destination-loadable `.sql` artifact targeting
- *     on-prem CTFS MySQL (`/api/export/ctfs-sql/...`). Rebuilding
- *     ViewFullTable is now a separate operator-triggered artifact.
+ * Emits a destination-loadable `.sql` artifact targeting the on-prem
+ * Smithsonian MySQL. Rebuilding ViewFullTable is a separate operator-triggered
+ * artifact.
+ *
+ * The `ctfs-*` names on the route path, the `X-CTFS-Precondition-Warnings`
+ * header and the module directory are a historical misnomer: the destination is
+ * the Smithsonian database, whose table shapes derive from the legacy CTFS
+ * schema. Renaming them is a breaking change and has not been done.
  *
  * The button calls the export endpoint, streams the response into a Blob, and
  * triggers a browser download. Server-side preconditions ("Finished Census"
@@ -84,7 +85,7 @@ export default function PublishCensusButton(props: PublishCensusButtonProps) {
     const parsed = Number.parseInt(destinationPlotId, 10);
     if (!Number.isInteger(parsed) || parsed < 0 || String(parsed) !== destinationPlotId) {
       setStatus('error');
-      setErrorMessage('Destination CTFS Plot ID must be a non-negative integer.');
+      setErrorMessage('Destination Smithsonian Plot ID must be a non-negative integer.');
       return;
     }
 
@@ -125,7 +126,7 @@ export default function PublishCensusButton(props: PublishCensusButtonProps) {
       // for downloads.
       const disposition = response.headers.get('Content-Disposition') ?? '';
       const match = /filename=([^;]+)/i.exec(disposition);
-      const filename = match ? match[1].trim() : `ctfs-export-${parsed}-${plotCensusNumber}.sql`;
+      const filename = match ? match[1].trim() : `smithsonian-export-${parsed}-${plotCensusNumber}.sql`;
 
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
@@ -164,11 +165,11 @@ export default function PublishCensusButton(props: PublishCensusButtonProps) {
 
       <Modal open={isOpen} onClose={handleClose}>
         <ModalDialog sx={{ minWidth: 480, maxWidth: 720 }}>
-          <DialogTitle>Publish census to CTFS</DialogTitle>
+          <DialogTitle>Publish census to the Smithsonian database</DialogTitle>
           <DialogContent>
             <Stack spacing={2}>
               <Typography level="body-sm">
-                Generates a <code>.sql</code> artifact you can run against the on-prem CTFS MySQL. Rebuild <code>ViewFullTable</code> separately after
+                Generates a <code>.sql</code> artifact you can run against the on-prem Smithsonian MySQL. Rebuild <code>ViewFullTable</code> separately after
                 confirming the load succeeded.
               </Typography>
 
@@ -184,10 +185,10 @@ export default function PublishCensusButton(props: PublishCensusButtonProps) {
 
               <Box>
                 <Typography level="body-xs" sx={{ mb: 0.5 }}>
-                  Destination CTFS Plot ID
+                  Destination Smithsonian Plot ID
                 </Typography>
                 <Input
-                  aria-label="Destination CTFS Plot ID"
+                  aria-label="Destination Smithsonian Plot ID"
                   value={destinationPlotId}
                   onChange={e => setDestinationPlotId(e.target.value)}
                   placeholder="1"

@@ -104,7 +104,7 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
     `-- Generated: ${input.generatedAt.toISOString()}`,
     `-- Source schema: ${input.schema}`,
     `-- Source app PlotID: ${input.appPlotId}`,
-    `-- Destination CTFS PlotID: ${input.destinationPlotId}`,
+    `-- Destination Smithsonian PlotID: ${input.destinationPlotId}`,
     `-- App CensusID: ${input.appCensusId}`,
     `-- PlotCensusNumber: ${input.plotCensusNumber}`,
     `-- Measurement rows: ${input.measurementRows.length}`,

@@ -26,7 +26,7 @@ describe('RebuildViewFullTableButton', () => {
     (global.fetch as any).mockResolvedValue(
       new Response(new Blob(['-- rebuild --']), {
         status: 200,
-        headers: { 'Content-Disposition': 'attachment; filename=ctfs-rebuild-viewfulltable-123.sql' }
+        headers: { 'Content-Disposition': 'attachment; filename=smithsonian-rebuild-viewfulltable-123.sql' }
       })
     );
     render(<RebuildViewFullTableButton schema={SCHEMA} />);

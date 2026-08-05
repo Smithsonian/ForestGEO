@@ -53,8 +53,8 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
   const generatedAt = new Date();
   const sql = renderRebuildViewFullTableArtifact();
   const filename = destinationPlotID
-    ? `ctfs-rebuild-viewfulltable-${destinationPlotID}-${generatedAt.getTime()}.sql`
-    : `ctfs-rebuild-viewfulltable-${generatedAt.getTime()}.sql`;
+    ? `smithsonian-rebuild-viewfulltable-${destinationPlotID}-${generatedAt.getTime()}.sql`
+    : `smithsonian-rebuild-viewfulltable-${generatedAt.getTime()}.sql`;
 
   ailogger.info('ctfs-viewfulltable rebuild generated', {
     userId: getSessionUserId(session!),

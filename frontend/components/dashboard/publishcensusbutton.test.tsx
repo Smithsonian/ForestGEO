@@ -69,7 +69,7 @@ describe('PublishCensusButton', () => {
   it('opens the dialog and shows context for the current census', async () => {
     renderButton();
     fireEvent.click(screen.getByRole('button', { name: /publish census/i }));
-    expect(await screen.findByText(/Publish census to CTFS/i)).toBeTruthy();
+    expect(await screen.findByText(/Publish census to the Smithsonian database/i)).toBeTruthy();
     expect(screen.getByText(SCHEMA)).toBeTruthy();
     expect(screen.getByText(String(APP_PLOT_ID))).toBeTruthy();
     expect(screen.getByText(String(APP_CENSUS_ID))).toBeTruthy();
@@ -85,7 +85,7 @@ describe('PublishCensusButton', () => {
   it('hides reload checkboxes when canReload is false', async () => {
     renderButton({ canReload: false });
     fireEvent.click(screen.getByRole('button', { name: /publish census/i }));
-    await screen.findByText(/Publish census to CTFS/i);
+    await screen.findByText(/Publish census to the Smithsonian database/i);
     expect(screen.queryByLabelText(/Allow reload/i)).toBeNull();
     expect(screen.queryByLabelText(/Dry run/i)).toBeNull();
   });
@@ -93,7 +93,7 @@ describe('PublishCensusButton', () => {
   it('shows reload checkboxes when canReload is true', async () => {
     renderButton({ canReload: true });
     fireEvent.click(screen.getByRole('button', { name: /publish census/i }));
-    await screen.findByText(/Publish census to CTFS/i);
+    await screen.findByText(/Publish census to the Smithsonian database/i);
     expect(screen.getByLabelText(/Allow reload/i)).toBeTruthy();
     expect(screen.getByLabelText(/Dry run/i)).toBeTruthy();
   });
@@ -103,7 +103,7 @@ describe('PublishCensusButton', () => {
     (global.fetch as any).mockResolvedValue(
       new Response(blob, {
         status: 200,
-        headers: { 'Content-Disposition': 'attachment; filename=ctfs-export-1-2024-12345.sql' }
+        headers: { 'Content-Disposition': 'attachment; filename=smithsonian-export-1-2024-12345.sql' }
       })
     );
 
@@ -188,7 +188,7 @@ describe('PublishCensusButton', () => {
       new Response(new Blob(['-- dry run --']), {
         status: 200,
         headers: {
-          'Content-Disposition': 'attachment; filename=ctfs-export-1-2024-1.sql',
+          'Content-Disposition': 'attachment; filename=smithsonian-export-1-2024-1.sql',
           'X-CTFS-Precondition-Warnings': JSON.stringify(warnings)
         }
       })

@@ -437,7 +437,7 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     expect(res.status).toBe(HTTPResponses.OK);
     expect(res.headers.get('Content-Type')).toMatch(/application\/sql/i);
     const disposition = res.headers.get('Content-Disposition') ?? '';
-    expect(disposition).toMatch(/^attachment; filename=ctfs-export-1-2025A-\d+\.sql$/);
+    expect(disposition).toMatch(/^attachment; filename=smithsonian-export-1-2025A-\d+\.sql$/);
     const body = await res.text();
     expect(body).toBe(STUB_RENDER_RESULT.sql);
   });
@@ -448,7 +448,7 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     const res = await GET(makeRequest(), makeProps());
 
     const disposition = res.headers.get('Content-Disposition') ?? '';
-    expect(disposition).toMatch(/^attachment; filename=ctfs-export-1-2025-A-pilot-\d+\.sql$/);
+    expect(disposition).toMatch(/^attachment; filename=smithsonian-export-1-2025-A-pilot-\d+\.sql$/);
     expect(mocks.renderArtifact).toHaveBeenCalledWith(expect.objectContaining({ plotCensusNumber: '2025 A/pilot' }));
   });
 
@@ -516,7 +516,7 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     expect(meta.reloadDryRun).toBe(false);
     expect(meta.procedureName).toBe(STUB_RENDER_RESULT.procedureName);
     expect(meta.lockName).toBe(STUB_RENDER_RESULT.lockName);
-    expect(meta.filename).toMatch(/^ctfs-export-1-2025A-\d+\.sql$/);
+    expect(meta.filename).toMatch(/^smithsonian-export-1-2025A-\d+\.sql$/);
 
     // D3: generatedAt is an ISO-8601 string equal to the Date passed to renderArtifact.
     const renderCall = mocks.renderArtifact.mock.calls[0][0];

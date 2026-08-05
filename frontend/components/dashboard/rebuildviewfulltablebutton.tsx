@@ -1,7 +1,9 @@
 'use client';
 
 /**
- * "Rebuild ViewFullTable" — operator-triggered CTFSWeb reporting-view rebuild.
+ * "Rebuild ViewFullTable" — operator-triggered reporting-view rebuild on the
+ * Smithsonian database. `ctfsweb_webuser` below is a real destination schema
+ * name, not the historical export misnomer.
  *
  * Decoupled from Publish census (D5): the publish artifact no longer rebuilds
  * ViewFullTable. Operators confirm a successful load first, then rebuild on
@@ -56,7 +58,7 @@ export default function RebuildViewFullTableButton({ schema, disabled = false }:
       }
       const disposition = response.headers.get('Content-Disposition') ?? '';
       const match = /filename=([^;]+)/i.exec(disposition);
-      const filename = match ? match[1].trim() : 'ctfs-rebuild-viewfulltable.sql';
+      const filename = match ? match[1].trim() : 'smithsonian-rebuild-viewfulltable.sql';
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
       try {
@@ -97,8 +99,8 @@ export default function RebuildViewFullTableButton({ schema, disabled = false }:
           <DialogContent>
             <Stack spacing={2}>
               <Typography level="body-sm">
-                Generates a <code>.sql</code> artifact that rebuilds the CTFSWeb <code>ViewFullTable</code> reporting view on the destination. Run it after
-                confirming a successful publish. This rebuild can be slow for large plots, so it runs only when you trigger it. The destination must have{' '}
+                Generates a <code>.sql</code> artifact that rebuilds the <code>ViewFullTable</code> reporting view on the destination. Run it after confirming a
+                successful publish. This rebuild can be slow for large plots, so it runs only when you trigger it. The destination must have{' '}
                 <code>creating_ViewFullTable.sql</code> sourced into <code>ctfsweb_webuser</code>.
               </Typography>
               {status === 'error' && (
