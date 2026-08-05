@@ -144,7 +144,7 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     // Default: authenticated, valid schema, census found.
     mocks.auth.mockResolvedValue(AUTHED_SESSION);
     mocks.isValidSchema.mockReturnValue(true);
-    mocks.checkFinishedCensus.mockResolvedValue({ ok: true, count: 3 });
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: true, count: 3, totalActiveCount: 3 });
     mocks.selectMeasurements.mockResolvedValue({
       measurementRows: STUB_MEASUREMENT_ROWS,
       attributeRows: STUB_ATTRIBUTE_ROWS
@@ -380,6 +380,48 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     expect(mocks.connRelease).toHaveBeenCalledTimes(1);
   });
 
+  it('returns 400 when quality exclusions leave less than half the census (insufficient-exportable-rows)', async () => {
+    // The proportional gate: a census that is mostly unvalidated must not publish a
+    // sliver of itself as an apparent success. insufficient-exportable-rows is NOT in
+    // WARNING_PRECONDITION_KINDS, so the real partition (importActual) must block it.
+    const warning = { kind: 'not-validated', message: '55411 rows not yet validated', coreMeasurementIds: [10, 11] };
+    const blocker = {
+      kind: 'insufficient-exportable-rows',
+      message: 'Only 156 of 55567 active measurements are exportable (0.3%)',
+      coreMeasurementIds: []
+    };
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons: [warning, blocker], count: 156, totalActiveCount: 55567 });
+
+    const res = await GET(makeRequest(), makeProps());
+
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    const body = await res.json();
+    expect(body.error).toMatch(/cannot be published/i);
+    expect(body.reasons).toEqual([blocker]);
+    expect(mocks.renderArtifact).not.toHaveBeenCalled();
+    expect(mocks.connRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('durably records the shortfall and warning kinds in the audit log entry on a warned publish', async () => {
+    // The X-CTFS-Precondition-Warnings header dies with the operator's modal; the
+    // ailogger entry is the only durable record that a publish shipped fewer rows
+    // than the census holds. It must carry the census total and the warning kinds.
+    const reasons = [{ kind: 'not-validated', message: '1440 rows not yet validated', coreMeasurementIds: [10, 11] }];
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons, count: 42348, totalActiveCount: 43788 });
+
+    const res = await GET(makeRequest(), makeProps());
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(mocks.loggerInfo).toHaveBeenCalledWith(
+      'ctfs-sql export generated',
+      expect.objectContaining({
+        measurementCount: STUB_MEASUREMENT_ROWS.length,
+        totalActiveMeasurements: 43788,
+        preconditionWarningKinds: ['not-validated']
+      })
+    );
+  });
+
   it('returns 200 with a dry-run artifact + warning header when preconditions fail in dry-run mode', async () => {
     const reasons = [{ kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] }];
     mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons });
@@ -399,7 +441,7 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
   });
 
   it('does not set the warning header on a dry run whose preconditions pass', async () => {
-    mocks.checkFinishedCensus.mockResolvedValue({ ok: true, count: 3 });
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: true, count: 3, totalActiveCount: 3 });
     mocks.auth.mockResolvedValue({
       user: { email: 'admin@example.com', name: 'Admin', userStatus: 'db admin', sites: [], allsites: [] }
     });

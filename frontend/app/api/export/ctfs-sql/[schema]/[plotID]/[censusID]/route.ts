@@ -160,6 +160,10 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
     const filename = buildDownloadFilename(destinationPlotId, plotCensusNumber, generatedAt.getTime());
     const userId = getSessionUserId(session!);
 
+    // totalActiveMeasurements and the warning kinds make the shortfall durable:
+    // measurementCount alone reads as a success even when quality warnings excluded
+    // rows, and the X-CTFS-Precondition-Warnings header only survives as long as the
+    // operator's modal. Counts are absent only on a dry run that bypassed a blocker.
     ailogger.info('ctfs-sql export generated', {
       userId,
       schema,
@@ -168,6 +172,8 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
       appCensusId,
       plotCensusNumber,
       measurementCount: measurementRows.length,
+      totalActiveMeasurements: precondition.totalActiveCount ?? null,
+      preconditionWarningKinds: preconditionWarnings.map(w => w.kind),
       attributeCount: attributeRows.length,
       allowReload,
       reloadDryRun,
