@@ -19,21 +19,33 @@ The publish flow is intended for finished census data only. If a census still ha
 
 ## Prerequisites
 
-The export will refuse to publish unless every one of these is true.
+### 1. The census must pass the "Finished Census" checks
 
-### 1. The census must be "Finished"
+Before generating an artifact the app runs eight checks over the census. They are **not** all treated the same. Four describe problems that would break the load on the Smithsonian side, and those stop the publish. The other four are data-quality notices: the publish still succeeds, and the modal shows them as warnings.
 
-Every measurement included in the export must satisfy:
+**These four stop the publish (HTTP 400):**
 
-- `IsValidated = TRUE` (not `FALSE`, not `NULL`)
-- No unresolved row in `measurement_error_log`
-- `StemGUID IS NOT NULL` (no app-side failure markers)
-- Joined `stems` and `trees` are active (`IsActive = 1`, `DeletedAt IS NULL`)
 - Every `cmattributes.Code` resolves to an active `attributes` row
 - Species row has `SpeciesCode`, `SpeciesName`, `Genus`, and `Family` set
 - All destination-bound strings fit Smithsonian DB column widths (Tag at most 20 characters, StemTag at most 32 characters, QuadratName at most 8 characters, etc.)
+- At least one measurement survives all filters
 
-If anything fails, the modal returns a structured list of disqualifying `CoreMeasurementID`s grouped by failure kind. Fix them in the app and retry.
+When one of these fails, the modal returns a structured list of disqualifying `CoreMeasurementID`s grouped by failure kind. Fix them in the app and retry.
+
+**These four warn, and the publish proceeds:**
+
+- `IsValidated = TRUE` (not `FALSE`, not `NULL`)
+- `StemGUID IS NOT NULL` (no app-side failure markers)
+- Joined `stems` and `trees` are active (`IsActive = 1`, `DeletedAt IS NULL`)
+- No unresolved row in `measurement_error_log`
+
+For the first two, the warning is telling you which rows are being **left out** of the artifact — the export already filters them, so nothing broken is sent.
+
+:::caution
+The fourth is different. The export filter selects on `IsValidated = TRUE` and does not consult `measurement_error_log`, so a measurement that is validated **and** still carries an unresolved error **is included in the artifact**. The app counts that row as an error elsewhere, but publish will send it with only a warning.
+
+If the warning list mentions `unresolved-error`, resolve those rows in **Census Hub -> Errors** before running the artifact against the Smithsonian database, or accept that they will land.
+:::
 
 ### 2. Your account must have export permission
 
@@ -182,20 +194,20 @@ The rebuild artifact first checks that `ctfsweb_webuser.CreateFullView` is insta
 
 ## Troubleshooting
 
-### "Census is not finished"
+### "Census is not finished", or a warning list on a successful publish
 
-The modal returns a structured list of failure kinds with the first 20 disqualifying `CoreMeasurementID`s per kind. Each kind maps to one of the preconditions:
+The modal returns a structured list of failure kinds with the first 20 `CoreMeasurementID`s per kind. Whether you see it as a blocking error or as a warning depends on the kind:
 
-| Kind | What to fix |
-|---|---|
-| `not-validated` | Re-run validation in the app for those rows. |
-| `unresolved-error` | Resolve the rows in **Census Hub -> Errors**. |
-| `no-stem-guid` | App-side failure marker. The row needs re-ingestion. |
-| `inactive-join` | The joined stem or tree is soft-deleted. Restore or remove the measurement. |
-| `unknown-attribute-code` | One or more `cmattributes.Code` values do not exist in `attributes`. Add the codes or fix the measurement. |
-| `missing-taxonomy-fields` | The species row is missing `SpeciesCode`, `SpeciesName`, `Genus`, or `Family`. Fix in **Stem & Plot Details -> All Taxonomies**. |
-| `string-too-long` | A destination-bound value exceeds the Smithsonian DB column width. Shorten the offending field. |
-| `zero-exportable-rows` | No measurements remain after applying all filters. Verify the census, plot, and validated state. |
+| Kind | Effect | What to fix |
+|---|---|---|
+| `unknown-attribute-code` | Blocks | One or more `cmattributes.Code` values do not exist in `attributes`. Add the codes or fix the measurement. |
+| `missing-taxonomy-fields` | Blocks | The species row is missing `SpeciesCode`, `SpeciesName`, `Genus`, or `Family`. Fix in **Stem & Plot Details -> All Taxonomies**. |
+| `string-too-long` | Blocks | A destination-bound value exceeds the Smithsonian DB column width. Shorten the offending field. |
+| `zero-exportable-rows` | Blocks | No measurements remain after applying all filters. Verify the census, plot, and validated state. |
+| `not-validated` | Warns; rows excluded | Re-run validation in the app for those rows, then re-publish to include them. |
+| `no-stem-guid` | Warns; rows excluded | App-side failure marker. The row needs re-ingestion, then a re-publish to include it. |
+| `inactive-join` | Warns; rows excluded | The joined stem or tree is soft-deleted. Restore or remove the measurement. |
+| `unresolved-error` | Warns; **rows still exported** | Resolve the rows in **Census Hub -> Errors** before running the artifact, or they will be loaded as-is. |
 
 ### "Expected exactly one Census row for PlotID=N, PlotCensusNumber=X; found 0"
 
