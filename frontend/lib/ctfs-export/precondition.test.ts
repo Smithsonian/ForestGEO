@@ -525,6 +525,46 @@ describe('checkFinishedCensus', () => {
     }
   });
 
+  it('uses the full export join graph when counting exportable measurements', async () => {
+    // QuadratID is nullable in the app schema. The actual export uses an inner
+    // quadrats join, so this otherwise-valid row disappears from selectMeasurements.
+    // The gate must count it the same way and block the would-be empty artifact.
+    await conn.query('UPDATE stems SET QuadratID = NULL WHERE StemGUID = 1');
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'a row omitted by the export join graph cannot pass the gate').toBe(false);
+    if (!result.ok) {
+      expect(result.reasons.map(reason => reason.kind)).toContain('zero-exportable-rows');
+      expect(result.count, 'the exportable count must match the actual export join').toBe(0);
+      expect(result.totalActiveCount).toBe(1);
+    }
+  });
+
+  it('still reports the proportional failure when another blocking check already failed', async () => {
+    // Dry runs promise a complete preview. An unknown attribute is already blocking,
+    // but the later proportional check must still run and report that only 1/3 rows
+    // would be exported.
+    await conn.query("UPDATE cmattributes SET Code = 'UNKNOWN' WHERE CoreMeasurementID = 1");
+    await conn.query(
+      `INSERT INTO coremeasurements
+         (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
+       VALUES (201, 1, 1, FALSE, '2024-07-01', 10.1, 1.3, 1),
+              (202, 1, 1, FALSE, '2024-07-01', 10.2, 1.3, 1)`
+    );
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const kinds = result.reasons.map(reason => reason.kind);
+      expect(kinds).toContain('unknown-attribute-code');
+      expect(kinds).toContain('insufficient-exportable-rows');
+      expect(result.count).toBe(1);
+      expect(result.totalActiveCount).toBe(3);
+    }
+  });
+
   // -------------------------------------------------------------------------
   // Cap behaviour: MAX_DISPLAY_FAILURES
   // -------------------------------------------------------------------------

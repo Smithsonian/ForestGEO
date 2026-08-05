@@ -92,14 +92,13 @@ export interface PreconditionInput {
 
 /**
  * `count` is the number of exportable measurements and `totalActiveCount` the number of
- * active measurements in the census (exportable or not); both are present whenever the
- * row-count check (check 8) ran — i.e. always on `ok: true`, and on `ok: false` unless
- * an earlier BLOCKING failure short-circuited. The publish route records them in its
- * audit log entry so a shortfall (rows excluded by quality warnings) is durably visible.
+ * active measurements in the census (exportable or not). Both are always present: all
+ * checks run so dry-run previews and audit events report the complete failure set and
+ * exact shortfall.
  */
 export type PreconditionResult =
   | { ok: true; count: number; totalActiveCount: number }
-  | { ok: false; reasons: PreconditionFailure[]; count?: number; totalActiveCount?: number };
+  | { ok: false; reasons: PreconditionFailure[]; count: number; totalActiveCount: number };
 
 /**
  * Publish-gate policy (Task 10C, ratified 2026-07-20: "warn on quality, keep structural
@@ -386,28 +385,22 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
     });
   }
 
-  // Check 8 (zero rows) must still run when the only failures so far are WARNING
-  // kinds — otherwise a census whose rows are all excluded by quality issues (e.g.
-  // every row unvalidated) would skip this gate, the publish would proceed on the
-  // warn-don't-block path, and selectMeasurements would render an empty artifact.
-  // It is skipped only when a BLOCKING failure already exists (the publish is going
-  // to 400 regardless, and the count query may not be meaningful in that state).
-  if (reasons.some(r => isBlockingPreconditionKind(r.kind))) {
-    return { ok: false, reasons };
-  }
-
   // Check 8: Zero (or too few) exportable rows remain after all filters. Uses the
-  // shared "exportable measurement" base WHERE so this precondition matches the
-  // filter that selectMeasurements applies — preventing drift between "I
-  // would let you export this" and "here's what would actually export."
-  // Aliases: cm = coremeasurements, c = census, s = stems, t = trees (matching
-  // exportableMeasurementBaseWhere conventions). Bound params: [censusId, plotId].
+  // same full join graph and shared WHERE clause as selectMeasurements. The joins
+  // beyond stems/trees matter because their foreign keys are nullable: counting a
+  // validated row with no quadrat/species/taxonomy join would otherwise let the gate
+  // pass even though the actual export silently drops that row.
+  // Bound params: [censusId, plotId].
   const [countRows] = await conn.query<any[]>(
     `SELECT COUNT(*) AS n
        FROM ${s}.coremeasurements cm
        JOIN ${s}.census c ON c.CensusID = cm.CensusID
        JOIN ${s}.stems s  ON s.StemGUID = cm.StemGUID
        JOIN ${s}.trees t  ON t.TreeID   = s.TreeID
+       JOIN ${s}.quadrats q  ON q.QuadratID = s.QuadratID
+       JOIN ${s}.species sp  ON sp.SpeciesID = t.SpeciesID
+       JOIN ${s}.genus gn    ON gn.GenusID = sp.GenusID
+       JOIN ${s}.family fam  ON fam.FamilyID = gn.FamilyID
       WHERE ${exportableMeasurementBaseWhere}`,
     [input.censusId, input.plotId]
   );

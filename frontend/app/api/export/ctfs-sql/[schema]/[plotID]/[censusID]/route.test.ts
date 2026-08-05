@@ -21,6 +21,10 @@ const mocks = vi.hoisted(() => ({
 
   // raw connection returned by getConn()
   connQuery: vi.fn(),
+  connBeginTransaction: vi.fn(),
+  connCommit: vi.fn(),
+  connRollback: vi.fn(),
+  connDestroy: vi.fn(),
   connRelease: vi.fn(),
 
   // ctfs-export module
@@ -30,6 +34,7 @@ const mocks = vi.hoisted(() => ({
 
   // ailogger
   loggerInfo: vi.fn(),
+  loggerWarn: vi.fn(),
   loggerError: vi.fn()
 }));
 
@@ -50,6 +55,10 @@ vi.mock('@/lib/db/sqlsecurity', () => ({
 vi.mock('@/lib/db/primitives', () => ({
   getConn: vi.fn(async () => ({
     query: mocks.connQuery,
+    beginTransaction: mocks.connBeginTransaction,
+    commit: mocks.connCommit,
+    rollback: mocks.connRollback,
+    destroy: mocks.connDestroy,
     release: mocks.connRelease
   }))
 }));
@@ -70,6 +79,7 @@ vi.mock('@/lib/ctfs-export', async () => {
 vi.mock('@/ailogger', () => ({
   default: {
     info: mocks.loggerInfo,
+    warn: mocks.loggerWarn,
     error: mocks.loggerError
   }
 }));
@@ -151,6 +161,10 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     });
     mocks.connQuery.mockResolvedValue([[{ PlotCensusNumber: '2025A' }]]);
     mocks.renderArtifact.mockReturnValue(STUB_RENDER_RESULT);
+    mocks.connBeginTransaction.mockResolvedValue(undefined);
+    mocks.connCommit.mockResolvedValue(undefined);
+    mocks.connRollback.mockResolvedValue(undefined);
+    mocks.connDestroy.mockReturnValue(undefined);
     mocks.connRelease.mockReturnValue(undefined);
   });
 
@@ -335,7 +349,7 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     // the quality warning does not stop a publish and must not masquerade as the blocker.
     const warning = { kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] };
     const blocker = { kind: 'string-too-long', message: 'Destination-bound value exceeds CTFS legacy column width', coreMeasurementIds: [12] };
-    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons: [warning, blocker] });
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons: [warning, blocker], count: 2, totalActiveCount: 3 });
 
     const res = await GET(makeRequest(), makeProps());
 
@@ -351,7 +365,7 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     // not-validated is a WARNING kind: the export already excludes those rows, so the
     // publish proceeds and the operator is warned rather than blocked.
     const reasons = [{ kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] }];
-    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons });
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons, count: 1, totalActiveCount: 3 });
 
     const res = await GET(makeRequest(), makeProps());
 
@@ -369,7 +383,7 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     // zero-exportable-rows is blocking; a real (non-dry) publish must 400, never emit an
     // empty artifact with a warning.
     const blocker = { kind: 'zero-exportable-rows', message: 'No exportable rows remain after applying all filters', coreMeasurementIds: [] };
-    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons: [blocker] });
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons: [blocker], count: 0, totalActiveCount: 0 });
 
     const res = await GET(makeRequest(), makeProps());
 
@@ -399,6 +413,18 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     expect(body.error).toMatch(/cannot be published/i);
     expect(body.reasons).toEqual([blocker]);
     expect(mocks.renderArtifact).not.toHaveBeenCalled();
+    expect(mocks.loggerWarn).toHaveBeenCalledWith(
+      'ctfs-sql export blocked by preconditions',
+      expect.objectContaining({
+        userId: 'researcher@example.com',
+        exportableMeasurementCount: 156,
+        totalActiveMeasurements: 55567,
+        preconditionBlockingKinds: ['insufficient-exportable-rows'],
+        preconditionWarningKinds: ['not-validated']
+      })
+    );
+    expect(mocks.connCommit).not.toHaveBeenCalled();
+    expect(mocks.connRollback).toHaveBeenCalledTimes(1);
     expect(mocks.connRelease).toHaveBeenCalledTimes(1);
   });
 
@@ -424,7 +450,7 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
 
   it('returns 200 with a dry-run artifact + warning header when preconditions fail in dry-run mode', async () => {
     const reasons = [{ kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] }];
-    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons });
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons, count: 1, totalActiveCount: 3 });
     mocks.auth.mockResolvedValue({
       user: { email: 'admin@example.com', name: 'Admin', userStatus: 'db admin', sites: [], allsites: [] }
     });
@@ -438,6 +464,23 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     expect(JSON.parse(warnHeader!)).toEqual([{ kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] }]);
     expect(mocks.renderArtifact).toHaveBeenCalledWith(expect.objectContaining({ reloadDryRun: true, preconditionWarnings: reasons }));
     expect(mocks.connRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('includes every blocker in a dry-run preview, including the proportional shortfall', async () => {
+    const reasons = [
+      { kind: 'unknown-attribute-code', message: 'Unknown code', coreMeasurementIds: [1] },
+      { kind: 'insufficient-exportable-rows', message: 'Only 1 of 3 active measurements are exportable', coreMeasurementIds: [] }
+    ];
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: false, reasons, count: 1, totalActiveCount: 3 });
+    mocks.auth.mockResolvedValue({
+      user: { email: 'admin@example.com', name: 'Admin', userStatus: 'db admin', sites: [], allsites: [] }
+    });
+
+    const res = await GET(makeRequest(makeUrl({ reloadDryRun: 'true' })), makeProps());
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(JSON.parse(res.headers.get('X-CTFS-Precondition-Warnings')!)).toEqual(reasons);
+    expect(mocks.renderArtifact).toHaveBeenCalledWith(expect.objectContaining({ reloadDryRun: true, preconditionWarnings: reasons }));
   });
 
   it('does not set the warning header on a dry run whose preconditions pass', async () => {
@@ -466,6 +509,23 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     const body = await res.json();
     expect(body.error).toMatch(/census not found/i);
     expect(mocks.checkFinishedCensus).not.toHaveBeenCalled();
+    expect(mocks.connRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('destroys the connection when an early-return rollback fails', async () => {
+    mocks.connQuery.mockResolvedValue([[]]);
+    mocks.connRollback.mockRejectedValue(new Error('rollback connection lost'));
+
+    const res = await GET(makeRequest(), makeProps());
+
+    expect(res.status).toBe(HTTPResponses.NOT_FOUND);
+    expect(mocks.connRollback).toHaveBeenCalledTimes(1);
+    expect(mocks.connDestroy).toHaveBeenCalledTimes(1);
+    expect(mocks.loggerError).toHaveBeenCalledWith(
+      'ctfs-sql export transaction rollback failed',
+      expect.objectContaining({ message: 'rollback connection lost' }),
+      expect.objectContaining({ schema: VALID_SCHEMA, appPlotId: 7, appCensusId: 42 })
+    );
     expect(mocks.connRelease).toHaveBeenCalledTimes(1);
   });
 
@@ -569,6 +629,10 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
   it('releases the connection on success', async () => {
     await GET(makeRequest(), makeProps());
 
+    expect(mocks.connQuery).toHaveBeenCalledWith('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+    expect(mocks.connBeginTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.connCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.connRollback).not.toHaveBeenCalled();
     expect(mocks.connRelease).toHaveBeenCalledTimes(1);
   });
 
@@ -591,6 +655,8 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     expect(meta.message).toMatch(/DB exploded/i);
 
     // Connection must still be released even when an error escapes.
+    expect(mocks.connCommit).not.toHaveBeenCalled();
+    expect(mocks.connRollback).toHaveBeenCalledTimes(1);
     expect(mocks.connRelease).toHaveBeenCalledTimes(1);
   });
 

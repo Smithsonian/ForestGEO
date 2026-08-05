@@ -18,6 +18,10 @@ const STUB_SQL = '-- generated ctfs export sql --';
 const mocks = vi.hoisted(() => ({
   getConn: vi.fn(),
   connQuery: vi.fn(),
+  connBeginTransaction: vi.fn(),
+  connCommit: vi.fn(),
+  connRollback: vi.fn(),
+  connDestroy: vi.fn(),
   connRelease: vi.fn(),
   checkFinishedCensus: vi.fn(),
   selectMeasurements: vi.fn(),
@@ -74,14 +78,29 @@ describe('GET /api/export/ctfs-sql/[schema]/[plotID]/[censusID] authz', () => {
   beforeEach(() => {
     mocks.getConn.mockReset();
     mocks.connQuery.mockReset();
+    mocks.connBeginTransaction.mockReset();
+    mocks.connCommit.mockReset();
+    mocks.connRollback.mockReset();
+    mocks.connDestroy.mockReset();
     mocks.connRelease.mockReset();
     mocks.checkFinishedCensus.mockReset();
     mocks.selectMeasurements.mockReset();
     mocks.renderArtifact.mockReset();
 
-    mocks.getConn.mockResolvedValue({ query: mocks.connQuery, release: mocks.connRelease });
+    mocks.getConn.mockResolvedValue({
+      query: mocks.connQuery,
+      beginTransaction: mocks.connBeginTransaction,
+      commit: mocks.connCommit,
+      rollback: mocks.connRollback,
+      destroy: mocks.connDestroy,
+      release: mocks.connRelease
+    });
     mocks.connQuery.mockResolvedValue([[{ PlotCensusNumber: '2025A' }]]);
-    mocks.checkFinishedCensus.mockResolvedValue({ ok: true, count: 0 });
+    mocks.connBeginTransaction.mockResolvedValue(undefined);
+    mocks.connCommit.mockResolvedValue(undefined);
+    mocks.connRollback.mockResolvedValue(undefined);
+    mocks.connDestroy.mockReturnValue(undefined);
+    mocks.checkFinishedCensus.mockResolvedValue({ ok: true, count: 1, totalActiveCount: 1 });
     mocks.selectMeasurements.mockResolvedValue({ measurementRows: [], attributeRows: [] });
     mocks.renderArtifact.mockReturnValue({ sql: STUB_SQL, procedureName: 'proc', lockName: 'lock' });
   });

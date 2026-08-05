@@ -164,7 +164,11 @@ publish blocks with `insufficient-exportable-rows` instead of shipping a sliver 
 census as an apparent success. Smaller shortfalls still publish on the warn path, but the
 route's audit log entry now durably records `totalActiveMeasurements` and the warning
 kinds alongside `measurementCount`, so any shortfall is reconstructible after the
-operator dismisses the warning modal. The full warning-vs-blocking
+operator dismisses the warning modal. Blocked publishes emit a separate warning-level
+audit event with both counts and the blocking/warning kinds. The precondition counts and
+the exported rows are read in one repeatable-read transaction, and the count uses the
+same complete census/stem/tree/quadrat/taxonomy join graph as the export so nullable
+relationships cannot inflate the exportable fraction. The full warning-vs-blocking
 validation-tier feature (authorized+audited override, server-side gate stale UI can't
 bypass) remains a TODO in `lib/ctfs-export/precondition.ts`.
 

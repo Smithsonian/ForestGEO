@@ -106,7 +106,15 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
 
   // --- Database work ---
   const conn = await getConn();
+  let transactionActive = false;
   try {
+    // The proportional gate and the selected artifact must observe one database
+    // snapshot. Pool sessions can inherit READ COMMITTED from other workflows, so
+    // set the next transaction explicitly before beginning the read transaction.
+    await conn.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+    await conn.beginTransaction();
+    transactionActive = true;
+
     // Resolve PlotCensusNumber and verify (plotID, censusID) belongs to this
     // schema. The combined WHERE prevents path-traversal across schemas: a
     // CensusID from another schema returns no row here.
@@ -116,6 +124,7 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
       return NextResponse.json({ error: 'Census not found' }, { status: HTTPResponses.NOT_FOUND });
     }
     const plotCensusNumber = String(censusRows[0].PlotCensusNumber);
+    const userId = getSessionUserId(session!);
 
     // Precondition gate (Task 10C, ratified 2026-07-20: warn on data-quality, keep
     // destination-integrity blocking). Data-quality failures (rows the export already
@@ -128,6 +137,20 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
     if (!precondition.ok) {
       const { blocking, warnings } = partitionPreconditionFailures(precondition.reasons);
       if (blocking.length > 0 && !reloadDryRun) {
+        ailogger.warn('ctfs-sql export blocked by preconditions', {
+          userId,
+          schema,
+          appPlotId,
+          destinationPlotId,
+          appCensusId,
+          plotCensusNumber,
+          exportableMeasurementCount: precondition.count,
+          totalActiveMeasurements: precondition.totalActiveCount,
+          preconditionBlockingKinds: blocking.map(reason => reason.kind),
+          preconditionWarningKinds: warnings.map(reason => reason.kind),
+          allowReload,
+          reloadDryRun
+        });
         return NextResponse.json({ error: 'Census cannot be published', reasons: blocking }, { status: HTTPResponses.BAD_REQUEST });
       }
       // Non-dry real publish with only quality warnings → surface those warnings and
@@ -141,6 +164,11 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
       plotId: appPlotId,
       censusId: appCensusId
     });
+
+    // Close the consistent-read snapshot as soon as all database reads finish;
+    // rendering the in-memory artifact does not need to keep a transaction open.
+    await conn.commit();
+    transactionActive = false;
 
     // Render the complete SQL artifact.
     const { sql, procedureName, lockName } = renderArtifact({
@@ -158,12 +186,11 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
     });
 
     const filename = buildDownloadFilename(destinationPlotId, plotCensusNumber, generatedAt.getTime());
-    const userId = getSessionUserId(session!);
 
     // totalActiveMeasurements and the warning kinds make the shortfall durable:
     // measurementCount alone reads as a success even when quality warnings excluded
     // rows, and the X-CTFS-Precondition-Warnings header only survives as long as the
-    // operator's modal. Counts are absent only on a dry run that bypassed a blocker.
+    // operator's modal. The counts come from the same snapshot as the artifact rows.
     ailogger.info('ctfs-sql export generated', {
       userId,
       schema,
@@ -172,7 +199,7 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
       appCensusId,
       plotCensusNumber,
       measurementCount: measurementRows.length,
-      totalActiveMeasurements: precondition.totalActiveCount ?? null,
+      totalActiveMeasurements: precondition.totalActiveCount,
       preconditionWarningKinds: preconditionWarnings.map(w => w.kind),
       attributeCount: attributeRows.length,
       allowReload,
@@ -202,6 +229,15 @@ async function handler(request: NextRequest, context: RouteContext): Promise<Nex
     ailogger.error('ctfs-sql export failed', error, { schema, appPlotId, appCensusId });
     return NextResponse.json({ error: error.message || 'Export failed' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
+    if (transactionActive) {
+      try {
+        await conn.rollback();
+      } catch (rollbackErr: unknown) {
+        const rollbackError = rollbackErr instanceof Error ? rollbackErr : new Error(String(rollbackErr));
+        ailogger.error('ctfs-sql export transaction rollback failed', rollbackError, { schema, appPlotId, appCensusId });
+        conn.destroy();
+      }
+    }
     conn.release();
   }
 }
