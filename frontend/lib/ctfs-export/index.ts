@@ -10,6 +10,7 @@ export {
   partitionPreconditionFailures,
   isBlockingPreconditionKind,
   WARNING_PRECONDITION_KINDS,
+  MIN_EXPORTABLE_FRACTION,
   type PreconditionResult,
   type PreconditionFailure,
   type PreconditionFailureKind

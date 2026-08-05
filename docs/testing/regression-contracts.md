@@ -151,19 +151,31 @@ preconditions, now split into two policies:
   (`exportableMeasurementBaseWhere`), so the operator is told what won't be exported and
   the publish continues, surfacing the warnings in `X-CTFS-Precondition-Warnings`.
 - **Blocking (publish 400s):** `unknown-attribute-code`, `missing-taxonomy-fields`,
-  `string-too-long`, `zero-exportable-rows`. Each would produce an artifact that fails to
-  load into, or silently truncates data in, the destination Smithsonian DB, so these still
-  stop a real publish. A dry run continues to surface everything (blockers included) as a
-  non-blocking preview.
+  `string-too-long`, `zero-exportable-rows`, `insufficient-exportable-rows`. Each would
+  produce an artifact that fails to load into, or silently truncates data in, the
+  destination Smithsonian DB, so these still stop a real publish. A dry run continues to
+  surface everything (blockers included) as a non-blocking preview.
 
 The "nothing left to export" check still runs even when only warnings are present, so a
-warn-only census cannot slip through as an empty publish. The full warning-vs-blocking
+warn-only census cannot slip through as an empty publish. That check is also
+**proportional** (added 2026-08-05): when quality exclusions leave less than
+`MIN_EXPORTABLE_FRACTION` (50%) of the census's active measurements exportable, the
+publish blocks with `insufficient-exportable-rows` instead of shipping a sliver of the
+census as an apparent success. Smaller shortfalls still publish on the warn path, but the
+route's audit log entry now durably records `totalActiveMeasurements` and the warning
+kinds alongside `measurementCount`, so any shortfall is reconstructible after the
+operator dismisses the warning modal. Blocked publishes emit a separate warning-level
+audit event with both counts and the blocking/warning kinds. The precondition counts and
+the exported rows are read in one repeatable-read transaction, and the count uses the
+same complete census/stem/tree/quadrat/taxonomy join graph as the export so nullable
+relationships cannot inflate the exportable fraction. The full warning-vs-blocking
 validation-tier feature (authorized+audited override, server-side gate stale UI can't
 bypass) remains a TODO in `lib/ctfs-export/precondition.ts`.
 
 Enforced by: `lib/ctfs-export/precondition.test.ts` (classification + warning-plus-zero-
-rows interaction) and the publish route test (`app/api/export/ctfs-sql/.../route.test.ts`:
-quality warning → 200 + header; blocker → 400 with only blocking reasons).
+rows interaction + proportional-gate threshold behaviour) and the publish route test
+(`app/api/export/ctfs-sql/.../route.test.ts`: quality warning → 200 + header + audit-log
+shortfall fields; blocker → 400 with only blocking reasons).
 
 > **Naming note.** The module path `lib/ctfs-export/`, the route `export/ctfs-sql`, and the
 > `X-CTFS-Precondition-Warnings` header are historical misnomers kept for compatibility.

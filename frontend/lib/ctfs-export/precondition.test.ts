@@ -81,6 +81,7 @@ describe('checkFinishedCensus', () => {
     expect(result.ok, 'expected ok=true for a fully valid census').toBe(true);
     if (result.ok) {
       expect(result.count, 'count should reflect the single exportable row').toBe(1);
+      expect(result.totalActiveCount, 'the single seed row is the only active measurement').toBe(1);
     }
   });
 
@@ -449,6 +450,122 @@ describe('checkFinishedCensus', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Check 8: insufficient-exportable-rows (proportional gate)
+  // -------------------------------------------------------------------------
+
+  it('blocks with insufficient-exportable-rows when quality exclusions leave less than half the census', async () => {
+    // Seed: 1 exportable row. Add 2 unvalidated rows → 1 of 3 active rows exportable
+    // (33%), below MIN_EXPORTABLE_FRACTION. Before the proportional gate this
+    // published "successfully" while silently omitting most of the census.
+    await conn.query(
+      `INSERT INTO coremeasurements
+         (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
+       VALUES (201, 1, 1, FALSE, '2024-07-01', 10.1, 1.3, 1),
+              (202, 1, 1, FALSE, '2024-07-01', 10.2, 1.3, 1)`
+    );
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'expected ok=false when only 1 of 3 active rows is exportable').toBe(false);
+    if (!result.ok) {
+      const failure = result.reasons.find(r => r.kind === 'insufficient-exportable-rows');
+      expect(failure, 'insufficient-exportable-rows failure should be present').toBeDefined();
+      expect(failure!.message, 'message should carry the exact shortfall').toContain('1 of 3');
+      const { blocking, warnings } = partitionPreconditionFailures(result.reasons);
+      expect(
+        blocking.map(r => r.kind),
+        'the proportional gate must BLOCK, not warn'
+      ).toEqual(['insufficient-exportable-rows']);
+      expect(
+        warnings.map(r => r.kind),
+        'the underlying quality warning is preserved'
+      ).toEqual(['not-validated']);
+      expect(result.count, 'exportable count is reported for the audit log').toBe(1);
+      expect(result.totalActiveCount, 'total active count is reported for the audit log').toBe(3);
+    }
+  });
+
+  it('does not block when the exportable fraction is exactly at MIN_EXPORTABLE_FRACTION', async () => {
+    // 1 exportable + 1 unvalidated → exactly the floor. The gate blocks strictly
+    // below MIN_EXPORTABLE_FRACTION, so this census proceeds on the warn path.
+    await conn.query(
+      `INSERT INTO coremeasurements
+         (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
+       VALUES (201, 1, 1, FALSE, '2024-07-01', 10.1, 1.3, 1)`
+    );
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'census is not perfectly clean, so ok=false').toBe(false);
+    if (!result.ok) {
+      const { blocking, warnings } = partitionPreconditionFailures(result.reasons);
+      expect(blocking, 'nothing blocks at exactly the floor').toEqual([]);
+      expect(warnings.map(r => r.kind)).toEqual(['not-validated']);
+      expect(result.count).toBe(1);
+      expect(result.totalActiveCount).toBe(2);
+    }
+  });
+
+  it('does not count inactive measurements toward the proportional gate', async () => {
+    // An IsActive=0 row is invisible to the export AND to the census total, so it
+    // must not drag the exportable fraction below the floor.
+    await conn.query(
+      `INSERT INTO coremeasurements
+         (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
+       VALUES (201, 1, 1, FALSE, '2024-07-01', 10.1, 1.3, 0),
+              (202, 1, 1, FALSE, '2024-07-01', 10.2, 1.3, 0)`
+    );
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'inactive rows should not affect the gate at all').toBe(true);
+    if (result.ok) {
+      expect(result.count).toBe(1);
+      expect(result.totalActiveCount, 'inactive rows are excluded from the census total').toBe(1);
+    }
+  });
+
+  it('uses the full export join graph when counting exportable measurements', async () => {
+    // QuadratID is nullable in the app schema. The actual export uses an inner
+    // quadrats join, so this otherwise-valid row disappears from selectMeasurements.
+    // The gate must count it the same way and block the would-be empty artifact.
+    await conn.query('UPDATE stems SET QuadratID = NULL WHERE StemGUID = 1');
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'a row omitted by the export join graph cannot pass the gate').toBe(false);
+    if (!result.ok) {
+      expect(result.reasons.map(reason => reason.kind)).toContain('zero-exportable-rows');
+      expect(result.count, 'the exportable count must match the actual export join').toBe(0);
+      expect(result.totalActiveCount).toBe(1);
+    }
+  });
+
+  it('still reports the proportional failure when another blocking check already failed', async () => {
+    // Dry runs promise a complete preview. An unknown attribute is already blocking,
+    // but the later proportional check must still run and report that only 1/3 rows
+    // would be exported.
+    await conn.query("UPDATE cmattributes SET Code = 'UNKNOWN' WHERE CoreMeasurementID = 1");
+    await conn.query(
+      `INSERT INTO coremeasurements
+         (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
+       VALUES (201, 1, 1, FALSE, '2024-07-01', 10.1, 1.3, 1),
+              (202, 1, 1, FALSE, '2024-07-01', 10.2, 1.3, 1)`
+    );
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const kinds = result.reasons.map(reason => reason.kind);
+      expect(kinds).toContain('unknown-attribute-code');
+      expect(kinds).toContain('insufficient-exportable-rows');
+      expect(result.count).toBe(1);
+      expect(result.totalActiveCount).toBe(3);
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // Cap behaviour: MAX_DISPLAY_FAILURES
   // -------------------------------------------------------------------------
 
@@ -511,7 +628,13 @@ describe('checkFinishedCensus', () => {
       expect(isBlockingPreconditionKind(kind), `${kind} should be a WARNING`).toBe(false);
     }
     // Destination-integrity: an artifact violating these breaks the CTFS load → block.
-    for (const kind of ['unknown-attribute-code', 'missing-taxonomy-fields', 'string-too-long', 'zero-exportable-rows'] as const) {
+    for (const kind of [
+      'unknown-attribute-code',
+      'missing-taxonomy-fields',
+      'string-too-long',
+      'zero-exportable-rows',
+      'insufficient-exportable-rows'
+    ] as const) {
       expect(isBlockingPreconditionKind(kind), `${kind} should be BLOCKING`).toBe(true);
     }
   });
