@@ -160,6 +160,15 @@ describe('Database Query Utilities', () => {
       expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(2);
     });
 
+    it('reports a duplicate upsert that changed no values as unchanged', async () => {
+      const data: { id?: number; name: string } = { name: 'Existing' };
+      (mockConnectionManager.executeQuery as any)
+        .mockResolvedValueOnce({ insertId: 0, affectedRows: 1 })
+        .mockResolvedValueOnce([{ id: 456, name: 'Existing' }]);
+
+      await expect(handleUpsert(mockConnectionManager, 'testSchema', 'users', data, 'id')).resolves.toEqual({ id: 456, operation: 'unchanged' });
+    });
+
     it('should throw error when record not found after update', async () => {
       const data: { id?: number; name: string; age: number } = { name: 'Test', age: 25 };
       (mockConnectionManager.executeQuery as any).mockResolvedValueOnce({ insertId: 0 }).mockResolvedValueOnce([]); // No record found

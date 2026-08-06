@@ -6,6 +6,7 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
+import type { UpsertOperation } from '@/config/utils';
 
 // need to try integrating this into validation system:
 
@@ -72,7 +73,12 @@ interface UpdateQueryConfig {
  * row from an overwritten one, which the changelog must record faithfully — a
  * hardcoded INSERT would claim a taxon was created every time one was edited.
  */
-export type SliceUpsertObserver<Result> = (slice: { sliceKey: string; id: number; operation?: string; rowData: Partial<Result> }) => Promise<void> | void;
+export type SliceUpsertObserver<Result> = (slice: {
+  sliceKey: string;
+  id: number;
+  operation: UpsertOperation;
+  rowData: Partial<Result>;
+}) => Promise<void> | void;
 
 export async function handleUpsertForSlices<Result>(
   connectionManager: ConnectionManager,
