@@ -247,10 +247,6 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
       } else dataToUpdate = remainingProperties;
 
       const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${dataType}`, dataToUpdate, demappedGridID, previousGridIDKey]);
-      // Must run on the same connection as the UPDATE so the changelog trigger
-      // reads the session variable this statement sets — hence tx.query, not a
-      // fresh pool connection.
-      await tx.query(`SET @CURRENT_CENSUS_ID = ?`, [censusID]);
       const updateResult = await tx.query(updateQuery);
 
       // A zero-row UPDATE must never be reported as success. The pool uses mysql2's

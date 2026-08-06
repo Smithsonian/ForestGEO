@@ -10,9 +10,14 @@ import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from '@/lib
  * - Single-row edits via datagrid EditToolbar (PATCH/DELETE operations)
  * - File uploads (INSERT operations with batch tracking)
  *
+ * Entries are written by the handlers themselves, inside the mutation's own
+ * transaction. No database trigger is involved — none has existed on any schema
+ * since 2025-05-12.
+ *
  * Exclusions:
  * - Bulk census deletions (would flood the log with thousands of entries)
- * - System-generated changes (auto-calculations, triggers firing from other triggers)
+ * - Raw-SQL changes made outside the app, which only a trigger or the binlog
+ *   could catch
  *
  * Test Coverage:
  * 1. Single-row UPDATE operations create ONE changelog entry
@@ -202,9 +207,8 @@ describe('Unified Changelog Tracking System', () => {
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce({}) // SET @CURRENT_CENSUS_ID session var (issued before the UPDATE)
         .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query (matched one row -> passes the zero-row guard)
-        .mockResolvedValueOnce([{ Count: 1 }]); // COUNT query
+        .mockResolvedValueOnce({}); // unifiedchangelog INSERT
 
       const oldRow = { code: 'A', description: 'Old Description', status: 'alive' };
       const newRow = { code: 'A', description: 'New Description', status: 'alive' };
@@ -224,7 +228,11 @@ describe('Unified Changelog Tracking System', () => {
       const updateCall = exec.mock.calls.find(call => String(call[0]).includes('UPDATE') && String(call[0]).includes('attributes'));
       expect(updateCall).toBeDefined();
 
-      // Once triggers are enabled, this would create ONE changelog entry via trigger
+      // Exactly one changelog entry, written by the handler inside the same
+      // transaction as the UPDATE.
+      const changelogCalls = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog'));
+      expect(changelogCalls).toHaveLength(1);
+      expect(changelogCalls[0][1]).toEqual(expect.arrayContaining(['attributes', 'UPDATE']));
       expect(commit).toHaveBeenCalledWith('tx-1');
     });
 
@@ -235,9 +243,8 @@ describe('Unified Changelog Tracking System', () => {
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce({}) // SET @CURRENT_CENSUS_ID session var (issued before the UPDATE)
         .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query (matched one row -> passes the zero-row guard)
-        .mockResolvedValueOnce([{ Count: 1 }]); // COUNT query
+        .mockResolvedValueOnce({}); // unifiedchangelog INSERT
 
       const oldRow = { personnelID: 1, firstName: 'John', lastName: 'Doe', role: 'researcher' };
       const newRow = { personnelID: 1, firstName: 'John', lastName: 'Doe', role: 'lead researcher' };
@@ -250,7 +257,9 @@ describe('Unified Changelog Tracking System', () => {
       const res = await PATCH(req, makeParams('personnel', ['testschema', 'personnelID']));
 
       expect(res.status).toBe(HTTPResponses.OK);
-      expect(exec).toHaveBeenCalled();
+      const changelogCalls = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog'));
+      expect(changelogCalls).toHaveLength(1);
+      expect(changelogCalls[0][1]).toEqual(expect.arrayContaining(['personnel', 'UPDATE']));
       expect(commit).toHaveBeenCalledWith('tx-2');
     });
   });
@@ -284,7 +293,11 @@ describe('Unified Changelog Tracking System', () => {
       const deleteCall = exec.mock.calls.find(call => String(call[0]).includes('DELETE') && String(call[0]).includes('attributes'));
       expect(deleteCall).toBeDefined();
 
-      // Once triggers are enabled, this would create ONE changelog entry via trigger
+      // Exactly one changelog entry, written by the handler inside the same
+      // transaction as the DELETE.
+      const changelogCalls = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog'));
+      expect(changelogCalls).toHaveLength(1);
+      expect(changelogCalls[0][1]).toEqual(expect.arrayContaining(['attributes', 'DELETE']));
       expect(commit).toHaveBeenCalledWith('tx-3');
     });
   });
