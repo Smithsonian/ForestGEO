@@ -9,6 +9,9 @@ import { handleError } from '@/lib/errorhandler';
 import { FamilyResult, GenusResult, SpeciesResult } from '@/lib/db/definitions/taxonomies';
 import { getCookie } from '@/app/actions/cookiemanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
+import { auth } from '@/auth';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { ChangelogOperation, recordMutation } from '@/lib/changelog/record-mutation';
 
 // Mapping from dataType to primary key column name
 const PRIMARY_KEY_MAP: Record<string, string> = {
@@ -32,6 +35,28 @@ const PRIMARY_KEY_MAP: Record<string, string> = {
 };
 
 const MEASUREMENT_PATCH_BLOCKED_DATATYPES = new Set(['measurementssummary', 'failedmeasurements']);
+
+/**
+ * Resolves the changelog's PlotID scope from the row itself. Most tables the
+ * grids mutate carry a PlotID column; for `plots` it is the record's own key.
+ * Tables without one (attributes, personnel, family, genus, roles, sites) get
+ * NULL — recordMutation normalizes a missing/zero id rather than inventing a
+ * plot the change did not belong to.
+ */
+function changelogPlotID(rowData: Record<string, unknown> | undefined): number | null {
+  const value = rowData?.PlotID;
+  return value === undefined || value === null ? null : Number(value);
+}
+
+/**
+ * `withRouteAuthz` has already resolved and validated the session by the time a
+ * handler runs, but its Handler type does not pass the session through. Reading
+ * it again here costs one extra `auth()` per mutating request; widening the
+ * Handler type would instead touch every wrapped route in the app.
+ */
+async function changelogChangedBy(): Promise<string> {
+  return authenticatedSessionIdentity((await auth())?.user);
+}
 
 /**
  * Raised when a PATCH UPDATE matches/changes no row, so the mutation cannot be
@@ -75,6 +100,10 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
   const { newRow, oldRow } = await request.json();
 
   try {
+    // Resolved before the transaction opens so the auth round-trip never holds a
+    // pooled connection.
+    const changedBy = await changelogChangedBy();
+
     const updateIDs = await connectionManager.withTransaction(async tx => {
       if (dataType === 'alltaxonomiesview') {
         let queryConfig;
@@ -145,6 +174,22 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
       if (affectedRows === 0) {
         throw new RowNotFoundError(`No ${dataType} row found for ${demappedGridID}=${previousGridIDKey}`);
       }
+
+      // Logged only after the zero-row guard, so a stale-key edit that throws
+      // RowNotFoundError records nothing. The write shares tx, so the log entry
+      // and the UPDATE commit or roll back together.
+      await recordMutation({
+        tx,
+        schema,
+        tableName: dataType,
+        recordID: previousGridIDKey,
+        operation: ChangelogOperation.UPDATE,
+        oldRowState: oldRowData ?? {},
+        newRowState: newRowData,
+        changedBy,
+        plotID: changelogPlotID(newRowData),
+        censusID
+      });
 
       return { [dataType]: updatedGridIDKey };
     });

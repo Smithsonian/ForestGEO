@@ -9,6 +9,12 @@ import { applyEdit } from '@/config/editplan/apply';
 // prevents the module from hitting the real DB stack when imported transitively.
 
 const PLAN_HASH = 'a'.repeat(64);
+const TEST_SESSION_EMAIL = 'grid-editor@si.edu';
+const CHANGELOG_TABLE = 'unifiedchangelog';
+// Must satisfy lib/db/sqlsecurity's schema pattern: the changelog write runs
+// through safeFormatQuery, which rejects anything that is not a real ForestGEO
+// schema. Production schemas always are — withRouteAuthz validates upstream.
+const TEST_SCHEMA = 'forestgeo_testing';
 
 // Mock dependencies
 vi.mock('@/lib/db/connectionmanager');
@@ -22,6 +28,11 @@ vi.mock('@/lib/errorhandler', () => ({
 }));
 vi.mock('@/app/actions/cookiemanager', () => ({
   getCookie: vi.fn((key: string) => Promise.resolve(key === 'plotID' ? '5' : '1'))
+}));
+// The CRUD handlers read the session for unifiedchangelog.ChangedBy. withRouteAuthz
+// has already validated it upstream; this models a resolved session.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { email: TEST_SESSION_EMAIL } }))
 }));
 vi.mock('@/ailogger', () => ({
   default: {
@@ -51,6 +62,23 @@ vi.mock('@/config/measurementerrors', () => ({
 vi.mock('@/config/editplan/apply', () => ({
   applyEdit: vi.fn()
 }));
+
+/** Positional decode of recordMutation's INSERT parameter list. */
+const CHANGELOG_PARAM_ORDER = ['tableName', 'recordID', 'operation', 'oldRowState', 'newRowState', 'changedBy', 'plotID', 'censusID'] as const;
+
+type DecodedChangelogRow = Record<(typeof CHANGELOG_PARAM_ORDER)[number], any>;
+
+function changelogRows(mockConnectionManager: any): DecodedChangelogRow[] {
+  return mockConnectionManager.executeQuery.mock.calls
+    .filter((call: any[]) => typeof call[0] === 'string' && call[0].includes(CHANGELOG_TABLE))
+    .map((call: any[]) => {
+      const params = call[1] as unknown[];
+      const row = Object.fromEntries(CHANGELOG_PARAM_ORDER.map((name, index) => [name, params[index]])) as DecodedChangelogRow;
+      // eslint-disable-next-line no-console
+      console.log('[coreapifunctions] changelog row', row);
+      return row;
+    });
+}
 
 describe('CoreAPIFunctions', () => {
   let mockConnectionManager: any;
@@ -145,7 +173,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'plots',
-        slugs: ['testSchema', 'plotID']
+        slugs: [TEST_SCHEMA, 'plotID']
       };
 
       const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
@@ -169,7 +197,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'plots',
-        slugs: ['testSchema', 'plotID']
+        slugs: [TEST_SCHEMA, 'plotID']
       };
 
       const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
@@ -193,12 +221,12 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'alltaxonomiesview',
-        slugs: ['testSchema', 'speciesID']
+        slugs: [TEST_SCHEMA, 'speciesID']
       };
 
       const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
 
-      expect(handleUpsertForSlices).toHaveBeenCalledWith(mockConnectionManager, 'testSchema', { Family: 'Fabaceae' }, expect.any(Object), 'transaction-123');
+      expect(handleUpsertForSlices).toHaveBeenCalledWith(mockConnectionManager, TEST_SCHEMA, { Family: 'Fabaceae' }, expect.any(Object), 'transaction-123');
       expect(response.status).toBe(200);
     });
 
@@ -215,7 +243,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'personnel',
-        slugs: ['testSchema', 'personnelID']
+        slugs: [TEST_SCHEMA, 'personnelID']
       };
 
       await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
@@ -242,7 +270,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'personnel',
-        slugs: ['testSchema', 'personnelID']
+        slugs: [TEST_SCHEMA, 'personnelID']
       };
 
       const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
@@ -267,7 +295,7 @@ describe('CoreAPIFunctions', () => {
       const response = await PATCH(mockRequest, {
         params: Promise.resolve({
           dataType,
-          slugs: ['testSchema', targetID]
+          slugs: [TEST_SCHEMA, targetID]
         })
       });
 
@@ -300,7 +328,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'attributes',
-        slugs: ['testSchema', 'code']
+        slugs: [TEST_SCHEMA, 'code']
       };
 
       const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
@@ -310,6 +338,81 @@ describe('CoreAPIFunctions', () => {
       // handler opened must be rolled back, not committed.
       expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('transaction-123');
       expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+    });
+
+    describe('changelog audit', () => {
+      it('writes one UPDATE row carrying the before and after states of the edited row', async () => {
+        const oldRow = { PlotID: 17, PlotName: 'Harvard Forest', DefaultDBHUnits: 'mm' };
+        const newRow = { DefaultDBHUnits: 'cm' };
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({ newRow, oldRow })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+
+        const response = await PATCH(mockRequest, {
+          params: Promise.resolve({ dataType: 'plots', slugs: [TEST_SCHEMA, 'plotID'] })
+        });
+
+        expect(response.status).toBe(200);
+
+        const rows = changelogRows(mockConnectionManager);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].tableName).toBe('plots');
+        expect(rows[0].recordID).toBe('17');
+        expect(rows[0].operation).toBe('UPDATE');
+        expect(JSON.parse(rows[0].oldRowState)).toEqual(oldRow);
+        expect(JSON.parse(rows[0].newRowState)).toEqual({ ...oldRow, ...newRow });
+        expect(rows[0].changedBy).toBe(TEST_SESSION_EMAIL);
+        // `plots` scopes to its own key; the census cookie mock resolves to 1.
+        expect(rows[0].plotID).toBe(17);
+        expect(rows[0].censusID).toBe(1);
+      });
+
+      it('writes nothing when the UPDATE matches zero rows', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            newRow: { Code: 'GHOST', Description: 'Edited' },
+            oldRow: { Code: 'GHOST', Description: 'Original' }
+          })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 0 });
+
+        const response = await PATCH(mockRequest, {
+          params: Promise.resolve({ dataType: 'attributes', slugs: [TEST_SCHEMA, 'code'] })
+        });
+
+        expect(response.status).toBe(HTTPResponses.NOT_FOUND);
+        // A stale-key edit is not a change. Logging it would put a row in the
+        // changelog that no committed mutation corresponds to.
+        expect(changelogRows(mockConnectionManager)).toHaveLength(0);
+      });
+
+      it('records NULL plot scope for a table that has no PlotID column', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            newRow: { Code: 'DEAD', Description: 'dead stem' },
+            oldRow: { Code: 'DEAD', Description: 'dead' }
+          })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+
+        await PATCH(mockRequest, {
+          params: Promise.resolve({ dataType: 'attributes', slugs: [TEST_SCHEMA, 'code'] })
+        });
+
+        const rows = changelogRows(mockConnectionManager);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].tableName).toBe('attributes');
+        // Natural key, preserved as-is rather than coerced to a number.
+        expect(rows[0].recordID).toBe('DEAD');
+        expect(rows[0].plotID).toBeNull();
+      });
     });
   });
 
@@ -346,7 +449,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'plots',
-        slugs: ['testSchema', 'plotID', '1', '1']
+        slugs: [TEST_SCHEMA, 'plotID', '1', '1']
       };
 
       const response = await POST(mockRequest, { params: Promise.resolve(mockParams) });
@@ -370,7 +473,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'plots',
-        slugs: ['testSchema', 'plotID', '1', '1']
+        slugs: [TEST_SCHEMA, 'plotID', '1', '1']
       };
 
       await POST(mockRequest, { params: Promise.resolve(mockParams) });
@@ -406,7 +509,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'alltaxonomiesview',
-        slugs: ['testSchema', 'speciesID', '1', '1']
+        slugs: [TEST_SCHEMA, 'speciesID', '1', '1']
       };
 
       const response = await POST(mockRequest, { params: Promise.resolve(mockParams) });
@@ -425,7 +528,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'plots',
-        slugs: ['testSchema', 'plotID', '1', '1']
+        slugs: [TEST_SCHEMA, 'plotID', '1', '1']
       };
 
       const response = await POST(mockRequest, { params: Promise.resolve(mockParams) });
@@ -455,7 +558,7 @@ describe('CoreAPIFunctions', () => {
         body: JSON.stringify({ newRow: { id: 1 } })
       });
 
-      const mockParams = { dataType: 'test', slugs: ['testSchema'] };
+      const mockParams = { dataType: 'test', slugs: [TEST_SCHEMA] };
 
       await expect(DELETE(mockRequest, { params: Promise.resolve(mockParams) })).rejects.toThrow('no schema or gridID provided');
     });
@@ -470,7 +573,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'plots',
-        slugs: ['testSchema', 'plotID', '123']
+        slugs: [TEST_SCHEMA, 'plotID', '123']
       };
 
       const response = await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
@@ -494,7 +597,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'attributes',
-        slugs: ['testSchema', 'cmaid', '456']
+        slugs: [TEST_SCHEMA, 'cmaid', '456']
       };
 
       const response = await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
@@ -514,14 +617,14 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'alltaxonomiesview',
-        slugs: ['testSchema', 'speciesID', '99']
+        slugs: [TEST_SCHEMA, 'speciesID', '99']
       };
 
       const response = await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
 
       // tx.query in the mock delegates to executeQuery(sql, params, transactionID),
       // so the assertion includes the threaded transaction id as the trailing arg.
-      expect(mockConnectionManager.executeQuery).toHaveBeenCalledWith('DELETE FROM testSchema.species WHERE SpeciesID = ?', [99], 'transaction-123');
+      expect(mockConnectionManager.executeQuery).toHaveBeenCalledWith(`DELETE FROM ${TEST_SCHEMA}.species WHERE SpeciesID = ?`, [99], 'transaction-123');
       expect(response.status).toBe(200);
     });
 
@@ -535,7 +638,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'plots',
-        slugs: ['testSchema', 'plotID', '123']
+        slugs: [TEST_SCHEMA, 'plotID', '123']
       };
 
       const response = await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
@@ -557,7 +660,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'plots',
-        slugs: ['testSchema', 'plotID']
+        slugs: [TEST_SCHEMA, 'plotID']
       };
 
       await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
@@ -578,7 +681,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'plots',
-        slugs: ['testSchema', 'plotID', '1', '1']
+        slugs: [TEST_SCHEMA, 'plotID', '1', '1']
       };
 
       await POST(mockRequest, { params: Promise.resolve(mockParams) });
@@ -599,7 +702,7 @@ describe('CoreAPIFunctions', () => {
 
       const mockParams = {
         dataType: 'plots',
-        slugs: ['testSchema', 'plotID', '123']
+        slugs: [TEST_SCHEMA, 'plotID', '123']
       };
 
       await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
