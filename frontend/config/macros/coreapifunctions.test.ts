@@ -68,16 +68,36 @@ const CHANGELOG_PARAM_ORDER = ['tableName', 'recordID', 'operation', 'oldRowStat
 
 type DecodedChangelogRow = Record<(typeof CHANGELOG_PARAM_ORDER)[number], any>;
 
+function changelogCalls(mockConnectionManager: any): any[][] {
+  return mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) => typeof call[0] === 'string' && call[0].includes(CHANGELOG_TABLE));
+}
+
 function changelogRows(mockConnectionManager: any): DecodedChangelogRow[] {
-  return mockConnectionManager.executeQuery.mock.calls
-    .filter((call: any[]) => typeof call[0] === 'string' && call[0].includes(CHANGELOG_TABLE))
-    .map((call: any[]) => {
-      const params = call[1] as unknown[];
-      const row = Object.fromEntries(CHANGELOG_PARAM_ORDER.map((name, index) => [name, params[index]])) as DecodedChangelogRow;
-      // eslint-disable-next-line no-console
-      console.log('[coreapifunctions] changelog row', row);
-      return row;
-    });
+  return changelogCalls(mockConnectionManager).map((call: any[]) => {
+    const params = call[1] as unknown[];
+    const row = Object.fromEntries(CHANGELOG_PARAM_ORDER.map((name, index) => [name, params[index]])) as DecodedChangelogRow;
+    // eslint-disable-next-line no-console
+    console.log('[coreapifunctions] changelog row', row);
+    return row;
+  });
+}
+
+/**
+ * The tx mock delegates to executeQuery(sql, params, transactionID). A changelog
+ * write issued on a bare pool connection would call executeQuery(sql, params)
+ * with no transaction id — and would autocommit independently of the mutation it
+ * claims to describe, surviving a rollback of that mutation.
+ *
+ * This is the precise discriminator between tx.query and executeQuery at unit
+ * level. The transaction-scoping consequence is proven against real MySQL in
+ * tests/integration/coreapifunctions-patch-atomicity.integration.test.ts.
+ */
+function expectChangelogWritesAreTransactionScoped(mockConnectionManager: any) {
+  const calls = changelogCalls(mockConnectionManager);
+  expect(calls.length).toBeGreaterThan(0);
+  for (const call of calls) {
+    expect(call[2], 'the changelog write must run on the mutation transaction, not a pool connection').toBe('transaction-123');
+  }
 }
 
 describe('CoreAPIFunctions', () => {
@@ -387,6 +407,7 @@ describe('CoreAPIFunctions', () => {
         // `plots` scopes to its own key; the census cookie mock resolves to 1.
         expect(rows[0].plotID).toBe(17);
         expect(rows[0].censusID).toBe(1);
+        expectChangelogWritesAreTransactionScoped(mockConnectionManager);
       });
 
       it('writes nothing when the UPDATE matches zero rows', async () => {
@@ -586,6 +607,7 @@ describe('CoreAPIFunctions', () => {
         expect(rows[0].oldRowState).toBeNull();
         expect(JSON.parse(rows[0].newRowState).PlotID).toBe(GENERATED_PLOT_ID);
         expect(rows[0].changedBy).toBe(TEST_SESSION_EMAIL);
+        expectChangelogWritesAreTransactionScoped(mockConnectionManager);
       });
 
       it('records an attributes insert under its natural Code key', async () => {
@@ -685,6 +707,7 @@ describe('CoreAPIFunctions', () => {
         // this audit exists to remove.
         expect(rows.map(row => row.tableName)).toEqual(['family', 'genus', 'species']);
         expect(rows.map(row => row.recordID)).toEqual(['11', '22', '33']);
+        expectChangelogWritesAreTransactionScoped(mockConnectionManager);
         expect(rows.every(row => row.operation === 'INSERT')).toBe(true);
         // The species id is the one the handler used to discard entirely.
         expect(JSON.parse(rows[2].newRowState).SpeciesCode).toBe('ACACIA');
@@ -872,6 +895,7 @@ describe('CoreAPIFunctions', () => {
         expect(rows[0].newRowState).toBeNull();
         expect(rows[0].plotID).toBe(5);
         expect(rows[0].censusID).toBe(7);
+        expectChangelogWritesAreTransactionScoped(mockConnectionManager);
       });
 
       it('records the state read from the database, not the payload the client sent', async () => {
@@ -956,6 +980,7 @@ describe('CoreAPIFunctions', () => {
 
         const rows = changelogRows(mockConnectionManager);
         expect(rows.map(row => row.tableName)).toEqual(['measurement_error_log', 'cmattributes', 'coremeasurements']);
+        expectChangelogWritesAreTransactionScoped(mockConnectionManager);
         // measurement_error_log is keyed on (MeasurementID, ErrorID), so the
         // RecordID must identify the pair, not just the measurement.
         expect(rows[0].recordID).toBe(`${MEASUREMENT_ID}-12`);
