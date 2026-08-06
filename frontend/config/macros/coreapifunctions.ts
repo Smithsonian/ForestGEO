@@ -49,6 +49,18 @@ function changelogPlotID(rowData: Record<string, unknown> | undefined): number |
 }
 
 /**
+ * One created row awaiting its changelog entry. A POST branch knows which table
+ * it wrote, but only learns the RecordID after the insert returns, so the audit
+ * write is deferred to the end of the same transaction.
+ */
+interface CreatedRowAudit {
+  /** The table actually written — not the view or dataType the request named. */
+  tableName: string;
+  recordID: string | number;
+  rowState: Record<string, unknown>;
+}
+
+/**
  * `withRouteAuthz` has already resolved and validated the session by the time a
  * handler runs, but its Handler type does not pass the session through. Reading
  * it again here costs one extra `auth()` per mutating request; widening the
@@ -222,8 +234,13 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
   const connectionManager = ConnectionManager.getInstance();
   const { newRow } = await request.json();
   try {
+    const changedBy = await changelogChangedBy();
+
     const insertIDs = await connectionManager.withTransaction(async tx => {
       const createdIDs: Record<string, number> = {};
+      // Collected per branch and written once below, because each branch knows a
+      // different table and only learns the RecordID after its own insert.
+      const createdRows: CreatedRowAudit[] = [];
 
       if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
 
@@ -274,12 +291,28 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(params.dataType)) {
         if (params.dataType === 'attributes') {
           await tx.query(format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, newRowData]));
+          // `attributes` keys on Code, so there is no insert id to read back.
+          createdRows.push({ tableName: params.dataType, recordID: newRowData.Code, rowState: newRowData });
         } else if (params.dataType === 'personnel') {
+          const censusActiveRow = { CensusID: censusID ?? 0, PersonnelID: newRowData.PersonnelID };
           await tx.query(`INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [censusID ?? 0, newRowData.PersonnelID]);
+          // This branch creates no `personnel` row — it only links an existing
+          // person to a census. Logging it as a personnel INSERT would assert a
+          // person was created who wasn't.
+          createdRows.push({
+            tableName: 'censusactivepersonnel',
+            recordID: newRowData.PersonnelID,
+            rowState: censusActiveRow
+          });
         } else {
           const { [demappedGridID]: demappedIDValue, ...remaining } = newRowData;
           const insertQuery = format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, remaining]);
-          await tx.query(insertQuery);
+          const results = await tx.query(insertQuery);
+          createdRows.push({
+            tableName: params.dataType,
+            recordID: results.insertId,
+            rowState: { ...remaining, [demappedGridID]: results.insertId }
+          });
         }
       } else {
         delete newRowData[demappedGridID];
@@ -314,11 +347,37 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
             tx.id
           );
           createdIDs[params.dataType] = inserted[0] ?? 0;
+          // insertIngestionFailureRows writes a coremeasurements row with a NULL
+          // StemGUID; `failedmeasurements` is a view over those, not a table.
+          createdRows.push({
+            tableName: 'coremeasurements',
+            recordID: createdIDs[params.dataType],
+            rowState: newRowData
+          });
         } else {
           const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
           const results = await tx.query(insertQuery);
           createdIDs[params.dataType] = results.insertId;
+          createdRows.push({
+            tableName: params.dataType,
+            recordID: results.insertId,
+            rowState: { ...newRowData, [demappedGridID]: results.insertId }
+          });
         }
+      }
+
+      for (const created of createdRows) {
+        await recordMutation({
+          tx,
+          schema,
+          tableName: created.tableName,
+          recordID: created.recordID,
+          operation: ChangelogOperation.INSERT,
+          newRowState: created.rowState,
+          changedBy,
+          plotID: changelogPlotID(created.rowState),
+          censusID: censusID ?? null
+        });
       }
 
       return createdIDs;

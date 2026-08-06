@@ -539,6 +539,116 @@ describe('CoreAPIFunctions', () => {
       expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('transaction-123');
       expect(response.status).toBe(500);
     });
+
+    describe('changelog audit', () => {
+      const GENERATED_PLOT_ID = 456;
+
+      it('writes one INSERT row whose RecordID is the generated key, not the submitted payload', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'POST',
+          body: JSON.stringify({ newRow: { PlotName: 'New Plot', LocationName: 'Somewhere' } })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue({ insertId: GENERATED_PLOT_ID });
+
+        const response = await POST(mockRequest, {
+          params: Promise.resolve({ dataType: 'plots', slugs: [TEST_SCHEMA, 'plotID', '1', '7'] })
+        });
+
+        expect(response.status).toBe(200);
+
+        const rows = changelogRows(mockConnectionManager);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].tableName).toBe('plots');
+        // The key only exists after the insert; reading it from the request body
+        // would record whatever the client happened to send.
+        expect(rows[0].recordID).toBe(String(GENERATED_PLOT_ID));
+        expect(rows[0].operation).toBe('INSERT');
+        expect(rows[0].oldRowState).toBeNull();
+        expect(JSON.parse(rows[0].newRowState).PlotID).toBe(GENERATED_PLOT_ID);
+        expect(rows[0].changedBy).toBe(TEST_SESSION_EMAIL);
+      });
+
+      it('records an attributes insert under its natural Code key', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'POST',
+          body: JSON.stringify({ newRow: { Code: 'BROKEN', Description: 'broken stem', Status: 'alive' } })
+        });
+
+        // `attributes` has no AUTO_INCREMENT key, so mysql2 reports insertId 0.
+        mockConnectionManager.executeQuery.mockResolvedValue({ insertId: 0 });
+
+        await POST(mockRequest, {
+          params: Promise.resolve({ dataType: 'attributes', slugs: [TEST_SCHEMA, 'code', '1', '7'] })
+        });
+
+        const rows = changelogRows(mockConnectionManager);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].tableName).toBe('attributes');
+        expect(rows[0].recordID).toBe('BROKEN');
+      });
+
+      it('captures the generated key for the quadrats branch, which does not return it to the client', async () => {
+        const GENERATED_QUADRAT_ID = 33;
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'POST',
+          body: JSON.stringify({ newRow: { QuadratID: 0, QuadratName: 'Q-33', PlotID: 5 } })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue({ insertId: GENERATED_QUADRAT_ID });
+
+        await POST(mockRequest, {
+          params: Promise.resolve({ dataType: 'quadrats', slugs: [TEST_SCHEMA, 'quadratID', '1', '7'] })
+        });
+
+        const rows = changelogRows(mockConnectionManager);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].tableName).toBe('quadrats');
+        expect(rows[0].recordID).toBe(String(GENERATED_QUADRAT_ID));
+        expect(rows[0].plotID).toBe(5);
+      });
+
+      it('records a personnel POST against censusactivepersonnel, the only table it writes', async () => {
+        const PERSONNEL_ID = 88;
+        const CENSUS_ID = 7;
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'POST',
+          body: JSON.stringify({ newRow: { PersonnelID: PERSONNEL_ID, FirstName: 'Existing', LastName: 'Person' } })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue({ insertId: 0 });
+
+        await POST(mockRequest, {
+          params: Promise.resolve({ dataType: 'personnel', slugs: [TEST_SCHEMA, 'personnelID', '1', String(CENSUS_ID)] })
+        });
+
+        const rows = changelogRows(mockConnectionManager);
+        expect(rows).toHaveLength(1);
+        // This branch links an existing person to a census; it creates no
+        // personnel row. Logging it as `personnel` would assert a person was
+        // created who wasn't.
+        expect(rows[0].tableName).toBe('censusactivepersonnel');
+        expect(rows[0].recordID).toBe(String(PERSONNEL_ID));
+        expect(JSON.parse(rows[0].newRowState)).toEqual({ CensusID: CENSUS_ID, PersonnelID: PERSONNEL_ID });
+      });
+
+      it('writes nothing when the insert fails and the transaction rolls back', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'POST',
+          body: JSON.stringify({ newRow: { PlotName: 'Doomed' } })
+        });
+
+        mockConnectionManager.executeQuery.mockRejectedValue(new Error('DB Error'));
+
+        const response = await POST(mockRequest, {
+          params: Promise.resolve({ dataType: 'plots', slugs: [TEST_SCHEMA, 'plotID', '1', '7'] })
+        });
+
+        expect(response.status).toBe(500);
+        expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('transaction-123');
+        expect(changelogRows(mockConnectionManager)).toHaveLength(0);
+      });
+    });
   });
 
   describe('DELETE function', () => {
