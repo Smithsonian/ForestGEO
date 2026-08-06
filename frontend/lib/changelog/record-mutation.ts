@@ -46,14 +46,25 @@ interface RecordMutationBase {
  */
 export type RecordMutationOptions =
   | (RecordMutationBase & { operation: ChangelogOperation.INSERT; newRowState: ChangelogRowState })
-  | (RecordMutationBase & { operation: ChangelogOperation.UPDATE; oldRowState: ChangelogRowState; newRowState: ChangelogRowState })
+  | (RecordMutationBase & {
+      operation: ChangelogOperation.UPDATE;
+      /**
+       * `null` records that the prior state was not captured — the only honest
+       * answer for an INSERT ... ON DUPLICATE KEY UPDATE, which overwrites the
+       * row before anything can read it. Every path that CAN read the prior
+       * state must pass it; fabricating an empty object would claim the row
+       * previously had no fields.
+       */
+      oldRowState: ChangelogRowState | null;
+      newRowState: ChangelogRowState;
+    })
   | (RecordMutationBase & { operation: ChangelogOperation.DELETE; oldRowState: ChangelogRowState });
 
 const INSERT_CHANGELOG_ROW = `INSERT INTO ??.unifiedchangelog
    (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
  VALUES (?, ?, ?, ?, ?, NOW(), ?, ?, ?)`;
 
-function serializeRowState(state: ChangelogRowState | undefined): string | null {
+function serializeRowState(state: ChangelogRowState | null | undefined): string | null {
   // `null`, not the string 'null': the absent side of the change must read as
   // SQL NULL so a consumer can tell "no prior state" from "prior state was null".
   return state === undefined || state === null ? null : JSON.stringify(state);

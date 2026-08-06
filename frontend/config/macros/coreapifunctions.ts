@@ -62,6 +62,31 @@ interface CreatedRowAudit {
   rowState: Record<string, unknown>;
 }
 
+/** handleUpsert's report that it created the row rather than overwriting one. */
+const UPSERT_INSERTED = 'inserted';
+
+/**
+ * Records one slice of an `alltaxonomiesview` write against its real table.
+ * The view spans family, genus and species; a family edit filed under the view's
+ * name is the same invisibility this audit exists to remove.
+ *
+ * An upsert overwrites the row before anything can read it, so an UPDATE here
+ * carries no prior state — see recordMutation's oldRowState contract.
+ */
+async function recordTaxonomySliceUpsert(
+  tx: TxExecutor,
+  schema: string,
+  slice: { sliceKey: string; id: number; operation?: string; rowData: Record<string, unknown> },
+  changedBy: string
+): Promise<void> {
+  const shared = { tx, schema, tableName: slice.sliceKey, recordID: slice.id, changedBy, plotID: null, censusID: null };
+  await recordMutation(
+    slice.operation === UPSERT_INSERTED
+      ? { ...shared, operation: ChangelogOperation.INSERT, newRowState: slice.rowData }
+      : { ...shared, operation: ChangelogOperation.UPDATE, oldRowState: null, newRowState: slice.rowData }
+  );
+}
+
 /** One removed row awaiting its changelog entry. */
 interface DeletedRowAudit {
   /** The table actually emptied — not the view or dataType the request named. */
@@ -180,7 +205,9 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             throw new Error('Incorrect view call');
         }
 
-        return await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig, tx.id);
+        return await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig, tx.id, async slice =>
+          recordTaxonomySliceUpsert(tx, schema, slice as Parameters<typeof recordTaxonomySliceUpsert>[2], changedBy)
+        );
       }
 
       const mapper = MapperFactory.getMapper<any, any>(dataType);
@@ -307,40 +334,49 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
 
         // handleUpsert still takes a string transactionID; threading tx.id keeps
         // these upserts on the same tx connection as the rest of this handler.
-        const { id: newFamilyID } = await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family }, 'FamilyID', tx.id);
-
-        const { id: newGenusID } = await handleUpsert<GenusResult>(
+        const familyRow = { Family };
+        const { id: newFamilyID, operation: familyOperation } = await handleUpsert<FamilyResult>(
           connectionManager,
           schema,
-          'genus',
-          {
-            Genus,
-            GenusAuthority,
-            FamilyID: newFamilyID
-          },
-          'GenusID',
+          'family',
+          familyRow,
+          'FamilyID',
           tx.id
         );
 
-        await handleUpsert<SpeciesResult>(
+        const genusRow = { Genus, GenusAuthority, FamilyID: newFamilyID };
+        const { id: newGenusID, operation: genusOperation } = await handleUpsert<GenusResult>(connectionManager, schema, 'genus', genusRow, 'GenusID', tx.id);
+
+        const speciesRow = {
+          GenusID: newGenusID,
+          SpeciesCode,
+          SpeciesName,
+          SubspeciesName,
+          IDLevel,
+          SpeciesAuthority,
+          SubspeciesAuthority,
+          ValidCode,
+          FieldFamily,
+          Description
+        };
+        // The species upsert's result used to be discarded, leaving no id to log.
+        const { id: newSpeciesID, operation: speciesOperation } = await handleUpsert<SpeciesResult>(
           connectionManager,
           schema,
           'species',
-          {
-            GenusID: newGenusID,
-            SpeciesCode,
-            SpeciesName,
-            SubspeciesName,
-            IDLevel,
-            SpeciesAuthority,
-            SubspeciesAuthority,
-            ValidCode,
-            FieldFamily,
-            Description
-          },
+          speciesRow,
           'SpeciesID',
           tx.id
         );
+
+        // Three rows, one per real table — see recordTaxonomySliceUpsert.
+        for (const slice of [
+          { sliceKey: 'family', id: newFamilyID, operation: familyOperation, rowData: familyRow },
+          { sliceKey: 'genus', id: newGenusID, operation: genusOperation, rowData: genusRow },
+          { sliceKey: 'species', id: newSpeciesID, operation: speciesOperation, rowData: speciesRow }
+        ]) {
+          await recordTaxonomySliceUpsert(tx, schema, slice, changedBy);
+        }
       } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(params.dataType)) {
         if (params.dataType === 'attributes') {
           await tx.query(format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, newRowData]));

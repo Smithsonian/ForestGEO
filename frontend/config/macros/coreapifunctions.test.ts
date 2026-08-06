@@ -237,7 +237,15 @@ describe('CoreAPIFunctions', () => {
 
       const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
 
-      expect(handleUpsertForSlices).toHaveBeenCalledWith(mockConnectionManager, TEST_SCHEMA, { Family: 'Fabaceae' }, expect.any(Object), 'transaction-123');
+      // The trailing observer is how each slice's upsert reaches the changelog.
+      expect(handleUpsertForSlices).toHaveBeenCalledWith(
+        mockConnectionManager,
+        TEST_SCHEMA,
+        { Family: 'Fabaceae' },
+        expect.any(Object),
+        'transaction-123',
+        expect.any(Function)
+      );
       expect(response.status).toBe(200);
     });
 
@@ -641,6 +649,74 @@ describe('CoreAPIFunctions', () => {
         expect(rows[0].tableName).toBe('censusactivepersonnel');
         expect(rows[0].recordID).toBe(String(PERSONNEL_ID));
         expect(JSON.parse(rows[0].newRowState)).toEqual({ CensusID: CENSUS_ID, PersonnelID: PERSONNEL_ID });
+      });
+
+      it('fans a single alltaxonomiesview POST out into one row per real table', async () => {
+        const { handleUpsert } = await import('@/config/utils');
+        const upsertMock = handleUpsert as ReturnType<typeof vi.fn>;
+        // Distinct ids per slice so a mis-wired fan-out cannot pass by accident.
+        upsertMock
+          .mockResolvedValueOnce({ id: 11, operation: 'inserted' })
+          .mockResolvedValueOnce({ id: 22, operation: 'inserted' })
+          .mockResolvedValueOnce({ id: 33, operation: 'inserted' });
+
+        const submitted = {
+          Family: 'Fabaceae',
+          Genus: 'Acacia',
+          GenusAuthority: 'Mill.',
+          SpeciesCode: 'ACACIA',
+          SpeciesName: 'acacia'
+        };
+        mockMapper.demapData.mockReturnValue([submitted]);
+
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'POST',
+          body: JSON.stringify({ newRow: submitted })
+        });
+
+        const response = await POST(mockRequest, {
+          params: Promise.resolve({ dataType: 'alltaxonomiesview', slugs: [TEST_SCHEMA, 'speciesID', '1', '7'] })
+        });
+
+        expect(response.status).toBe(200);
+
+        const rows = changelogRows(mockConnectionManager);
+        // A family edit hidden under the view's name is the same invisibility
+        // this audit exists to remove.
+        expect(rows.map(row => row.tableName)).toEqual(['family', 'genus', 'species']);
+        expect(rows.map(row => row.recordID)).toEqual(['11', '22', '33']);
+        expect(rows.every(row => row.operation === 'INSERT')).toBe(true);
+        // The species id is the one the handler used to discard entirely.
+        expect(JSON.parse(rows[2].newRowState).SpeciesCode).toBe('ACACIA');
+        expect(JSON.parse(rows[1].newRowState).FamilyID).toBe(11);
+      });
+
+      it('records an upsert that overwrote an existing taxon as UPDATE, not INSERT', async () => {
+        const { handleUpsert } = await import('@/config/utils');
+        const upsertMock = handleUpsert as ReturnType<typeof vi.fn>;
+        upsertMock
+          .mockResolvedValueOnce({ id: 11, operation: 'updated' })
+          .mockResolvedValueOnce({ id: 22, operation: 'updated' })
+          .mockResolvedValueOnce({ id: 33, operation: 'inserted' });
+
+        mockMapper.demapData.mockReturnValue([{ Family: 'Fabaceae', Genus: 'Acacia', SpeciesCode: 'NEWSP' }]);
+
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'POST',
+          body: JSON.stringify({ newRow: { Family: 'Fabaceae', Genus: 'Acacia', SpeciesCode: 'NEWSP' } })
+        });
+
+        await POST(mockRequest, {
+          params: Promise.resolve({ dataType: 'alltaxonomiesview', slugs: [TEST_SCHEMA, 'speciesID', '1', '7'] })
+        });
+
+        const rows = changelogRows(mockConnectionManager);
+        // Hardcoding INSERT would claim the family and genus were created here.
+        expect(rows.map(row => row.operation)).toEqual(['UPDATE', 'UPDATE', 'INSERT']);
+        // An upsert overwrites the row before anything can read it, so the prior
+        // state is genuinely unknown — recorded as NULL rather than fabricated.
+        expect(rows[0].oldRowState).toBeNull();
+        expect(rows[2].oldRowState).toBeNull();
       });
 
       it('writes nothing when the insert fails and the transaction rolls back', async () => {
