@@ -80,19 +80,44 @@ function normalizeScopeID(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
 }
 
+export class ChangelogWriteError extends Error {
+  readonly operation: ChangelogOperation;
+  readonly tableName: string;
+  readonly recordID: string;
+  override readonly cause: unknown;
+
+  constructor(operation: ChangelogOperation, tableName: string, recordID: string | number, cause: unknown) {
+    const normalizedRecordID = String(recordID);
+    const causeMessage = cause instanceof Error ? cause.message : String(cause);
+    super(`Failed to record ${operation} audit for ${tableName} record ${JSON.stringify(normalizedRecordID)}: ${causeMessage}`);
+    this.name = 'ChangelogWriteError';
+    this.operation = operation;
+    this.tableName = tableName;
+    this.recordID = normalizedRecordID;
+    this.cause = cause;
+  }
+}
+
 export async function recordMutation(options: RecordMutationOptions): Promise<void> {
   const { tx, schema, tableName, recordID, operation, changedBy, plotID, censusID } = options;
   const oldRowState = operation === ChangelogOperation.INSERT ? undefined : options.oldRowState;
   const newRowState = operation === ChangelogOperation.DELETE ? undefined : options.newRowState;
+  // Identifier validation is an input-boundary failure, not a changelog write
+  // failure; preserve its specific error for callers and security tests.
+  const changelogSQL = safeFormatQuery(schema, INSERT_CHANGELOG_ROW);
 
-  await tx.query(safeFormatQuery(schema, INSERT_CHANGELOG_ROW), [
-    tableName,
-    String(recordID),
-    operation,
-    serializeRowState(oldRowState),
-    serializeRowState(newRowState),
-    changedBy,
-    normalizeScopeID(plotID),
-    normalizeScopeID(censusID)
-  ]);
+  try {
+    await tx.query(changelogSQL, [
+      tableName,
+      String(recordID),
+      operation,
+      serializeRowState(oldRowState),
+      serializeRowState(newRowState),
+      changedBy,
+      normalizeScopeID(plotID),
+      normalizeScopeID(censusID)
+    ]);
+  } catch (error: unknown) {
+    throw new ChangelogWriteError(operation, tableName, recordID, error);
+  }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TxExecutor } from '@/lib/db/connectionmanager';
-import { ChangelogOperation, recordMutation } from './record-mutation';
+import { ChangelogOperation, ChangelogWriteError, recordMutation } from './record-mutation';
 
 const TEST_SCHEMA = 'forestgeo_harvard';
 const TEST_TABLE = 'plots';
@@ -272,18 +272,25 @@ describe('recordMutation', () => {
       });
       const tx: TxExecutor = { id: 'tx-failing', query: query as unknown as TxExecutor['query'] };
 
-      await expect(
-        recordMutation({
-          tx,
-          schema: TEST_SCHEMA,
-          tableName: TEST_TABLE,
-          recordID: TEST_PLOT_ID,
-          operation: ChangelogOperation.UPDATE,
-          oldRowState: {},
-          newRowState: {},
-          changedBy: TEST_CHANGED_BY
-        })
-      ).rejects.toThrow('ER_DATA_TOO_LONG');
+      const result = recordMutation({
+        tx,
+        schema: TEST_SCHEMA,
+        tableName: TEST_TABLE,
+        recordID: TEST_PLOT_ID,
+        operation: ChangelogOperation.UPDATE,
+        oldRowState: {},
+        newRowState: {},
+        changedBy: TEST_CHANGED_BY
+      });
+
+      await expect(result).rejects.toThrow('Failed to record UPDATE audit for plots record "17": ER_DATA_TOO_LONG');
+      await expect(result).rejects.toMatchObject({
+        name: 'ChangelogWriteError',
+        operation: ChangelogOperation.UPDATE,
+        tableName: TEST_TABLE,
+        recordID: String(TEST_PLOT_ID),
+        cause: expect.any(Error)
+      } satisfies Partial<ChangelogWriteError>);
     });
   });
 });
