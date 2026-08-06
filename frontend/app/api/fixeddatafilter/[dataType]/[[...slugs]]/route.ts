@@ -68,7 +68,9 @@ async function postHandler(request: NextRequest, context: RouteContext) {
   const props = context as unknown as SlugRouteProps;
   const params = await props.params;
   // trying to ensure that system correctly retains edit/add functionality -- not necessarily needed currently but better safe than sorry
-  const body = await request.json();
+  // Inspect a clone so the mutation handler can still consume the original
+  // request body. A Request stream is single-use.
+  const body = await request.clone().json();
   if (body.newRow) {
     return SINGLEPOST(request, props);
   } else {
