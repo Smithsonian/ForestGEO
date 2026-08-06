@@ -207,11 +207,13 @@ describe('Unified Changelog Tracking System', () => {
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ Code: 'A', Description: 'Old Description', Status: 'alive' }]) // locked pre-update snapshot
         .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query (matched one row -> passes the zero-row guard)
+        .mockResolvedValueOnce([{ Code: 'A', Description: 'New Description', Status: 'alive' }]) // persisted post-update snapshot
         .mockResolvedValueOnce({}); // unifiedchangelog INSERT
 
-      const oldRow = { code: 'A', description: 'Old Description', status: 'alive' };
-      const newRow = { code: 'A', description: 'New Description', status: 'alive' };
+      const oldRow = { Code: 'A', Description: 'Old Description', Status: 'alive' };
+      const newRow = { Code: 'A', Description: 'New Description', Status: 'alive' };
 
       const req = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {
         oldRow,
@@ -243,11 +245,13 @@ describe('Unified Changelog Tracking System', () => {
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ PersonnelID: 1, FirstName: 'John', LastName: 'Doe', Role: 'researcher' }]) // locked pre-update snapshot
         .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query (matched one row -> passes the zero-row guard)
+        .mockResolvedValueOnce([{ PersonnelID: 1, FirstName: 'John', LastName: 'Doe', Role: 'lead researcher' }]) // persisted post-update snapshot
         .mockResolvedValueOnce({}); // unifiedchangelog INSERT
 
-      const oldRow = { personnelID: 1, firstName: 'John', lastName: 'Doe', role: 'researcher' };
-      const newRow = { personnelID: 1, firstName: 'John', lastName: 'Doe', role: 'lead researcher' };
+      const oldRow = { PersonnelID: 1, FirstName: 'John', LastName: 'Doe', Role: 'researcher' };
+      const newRow = { PersonnelID: 1, FirstName: 'John', LastName: 'Doe', Role: 'lead researcher' };
 
       const req = makeRequest('http://localhost/api/fixeddata/personnel/testschema/personnelID', 'PATCH', {
         oldRow,
@@ -628,25 +632,28 @@ describe('Unified Changelog Tracking System', () => {
 
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-10a').mockResolvedValueOnce('tx-10b');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
-      // Both PATCHes run under Promise.all, so their SET/UPDATE statements interleave
-      // in a non-deterministic order. Branch on the SQL text instead of a fixed call
-      // sequence so every UPDATE reports a matched row (affectedRows: 1) and neither
-      // request trips the zero-row NOT_FOUND guard.
-      const exec = vi.spyOn(cm, 'executeQuery').mockImplementation(async (sql: string) => {
+      // Both PATCHes run under Promise.all, so their reads and UPDATE statements
+      // interleave in a non-deterministic order. Model the persisted state by key
+      // instead of relying on a fixed call sequence.
+      const exec = vi.spyOn(cm, 'executeQuery').mockImplementation(async (sql: string, params?: unknown[]) => {
         if (String(sql).includes('UPDATE')) return { affectedRows: 1 };
-        return [{ Count: 1 }];
+        if (String(sql).includes('unifiedchangelog')) return {};
+
+        const key = params?.[0] === 'B' ? 'B' : 'A';
+        const postUpdateRead = exec.mock.calls.filter(call => String(call[0]).includes('UPDATE')).length >= 1;
+        return [{ Code: key, Description: `${postUpdateRead ? 'New' : 'Old'} ${key}` }];
       });
 
       // User 1 edits row A
       const req1 = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {
-        oldRow: { code: 'A', description: 'Old A' },
-        newRow: { code: 'A', description: 'New A' }
+        oldRow: { Code: 'A', Description: 'Old A' },
+        newRow: { Code: 'A', Description: 'New A' }
       });
 
       // User 2 edits row B
       const req2 = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {
-        oldRow: { code: 'B', description: 'Old B' },
-        newRow: { code: 'B', description: 'New B' }
+        oldRow: { Code: 'B', Description: 'Old B' },
+        newRow: { Code: 'B', Description: 'New B' }
       });
 
       const [res1, res2] = await Promise.all([

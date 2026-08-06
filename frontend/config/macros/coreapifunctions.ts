@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { AllTaxonomiesViewQueryConfig, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
 import MapperFactory from '@/config/datamapper';
-import { handleUpsert } from '@/config/utils';
+import { handleUpsert, type UpsertOperation } from '@/config/utils';
 import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
 import { handleError } from '@/lib/errorhandler';
@@ -38,6 +38,78 @@ const PRIMARY_KEY_MAP: Record<string, string> = {
 
 const MEASUREMENT_PATCH_BLOCKED_DATATYPES = new Set(['measurementssummary', 'failedmeasurements']);
 
+const MUTABLE_METADATA_DATA_TYPES = new Set([
+  'alltaxonomiesview',
+  'attributes',
+  'census',
+  'personnel',
+  'plots',
+  'quadratpersonnel',
+  'quadrats',
+  'roles',
+  'sitespecificvalidations',
+  'species',
+  'specieslimits'
+]);
+const POST_DATA_TYPES = new Set([...MUTABLE_METADATA_DATA_TYPES, 'failedmeasurements']);
+const DELETE_DATA_TYPES = new Set([...MUTABLE_METADATA_DATA_TYPES, 'failedmeasurements', 'measurementssummary']);
+const MYSQL_SIGNED_INT_MAX = 2_147_483_647;
+
+type MutationMethod = 'PATCH' | 'POST' | 'DELETE';
+type RowLookup = { column: string; value: unknown };
+
+class MutationRequestError extends Error {
+  readonly status: HTTPResponses;
+
+  constructor(message: string, status: HTTPResponses = HTTPResponses.INVALID_REQUEST) {
+    super(message);
+    this.name = 'MutationRequestError';
+    this.status = status;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function readMutationBody(request: NextRequest, method: MutationMethod): Promise<{ newRow: Record<string, unknown>; oldRow?: Record<string, unknown> }> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    throw new MutationRequestError('Request body must be valid JSON');
+  }
+
+  if (!isRecord(body) || !isRecord(body.newRow)) {
+    throw new MutationRequestError('Request body must contain a newRow object');
+  }
+  if (method === 'PATCH' && !isRecord(body.oldRow)) {
+    throw new MutationRequestError('PATCH request body must contain an oldRow object');
+  }
+  return { newRow: body.newRow, oldRow: isRecord(body.oldRow) ? body.oldRow : undefined };
+}
+
+function assertMutableDataType(method: MutationMethod, dataType: string): void {
+  const allowed = method === 'POST' ? POST_DATA_TYPES : method === 'DELETE' ? DELETE_DATA_TYPES : MUTABLE_METADATA_DATA_TYPES;
+  if (!allowed.has(dataType)) {
+    throw new MutationRequestError(`${method} is not supported for data type ${dataType}`, HTTPResponses.METHOD_NOT_ALLOWED);
+  }
+}
+
+function parseOptionalPositiveInt(value: string | undefined, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!/^[1-9]\d*$/.test(value)) throw new MutationRequestError(`${label} must be a positive integer`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed > MYSQL_SIGNED_INT_MAX) {
+    throw new MutationRequestError(`${label} is outside the supported integer range`);
+  }
+  return parsed;
+}
+
+function mutationErrorResponse(error: MutationRequestError): NextResponse {
+  return NextResponse.json({ error: error.message }, { status: error.status });
+}
+
 /**
  * Resolves the changelog's PlotID scope from the row itself. Most tables the
  * grids mutate carry a PlotID column; for `plots` it is the record's own key.
@@ -58,12 +130,9 @@ function changelogPlotID(rowData: Record<string, unknown> | undefined): number |
 interface CreatedRowAudit {
   /** The table actually written — not the view or dataType the request named. */
   tableName: string;
-  recordID: string | number;
-  rowState: Record<string, unknown>;
+  lookup: RowLookup[];
+  recordIDColumns: string[];
 }
-
-/** handleUpsert's report that it created the row rather than overwriting one. */
-const UPSERT_INSERTED = 'inserted';
 
 /**
  * Records one slice of an `alltaxonomiesview` write against its real table.
@@ -76,14 +145,18 @@ const UPSERT_INSERTED = 'inserted';
 async function recordTaxonomySliceUpsert(
   tx: TxExecutor,
   schema: string,
-  slice: { sliceKey: string; id: number; operation?: string; rowData: Record<string, unknown> },
+  slice: { sliceKey: string; id: number; operation: UpsertOperation; rowData: Record<string, unknown> },
   changedBy: string
 ): Promise<void> {
+  if (slice.operation === 'unchanged') return;
+  const persistedRow = await loadSinglePersistedRow(tx, schema, slice.sliceKey, [
+    { column: `${slice.sliceKey.charAt(0).toUpperCase()}${slice.sliceKey.slice(1)}ID`, value: slice.id }
+  ]);
   const shared = { tx, schema, tableName: slice.sliceKey, recordID: slice.id, changedBy, plotID: null, censusID: null };
   await recordMutation(
-    slice.operation === UPSERT_INSERTED
-      ? { ...shared, operation: ChangelogOperation.INSERT, newRowState: slice.rowData }
-      : { ...shared, operation: ChangelogOperation.UPDATE, oldRowState: null, newRowState: slice.rowData }
+    slice.operation === 'inserted'
+      ? { ...shared, operation: ChangelogOperation.INSERT, newRowState: persistedRow }
+      : { ...shared, operation: ChangelogOperation.UPDATE, oldRowState: null, newRowState: persistedRow }
   );
 }
 
@@ -96,6 +169,55 @@ interface DeletedRowAudit {
 }
 
 const FAILED_MEASUREMENT_PREDICATE = 'StemGUID IS NULL';
+
+function buildLookupPredicate(lookup: RowLookup[]): { sql: string; values: unknown[] } {
+  if (lookup.length === 0) throw new Error('At least one row lookup column is required');
+  return {
+    sql: lookup.map(item => `${safeEscapeId(item.column)} = ?`).join(' AND '),
+    values: lookup.map(item => item.value)
+  };
+}
+
+async function loadSinglePersistedRow(
+  tx: TxExecutor,
+  schema: string,
+  tableName: string,
+  lookup: RowLookup[],
+  options: { forUpdate?: boolean } = {}
+): Promise<Record<string, unknown>> {
+  const rows = await loadPersistedRows(tx, schema, tableName, lookup, options);
+  if (rows.length === 0) {
+    throw new RowNotFoundError(`No ${tableName} row found for ${lookup.map(item => `${item.column}=${String(item.value)}`).join(', ')}`);
+  }
+  return rows[0];
+}
+
+async function loadPersistedRows(
+  tx: TxExecutor,
+  schema: string,
+  tableName: string,
+  lookup: RowLookup[],
+  options: { forUpdate?: boolean } = {}
+): Promise<Record<string, unknown>[]> {
+  const predicate = buildLookupPredicate(lookup);
+  const selectSQL = safeFormatQuery(
+    schema,
+    `SELECT * FROM ??.${safeEscapeId(tableName)} WHERE ${predicate.sql} LIMIT 2${options.forUpdate ? ' FOR UPDATE' : ''}`
+  );
+  const rows: Record<string, unknown>[] = await tx.query(selectSQL, predicate.values);
+  if (rows.length > 1) {
+    throw new MutationRequestError(`Mutation target for ${tableName} is ambiguous`, HTTPResponses.CONFLICT);
+  }
+  return rows;
+}
+
+function recordIDFromRow(row: Record<string, unknown>, columns: string[]): string {
+  return columns.map(column => String(row[column])).join('-');
+}
+
+function rowStatesDiffer(before: Record<string, unknown>, after: Record<string, unknown>): boolean {
+  return JSON.stringify(before) !== JSON.stringify(after);
+}
 
 /**
  * Reads the rows a DELETE is about to remove, so the changelog records their
@@ -117,7 +239,7 @@ async function captureRowsForDeletion(
 ): Promise<DeletedRowAudit[]> {
   const { recordIDColumns = [keyColumn], extraPredicate } = options;
   const predicate = `${safeEscapeId(keyColumn)} = ?${extraPredicate ? ` AND ${extraPredicate}` : ''}`;
-  const selectSQL = safeFormatQuery(schema, `SELECT * FROM ??.${safeEscapeId(tableName)} WHERE ${predicate}`);
+  const selectSQL = safeFormatQuery(schema, `SELECT * FROM ??.${safeEscapeId(tableName)} WHERE ${predicate} FOR UPDATE`);
   const rows: Record<string, unknown>[] = await tx.query(selectSQL, [keyValue]);
 
   return rows.map(row => ({
@@ -184,12 +306,13 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
   }
 
   const connectionManager = ConnectionManager.getInstance();
-  // Get the primary key column name for this dataType, or fallback to capitalized gridID
-  const primaryKeyColumn = PRIMARY_KEY_MAP[dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
-  const demappedGridID = primaryKeyColumn;
-  const { newRow, oldRow } = await request.json();
 
   try {
+    assertMutableDataType('PATCH', dataType);
+    const { newRow, oldRow } = await readMutationBody(request, 'PATCH');
+    const primaryKeyColumn = PRIMARY_KEY_MAP[dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
+    const demappedGridID = primaryKeyColumn;
+
     // Resolved before the transaction opens so the auth round-trip never holds a
     // pooled connection.
     const changedBy = await changelogChangedBy();
@@ -211,13 +334,24 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
       }
 
       const mapper = MapperFactory.getMapper<any, any>(dataType);
-      const oldRowData = mapper.demapData([oldRow])[0];
-      const newRowData = mapper.demapData([{ ...oldRow, ...newRow }])[0];
+      const oldRowData = mapper.demapData([oldRow!])[0];
       const previousGridIDKey = oldRowData?.[demappedGridID];
+      if (previousGridIDKey === undefined || previousGridIDKey === null || previousGridIDKey === '') {
+        throw new MutationRequestError(`oldRow must contain ${demappedGridID}`);
+      }
+
+      const beforeLookup: RowLookup[] = [{ column: demappedGridID, value: previousGridIDKey }];
+      if (dataType === 'attributes' && oldRowData.IsActive !== undefined && oldRowData.IsActive !== null) {
+        beforeLookup.push({ column: 'IsActive', value: oldRowData.IsActive });
+      }
+      const persistedBefore = await loadSinglePersistedRow(tx, schema, dataType, beforeLookup, { forUpdate: true });
+      const requestedChanges = mapper.demapData([newRow])[0];
+      const newRowData = { ...persistedBefore, ...requestedChanges };
       const { [demappedGridID]: updatedGridIDKey, ...remainingProperties } = newRowData;
 
       let dataToUpdate;
-      const censusID = parseInt((await getCookie('censusID')) ?? '0');
+      const censusCookie = await getCookie('censusID');
+      const censusID = parseOptionalPositiveInt(censusCookie ?? undefined, 'Census context');
 
       if (dataType === 'plots') {
         const { NumQuadrats, ...plotTrimmed } = newRowData;
@@ -231,23 +365,59 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         const { CensusID, ...specTrimmed } = newRowData;
         dataToUpdate = specTrimmed;
       } else if (dataType === 'personnel') {
-        const { CensusActive, ...personnelTrimmed } = newRowData;
-        const hasCensusActiveFlag =
-          Object.prototype.hasOwnProperty.call(oldRowData ?? {}, 'CensusActive') || Object.prototype.hasOwnProperty.call(newRowData, 'CensusActive');
+        const personnelTrimmed = { ...newRowData };
+        delete personnelTrimmed.CensusActive;
+        const hasCensusActiveFlag = Object.prototype.hasOwnProperty.call(newRow, 'CensusActive');
         if (hasCensusActiveFlag) {
-          if (!Number.isInteger(censusID) || censusID <= 0) {
-            throw new Error('Census context required to update personnel census activity');
+          if (typeof newRow.CensusActive !== 'boolean') {
+            throw new MutationRequestError('CensusActive must be a boolean');
           }
-          const query = CensusActive
-            ? `INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?);`
-            : `DELETE FROM ${schema}.censusactivepersonnel WHERE CensusID = ? AND PersonnelID = ?`;
-          await tx.query(query, [censusID, previousGridIDKey]);
+          if (!censusID) throw new MutationRequestError('Census context required to update personnel census activity');
+
+          const relationLookup = [
+            { column: 'CensusID', value: censusID },
+            { column: 'PersonnelID', value: previousGridIDKey }
+          ];
+          const existingRelation = (await loadPersistedRows(tx, schema, 'censusactivepersonnel', relationLookup, { forUpdate: true }))[0];
+          const desiredActive = newRow.CensusActive;
+
+          if (desiredActive && !existingRelation) {
+            const insertResult = await tx.query(safeFormatQuery(schema, 'INSERT INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)'), [
+              censusID,
+              previousGridIDKey
+            ]);
+            const persistedRelation = await loadSinglePersistedRow(tx, schema, 'censusactivepersonnel', [{ column: 'CAPID', value: insertResult.insertId }]);
+            await recordMutation({
+              tx,
+              schema,
+              tableName: 'censusactivepersonnel',
+              recordID: persistedRelation.CAPID as string | number,
+              operation: ChangelogOperation.INSERT,
+              newRowState: persistedRelation,
+              changedBy,
+              censusID
+            });
+          } else if (!desiredActive && existingRelation) {
+            const deleteSQL = safeFormatQuery(schema, 'DELETE FROM ??.censusactivepersonnel WHERE CAPID = ?');
+            await tx.query(deleteSQL, [existingRelation.CAPID]);
+            await recordMutation({
+              tx,
+              schema,
+              tableName: 'censusactivepersonnel',
+              recordID: existingRelation.CAPID as string | number,
+              operation: ChangelogOperation.DELETE,
+              oldRowState: existingRelation,
+              changedBy,
+              censusID
+            });
+          }
         }
         dataToUpdate = personnelTrimmed;
       } else dataToUpdate = remainingProperties;
 
-      const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${dataType}`, dataToUpdate, demappedGridID, previousGridIDKey]);
-      const updateResult = await tx.query(updateQuery);
+      const updatePredicate = buildLookupPredicate(beforeLookup);
+      const updateSQL = safeFormatQuery(schema, `UPDATE ??.${safeEscapeId(dataType)} SET ? WHERE ${updatePredicate.sql}`);
+      const updateResult = await tx.query(format(updateSQL, [dataToUpdate, ...updatePredicate.values]));
 
       // A zero-row UPDATE must never be reported as success. The pool uses mysql2's
       // default connection flags, which include FOUND_ROWS (connection_config.js
@@ -263,27 +433,35 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         throw new RowNotFoundError(`No ${dataType} row found for ${demappedGridID}=${previousGridIDKey}`);
       }
 
-      // Logged only after the zero-row guard, so a stale-key edit that throws
-      // RowNotFoundError records nothing. The write shares tx, so the log entry
-      // and the UPDATE commit or roll back together.
-      await recordMutation({
-        tx,
-        schema,
-        tableName: dataType,
-        recordID: previousGridIDKey,
-        operation: ChangelogOperation.UPDATE,
-        oldRowState: oldRowData ?? {},
-        newRowState: newRowData,
-        changedBy,
-        plotID: changelogPlotID(newRowData),
-        censusID
-      });
+      const afterLookup: RowLookup[] = [{ column: demappedGridID, value: updatedGridIDKey ?? previousGridIDKey }];
+      if (dataType === 'attributes' && newRowData.IsActive !== undefined && newRowData.IsActive !== null) {
+        afterLookup.push({ column: 'IsActive', value: newRowData.IsActive });
+      }
+      const persistedAfter = await loadSinglePersistedRow(tx, schema, dataType, afterLookup);
 
-      return { [dataType]: updatedGridIDKey };
+      // A matched re-save is a successful request but not a mutation. Suppress a
+      // false UPDATE event by comparing the database snapshots, not request data.
+      if (rowStatesDiffer(persistedBefore, persistedAfter)) {
+        await recordMutation({
+          tx,
+          schema,
+          tableName: dataType,
+          recordID: previousGridIDKey,
+          operation: ChangelogOperation.UPDATE,
+          oldRowState: persistedBefore,
+          newRowState: persistedAfter,
+          changedBy,
+          plotID: changelogPlotID(persistedAfter),
+          censusID: changelogCensusID(persistedAfter) ?? censusID ?? null
+        });
+      }
+
+      return { [dataType]: persistedAfter[demappedGridID] };
     });
 
     return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
+    if (error instanceof MutationRequestError) return mutationErrorResponse(error);
     // A zero-row UPDATE must not report success: surface the NOT_FOUND status the
     // error carries instead of the generic 500 handleError would produce. Use the
     // `message` key so the grid consumer (isolateddatagridcommons reads
@@ -295,7 +473,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
     // withTransaction has already rolled back on throw; pass no transactionID so
     // handleError only formats the response and does not attempt a second
     // rollback (which would log against an already-released connection).
-    return handleError(error, connectionManager, newRow);
+    return handleError(error, connectionManager, undefined);
   }
 }
 
@@ -305,11 +483,11 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
   const [schema, gridID, _plotIDParam, censusIDParam] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
 
-  const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
-
   const connectionManager = ConnectionManager.getInstance();
-  const { newRow } = await request.json();
   try {
+    assertMutableDataType('POST', params.dataType);
+    const censusID = parseOptionalPositiveInt(censusIDParam, 'Census ID');
+    const { newRow } = await readMutationBody(request, 'POST');
     const changedBy = await changelogChangedBy();
 
     const insertIDs = await connectionManager.withTransaction(async tx => {
@@ -318,9 +496,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       // different table and only learns the RecordID after its own insert.
       const createdRows: CreatedRowAudit[] = [];
 
-      if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
+      const submittedRow = { ...newRow };
+      delete submittedRow.isNew;
 
-      const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
+      const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([submittedRow])[0];
       const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
 
       if (params.dataType === 'alltaxonomiesview') {
@@ -376,27 +555,38 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(params.dataType)) {
         if (params.dataType === 'attributes') {
           await tx.query(format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, newRowData]));
-          // `attributes` keys on Code, so there is no insert id to read back.
-          createdRows.push({ tableName: params.dataType, recordID: newRowData.Code, rowState: newRowData });
-        } else if (params.dataType === 'personnel') {
-          const censusActiveRow = { CensusID: censusID ?? 0, PersonnelID: newRowData.PersonnelID };
-          await tx.query(`INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [censusID ?? 0, newRowData.PersonnelID]);
-          // This branch creates no `personnel` row — it only links an existing
-          // person to a census. Logging it as a personnel INSERT would assert a
-          // person was created who wasn't.
-          createdRows.push({
-            tableName: 'censusactivepersonnel',
-            recordID: newRowData.PersonnelID,
-            rowState: censusActiveRow
-          });
-        } else {
-          const { [demappedGridID]: demappedIDValue, ...remaining } = newRowData;
-          const insertQuery = format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, remaining]);
-          const results = await tx.query(insertQuery);
           createdRows.push({
             tableName: params.dataType,
-            recordID: results.insertId,
-            rowState: { ...remaining, [demappedGridID]: results.insertId }
+            lookup: [
+              { column: 'Code', value: newRowData.Code },
+              { column: 'IsActive', value: newRowData.IsActive ?? 1 }
+            ],
+            recordIDColumns: ['Code']
+          });
+        } else if (params.dataType === 'personnel') {
+          if (!censusID) throw new MutationRequestError('Census ID is required to activate personnel');
+          const insertResult = await tx.query(safeFormatQuery(schema, 'INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)'), [
+            censusID,
+            newRowData.PersonnelID
+          ]);
+          // INSERT IGNORE reports zero affected rows for an existing relation. A
+          // retry/no-op is successful, but it must not invent a second INSERT.
+          if (Number(insertResult.affectedRows ?? 0) > 0) {
+            createdRows.push({
+              tableName: 'censusactivepersonnel',
+              lookup: [{ column: 'CAPID', value: insertResult.insertId }],
+              recordIDColumns: ['CAPID']
+            });
+          }
+        } else {
+          const { [demappedGridID]: _demappedIDValue, ...remaining } = newRowData;
+          const insertQuery = format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, remaining]);
+          const results = await tx.query(insertQuery);
+          createdIDs[params.dataType] = results.insertId;
+          createdRows.push({
+            tableName: params.dataType,
+            lookup: [{ column: demappedGridID, value: results.insertId }],
+            recordIDColumns: [demappedGridID]
           });
         }
       } else {
@@ -436,8 +626,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
           // StemGUID; `failedmeasurements` is a view over those, not a table.
           createdRows.push({
             tableName: 'coremeasurements',
-            recordID: createdIDs[params.dataType],
-            rowState: newRowData
+            lookup: [{ column: 'CoreMeasurementID', value: createdIDs[params.dataType] }],
+            recordIDColumns: ['CoreMeasurementID']
           });
         } else {
           const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
@@ -445,23 +635,24 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
           createdIDs[params.dataType] = results.insertId;
           createdRows.push({
             tableName: params.dataType,
-            recordID: results.insertId,
-            rowState: { ...newRowData, [demappedGridID]: results.insertId }
+            lookup: [{ column: demappedGridID, value: results.insertId }],
+            recordIDColumns: [demappedGridID]
           });
         }
       }
 
       for (const created of createdRows) {
+        const persistedRow = await loadSinglePersistedRow(tx, schema, created.tableName, created.lookup);
         await recordMutation({
           tx,
           schema,
           tableName: created.tableName,
-          recordID: created.recordID,
+          recordID: recordIDFromRow(persistedRow, created.recordIDColumns),
           operation: ChangelogOperation.INSERT,
-          newRowState: created.rowState,
+          newRowState: persistedRow,
           changedBy,
-          plotID: changelogPlotID(created.rowState),
-          censusID: censusID ?? null
+          plotID: changelogPlotID(persistedRow),
+          censusID: changelogCensusID(persistedRow) ?? censusID ?? null
         });
       }
 
@@ -470,10 +661,11 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
 
     return NextResponse.json({ message: 'Insert successful', createdIDs: insertIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
+    if (error instanceof MutationRequestError) return mutationErrorResponse(error);
     // withTransaction has already rolled back on throw; pass no transactionID so
     // handleError only formats the response and does not attempt a second
     // rollback (same change Task 5 made for PATCH).
-    return handleError(error, connectionManager, newRow);
+    return handleError(error, connectionManager, undefined);
   }
 }
 
@@ -483,11 +675,11 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
   const connectionManager = ConnectionManager.getInstance();
-  // Get the primary key column name for this dataType, or fallback to capitalized gridID
-  const primaryKeyColumn = PRIMARY_KEY_MAP[params.dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
-  const demappedGridID = primaryKeyColumn;
-  const { newRow } = await request.json();
   try {
+    assertMutableDataType('DELETE', params.dataType);
+    const { newRow } = await readMutationBody(request, 'DELETE');
+    const primaryKeyColumn = PRIMARY_KEY_MAP[params.dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
+    const demappedGridID = primaryKeyColumn;
     const changedBy = await changelogChangedBy();
 
     await connectionManager.withTransaction(async tx => {
@@ -499,7 +691,7 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
       if (params.dataType === 'alltaxonomiesview') {
         const { SpeciesID } = deleteRowData;
         removedRows.push(...(await captureRowsForDeletion(tx, schema, 'species', 'SpeciesID', SpeciesID)));
-        await tx.query(`DELETE FROM ${schema}.species WHERE SpeciesID = ?`, [SpeciesID]);
+        await tx.query(safeFormatQuery(schema, 'DELETE FROM ??.species WHERE SpeciesID = ?'), [SpeciesID]);
       } else if (params.dataType === 'failedmeasurements') {
         // Measurement deletes bypass the edit_operations ledger: deletion is a
         // terminal operation, not a revertable edit, and the ledger's
@@ -554,6 +746,7 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
     });
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
   } catch (error: any) {
+    if (error instanceof MutationRequestError) return mutationErrorResponse(error);
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
       // withTransaction has already rolled back; no manual rollback here.
       const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
@@ -565,6 +758,6 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
         },
         { status: HTTPResponses.FOREIGN_KEY_CONFLICT }
       );
-    } else return handleError(error, connectionManager, newRow);
+    } else return handleError(error, connectionManager, undefined);
   }
 }

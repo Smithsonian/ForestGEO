@@ -115,6 +115,36 @@ describe('CoreAPIFunctions', () => {
     );
   }
 
+  function mockPatchSnapshots(before: Record<string, unknown>, after: Record<string, unknown>, affectedRows = 1) {
+    let targetRead = 0;
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
+      if (typeof sql === 'string' && sql.includes(CHANGELOG_TABLE)) return { affectedRows: 1 };
+      if (typeof sql === 'string' && sql.trimStart().toUpperCase().startsWith('SELECT')) {
+        return [targetRead++ === 0 ? before : after];
+      }
+      if (typeof sql === 'string' && sql.trimStart().toUpperCase().startsWith('UPDATE')) return { affectedRows };
+      return { affectedRows: 1, insertId: 91 };
+    });
+  }
+
+  function mockInsertReadback(insertId: number, persistedRow: Record<string, unknown>, affectedRows = 1) {
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
+      if (typeof sql === 'string' && sql.includes(CHANGELOG_TABLE)) return { affectedRows: 1 };
+      if (typeof sql === 'string' && sql.trimStart().toUpperCase().startsWith('SELECT')) return [persistedRow];
+      return { insertId, affectedRows };
+    });
+  }
+
+  function mockTaxonomyReadback(rows: { family: Record<string, unknown>; genus: Record<string, unknown>; species: Record<string, unknown> }) {
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
+      if (typeof sql === 'string' && sql.includes(CHANGELOG_TABLE)) return { affectedRows: 1 };
+      if (typeof sql === 'string' && sql.includes('.`family`')) return [rows.family];
+      if (typeof sql === 'string' && sql.includes('.`genus`')) return [rows.genus];
+      if (typeof sql === 'string' && sql.includes('.`species`')) return [rows.species];
+      return { affectedRows: 1 };
+    });
+  }
+
   beforeEach(() => {
     // Reset all mocks
     vi.clearAllMocks();
@@ -188,19 +218,41 @@ describe('CoreAPIFunctions', () => {
       await expect(PATCH(mockRequest, { params: Promise.resolve(mockParams) })).rejects.toThrow();
     });
 
+    it('returns 400 for malformed JSON before opening a transaction', async () => {
+      const mockRequest = new NextRequest('http://localhost/api/test', { method: 'PATCH', body: '{' });
+      const response = await PATCH(mockRequest, { params: Promise.resolve({ dataType: 'plots', slugs: [TEST_SCHEMA, 'plotID'] }) });
+
+      expect(response.status).toBe(HTTPResponses.BAD_REQUEST);
+      expect(mockConnectionManager.withTransaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects a read-only mapped dataType before it can become an arbitrary-table writer', async () => {
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({ oldRow: { ChangeID: 1 }, newRow: { ChangedBy: 'forged' } })
+      });
+      const response = await PATCH(mockRequest, {
+        params: Promise.resolve({ dataType: 'unifiedchangelog', slugs: [TEST_SCHEMA, 'changeID'] })
+      });
+
+      expect(response.status).toBe(HTTPResponses.METHOD_NOT_ALLOWED);
+      expect(mockConnectionManager.withTransaction).not.toHaveBeenCalled();
+      expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    });
+
     it('should begin and commit transaction for valid update', async () => {
       const mockRequest = new NextRequest('http://localhost/api/test', {
         method: 'PATCH',
         body: JSON.stringify({
-          newRow: { id: 1, name: 'Updated' },
-          oldRow: { id: 1, name: 'Original' }
+          newRow: { PlotID: 1, PlotName: 'Updated' },
+          oldRow: { PlotID: 1, PlotName: 'Original' }
         })
       });
 
       // The PATCH UPDATE is guarded against zero-row writes: mysql2 returns a
       // ResultSetHeader whose affectedRows counts matched rows, so a real matched
       // update reports affectedRows >= 1. Model that here so the guard sees a hit.
-      mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+      mockPatchSnapshots({ PlotID: 1, PlotName: 'Original' }, { PlotID: 1, PlotName: 'Updated' });
 
       const mockParams = {
         dataType: 'plots',
@@ -221,7 +273,7 @@ describe('CoreAPIFunctions', () => {
     it('rolls back via withTransaction when a write fails', async () => {
       const mockRequest = new NextRequest('http://localhost/api/test', {
         method: 'PATCH',
-        body: JSON.stringify({ newRow: {}, oldRow: {} })
+        body: JSON.stringify({ newRow: { PlotName: 'Updated' }, oldRow: { PlotID: 1 } })
       });
 
       mockConnectionManager.executeQuery.mockRejectedValue(new Error('DB Error'));
@@ -278,7 +330,20 @@ describe('CoreAPIFunctions', () => {
         })
       });
 
-      mockMapper.demapData.mockReturnValue([{ PersonnelID: 1, CensusActive: true }]);
+      mockMapper.demapData.mockImplementation((data: any[]) => data);
+      let personnelReads = 0;
+      mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes(CHANGELOG_TABLE)) return { affectedRows: 1 };
+        if (sql.includes('censusactivepersonnel') && sql.trimStart().toUpperCase().startsWith('SELECT')) {
+          if (sql.includes('`CAPID`')) return [{ CAPID: 91, CensusID: 1, PersonnelID: 1 }];
+          return [];
+        }
+        if (sql.includes('censusactivepersonnel') && sql.trimStart().toUpperCase().startsWith('INSERT')) return { insertId: 91, affectedRows: 1 };
+        if (sql.trimStart().toUpperCase().startsWith('SELECT')) {
+          return [personnelReads++ === 0 ? { PersonnelID: 1 } : { PersonnelID: 1 }];
+        }
+        return { affectedRows: 1 };
+      });
 
       const mockParams = {
         dataType: 'personnel',
@@ -287,11 +352,15 @@ describe('CoreAPIFunctions', () => {
 
       await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
 
-      // Should call executeQuery for INSERT IGNORE (CensusActive = true)
+      // Should create the missing census/personnel relation.
       expect(mockConnectionManager.executeQuery).toHaveBeenCalled();
       const queries = mockConnectionManager.executeQuery.mock.calls.map((call: any) => call[0]);
-      const hasInsertQuery = queries.some((q: string) => typeof q === 'string' && q.includes('INSERT IGNORE'));
+      const hasInsertQuery = queries.some((q: string) => typeof q === 'string' && q.includes('INSERT INTO') && q.includes('censusactivepersonnel'));
       expect(hasInsertQuery).toBe(true);
+      const auditRows = changelogRows(mockConnectionManager);
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0].tableName).toBe('censusactivepersonnel');
+      expect(auditRows[0].recordID).toBe('91');
     });
 
     it('should skip personnel census-activity updates when CensusActive is not provided', async () => {
@@ -304,8 +373,7 @@ describe('CoreAPIFunctions', () => {
       });
 
       mockMapper.demapData.mockImplementation((data: any[]) => data);
-      // The UPDATE must report a matched row so the zero-row guard resolves to a 200.
-      mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+      mockPatchSnapshots({ PersonnelID: 1, LastName: 'Original' }, { PersonnelID: 1, LastName: 'Updated' });
 
       const mockParams = {
         dataType: 'personnel',
@@ -388,7 +456,9 @@ describe('CoreAPIFunctions', () => {
           body: JSON.stringify({ newRow, oldRow })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+        const persistedBefore = { PlotID: 17, PlotName: 'Harvard Forest', DefaultDBHUnits: 'mm' };
+        const persistedAfter = { PlotID: 17, PlotName: 'Harvard Forest', DefaultDBHUnits: 'cm' };
+        mockPatchSnapshots(persistedBefore, persistedAfter);
 
         const response = await PATCH(mockRequest, {
           params: Promise.resolve({ dataType: 'plots', slugs: [TEST_SCHEMA, 'plotID'] })
@@ -401,8 +471,8 @@ describe('CoreAPIFunctions', () => {
         expect(rows[0].tableName).toBe('plots');
         expect(rows[0].recordID).toBe('17');
         expect(rows[0].operation).toBe('UPDATE');
-        expect(JSON.parse(rows[0].oldRowState)).toEqual(oldRow);
-        expect(JSON.parse(rows[0].newRowState)).toEqual({ ...oldRow, ...newRow });
+        expect(JSON.parse(rows[0].oldRowState)).toEqual(persistedBefore);
+        expect(JSON.parse(rows[0].newRowState)).toEqual(persistedAfter);
         expect(rows[0].changedBy).toBe(TEST_SESSION_EMAIL);
         // `plots` scopes to its own key; the census cookie mock resolves to 1.
         expect(rows[0].plotID).toBe(17);
@@ -440,7 +510,7 @@ describe('CoreAPIFunctions', () => {
           })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+        mockPatchSnapshots({ Code: 'DEAD', Description: 'dead', IsActive: 1 }, { Code: 'DEAD', Description: 'dead stem', IsActive: 1 });
 
         await PATCH(mockRequest, {
           params: Promise.resolve({ dataType: 'attributes', slugs: [TEST_SCHEMA, 'code'] })
@@ -452,6 +522,26 @@ describe('CoreAPIFunctions', () => {
         // Natural key, preserved as-is rather than coerced to a number.
         expect(rows[0].recordID).toBe('DEAD');
         expect(rows[0].plotID).toBeNull();
+      });
+
+      it('ignores forged client history and records the row snapshots read from MySQL', async () => {
+        const persistedBefore = { PlotID: 17, PlotName: 'Real database name', DefaultDBHUnits: 'mm' };
+        const persistedAfter = { ...persistedBefore, DefaultDBHUnits: 'cm' };
+        mockPatchSnapshots(persistedBefore, persistedAfter);
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            oldRow: { PlotID: 17, PlotName: 'FORGED OLD VALUE', DefaultDBHUnits: 'feet' },
+            newRow: { DefaultDBHUnits: 'cm' }
+          })
+        });
+
+        const response = await PATCH(mockRequest, { params: Promise.resolve({ dataType: 'plots', slugs: [TEST_SCHEMA, 'plotID'] }) });
+
+        expect(response.status).toBe(HTTPResponses.OK);
+        const [audit] = changelogRows(mockConnectionManager);
+        expect(JSON.parse(audit.oldRowState)).toEqual(persistedBefore);
+        expect(JSON.parse(audit.newRowState)).toEqual(persistedAfter);
       });
     });
   });
@@ -485,7 +575,7 @@ describe('CoreAPIFunctions', () => {
         body: JSON.stringify({ newRow: { name: 'New Item' } })
       });
 
-      mockConnectionManager.executeQuery.mockResolvedValue({ insertId: 456 });
+      mockInsertReadback(456, { PlotID: 456, PlotName: 'New Item', IsActive: 1 });
 
       const mockParams = {
         dataType: 'plots',
@@ -509,7 +599,7 @@ describe('CoreAPIFunctions', () => {
         body: JSON.stringify({ newRow: { name: 'Test', isNew: true } })
       });
 
-      mockConnectionManager.executeQuery.mockResolvedValue({ insertId: 789 });
+      mockInsertReadback(789, { PlotID: 789, Name: 'Test', IsActive: 1 });
 
       const mockParams = {
         dataType: 'plots',
@@ -546,6 +636,11 @@ describe('CoreAPIFunctions', () => {
           SpeciesName: 'acacia'
         }
       ]);
+      mockTaxonomyReadback({
+        family: { FamilyID: 123, Family: 'Fabaceae' },
+        genus: { GenusID: 123, FamilyID: 123, Genus: 'Acacia', GenusAuthority: 'Mill.' },
+        species: { SpeciesID: 123, GenusID: 123, SpeciesCode: 'ACACIA', SpeciesName: 'acacia' }
+      });
 
       const mockParams = {
         dataType: 'alltaxonomiesview',
@@ -589,7 +684,7 @@ describe('CoreAPIFunctions', () => {
           body: JSON.stringify({ newRow: { PlotName: 'New Plot', LocationName: 'Somewhere' } })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue({ insertId: GENERATED_PLOT_ID });
+        mockInsertReadback(GENERATED_PLOT_ID, { PlotID: GENERATED_PLOT_ID, PlotName: 'New Plot', LocationName: 'Somewhere', IsActive: 1 });
 
         const response = await POST(mockRequest, {
           params: Promise.resolve({ dataType: 'plots', slugs: [TEST_SCHEMA, 'plotID', '1', '7'] })
@@ -617,7 +712,7 @@ describe('CoreAPIFunctions', () => {
         });
 
         // `attributes` has no AUTO_INCREMENT key, so mysql2 reports insertId 0.
-        mockConnectionManager.executeQuery.mockResolvedValue({ insertId: 0 });
+        mockInsertReadback(0, { Code: 'BROKEN', Description: 'broken stem', Status: 'alive', IsActive: 1 });
 
         await POST(mockRequest, {
           params: Promise.resolve({ dataType: 'attributes', slugs: [TEST_SCHEMA, 'code', '1', '7'] })
@@ -636,7 +731,7 @@ describe('CoreAPIFunctions', () => {
           body: JSON.stringify({ newRow: { QuadratID: 0, QuadratName: 'Q-33', PlotID: 5 } })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue({ insertId: GENERATED_QUADRAT_ID });
+        mockInsertReadback(GENERATED_QUADRAT_ID, { QuadratID: GENERATED_QUADRAT_ID, QuadratName: 'Q-33', PlotID: 5, IsActive: 1 });
 
         await POST(mockRequest, {
           params: Promise.resolve({ dataType: 'quadrats', slugs: [TEST_SCHEMA, 'quadratID', '1', '7'] })
@@ -657,7 +752,7 @@ describe('CoreAPIFunctions', () => {
           body: JSON.stringify({ newRow: { PersonnelID: PERSONNEL_ID, FirstName: 'Existing', LastName: 'Person' } })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue({ insertId: 0 });
+        mockInsertReadback(901, { CAPID: 901, CensusID: CENSUS_ID, PersonnelID: PERSONNEL_ID });
 
         await POST(mockRequest, {
           params: Promise.resolve({ dataType: 'personnel', slugs: [TEST_SCHEMA, 'personnelID', '1', String(CENSUS_ID)] })
@@ -669,8 +764,23 @@ describe('CoreAPIFunctions', () => {
         // personnel row. Logging it as `personnel` would assert a person was
         // created who wasn't.
         expect(rows[0].tableName).toBe('censusactivepersonnel');
-        expect(rows[0].recordID).toBe(String(PERSONNEL_ID));
-        expect(JSON.parse(rows[0].newRowState)).toEqual({ CensusID: CENSUS_ID, PersonnelID: PERSONNEL_ID });
+        expect(rows[0].recordID).toBe('901');
+        expect(JSON.parse(rows[0].newRowState)).toEqual({ CAPID: 901, CensusID: CENSUS_ID, PersonnelID: PERSONNEL_ID });
+      });
+
+      it('does not log a duplicate personnel activation that INSERT IGNORE skipped', async () => {
+        mockConnectionManager.executeQuery.mockResolvedValue({ insertId: 0, affectedRows: 0 });
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'POST',
+          body: JSON.stringify({ newRow: { PersonnelID: 88 } })
+        });
+
+        const response = await POST(mockRequest, {
+          params: Promise.resolve({ dataType: 'personnel', slugs: [TEST_SCHEMA, 'personnelID', '1', '7'] })
+        });
+
+        expect(response.status).toBe(HTTPResponses.OK);
+        expect(changelogRows(mockConnectionManager)).toHaveLength(0);
       });
 
       it('fans a single alltaxonomiesview POST out into one row per real table', async () => {
@@ -690,6 +800,11 @@ describe('CoreAPIFunctions', () => {
           SpeciesName: 'acacia'
         };
         mockMapper.demapData.mockReturnValue([submitted]);
+        mockTaxonomyReadback({
+          family: { FamilyID: 11, Family: 'Fabaceae' },
+          genus: { GenusID: 22, FamilyID: 11, Genus: 'Acacia', GenusAuthority: 'Mill.' },
+          species: { SpeciesID: 33, GenusID: 22, SpeciesCode: 'ACACIA', SpeciesName: 'acacia' }
+        });
 
         const mockRequest = new NextRequest('http://localhost/api/test', {
           method: 'POST',
@@ -723,6 +838,11 @@ describe('CoreAPIFunctions', () => {
           .mockResolvedValueOnce({ id: 33, operation: 'inserted' });
 
         mockMapper.demapData.mockReturnValue([{ Family: 'Fabaceae', Genus: 'Acacia', SpeciesCode: 'NEWSP' }]);
+        mockTaxonomyReadback({
+          family: { FamilyID: 11, Family: 'Fabaceae' },
+          genus: { GenusID: 22, FamilyID: 11, Genus: 'Acacia' },
+          species: { SpeciesID: 33, GenusID: 22, SpeciesCode: 'NEWSP' }
+        });
 
         const mockRequest = new NextRequest('http://localhost/api/test', {
           method: 'POST',
@@ -740,6 +860,28 @@ describe('CoreAPIFunctions', () => {
         // state is genuinely unknown — recorded as NULL rather than fabricated.
         expect(rows[0].oldRowState).toBeNull();
         expect(rows[2].oldRowState).toBeNull();
+      });
+
+      it('does not log taxonomy slices whose duplicate upsert changed no values', async () => {
+        const { handleUpsert } = await import('@/config/utils');
+        const upsertMock = handleUpsert as ReturnType<typeof vi.fn>;
+        upsertMock
+          .mockResolvedValueOnce({ id: 11, operation: 'unchanged' })
+          .mockResolvedValueOnce({ id: 22, operation: 'unchanged' })
+          .mockResolvedValueOnce({ id: 33, operation: 'unchanged' });
+        mockMapper.demapData.mockReturnValue([{ Family: 'Fabaceae', Genus: 'Acacia', SpeciesCode: 'ACACIA' }]);
+
+        const response = await POST(
+          new NextRequest('http://localhost/api/test', {
+            method: 'POST',
+            body: JSON.stringify({ newRow: { Family: 'Fabaceae', Genus: 'Acacia', SpeciesCode: 'ACACIA' } })
+          }),
+          { params: Promise.resolve({ dataType: 'alltaxonomiesview', slugs: [TEST_SCHEMA, 'speciesID', '1', '7'] }) }
+        );
+
+        expect(response.status).toBe(HTTPResponses.OK);
+        expect(changelogRows(mockConnectionManager)).toHaveLength(0);
+        expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
       });
 
       it('writes nothing when the insert fails and the transaction rolls back', async () => {
@@ -844,7 +986,7 @@ describe('CoreAPIFunctions', () => {
 
       // tx.query in the mock delegates to executeQuery(sql, params, transactionID),
       // so the assertion includes the threaded transaction id as the trailing arg.
-      expect(mockConnectionManager.executeQuery).toHaveBeenCalledWith(`DELETE FROM ${TEST_SCHEMA}.species WHERE SpeciesID = ?`, [99], 'transaction-123');
+      expect(mockConnectionManager.executeQuery).toHaveBeenCalledWith(`DELETE FROM \`${TEST_SCHEMA}\`.species WHERE SpeciesID = ?`, [99], 'transaction-123');
       expect(response.status).toBe(200);
     });
 
@@ -1098,7 +1240,7 @@ describe('CoreAPIFunctions', () => {
         expect(applyEditMock).not.toHaveBeenCalled();
       });
 
-      it('should use CoreMeasurementID for coremeasurements dataType', async () => {
+      it('rejects direct coremeasurements PATCH so measurement edits cannot bypass the edit plan', async () => {
         const mockRequest = new NextRequest('http://localhost/api/test', {
           method: 'PATCH',
           body: JSON.stringify({
@@ -1107,9 +1249,6 @@ describe('CoreAPIFunctions', () => {
           })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
-        mockMapper.demapData.mockReturnValue([{ CoreMeasurementID: 42, MeasuredDBH: 15.5 }]);
-
         const mockParams = {
           dataType: 'coremeasurements',
           slugs: ['forestgeo_test', '42']
@@ -1117,10 +1256,8 @@ describe('CoreAPIFunctions', () => {
 
         const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
 
-        expect(response.status).toBe(200);
-
-        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('UPDATE'));
-        expect(updateCall[0]).toMatch(/CoreMeasurementID/i);
+        expect(response.status).toBe(HTTPResponses.METHOD_NOT_ALLOWED);
+        expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
       });
 
       it('should use Code for attributes dataType', async () => {
@@ -1132,8 +1269,7 @@ describe('CoreAPIFunctions', () => {
           })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
-        mockMapper.demapData.mockReturnValue([{ Code: 'TEST', Description: 'Updated' }]);
+        mockPatchSnapshots({ Code: 'TEST', Description: 'Original' }, { Code: 'TEST', Description: 'Updated' });
 
         const mockParams = {
           dataType: 'attributes',
@@ -1144,7 +1280,9 @@ describe('CoreAPIFunctions', () => {
 
         expect(response.status).toBe(200);
 
-        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('UPDATE'));
+        const updateCall = mockConnectionManager.executeQuery.mock.calls.find(
+          (call: any) => typeof call[0] === 'string' && call[0].trimStart().toUpperCase().startsWith('UPDATE')
+        );
         expect(updateCall[0]).toMatch(/Code/i);
       });
 
@@ -1157,7 +1295,7 @@ describe('CoreAPIFunctions', () => {
           })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+        mockPatchSnapshots({ Code: 'OLDCODE', Description: 'Original' }, { Code: 'NEWCODE', Description: 'Updated' });
 
         const mockParams = {
           dataType: 'attributes',
@@ -1168,13 +1306,15 @@ describe('CoreAPIFunctions', () => {
 
         expect(response.status).toBe(200);
 
-        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('UPDATE'));
+        const updateCall = mockConnectionManager.executeQuery.mock.calls.find(
+          (call: any) => typeof call[0] === 'string' && call[0].trimStart().toUpperCase().startsWith('UPDATE')
+        );
         expect(updateCall).toBeDefined();
         expect(updateCall[0]).toContain('NEWCODE');
         expect(updateCall[0]).toContain('OLDCODE');
       });
 
-      it('should fallback to capitalized gridID for unmapped dataTypes', async () => {
+      it('rejects unmapped dataTypes instead of treating the route as an arbitrary-table writer', async () => {
         const mockRequest = new NextRequest('http://localhost/api/test', {
           method: 'PATCH',
           body: JSON.stringify({
@@ -1183,9 +1323,6 @@ describe('CoreAPIFunctions', () => {
           })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
-        mockMapper.demapData.mockReturnValue([{ CustomID: 99, Name: 'Updated' }]);
-
         const mockParams = {
           dataType: 'customtable', // Not in PRIMARY_KEY_MAP
           slugs: ['forestgeo_test', 'customID']
@@ -1193,11 +1330,8 @@ describe('CoreAPIFunctions', () => {
 
         const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
 
-        expect(response.status).toBe(200);
-
-        // Should use 'CustomID' (capitalized gridID) as fallback
-        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('UPDATE'));
-        expect(updateCall[0]).toMatch(/CustomID/i);
+        expect(response.status).toBe(HTTPResponses.METHOD_NOT_ALLOWED);
+        expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
       });
     });
 
@@ -1225,14 +1359,11 @@ describe('CoreAPIFunctions', () => {
         expect(deleteCall[1]).toEqual([5]);
       });
 
-      it('should use StemGUID for stems delete', async () => {
+      it('rejects direct stems DELETE outside the supported metadata surface', async () => {
         const mockRequest = new NextRequest('http://localhost/api/test', {
           method: 'DELETE',
           body: JSON.stringify({ newRow: { StemGUID: 12345 } })
         });
-
-        mockDeleteCapture([{ StemGUID: 12345, StemTag: 'S-1' }]);
-        mockMapper.demapData.mockReturnValue([{ StemGUID: 12345 }]);
 
         const mockParams = {
           dataType: 'stems',
@@ -1241,10 +1372,8 @@ describe('CoreAPIFunctions', () => {
 
         const response = await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
 
-        expect(response.status).toBe(200);
-
-        const deleteCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('DELETE'));
-        expect(deleteCall[0]).toMatch(/StemGUID/i);
+        expect(response.status).toBe(HTTPResponses.METHOD_NOT_ALLOWED);
+        expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
       });
     });
 

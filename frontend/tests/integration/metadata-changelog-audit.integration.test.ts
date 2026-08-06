@@ -205,8 +205,10 @@ describe('the motivating case: an unlogged plots.DefaultDBHUnits correction', ()
     const plot = await seededPlot();
     expect(plot.DefaultDBHUnits, 'seed must start at the schema default').toBe(SEEDED_DBH_UNITS);
 
-    const oldRow = plotGridRow(plot);
-    const response = await patchRow('plots', 'plotID', oldRow, { ...oldRow, defaultDBHUnits: CORRECTED_DBH_UNITS });
+    // The client deliberately lies about another old value. The key is used to
+    // locate the row, but neither audit state may trust this stale/forged copy.
+    const oldRow = { ...plotGridRow(plot), plotName: 'FORGED CLIENT HISTORY' };
+    const response = await patchRow('plots', 'plotID', oldRow, { defaultDBHUnits: CORRECTED_DBH_UNITS });
     expect(response.status, 'the plots PATCH must succeed').toBe(HTTPResponses.OK);
 
     const rows = await readChangelog('plots');
@@ -223,6 +225,8 @@ describe('the motivating case: an unlogged plots.DefaultDBHUnits correction', ()
     const after = rowState(entry.NewRowState)!;
     expect(before.DefaultDBHUnits).toBe(SEEDED_DBH_UNITS);
     expect(after.DefaultDBHUnits).toBe(CORRECTED_DBH_UNITS);
+    expect(before.PlotName).toBe(plot.PlotName);
+    expect(after.PlotName).toBe(plot.PlotName);
 
     // Field-by-field: the log must show WHICH column moved. Asserting only that
     // a row exists would pass even if both states were identical.
@@ -357,13 +361,12 @@ describe('the log never describes a change that did not commit', () => {
     expect(unchanged[0].DefaultDBHUnits).toBe(plot.DefaultDBHUnits);
   });
 
-  it('rolls the data back when the audit write itself fails, rather than persisting it unlogged', async () => {
+  it('rejects an out-of-range census scope before opening a mutation transaction', async () => {
     const quadratName = 'CHANGELOG-AUDIT-FAILURE-Q';
     const plot = await seededPlot();
 
-    // CensusID is an INT. A value past its range makes the changelog INSERT — and
-    // only the changelog INSERT — fail under STRICT_TRANS_TABLES, after the
-    // quadrat row has already been written inside the same transaction.
+    // CensusID is an INT. Rejecting the slug at the HTTP boundary avoids doing a
+    // valid data write that would only fail later in the audit insert.
     const slugs = [schema, 'quadratID', '1', String(OUT_OF_RANGE_CENSUS_ID)];
     const response = await POST(
       buildRequest('POST', 'quadrats', slugs, {
@@ -382,13 +385,10 @@ describe('the log never describes a change that did not commit', () => {
       }),
       { params: Promise.resolve({ dataType: 'quadrats', slugs }) }
     );
-    expect(response.status, 'a failed audit write must not report success').not.toBe(HTTPResponses.OK);
+    expect(response.status).toBe(HTTPResponses.BAD_REQUEST);
 
-    // REGRESSION SENTINEL: making the changelog write best-effort (wrapping it in
-    // a try/catch) would leave this quadrat persisted with no audit row — exactly
-    // the silent-mutation state this work exists to remove.
     const [orphan] = await setupConnection!.query<RowDataPacket[]>(`SELECT QuadratID FROM \`${schema}\`.quadrats WHERE QuadratName = ?`, [quadratName]);
-    expect(orphan, 'the mutation must roll back with its failed audit write').toHaveLength(0);
+    expect(orphan, 'invalid scope input must not reach the mutation').toHaveLength(0);
     expect(await readChangelog()).toHaveLength(0);
   });
 
