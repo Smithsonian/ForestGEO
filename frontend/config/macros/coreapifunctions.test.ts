@@ -100,6 +100,49 @@ function expectChangelogWritesAreTransactionScoped(mockConnectionManager: any) {
   }
 }
 
+/**
+ * Every dataType the CLIENT can actually send to a mutating verb on
+ * /api/fixeddata, with the verbs that reach it. Derived from the call sites, not
+ * from the handler's allowlist — a test written against the allowlist would stay
+ * green while the allowlist 405s a live grid.
+ *
+ * Call sites:
+ *   - components/datagrids/isolateddatagridcommons.tsx (POST/PATCH, DELETE)
+ *   - components/datagrids/measurementscommons.tsx (POST for new rows, DELETE)
+ *   - components/client/modals/specieslimitsmodal.tsx (PATCH/POST/DELETE)
+ *   - components/client/modals/plotcardmodal.tsx (POST/PATCH)
+ *   - lib/db/definitions/timekeeping.ts (POST)
+ *
+ * `stemtaxonomiesview`, `unifiedchangelog` and the admin `sites`/`users` grids
+ * are intentionally excluded: the first two pass `locked`, and the admin grids
+ * rewrite every mutation to /api/administrative/fetch/*.
+ */
+const CLIENT_REACHABLE_MUTATIONS: { dataType: string; methods: ('PATCH' | 'POST' | 'DELETE')[] }[] = [
+  { dataType: 'alltaxonomiesview', methods: ['PATCH', 'POST', 'DELETE'] },
+  { dataType: 'attributes', methods: ['PATCH', 'POST', 'DELETE'] },
+  { dataType: 'quadrats', methods: ['PATCH', 'POST', 'DELETE'] },
+  { dataType: 'personnel', methods: ['PATCH', 'POST', 'DELETE'] },
+  { dataType: 'quadratpersonnel', methods: ['PATCH', 'POST', 'DELETE'] },
+  { dataType: 'roles', methods: ['PATCH', 'POST', 'DELETE'] },
+  { dataType: 'species', methods: ['PATCH', 'POST', 'DELETE'] },
+  { dataType: 'specieslimits', methods: ['PATCH', 'POST', 'DELETE'] },
+  { dataType: 'plots', methods: ['PATCH', 'POST'] },
+  { dataType: 'census', methods: ['POST'] },
+  { dataType: 'viewfulltable', methods: ['PATCH', 'POST', 'DELETE'] },
+  // PATCH is deliberately absent: measurement edits go through /api/edits/*.
+  { dataType: 'measurementssummary', methods: ['POST', 'DELETE'] },
+  { dataType: 'failedmeasurements', methods: ['POST', 'DELETE'] }
+];
+
+const UNSUPPORTED_DATA_TYPE_MARKER = 'is not supported for data type';
+
+/** True only for the allowlist's own rejection, not other 405s or failures. */
+async function rejectedAsUnsupportedDataType(response: Response): Promise<boolean> {
+  if (response.status !== HTTPResponses.METHOD_NOT_ALLOWED) return false;
+  const body = await response.clone().json();
+  return typeof body?.error === 'string' && body.error.includes(UNSUPPORTED_DATA_TYPE_MARKER);
+}
+
 describe('CoreAPIFunctions', () => {
   let mockConnectionManager: any;
   let mockMapper: any;
@@ -1148,6 +1191,43 @@ describe('CoreAPIFunctions', () => {
         // A delete that removed nothing is not a change.
         expect(changelogRows(mockConnectionManager)).toHaveLength(0);
       });
+    });
+  });
+
+  describe('mutation allowlist covers every client-reachable dataType', () => {
+    const cases = CLIENT_REACHABLE_MUTATIONS.flatMap(entry => entry.methods.map(method => ({ dataType: entry.dataType, method })));
+
+    it.each(cases)('does not reject $method $dataType as an unsupported data type', async ({ dataType, method }) => {
+      // Permissive mocks: the point is only whether the request gets PAST the
+      // allowlist. Any later outcome (200, 404, 500) is fine — a 405 naming an
+      // unsupported data type is not, because the client sends this today.
+      mockConnectionManager.executeQuery.mockImplementation(async (sql: string) =>
+        typeof sql === 'string' && sql.trimStart().toUpperCase().startsWith('SELECT') ? [{ id: 1, Code: 'X', IsActive: 1 }] : { affectedRows: 1, insertId: 1 }
+      );
+
+      const body = JSON.stringify({ oldRow: { id: 1 }, newRow: { id: 1 } });
+      const request = new NextRequest('http://localhost/api/test', { method, body });
+      const slugs = [TEST_SCHEMA, 'id', '1', '1'];
+      const params = Promise.resolve({ dataType, slugs });
+
+      const response =
+        method === 'PATCH' ? await PATCH(request, { params }) : method === 'POST' ? await POST(request, { params }) : await DELETE(request, { params });
+
+      expect(
+        await rejectedAsUnsupportedDataType(response),
+        `${method} ${dataType} is reachable from the client but the allowlist rejects it as unsupported`
+      ).toBe(false);
+    });
+
+    it('still rejects a dataType no client sends', async () => {
+      // The allowlist must remain an allowlist — proving the assertion above can
+      // actually fail rather than passing vacuously.
+      const request = new NextRequest('http://localhost/api/test', { method: 'POST', body: JSON.stringify({ newRow: {} }) });
+      const response = await POST(request, {
+        params: Promise.resolve({ dataType: 'not_a_real_grid', slugs: [TEST_SCHEMA, 'id', '1', '1'] })
+      });
+
+      expect(await rejectedAsUnsupportedDataType(response)).toBe(true);
     });
   });
 

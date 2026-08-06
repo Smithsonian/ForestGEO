@@ -38,6 +38,22 @@ const PRIMARY_KEY_MAP: Record<string, string> = {
 
 const MEASUREMENT_PATCH_BLOCKED_DATATYPES = new Set(['measurementssummary', 'failedmeasurements']);
 
+/**
+ * dataTypes a grid may mutate through this handler. The set is an allowlist, so
+ * a name absent here is a 405 rather than an attempt to write a table the app
+ * does not intend to expose.
+ *
+ * Membership tracks what the client can actually reach (the grids in
+ * components/datagrids/applications) intersected with what exists as a writable
+ * base table. Deliberately absent:
+ *   - `stemtaxonomiesview` — a VIEW, and its grid is `locked`.
+ *   - `unifiedchangelog` — its grid is `locked`; the audit log is append-only
+ *     and must never be editable through a grid.
+ *   - `measurementssummary_staging` — a read-only alias in the fixeddatafilter
+ *     query; no such table exists in any schema, so a mutation could only 500.
+ *   - `sites` / `users` — the admin grids rewrite every mutation to
+ *     /api/administrative/fetch/*, and they live in `catalog`, not a site schema.
+ */
 const MUTABLE_METADATA_DATA_TYPES = new Set([
   'alltaxonomiesview',
   'attributes',
@@ -49,9 +65,14 @@ const MUTABLE_METADATA_DATA_TYPES = new Set([
   'roles',
   'sitespecificvalidations',
   'species',
-  'specieslimits'
+  'specieslimits',
+  // Materialized base table, not a view, and its grid is not `locked`.
+  'viewfulltable'
 ]);
-const POST_DATA_TYPES = new Set([...MUTABLE_METADATA_DATA_TYPES, 'failedmeasurements']);
+// measurementssummary is a base table whose grid creates new rows via POST
+// (measurementscommons::createNewRowPost). PATCH stays blocked for it by
+// MEASUREMENT_PATCH_BLOCKED_DATATYPES, which routes edits through /api/edits/*.
+const POST_DATA_TYPES = new Set([...MUTABLE_METADATA_DATA_TYPES, 'failedmeasurements', 'measurementssummary']);
 const DELETE_DATA_TYPES = new Set([...MUTABLE_METADATA_DATA_TYPES, 'failedmeasurements', 'measurementssummary']);
 const MYSQL_SIGNED_INT_MAX = 2_147_483_647;
 
