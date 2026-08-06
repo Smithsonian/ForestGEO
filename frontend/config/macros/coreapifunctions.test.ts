@@ -84,6 +84,17 @@ describe('CoreAPIFunctions', () => {
   let mockConnectionManager: any;
   let mockMapper: any;
 
+  /**
+   * DELETE now reads the rows it is about to remove so the changelog can record
+   * their real prior state. Model both statement shapes: a SELECT yields rows, a
+   * DELETE yields a ResultSetHeader.
+   */
+  function mockDeleteCapture(rowsToRemove: Record<string, unknown>[]) {
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: string) =>
+      typeof sql === 'string' && sql.trimStart().toUpperCase().startsWith('SELECT') ? rowsToRemove : { affectedRows: rowsToRemove.length }
+    );
+  }
+
   beforeEach(() => {
     // Reset all mocks
     vi.clearAllMocks();
@@ -679,7 +690,7 @@ describe('CoreAPIFunctions', () => {
         body: JSON.stringify({ newRow: { PlotID: 123 } })
       });
 
-      mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+      mockDeleteCapture([{ PlotID: 123, PlotName: 'Doomed Plot' }]);
 
       const mockParams = {
         dataType: 'plots',
@@ -703,7 +714,7 @@ describe('CoreAPIFunctions', () => {
         body: JSON.stringify({ newRow: { CMAID: 456 } })
       });
 
-      mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+      mockDeleteCapture([{ Code: 'DEAD', Description: 'dead stem' }]);
 
       const mockParams = {
         dataType: 'attributes',
@@ -723,7 +734,7 @@ describe('CoreAPIFunctions', () => {
       });
 
       mockMapper.demapData.mockReturnValue([{ SpeciesID: 99 }]);
-      mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+      mockDeleteCapture([{ SpeciesID: 99, SpeciesCode: 'ACACIA' }]);
 
       const mockParams = {
         dataType: 'alltaxonomiesview',
@@ -756,6 +767,144 @@ describe('CoreAPIFunctions', () => {
       expect(mockConnectionManager.withTransaction).toHaveBeenCalled();
       expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('transaction-123');
       expect(response.status).toBe(500);
+    });
+
+    describe('changelog audit', () => {
+      it('writes one DELETE row carrying the removed row and a null NewRowState', async () => {
+        const removedRow = { QuadratID: 33, QuadratName: 'Q-33', PlotID: 5, CensusID: 7 };
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'DELETE',
+          body: JSON.stringify({ newRow: { QuadratID: 33 } })
+        });
+
+        mockMapper.demapData.mockReturnValue([{ QuadratID: 33 }]);
+        mockDeleteCapture([removedRow]);
+
+        const response = await DELETE(mockRequest, {
+          params: Promise.resolve({ dataType: 'quadrats', slugs: [TEST_SCHEMA, 'quadratID', '33'] })
+        });
+
+        expect(response.status).toBe(200);
+
+        const rows = changelogRows(mockConnectionManager);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].tableName).toBe('quadrats');
+        expect(rows[0].recordID).toBe('33');
+        expect(rows[0].operation).toBe('DELETE');
+        // The request field is named `newRow`, but it is the row being removed.
+        expect(JSON.parse(rows[0].oldRowState)).toEqual(removedRow);
+        expect(rows[0].newRowState).toBeNull();
+        expect(rows[0].plotID).toBe(5);
+        expect(rows[0].censusID).toBe(7);
+      });
+
+      it('records the state read from the database, not the payload the client sent', async () => {
+        // A grid row can be stale. Logging the client's copy would record a
+        // prior state that never existed in the table.
+        const databaseRow = { QuadratID: 33, QuadratName: 'Renamed Since Load' };
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'DELETE',
+          body: JSON.stringify({ newRow: { QuadratID: 33, QuadratName: 'Stale Client Copy' } })
+        });
+
+        mockMapper.demapData.mockReturnValue([{ QuadratID: 33, QuadratName: 'Stale Client Copy' }]);
+        mockDeleteCapture([databaseRow]);
+
+        await DELETE(mockRequest, {
+          params: Promise.resolve({ dataType: 'quadrats', slugs: [TEST_SCHEMA, 'quadratID', '33'] })
+        });
+
+        expect(JSON.parse(changelogRows(mockConnectionManager)[0].oldRowState)).toEqual(databaseRow);
+      });
+
+      it('names the table actually emptied, not the view the request addressed', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'DELETE',
+          body: JSON.stringify({ newRow: { SpeciesID: 99 } })
+        });
+
+        mockMapper.demapData.mockReturnValue([{ SpeciesID: 99 }]);
+        mockDeleteCapture([{ SpeciesID: 99, SpeciesCode: 'ACACIA' }]);
+
+        await DELETE(mockRequest, {
+          params: Promise.resolve({ dataType: 'alltaxonomiesview', slugs: [TEST_SCHEMA, 'speciesID', '99'] })
+        });
+
+        const rows = changelogRows(mockConnectionManager);
+        expect(rows).toHaveLength(1);
+        // `alltaxonomiesview` is a view; the DELETE hits `species`.
+        expect(rows[0].tableName).toBe('species');
+      });
+
+      it('records a failedmeasurements delete against coremeasurements', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'DELETE',
+          body: JSON.stringify({ newRow: { FailedMeasurementID: 5 } })
+        });
+
+        mockMapper.demapData.mockReturnValue([{ FailedMeasurementID: 5 }]);
+        mockDeleteCapture([{ CoreMeasurementID: 5, StemGUID: null, CensusID: 3 }]);
+
+        await DELETE(mockRequest, {
+          params: Promise.resolve({ dataType: 'failedmeasurements', slugs: [TEST_SCHEMA, 'failedMeasurementID', '5'] })
+        });
+
+        const rows = changelogRows(mockConnectionManager);
+        expect(rows).toHaveLength(1);
+        // `failedmeasurements` is a view over coremeasurements rows whose
+        // StemGUID is NULL; that is the table the DELETE empties.
+        expect(rows[0].tableName).toBe('coremeasurements');
+        expect(rows[0].recordID).toBe('5');
+      });
+
+      it('writes one row per table a measurementssummary delete empties', async () => {
+        const MEASUREMENT_ID = 77;
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'DELETE',
+          body: JSON.stringify({ newRow: { CoreMeasurementID: MEASUREMENT_ID } })
+        });
+
+        mockMapper.demapData.mockReturnValue([{ CoreMeasurementID: MEASUREMENT_ID }]);
+        // Each capture SELECT hits a different table; return a row shaped for
+        // whichever table the statement names.
+        mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
+          if (typeof sql !== 'string' || !sql.trimStart().toUpperCase().startsWith('SELECT')) return { affectedRows: 1 };
+          if (sql.includes('measurement_error_log')) return [{ MeasurementID: MEASUREMENT_ID, ErrorID: 12, IsResolved: 0 }];
+          if (sql.includes('cmattributes')) return [{ CMAID: 501, CoreMeasurementID: MEASUREMENT_ID, Code: 'DEAD' }];
+          return [{ CoreMeasurementID: MEASUREMENT_ID, CensusID: 3 }];
+        });
+
+        await DELETE(mockRequest, {
+          params: Promise.resolve({ dataType: 'measurementssummary', slugs: [TEST_SCHEMA, 'coreMeasurementID', String(MEASUREMENT_ID)] })
+        });
+
+        const rows = changelogRows(mockConnectionManager);
+        expect(rows.map(row => row.tableName)).toEqual(['measurement_error_log', 'cmattributes', 'coremeasurements']);
+        // measurement_error_log is keyed on (MeasurementID, ErrorID), so the
+        // RecordID must identify the pair, not just the measurement.
+        expect(rows[0].recordID).toBe(`${MEASUREMENT_ID}-12`);
+        expect(rows[1].recordID).toBe('501');
+        expect(rows[2].recordID).toBe(String(MEASUREMENT_ID));
+        expect(rows.every(row => row.operation === 'DELETE' && row.newRowState === null)).toBe(true);
+      });
+
+      it('writes nothing when the delete matches no row', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'DELETE',
+          body: JSON.stringify({ newRow: { QuadratID: 999 } })
+        });
+
+        mockMapper.demapData.mockReturnValue([{ QuadratID: 999 }]);
+        mockDeleteCapture([]);
+
+        const response = await DELETE(mockRequest, {
+          params: Promise.resolve({ dataType: 'quadrats', slugs: [TEST_SCHEMA, 'quadratID', '999'] })
+        });
+
+        expect(response.status).toBe(200);
+        // A delete that removed nothing is not a change.
+        expect(changelogRows(mockConnectionManager)).toHaveLength(0);
+      });
     });
   });
 
@@ -958,7 +1107,7 @@ describe('CoreAPIFunctions', () => {
           body: JSON.stringify({ newRow: { FailedMeasurementID: 5 } })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+        mockDeleteCapture([{ CoreMeasurementID: 5, StemGUID: null, CensusID: 3 }]);
         mockMapper.demapData.mockReturnValue([{ FailedMeasurementID: 5 }]);
 
         const mockParams = {
@@ -981,7 +1130,7 @@ describe('CoreAPIFunctions', () => {
           body: JSON.stringify({ newRow: { StemGUID: 12345 } })
         });
 
-        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+        mockDeleteCapture([{ StemGUID: 12345, StemTag: 'S-1' }]);
         mockMapper.demapData.mockReturnValue([{ StemGUID: 12345 }]);
 
         const mockParams = {

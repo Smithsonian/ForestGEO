@@ -12,6 +12,8 @@ import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { auth } from '@/auth';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { ChangelogOperation, recordMutation } from '@/lib/changelog/record-mutation';
+import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
+import type { TxExecutor } from '@/lib/db/connectionmanager';
 
 // Mapping from dataType to primary key column name
 const PRIMARY_KEY_MAP: Record<string, string> = {
@@ -58,6 +60,57 @@ interface CreatedRowAudit {
   tableName: string;
   recordID: string | number;
   rowState: Record<string, unknown>;
+}
+
+/** One removed row awaiting its changelog entry. */
+interface DeletedRowAudit {
+  /** The table actually emptied — not the view or dataType the request named. */
+  tableName: string;
+  recordID: string;
+  rowState: Record<string, unknown>;
+}
+
+const FAILED_MEASUREMENT_PREDICATE = 'StemGUID IS NULL';
+
+/**
+ * Reads the rows a DELETE is about to remove, so the changelog records their
+ * real prior state rather than the client's payload. The grid sends only the row
+ * the user was looking at; for the dependent tables a measurement delete also
+ * clears, it describes nothing at all. Selecting first also means a delete that
+ * matches no row logs nothing, instead of asserting a removal that never
+ * happened.
+ *
+ * Runs on the mutation's own connection, so it observes the transaction's view.
+ */
+async function captureRowsForDeletion(
+  tx: TxExecutor,
+  schema: string,
+  tableName: string,
+  keyColumn: string,
+  keyValue: unknown,
+  options: { recordIDColumns?: string[]; extraPredicate?: string } = {}
+): Promise<DeletedRowAudit[]> {
+  const { recordIDColumns = [keyColumn], extraPredicate } = options;
+  const predicate = `${safeEscapeId(keyColumn)} = ?${extraPredicate ? ` AND ${extraPredicate}` : ''}`;
+  const selectSQL = safeFormatQuery(schema, `SELECT * FROM ??.${safeEscapeId(tableName)} WHERE ${predicate}`);
+  const rows: Record<string, unknown>[] = await tx.query(selectSQL, [keyValue]);
+
+  return rows.map(row => ({
+    tableName,
+    // Composite keys (measurement_error_log is keyed on MeasurementID+ErrorID)
+    // are joined so one changelog row still identifies exactly one table row.
+    recordID: recordIDColumns.map(column => String(row[column])).join('-'),
+    rowState: row
+  }));
+}
+
+/**
+ * A DELETE handler has no census in scope, so the changelog takes the census the
+ * removed row itself belonged to. Tables without the column record NULL.
+ */
+function changelogCensusID(rowData: Record<string, unknown> | undefined): number | null {
+  const value = rowData?.CensusID;
+  return value === undefined || value === null ? null : Number(value);
 }
 
 /**
@@ -403,28 +456,68 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const demappedGridID = primaryKeyColumn;
   const { newRow } = await request.json();
   try {
+    const changedBy = await changelogChangedBy();
+
     await connectionManager.withTransaction(async tx => {
       const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
       const { [demappedGridID]: gridIDKey } = deleteRowData;
+      // Captured before each DELETE runs; a removed row cannot be read back.
+      const removedRows: DeletedRowAudit[] = [];
+
       if (params.dataType === 'alltaxonomiesview') {
         const { SpeciesID } = deleteRowData;
+        removedRows.push(...(await captureRowsForDeletion(tx, schema, 'species', 'SpeciesID', SpeciesID)));
         await tx.query(`DELETE FROM ${schema}.species WHERE SpeciesID = ?`, [SpeciesID]);
       } else if (params.dataType === 'failedmeasurements') {
         // Measurement deletes bypass the edit_operations ledger: deletion is a
         // terminal operation, not a revertable edit, and the ledger's
         // single-row revert path cannot reconstruct a deleted coremeasurements
         // row from beforeState alone (stems/trees/cmattributes dependencies).
-        // Audit trail for deletes lives in the uploadmetrics and database
-        // binlog, not edit_operations.
+        // Because that makes them terminal AND unrecorded, they are logged to
+        // unifiedchangelog here — against coremeasurements, the table this
+        // actually empties.
+        removedRows.push(
+          ...(await captureRowsForDeletion(tx, schema, 'coremeasurements', 'CoreMeasurementID', gridIDKey, {
+            extraPredicate: FAILED_MEASUREMENT_PREDICATE
+          }))
+        );
         const deleteFailedQuery = format('DELETE FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND StemGUID IS NULL', [schema]);
         await tx.query(deleteFailedQuery, [gridIDKey]);
       } else if (params.dataType === 'measurementssummary') {
+        // Three tables are emptied, so three sets of changelog rows: naming them
+        // all `measurementssummary` would hide which table lost what.
+        removedRows.push(
+          ...(await captureRowsForDeletion(tx, schema, 'measurement_error_log', 'MeasurementID', gridIDKey, {
+            recordIDColumns: ['MeasurementID', 'ErrorID']
+          }))
+        );
         await tx.query(format('DELETE FROM ?? WHERE MeasurementID = ?', [`${schema}.measurement_error_log`]), [gridIDKey]);
+
+        removedRows.push(...(await captureRowsForDeletion(tx, schema, 'cmattributes', demappedGridID, gridIDKey, { recordIDColumns: ['CMAID'] })));
         await tx.query(format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.cmattributes`, demappedGridID, gridIDKey]));
+
+        removedRows.push(...(await captureRowsForDeletion(tx, schema, 'coremeasurements', demappedGridID, gridIDKey)));
         await tx.query(format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.coremeasurements`, demappedGridID, gridIDKey]));
       } else {
+        removedRows.push(...(await captureRowsForDeletion(tx, schema, params.dataType, demappedGridID, gridIDKey)));
         const softDelete = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
         await tx.query(softDelete);
+      }
+
+      for (const removed of removedRows) {
+        await recordMutation({
+          tx,
+          schema,
+          tableName: removed.tableName,
+          recordID: removed.recordID,
+          operation: ChangelogOperation.DELETE,
+          // The request field is called `newRow`, but semantically it is the row
+          // being removed — it belongs in OldRowState, with no new state at all.
+          oldRowState: removed.rowState,
+          changedBy,
+          plotID: changelogPlotID(removed.rowState),
+          censusID: changelogCensusID(removed.rowState)
+        });
       }
     });
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });

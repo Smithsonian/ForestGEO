@@ -26,6 +26,7 @@ import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from '@/lib
 vi.mock('@/lib/db/sqlsecurity', () => ({
   validateSchemaOrThrow: vi.fn(),
   safeFormatQuery: vi.fn((schema, query) => query),
+  safeEscapeId: vi.fn((identifier: string) => `\`${identifier}\``),
   isValidSchema: vi.fn(() => true)
 }));
 
@@ -260,7 +261,12 @@ describe('Unified Changelog Tracking System', () => {
 
       const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-3');
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-      const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({ affectedRows: 1 }); // DELETE query
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        // DELETE reads the row it is about to remove so the changelog can record
+        // its real prior state, then issues the DELETE.
+        .mockResolvedValueOnce([{ Code: 'B', Description: 'To Delete', Status: 'dead' }])
+        .mockResolvedValueOnce({ affectedRows: 1 });
 
       const rowToDelete = { code: 'B', description: 'To Delete', status: 'dead' };
 
