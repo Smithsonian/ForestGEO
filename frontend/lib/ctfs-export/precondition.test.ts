@@ -276,46 +276,33 @@ describe('checkFinishedCensus', () => {
     }
   });
 
-  it('fails with missing-taxonomy-fields when species.SpeciesName is empty string', async () => {
+  it('allows an empty SpeciesName because destination taxonomy resolves on mnemonic', async () => {
     await conn.query("UPDATE species SET SpeciesName = '' WHERE SpeciesID = 1");
 
     const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
 
-    expect(result.ok, 'expected ok=false when SpeciesName is empty string').toBe(false);
-    if (!result.ok) {
-      const failure = result.reasons.find(r => r.kind === 'missing-taxonomy-fields');
-      expect(failure, 'missing-taxonomy-fields failure should be present for empty SpeciesName').toBeDefined();
-    }
+    expect(result.ok, 'SpeciesName is not part of destination lookup').toBe(true);
   });
 
-  it('fails with missing-taxonomy-fields when genus.Genus is NULL', async () => {
+  it('allows a NULL Genus because destination taxonomy resolves on mnemonic', async () => {
     await conn.query('UPDATE genus SET Genus = NULL WHERE GenusID = 1');
 
     const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
 
-    expect(result.ok, 'expected ok=false when Genus is NULL').toBe(false);
-    if (!result.ok) {
-      const failure = result.reasons.find(r => r.kind === 'missing-taxonomy-fields');
-      expect(failure, 'missing-taxonomy-fields failure should be present for NULL Genus').toBeDefined();
-    }
+    expect(result.ok, 'Genus is not part of destination lookup').toBe(true);
   });
 
-  it('fails with missing-taxonomy-fields when family.Family is NULL', async () => {
+  it('allows a NULL Family because destination taxonomy resolves on mnemonic', async () => {
     await conn.query('UPDATE family SET Family = NULL WHERE FamilyID = 1');
 
     const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
 
-    expect(result.ok, 'expected ok=false when Family is NULL').toBe(false);
-    if (!result.ok) {
-      const failure = result.reasons.find(r => r.kind === 'missing-taxonomy-fields');
-      expect(failure, 'missing-taxonomy-fields failure should be present for NULL Family').toBeDefined();
-    }
+    expect(result.ok, 'Family is not part of destination lookup').toBe(true);
   });
 
   it('does not fail for subspecies rows (SubspeciesName IS NOT NULL is allowed)', async () => {
     // Subspecies rows are supported per Suzanne; presence of SubspeciesName alone
-    // must not trigger a rejection. All required fields (SpeciesCode, SpeciesName,
-    // Genus, Family) are still populated.
+    // must not trigger a rejection. SpeciesCode is the only required lookup field.
     await conn.query("UPDATE species SET SubspeciesName = 'foobarius' WHERE SpeciesID = 1");
 
     const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });

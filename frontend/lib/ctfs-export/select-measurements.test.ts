@@ -128,6 +128,23 @@ describe('selectMeasurements', () => {
     expect(attributeRows[0].CoreMeasurementID, 'attribute references parent measurement').toBe(1);
   });
 
+  it('preserves missing descriptive taxonomy as SQL NULL instead of the string "null"', async () => {
+    await conn.query('UPDATE species SET SpeciesName = NULL WHERE SpeciesID = 1');
+    await conn.query('UPDATE genus SET Genus = NULL WHERE GenusID = 1');
+    await conn.query('UPDATE family SET Family = NULL WHERE FamilyID = 1');
+
+    const { measurementRows } = await selectMeasurements(conn, {
+      schema: DB_NAME,
+      plotId: PLOT_ID,
+      censusId: CENSUS_ID
+    });
+
+    expect(measurementRows).toHaveLength(1);
+    expect(measurementRows[0].Family).toBeNull();
+    expect(measurementRows[0].Genus).toBeNull();
+    expect(measurementRows[0].SpeciesName).toBeNull();
+  });
+
   it('returns no rows when the requested plotId does not own the census', async () => {
     const { measurementRows, attributeRows } = await selectMeasurements(conn, {
       schema: DB_NAME,
