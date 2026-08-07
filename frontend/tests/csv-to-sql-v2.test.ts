@@ -14,6 +14,8 @@ import {
   renderPostLoadViewFullTableCall,
   LEGACY_DEFAULT_STEM_NUMBER,
   LEGACY_DEFAULT_MEASURE_ID,
+  TAXON_RANK_SUBSPECIES,
+  TAXON_RANK_SPECIES,
   type Stage1Options
 } from '../lib/csv-to-sql-v2';
 import { type MeasurementStagingRow, type AttributeStagingRow } from '../lib/csv-to-sql-shared';
@@ -462,23 +464,33 @@ describe('renderStage2', () => {
     expect(sql()).toMatch(/JOIN Quadrat q ON q\.QuadratName = t\.QuadratName AND q\.PlotID = @target_plot_id\s+SET t\.QuadratID = q\.QuadratID/);
   });
 
-  it('taxonomy_lookup joins through Family -> Genus -> Species (LEFT JOIN SubSpecies)', () => {
+  it('taxonomy candidates resolve Mnemonic against both SubSpecies and Species, current taxa only', () => {
     const s = sql();
-    expect(s).toMatch(/CREATE TEMPORARY TABLE taxonomy_lookup AS/);
-    expect(s).toMatch(/JOIN Family fam ON fam\.Family = t\.Family/);
-    expect(s).toMatch(/JOIN Genus gen ON gen\.Genus = t\.Genus AND gen\.FamilyID = fam\.FamilyID/);
-    expect(s).toMatch(/JOIN Species sp ON sp\.GenusID = gen\.GenusID\s+AND sp\.SpeciesName = t\.SpeciesName\s+AND sp\.CurrentTaxonFlag = 1/);
-    expect(s).toMatch(/LEFT JOIN SubSpecies ss ON ss\.SpeciesID = sp\.SpeciesID\s+AND ss\.SubSpeciesName = t\.SubspeciesName\s+AND ss\.CurrentTaxonFlag = 1/);
+    expect(s).toMatch(/CREATE TEMPORARY TABLE taxonomy_candidates AS/);
+    expect(s).toMatch(/FROM SubSpecies ss\s+WHERE ss\.CurrentTaxonFlag = 1/);
+    expect(s).toMatch(/FROM Species sp\s+WHERE sp\.CurrentTaxonFlag = 1/);
+    expect(s).toMatch(/\) r ON r\.Mnemonic = t\.Mnemonic/);
   });
 
-  it('taxonomy_lookup WHERE clause matches subspecies-present on both sides', () => {
-    expect(sql()).toMatch(
-      /\(t\.SubspeciesName IS NULL AND ss\.SubSpeciesID IS NULL\)\s+OR\s+\(t\.SubspeciesName IS NOT NULL AND ss\.SubSpeciesID IS NOT NULL\)/
-    );
+  it('a SubSpecies hit outranks a Species hit for the same mnemonic', () => {
+    const s = sql();
+    expect(TAXON_RANK_SUBSPECIES).toBeLessThan(TAXON_RANK_SPECIES);
+    expect(s).toMatch(new RegExp(`ss\\.SubSpeciesID AS SubSpeciesID, ${TAXON_RANK_SUBSPECIES} AS MatchRank`));
+    expect(s).toMatch(new RegExp(`SELECT sp\\.Mnemonic, sp\\.SpeciesID, NULL, ${TAXON_RANK_SPECIES}`));
+    expect(s).toMatch(/SELECT TempID, MIN\(MatchRank\) AS BestRank/);
   });
 
-  it('taxonomy_lookup TaxonCount uses COUNT(DISTINCT CONCAT(SpeciesID, :, COALESCE(SubSpeciesID, 0)))', () => {
-    expect(sql()).toMatch(/COUNT\(DISTINCT CONCAT\(sp\.SpeciesID, ':', COALESCE\(ss\.SubSpeciesID, 0\)\)\) AS TaxonCount/);
+  it('ambiguity is counted only within the winning rank, so a dual-table mnemonic is not self-ambiguous', () => {
+    const s = sql();
+    expect(s).toMatch(/JOIN taxonomy_best_rank b ON b\.TempID = c\.TempID AND b\.BestRank = c\.MatchRank/);
+    expect(s).toMatch(/COUNT\(DISTINCT CONCAT\(c\.SpeciesID, ':', COALESCE\(c\.SubSpeciesID, 0\)\)\) AS TaxonCount/);
+  });
+
+  it('no longer matches taxonomy on family, genus or species name', () => {
+    const s = sql();
+    expect(s).not.toMatch(/JOIN Family fam ON fam\.Family = t\.Family/);
+    expect(s).not.toMatch(/JOIN Genus gen ON gen\.Genus = t\.Genus/);
+    expect(s).not.toMatch(/sp\.SpeciesName = t\.SpeciesName/);
   });
 
   it('taxonomy write-back sets both SpeciesID and SubSpeciesID where TaxonCount = 1', () => {
@@ -525,13 +537,9 @@ describe('renderStage2', () => {
     expect(sql()).toMatch(/UPDATE `staging_measurements` SET HOM = NULL WHERE DBH IS NULL/);
   });
 
-  it('does not join on Mnemonic anywhere in Stage 2', () => {
-    expect(sql()).not.toMatch(/JOIN .+ ON .+Mnemonic/);
-  });
-
   it('DROP TEMPORARY TABLE IF EXISTS precedes each CREATE TEMPORARY TABLE', () => {
     const s = sql();
-    for (const t of ['taxonomy_lookup', 'tree_lookup', 'stem_lookup']) {
+    for (const t of ['taxonomy_candidates', 'taxonomy_best_rank', 'taxonomy_lookup', 'tree_lookup', 'stem_lookup']) {
       const drop = s.indexOf(`DROP TEMPORARY TABLE IF EXISTS ${t}`);
       const create = s.indexOf(`CREATE TEMPORARY TABLE ${t}`);
       expect(drop).toBeGreaterThan(-1);
@@ -562,10 +570,14 @@ describe('renderStage5', () => {
     expect(sql()).toMatch(/_stage5_empty_stemtag/);
   });
 
-  it('check 2: taxonomy not uniquely resolved (error includes the conflicting destination IDs)', () => {
-    expect(sql()).toMatch(/'Taxonomy not uniquely resolved'/);
-    expect(sql()).toMatch(/GROUP_CONCAT\(DISTINCT CONCAT\(SpeciesID/);
-    expect(sql()).toMatch(/COUNT\(DISTINCT CONCAT\(SpeciesID, ':', COALESCE\(SubSpeciesID, 0\)\)\) AS taxon_count/);
+  it('check 2: unmatched and ambiguous taxonomy are separate, distinguishable reasons', () => {
+    const s = sql();
+    expect(s).toMatch(/'Mnemonic not found in destination taxonomy'/);
+    expect(s).toMatch(/NOT EXISTS \(SELECT 1 FROM taxonomy_lookup tx WHERE tx\.TempID = `staging_measurements`\.TempID\)/);
+    expect(s).toMatch(/'Mnemonic matches ', tx\.TaxonCount, ' current destination taxa'/);
+    expect(s).toMatch(/WHERE tx\.TaxonCount <> 1/);
+    // The single ambiguous message that made the two indistinguishable is gone.
+    expect(s).not.toMatch(/Taxonomy not uniquely resolved/);
   });
 
   it('check 3: ambiguous tree key (TreeCount > 1)', () => {
