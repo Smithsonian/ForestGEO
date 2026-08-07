@@ -5,10 +5,12 @@
  * to the known live-schema drift (drops temporarymeasurements.PublishedStemID and
  * SourceFormat, stems.PublishedStemID and its lookup index, and
  * coremeasurements.RawPublishedStemID — the exact shape of a site provisioned by a
- * deployment that predates the PublishedStemID work; downgrades representative
- * VARCHAR/TEXT columns to utf8mb3; no migration ledger), then proves the migrate +
- * verify pipeline repairs the application write contract end to end without
- * rebuilding unrelated tables and remains idempotent:
+ * deployment that predates the PublishedStemID work; reverts viewfulltable to its
+ * pre-rename StemID column — the shape forestgeo_panama/mpala/serc carried, which
+ * made every single-row measurement edit roll back on "Unknown column 'StemGUID'";
+ * downgrades representative VARCHAR/TEXT columns to utf8mb3; no migration ledger),
+ * then proves the migrate + verify pipeline repairs the application write contract
+ * end to end without rebuilding unrelated tables and remains idempotent:
  *
  *   (1) the read-only contract audit FAILS, naming both the missing columns and
  *       the legacy-collation columns as maintenance warnings;
@@ -52,6 +54,10 @@ const LEGACY_CHARSET = 'utf8mb3';
 const LEGACY_COLLATION = 'utf8mb3_general_ci';
 const PUBLISHED_STEMID_INDEX = 'idx_stems_publishedstemid';
 const PUBLISHED_STEMID_CONFLICT_CODE = 'PUBLISHED_STEMID_CONFLICT';
+// Sentinel viewfulltable cache row: proves the StemID -> StemGUID repair is a
+// metadata-only RENAME that preserves cached rows, not a drop-and-recreate.
+const VFT_SENTINEL_CORE_MEASUREMENT_ID = 999001;
+const VFT_SENTINEL_STEM_VALUE = 424242;
 
 describe('Stale-schema migrate + verify pipeline', () => {
   let connection: Connection;
@@ -83,6 +89,11 @@ describe('Stale-schema migrate + verify pipeline', () => {
     await connection.query('ALTER TABLE stems DROP COLUMN PublishedStemID');
     await connection.query('ALTER TABLE coremeasurements DROP COLUMN RawPublishedStemID');
     await connection.query('DELETE FROM measurement_errors WHERE ErrorSource = ? AND ErrorCode = ?', ['ingestion', PUBLISHED_STEMID_CONFLICT_CODE]);
+    // The 2025-09 identity rename (StemID => StemGUID) never migrated the
+    // viewfulltable caches on ctfs-migrated schemas. Reproduce that shape, with
+    // a cached row that must survive the repair rename.
+    await connection.query('ALTER TABLE viewfulltable RENAME COLUMN StemGUID TO StemID');
+    await connection.query('INSERT INTO viewfulltable (CoreMeasurementID, StemID) VALUES (?, ?)', [VFT_SENTINEL_CORE_MEASUREMENT_ID, VFT_SENTINEL_STEM_VALUE]);
     await connection.query(
       `ALTER TABLE temporarymeasurements MODIFY COLUMN ${REPRESENTATIVE_TEXT_COLUMN} varchar(255) CHARACTER SET ${LEGACY_CHARSET} COLLATE ${LEGACY_COLLATION} NULL`
     );
@@ -117,6 +128,11 @@ describe('Stale-schema migrate + verify pipeline', () => {
     // stems.PublishedStemID is dropped from a different table than the
     // temporarymeasurements column of the same name — assert the table too.
     expect(audit.contractFailures.some(f => f.kind === 'missing' && f.category === 'column' && f.table === 'stems' && f.object === 'PublishedStemID')).toBe(
+      true
+    );
+    // The pre-rename viewfulltable cache (forestgeo_panama/mpala/serc shape) is
+    // named as drift on the exact table+column the edit-apply refresh writes.
+    expect(audit.contractFailures.some(f => f.kind === 'missing' && f.category === 'column' && f.table === 'viewfulltable' && f.object === 'StemGUID')).toBe(
       true
     );
     const missingIndexes = audit.contractFailures.filter(f => f.kind === 'missing' && f.category === 'index').map(f => f.object);
@@ -181,6 +197,14 @@ describe('Stale-schema migrate + verify pipeline', () => {
       PUBLISHED_STEMID_CONFLICT_CODE
     ]);
     expect(conflictCode.length).toBe(1);
+
+    // The viewfulltable repair must be a column RENAME, not a rebuild: the
+    // sentinel cache row survives with its stem value now under StemGUID.
+    const [sentinel] = await connection.query<RowDataPacket[]>(`SELECT StemGUID FROM viewfulltable WHERE CoreMeasurementID = ?`, [
+      VFT_SENTINEL_CORE_MEASUREMENT_ID
+    ]);
+    expect(sentinel.length).toBe(1);
+    expect(Number(sentinel[0].StemGUID)).toBe(VFT_SENTINEL_STEM_VALUE);
   });
 
   it('(5) a production keyed insert + one-row bulkingestionprocess succeed against the repaired schema', async () => {

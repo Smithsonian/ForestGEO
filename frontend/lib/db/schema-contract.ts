@@ -22,7 +22,17 @@ import path from 'path';
 
 export const TARGET_TEXT_COLLATION = 'utf8mb4_0900_ai_ci';
 
-/** Tables whose write contract the application must be able to trust. */
+/**
+ * Tables whose write contract the application must be able to trust.
+ *
+ * viewfulltable and measurementssummary are derived caches, but they are NOT
+ * exempt: lib/measurementviewrefresh.ts rebuilds them with explicit column-list
+ * INSERTs inside the single-row edit apply transaction, so a shape mismatch
+ * aborts (and rolls back) every measurement edit on the drifted schema. That is
+ * exactly what happened on forestgeo_panama/mpala/serc, whose viewfulltable kept
+ * the pre-rename StemID column from the 2025-09 identity rename until 2026-08
+ * because no gate compared these tables (repaired by migration 2026-08-07-01).
+ */
 export const CRITICAL_TABLES = [
   'temporarymeasurements',
   'coremeasurements',
@@ -32,7 +42,9 @@ export const CRITICAL_TABLES = [
   'stems',
   'measurement_error_log',
   'uploadintegrityalerts',
-  'uploadmetrics'
+  'uploadmetrics',
+  'measurementssummary',
+  'viewfulltable'
 ] as const;
 
 /**
