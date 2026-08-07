@@ -36,6 +36,12 @@ export const LEGACY_DEFAULT_MEASURE_ID = 0;
 // match `CTFS_LIMITS.treeTag` in lib/ctfs-export/precondition.ts.
 export const TREE_TAG_MAX_WIDTH = 20;
 
+// Precedence for a mnemonic that resolves in both destination taxonomy tables.
+// Lower wins. A SubSpecies hit is the more specific identification and is what the
+// researchers asked to preserve, so it outranks the parent Species row.
+export const TAXON_RANK_SUBSPECIES = 1;
+export const TAXON_RANK_SPECIES = 2;
+
 // Live scalars only — resprout/cursor scratch removed with the pivot.
 // `_viewfulltable_installed` is populated by the Stage 0 ViewFullTable probe.
 // `_tag_col_width` is populated by the Stage 0 Tree.Tag width probe.
@@ -382,9 +388,10 @@ export interface Stage2Options {
  * Emits, in order:
  *   1. UPDATE measurementsTable SET CensusID = @target_census_id
  *   2. UPDATE measurementsTable JOIN Quadrat to resolve QuadratID
- *   3. CREATE TEMPORARY TABLE taxonomy_lookup — joins through Family → Genus → Species → SubSpecies
- *      with a 2-arm WHERE clause ensuring subspecies presence matches on both sides
- *   4. UPDATE measurementsTable JOIN taxonomy_lookup (TaxonCount = 1) to write back SpeciesID + SubSpeciesID
+ *   3. CREATE TEMPORARY TABLE taxonomy_lookup — resolves Mnemonic against SubSpecies then Species
+ *      (see the comment on the emitted SQL for why subspecies outranks species)
+ *   4. UPDATE measurementsTable JOIN taxonomy_lookup (one winning-rank taxon with
+ *      cross-rank SpeciesID agreement) to write back SpeciesID + SubSpeciesID
  *   5. CREATE TEMPORARY TABLE tree_lookup — scoped via Tree → Stem → Quadrat → @target_plot_id
  *      (Tree has no PlotID column; scope must come from the Stem/Quadrat join chain)
  *      Groups by (Tag, SpeciesID, SubSpeciesID)
@@ -410,29 +417,64 @@ export function renderStage2(opts: Stage2Options): string {
     JOIN Quadrat q ON q.QuadratName = t.QuadratName AND q.PlotID = @target_plot_id
     SET t.QuadratID = q.QuadratID;
 
-  -- Taxonomy lookup through Family -> Genus -> Species -> SubSpecies.
-  -- Subspecies rows must produce a non-NULL SubSpeciesID; non-subspecies rows must produce NULL.
+  -- Taxonomy lookup on Mnemonic, which survives taxonomic revision; the destination
+  -- Species table retains every name ever used, so matching on Family/Genus/SpeciesName
+  -- misses any taxon renamed since the census was recorded.
+  --
+  -- A mnemonic may exist in Species, in SubSpecies, or in both. Panama's swars1 is both
+  -- Swartzia simplex in Species AND var. grandiflora in SubSpecies, while swars2 exists
+  -- only in SubSpecies. Resolving against Species alone would therefore fail swars2
+  -- outright and silently discard the varietal distinction on swars1, so SubSpecies
+  -- outranks Species. Ambiguity is counted within that winning rank, while candidates
+  -- across both ranks must agree on SpeciesID so precedence cannot hide a collision.
+  DROP TEMPORARY TABLE IF EXISTS taxonomy_candidates;
+  CREATE TEMPORARY TABLE taxonomy_candidates AS
+    SELECT t.TempID,
+           r.MatchRank,
+           r.SpeciesID,
+           r.SubSpeciesID
+      FROM ${m} t
+      JOIN (
+        SELECT ss.Mnemonic AS Mnemonic, ss.SpeciesID AS SpeciesID, ss.SubSpeciesID AS SubSpeciesID, ${TAXON_RANK_SUBSPECIES} AS MatchRank
+          FROM SubSpecies ss
+         WHERE ss.CurrentTaxonFlag = 1
+        UNION ALL
+        SELECT sp.Mnemonic, sp.SpeciesID, NULL, ${TAXON_RANK_SPECIES}
+          FROM Species sp
+         WHERE sp.CurrentTaxonFlag = 1
+      ) r ON r.Mnemonic = t.Mnemonic;
+
+  DROP TEMPORARY TABLE IF EXISTS taxonomy_best_rank;
+  CREATE TEMPORARY TABLE taxonomy_best_rank AS
+    SELECT TempID, MIN(MatchRank) AS BestRank
+      FROM taxonomy_candidates
+     GROUP BY TempID;
+
   DROP TEMPORARY TABLE IF EXISTS taxonomy_lookup;
   CREATE TEMPORARY TABLE taxonomy_lookup AS
-    SELECT t.TempID,
-           MIN(sp.SpeciesID)    AS SpeciesID,
-           MIN(ss.SubSpeciesID) AS SubSpeciesID,
-           COUNT(DISTINCT CONCAT(sp.SpeciesID, ':', COALESCE(ss.SubSpeciesID, 0))) AS TaxonCount
-      FROM ${m} t
-      JOIN Family fam ON fam.Family = t.Family
-      JOIN Genus gen ON gen.Genus = t.Genus AND gen.FamilyID = fam.FamilyID
-      JOIN Species sp ON sp.GenusID = gen.GenusID
-                     AND sp.SpeciesName = t.SpeciesName
-                     AND sp.CurrentTaxonFlag = 1
-      LEFT JOIN SubSpecies ss ON ss.SpeciesID = sp.SpeciesID
-                             AND ss.SubSpeciesName = t.SubspeciesName
-                             AND ss.CurrentTaxonFlag = 1
-     WHERE (t.SubspeciesName IS NULL AND ss.SubSpeciesID IS NULL)
-        OR (t.SubspeciesName IS NOT NULL AND ss.SubSpeciesID IS NOT NULL)
-     GROUP BY t.TempID;
+    SELECT c.TempID,
+           MIN(CASE WHEN c.MatchRank = b.BestRank THEN c.SpeciesID END)    AS SpeciesID,
+           MIN(CASE WHEN c.MatchRank = b.BestRank THEN c.SubSpeciesID END) AS SubSpeciesID,
+           COUNT(DISTINCT CASE
+             WHEN c.MatchRank = b.BestRank
+             THEN CONCAT(c.SpeciesID, ':', COALESCE(c.SubSpeciesID, 0))
+           END) AS TaxonCount,
+           COUNT(DISTINCT c.SpeciesID) AS CrossRankSpeciesCount,
+           GROUP_CONCAT(
+             DISTINCT CONCAT(c.SpeciesID, IF(c.SubSpeciesID IS NULL, '', CONCAT(':', c.SubSpeciesID)))
+             ORDER BY c.SpeciesID, c.SubSpeciesID SEPARATOR ','
+           ) AS CandidateIDs
+      FROM taxonomy_candidates c
+      JOIN taxonomy_best_rank b ON b.TempID = c.TempID
+     GROUP BY c.TempID;
+
+  DROP TEMPORARY TABLE IF EXISTS taxonomy_candidates;
+  DROP TEMPORARY TABLE IF EXISTS taxonomy_best_rank;
 
   UPDATE ${m} t
-    JOIN taxonomy_lookup tx ON tx.TempID = t.TempID AND tx.TaxonCount = 1
+    JOIN taxonomy_lookup tx ON tx.TempID = t.TempID
+                           AND tx.TaxonCount = 1
+                           AND tx.CrossRankSpeciesCount = 1
     SET t.SpeciesID = tx.SpeciesID,
         t.SubSpeciesID = tx.SubSpeciesID;
 
@@ -585,24 +627,21 @@ ${appendErr(
 
   DROP TEMPORARY TABLE IF EXISTS _stage5_empty_stemtag;
 
-  -- Stage 5 check 2: taxonomy uniqueness — include the conflicting destination
-  -- SpeciesID set in the error reason so operators can dedup CurrentTaxonFlag
-  -- on the destination without a separate query.
+  -- Stage 5 check 2: taxonomy resolution. Unmatched and ambiguous are reported as
+  -- distinct reasons — they were a single message before, which made the two
+  -- indistinguishable in the operator's error report and required a database
+  -- investigation to tell apart.
+${appendErr(m, 'Mnemonic not found in destination taxonomy', `NOT EXISTS (SELECT 1 FROM taxonomy_lookup tx WHERE tx.TempID = ${m}.TempID)`)}
+
   UPDATE ${m} t
-    LEFT JOIN (
-      SELECT TempID,
-             GROUP_CONCAT(DISTINCT CONCAT(SpeciesID, IFNULL(CONCAT(':', SubSpeciesID), '')) ORDER BY SpeciesID SEPARATOR ',') AS ambiguous_ids,
-             COUNT(DISTINCT CONCAT(SpeciesID, ':', COALESCE(SubSpeciesID, 0))) AS taxon_count
-        FROM taxonomy_lookup
-       GROUP BY TempID
-    ) tx ON tx.TempID = t.TempID
+    JOIN taxonomy_lookup tx ON tx.TempID = t.TempID
     SET t.Errors = CONCAT(
       COALESCE(t.Errors, ''),
       CASE WHEN t.Errors IS NULL THEN '' ELSE '; ' END,
-      'Taxonomy not uniquely resolved',
-      CASE WHEN tx.ambiguous_ids IS NULL THEN '' ELSE CONCAT(' (matches ', tx.ambiguous_ids, ')') END
+      'Mnemonic is ambiguous: winning rank matches ', tx.TaxonCount,
+      '; candidates ', tx.CandidateIDs
     )
-    WHERE COALESCE(tx.taxon_count, 0) <> 1;
+    WHERE tx.TaxonCount <> 1 OR tx.CrossRankSpeciesCount <> 1;
 
 ${appendErr(
   m,

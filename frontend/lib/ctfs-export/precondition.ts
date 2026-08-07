@@ -112,7 +112,7 @@ export type PreconditionResult =
  *    fails to load into, or silently truncates data in, the on-prem CTFS MySQL:
  *      • unknown-attribute-code — the row IS exported (base WHERE does not filter on
  *        attributes) carrying a code the destination's TSMAttributes cannot resolve;
- *      • missing-taxonomy-fields — the destination species/genus/family lookup fails;
+ *      • missing-taxonomy-fields — the destination mnemonic lookup cannot run;
  *      • string-too-long — a value overflows a narrower CTFS column;
  *      • zero-exportable-rows — an empty/meaningless artifact;
  *      • insufficient-exportable-rows — quality exclusions leave less than
@@ -302,10 +302,9 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
     });
   }
 
-  // Check 6: Missing taxonomy fields needed for destination lookup.
-  // Required: SpeciesCode, SpeciesName, genus.Genus, family.Family.
-  // Subspecies rows (SubspeciesName IS NOT NULL) are allowed — they get a destination
-  // SubSpecies lookup; the check does not reject them.
+  // Check 6: Missing mnemonic needed for destination taxonomy lookup.
+  // SpeciesName, Genus, and Family are descriptive context only: the Smithsonian
+  // contract confirmed by Suzanne resolves current Species/SubSpecies on Mnemonic.
   const missingTaxonomyIds = await gatherIds(
     conn,
     `SELECT cm.CoreMeasurementID
@@ -317,19 +316,14 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
        JOIN ${s}.genus   gn  ON gn.GenusID   = sp.GenusID
        JOIN ${s}.family  fam ON fam.FamilyID = gn.FamilyID
       WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
-        AND (
-          sp.SpeciesCode IS NULL OR sp.SpeciesCode = ''
-          OR sp.SpeciesName IS NULL  OR sp.SpeciesName = ''
-          OR gn.Genus       IS NULL  OR gn.Genus = ''
-          OR fam.Family     IS NULL  OR fam.Family = ''
-        )
+        AND (sp.SpeciesCode IS NULL OR sp.SpeciesCode = '')
       LIMIT ?`,
     [input.plotId, input.censusId, fetchLimit]
   );
   if (missingTaxonomyIds.length > 0) {
     reasons.push({
       kind: 'missing-taxonomy-fields',
-      message: 'Species row is missing taxonomy fields required for destination lookup (SpeciesCode, SpeciesName, Genus, Family)',
+      message: 'Species row is missing SpeciesCode required for destination mnemonic lookup',
       coreMeasurementIds: missingTaxonomyIds
     });
   }
