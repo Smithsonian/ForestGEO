@@ -528,6 +528,20 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
     expect(rows[0].SubSpeciesID).toBe(10);
   });
 
+  it('rejects a mnemonic shared by an unrelated Species and SubSpecies instead of silently preferring the subspecies', async () => {
+    await connection.query(
+      "INSERT INTO Species (SpeciesID, GenusID, CurrentTaxonFlag, SpeciesName, Mnemonic, IDLevel) VALUES (20, 1, 1, 'conflicta', 'CROSS', 'species')"
+    );
+    await connection.query(
+      "INSERT INTO SubSpecies (SubSpeciesID, SpeciesID, SubSpeciesName, Mnemonic, Authority, CurrentTaxonFlag) VALUES (20, 2, 'conflictb', 'CROSS', 'L.', 1)"
+    );
+
+    await expect(publishOne(makeMeasurement({ Tag: 'XR1', StemTag: '1', Mnemonic: 'CROSS' }))).rejects.toThrow(/Validation failed/);
+
+    const [rows] = await connection.query<mysql.RowDataPacket[]>('SELECT TreeID FROM Tree WHERE Tag = ?', ['XR1']);
+    expect(rows).toHaveLength(0);
+  });
+
   it('a taxon renamed in the destination still resolves, because the mnemonic did not move', async () => {
     // The regression for the 2026-08-05 Cocoli publish: the destination Species table
     // retains every name ever used, so a census recorded under an older name resolved to

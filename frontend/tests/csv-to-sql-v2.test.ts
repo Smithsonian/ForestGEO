@@ -480,10 +480,12 @@ describe('renderStage2', () => {
     expect(s).toMatch(/SELECT TempID, MIN\(MatchRank\) AS BestRank/);
   });
 
-  it('ambiguity is counted only within the winning rank, so a dual-table mnemonic is not self-ambiguous', () => {
+  it('counts ambiguity within the winning rank while retaining every candidate for cross-rank validation', () => {
     const s = sql();
-    expect(s).toMatch(/JOIN taxonomy_best_rank b ON b\.TempID = c\.TempID AND b\.BestRank = c\.MatchRank/);
-    expect(s).toMatch(/COUNT\(DISTINCT CONCAT\(c\.SpeciesID, ':', COALESCE\(c\.SubSpeciesID, 0\)\)\) AS TaxonCount/);
+    expect(s).toMatch(/JOIN taxonomy_best_rank b ON b\.TempID = c\.TempID\s+GROUP BY c\.TempID/);
+    expect(s).toMatch(/WHEN c\.MatchRank = b\.BestRank\s+THEN CONCAT\(c\.SpeciesID, ':', COALESCE\(c\.SubSpeciesID, 0\)\)/);
+    expect(s).toMatch(/COUNT\(DISTINCT c\.SpeciesID\) AS CrossRankSpeciesCount/);
+    expect(s).toMatch(/GROUP_CONCAT\([\s\S]+\) AS CandidateIDs/);
   });
 
   it('no longer matches taxonomy on family, genus or species name', () => {
@@ -493,9 +495,9 @@ describe('renderStage2', () => {
     expect(s).not.toMatch(/sp\.SpeciesName = t\.SpeciesName/);
   });
 
-  it('taxonomy write-back sets both SpeciesID and SubSpeciesID where TaxonCount = 1', () => {
+  it('taxonomy write-back requires one winning-rank taxon and cross-rank species agreement', () => {
     expect(sql()).toMatch(
-      /JOIN taxonomy_lookup tx ON tx\.TempID = t\.TempID AND tx\.TaxonCount = 1\s+SET t\.SpeciesID = tx\.SpeciesID,\s+t\.SubSpeciesID = tx\.SubSpeciesID/
+      /JOIN taxonomy_lookup tx ON tx\.TempID = t\.TempID\s+AND tx\.TaxonCount = 1\s+AND tx\.CrossRankSpeciesCount = 1\s+SET t\.SpeciesID = tx\.SpeciesID,\s+t\.SubSpeciesID = tx\.SubSpeciesID/
     );
   });
 
@@ -574,8 +576,8 @@ describe('renderStage5', () => {
     const s = sql();
     expect(s).toMatch(/'Mnemonic not found in destination taxonomy'/);
     expect(s).toMatch(/NOT EXISTS \(SELECT 1 FROM taxonomy_lookup tx WHERE tx\.TempID = `staging_measurements`\.TempID\)/);
-    expect(s).toMatch(/'Mnemonic matches ', tx\.TaxonCount, ' current destination taxa'/);
-    expect(s).toMatch(/WHERE tx\.TaxonCount <> 1/);
+    expect(s).toMatch(/'Mnemonic is ambiguous: winning rank matches ', tx\.TaxonCount,\s+'; candidates ', tx\.CandidateIDs/);
+    expect(s).toMatch(/WHERE tx\.TaxonCount <> 1 OR tx\.CrossRankSpeciesCount <> 1/);
     // The single ambiguous message that made the two indistinguishable is gone.
     expect(s).not.toMatch(/Taxonomy not uniquely resolved/);
   });

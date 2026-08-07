@@ -390,7 +390,8 @@ export interface Stage2Options {
  *   2. UPDATE measurementsTable JOIN Quadrat to resolve QuadratID
  *   3. CREATE TEMPORARY TABLE taxonomy_lookup — resolves Mnemonic against SubSpecies then Species
  *      (see the comment on the emitted SQL for why subspecies outranks species)
- *   4. UPDATE measurementsTable JOIN taxonomy_lookup (TaxonCount = 1) to write back SpeciesID + SubSpeciesID
+ *   4. UPDATE measurementsTable JOIN taxonomy_lookup (one winning-rank taxon with
+ *      cross-rank SpeciesID agreement) to write back SpeciesID + SubSpeciesID
  *   5. CREATE TEMPORARY TABLE tree_lookup — scoped via Tree → Stem → Quadrat → @target_plot_id
  *      (Tree has no PlotID column; scope must come from the Stem/Quadrat join chain)
  *      Groups by (Tag, SpeciesID, SubSpeciesID)
@@ -424,7 +425,8 @@ export function renderStage2(opts: Stage2Options): string {
   -- Swartzia simplex in Species AND var. grandiflora in SubSpecies, while swars2 exists
   -- only in SubSpecies. Resolving against Species alone would therefore fail swars2
   -- outright and silently discard the varietal distinction on swars1, so SubSpecies
-  -- outranks Species and only the winning rank is counted for ambiguity.
+  -- outranks Species. Ambiguity is counted within that winning rank, while candidates
+  -- across both ranks must agree on SpeciesID so precedence cannot hide a collision.
   DROP TEMPORARY TABLE IF EXISTS taxonomy_candidates;
   CREATE TEMPORARY TABLE taxonomy_candidates AS
     SELECT t.TempID,
@@ -451,18 +453,28 @@ export function renderStage2(opts: Stage2Options): string {
   DROP TEMPORARY TABLE IF EXISTS taxonomy_lookup;
   CREATE TEMPORARY TABLE taxonomy_lookup AS
     SELECT c.TempID,
-           MIN(c.SpeciesID)    AS SpeciesID,
-           MIN(c.SubSpeciesID) AS SubSpeciesID,
-           COUNT(DISTINCT CONCAT(c.SpeciesID, ':', COALESCE(c.SubSpeciesID, 0))) AS TaxonCount
+           MIN(CASE WHEN c.MatchRank = b.BestRank THEN c.SpeciesID END)    AS SpeciesID,
+           MIN(CASE WHEN c.MatchRank = b.BestRank THEN c.SubSpeciesID END) AS SubSpeciesID,
+           COUNT(DISTINCT CASE
+             WHEN c.MatchRank = b.BestRank
+             THEN CONCAT(c.SpeciesID, ':', COALESCE(c.SubSpeciesID, 0))
+           END) AS TaxonCount,
+           COUNT(DISTINCT c.SpeciesID) AS CrossRankSpeciesCount,
+           GROUP_CONCAT(
+             DISTINCT CONCAT(c.SpeciesID, IF(c.SubSpeciesID IS NULL, '', CONCAT(':', c.SubSpeciesID)))
+             ORDER BY c.SpeciesID, c.SubSpeciesID SEPARATOR ','
+           ) AS CandidateIDs
       FROM taxonomy_candidates c
-      JOIN taxonomy_best_rank b ON b.TempID = c.TempID AND b.BestRank = c.MatchRank
+      JOIN taxonomy_best_rank b ON b.TempID = c.TempID
      GROUP BY c.TempID;
 
   DROP TEMPORARY TABLE IF EXISTS taxonomy_candidates;
   DROP TEMPORARY TABLE IF EXISTS taxonomy_best_rank;
 
   UPDATE ${m} t
-    JOIN taxonomy_lookup tx ON tx.TempID = t.TempID AND tx.TaxonCount = 1
+    JOIN taxonomy_lookup tx ON tx.TempID = t.TempID
+                           AND tx.TaxonCount = 1
+                           AND tx.CrossRankSpeciesCount = 1
     SET t.SpeciesID = tx.SpeciesID,
         t.SubSpeciesID = tx.SubSpeciesID;
 
@@ -626,9 +638,10 @@ ${appendErr(m, 'Mnemonic not found in destination taxonomy', `NOT EXISTS (SELECT
     SET t.Errors = CONCAT(
       COALESCE(t.Errors, ''),
       CASE WHEN t.Errors IS NULL THEN '' ELSE '; ' END,
-      'Mnemonic matches ', tx.TaxonCount, ' current destination taxa'
+      'Mnemonic is ambiguous: winning rank matches ', tx.TaxonCount,
+      '; candidates ', tx.CandidateIDs
     )
-    WHERE tx.TaxonCount <> 1;
+    WHERE tx.TaxonCount <> 1 OR tx.CrossRankSpeciesCount <> 1;
 
 ${appendErr(
   m,
