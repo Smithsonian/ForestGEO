@@ -30,6 +30,8 @@ jobs:
 
       - name: create env file (in frontend/ directory) -- development
         id: create-env-file-dev
+        env:
+          AI_CONNECTION_STRING: ${{ secrets.APP_INSIGHTS_CONNECTION_STRING }}
         run: |
           touch frontend/.env
           echo AUTH_MICROSOFT_ENTRA_ID_SECRET=${{ secrets.AUTH_MICROSOFT_ENTRA_ID_SECRET }} >> frontend/.env
@@ -47,11 +49,13 @@ jobs:
           echo AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }} >> frontend/.env
           echo AZURE_SQL_CATALOG_SCHEMA=${{ secrets.AZURE_SQL_CATALOG_SCHEMA }} >> frontend/.env
           echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
-          echo APP_INSIGHTS_CONNECTION_STRING=${{ secrets.APP_INSIGHTS_CONNECTION_STRING }} >> frontend/.env
+          # The connection string contains semicolons; unquoted echo interpolation
+          # splits on them and the value never reaches the file. printf from env.
+          printf 'APP_INSIGHTS_CONNECTION_STRING=%s\n' "$AI_CONNECTION_STRING" >> frontend/.env
           # NEXT_PUBLIC_ variant is inlined into the client bundle at build time;
           # without it the browser App Insights SDK never initializes (the
           # connection string is a public telemetry identifier, not a secret).
-          echo NEXT_PUBLIC_APP_INSIGHTS_CONNECTION_STRING=${{ secrets.APP_INSIGHTS_CONNECTION_STRING }} >> frontend/.env
+          printf 'NEXT_PUBLIC_APP_INSIGHTS_CONNECTION_STRING=%s\n' "$AI_CONNECTION_STRING" >> frontend/.env
           echo NEXTAUTH_DEBUG=true >> frontend/.env
           echo NODE_ENV=development >> frontend/.env
           echo NEXT_RUNTIME=nodejs >> frontend/.env
