@@ -26,7 +26,7 @@ Before generating an artifact the app runs eight checks over the census. They ar
 **These four stop the publish (HTTP 400):**
 
 - Every `cmattributes.Code` resolves to an active `attributes` row
-- Species row has `SpeciesCode`, `SpeciesName`, `Genus`, and `Family` set
+- Species row has a non-empty `SpeciesCode` for destination mnemonic lookup
 - All destination-bound strings fit Smithsonian DB column widths (Tag at most 20 characters, StemTag at most 32 characters, QuadratName at most 8 characters, etc.)
 - At least one measurement survives all filters
 
@@ -101,7 +101,7 @@ main: BEGIN
   -- Stage 0:  Census row exists for (destPlot, plotCensusNumber)? Continue, else SIGNAL
   -- Stage 0b: reload only: DELETE measurement attributes + measurements for the target census
   -- Stage 1:  temporary InnoDB staging tables, populated with all rows
-  -- Stage 2:  destination identity lookup (Quadrat, Family -> Genus -> Species -> SubSpecies, Tree, Stem, TSMAttributes)
+  -- Stage 2:  destination identity lookup (Quadrat, mnemonic -> SubSpecies/Species, Tree, Stem, TSMAttributes)
   -- Stage 2c: destination normalization (HOM=1.3 for new stems where DBH>0 AND HOM IS NULL)
   -- Stage 5:  destination contract checks: per-row error reasons, SIGNAL on any failure
   -- Stage 6:  bulk insert new Tree rows
@@ -201,7 +201,7 @@ The modal returns a structured list of failure kinds with the first 20 `CoreMeas
 | Kind | Effect | What to fix |
 |---|---|---|
 | `unknown-attribute-code` | Blocks | One or more `cmattributes.Code` values do not exist in `attributes`. Add the codes or fix the measurement. |
-| `missing-taxonomy-fields` | Blocks | The species row is missing `SpeciesCode`, `SpeciesName`, `Genus`, or `Family`. Fix in **Stem & Plot Details -> All Taxonomies**. |
+| `missing-taxonomy-fields` | Blocks | The species row is missing `SpeciesCode`, which the destination needs for mnemonic lookup. Fix it in **Stem & Plot Details -> All Taxonomies**. |
 | `string-too-long` | Blocks | A destination-bound value exceeds the Smithsonian DB column width. Shorten the offending field. |
 | `zero-exportable-rows` | Blocks | No measurements remain after applying all filters. Verify the census, plot, and validated state. |
 | `not-validated` | Warns; rows excluded | Re-run validation in the app for those rows, then re-publish to include them. |
@@ -223,7 +223,8 @@ A destination contract check failed. The SELECT result sets immediately precedin
 
 - **Ambiguous tree key**: The destination has multiple `Tree` rows with the same `(Tag, SpeciesID, SubSpeciesID)` in the target plot. Deduplicate or fix the destination.
 - **Ambiguous stem key**: The destination has multiple `Stem` rows with the same `(TreeID, StemTag)`. Deduplicate or fix.
-- **Taxonomy not uniquely resolved**: The taxonomy chain on the destination resolves to multiple `(SpeciesID, SubSpeciesID)` pairs. Usually this means a stale `CurrentTaxonFlag`. The error message includes the conflicting destination SpeciesIDs.
+- **Mnemonic not found in destination taxonomy**: No current `Species` or `SubSpecies` row has the staged mnemonic. Confirm that the destination taxonomy is populated and that the source `SpeciesCode` is correct.
+- **Mnemonic is ambiguous**: More than one current destination taxon has the mnemonic, or a `Species` and `SubSpecies` use it for different parent species. The error includes the conflicting `SpeciesID[:SubSpeciesID]` candidates. A `SubSpecies` match intentionally outranks its parent `Species` match when both identify the same taxon, preserving cases such as Panama's `swars1` varieties.
 - **Unknown quadrat / Unknown TSMCode**: The destination is missing a referenced quadrat or TSM attribute. Add it first.
 - **Empty StemTag collides with another stem under same Tree+Quadrat**: Two stems with `StemTag = ''` under the same tree and quadrat would collide on the destination. Assign distinct tags.
 
