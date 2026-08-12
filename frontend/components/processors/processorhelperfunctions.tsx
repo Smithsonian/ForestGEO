@@ -347,6 +347,38 @@ async function prepareValidationRun(
     `Validation ${validationProcedureName}`
   );
 
+  const censusID = params.p_CensusID ?? null;
+  const plotID = params.p_PlotID ?? null;
+
+  // Rows this validation previously failed must be re-examined on a rerun, or
+  // a correction elsewhere (e.g. renaming one half of a duplicate-tag pair)
+  // can never clear the partner row's stale error: validation definitions only
+  // process IsValidated IS NULL rows, so a row stuck at FALSE would keep its
+  // unresolved error forever. Reset only THIS validation's unresolved-error
+  // carriers — other validations' verdicts stay untouched, and rows overridden
+  // to TRUE or failed at ingestion (StemGUID IS NULL) are excluded.
+  const resetStaleFailuresQuery = `
+    UPDATE ${schema}.coremeasurements cm
+    JOIN ${schema}.census c ON cm.CensusID = c.CensusID
+    JOIN ${schema}.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+    JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
+    SET cm.IsValidated = NULL
+    WHERE me.ErrorSource = ?
+      AND me.ErrorCode = ?
+      AND mel.IsResolved = FALSE
+      AND cm.IsValidated = FALSE
+      AND cm.StemGUID IS NOT NULL
+      AND cm.IsActive = TRUE
+      AND (? IS NULL OR cm.CensusID = ?)
+      AND (? IS NULL OR c.PlotID = ?)
+  `;
+  const resetResult: any = await connectionManager.executeQuery(
+    resetStaleFailuresQuery,
+    [VALIDATION_ERROR_SOURCE, String(validationProcedureID), censusID, censusID, plotID, plotID],
+    transactionID
+  );
+  const resetRowCount = Number(resetResult?.affectedRows ?? 0);
+
   const cleanupQuery = `
     DELETE cme FROM ${schema}.measurement_error_log cme
     JOIN ${schema}.measurement_errors me ON me.ErrorID = cme.ErrorID
@@ -359,15 +391,13 @@ async function prepareValidationRun(
       AND (? IS NULL OR cm.CensusID = ?)
       AND (? IS NULL OR c.PlotID = ?)
   `;
-  const censusID = params.p_CensusID ?? null;
-  const plotID = params.p_PlotID ?? null;
   await connectionManager.executeQuery(
     cleanupQuery,
     [VALIDATION_ERROR_SOURCE, String(validationProcedureID), censusID, censusID, plotID, plotID],
     transactionID
   );
 
-  ailogger.info(`[${validationProcedureName}] Cleared stale errors before re-validation`);
+  ailogger.info(`[${validationProcedureName}] Reset ${resetRowCount} previously-failed row(s) and cleared stale errors before re-validation`);
 }
 
 function formatValidationQuery(schema: string, cursorQuery: string, validationProcedureID: number, params: ValidationExecutionParams): string {
