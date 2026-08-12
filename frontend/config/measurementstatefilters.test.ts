@@ -44,12 +44,13 @@ describe('measurementstatefilters', () => {
       return predicateMatch![1];
     }
 
-    it('projects the five measurement-state count aliases', () => {
+    it('projects the six measurement-state count aliases', () => {
       expect(countsSql).toContain('AS CountFailedNoLog');
       expect(countsSql).toContain('AS CountUnresolvedLogged');
       expect(countsSql).toContain('AS CountPending');
       expect(countsSql).toContain('AS CountValid');
       expect(countsSql).toContain('AS CountOverridable');
+      expect(countsSql).toContain('AS CountRevalidatable');
     });
 
     it('counts failed-no-log as IsValidated = FALSE rows WITHOUT an unresolved log entry (disjoint from CountUnresolvedLogged)', () => {
@@ -81,6 +82,14 @@ describe('measurementstatefilters', () => {
       const overridablePredicate = statePredicate('CountOverridable');
       expect(overridablePredicate).toBe('vft.IsValidated = FALSE OR vft.IsValidated IS NULL');
       expect(overridablePredicate).not.toContain('EXISTS');
+    });
+
+    it('counts revalidatable rows with exactly the prepareValidationRun reset predicate: failed, real stem, unresolved validation-source error', () => {
+      const revalidatablePredicate = statePredicate('CountRevalidatable');
+      expect(revalidatablePredicate).toContain('vft.IsValidated = FALSE AND vft.StemGUID IS NOT NULL AND (EXISTS');
+      expect(revalidatablePredicate).toContain('JOIN myschema.measurement_errors me ON me.ErrorID = mel.ErrorID');
+      expect(revalidatablePredicate).toContain("me.ErrorSource = 'validation'");
+      expect(revalidatablePredicate).toContain('COALESCE(mel.IsResolved, FALSE) = FALSE');
     });
   });
 });
