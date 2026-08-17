@@ -114,6 +114,8 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     const [forwardReq, forwardProps] = singlePostSpy.mock.calls[0] as any[];
     expect(forwardReq).toBe(req);
     expect(forwardProps).toBe(props);
+    expect(forwardReq.bodyUsed).toBe(false);
+    await expect(forwardReq.clone().json()).resolves.toEqual({ newRow: { some: 'data' } });
 
     expect(res.status).toBe(201);
     const j = await res.json();

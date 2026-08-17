@@ -6,6 +6,7 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
+import type { UpsertOperation } from '@/config/utils';
 
 // need to try integrating this into validation system:
 
@@ -67,12 +68,25 @@ interface UpdateQueryConfig {
   fieldList: FieldList;
 }
 
+/**
+ * Reports one slice's upsert to the caller. `operation` distinguishes a created
+ * row from an overwritten one, which the changelog must record faithfully — a
+ * hardcoded INSERT would claim a taxon was created every time one was edited.
+ */
+export type SliceUpsertObserver<Result> = (slice: {
+  sliceKey: string;
+  id: number;
+  operation: UpsertOperation;
+  rowData: Partial<Result>;
+}) => Promise<void> | void;
+
 export async function handleUpsertForSlices<Result>(
   connectionManager: ConnectionManager,
   schema: string,
   newRow: Partial<Result>,
   config: UpdateQueryConfig,
-  transactionID?: string
+  transactionID?: string,
+  onSliceUpsert?: SliceUpsertObserver<Result>
 ): Promise<Record<string, number>> {
   const insertedIds: Record<string, number> = {};
 
@@ -108,7 +122,9 @@ export async function handleUpsertForSlices<Result>(
     ailogger.info('inserting rowData: ', rowData);
 
     // Perform the upsert and store the resulting ID
-    insertedIds[sliceKey] = (await handleUpsert<Result>(connectionManager, schema, sliceKey, rowData, primaryKey as keyof Result, transactionID)).id;
+    const { id, operation } = await handleUpsert<Result>(connectionManager, schema, sliceKey, rowData, primaryKey as keyof Result, transactionID);
+    insertedIds[sliceKey] = id;
+    await onSliceUpsert?.({ sliceKey, id, operation, rowData });
   }
 
   return insertedIds;

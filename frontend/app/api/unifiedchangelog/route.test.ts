@@ -10,9 +10,14 @@ import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from '@/lib
  * - Single-row edits via datagrid EditToolbar (PATCH/DELETE operations)
  * - File uploads (INSERT operations with batch tracking)
  *
+ * Entries are written by the handlers themselves, inside the mutation's own
+ * transaction. No database trigger is involved — none has existed on any schema
+ * since 2025-05-12.
+ *
  * Exclusions:
  * - Bulk census deletions (would flood the log with thousands of entries)
- * - System-generated changes (auto-calculations, triggers firing from other triggers)
+ * - Raw-SQL changes made outside the app, which only a trigger or the binlog
+ *   could catch
  *
  * Test Coverage:
  * 1. Single-row UPDATE operations create ONE changelog entry
@@ -26,6 +31,7 @@ import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from '@/lib
 vi.mock('@/lib/db/sqlsecurity', () => ({
   validateSchemaOrThrow: vi.fn(),
   safeFormatQuery: vi.fn((schema, query) => query),
+  safeEscapeId: vi.fn((identifier: string) => `\`${identifier}\``),
   isValidSchema: vi.fn(() => true)
 }));
 
@@ -201,12 +207,13 @@ describe('Unified Changelog Tracking System', () => {
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce({}) // SET @CURRENT_CENSUS_ID session var (issued before the UPDATE)
+        .mockResolvedValueOnce([{ Code: 'A', Description: 'Old Description', Status: 'alive' }]) // locked pre-update snapshot
         .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query (matched one row -> passes the zero-row guard)
-        .mockResolvedValueOnce([{ Count: 1 }]); // COUNT query
+        .mockResolvedValueOnce([{ Code: 'A', Description: 'New Description', Status: 'alive' }]) // persisted post-update snapshot
+        .mockResolvedValueOnce({}); // unifiedchangelog INSERT
 
-      const oldRow = { code: 'A', description: 'Old Description', status: 'alive' };
-      const newRow = { code: 'A', description: 'New Description', status: 'alive' };
+      const oldRow = { Code: 'A', Description: 'Old Description', Status: 'alive' };
+      const newRow = { Code: 'A', Description: 'New Description', Status: 'alive' };
 
       const req = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {
         oldRow,
@@ -223,7 +230,11 @@ describe('Unified Changelog Tracking System', () => {
       const updateCall = exec.mock.calls.find(call => String(call[0]).includes('UPDATE') && String(call[0]).includes('attributes'));
       expect(updateCall).toBeDefined();
 
-      // Once triggers are enabled, this would create ONE changelog entry via trigger
+      // Exactly one changelog entry, written by the handler inside the same
+      // transaction as the UPDATE.
+      const changelogCalls = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog'));
+      expect(changelogCalls).toHaveLength(1);
+      expect(changelogCalls[0][1]).toEqual(expect.arrayContaining(['attributes', 'UPDATE']));
       expect(commit).toHaveBeenCalledWith('tx-1');
     });
 
@@ -234,12 +245,13 @@ describe('Unified Changelog Tracking System', () => {
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce({}) // SET @CURRENT_CENSUS_ID session var (issued before the UPDATE)
+        .mockResolvedValueOnce([{ PersonnelID: 1, FirstName: 'John', LastName: 'Doe', Role: 'researcher' }]) // locked pre-update snapshot
         .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query (matched one row -> passes the zero-row guard)
-        .mockResolvedValueOnce([{ Count: 1 }]); // COUNT query
+        .mockResolvedValueOnce([{ PersonnelID: 1, FirstName: 'John', LastName: 'Doe', Role: 'lead researcher' }]) // persisted post-update snapshot
+        .mockResolvedValueOnce({}); // unifiedchangelog INSERT
 
-      const oldRow = { personnelID: 1, firstName: 'John', lastName: 'Doe', role: 'researcher' };
-      const newRow = { personnelID: 1, firstName: 'John', lastName: 'Doe', role: 'lead researcher' };
+      const oldRow = { PersonnelID: 1, FirstName: 'John', LastName: 'Doe', Role: 'researcher' };
+      const newRow = { PersonnelID: 1, FirstName: 'John', LastName: 'Doe', Role: 'lead researcher' };
 
       const req = makeRequest('http://localhost/api/fixeddata/personnel/testschema/personnelID', 'PATCH', {
         oldRow,
@@ -249,7 +261,9 @@ describe('Unified Changelog Tracking System', () => {
       const res = await PATCH(req, makeParams('personnel', ['testschema', 'personnelID']));
 
       expect(res.status).toBe(HTTPResponses.OK);
-      expect(exec).toHaveBeenCalled();
+      const changelogCalls = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog'));
+      expect(changelogCalls).toHaveLength(1);
+      expect(changelogCalls[0][1]).toEqual(expect.arrayContaining(['personnel', 'UPDATE']));
       expect(commit).toHaveBeenCalledWith('tx-2');
     });
   });
@@ -260,7 +274,12 @@ describe('Unified Changelog Tracking System', () => {
 
       const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-3');
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-      const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({ affectedRows: 1 }); // DELETE query
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        // DELETE reads the row it is about to remove so the changelog can record
+        // its real prior state, then issues the DELETE.
+        .mockResolvedValueOnce([{ Code: 'B', Description: 'To Delete', Status: 'dead' }])
+        .mockResolvedValueOnce({ affectedRows: 1 });
 
       const rowToDelete = { code: 'B', description: 'To Delete', status: 'dead' };
 
@@ -278,7 +297,11 @@ describe('Unified Changelog Tracking System', () => {
       const deleteCall = exec.mock.calls.find(call => String(call[0]).includes('DELETE') && String(call[0]).includes('attributes'));
       expect(deleteCall).toBeDefined();
 
-      // Once triggers are enabled, this would create ONE changelog entry via trigger
+      // Exactly one changelog entry, written by the handler inside the same
+      // transaction as the DELETE.
+      const changelogCalls = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog'));
+      expect(changelogCalls).toHaveLength(1);
+      expect(changelogCalls[0][1]).toEqual(expect.arrayContaining(['attributes', 'DELETE']));
       expect(commit).toHaveBeenCalledWith('tx-3');
     });
   });
@@ -609,25 +632,28 @@ describe('Unified Changelog Tracking System', () => {
 
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-10a').mockResolvedValueOnce('tx-10b');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
-      // Both PATCHes run under Promise.all, so their SET/UPDATE statements interleave
-      // in a non-deterministic order. Branch on the SQL text instead of a fixed call
-      // sequence so every UPDATE reports a matched row (affectedRows: 1) and neither
-      // request trips the zero-row NOT_FOUND guard.
-      const exec = vi.spyOn(cm, 'executeQuery').mockImplementation(async (sql: string) => {
+      // Both PATCHes run under Promise.all, so their reads and UPDATE statements
+      // interleave in a non-deterministic order. Model the persisted state by key
+      // instead of relying on a fixed call sequence.
+      const exec = vi.spyOn(cm, 'executeQuery').mockImplementation(async (sql: string, params?: unknown[]) => {
         if (String(sql).includes('UPDATE')) return { affectedRows: 1 };
-        return [{ Count: 1 }];
+        if (String(sql).includes('unifiedchangelog')) return {};
+
+        const key = params?.[0] === 'B' ? 'B' : 'A';
+        const postUpdateRead = exec.mock.calls.filter(call => String(call[0]).includes('UPDATE')).length >= 1;
+        return [{ Code: key, Description: `${postUpdateRead ? 'New' : 'Old'} ${key}` }];
       });
 
       // User 1 edits row A
       const req1 = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {
-        oldRow: { code: 'A', description: 'Old A' },
-        newRow: { code: 'A', description: 'New A' }
+        oldRow: { Code: 'A', Description: 'Old A' },
+        newRow: { Code: 'A', Description: 'New A' }
       });
 
       // User 2 edits row B
       const req2 = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {
-        oldRow: { code: 'B', description: 'Old B' },
-        newRow: { code: 'B', description: 'New B' }
+        oldRow: { Code: 'B', Description: 'Old B' },
+        newRow: { Code: 'B', Description: 'New B' }
       });
 
       const [res1, res2] = await Promise.all([
