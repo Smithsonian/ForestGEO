@@ -5,6 +5,7 @@ import { PATCH, POST, DELETE } from './coreapifunctions';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import MapperFactory from '@/config/datamapper';
 import { applyEdit } from '@/config/editplan/apply';
+import { getCookie } from '@/app/actions/cookiemanager';
 // Keep measurementerrors mocked even though no test reads the mock directly; it
 // prevents the module from hitting the real DB stack when imported transitively.
 
@@ -658,6 +659,43 @@ describe('CoreAPIFunctions', () => {
         const [audit] = changelogRows(mockConnectionManager);
         expect(JSON.parse(audit.oldRowState)).toEqual(persistedBefore);
         expect(JSON.parse(audit.newRowState)).toEqual(persistedAfter);
+      });
+
+      /**
+       * REGRESSION: the census cookie is CLEARED by writing an empty string, not
+       * by deleting it (censusselector, useOrgCensusDispatch), so `getCookie`
+       * returns ''. Treating that as malformed 400s every metadata edit made
+       * before a census is selected — plots, attributes, quadrats, all of them.
+       */
+      it('accepts an edit made with no census selected and records a null census scope', async () => {
+        vi.mocked(getCookie).mockResolvedValueOnce('');
+        const persistedBefore = { PlotID: 17, PlotName: 'Harvard Forest', DefaultDBHUnits: 'mm' };
+        mockPatchSnapshots(persistedBefore, { ...persistedBefore, DefaultDBHUnits: 'cm' });
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({ oldRow: { PlotID: 17 }, newRow: { DefaultDBHUnits: 'cm' } })
+        });
+
+        const response = await PATCH(mockRequest, { params: Promise.resolve({ dataType: 'plots', slugs: [TEST_SCHEMA, 'plotID'] }) });
+
+        expect(response.status, 'a blank census cookie means "none selected", not "malformed"').toBe(HTTPResponses.OK);
+        const rows = changelogRows(mockConnectionManager);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].censusID, 'no census in scope must record NULL, not an invented id').toBeNull();
+      });
+
+      it('still rejects a census cookie that is present but malformed', async () => {
+        vi.mocked(getCookie).mockResolvedValueOnce('not-a-census');
+        mockPatchSnapshots({ PlotID: 17, PlotName: 'Harvard Forest' }, { PlotID: 17, PlotName: 'Renamed' });
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({ oldRow: { PlotID: 17 }, newRow: { PlotName: 'Renamed' } })
+        });
+
+        const response = await PATCH(mockRequest, { params: Promise.resolve({ dataType: 'plots', slugs: [TEST_SCHEMA, 'plotID'] }) });
+
+        expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+        expect(changelogRows(mockConnectionManager)).toHaveLength(0);
       });
     });
   });

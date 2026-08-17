@@ -377,7 +377,11 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
       let dataToUpdate;
       const censusCookie = await getCookie('censusID');
-      const censusID = parseOptionalPositiveInt(censusCookie ?? undefined, 'Census context');
+      // The census cookie is CLEARED by writing an empty string rather than by
+      // deleting it (components/sidebar/censusselector, useOrgCensusDispatch), so
+      // a blank value means "no census selected" — not a malformed one. Rejecting
+      // it would 400 every metadata edit made before a census is chosen.
+      const censusID = parseOptionalPositiveInt(censusCookie?.trim() || undefined, 'Census context');
 
       if (dataType === 'plots') {
         const { NumQuadrats, ...plotTrimmed } = newRowData;

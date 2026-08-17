@@ -508,6 +508,42 @@ describe('personnel census activity', () => {
   });
 });
 
+describe('census context', () => {
+  /**
+   * REGRESSION: censusselector and useOrgCensusDispatch CLEAR the census by
+   * writing an empty string rather than deleting the cookie, so getCookie
+   * returns ''. Rejecting that as malformed 400s every metadata edit made before
+   * a census is chosen — including the plots correction that motivated this work.
+   */
+  it('records a plots edit made before any census is selected', async () => {
+    vi.mocked(getCookie).mockResolvedValue('');
+    const plot = await seededPlot();
+    const oldRow = plotGridRow(plot);
+    const editedName = 'Test Plot NO-CENSUS-SELECTED';
+
+    const response = await patchRow('plots', 'plotID', oldRow, { ...oldRow, plotName: editedName });
+    expect(response.status, 'a blank census cookie means "none selected", not "malformed"').toBe(HTTPResponses.OK);
+
+    const rows = await readChangelog('plots');
+    logChangelog('plots edit with no census selected', rows);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].CensusID, 'no census in scope must record NULL, not an invented id').toBeNull();
+
+    const [persisted] = await setupConnection!.query<RowDataPacket[]>(`SELECT PlotName FROM \`${schema}\`.plots WHERE PlotID = ?`, [plot.PlotID]);
+    expect(persisted[0].PlotName).toBe(editedName);
+  });
+
+  it('rejects a census cookie that is present but malformed', async () => {
+    vi.mocked(getCookie).mockResolvedValue('not-a-census');
+    const plot = await seededPlot();
+    const oldRow = plotGridRow(plot);
+
+    const response = await patchRow('plots', 'plotID', oldRow, { ...oldRow, plotName: 'Should never persist' });
+    expect(response.status).toBe(HTTPResponses.BAD_REQUEST);
+    expect(await readChangelog()).toHaveLength(0);
+  });
+});
+
 describe('ChangedBy attribution', () => {
   it('truncates an over-length session identity instead of rolling the edit back', async () => {
     // ChangedBy is varchar(64). Under STRICT_TRANS_TABLES an over-length value
