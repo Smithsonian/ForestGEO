@@ -490,8 +490,8 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 {/* Failed-row recovery stays prominent and warning-colored: users must
                     never have to discover it inside the More menu while rows sit stuck. */}
                 {dynamicButtons
-                  .filter((button: any) => button.prominentWarning)
-                  .map((button: any, index: number) => (
+                  .filter((button: DynamicButton) => button.prominentWarning)
+                  .map((button: DynamicButton, index: number) => (
                     <Tooltip key={index} title={button.tooltip} placement="top" arrow>
                       <ToolbarButton
                         render={
