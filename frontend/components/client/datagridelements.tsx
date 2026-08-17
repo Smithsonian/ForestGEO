@@ -205,7 +205,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
 
   const hasAnyExport = typeof handleExport === 'function' || typeof handleExportAll === 'function' || typeof handleExportCSV === 'function';
 
-  const moreMenuButtons = dynamicButtons.filter((button: any) => button.label !== 'Manual Entry Form' && button.label !== 'Upload' && button.tooltip);
+  const moreMenuButtons = dynamicButtons.filter(
+    (button: any) => button.label !== 'Manual Entry Form' && button.label !== 'Upload' && button.label !== 'Fix Failed Rows' && button.tooltip
+  );
   const hasMoreMenuItems = moreMenuButtons.length > 0 || Boolean(validationMenu);
 
   // only require add / refresh / quickFilter / model / columns
@@ -480,6 +482,21 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                         render={
                           <Button onClick={button.onClick} variant="soft" color="primary" size="sm" startDecorator={button.icon} sx={{ whiteSpace: 'nowrap' }}>
                             {button.label}
+                          </Button>
+                        }
+                      />
+                    </Tooltip>
+                  ))}
+                {/* Failed-row recovery stays prominent and warning-colored: users must
+                    never have to discover it inside the More menu while rows sit stuck. */}
+                {dynamicButtons
+                  .filter((button: any) => button.label === 'Fix Failed Rows')
+                  .map((button: any, index: number) => (
+                    <Tooltip key={index} title={button.tooltip} placement="top" arrow>
+                      <ToolbarButton
+                        render={
+                          <Button onClick={button.onClick} variant="soft" color="warning" size="sm" startDecorator={button.icon} sx={{ whiteSpace: 'nowrap' }}>
+                            {typeof button.badgeCount === 'number' ? `${button.label} (${button.badgeCount})` : button.label}
                           </Button>
                         }
                       />

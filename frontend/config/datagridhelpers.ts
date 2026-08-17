@@ -21,6 +21,8 @@ export interface DynamicButton {
   onClick: () => void | Promise<void>;
   tooltip?: string;
   icon?: ReactElement;
+  /** Count appended to the visible label, e.g. "Fix Failed Rows (3)". */
+  badgeCount?: number;
 }
 
 export interface FieldTemplate {

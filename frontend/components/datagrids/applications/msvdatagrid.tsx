@@ -2,7 +2,7 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
 import { Snackbar, Typography } from '@mui/joy';
@@ -15,7 +15,7 @@ import MultilineModal from '@/components/datagrids/applications/multiline/multil
 import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
-import { AssignmentOutlined, CachedOutlined, UploadFileOutlined } from '@mui/icons-material';
+import { AssignmentOutlined, BuildCircleOutlined, CachedOutlined, UploadFileOutlined } from '@mui/icons-material';
 import ailogger from '@/ailogger';
 import { useRouter } from 'next/navigation';
 import { VisibleFilter } from '@/config/datagridhelpers';
@@ -95,6 +95,31 @@ export default function MeasurementsSummaryViewDataGrid({
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const hasAutoOpenedFailedMeasurementsRef = useRef(false);
+  const [failedRowCount, setFailedRowCount] = useState(0);
+
+  // Same endpoint the Failed Measurements modal uses for its own count; keeps
+  // the toolbar badge and the modal's "Clear Failed (N)" in agreement.
+  const fetchFailedRowCount = useCallback(async () => {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) {
+      return;
+    }
+    try {
+      const response = await fetch(
+        `/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+        { method: 'GET' }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setFailedRowCount(Number(data.recordCount) || 0);
+      }
+    } catch (error: any) {
+      ailogger.error('Failed to fetch failed-measurement count:', error);
+    }
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
+
+  useEffect(() => {
+    fetchFailedRowCount();
+  }, [fetchFailedRowCount]);
 
   useEffect(() => {
     // Guard: only call if FSM is open AND schemaName is defined
@@ -161,6 +186,9 @@ export default function MeasurementsSummaryViewDataGrid({
     } finally {
       setLoading(false);
       setRefresh(true);
+      // Uploads and reingestion runs both land here; either can change how
+      // many rows are stuck as failed.
+      void fetchFailedRowCount();
     }
   }
 
@@ -171,6 +199,7 @@ export default function MeasurementsSummaryViewDataGrid({
     }
 
     setOpenFSM(false);
+    await fetchFailedRowCount();
 
     if (failedMeasurementsCloseRedirectHref) {
       router.replace(failedMeasurementsCloseRedirectHref);
@@ -271,6 +300,17 @@ export default function MeasurementsSummaryViewDataGrid({
             icon: <AssignmentOutlined />
           },
           { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> },
+          ...(failedRowCount > 0
+            ? [
+                {
+                  label: 'Fix Failed Rows',
+                  onClick: () => setOpenFSM(true),
+                  tooltip: 'Review rows that failed upload, correct them, and reingest',
+                  icon: <BuildCircleOutlined />,
+                  badgeCount: failedRowCount
+                }
+              ]
+            : []),
           {
             label: 'Import ArcGIS',
             onClick: () => setIsArcgisUploadOpen(true),
