@@ -3,6 +3,15 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FailedMeasurementsModal from './failedmeasurementsmodal';
 
+const { sessionState, failedMeasurementsGridMock } = vi.hoisted(() => ({
+  sessionState: { userStatus: 'global' },
+  failedMeasurementsGridMock: vi.fn()
+}));
+
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { userStatus: sessionState.userStatus } } })
+}));
+
 // Mock dependencies - must match actual import path in component
 vi.mock('@/app/contexts/compat-hooks', () => ({
   usePlotContext: () => ({ plotID: 1, plotName: 'Test Plot' }),
@@ -11,7 +20,10 @@ vi.mock('@/app/contexts/compat-hooks', () => ({
 }));
 
 vi.mock('@/components/datagrids/applications/isolated/isolatedfailedmeasurementsdatagrid', () => ({
-  default: () => <div data-testid="failed-measurements-grid">Mock Grid</div>
+  default: (props: Record<string, unknown>) => {
+    failedMeasurementsGridMock(props);
+    return <div data-testid="failed-measurements-grid">Mock Grid</div>;
+  }
 }));
 
 vi.mock('@/ailogger', () => ({
@@ -19,17 +31,16 @@ vi.mock('@/ailogger', () => ({
 }));
 
 describe('FailedMeasurementsModal', () => {
-  const mockSetReingested = vi.fn();
   const mockHandleCloseModal = vi.fn();
 
   const defaultProps = {
     open: true,
-    setReingested: mockSetReingested,
     handleCloseModal: mockHandleCloseModal
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionState.userStatus = 'global';
     global.fetch = vi.fn();
     mockHandleCloseModal.mockResolvedValue(undefined);
   });
@@ -64,8 +75,7 @@ describe('FailedMeasurementsModal', () => {
         expect(mockHandleCloseModal).toHaveBeenCalledTimes(1);
       });
 
-      // Verify no data reingest was triggered
-      expect(mockSetReingested).not.toHaveBeenCalledWith(true);
+      expect(mockHandleCloseModal).toHaveBeenCalledWith({ dataChanged: false });
     });
 
     it('should set reingested flag when Clear Failed is executed', async () => {
@@ -130,7 +140,7 @@ describe('FailedMeasurementsModal', () => {
 
       await waitFor(
         () => {
-          expect(mockSetReingested).toHaveBeenCalledWith(true);
+          expect(mockHandleCloseModal).toHaveBeenCalledWith({ dataChanged: true });
         },
         { timeout: 3000 }
       );
@@ -182,7 +192,7 @@ describe('FailedMeasurementsModal', () => {
       // Wait for the reingestion process to complete
       await waitFor(
         () => {
-          expect(mockSetReingested).toHaveBeenCalledWith(true);
+          expect(mockHandleCloseModal).toHaveBeenCalledWith({ dataChanged: true });
         },
         { timeout: 15000 } // Increased timeout for async operations
       );
@@ -217,8 +227,14 @@ describe('FailedMeasurementsModal', () => {
       render(<FailedMeasurementsModal {...defaultProps} />);
 
       await waitFor(() => {
-        expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/admin/clear/failedmeasurements/testschema/1/1'), { method: 'GET' });
-        expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/admin/clear/temporarymeasurements/testschema/1/1'), { method: 'GET' });
+        expect(global.fetch).toHaveBeenCalledWith(
+          expect.stringContaining('/api/failedmeasurements/count/testschema/1/1'),
+          expect.objectContaining({ method: 'GET' })
+        );
+        expect(global.fetch).toHaveBeenCalledWith(
+          expect.stringContaining('/api/admin/clear/temporarymeasurements/testschema/1/1'),
+          expect.objectContaining({ method: 'GET' })
+        );
       });
     });
 
@@ -240,8 +256,53 @@ describe('FailedMeasurementsModal', () => {
       });
 
       expect(mockHandleCloseModal).not.toHaveBeenCalled();
-      expect(mockSetReingested).not.toHaveBeenCalledWith(true);
       expect(screen.getByText('Failed Measurements')).toBeInTheDocument();
+    });
+
+    it('hides admin-only clear controls from non-admin site users', async () => {
+      sessionState.userStatus = 'field crew';
+      (global.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ recordCount: 2 }) });
+
+      render(<FailedMeasurementsModal {...defaultProps} />);
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/failedmeasurements/count/testschema/1/1'),
+        expect.objectContaining({ method: 'GET' })
+      );
+      expect(screen.queryByRole('button', { name: /Clear Failed/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Clear Temp/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Reingest All Rows/i })).toBeInTheDocument();
+    });
+
+    it('keeps recovery controls and the editable grid hidden for pending users', () => {
+      sessionState.userStatus = 'pending';
+
+      render(<FailedMeasurementsModal {...defaultProps} />);
+
+      expect(screen.getByText(/read-only access/i)).toBeInTheDocument();
+      expect(screen.queryByTestId('failed-measurements-grid')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Reingest All Rows/i })).not.toBeInTheDocument();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('reports row-level reingestion to the parent when the user closes a deep-linked modal', async () => {
+      const user = userEvent.setup();
+      (global.fetch as any)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ recordCount: 1 }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ recordCount: 0 }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ recordCount: 0 }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ recordCount: 0 }) });
+
+      render(<FailedMeasurementsModal {...defaultProps} autoCloseWhenEmpty={false} />);
+      await waitFor(() => expect(screen.getByRole('button', { name: /Clear Failed/i })).toHaveTextContent('1'));
+
+      const gridProps = failedMeasurementsGridMock.mock.calls.at(-1)?.[0] as { onRowReingested: () => void };
+      gridProps.onRowReingested();
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(4));
+      await user.click(screen.getByRole('button', { name: 'Close' }));
+
+      expect(mockHandleCloseModal).toHaveBeenCalledWith({ dataChanged: true });
     });
   });
 });

@@ -20,6 +20,7 @@ import ailogger from '@/ailogger';
 import { useRouter } from 'next/navigation';
 import { VisibleFilter } from '@/config/datagridhelpers';
 import { getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
+import { useSession } from 'next-auth/react';
 
 // Identity under which CustomGridPagination persists the rows-per-page choice;
 // the initializer below must read the same key.
@@ -70,6 +71,8 @@ export default function MeasurementsSummaryViewDataGrid({
   const currentSite = useSiteContext();
   const { setLoading } = useLoading();
   const router = useRouter();
+  const { data: session } = useSession();
+  const canRecoverFailedRows = Boolean(session?.user?.userStatus && session.user.userStatus !== 'pending');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isArcgisUploadOpen, setIsArcgisUploadOpen] = useState(false);
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
@@ -78,7 +81,6 @@ export default function MeasurementsSummaryViewDataGrid({
   const [openAlert, setOpenAlert] = useState(false);
   const [openViewResetAlert, setOpenViewResetAlert] = useState(false);
   const [openFSM, setOpenFSM] = useState(false);
-  const [dataReingested, setDataReingested] = useState(false);
   const [isReingesting, setIsReingesting] = useState(false);
   const [uploadCompleted, setUploadCompleted] = useState(false);
   const [manualEntryCompleted, setManualEntryCompleted] = useState(false);
@@ -95,40 +97,69 @@ export default function MeasurementsSummaryViewDataGrid({
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const hasAutoOpenedFailedMeasurementsRef = useRef(false);
-  const [failedRowCount, setFailedRowCount] = useState(0);
+  const failedCountAbortControllerRef = useRef<AbortController | null>(null);
+  const failedMeasurementsScope =
+    currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID
+      ? `${currentSite.schemaName}:${currentPlot.plotID}:${currentCensus.dateRanges[0].censusID}`
+      : '';
+  const [failedRowCountState, setFailedRowCountState] = useState({ scope: '', count: 0 });
+  const failedRowCount = failedRowCountState.scope === failedMeasurementsScope ? failedRowCountState.count : 0;
 
-  // Same endpoint the Failed Measurements modal uses for its own count; keeps
-  // the toolbar badge and the modal's "Clear Failed (N)" in agreement.
+  // Use a site-scoped read endpoint. The similarly named /api/admin/clear
+  // endpoint is deliberately admin-only, while failed-row recovery is
+  // available to every role that may edit measurements for this site.
   const fetchFailedRowCount = useCallback(async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) {
+    failedCountAbortControllerRef.current?.abort();
+
+    if (!canRecoverFailedRows || !currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID || !failedMeasurementsScope) {
+      setFailedRowCountState({ scope: '', count: 0 });
       return;
     }
+
+    const controller = new AbortController();
+    failedCountAbortControllerRef.current = controller;
+    const requestScope = failedMeasurementsScope;
+
     try {
       const response = await fetch(
-        `/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
-        { method: 'GET' }
+        `/api/failedmeasurements/count/${encodeURIComponent(currentSite.schemaName)}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+        { method: 'GET', signal: controller.signal }
       );
-      if (response.ok) {
-        const data = await response.json();
-        setFailedRowCount(Number(data.recordCount) || 0);
+      if (!response.ok) {
+        throw new Error(`Failed-measurement count request returned ${response.status}`);
       }
-    } catch (error: any) {
-      ailogger.error('Failed to fetch failed-measurement count:', error);
+
+      const data = await response.json();
+      const recordCount = data.recordCount;
+      if (typeof recordCount !== 'number' || !Number.isSafeInteger(recordCount) || recordCount < 0) {
+        throw new Error('Failed-measurement count response was invalid');
+      }
+
+      if (!controller.signal.aborted && failedCountAbortControllerRef.current === controller) {
+        setFailedRowCountState({ scope: requestScope, count: recordCount });
+        setGlobalError(null);
+        setTriggerGlobalError(false);
+      }
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      const err = error instanceof Error ? error : new Error(String(error));
+      ailogger.error(`Failed to fetch failed-measurement count for ${requestScope}:`, err);
+      if (!controller.signal.aborted && failedCountAbortControllerRef.current === controller) {
+        setFailedRowCountState({ scope: requestScope, count: 0 });
+        setGlobalError('Unable to load the failed-measurement count. Refresh the page to try again.');
+        setTriggerGlobalError(true);
+      }
+    } finally {
+      if (failedCountAbortControllerRef.current === controller) {
+        failedCountAbortControllerRef.current = null;
+      }
     }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
+  }, [canRecoverFailedRows, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges?.[0]?.censusID, failedMeasurementsScope]);
 
   useEffect(() => {
-    fetchFailedRowCount();
+    void fetchFailedRowCount();
+    return () => failedCountAbortControllerRef.current?.abort();
   }, [fetchFailedRowCount]);
-
-  useEffect(() => {
-    // Guard: only call if FSM is open AND schemaName is defined
-    if (openFSM && currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID) {
-      fetch(`/api/validatefailed/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`, { method: 'GET' }).catch(
-        ailogger.error
-      );
-    }
-  }, [openFSM, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
 
   useEffect(() => {
     if (!autoOpenFailedMeasurements || hasAutoOpenedFailedMeasurementsRef.current) {
@@ -192,14 +223,16 @@ export default function MeasurementsSummaryViewDataGrid({
     }
   }
 
-  const handleCloseFailedMeasurementsModal = async () => {
-    if (dataReingested) {
-      await reloadMSV();
-      setDataReingested(false);
-    }
-
+  const handleCloseFailedMeasurementsModal = async ({ dataChanged = false }: { dataChanged?: boolean } = {}) => {
+    // Close immediately; refreshing the summary must not trap the user behind
+    // the modal while a network request is in flight.
     setOpenFSM(false);
-    await fetchFailedRowCount();
+
+    if (dataChanged) {
+      await reloadMSV();
+    } else if (!failedMeasurementsCloseRedirectHref) {
+      void fetchFailedRowCount();
+    }
 
     if (failedMeasurementsCloseRedirectHref) {
       router.replace(failedMeasurementsCloseRedirectHref);
@@ -264,12 +297,7 @@ export default function MeasurementsSummaryViewDataGrid({
         formType={'measurements'}
         onSubmitComplete={() => setManualEntryCompleted(true)}
       />
-      <FailedMeasurementsModal
-        open={openFSM}
-        setReingested={setDataReingested}
-        handleCloseModal={handleCloseFailedMeasurementsModal}
-        autoCloseWhenEmpty={!autoOpenFailedMeasurements}
-      />
+      <FailedMeasurementsModal open={openFSM} handleCloseModal={handleCloseFailedMeasurementsModal} autoCloseWhenEmpty={!autoOpenFailedMeasurements} />
       <MeasurementsCommons
         gridType={MEASUREMENTS_SUMMARY_GRID_TYPE}
         gridColumns={MeasurementsSummaryViewGridColumns}
@@ -300,14 +328,15 @@ export default function MeasurementsSummaryViewDataGrid({
             icon: <AssignmentOutlined />
           },
           { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> },
-          ...(failedRowCount > 0
+          ...(canRecoverFailedRows && failedRowCount > 0
             ? [
                 {
                   label: 'Fix Failed Rows',
                   onClick: () => setOpenFSM(true),
                   tooltip: 'Review rows that failed upload, correct them, and reingest',
                   icon: <BuildCircleOutlined />,
-                  badgeCount: failedRowCount
+                  badgeCount: failedRowCount,
+                  prominentWarning: true
                 }
               ]
             : []),

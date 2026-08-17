@@ -206,7 +206,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
   const hasAnyExport = typeof handleExport === 'function' || typeof handleExportAll === 'function' || typeof handleExportCSV === 'function';
 
   const moreMenuButtons = dynamicButtons.filter(
-    (button: any) => button.label !== 'Manual Entry Form' && button.label !== 'Upload' && button.label !== 'Fix Failed Rows' && button.tooltip
+    (button: any) => button.label !== 'Manual Entry Form' && button.label !== 'Upload' && !button.prominentWarning && button.tooltip
   );
   const hasMoreMenuItems = moreMenuButtons.length > 0 || Boolean(validationMenu);
 
@@ -490,7 +490,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 {/* Failed-row recovery stays prominent and warning-colored: users must
                     never have to discover it inside the More menu while rows sit stuck. */}
                 {dynamicButtons
-                  .filter((button: any) => button.label === 'Fix Failed Rows')
+                  .filter((button: any) => button.prominentWarning)
                   .map((button: any, index: number) => (
                     <Tooltip key={index} title={button.tooltip} placement="top" arrow>
                       <ToolbarButton

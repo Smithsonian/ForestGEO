@@ -1,7 +1,7 @@
 import MeasurementsSummaryViewDataGrid from '@/components/datagrids/applications/msvdatagrid';
 
 interface SummaryPageProps {
-  searchParams: Promise<{ openFailed?: string }>;
+  searchParams: Promise<{ openFailed?: string | string[] }>;
 }
 
 export default async function SummaryPage({ searchParams }: SummaryPageProps) {

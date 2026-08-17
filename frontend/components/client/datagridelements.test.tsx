@@ -362,7 +362,9 @@ describe('EditToolbar', () => {
         gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
         gridType="measurementssummary"
         showToolbarActions
-        dynamicButtons={[{ label: 'Fix Failed Rows', tooltip: 'Review rows that failed upload', onClick: onFixFailedRows, badgeCount: 3 }]}
+        dynamicButtons={[
+          { label: 'Fix Failed Rows', tooltip: 'Review rows that failed upload', onClick: onFixFailedRows, badgeCount: 3, prominentWarning: true }
+        ]}
         validationMenu={null}
       />
     );

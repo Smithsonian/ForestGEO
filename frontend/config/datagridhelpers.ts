@@ -23,6 +23,8 @@ export interface DynamicButton {
   icon?: ReactElement;
   /** Count appended to the visible label, e.g. "Fix Failed Rows (3)". */
   badgeCount?: number;
+  /** Keep a recovery action visible as a warning button instead of overflowing it. */
+  prominentWarning?: boolean;
 }
 
 export interface FieldTemplate {

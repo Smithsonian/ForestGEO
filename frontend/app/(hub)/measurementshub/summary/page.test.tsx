@@ -28,4 +28,10 @@ describe('SummaryPage — failed-measurements deep link', () => {
 
     expect(element.props.autoOpenFailedMeasurements).toBe(false);
   });
+
+  it('fails closed when the query parameter is repeated', async () => {
+    const element = await SummaryPage({ searchParams: Promise.resolve({ openFailed: ['1', '1'] }) });
+
+    expect(element.props.autoOpenFailedMeasurements).toBe(false);
+  });
 });

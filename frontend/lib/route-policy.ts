@@ -137,6 +137,7 @@ export const ROUTE_POLICIES = {
   'validations/validationerrordisplay': 'site-scoped',
   'validations/validationlist': 'site-scoped',
   // Failed measurement management
+  'failedmeasurements/count/[schema]/[plotID]/[censusID]': 'site-scoped',
   'validatefailed/[schema]/[plotID]/[censusID]': 'site-scoped',
   'reingest/[schema]/[plotID]/[censusID]': 'site-scoped',
   'reingestsinglefailure/[schema]/[targetRowID]': 'site-scoped',

@@ -1010,7 +1010,7 @@ export default function ErrorsExplorer() {
           {/* Ingestion errors cannot be cleared by editing or rerunning
               validations here — the row must be corrected and reingested via
               the Failed Measurements workflow. */}
-          {!loadingRows && results.summary.ingestion > 0 && (
+          {canEditRows && !loadingRows && results.summary.ingestion > 0 && (
             <Button
               component={Link}
               href="/measurementshub/summary?openFailed=1"
