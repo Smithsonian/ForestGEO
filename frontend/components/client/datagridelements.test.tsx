@@ -344,4 +344,38 @@ describe('EditToolbar', () => {
 
     expect(screen.getByRole('button', { name: /more actions/i })).toBeInTheDocument();
   });
+
+  it('renders Fix Failed Rows as a visible warning button with its count, not inside the More menu', async () => {
+    const user = userEvent.setup();
+    const onFixFailedRows = vi.fn();
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="measurementssummary"
+        showToolbarActions
+        dynamicButtons={[
+          { label: 'Fix Failed Rows', tooltip: 'Review rows that failed upload', onClick: onFixFailedRows, badgeCount: 3, prominentWarning: true }
+        ]}
+        validationMenu={null}
+      />
+    );
+
+    const fixButton = screen.getByRole('button', { name: 'Fix Failed Rows (3)' });
+    expect(fixButton).toBeInTheDocument();
+    // Despite carrying a tooltip, the recovery action must never be relegated
+    // to the More overflow menu.
+    expect(screen.queryByRole('button', { name: /more actions/i })).not.toBeInTheDocument();
+
+    await user.click(fixButton);
+    expect(onFixFailedRows).toHaveBeenCalledTimes(1);
+  });
 });

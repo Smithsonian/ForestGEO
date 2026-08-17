@@ -37,6 +37,8 @@ import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import CallSplitIcon from '@mui/icons-material/CallSplit';
+import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
+import Link from 'next/link';
 import {
   ContradictionType,
   CONTRADICTION_LABELS,
@@ -1004,6 +1006,22 @@ export default function ErrorsExplorer() {
             <CircularProgress size="sm" aria-label="Loading ingestion count" />
           ) : (
             <Typography level="h3">{results.summary.ingestion}</Typography>
+          )}
+          {/* Ingestion errors cannot be cleared by editing or rerunning
+              validations here — the row must be corrected and reingested via
+              the Failed Measurements workflow. */}
+          {canEditRows && !loadingRows && results.summary.ingestion > 0 && (
+            <Button
+              component={Link}
+              href="/measurementshub/summary?openFailed=1"
+              size="sm"
+              variant="solid"
+              color="warning"
+              startDecorator={<BuildCircleOutlinedIcon />}
+              data-testid="errorsexplorer-fix-failed-link"
+            >
+              Fix failed uploads
+            </Button>
           )}
         </Card>
         <Card variant="soft" color="danger" sx={{ minWidth: 160 }}>

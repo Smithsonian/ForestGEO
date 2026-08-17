@@ -441,6 +441,45 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     });
   });
 
+  it('links ingestion failures to the failed-measurement recovery modal', async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/errors/explorer/query')) {
+        return {
+          ok: true,
+          json: async () => ({
+            rows: [{ ...GRID_ROW, errorSources: ['ingestion'], isFailedRow: true }],
+            totalRows: 1,
+            summary: { total: 1, validation: 0, ingestion: 1, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
+          })
+        } as Response;
+      }
+      if (url.includes('/api/errors/explorer/facets')) {
+        return {
+          ok: true,
+          json: async () => ({
+            messages: [],
+            fields: [],
+            sourceCounts: { validation: 0, ingestion: 1 },
+            contradictionCounts: { duplicateTagStem: 0, sameBatchConflict: 0 }
+          })
+        } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+
+    const { unmount } = await mountExplorer();
+
+    const recoveryLink = await screen.findByRole('link', { name: /fix failed uploads/i });
+    expect(recoveryLink).toHaveAttribute('href', '/measurementshub/summary?openFailed=1');
+
+    unmount();
+    mockSessionUserStatus = 'pending';
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    expect(screen.queryByRole('link', { name: /fix failed uploads/i })).not.toBeInTheDocument();
+  });
+
   it('does not call the legacy PATCH endpoint when a row is saved', async () => {
     mockBeginEdit.mockResolvedValue({
       updatedIDs: { coreMeasurementID: TEST_CORE_MEASUREMENT_ID },
