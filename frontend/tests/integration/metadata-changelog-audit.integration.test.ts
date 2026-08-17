@@ -420,6 +420,94 @@ describe('the log never describes a change that did not commit', () => {
   });
 });
 
+describe('personnel census activity', () => {
+  /**
+   * REGRESSION: the toggle sends `censusActive` (isolatedpersonneldatagrid:
+   * field 'censusActive'), and isolateddatagridcommons JSON.stringifies the grid
+   * row unchanged. When the handler matched the raw body against `CensusActive`
+   * instead, the branch never ran: no relation row was written or removed, and
+   * the request still answered 200 — the exact silent-success failure this audit
+   * exists to expose. These tests send the real payload shape.
+   */
+  // personnel is UNIQUE on (FirstName, LastName, IsActive), so each test seeds
+  // its own person rather than reusing one across tests.
+  async function seededPersonnel(lastName: string): Promise<{ personnelID: number; censusID: number }> {
+    await setupConnection!.query(`INSERT INTO \`${schema}\`.personnel (FirstName, LastName) VALUES (?, ?)`, ['Ada', lastName]);
+    const [people] = await setupConnection!.query<RowDataPacket[]>(`SELECT PersonnelID FROM \`${schema}\`.personnel WHERE LastName = ?`, [lastName]);
+    expect(people, 'exactly one seeded person').toHaveLength(1);
+    const [censuses] = await setupConnection!.query<RowDataPacket[]>(`SELECT CensusID FROM \`${schema}\`.census ORDER BY CensusID LIMIT 1`);
+    expect(censuses.length, 'the harness must seed one census').toBe(1);
+    return { personnelID: Number(people[0].PersonnelID), censusID: Number(censuses[0].CensusID) };
+  }
+
+  async function readRelations(personnelID: number): Promise<RowDataPacket[]> {
+    const [rows] = await setupConnection!.query<RowDataPacket[]>(`SELECT * FROM \`${schema}\`.censusactivepersonnel WHERE PersonnelID = ?`, [personnelID]);
+    return rows;
+  }
+
+  it('activates and deactivates a person from the payload the grid actually sends', async () => {
+    const lastName = 'Toggled';
+    const { personnelID, censusID } = await seededPersonnel(lastName);
+    vi.mocked(getCookie).mockResolvedValue(String(censusID));
+    const gridRow = { id: 1, personnelID, firstName: 'Ada', lastName };
+
+    const activation = await patchRow('personnel', 'personnelID', gridRow, { ...gridRow, censusActive: true });
+    expect(activation.status, 'the personnel PATCH must succeed').toBe(HTTPResponses.OK);
+
+    const activated = await readRelations(personnelID);
+    expect(activated, 'toggling censusActive on must persist the relation, not silently no-op').toHaveLength(1);
+    expect(Number(activated[0].CensusID)).toBe(censusID);
+
+    const activationRows = await readChangelog('censusactivepersonnel');
+    logChangelog('personnel activation', activationRows);
+    expect(activationRows).toHaveLength(1);
+    expect(activationRows[0].Operation).toBe(CHANGELOG_OPERATION.INSERT);
+    expect(activationRows[0].RecordID).toBe(String(activated[0].CAPID));
+    expect(activationRows[0].OldRowState).toBeNull();
+    expect(activationRows[0].CensusID).toBe(censusID);
+
+    await truncateChangelog();
+
+    const deactivation = await patchRow('personnel', 'personnelID', gridRow, { ...gridRow, censusActive: false });
+    expect(deactivation.status).toBe(HTTPResponses.OK);
+    expect(await readRelations(personnelID), 'toggling censusActive off must remove the relation').toHaveLength(0);
+
+    const deactivationRows = await readChangelog('censusactivepersonnel');
+    logChangelog('personnel deactivation', deactivationRows);
+    expect(deactivationRows).toHaveLength(1);
+    expect(deactivationRows[0].Operation).toBe(CHANGELOG_OPERATION.DELETE);
+    expect(deactivationRows[0].NewRowState).toBeNull();
+    expect(rowState(deactivationRows[0].OldRowState)!.PersonnelID).toBe(personnelID);
+  });
+
+  it('leaves an existing relation untouched when the edit changes only a name', async () => {
+    const { personnelID, censusID } = await seededPersonnel('Unchanged');
+    vi.mocked(getCookie).mockResolvedValue(String(censusID));
+    const gridRow = { id: 1, personnelID, firstName: 'Ada', lastName: 'Unchanged' };
+
+    await patchRow('personnel', 'personnelID', gridRow, { ...gridRow, censusActive: true });
+    const [existing] = await readRelations(personnelID);
+    await truncateChangelog();
+
+    // The grid re-sends the whole row, censusActive included, for any edit. An
+    // active person staying active must not churn the relation or the log.
+    const rename = await patchRow('personnel', 'personnelID', gridRow, { ...gridRow, lastName: 'Renamed', censusActive: true });
+    expect(rename.status).toBe(HTTPResponses.OK);
+
+    const relations = await readRelations(personnelID);
+    expect(relations).toHaveLength(1);
+    expect(Number(relations[0].CAPID), 'an unchanged activation must not delete and re-create the relation').toBe(Number(existing.CAPID));
+
+    const rows = await readChangelog();
+    logChangelog('personnel rename with an unchanged activation', rows);
+    expect(
+      rows.map(row => row.TableName),
+      'only the personnel row changed'
+    ).toEqual(['personnel']);
+    expect(rowState(rows[0].NewRowState)!.LastName).toBe('Renamed');
+  });
+});
+
 describe('ChangedBy attribution', () => {
   it('truncates an over-length session identity instead of rolling the edit back', async () => {
     // ChangedBy is varchar(64). Under STRICT_TRANS_TABLES an over-length value

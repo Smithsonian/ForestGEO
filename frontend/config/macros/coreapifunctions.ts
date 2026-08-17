@@ -76,6 +76,11 @@ const POST_DATA_TYPES = new Set([...MUTABLE_METADATA_DATA_TYPES, 'failedmeasurem
 const DELETE_DATA_TYPES = new Set([...MUTABLE_METADATA_DATA_TYPES, 'failedmeasurements', 'measurementssummary']);
 const MYSQL_SIGNED_INT_MAX = 2_147_483_647;
 
+// demapData runs the grid's boolean `censusActive` through booleanToBit, so the
+// demapped flag is 1/0 rather than true/false.
+const CENSUS_ACTIVE_ENABLED = 1;
+const CENSUS_ACTIVE_DISABLED = 0;
+
 type MutationMethod = 'PATCH' | 'POST' | 'DELETE';
 type RowLookup = { column: string; value: unknown };
 
@@ -388,10 +393,16 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
       } else if (dataType === 'personnel') {
         const personnelTrimmed = { ...newRowData };
         delete personnelTrimmed.CensusActive;
-        const hasCensusActiveFlag = Object.prototype.hasOwnProperty.call(newRow, 'CensusActive');
+        // Read the flag from the DEMAPPED row, not the raw body: the grid sends
+        // RDS-shaped keys (`censusActive`), and every other field in this handler
+        // goes through demapData. Matching the raw body against `CensusActive`
+        // never fired, so the toggle silently persisted nothing and still
+        // reported success.
+        const hasCensusActiveFlag = Object.prototype.hasOwnProperty.call(requestedChanges, 'CensusActive');
         if (hasCensusActiveFlag) {
-          if (typeof newRow.CensusActive !== 'boolean') {
-            throw new MutationRequestError('CensusActive must be a boolean');
+          const desiredActive = requestedChanges.CensusActive;
+          if (desiredActive !== CENSUS_ACTIVE_ENABLED && desiredActive !== CENSUS_ACTIVE_DISABLED) {
+            throw new MutationRequestError('censusActive must be a boolean');
           }
           if (!censusID) throw new MutationRequestError('Census context required to update personnel census activity');
 
@@ -400,9 +411,8 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             { column: 'PersonnelID', value: previousGridIDKey }
           ];
           const existingRelation = (await loadPersistedRows(tx, schema, 'censusactivepersonnel', relationLookup, { forUpdate: true }))[0];
-          const desiredActive = newRow.CensusActive;
 
-          if (desiredActive && !existingRelation) {
+          if (desiredActive === CENSUS_ACTIVE_ENABLED && !existingRelation) {
             const insertResult = await tx.query(safeFormatQuery(schema, 'INSERT INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)'), [
               censusID,
               previousGridIDKey
@@ -418,7 +428,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
               changedBy,
               censusID
             });
-          } else if (!desiredActive && existingRelation) {
+          } else if (desiredActive === CENSUS_ACTIVE_DISABLED && existingRelation) {
             const deleteSQL = safeFormatQuery(schema, 'DELETE FROM ??.censusactivepersonnel WHERE CAPID = ?');
             await tx.query(deleteSQL, [existingRelation.CAPID]);
             await recordMutation({

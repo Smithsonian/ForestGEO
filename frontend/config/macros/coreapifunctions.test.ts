@@ -136,6 +136,25 @@ const CLIENT_REACHABLE_MUTATIONS: { dataType: string; methods: ('PATCH' | 'POST'
 
 const UNSUPPORTED_DATA_TYPE_MARKER = 'is not supported for data type';
 
+/**
+ * Swaps the identity-stub mapper for the REAL one.
+ *
+ * The stub passes payloads through untouched, so it cannot catch a key-casing
+ * mismatch between what the grid sends (`censusActive`) and what the handler
+ * reads. The real GenericMapper is the component that capitalizes the key and
+ * runs the boolean through booleanToBit, so any test asserting on a demapped
+ * field name has to go through it or it proves nothing.
+ */
+async function useRealMapper(): Promise<void> {
+  const { GenericMapper } = await vi.importActual<typeof import('@/config/datamapper')>('@/config/datamapper');
+  (MapperFactory.getMapper as any).mockReturnValue(new GenericMapper());
+}
+
+/** The personnel row shape the grid PATCHes with — RDS-cased, exactly as sent. */
+const PERSONNEL_GRID_ROW = { id: 1, personnelID: 1, firstName: 'Ada', lastName: 'Audit' } as const;
+const PERSISTED_PERSONNEL_ROW = { PersonnelID: 1, FirstName: 'Ada', LastName: 'Audit', RoleID: null, IsActive: 1 };
+const SEEDED_RELATION_ID = 91;
+
 /** True only for the allowlist's own rejection, not other 405s or failures. */
 async function rejectedAsUnsupportedDataType(response: Response): Promise<boolean> {
   if (response.status !== HTTPResponses.METHOD_NOT_ALLOWED) return false;
@@ -364,46 +383,100 @@ describe('CoreAPIFunctions', () => {
       expect(response.status).toBe(200);
     });
 
-    it('should handle personnel dataType with CensusActive logic', async () => {
-      const mockRequest = new NextRequest('http://localhost/api/test', {
-        method: 'PATCH',
-        body: JSON.stringify({
-          newRow: { PersonnelID: 1, CensusActive: true },
-          oldRow: { PersonnelID: 1, CensusActive: false }
-        })
-      });
-
-      mockMapper.demapData.mockImplementation((data: any[]) => data);
-      let personnelReads = 0;
+    /**
+     * REGRESSION: the handler once matched the RAW body against `CensusActive`,
+     * but the grid sends `censusActive` (isolatedpersonneldatagrid: field
+     * 'censusActive'; isolateddatagridcommons JSON.stringifies the row as-is).
+     * The branch never fired: the toggle wrote nothing and still answered 200.
+     * These two tests go through the REAL mapper, so the key the handler reads
+     * has to be the key the real mapper produces from the real client field.
+     */
+    function mockPersonnelRelationQueries(existingRelation: Record<string, unknown> | null) {
       mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
         if (sql.includes(CHANGELOG_TABLE)) return { affectedRows: 1 };
-        if (sql.includes('censusactivepersonnel') && sql.trimStart().toUpperCase().startsWith('SELECT')) {
-          if (sql.includes('`CAPID`')) return [{ CAPID: 91, CensusID: 1, PersonnelID: 1 }];
-          return [];
+        if (sql.includes('censusactivepersonnel')) {
+          if (sql.trimStart().toUpperCase().startsWith('SELECT')) {
+            // The CAPID read-back follows the INSERT; the lookup precedes it.
+            if (sql.includes('`CAPID`')) return [{ CAPID: SEEDED_RELATION_ID, CensusID: 1, PersonnelID: 1 }];
+            return existingRelation ? [existingRelation] : [];
+          }
+          if (sql.trimStart().toUpperCase().startsWith('INSERT')) return { insertId: SEEDED_RELATION_ID, affectedRows: 1 };
+          return { affectedRows: 1 };
         }
-        if (sql.includes('censusactivepersonnel') && sql.trimStart().toUpperCase().startsWith('INSERT')) return { insertId: 91, affectedRows: 1 };
-        if (sql.trimStart().toUpperCase().startsWith('SELECT')) {
-          return [personnelReads++ === 0 ? { PersonnelID: 1 } : { PersonnelID: 1 }];
-        }
+        // Toggling census activity changes no personnel column, so both
+        // snapshots are the same row — the only audit row must be the relation.
+        if (sql.trimStart().toUpperCase().startsWith('SELECT')) return [PERSISTED_PERSONNEL_ROW];
         return { affectedRows: 1 };
       });
+    }
 
-      const mockParams = {
-        dataType: 'personnel',
-        slugs: [TEST_SCHEMA, 'personnelID']
-      };
+    function personnelPatchRequest(censusActive: boolean): NextRequest {
+      return new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          newRow: { ...PERSONNEL_GRID_ROW, censusActive },
+          oldRow: PERSONNEL_GRID_ROW
+        })
+      });
+    }
 
-      await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
+    it('creates the census relation when the grid toggles censusActive on', async () => {
+      await useRealMapper();
+      mockPersonnelRelationQueries(null);
 
-      // Should create the missing census/personnel relation.
-      expect(mockConnectionManager.executeQuery).toHaveBeenCalled();
+      const response = await PATCH(personnelPatchRequest(true), {
+        params: Promise.resolve({ dataType: 'personnel', slugs: [TEST_SCHEMA, 'personnelID'] })
+      });
+
+      expect(response.status).toBe(HTTPResponses.OK);
       const queries = mockConnectionManager.executeQuery.mock.calls.map((call: any) => call[0]);
       const hasInsertQuery = queries.some((q: string) => typeof q === 'string' && q.includes('INSERT INTO') && q.includes('censusactivepersonnel'));
-      expect(hasInsertQuery).toBe(true);
+      expect(hasInsertQuery, 'toggling censusActive on must write the relation, not silently no-op').toBe(true);
+
       const auditRows = changelogRows(mockConnectionManager);
       expect(auditRows).toHaveLength(1);
       expect(auditRows[0].tableName).toBe('censusactivepersonnel');
-      expect(auditRows[0].recordID).toBe('91');
+      expect(auditRows[0].operation).toBe('INSERT');
+      expect(auditRows[0].recordID).toBe(String(SEEDED_RELATION_ID));
+    });
+
+    it('removes the census relation when the grid toggles censusActive off', async () => {
+      await useRealMapper();
+      mockPersonnelRelationQueries({ CAPID: SEEDED_RELATION_ID, CensusID: 1, PersonnelID: 1 });
+
+      const response = await PATCH(personnelPatchRequest(false), {
+        params: Promise.resolve({ dataType: 'personnel', slugs: [TEST_SCHEMA, 'personnelID'] })
+      });
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const queries = mockConnectionManager.executeQuery.mock.calls.map((call: any) => call[0]);
+      const hasDeleteQuery = queries.some((q: string) => typeof q === 'string' && q.trimStart().toUpperCase().startsWith('DELETE'));
+      expect(hasDeleteQuery, 'toggling censusActive off must remove the relation').toBe(true);
+
+      const auditRows = changelogRows(mockConnectionManager);
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0].tableName).toBe('censusactivepersonnel');
+      expect(auditRows[0].operation).toBe('DELETE');
+      expect(auditRows[0].newRowState, 'a removal has no after-state').toBeNull();
+    });
+
+    it('rejects a censusActive flag that is not a boolean', async () => {
+      await useRealMapper();
+      mockPersonnelRelationQueries(null);
+
+      const request = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          newRow: { ...PERSONNEL_GRID_ROW, censusActive: 'yes' },
+          oldRow: PERSONNEL_GRID_ROW
+        })
+      });
+      const response = await PATCH(request, {
+        params: Promise.resolve({ dataType: 'personnel', slugs: [TEST_SCHEMA, 'personnelID'] })
+      });
+
+      expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+      expect(changelogRows(mockConnectionManager)).toHaveLength(0);
     });
 
     it('should skip personnel census-activity updates when CensusActive is not provided', async () => {
