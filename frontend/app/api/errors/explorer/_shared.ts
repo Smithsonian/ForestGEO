@@ -65,7 +65,7 @@ interface ContradictionInfo {
   relatedMeasurementIDs: number[];
 }
 
-interface GroupedErrorRow {
+export interface GroupedErrorRow {
   baseRow: ErrorExplorerRow;
   allErrors: ErrorDetailRecord[];
   contradictions: ContradictionInfo[];
@@ -519,6 +519,54 @@ export async function queryErrorExplorer(connectionManager: ExplorerConnection, 
     totalRows: filteredRows.length,
     summary: buildSummary(filteredRows, request.filters)
   };
+}
+
+export interface ErrorExportRow {
+  CoreMeasurementID: number;
+  TreeTag: string;
+  StemTag: string;
+  SpeciesCode: string;
+  QuadratName: string;
+  MeasurementDate: string;
+  MeasuredDBH: number | '';
+  MeasuredHOM: number | '';
+  ErrorSource: string;
+  ErrorCode: string;
+  ErrorMessage: string;
+  PriorCensusID: number | '';
+  PriorDBH: number | '';
+  PriorHOM: number | '';
+  HOMChanged: 'true' | 'false' | '';
+}
+
+// One row per error occurrence (not per measurement) — a measurement with three
+// unresolved errors produces three CSV rows, each carrying its own comparison
+// context. Sort mirrors queryErrorExplorer's unfiltered grid order so the
+// export reads the same top-to-bottom as the grid the user was looking at.
+export function buildErrorExportRows(groupedRows: Map<number, GroupedErrorRow>, filters: ErrorExplorerFilters): ErrorExportRow[] {
+  return buildFilteredRows(groupedRows, filters)
+    .sort(sortRows)
+    .flatMap(row =>
+      materializeMatchingErrors(row, filters).map(
+        (error): ErrorExportRow => ({
+          CoreMeasurementID: Number(row.baseRow.coreMeasurementID),
+          TreeTag: row.baseRow.treeTag ?? '',
+          StemTag: row.baseRow.stemTag ?? '',
+          SpeciesCode: row.baseRow.speciesCode ?? '',
+          QuadratName: row.baseRow.quadratName ?? '',
+          MeasurementDate: row.baseRow.measurementDate ?? '',
+          MeasuredDBH: row.baseRow.measuredDBH ?? '',
+          MeasuredHOM: row.baseRow.measuredHOM ?? '',
+          ErrorSource: error.source,
+          ErrorCode: error.code,
+          ErrorMessage: error.message,
+          PriorCensusID: error.comparison?.priorCensusID ?? '',
+          PriorDBH: error.comparison?.priorDBH ?? '',
+          PriorHOM: error.comparison?.priorHOM ?? '',
+          HOMChanged: error.comparison ? (error.comparison.homChanged ? 'true' : 'false') : ''
+        })
+      )
+    );
 }
 
 export async function buildErrorExplorerFacets(

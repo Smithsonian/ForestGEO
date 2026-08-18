@@ -120,6 +120,7 @@ export const ROUTE_POLICIES = {
   'changes/explorer/query': 'site-scoped',
   // Errors / validation explorer
   'errors/explorer/details/[measurementID]': 'site-scoped',
+  'errors/explorer/export': 'site-scoped',
   'errors/explorer/facets': 'site-scoped',
   'errors/explorer/query': 'site-scoped',
   // CMP revalidation

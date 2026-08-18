@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // row set, fixed in StyledDataGridMock.
 configure({ asyncUtilTimeout: 5000 });
 
-import { getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorsexplorer';
+import { formatOptionalMeasurement, getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorsexplorer';
 import type { EditPlan } from '@/config/editplan/types';
 import type { UseEditPreviewFlowReturn } from '@/app/hooks/useEditPreviewFlow';
 
@@ -91,6 +91,20 @@ describe('ErrorsExplorer — Codes column helpers', () => {
 
     it('flags rows where uploaded codes contain invalid or dropped values', () => {
       expect(hasCodesMismatch({ attributes: 'D', rawCodes: 'D,MX' })).toBe(true);
+    });
+  });
+
+  describe('formatOptionalMeasurement', () => {
+    it('renders null as an empty string rather than "0.00"', () => {
+      expect(formatOptionalMeasurement(null)).toBe('');
+    });
+
+    it('formats a real measurement to two decimal places', () => {
+      expect(formatOptionalMeasurement(12.5)).toBe('12.50');
+    });
+
+    it('renders zero as "0.00", not blank — zero is a real measured value', () => {
+      expect(formatOptionalMeasurement(0)).toBe('0.00');
     });
   });
 });
