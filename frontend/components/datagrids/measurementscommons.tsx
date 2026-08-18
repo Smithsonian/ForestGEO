@@ -1429,7 +1429,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                   color="danger"
                   variant="solid"
                   sx={{
-                    color: 'error.main',
                     fontSize: '0.75rem',
                     mt: 1,
                     whiteSpace: 'normal',

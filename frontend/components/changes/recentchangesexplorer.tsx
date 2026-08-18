@@ -121,7 +121,7 @@ function DiffBlock({ diffs }: { diffs: DiffEntry[] }) {
             >
               {formatDiffValue(diff.oldValue)}
             </Box>
-            <Typography sx={{ color: 'neutral.600', fontFamily: 'inherit', fontSize: 'inherit' }}>→</Typography>
+            <Typography sx={{ color: 'text.tertiary', fontFamily: 'inherit', fontSize: 'inherit' }}>→</Typography>
             <Box
               component="span"
               sx={{
@@ -221,8 +221,8 @@ function BatchInsertCard({ batch }: { batch: BatchInsertGroup }) {
               INSERT
             </Chip>
             <Typography level="title-sm">{batch.tableName}</Typography>
-            <Typography sx={{ color: 'neutral.600' }}>·</Typography>
-            <Typography level="body-sm" sx={{ color: 'success.500', fontWeight: 500 }}>
+            <Typography sx={{ color: 'text.tertiary' }}>·</Typography>
+            <Typography level="body-sm" sx={{ color: 'success.400', fontWeight: 500 }}>
               {batch.count} rows uploaded
             </Typography>
           </Stack>

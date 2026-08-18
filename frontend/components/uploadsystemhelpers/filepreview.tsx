@@ -137,7 +137,7 @@ export default function FilePreview({ file, expectedHeaders, onDelimiterChange, 
             <Box sx={{ mt: 2 }}>
               <Typography level="body-xs" color="neutral">
                 <strong>Legend:</strong>
-                <Typography component="span" sx={{ color: 'success.500', ml: 1 }}>
+                <Typography component="span" sx={{ color: 'success.400', ml: 1 }}>
                   Green headers match expected columns
                 </Typography>
               </Typography>
@@ -155,7 +155,7 @@ export default function FilePreview({ file, expectedHeaders, onDelimiterChange, 
                 {' | '}
                 <strong>Expected columns:</strong> {expectedHeaders.length}
                 {previewData[0]?.length !== expectedHeaders.length && (
-                  <Typography component="span" sx={{ color: 'warning.500', ml: 1 }}>
+                  <Typography component="span" sx={{ color: 'warning.400', ml: 1 }}>
                     ⚠ Column count mismatch
                   </Typography>
                 )}

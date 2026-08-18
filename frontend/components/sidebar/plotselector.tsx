@@ -113,8 +113,8 @@ export default function PlotSelector() {
             px: 1.5
           }}
         >
-          <CheckCircle sx={{ fontSize: 16, color: 'success.500' }} />
-          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.500', fontWeight: 'lg' }}>
+          <CheckCircle sx={{ fontSize: 16, color: 'success.400' }} />
+          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.400', fontWeight: 'lg' }}>
             With Quadrats ({plotsWithQuadrats.length})
           </Typography>
         </ListItem>

@@ -432,7 +432,7 @@ function AddCensusCard({ onAdd }: { onAdd: () => void }) {
         >
           <AddIcon sx={{ fontSize: 28 }} />
         </Avatar>
-        <Typography level="title-md" sx={{ fontWeight: 600, color: 'primary.700' }}>
+        <Typography level="title-md" sx={{ fontWeight: 600, color: 'primary.300' }}>
           Start New Census
         </Typography>
         <Typography level="body-sm" color="neutral">

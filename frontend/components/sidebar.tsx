@@ -481,8 +481,8 @@ export default function Sidebar(props: SidebarProps) {
             px: 1.5
           }}
         >
-          <CheckCircle sx={{ fontSize: 16, color: 'success.500' }} />
-          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.500', fontWeight: 'lg' }}>
+          <CheckCircle sx={{ fontSize: 16, color: 'success.400' }} />
+          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.400', fontWeight: 'lg' }}>
             With Quadrats ({plotsWithQuadrats.length})
           </Typography>
         </ListItem>
@@ -887,7 +887,7 @@ export default function Sidebar(props: SidebarProps) {
                           sx={{
                             minWidth: 28,
                             minHeight: 28,
-                            '&:hover': { bgcolor: 'danger.softBg', color: 'danger.500' }
+                            '&:hover': { bgcolor: 'danger.softBg', color: 'danger.400' }
                           }}
                           aria-label="Clear plot selection"
                         >
@@ -917,7 +917,7 @@ export default function Sidebar(props: SidebarProps) {
                               sx={{
                                 minWidth: 28,
                                 minHeight: 28,
-                                '&:hover': { bgcolor: 'danger.softBg', color: 'danger.500' }
+                                '&:hover': { bgcolor: 'danger.softBg', color: 'danger.400' }
                               }}
                               aria-label="Clear census selection"
                             >
