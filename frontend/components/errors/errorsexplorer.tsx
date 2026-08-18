@@ -914,6 +914,43 @@ export default function ErrorsExplorer() {
         valueFormatter: (value: number | null | undefined) => Number(value ?? 0).toFixed(2)
       },
       {
+        field: 'priorDBH',
+        headerName: 'Prior DBH',
+        width: 100,
+        type: 'number',
+        editable: false,
+        sortable: false,
+        align: 'right',
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => (value == null ? '' : Number(value).toFixed(2))
+      },
+      {
+        field: 'priorHOM',
+        headerName: 'Prior HOM',
+        width: 100,
+        type: 'number',
+        editable: false,
+        sortable: false,
+        align: 'right',
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => (value == null ? '' : Number(value).toFixed(2))
+      },
+      {
+        field: 'homChanged',
+        headerName: 'HOM Changed',
+        width: 130,
+        editable: false,
+        sortable: false,
+        align: 'center',
+        headerAlign: 'center',
+        renderCell: params =>
+          (params.row as ErrorExplorerRow).homChanged ? (
+            <Chip size="sm" color="warning" variant="soft">
+              HOM changed
+            </Chip>
+          ) : null
+      },
+      {
         field: 'description',
         headerName: 'Description',
         minWidth: 220,
@@ -1463,6 +1500,14 @@ export default function ErrorsExplorer() {
                           </Stack>
                         )}
                         {error.procedureName && <Typography level="body-xs">Procedure: {error.procedureName}</Typography>}
+                        {error.comparison && (
+                          <Typography level="body-xs" sx={{ color: 'text.tertiary' }}>
+                            {error.comparison.priorHOM == null || details.row?.measuredHOM == null
+                              ? 'Comparison unavailable'
+                              : `Prior census ${error.comparison.priorCensusID ?? '—'}: DBH ${error.comparison.priorDBH ?? '—'}, HOM ${error.comparison.priorHOM}` +
+                                (error.comparison.homChanged ? ' (HOM changed)' : '')}
+                          </Typography>
+                        )}
                       </Stack>
                     </Card>
                   ))}
