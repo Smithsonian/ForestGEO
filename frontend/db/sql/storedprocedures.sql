@@ -835,110 +835,134 @@ BEGIN
     DROP TEMPORARY TABLE IF EXISTS dbh_change_candidates;
     CREATE TEMPORARY TABLE dbh_change_candidates
     (
-        CoreMeasurementID    int        NOT NULL PRIMARY KEY,
-        HasGrowthViolation   tinyint(1) NOT NULL,
-        HasShrinkageViolation tinyint(1) NOT NULL,
-        KEY idx_growth_violation (HasGrowthViolation, CoreMeasurementID),
-        KEY idx_shrink_violation (HasShrinkageViolation, CoreMeasurementID)
+        CoreMeasurementID int            NOT NULL,
+        ErrorID           int            NOT NULL,
+        PriorCensusID     int            NULL,
+        PriorDBH          decimal(12, 6) NULL,
+        PriorHOM          decimal(12, 6) NULL,
+        PRIMARY KEY (CoreMeasurementID, ErrorID)
     );
 
-    INSERT INTO dbh_change_candidates (CoreMeasurementID, HasGrowthViolation, HasShrinkageViolation)
-    SELECT cm_present.CoreMeasurementID,
-           MAX(CASE
-                   WHEN (cm_present.MeasuredDBH - cm_past.MeasuredDBH) * (CASE p.DefaultDBHUnits
-                                                                              WHEN 'km' THEN 1000000
-                                                                              WHEN 'hm' THEN 100000
-                                                                              WHEN 'dam' THEN 10000
-                                                                              WHEN 'm' THEN 1000
-                                                                              WHEN 'dm' THEN 100
-                                                                              WHEN 'cm' THEN 10
-                                                                              WHEN 'mm' THEN 1
-                                                                              ELSE 1 END) > 65 THEN 1
-                   ELSE 0
-               END) AS HasGrowthViolation,
-           MAX(CASE
-                   WHEN cm_present.MeasuredDBH < (cm_past.MeasuredDBH * 0.95) THEN 1
-                   ELSE 0
-               END) AS HasShrinkageViolation
-    FROM coremeasurements cm_present
-             JOIN census c_present
-                  ON cm_present.CensusID = c_present.CensusID
-                      AND c_present.IsActive = 1
-             JOIN stems s_present
-                  ON s_present.StemGUID = cm_present.StemGUID
-                      AND s_present.CensusID = cm_present.CensusID
-                      AND s_present.IsActive = 1
-             JOIN trees t_present
-                  ON t_present.TreeID = s_present.TreeID
-                      AND t_present.CensusID = s_present.CensusID
-                      AND t_present.IsActive = 1
-             JOIN plots p
-                  ON c_present.PlotID = p.PlotID
-             JOIN census c_past
-                  ON c_past.PlotID = c_present.PlotID
-                      AND c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
-                      AND c_past.IsActive = 1
-             JOIN trees t_past
-                  ON t_past.CensusID = c_past.CensusID
-                      AND t_past.TreeTag = t_present.TreeTag
-                      AND t_past.IsActive = 1
-             JOIN stems s_past
-                  ON s_past.TreeID = t_past.TreeID
-                      AND s_past.CensusID = c_past.CensusID
-                      AND s_past.StemTag = s_present.StemTag
-                      AND s_past.IsActive = 1
-             JOIN coremeasurements cm_past
-                  ON cm_past.StemGUID = s_past.StemGUID
-                      AND cm_past.CensusID = c_past.CensusID
-                      AND cm_past.IsActive = 1
-                      AND cm_past.IsValidated = 1
-    WHERE cm_present.IsActive = 1
-      AND cm_present.IsValidated IS NULL
-      AND (p_CensusID IS NULL OR cm_present.CensusID = p_CensusID)
-      AND (p_PlotID IS NULL OR c_present.PlotID = p_PlotID)
-      AND cm_past.MeasuredDBH > 0
-      AND NOT EXISTS (
-        SELECT 1
-        FROM cmattributes cma_present
-                 JOIN attributes a_present
-                      ON a_present.Code = cma_present.Code
-                          AND a_present.IsActive = 1
-        WHERE cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
-          AND a_present.Status IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted')
-    )
-      AND NOT EXISTS (
-        SELECT 1
-        FROM cmattributes cma_past
-                 JOIN attributes a_past
-                      ON a_past.Code = cma_past.Code
-                          AND a_past.IsActive = 1
-        WHERE cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
-          AND a_past.Status IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted')
-    )
-    GROUP BY cm_present.CoreMeasurementID;
+    -- One row per (measurement, error kind): the single prior comparison recorded as
+    -- this occurrence's provenance. Ties from malformed historical data (several
+    -- violating prior matches) resolve to the greatest violating
+    -- cm_past.CoreMeasurementID — never a prior row that did not itself violate.
+    INSERT INTO dbh_change_candidates (CoreMeasurementID, ErrorID, PriorCensusID, PriorDBH, PriorHOM)
+    SELECT ranked.CoreMeasurementID, ranked.ErrorID, ranked.PriorCensusID, ranked.PriorDBH, ranked.PriorHOM
+    FROM (
+        SELECT pair.CoreMeasurementID,
+               pair.ErrorID,
+               pair.PriorCensusID,
+               pair.PriorDBH,
+               pair.PriorHOM,
+               ROW_NUMBER() OVER (PARTITION BY pair.CoreMeasurementID, pair.ErrorID
+                                  ORDER BY pair.PriorCoreMeasurementID DESC) AS rn
+        FROM (
+            SELECT cm_present.CoreMeasurementID,
+                   err.ErrorID,
+                   cm_past.CensusID          AS PriorCensusID,
+                   cm_past.MeasuredDBH       AS PriorDBH,
+                   cm_past.MeasuredHOM       AS PriorHOM,
+                   cm_past.CoreMeasurementID AS PriorCoreMeasurementID
+            FROM coremeasurements cm_present
+                     JOIN census c_present
+                          ON cm_present.CensusID = c_present.CensusID
+                              AND c_present.IsActive = 1
+                     JOIN stems s_present
+                          ON s_present.StemGUID = cm_present.StemGUID
+                              AND s_present.CensusID = cm_present.CensusID
+                              AND s_present.IsActive = 1
+                     JOIN trees t_present
+                          ON t_present.TreeID = s_present.TreeID
+                              AND t_present.CensusID = s_present.CensusID
+                              AND t_present.IsActive = 1
+                     JOIN plots p
+                          ON c_present.PlotID = p.PlotID
+                     JOIN census c_past
+                          ON c_past.PlotID = c_present.PlotID
+                              AND c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
+                              AND c_past.IsActive = 1
+                     JOIN trees t_past
+                          ON t_past.CensusID = c_past.CensusID
+                              AND t_past.TreeTag = t_present.TreeTag
+                              AND t_past.IsActive = 1
+                     JOIN stems s_past
+                          ON s_past.TreeID = t_past.TreeID
+                              AND s_past.CensusID = c_past.CensusID
+                              AND s_past.StemTag = s_present.StemTag
+                              AND s_past.IsActive = 1
+                     JOIN coremeasurements cm_past
+                          ON cm_past.StemGUID = s_past.StemGUID
+                              AND cm_past.CensusID = c_past.CensusID
+                              AND cm_past.IsActive = 1
+                              AND cm_past.IsValidated = 1
+                     JOIN (SELECT vGrowthErrorID AS ErrorID, 'growth' AS Kind FROM DUAL WHERE vRunGrowth = 1
+                           UNION ALL
+                           SELECT vShrinkageErrorID, 'shrinkage' FROM DUAL WHERE vRunShrinkage = 1) err
+            WHERE cm_present.IsActive = 1
+              AND cm_present.IsValidated IS NULL
+              AND (p_CensusID IS NULL OR cm_present.CensusID = p_CensusID)
+              AND (p_PlotID IS NULL OR c_present.PlotID = p_PlotID)
+              AND cm_past.MeasuredDBH > 0
+              AND NOT EXISTS (
+                SELECT 1
+                FROM cmattributes cma_present
+                         JOIN attributes a_present
+                              ON a_present.Code = cma_present.Code
+                                  AND a_present.IsActive = 1
+                WHERE cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
+                  AND a_present.Status IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted')
+            )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM cmattributes cma_past
+                         JOIN attributes a_past
+                              ON a_past.Code = cma_past.Code
+                                  AND a_past.IsActive = 1
+                WHERE cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
+                  AND a_past.Status IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted')
+            )
+              AND (
+                    (err.Kind = 'growth' AND
+                     (cm_present.MeasuredDBH - cm_past.MeasuredDBH) * (CASE p.DefaultDBHUnits
+                                                                           WHEN 'km' THEN 1000000
+                                                                           WHEN 'hm' THEN 100000
+                                                                           WHEN 'dam' THEN 10000
+                                                                           WHEN 'm' THEN 1000
+                                                                           WHEN 'dm' THEN 100
+                                                                           WHEN 'cm' THEN 10
+                                                                           WHEN 'mm' THEN 1
+                                                                           ELSE 1 END) > 65)
+                 OR (err.Kind = 'shrinkage' AND cm_present.MeasuredDBH < (cm_past.MeasuredDBH * 0.95))
+                  )
+        ) pair
+    ) ranked
+    WHERE ranked.rn = 1;
 
     IF vRunGrowth = 1 THEN
-        INSERT INTO measurement_error_log (MeasurementID, ErrorID)
-        SELECT candidate.CoreMeasurementID, vGrowthErrorID
-        FROM dbh_change_candidates candidate
-                 LEFT JOIN measurement_error_log e
-                           ON e.MeasurementID = candidate.CoreMeasurementID
-                               AND e.ErrorID = vGrowthErrorID
-        WHERE candidate.HasGrowthViolation = 1
-          AND e.MeasurementID IS NULL
-        ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;
+        INSERT INTO measurement_error_log (MeasurementID, ErrorID, PriorCensusID, PriorDBH, PriorHOM)
+        SELECT CoreMeasurementID, ErrorID, PriorCensusID, PriorDBH, PriorHOM
+        FROM dbh_change_candidates
+        WHERE ErrorID = vGrowthErrorID
+        ON DUPLICATE KEY UPDATE
+            IsResolved    = FALSE,
+            ResolvedAt    = NULL,
+            PriorCensusID = VALUES(PriorCensusID),
+            PriorDBH      = VALUES(PriorDBH),
+            PriorHOM      = VALUES(PriorHOM);
     END IF;
 
     IF vRunShrinkage = 1 THEN
-        INSERT INTO measurement_error_log (MeasurementID, ErrorID)
-        SELECT candidate.CoreMeasurementID, vShrinkageErrorID
-        FROM dbh_change_candidates candidate
-                 LEFT JOIN measurement_error_log e
-                           ON e.MeasurementID = candidate.CoreMeasurementID
-                               AND e.ErrorID = vShrinkageErrorID
-        WHERE candidate.HasShrinkageViolation = 1
-          AND e.MeasurementID IS NULL
-        ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;
+        INSERT INTO measurement_error_log (MeasurementID, ErrorID, PriorCensusID, PriorDBH, PriorHOM)
+        SELECT CoreMeasurementID, ErrorID, PriorCensusID, PriorDBH, PriorHOM
+        FROM dbh_change_candidates
+        WHERE ErrorID = vShrinkageErrorID
+        ON DUPLICATE KEY UPDATE
+            IsResolved    = FALSE,
+            ResolvedAt    = NULL,
+            PriorCensusID = VALUES(PriorCensusID),
+            PriorDBH      = VALUES(PriorDBH),
+            PriorHOM      = VALUES(PriorHOM);
     END IF;
 
     DROP TEMPORARY TABLE IF EXISTS dbh_change_candidates;
