@@ -30,9 +30,10 @@ const theme = extendTheme({
       palette: {
         // Override default text colors to meet WCAG AA accessibility standards
         text: {
-          primary: designTokens.colors.earthBrown[200], // #e7e5e4 - high contrast on black
-          secondary: designTokens.colors.earthBrown[300], // #d6d3d1 - 7.8:1 contrast
-          tertiary: designTokens.colors.earthBrown[300]
+          primary: designTokens.colors.earthBrown[100], // #f5f5f4 - highest contrast on black
+          secondary: designTokens.colors.earthBrown[200], // #e7e5e4
+          tertiary: designTokens.colors.earthBrown[300], // #d6d3d1
+          icon: designTokens.colors.earthBrown[300]
         },
 
         // Background palette
