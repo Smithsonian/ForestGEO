@@ -923,6 +923,9 @@ create table if not exists measurement_error_log
     CreatedAt     datetime default CURRENT_TIMESTAMP null,
     IsResolved    tinyint(1) default 0             not null,
     ResolvedAt    datetime                          null,
+    PriorCensusID int                               null,
+    PriorDBH      decimal(12, 6)                    null,
+    PriorHOM      decimal(12, 6)                    null,
     primary key (MeasurementID, ErrorID),
     constraint measurement_error_log_coremeasurements_fk
         foreign key (MeasurementID) references coremeasurements (CoreMeasurementID)
