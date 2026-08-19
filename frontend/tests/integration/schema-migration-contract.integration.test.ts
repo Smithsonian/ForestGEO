@@ -88,6 +88,10 @@ describe('Stale-schema migrate + verify pipeline', () => {
     // lacks the storage columns, their lookup index, and the conflict error code.
     await connection.query('ALTER TABLE stems DROP COLUMN PublishedStemID');
     await connection.query('ALTER TABLE coremeasurements DROP COLUMN RawPublishedStemID');
+    // Reproduce a partially-applied prior-snapshot migration: PriorCensusID is
+    // present, while the two value columns are missing. The original migration
+    // only checked PriorCensusID, so the follow-up must repair both independently.
+    await connection.query('ALTER TABLE measurement_error_log DROP COLUMN PriorHOM, DROP COLUMN PriorDBH');
     await connection.query('DELETE FROM measurement_errors WHERE ErrorSource = ? AND ErrorCode = ?', ['ingestion', PUBLISHED_STEMID_CONFLICT_CODE]);
     // The 2025-09 identity rename (StemID => StemGUID) never migrated the
     // viewfulltable caches on ctfs-migrated schemas. Reproduce that shape, with
@@ -188,6 +192,16 @@ describe('Stale-schema migrate + verify pipeline', () => {
     }
     expect(audit.ok).toBe(true);
     expect(audit.collationViolations.some(v => v.includes(LEGACY_COLLATION))).toBe(true);
+
+    const [repairedSnapshotColumns] = await connection.query<RowDataPacket[]>(
+      `SELECT COLUMN_NAME
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ?
+         AND TABLE_NAME = 'measurement_error_log'
+         AND COLUMN_NAME IN ('PriorCensusID', 'PriorDBH', 'PriorHOM')`,
+      [schema]
+    );
+    expect(repairedSnapshotColumns.map(row => String(row.COLUMN_NAME)).sort()).toEqual(['PriorCensusID', 'PriorDBH', 'PriorHOM']);
 
     // The error catalog is outside the structural contract, so audit.ok cannot
     // speak for it — but bulkingestionprocess writes this code, so a repair that

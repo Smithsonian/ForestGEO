@@ -75,5 +75,9 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-08-17-01-add-error-log-prior-snapshot',
     file: 'schema-contract-repair/2026-08-17-01-add-error-log-prior-snapshot.sql'
+  },
+  {
+    id: '2026-08-19-02-repair-error-log-prior-snapshot-columns',
+    file: 'schema-contract-repair/2026-08-19-02-repair-error-log-prior-snapshot-columns.sql'
   }
 ] as const;
