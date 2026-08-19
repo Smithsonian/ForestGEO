@@ -45,6 +45,7 @@ import {
   CONTRADICTION_LABELS,
   DEFAULT_ERROR_EXPLORER_FILTERS,
   ErrorExplorerDetailsResponse,
+  ErrorComparisonContext,
   ErrorExplorerFacetsResponse,
   ErrorExplorerFilters,
   ErrorExplorerQueryResponse,
@@ -207,6 +208,14 @@ export function getMaterializedCodesValue(row?: Partial<CodesRow> | null): strin
 
 export function formatOptionalMeasurement(value: number | null | undefined): string {
   return value == null ? '' : Number(value).toFixed(2);
+}
+
+export function formatErrorComparison(comparison: ErrorComparisonContext, currentHOM: number | null | undefined): string {
+  if (comparison.priorCensusID == null && comparison.priorDBH == null && comparison.priorHOM == null) return 'Comparison unavailable';
+  return (
+    `Prior census ${comparison.priorCensusID ?? '—'}: DBH ${comparison.priorDBH ?? '—'}, HOM ${comparison.priorHOM ?? '—'}` +
+    (comparison.priorHOM != null && currentHOM != null && comparison.homChanged ? ' (HOM changed)' : '')
+  );
 }
 
 export function hasCodesMismatch(row?: Partial<CodesRow> | null): boolean {
@@ -456,6 +465,8 @@ export default function ErrorsExplorer() {
     }
     setIsExportingCsv(true);
     setErrorMessage(null);
+    let objectUrl: string | null = null;
+    let anchor: HTMLAnchorElement | null = null;
     try {
       const response = await fetch('/api/errors/explorer/export', {
         method: 'POST',
@@ -474,18 +485,18 @@ export default function ErrorsExplorer() {
       }
       const blob = await response.blob();
       const filename = extractFilenameFromContentDisposition(response.headers.get('Content-Disposition'));
-      const objectUrl = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
+      objectUrl = URL.createObjectURL(blob);
+      anchor = document.createElement('a');
       anchor.href = objectUrl;
       anchor.download = filename;
       document.body.appendChild(anchor);
       anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(objectUrl);
     } catch (error) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
       setErrorMessage(`Export failed: ${errorObj.message}`);
     } finally {
+      anchor?.remove();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
       setIsExportingCsv(false);
     }
   }, [filters, resolveExplorerScope]);
@@ -1575,10 +1586,7 @@ export default function ErrorsExplorer() {
                         {error.procedureName && <Typography level="body-xs">Procedure: {error.procedureName}</Typography>}
                         {error.comparison && (
                           <Typography level="body-xs" sx={{ color: 'text.tertiary' }}>
-                            {error.comparison.priorHOM == null || details.row?.measuredHOM == null
-                              ? 'Comparison unavailable'
-                              : `Prior census ${error.comparison.priorCensusID ?? '—'}: DBH ${error.comparison.priorDBH ?? '—'}, HOM ${error.comparison.priorHOM}` +
-                                (error.comparison.homChanged ? ' (HOM changed)' : '')}
+                            {formatErrorComparison(error.comparison, details.row?.measuredHOM)}
                           </Typography>
                         )}
                       </Stack>

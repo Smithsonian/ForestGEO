@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // row set, fixed in StyledDataGridMock.
 configure({ asyncUtilTimeout: 5000 });
 
-import { formatOptionalMeasurement, getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorsexplorer';
+import { formatErrorComparison, formatOptionalMeasurement, getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorsexplorer';
 import type { EditPlan } from '@/config/editplan/types';
 import type { UseEditPreviewFlowReturn } from '@/app/hooks/useEditPreviewFlow';
 
@@ -106,6 +106,12 @@ describe('ErrorsExplorer — Codes column helpers', () => {
     it('renders zero as "0.00", not blank — zero is a real measured value', () => {
       expect(formatOptionalMeasurement(0)).toBe('0.00');
     });
+  });
+});
+
+describe('formatErrorComparison', () => {
+  it('keeps prior DBH visible when either HOM value is unavailable', () => {
+    expect(formatErrorComparison({ priorCensusID: 4, priorDBH: 10.5, priorHOM: null, homChanged: false }, null)).toBe('Prior census 4: DBH 10.5, HOM —');
   });
 });
 
