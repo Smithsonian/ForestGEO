@@ -539,6 +539,17 @@ export interface ErrorExportRow {
   HOMChanged: 'true' | 'false' | '';
 }
 
+// A blank HOMChanged means "the two HOM values were never comparable", never
+// "compared and unchanged". comparison.homChanged is a two-state display flag —
+// false there only means "show no HOM-changed warning" — so the export cannot
+// print it verbatim without asserting a comparison that may not have happened:
+// legacy Validation 1/2 rows predate the prior-census snapshot entirely, and
+// either census may simply carry no HOM.
+function formatHOMChangedForExport(comparison: ErrorComparisonContext | null, currentHOM: number | null | undefined): ErrorExportRow['HOMChanged'] {
+  if (comparison?.priorHOM == null || currentHOM == null) return '';
+  return comparison.homChanged ? 'true' : 'false';
+}
+
 // One row per error occurrence (not per measurement) — a measurement with three
 // unresolved errors produces three CSV rows, each carrying its own comparison
 // context. Sort mirrors queryErrorExplorer's unfiltered grid order so the
@@ -563,7 +574,7 @@ export function buildErrorExportRows(groupedRows: Map<number, GroupedErrorRow>, 
           PriorCensusID: error.comparison?.priorCensusID ?? '',
           PriorDBH: error.comparison?.priorDBH ?? '',
           PriorHOM: error.comparison?.priorHOM ?? '',
-          HOMChanged: error.comparison ? (error.comparison.homChanged ? 'true' : 'false') : ''
+          HOMChanged: formatHOMChangedForExport(error.comparison, row.baseRow.measuredHOM)
         })
       )
     );

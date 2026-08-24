@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupErrorRowsForTest, toDisplayRowForTest, RawErrorOccurrenceRow } from './_shared';
+import { buildErrorExportRows, groupErrorRowsForTest, toDisplayRowForTest, RawErrorOccurrenceRow } from './_shared';
 import { ErrorExplorerFilters } from '@/config/errorsexplorer';
 
 // DEFAULT_FILTERS mirrors the all-pass literal buildErrorExplorerDetails passes to
@@ -122,5 +122,69 @@ describe('DBH growth/shrinkage comparison context', () => {
     const comparison = grouped.get(10)!.allErrors[0].comparison;
 
     expect(comparison?.homChanged).toBe(false);
+  });
+});
+
+describe('HOMChanged in the CSV export', () => {
+  function exportHOMChanged(overrides: Partial<RawErrorOccurrenceRow> = {}): string {
+    const grouped = groupErrorRowsForTest([rawRow(overrides)], new Map());
+    const rows = buildErrorExportRows(grouped, DEFAULT_FILTERS);
+    expect(rows).toHaveLength(1);
+    return rows[0].HOMChanged;
+  }
+
+  it('reports true only when both HOM values are present and differ', () => {
+    expect(exportHOMChanged({ PriorHOM: 1.3, MeasuredHOM: 2.6 })).toBe('true');
+  });
+
+  it('reports false when both HOM values are present and equal', () => {
+    expect(exportHOMChanged({ PriorHOM: 1.3, MeasuredHOM: 1.3 })).toBe('false');
+  });
+
+  // The bug this guards: a legacy row carries no snapshot at all, so every
+  // Prior* column exports blank. Printing "false" beside them would claim a
+  // comparison that never ran.
+  it('leaves HOMChanged blank for a legacy row that predates the prior-census snapshot', () => {
+    const legacy = { PriorCensusID: null, PriorDBH: null, PriorHOM: null };
+    const grouped = groupErrorRowsForTest([rawRow(legacy as Partial<RawErrorOccurrenceRow>)], new Map());
+    const row = buildErrorExportRows(grouped, DEFAULT_FILTERS)[0];
+
+    expect(row.PriorCensusID).toBe('');
+    expect(row.PriorDBH).toBe('');
+    expect(row.PriorHOM).toBe('');
+    expect(row.HOMChanged).toBe('');
+  });
+
+  it.each([
+    ['the prior census recorded no HOM', { PriorHOM: null }],
+    ['the current measurement has no HOM', { MeasuredHOM: null }],
+    ['neither census recorded a HOM', { PriorHOM: null, MeasuredHOM: null }]
+  ])('leaves HOMChanged blank when %s', (_label, overrides) => {
+    expect(exportHOMChanged(overrides as Partial<RawErrorOccurrenceRow>)).toBe('');
+  });
+
+  // Prior DBH stays exportable even when HOM is not comparable -- the DBH
+  // comparison is what the growth/shrinkage finding was actually based on.
+  it('still exports the prior DBH when only the HOM is unavailable', () => {
+    const grouped = groupErrorRowsForTest([rawRow({ PriorHOM: null })], new Map());
+    const row = buildErrorExportRows(grouped, DEFAULT_FILTERS)[0];
+
+    expect(row.PriorDBH).toBe(50);
+    expect(row.PriorHOM).toBe('');
+    expect(row.HOMChanged).toBe('');
+  });
+
+  it('leaves HOMChanged blank for a non-DBH-change occurrence, which has no comparison at all', () => {
+    expect(
+      exportHOMChanged({
+        ErrorSource: 'ingestion',
+        ErrorCode: 'INVALID_QUADRAT',
+        DisplayMessage: 'bad quadrat',
+        ValidationCriteria: null,
+        PriorCensusID: null,
+        PriorDBH: null,
+        PriorHOM: null
+      } as Partial<RawErrorOccurrenceRow>)
+    ).toBe('');
   });
 });
