@@ -78,6 +78,24 @@ Trees rarely shrink significantly. Large shrinkage usually indicates measurement
 
 ---
 
+### Reviewing growth and shrinkage findings in View Errors
+
+Both checks compare the current measurement against the same tag/stem in the previous census, so
+View Errors shows that comparison alongside each finding: the **Prior DBH** and **Prior HOM** from
+the earlier census, and an **HOM Changed** chip when the height of measurement differs between the
+two — a changed HOM is a common, legitimate explanation for an apparent shrinkage or growth
+finding, not necessarily a measurement error. An **Export CSV** button on the errors screen exports
+every flagged occurrence, including the prior-census columns, for review outside the application.
+
+Neither check runs at all when the DBH it needs from either census is missing — there is nothing
+to compare, so the row is silently skipped rather than flagged in either direction.
+
+A related check, **Live stem is missing DBH measurement** (Validation ID 13, see the reference
+table below), flags a live stem that carries no DBH at all. It exists but ships **disabled**; ask
+your administrator to enable it if your site wants every live stem to carry a DBH.
+
+---
+
 ## Species Validations
 
 ### Invalid Species Codes

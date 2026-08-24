@@ -39,6 +39,7 @@ Each failed row carries a **consolidated failure reason** built from one or more
 | **Missing required field: SpeciesCode** | Species Code | Supply a species code |
 | **Missing required field: QuadratName** | Quadrat | Supply a quadrat name |
 | **Missing required field: MeasurementDate** | Date | Provide a valid date (`YYYY-MM-DD`) |
+| **Missing required field: LocalX / LocalY** | Coordinates | Coordinates are required on a regular CSV upload too, not just ArcGIS imports — supply `lx` and `ly` for every row |
 | **Invalid species code: "X" not found in database** | Species Code | Add the species under **Stem & Plot Details → Species List**, then re-submit the row |
 | **Invalid quadrat name: "X" not found in database** | Quadrat | Add the quadrat under **Stem & Plot Details → Quadrats**, then re-submit the row |
 | **Invalid LocalX / Invalid LocalY** | Coordinates | A negative coordinate is rejected outright — correct it to a position inside the quadrat |
