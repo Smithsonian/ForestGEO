@@ -1,8 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
-vi.mock('@/config/connectionmanager', () => {
+// Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
+// A 'global' admin passes the per-site access gate; 'forestgeo_testing' is a
+// structurally valid schema, so the guard's isValidSchema check passes too.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
+vi.mock('@/lib/db/connectionmanager', () => {
   const beginTransaction = vi.fn();
   const executeQuery = vi.fn();
   const commitTransaction = vi.fn();
@@ -83,6 +90,7 @@ describe('reingestsinglefailure API route', () => {
           RawX: 1.23,
           RawY: 4.56,
           RawCodes: 'AL',
+          RawPublishedStemID: 5001,
           RawComments: null,
           IsActive: 1
         }
@@ -111,6 +119,8 @@ describe('reingestsinglefailure API route', () => {
 
     const syncCall = calls.find((call: any[]) => String(call[0]).includes('SET orig.CensusID'));
     expect(syncCall).toBeDefined();
+    expect(String(syncCall?.[0])).toContain('orig.RawPublishedStemID');
+    expect(syncCall?.[1]).toContain(5001);
     expect(String(syncCall?.[0])).not.toContain('orig.UploadFileID');
     expect(String(syncCall?.[0])).not.toContain('orig.UploadBatchID');
     expect(String(syncCall?.[0])).not.toContain('orig.SourceRowIndex');

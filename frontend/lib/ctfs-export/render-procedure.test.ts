@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderArtifact, type RenderArtifactInput } from './render-procedure';
+import { renderArtifact, renderRebuildViewFullTableArtifact, type RenderArtifactInput } from './render-procedure';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../csv-to-sql-shared';
 
 const baseInput = (overrides: Partial<RenderArtifactInput> = {}): RenderArtifactInput => ({
@@ -77,7 +77,7 @@ describe('renderArtifact', () => {
     expect(sql).toMatch(/-- Generated: 2026-05-19T12:00:00\.000Z/);
     expect(sql).toMatch(/-- Source schema: forestgeo_test/);
     expect(sql).toMatch(/-- Source app PlotID: 5/);
-    expect(sql).toMatch(/-- Destination CTFS PlotID: 1/);
+    expect(sql).toMatch(/-- Destination Smithsonian PlotID: 1/);
     expect(sql).toMatch(/-- App CensusID: 7/);
     expect(sql).toMatch(/-- PlotCensusNumber: 2024/);
     expect(sql).toMatch(/-- Measurement rows: 1/);
@@ -164,31 +164,44 @@ describe('renderArtifact', () => {
     expect(sql).toMatch(/Stage 10:/);
   });
 
-  it('non-dry-run emits the ViewFullTable rebuild CALL outside the load procedure', () => {
+  it('non-dry-run does NOT emit the ViewFullTable rebuild CALL (D5: rebuild is a separate step)', () => {
     const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
-    // The CALL must run AFTER the load procedure's DROP PROCEDURE: CreateFullView
-    // does DDL (DROP/CREATE TABLE) which would auto-commit and break the load txn.
-    expect(sql).toMatch(/CALL ctfsweb_webuser\.CreateFullView\(DATABASE\(\), 'ViewFullTable'\);/);
-    const callIdx = sql.indexOf("CALL ctfsweb_webuser.CreateFullView(DATABASE(), 'ViewFullTable');");
-    const lastDropIdx = sql.lastIndexOf('DROP PROCEDURE ');
-    expect(callIdx).toBeGreaterThan(lastDropIdx);
+    expect(sql).not.toMatch(/CALL ctfsweb_webuser\.CreateFullView/);
   });
 
-  it('Stage 0 probes for ctfsweb_webuser.CreateFullView before loading anything', () => {
+  it('publish Stage 0 does NOT probe for ctfsweb_webuser.CreateFullView (D5)', () => {
     const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
-    expect(sql).toMatch(/information_schema\.ROUTINES[\s\S]+CreateFullView/);
-    expect(sql).toMatch(/Source creating_ViewFullTable\.sql/);
-    // Probe must come BEFORE the data-load WHERE/JOIN section.
-    const probeIdx = sql.indexOf("ROUTINE_NAME = 'CreateFullView'");
-    const stage1Idx = sql.indexOf('Stage 1:');
-    expect(probeIdx).toBeGreaterThan(0);
-    expect(probeIdx).toBeLessThan(stage1Idx);
+    expect(sql).not.toMatch(/CreateFullView/);
+    expect(sql).not.toMatch(/Source creating_ViewFullTable\.sql/);
   });
 
   it('Stage 0 probes that DBHAttributes no longer has CensusID (post-DBCHANGES2014f)', () => {
     const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
     expect(sql).toMatch(/DBHAttributes still has a CensusID column/);
     expect(sql).toMatch(/apply DBCHANGES2014f\.sql/);
+  });
+
+  it('Stage 0 probes the destination Tree.Tag column width and SIGNALs when narrower than 20', () => {
+    const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
+    expect(sql).toMatch(/information_schema\.COLUMNS[\s\S]+TABLE_NAME = 'Tree'[\s\S]+COLUMN_NAME = 'Tag'/);
+    expect(sql).toMatch(/COALESCE\(_tag_col_width, 0\) < 20/);
+    expect(sql).toMatch(/Destination Tree\.Tag is missing or narrower than 20 chars/);
+  });
+
+  it('the Tree.Tag width probe runs in a reloadDryRun artifact (Stage 0a always emits)', () => {
+    // Regression guard: a dry run against an un-migrated char(10) destination
+    // must surface the width mismatch. Stages 1-10 (and the Stage 5 length
+    // check) are skipped in dry-run, so this Stage 0a probe is the ONLY place
+    // the destination width is verified during a dry run.
+    const { sql } = renderArtifact(baseInput({ reloadDryRun: true, measurementRows: [sampleMeasurement] }));
+    expect(sql).not.toMatch(/Stage 1:/);
+    expect(sql).toMatch(/COALESCE\(_tag_col_width, 0\) < 20/);
+    expect(sql).toMatch(/Destination Tree\.Tag is missing or narrower than 20 chars/);
+  });
+
+  it('declares the _tag_col_width scalar used by the Stage 0 width probe', () => {
+    const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
+    expect(sql).toMatch(/DECLARE _tag_col_width INT DEFAULT 0;/);
   });
 
   it('allowReload=true (non-dry-run) emits Stage 0b but not SAVEPOINT', () => {
@@ -259,5 +272,61 @@ describe('renderArtifact', () => {
     const { sql } = renderArtifact(baseInput({ allowReload: false, reloadDryRun: true }));
     expect(sql).toMatch(/Stage 0b: reload/);
     expect(sql).toMatch(/SAVEPOINT reload_dry/);
+  });
+
+  it('dry-run header includes precondition warnings when provided', () => {
+    const { sql } = renderArtifact(
+      baseInput({
+        reloadDryRun: true,
+        preconditionWarnings: [{ kind: 'not-validated', message: '2 rows not yet validated', coreMeasurementIds: [10, 11] }]
+      })
+    );
+    expect(sql).toMatch(/-- DRY-RUN PRECONDITION WARNINGS \(would block a real publish\):/);
+    expect(sql).toMatch(/--   not-validated - 2 rows not yet validated - listed CoreMeasurementIDs: 10, 11/);
+  });
+
+  it('non-dry-run does not embed precondition warnings even if provided', () => {
+    const { sql } = renderArtifact(
+      baseInput({
+        reloadDryRun: false,
+        measurementRows: [sampleMeasurement],
+        preconditionWarnings: [{ kind: 'not-validated', message: 'x', coreMeasurementIds: [1] }]
+      })
+    );
+    expect(sql).not.toMatch(/DRY-RUN PRECONDITION WARNINGS/);
+  });
+});
+
+describe('renderRebuildViewFullTableArtifact', () => {
+  it('emits the CreateFullView install probe with the install hint', () => {
+    const sql = renderRebuildViewFullTableArtifact();
+    expect(sql).toMatch(/information_schema\.ROUTINES[\s\S]+CreateFullView/);
+    expect(sql).toMatch(/Source creating_ViewFullTable\.sql/);
+  });
+
+  it('emits the rebuild CALL and a status SELECT after the probe', () => {
+    const sql = renderRebuildViewFullTableArtifact();
+    expect(sql).toMatch(/CALL ctfsweb_webuser\.CreateFullView\(DATABASE\(\), 'ViewFullTable'\);/);
+    expect(sql).toMatch(/'ViewFullTable rebuild' AS scope/);
+    const probeIdx = sql.indexOf("ROUTINE_NAME = 'CreateFullView'");
+    const callIdx = sql.indexOf("CALL ctfsweb_webuser.CreateFullView(DATABASE(), 'ViewFullTable');");
+    expect(probeIdx).toBeGreaterThan(-1);
+    expect(callIdx).toBeGreaterThan(probeIdx);
+  });
+
+  it('wraps the probe in a real CREATE PROCEDURE ... CALL ... DROP PROCEDURE (valid standalone SQL)', () => {
+    const sql = renderRebuildViewFullTableArtifact();
+    expect(sql).toMatch(/CREATE PROCEDURE rebuild_viewfulltable_probe\(\)/);
+    expect(sql).toMatch(/DECLARE _viewfulltable_installed INT DEFAULT 0;/);
+    expect(sql).toMatch(/CALL rebuild_viewfulltable_probe\(\);/);
+    expect(sql).toMatch(/DROP PROCEDURE rebuild_viewfulltable_probe;/);
+    // No undeclared top-level IF after the probe procedure is dropped.
+    const dropProcIdx = sql.indexOf('DROP PROCEDURE rebuild_viewfulltable_probe;');
+    const afterDrop = sql.slice(dropProcIdx);
+    expect(afterDrop).not.toMatch(/^\s*IF /m);
+  });
+
+  it('is byte-identical across calls (input-independent)', () => {
+    expect(renderRebuildViewFullTableArtifact()).toBe(renderRebuildViewFullTableArtifact());
   });
 });

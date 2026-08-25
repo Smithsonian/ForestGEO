@@ -14,7 +14,10 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   assertCanEditMeasurementScope: vi.fn(async () => undefined),
   loggerError: vi.fn(),
-  withTransaction: vi.fn(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1')),
+  executeQuery: vi.fn(async (_sql?: string, _params?: unknown[]) => [{ ok: 1 }]),
+  withTransaction: vi.fn(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+    fn({ query: (sql: string, params?: unknown[]) => mocks.executeQuery(sql, params), id: 'tx-1' })
+  ),
   acquireApplicationLock: vi.fn(async () => true),
   buildMeasurementScopeLockName: vi.fn((schema: string, plotId: number, censusId: number) => `measurement-scope:${schema}:${plotId}:${censusId}`)
 }));
@@ -51,16 +54,16 @@ vi.mock('@/config/editplan/scopeguard', () => ({
   ScopeAccessError: class ScopeAccessError extends Error {}
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: mocks.isValidSchema
 }));
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({
       withTransaction: mocks.withTransaction,
       acquireApplicationLock: mocks.acquireApplicationLock,
-      executeQuery: vi.fn(async () => [{ ok: 1 }])
+      executeQuery: mocks.executeQuery
     })
   }
 }));

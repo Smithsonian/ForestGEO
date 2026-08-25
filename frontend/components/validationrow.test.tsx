@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ValidationRow from './validationrow';
-import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
+import { ValidationProceduresRDS } from '@/lib/db/definitions/validations';
 
 // Mock CodeEditor component
 vi.mock('@/components/client/codeeditor', () => ({
@@ -90,11 +90,11 @@ describe('ValidationRow - Functional Tests', () => {
       expect(criteriaList).toBeInTheDocument();
     });
 
-    it('MUST have accessible label for collapsed definition textarea', () => {
+    it('MUST expose an accessible View query control when collapsed', () => {
       render(<ValidationRow {...defaultProps} expandedValidationID={null} />);
 
-      const textarea = screen.getByLabelText('Validation definition');
-      expect(textarea).toBeInTheDocument();
+      const viewQueryButton = screen.getByRole('button', { name: 'View query' });
+      expect(viewQueryButton).toHaveAccessibleName();
     });
 
     it('MUST have accessible label for expanded code editor', () => {
@@ -131,8 +131,7 @@ describe('ValidationRow - Functional Tests', () => {
     it('MUST show collapsed view when not expanded', () => {
       render(<ValidationRow {...defaultProps} expandedValidationID={null} />);
 
-      const textarea = screen.getByLabelText('Validation definition');
-      expect(textarea).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'View query' })).toBeInTheDocument();
       expect(screen.queryByTestId('code-editor')).not.toBeInTheDocument();
     });
 
@@ -445,20 +444,13 @@ describe('ValidationRow - Functional Tests', () => {
   });
 
   describe('Template Variable Replacement', () => {
-    it('MUST replace schema variable in collapsed view', () => {
+    it('MUST request expansion when the collapsed View query button is clicked', async () => {
+      const user = userEvent.setup();
       render(<ValidationRow {...defaultProps} expandedValidationID={null} />);
 
-      const textarea = screen.getByLabelText('Validation definition') as HTMLTextAreaElement;
-      expect(textarea.value).toContain('test_schema');
-      expect(textarea.value).not.toContain('${schema}');
-    });
+      await user.click(screen.getByRole('button', { name: 'View query' }));
 
-    it('MUST replace currentPlotID variable in collapsed view', () => {
-      render(<ValidationRow {...defaultProps} expandedValidationID={null} />);
-
-      const textarea = screen.getByLabelText('Validation definition') as HTMLTextAreaElement;
-      expect(textarea.value).toContain('123');
-      expect(textarea.value).not.toContain('${currentPlotID}');
+      expect(mockHandleExpandClick).toHaveBeenCalledWith(defaultProps.validation.validationID);
     });
 
     it('MUST show original template variables in editor when expanded', () => {

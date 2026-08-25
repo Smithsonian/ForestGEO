@@ -5,9 +5,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Button } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
-import { AllTaxonomiesViewRDS } from '@/config/sqlrdsdefinitions/views';
+import { AllTaxonomiesViewRDS } from '@/lib/db/definitions/views';
 import { AllTaxonomiesViewGridColumns, formatHeader } from '@/components/client/datagridcolumns';
-import { SpeciesLimitsRDS, SpeciesRDS } from '@/config/sqlrdsdefinitions/taxonomies';
+import { SpeciesLimitsRDS, SpeciesRDS } from '@/lib/db/definitions/taxonomies';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
@@ -146,7 +146,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
         clusters={{
           Family: ['family'],
           Genus: ['genus', 'genusAuthority'],
-          Species: ['speciesCode', 'speciesName', 'speciesIDLevel', 'speciesAuthority', 'fieldFamily', 'validCode', 'speciesDescription'],
+          Species: ['speciesCode', 'speciesName', 'idLevel', 'speciesAuthority', 'fieldFamily', 'validCode', 'description'],
           Subspecies: ['subspeciesName', 'subspeciesAuthority']
         }}
         dynamicButtons={[

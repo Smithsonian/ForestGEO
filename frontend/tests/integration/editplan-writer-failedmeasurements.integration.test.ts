@@ -15,7 +15,7 @@ const sharedState = vi.hoisted(() => ({
 
 const TEST_TRANSACTION_ID = 'test-transaction-id';
 
-vi.mock('@/config/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) {
@@ -69,7 +69,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 // Imports must follow vi.mock so the mocked ConnectionManager is wired in.
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { writeFailedMeasurements } from '@/config/editplan/writers/failedmeasurements';
 import type { EditPlan, FieldChange } from '@/config/editplan/types';
 import type { ApplyInTransactionInput } from '@/config/editplan/apply';

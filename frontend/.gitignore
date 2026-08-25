@@ -10,6 +10,7 @@
 /.idea/*
 /.idea
 /cypress/screenshots
+/cypress/downloads
 
 # testing
 /coverage
@@ -22,7 +23,6 @@
 # production
 /build
 /sampledata
-/scripts
 DigiCertGlobalRootCA.crt.pem
 
 # misc
@@ -55,19 +55,8 @@ yarn-error.log*
 /playwright-report/
 /blob-report/
 /playwright/.cache/
-/.fleet
-/.vscode
-/.idea
-/test-results/
-/playwright-report/
-/blob-report/
-/playwright/.cache/
 
 *storybook.log
-/test-results/
-/playwright-report/
-/blob-report/
-/playwright/.cache/
 /.jscpd/
 **/.logs/*
 

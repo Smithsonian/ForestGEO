@@ -10,14 +10,14 @@
 // `RevertDriftError` with the fresh plan. The client is expected to surface it
 // and retry with `confirmedPlanHash` matching the plan to explicitly accept
 // those consequences.
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import type { UserAuthRoles } from '@/config/macros';
 import { ApplyResult, EditPlan, EditPlanDataType, SEVERITY_RANK } from './types';
 import { analyzeEdit, assertEditPlanCanApply } from './analyzer';
 import { applyEditInTransaction, ScopeLockHeldError } from './apply';
 import { EditOperationRecord, EditOperationStateRow, ensureEditOperationsTable, markEditOperationReverted, readEditOperation } from '@/config/editoperations';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { assertNoActiveMeasurementScopeConflict } from './scopeguard';
 
 export class EditOperationNotFoundError extends Error {

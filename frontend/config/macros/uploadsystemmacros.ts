@@ -1,8 +1,12 @@
 import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
 import React, { Dispatch, SetStateAction } from 'react';
 import { FileWithPath } from 'react-dropzone';
-import { FileCollectionRowSet, FormType } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
+import type { ArcgisImportReference } from '@/lib/arcgis/types';
+import type { ColumnMapping } from '@/lib/column-mapping/types';
+import type { QuadratOverlapAcknowledgment } from '@/lib/provisioning/types';
+import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
 
 // File upload constraints
 export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500MB per file
@@ -34,12 +38,21 @@ export interface UploadParseFilesProps {
   // state vars
   uploadForm: FormType | undefined;
   uploadMode: UploadMode | undefined;
+  sourceFormat?: SourceFormat;
   acceptedFiles: FileWithStream[];
   dataViewActive: number;
   selectedDelimiters: Record<string, string>;
   // state setters
   setDataViewActive: Dispatch<SetStateAction<number>>;
   setSelectedDelimiters: Dispatch<SetStateAction<Record<string, string>>>;
+  // column mapping (CSV flow): per-file mappings keyed by file name, confirmed via the mapping dialog
+  columnMappings?: Record<string, ColumnMapping>;
+  setColumnMappingForFile?: (fileName: string, mapping: ColumnMapping) => void;
+  // Confirmation bound to the exact reviewed quadrat layout signatures.
+  quadratOverlapAcknowledgment: QuadratOverlapAcknowledgment | null;
+  setQuadratOverlapAcknowledgment: Dispatch<SetStateAction<QuadratOverlapAcknowledgment | null>>;
+  serverQuadratOverlapSummaries: QuadratOverlapSummary[];
+  clearServerQuadratOverlapSummaries: () => void;
   // centralized functions
   handleInitialSubmit: () => Promise<void>;
   handleAddFile: (newFile: FileWithPath) => void;
@@ -83,11 +96,18 @@ export interface UploadFireProps {
   // state vars
   uploadForm: FormType | undefined;
   uploadMode: UploadMode | undefined;
+  sourceFormat?: SourceFormat;
   personnelRecording: string;
   acceptedFiles: FileWithStream[];
   parsedData: FileCollectionRowSet;
+  arcgisImportSession?: ArcgisImportReference | null;
   uploadCompleteMessage: string;
   selectedDelimiters: Record<string, string>;
+  // Per-file confirmed column mappings from the parse step. When omitted, falls back to legacy header aliasing.
+  columnMappings?: Record<string, ColumnMapping>;
+  // Overlap acknowledgment confirmed in UploadParseFiles and scoped to reviewed layouts.
+  quadratOverlapAcknowledgment: QuadratOverlapAcknowledgment | null;
+  onQuadratOverlapAcknowledgmentRequired: (summaries: QuadratOverlapSummary[]) => void;
   // state setters
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
@@ -102,6 +122,7 @@ export interface UploadFireAzureProps {
   user: string;
   // state vars
   uploadForm: FormType | undefined;
+  sourceFormat?: SourceFormat;
   acceptedFiles: FileWithStream[];
   allRowToCMID: DetailedCMIDRow[];
   // state setters
@@ -166,6 +187,7 @@ export interface UploadErrorProps {
 export enum ReviewStates {
   START = 'start',
   UPLOAD_FILES = 'upload_files',
+  ARCGIS_PREFLIGHT = 'arcgis_preflight',
   REVIEW = 'review',
   UPLOAD_SQL = 'upload_sql',
   REVISION_MATCH = 'revision_match',
@@ -190,7 +212,8 @@ export enum ReviewProgress {
   VALIDATE_ERRORS_FOUND = 8,
   UPDATE = 9,
   UPLOAD_AZURE = 10,
-  COMPLETE = 11
+  COMPLETE = 11,
+  ARCGIS_PREFLIGHT = 12
 }
 
 // for validation error display ONLY

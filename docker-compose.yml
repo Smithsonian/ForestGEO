@@ -16,8 +16,8 @@ services:
       # Persist data between container restarts
       - mysql_data:/var/lib/mysql
       # Mount SQL scripts for reference (not auto-executed; local-db-setup.ts loads them)
-      - ./frontend/sqlscripting:/sqlscripting:ro
-      - ./frontend/db-migrations:/migrations:ro
+      - ./frontend/db/sql:/db/sql:ro
+      - ./frontend/db/migrations:/migrations:ro
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci

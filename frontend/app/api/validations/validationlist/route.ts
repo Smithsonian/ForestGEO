@@ -1,6 +1,8 @@
 import { HTTPResponses } from '@/config/macros';
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { fromQuery, withRouteAuthz } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -16,13 +18,18 @@ interface ValidationProcedure {
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
-export async function GET(request: NextRequest): Promise<NextResponse<ValidationMessages>> {
+async function handler(request: NextRequest): Promise<NextResponse> {
   const conn = ConnectionManager.getInstance();
   const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('No schema variable provided!');
-  try {
-    const siteQuery = `SELECT ValidationID, ProcedureName, Description, Definition FROM ${schema}.sitespecificvalidations WHERE IsEnabled = 1;`;
+  if (!schema) {
+    return NextResponse.json({ error: 'No schema variable provided' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
 
+  try {
+    const siteQuery = safeFormatQuery(
+      schema,
+      'SELECT ValidationID, ProcedureName, Description, Definition FROM ??.sitespecificvalidations WHERE IsEnabled = 1;'
+    );
     const results: ValidationProcedure[] = await conn.executeQuery(siteQuery);
 
     const validationMessages: ValidationMessages = results.reduce((acc, { ValidationID, ProcedureName, Description, Definition }) => {
@@ -30,14 +37,11 @@ export async function GET(request: NextRequest): Promise<NextResponse<Validation
       return acc;
     }, {} as ValidationMessages);
 
-    return new NextResponse(JSON.stringify({ coreValidations: validationMessages }), {
-      status: HTTPResponses.OK,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return NextResponse.json({ coreValidations: validationMessages }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    ailogger.error('Error in GET request:', error.message);
-    return new NextResponse(JSON.stringify({ error: error.message }), {
-      status: HTTPResponses.INTERNAL_SERVER_ERROR
-    });
+    ailogger.error('Error in validationlist GET request:', error.message);
+    return NextResponse.json({ error: error.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   }
 }
+
+export const GET = withRouteAuthz('validations/validationlist', handler, { schema: fromQuery('schema') });

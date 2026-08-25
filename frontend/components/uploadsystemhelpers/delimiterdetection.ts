@@ -6,18 +6,27 @@
  */
 
 import { parseLineWithDelimiter } from './csvparserutils';
+import { analyzeDelimiters, calculateVariance, DelimiterDetectionResult } from '@/lib/uploads/detect-delimiter';
 
-export interface DelimiterDetectionResult {
-  delimiter: string;
-  confidence: number;
-  sampleRows: number;
-  avgColumnsPerRow: number;
+export type { DelimiterDetectionResult } from '@/lib/uploads/detect-delimiter';
+
+export enum DelimiterIssueCode {
+  EMPTY_FIRST_ROW = 'EMPTY_FIRST_ROW',
+  MISSING_REQUIRED_COLUMNS = 'MISSING_REQUIRED_COLUMNS',
+  TOO_FEW_COLUMNS = 'TOO_FEW_COLUMNS',
+  ROW_COLUMN_COUNT_MISMATCH = 'ROW_COLUMN_COUNT_MISMATCH',
+  INCONSISTENT_COLUMNS = 'INCONSISTENT_COLUMNS'
+}
+
+export interface DelimiterIssue {
+  code: DelimiterIssueCode;
+  message: string;
 }
 
 export interface DelimiterValidationResult {
   isValid: boolean;
   delimiter: string;
-  issues: string[];
+  issues: DelimiterIssue[];
   preview: string[][];
 }
 
@@ -147,86 +156,6 @@ export async function detectDelimiter(file: File, sessionId?: string): Promise<D
 }
 
 /**
- * Analyzes text content to determine the most likely delimiter
- */
-function analyzeDelimiters(content: string): DelimiterDetectionResult {
-  const lines = content.split('\n').slice(0, 10); // Analyze first 10 lines
-  const delimiters = [',', '\t', ';', '|'];
-  const results: Array<DelimiterDetectionResult> = [];
-
-  for (const delimiter of delimiters) {
-    const analysis = analyzeDelimiter(lines, delimiter);
-    results.push(analysis);
-  }
-
-  // Return the delimiter with highest confidence
-  return results.reduce((best, current) => (current.confidence > best.confidence ? current : best));
-}
-
-/**
- * Analyzes how well a specific delimiter works for the given lines
- */
-function analyzeDelimiter(lines: string[], delimiter: string): DelimiterDetectionResult {
-  let totalColumns = 0;
-  let validRows = 0;
-  const columnCounts: number[] = [];
-
-  for (const line of lines) {
-    if (line.trim().length === 0) continue;
-
-    const columns = parseLineWithDelimiter(line, delimiter);
-    const columnCount = columns.length;
-
-    if (columnCount > 1) {
-      columnCounts.push(columnCount);
-      totalColumns += columnCount;
-      validRows++;
-    }
-  }
-
-  if (validRows === 0) {
-    return {
-      delimiter,
-      confidence: 0,
-      sampleRows: 0,
-      avgColumnsPerRow: 0
-    };
-  }
-
-  const avgColumns = totalColumns / validRows;
-  const columnVariance = calculateVariance(columnCounts);
-
-  // Calculate confidence based on:
-  // 1. Consistency of column count across rows (lower variance = higher confidence)
-  // 2. Average number of columns (more columns usually = more confident)
-  // 3. Number of valid rows processed
-  const consistencyScore = Math.max(0, 1 - columnVariance / Math.max(avgColumns, 1));
-  const volumeScore = Math.min(1, validRows / lines.length);
-  const columnScore = Math.min(1, avgColumns / 10); // Normalize around 10 columns
-
-  const confidence = (consistencyScore * 0.6 + volumeScore * 0.2 + columnScore * 0.2) * 100;
-
-  return {
-    delimiter,
-    confidence,
-    sampleRows: validRows,
-    avgColumnsPerRow: avgColumns
-  };
-}
-
-/**
- * Calculates variance for an array of numbers
- */
-function calculateVariance(numbers: number[]): number {
-  if (numbers.length === 0) return 0;
-
-  const mean = numbers.reduce((sum, num) => sum + num, 0) / numbers.length;
-  const variance = numbers.reduce((sum, num) => sum + Math.pow(num - mean, 2), 0) / numbers.length;
-
-  return variance;
-}
-
-/**
  * Validates a delimiter by parsing a preview of the file
  */
 // Session-scoped cache for validation results
@@ -298,14 +227,14 @@ export async function validateDelimiter(file: File, delimiter: string, expectedH
  */
 function validateDelimiterContent(content: string, delimiter: string, expectedHeaders?: string[]): DelimiterValidationResult {
   const lines = content.split('\n').slice(0, 5); // Check first 5 lines
-  const issues: string[] = [];
+  const issues: DelimiterIssue[] = [];
   const preview: string[][] = [];
 
   if (lines.length === 0) {
     return {
       isValid: false,
       delimiter,
-      issues: ['File appears to be empty'],
+      issues: [{ code: DelimiterIssueCode.EMPTY_FIRST_ROW, message: 'File appears to be empty' }],
       preview: []
     };
   }
@@ -313,7 +242,7 @@ function validateDelimiterContent(content: string, delimiter: string, expectedHe
   // Parse header row
   const headerLine = lines[0].trim();
   if (!headerLine) {
-    issues.push('First row is empty or contains only whitespace');
+    issues.push({ code: DelimiterIssueCode.EMPTY_FIRST_ROW, message: 'First row is empty or contains only whitespace' });
   }
 
   const headers = parseLineWithDelimiter(headerLine, delimiter);
@@ -347,13 +276,16 @@ function validateDelimiterContent(content: string, delimiter: string, expectedHe
     if (missingHeaders.length > 0) {
       // Capitalize first letter of each missing header for display
       const formattedMissing = missingHeaders.map(h => h.charAt(0).toUpperCase() + h.slice(1));
-      issues.push(`Missing required columns: ${formattedMissing.join(', ')}`);
+      issues.push({ code: DelimiterIssueCode.MISSING_REQUIRED_COLUMNS, message: `Missing required columns: ${formattedMissing.join(', ')}` });
     }
 
     // Count only non-empty headers for the column count check
     const nonEmptyHeaderCount = headers.filter(h => h.trim().length > 0).length;
     if (nonEmptyHeaderCount < expectedHeaders.length * 0.7) {
-      issues.push(`Too few columns detected (${nonEmptyHeaderCount}) compared to expected (${expectedHeaders.length})`);
+      issues.push({
+        code: DelimiterIssueCode.TOO_FEW_COLUMNS,
+        message: `Too few columns detected (${nonEmptyHeaderCount}) compared to expected (${expectedHeaders.length})`
+      });
     }
   }
 
@@ -367,7 +299,7 @@ function validateDelimiterContent(content: string, delimiter: string, expectedHe
       columnCounts.push(columns.length);
 
       if (columns.length !== headers.length) {
-        issues.push(`Row ${i + 1} has ${columns.length} columns, expected ${headers.length}`);
+        issues.push({ code: DelimiterIssueCode.ROW_COLUMN_COUNT_MISMATCH, message: `Row ${i + 1} has ${columns.length} columns, expected ${headers.length}` });
       }
     }
   }
@@ -376,7 +308,7 @@ function validateDelimiterContent(content: string, delimiter: string, expectedHe
   if (columnCounts.length > 0) {
     const variance = calculateVariance(columnCounts);
     if (variance > 1) {
-      issues.push('Inconsistent number of columns across rows');
+      issues.push({ code: DelimiterIssueCode.INCONSISTENT_COLUMNS, message: 'Inconsistent number of columns across rows' });
     }
   }
 

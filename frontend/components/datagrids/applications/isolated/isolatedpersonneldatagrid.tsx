@@ -9,7 +9,7 @@ import { formatHeader, PersonnelGridColumns } from '@/components/client/datagrid
 import { useOrgCensusContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import CloseIcon from '@mui/icons-material/Close';
 import { AssignmentOutlined, ManageAccountsOutlined, UploadFileOutlined } from '@mui/icons-material';
-import { PersonnelRDS, RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
+import { PersonnelRDS, RoleRDS } from '@/lib/db/definitions/personnel';
 import IsolatedDataGridCommons, { IsolatedDataGridCommonsHandle } from '@/components/datagrids/isolateddatagridcommons';
 import IsolatedRolesDataGrid from '@/components/datagrids/applications/isolated/isolatedrolesdatagrid';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';

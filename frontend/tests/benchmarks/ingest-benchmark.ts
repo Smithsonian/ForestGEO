@@ -65,7 +65,7 @@ const EMPTY_PHASE_TIMINGS: ProcedurePhaseTimings = {
 // ---------------------------------------------------------------------------
 
 async function loadSchema(conn: mysql.Connection): Promise<void> {
-  const schemaPath = path.join(process.cwd(), 'sqlscripting', 'tablestructures.sql');
+  const schemaPath = path.join(process.cwd(), 'db/sql', 'tablestructures.sql');
   const schema = fs.readFileSync(schemaPath, 'utf-8');
   await conn.query('SET FOREIGN_KEY_CHECKS = 0');
   for (const stmt of schema
@@ -84,7 +84,7 @@ async function loadSchema(conn: mysql.Connection): Promise<void> {
 }
 
 async function loadStoredProcedures(conn: mysql.Connection): Promise<void> {
-  const procPath = path.join(process.cwd(), 'sqlscripting', 'storedprocedures.sql');
+  const procPath = path.join(process.cwd(), 'db/sql', 'storedprocedures.sql');
   const content = fs
     .readFileSync(procPath, 'utf-8')
     .replace(/DELIMITER\s+\$\$/gi, '')
@@ -506,7 +506,7 @@ async function main() {
 
   console.log('=== Bulk Ingestion Benchmark ===');
   console.log(`MySQL: ${DB_CONFIG.host}:${DB_CONFIG.port}`);
-  console.log(`Stored procedures from: sqlscripting/storedprocedures.sql`);
+  console.log(`Stored procedures from: db/sql/storedprocedures.sql`);
   console.log(`Sizes: ${sizes.join(', ')} rows (clean) + dirty 10k`);
 
   const results: BenchmarkResult[] = [];

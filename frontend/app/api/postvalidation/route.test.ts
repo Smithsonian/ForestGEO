@@ -3,11 +3,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ---- Import the route under test AFTER mocks ----
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager'; // ---- Helpers ----
+import ConnectionManager from '@/lib/db/connectionmanager'; // ---- Helpers ----
 
 // ---- Mocks (must be declared before importing the route) ----
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+// Route is now wrapped by withRouteAuthz, so auth() is called before the handler.
+// A 'global' admin passes the per-site access gate.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
@@ -35,7 +41,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 // Mock schema validation to accept test schemas
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     return ['myschema', 'testschema'].includes(schema);
   }),
@@ -53,20 +59,20 @@ function makeRequest(url: string) {
 }
 
 describe('GET /api/postvalidation', () => {
+  const emptyCtx = { params: Promise.resolve({}) };
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('returns 400 if schema is missing', async () => {
-    const cm = (ConnectionManager as any).getInstance();
-    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
-
+  it('returns 400 (INVALID_SCHEMA) when schema is missing, before any handler logic', async () => {
     const req = makeRequest('http://localhost/api/postvalidation'); // no ?schema=
-    const res = await GET(req);
+    const res = await GET(req, emptyCtx);
 
-    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    // The authz guard resolves the schema first and short-circuits on a missing one.
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
     const body = await res.json();
-    expect(body.error).toMatch(/no schema variable provided/i);
+    expect(body.code).toBe('INVALID_SCHEMA');
   });
 
   it('404 when no queries found; closes connection', async () => {
@@ -75,7 +81,7 @@ describe('GET /api/postvalidation', () => {
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const req = makeRequest('http://localhost/api/postvalidation?schema=myschema');
-    const res = await GET(req);
+    const res = await GET(req, emptyCtx);
 
     expect(res.status).toBe(HTTPResponses.NOT_FOUND);
     const body = await res.json();
@@ -99,7 +105,7 @@ describe('GET /api/postvalidation', () => {
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const req = makeRequest('http://localhost/api/postvalidation?schema=myschema');
-    const res = await GET(req);
+    const res = await GET(req, emptyCtx);
 
     expect(res.status).toBe(HTTPResponses.OK);
     const body = await res.json();
@@ -123,7 +129,7 @@ describe('GET /api/postvalidation', () => {
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const req = makeRequest('http://localhost/api/postvalidation?schema=myschema');
-    const res = await GET(req);
+    const res = await GET(req, emptyCtx);
 
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const body = await res.json();

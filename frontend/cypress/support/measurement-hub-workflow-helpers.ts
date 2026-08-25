@@ -1,6 +1,7 @@
 import type { ErrorExplorerQueryRequest, ErrorExplorerRow } from '../../config/errorsexplorer';
 import { buildErrorsExplorerDetails, buildErrorsExplorerQueryResponse } from './errors-explorer-helpers';
 import type { MeasurementValidationFailure } from './grid-api-helpers';
+import { canonicalDiffToRowPatch, mockEditPlanFlow } from './edit-plan-helpers';
 
 type GenericRow = Record<string, any>;
 
@@ -110,9 +111,11 @@ function buildCounts(rows: GenericRow[], validationFailures: MeasurementValidati
 
   return {
     CountValid: rows.filter(row => !failedIDs.has(Number(row.coreMeasurementID)) && row.isValidated === true).length,
-    CountInvalid: rows.filter(row => failedIDs.has(Number(row.coreMeasurementID))).length,
-    CountValidationErrors: rows.filter(row => failedIDs.has(Number(row.coreMeasurementID))).length,
+    CountUnresolvedLogged: rows.filter(row => failedIDs.has(Number(row.coreMeasurementID))).length,
+    CountFailedNoLog: rows.filter(row => !failedIDs.has(Number(row.coreMeasurementID)) && row.isValidated === false).length,
     CountPending: rows.filter(row => !failedIDs.has(Number(row.coreMeasurementID)) && row.isValidated == null).length,
+    // Mirrors the override modal predicate (IsValidated = FALSE OR IS NULL); intentionally not disjoint.
+    CountOverridable: rows.filter(row => row.isValidated === false || row.isValidated == null).length,
     CountOldTrees: rows.filter(row => normalizeText(row.userDefinedFields).includes('old tree')).length,
     CountNewRecruits: rows.filter(row => normalizeText(row.userDefinedFields).includes('new recruit')).length,
     CountMultiStems: rows.filter(row => normalizeText(row.userDefinedFields).includes('multi stem')).length
@@ -195,28 +198,18 @@ export function mockMeasurementHubWorkflowApi({
     });
   }).as('filterMeasurementHubFullRows');
 
-  cy.intercept('PATCH', `**/api/fixeddata/measurementssummary/${schema}/coreMeasurementID`, req => {
-    const newRow = (req.body?.newRow ?? {}) as Partial<GenericRow>;
-
-    state.summaryRows = applyRowUpdate(state.summaryRows, newRow);
-    state.viewFullTableRows = applyRowUpdate(state.viewFullTableRows, newRow);
-    state.errorRows = state.errorRows.map(row =>
-      Number(row.coreMeasurementID) === Number(newRow.coreMeasurementID)
-        ? {
-            ...row,
-            ...newRow
-          }
-        : row
-    );
-
-    req.reply({
-      statusCode: 200,
-      body: {
-        message: 'Update successful',
-        updatedIDs: { measurementssummary: newRow.coreMeasurementID }
-      }
-    });
-  }).as('saveMeasurementHubRow');
+  // Edits commit through the edit-plan flow (POST /api/edits/preview then
+  // /api/edits/apply). A SpeciesCode change is `warn` severity, so consuming specs
+  // must confirm the PreviewDialog before @applyEdit fires.
+  mockEditPlanFlow({
+    onApply: ({ targetID, newRow }) => {
+      const patchRow = { coreMeasurementID: targetID, ...canonicalDiffToRowPatch(newRow) } as Partial<GenericRow>;
+      state.summaryRows = applyRowUpdate(state.summaryRows, patchRow);
+      state.viewFullTableRows = applyRowUpdate(state.viewFullTableRows, patchRow);
+      state.errorRows = state.errorRows.map(row => (Number(row.coreMeasurementID) === Number(targetID) ? { ...row, ...patchRow } : row));
+      return undefined;
+    }
+  });
 
   cy.intercept('GET', '**/api/validations/validationerrordisplay?*', req => {
     req.reply({
@@ -258,7 +251,7 @@ export function mockMeasurementHubWorkflowApi({
     }
 
     if (typeof body === 'string') {
-      if (body.includes('CountValid') || body.includes('CountInvalid') || body.includes('CountPending') || body.includes('CountValidationErrors')) {
+      if (body.includes('CountValid') || body.includes('CountUnresolvedLogged') || body.includes('CountPending') || body.includes('CountFailedNoLog')) {
         req.reply({
           statusCode: 200,
           body: [buildCounts(state.summaryRows, state.validationFailures)]

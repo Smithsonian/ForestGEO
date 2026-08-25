@@ -3,11 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ---- Import route AFTER mocks ----
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager'; // ---- Helpers ----
+import ConnectionManager from '@/lib/db/connectionmanager'; // ---- Helpers ----
+
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
 
 // ---- Ensure ConnectionManager.getInstance() returns the shared mock instance ----
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
@@ -41,13 +45,16 @@ function makeRequest(cmid?: string | number, schema?: string) {
 }
 
 describe('GET /api/details/cmid', () => {
+  const emptyCtx = { params: Promise.resolve({}) };
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('throws when schema is missing', async () => {
+  it('returns 400 when schema is missing', async () => {
     const req = makeRequest(123 /* cmid present */, undefined /* no schema */);
-    await expect(GET(req)).rejects.toThrow(/no schema variable provided!/i);
+    const res = await GET(req, emptyCtx);
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
   });
 
   it('200 with mapped results; builds expected SQL + params; closes connection', async () => {
@@ -65,8 +72,8 @@ describe('GET /api/details/cmid', () => {
     ]);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    const req = makeRequest(123, 'myschema');
-    const res = await GET(req);
+    const req = makeRequest(123, 'forestgeo_testing');
+    const res = await GET(req, emptyCtx);
 
     expect(res.status).toBe(HTTPResponses.OK);
     const body = await res.json();
@@ -83,7 +90,7 @@ describe('GET /api/details/cmid', () => {
     // SQL + params sanity
     expect(exec).toHaveBeenCalledTimes(1);
     const [sql, params] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/FROM\s+myschema\.coremeasurements\s+cm/i);
+    expect(String(sql)).toMatch(/FROM\s+`forestgeo_testing`\.coremeasurements\s+cm/i);
     expect(String(sql)).toMatch(/WHERE\s+cm\.CoreMeasurementID\s*=\s*\?\s*;?/i);
     expect(params).toEqual([123]);
 
@@ -95,8 +102,8 @@ describe('GET /api/details/cmid', () => {
     const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('boom'));
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    const req = makeRequest(999, 'orgschema');
-    await expect(GET(req)).rejects.toThrow(/SQL query failed: boom/i);
+    const req = makeRequest(999, 'forestgeo_testing');
+    await expect(GET(req, emptyCtx)).rejects.toThrow(/SQL query failed: boom/i);
 
     expect(exec).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);

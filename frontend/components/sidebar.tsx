@@ -1,9 +1,10 @@
 'use client';
 import * as React from 'react';
-import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
+import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react';
 import { preloadKey } from '@/lib/query/preload';
 import { queryKey } from '@/lib/query';
 import { createFetchQuery } from '@/config/servergridhelpers';
+import { formatDisplayDate } from '@/config/dateformats';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -18,13 +19,15 @@ import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 import { LoginLogout } from '@/components/loginlogout';
 import { siteConfigNav, SiteConfigProps, validityMapping } from '@/config/macros/siteconfigs';
 import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, usePlotDispatch, useSiteContext, useSiteDispatch } from '@/app/contexts/compat-hooks';
+import { markExplicitSelectionClear } from '@/config/store/appstore';
 import { usePathname, useRouter } from 'next/navigation';
+import NextLink from 'next/link';
+import ailogger from '@/ailogger';
 import { Badge, IconButton, SelectOption, Stack, Tooltip } from '@mui/joy';
 import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
 import { useOrgCensusListContext, usePlotListContext, useSiteListContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
-import { useLoading } from '@/app/contexts/loadingprovider';
 import { TransitionComponent } from '@/components/client/clientmacros';
 import ListDivider from '@mui/joy/ListDivider';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
@@ -32,12 +35,10 @@ import Avatar from '@mui/joy/Avatar';
 import { CensusLogo, PlotLogo } from '@/components/icons';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-import { Plot, Site, SitesRDS } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensus, OrgCensusRDS } from '@/config/sqlrdsdefinitions/timekeeping';
-import { DeleteForever, CheckCircle, Cancel, Clear } from '@mui/icons-material';
-import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
+import { Plot, Site, SitesRDS } from '@/lib/db/definitions/zones';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
+import { CheckCircle, Cancel, Clear, LockOutlined } from '@mui/icons-material';
 import ValidationStatusBadge from '@/components/client/validationstatusbadge';
-import ailogger from '@/ailogger';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -83,35 +84,35 @@ function MenuRenderToggle(
   const { plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete } = props;
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
+  const locked = plotSelectionRequired || censusSelectionRequired;
+  const missingSelection = !currentSite ? 'site' : plotSelectionRequired ? 'plot' : censusSelectionRequired ? 'census' : null;
   return (
-    <ListItemButton
-      disabled={plotSelectionRequired || censusSelectionRequired}
-      color={pathname === siteConfigProps.href ? 'primary' : undefined}
-      onClick={() => {
-        if (setMenuOpen) {
-          setMenuOpen(!menuOpen);
-        }
-      }}
-      data-testid={'menu-render-toggle'}
-      sx={{ width: '100%', padding: 0, margin: 0 }}
-    >
-      <Tooltip data-testid={'menu-render-toggle-tooltip'} title={isParentDataIncomplete ? 'Missing Core Data!' : undefined} arrow>
-        <Badge
-          data-testid={'menu-render-toggle-tooltip-badge'}
-          color="danger"
-          variant={isParentDataIncomplete ? 'solid' : 'soft'}
-          badgeContent={isParentDataIncomplete ? '!' : undefined}
-          invisible={!isParentDataIncomplete || !currentSite || !currentPlot}
-          aria-label={isParentDataIncomplete ? 'Warning: Some subsections have missing data' : undefined}
+    <Tooltip title={missingSelection ? `Choose a ${missingSelection} to unlock` : isParentDataIncomplete ? 'Missing Core Data!' : ''} arrow>
+      <span style={{ width: '100%' }}>
+        <ListItemButton
+          disabled={locked}
+          color={pathname === siteConfigProps.href ? 'primary' : undefined}
+          onClick={() => setMenuOpen?.(!menuOpen)}
+          data-testid={'menu-render-toggle'}
+          sx={{ width: '100%', padding: 0, margin: 0 }}
         >
-          <Icon />
-        </Badge>
-      </Tooltip>
-      <ListItemContent data-testid={'menu-render-toggle-content'}>
-        <Typography level={'title-sm'}>{siteConfigProps.label}</Typography>
-      </ListItemContent>
-      <KeyboardArrowDownIcon sx={{ transform: menuOpen ? 'rotate(180deg)' : 'none' }} />
-    </ListItemButton>
+          <Badge
+            data-testid={'menu-render-toggle-tooltip-badge'}
+            color="danger"
+            variant={isParentDataIncomplete ? 'solid' : 'soft'}
+            badgeContent={isParentDataIncomplete ? '!' : undefined}
+            invisible={!isParentDataIncomplete || !currentSite || !currentPlot}
+            aria-label={isParentDataIncomplete ? 'Warning: Some subsections have missing data' : undefined}
+          >
+            {locked ? <LockOutlined /> : <Icon />}
+          </Badge>
+          <ListItemContent data-testid={'menu-render-toggle-content'}>
+            <Typography level={'title-sm'}>{siteConfigProps.label}</Typography>
+          </ListItemContent>
+          <KeyboardArrowDownIcon sx={{ transform: menuOpen ? 'rotate(180deg)' : 'none' }} />
+        </ListItemButton>
+      </span>
+    </Tooltip>
   );
 }
 
@@ -120,10 +121,28 @@ interface SidebarProps {
   coreDataLoaded: boolean;
   /** @deprecated This prop is unused and will be removed in a future version */
   setCensusListLoaded: () => void;
-  setManualReset: Dispatch<SetStateAction<boolean>>;
 }
 
+/**
+ * MUI Base fires a programmatic onChange(null) — its internal itemsChange action carries
+ * event: null (@mui/base useList) and its reducer prunes a controlled Select's value while
+ * async-loaded options (re)register during boot. Treating that prune as a user deselect
+ * wiped the persisted site/plot/census selection on every reload and bounced the user to
+ * /dashboard (bug F7). Real user interactions (click/keyboard) always carry an event, so
+ * only they may clear a selection.
+ */
+export const isProgrammaticSelectClear = (event: React.SyntheticEvent | null, newValue: number | string | null): boolean => event === null && newValue === null;
+
+const ADMIN_NAV = [
+  { href: '/admin/users', label: 'Users', icon: <CheckCircle /> },
+  { href: '/admin/sites', label: 'Sites', icon: <TravelExploreIcon /> },
+  { href: '/admin/userstosites', label: 'Assignments', icon: <AddCircleOutlineIcon /> },
+  { href: '/admin/provision', label: 'Provisioning', icon: <AddCircleOutlineIcon /> },
+  { href: '/admin/provision/runs', label: 'Provisioning runs', icon: <FormatListBulletedIcon /> }
+];
+
 export default function Sidebar(props: SidebarProps) {
+  const { coreDataLoaded } = props;
   const { data: session } = useSession();
   const currentSite = useSiteContext();
   const siteDispatch = useSiteDispatch();
@@ -134,11 +153,13 @@ export default function Sidebar(props: SidebarProps) {
   const censusListContext = useOrgCensusListContext();
   const siteListContext = useSiteListContext();
   const plotListContext = usePlotListContext();
-  const { validity } = useDataValidityContext();
-  const { setLoading } = useLoading();
-  const isAllValiditiesTrue = Object.entries(validity)
-    .filter(([key]) => key !== 'subquadrats')
-    .every(([, value]) => value);
+  const { validity, isChecking } = useDataValidityContext();
+  const validityReady = coreDataLoaded && !isChecking;
+  const isAllValiditiesTrue =
+    !validityReady ||
+    Object.entries(validity)
+      .filter(([key]) => key !== 'subquadrats')
+      .every(([, value]) => value);
 
   const router = useRouter();
   const pathname = usePathname();
@@ -150,17 +171,13 @@ export default function Sidebar(props: SidebarProps) {
   const [propertiesToggle, setPropertiesToggle] = useState(true);
   const [formsToggle, setFormsToggle] = useState(true);
 
-  const { setCensusListLoaded: _setCensusListLoaded, setManualReset } = props;
+  const { setCensusListLoaded: _setCensusListLoaded } = props;
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number>(340); // Default width
   const [isSiteDropdownOpen, setSiteDropdownOpen] = useState(false);
   const [isPlotDropdownOpen, setPlotDropdownOpen] = useState(false);
   const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
-  const [isClearDropdownOpen, setIsClearDropdownOpen] = useState(false);
-  const [censusToDelete, setCensusToDelete] = useState<OrgCensusRDS | null>(null);
-  const [isDeletingCensus, setIsDeletingCensus] = useState(false);
-
   // Admin pages used to forcibly clear the user's site/plot/census selections on mount.
   // That side-effect was hostile UX (sub-paths like /admin/provision/runs would wipe state),
   // and admin pages are overlays — they don't need a clean context. Removed in 2026-05 task 13.
@@ -200,6 +217,11 @@ export default function Sidebar(props: SidebarProps) {
   }, []); // Remove context dependencies - observer doesn't need to recreate
 
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
+    if (selectedSite === undefined) {
+      // A user-driven deselect empties the whole selection cascade below; without this
+      // marker the guarded persist storage would refuse to write the empty state.
+      markExplicitSelectionClear();
+    }
     if (siteDispatch) {
       await siteDispatch({ site: selectedSite });
     }
@@ -227,43 +249,6 @@ export default function Sidebar(props: SidebarProps) {
     }
   };
 
-  // Handler for census deletion from the shared modal
-  const handleCensusDelete = useCallback(
-    async (deleteType: 'msmts' | 'full') => {
-      const censusID = censusToDelete?.dateRanges?.[0]?.censusID;
-      if (!currentSite?.schemaName || !censusID) {
-        ailogger.error('Missing required context: schema or censusID', undefined, {
-          schema: currentSite?.schemaName || 'unknown',
-          censusID: censusID || 'unknown'
-        });
-        setIsClearDropdownOpen(false);
-        setCensusToDelete(null);
-        return;
-      }
-
-      setIsDeletingCensus(true);
-      const loadingMessage = deleteType === 'msmts' ? 'Deleting census measurements...' : 'Deleting census measurements and fixed data...';
-      // destructive mutation — global overlay blocks UI for the duration of the API call
-      setLoading(true, loadingMessage);
-      setIsClearDropdownOpen(false);
-
-      try {
-        const response = await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=${deleteType}`);
-        if (!response.ok) {
-          throw new Error(`Failed to clear census: ${response.status}`);
-        }
-        setCensusToDelete(null);
-        setManualReset(true);
-      } catch (error: any) {
-        ailogger.error(`Failed to delete census: ${error?.message ?? error}`, error instanceof Error ? error : undefined);
-      } finally {
-        setLoading(false);
-        setIsDeletingCensus(false);
-      }
-    },
-    [censusToDelete, currentSite?.schemaName, setLoading, setManualReset]
-  );
-
   const renderSiteValue = (option: SelectOption<number> | null) => {
     if (!option) {
       return <Typography data-testid={'pending-site-select'}>Select a Site</Typography>;
@@ -274,16 +259,23 @@ export default function Sidebar(props: SidebarProps) {
     return (
       <>
         {selectedSite ? (
-          <Stack direction={'column'} alignItems={'start'} aria-label={'site value render stack'}>
+          <Stack direction={'column'} alignItems={'start'} aria-label={'site value render stack'} sx={{ maxWidth: '100%', minWidth: 0 }}>
             <Typography
               id={'site-selected'}
               level="body-lg"
               className="sidebar-item"
               data-testid={'selected-site-name'}
+              sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}
             >{`Site: ${selectedSite?.siteName}`}</Typography>
             <Stack direction={'column'} alignItems={'start'} aria-labelledby={'site-selected'}>
-              <Typography level="body-sm" color={'primary'} className="sidebar-item" data-testid={'selected-site-schema'}>
-                &mdash; Schema: {selectedSite.schemaName}
+              <Typography
+                level="body-sm"
+                color={'primary'}
+                className="sidebar-item"
+                data-testid={'selected-site-schema'}
+                sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}
+              >
+                {' — '}Schema: {selectedSite.schemaName}
               </Typography>
             </Stack>
           </Stack>
@@ -307,11 +299,12 @@ export default function Sidebar(props: SidebarProps) {
     return (
       <>
         {selectedPlot ? (
-          <Stack direction="column" alignItems="start" aria-label={'plot value render stack'}>
+          <Stack direction="column" alignItems="start" aria-label={'plot value render stack'} sx={{ maxWidth: '100%', minWidth: 0 }}>
             <Typography level="body-md" className="sidebar-item" data-testid={'selected-plot-name'}>{`Plot: ${selectedPlot?.plotName}`}</Typography>
             <Box aria-label={'selected plot information'} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
               <Typography level="body-sm" color={'primary'} data-testid={'selected-plot-quadrats'}>
-                &mdash; {selectedPlot.numQuadrats || selectedPlot.numQuadrats === 0 ? `Quadrats: ${selectedPlot.numQuadrats}` : 'No Quadrats'}
+                {' — '}
+                {selectedPlot.numQuadrats || selectedPlot.numQuadrats === 0 ? `Quadrats: ${selectedPlot.numQuadrats}` : 'No Quadrats'}
               </Typography>
             </Box>
           </Stack>
@@ -345,14 +338,14 @@ export default function Sidebar(props: SidebarProps) {
     // Ensure dates are rendered in a block layout to stack them vertically
     const dateMessage = (
       <span aria-label={'census record information'} style={{ display: 'block' }}>
-        {hasStartDate && <Typography display="block">&mdash;{` First Record: ${new Date(startDate).toDateString()}`}</Typography>}
-        {hasEndDate && <Typography display="block">&mdash;{` Last Record: ${new Date(endDate).toDateString()}`}</Typography>}
+        {hasStartDate && <Typography display="block">{`— First Record: ${formatDisplayDate(startDate)}`}</Typography>}
+        {hasEndDate && <Typography display="block">{`— Last Record: ${formatDisplayDate(endDate)}`}</Typography>}
         {!hasStartDate && !hasEndDate && <Typography display="block">No Measurements</Typography>}
       </span>
     );
 
     return (
-      <Stack direction={'column'} alignItems={'start'} id={'selected-census-stack'}>
+      <Stack direction={'column'} alignItems={'start'} id={'selected-census-stack'} sx={{ maxWidth: '100%', minWidth: 0 }}>
         <Typography level="body-md" className="sidebar-item" data-testid={'selected-census-plotcensusnumber'}>
           {`Census: ${selectedCensus?.plotCensusNumber}`}
         </Typography>
@@ -381,7 +374,7 @@ export default function Sidebar(props: SidebarProps) {
   const renderCensusOptions = () => (
     <Select
       suppressHydrationWarning
-      placeholder="Select a Census. Required"
+      placeholder="Select a Census"
       className="census-select sidebar-item"
       name="None"
       required
@@ -389,6 +382,7 @@ export default function Sidebar(props: SidebarProps) {
       value={currentCensus?.plotCensusNumber?.toString() || ''}
       renderValue={renderCensusValue}
       data-testid={'census-select-component'}
+      sx={{ width: '100%', minWidth: 0 }}
       aria-label="Select a Census. Required field for accessing measurement tools"
       listboxOpen={isCensusDropdownOpen}
       onListboxOpenChange={() => {
@@ -397,7 +391,8 @@ export default function Sidebar(props: SidebarProps) {
         setCensusDropdownOpen(true);
       }}
       onClose={() => setCensusDropdownOpen(false)}
-      onChange={async (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
+      onChange={async (event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
+        if (isProgrammaticSelectClear(event, selectedPlotCensusNumberStr)) return;
         if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) await handleCensusSelection(undefined);
         else {
           const selectedPlotCensusNumber = parseInt(selectedPlotCensusNumberStr, 10);
@@ -411,7 +406,7 @@ export default function Sidebar(props: SidebarProps) {
           .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
           .map(item => (
             <Option
-              aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${item.dateRanges?.[0]?.startDate ? new Date(item.dateRanges?.[0]?.startDate).toDateString() : 'No measurements'}` : ''}`}
+              aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${item.dateRanges?.[0]?.startDate ? formatDisplayDate(item.dateRanges?.[0]?.startDate) : 'No measurements'}` : ''}`}
               data-testid={'census-selection-option'}
               key={item?.plotCensusNumber}
               value={item?.plotCensusNumber?.toString()}
@@ -432,40 +427,21 @@ export default function Sidebar(props: SidebarProps) {
                   </Typography>
                   {Array.isArray(item?.dateRanges) &&
                     item.dateRanges.map((dateRange, index) => (
-                      <React.Fragment key={index}>
-                        <Stack direction={'row'}>
-                          <Typography level="body-sm" color={'neutral'}>
-                            {`${dateRange.startDate ? ` — First Msmt: ${new Date(dateRange.startDate).toDateString()}` : ' — No Measurements'}`}
+                      <Stack key={index} direction={'row'}>
+                        <Typography level="body-sm" color={'neutral'}>
+                          {`${dateRange.startDate ? `First Msmt: ${formatDisplayDate(dateRange.startDate)}` : 'No Measurements'}`}
+                        </Typography>
+                        {dateRange.endDate && (
+                          <Typography level="body-sm" color={'neutral'} sx={{ whiteSpace: 'pre' }}>
+                            {' — '}
                           </Typography>
-                          {dateRange.endDate && (
-                            <Typography level="body-sm" color={'neutral'} sx={{ paddingLeft: '1em', paddingRight: '1em' }}>
-                              &lt;===&gt;
-                            </Typography>
-                          )}
-                          <Typography level="body-sm" color={'neutral'}>
-                            {`${dateRange.endDate ? ` — Last Msmt: ${new Date(dateRange.endDate).toDateString()}` : ''}`}
-                          </Typography>
-                        </Stack>
-                      </React.Fragment>
+                        )}
+                        <Typography level="body-sm" color={'neutral'}>
+                          {`${dateRange.endDate ? `Last Msmt: ${formatDisplayDate(dateRange.endDate)}` : ''}`}
+                        </Typography>
+                      </Stack>
                     ))}
                 </Box>
-                <IconButton
-                  variant={'soft'}
-                  color={'danger'}
-                  onClick={e => {
-                    e.stopPropagation(); // Prevent dropdown selection
-                    if (item) setCensusToDelete(item);
-                    setIsClearDropdownOpen(true);
-                  }}
-                  disabled={
-                    (item?.plotCensusNumber ?? 0) <
-                    (Array.isArray(censusListContext)
-                      ? censusListContext.reduce((currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0), 0)
-                      : 0)
-                  }
-                >
-                  <DeleteForever />
-                </IconButton>
               </Box>
             </Option>
           ))}
@@ -505,8 +481,8 @@ export default function Sidebar(props: SidebarProps) {
             px: 1.5
           }}
         >
-          <CheckCircle sx={{ fontSize: 16, color: 'success.500' }} />
-          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.500', fontWeight: 'lg' }}>
+          <CheckCircle sx={{ fontSize: 16, color: 'success.400' }} />
+          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.400', fontWeight: 'lg' }}>
             With Quadrats ({plotsWithQuadrats.length})
           </Typography>
         </ListItem>
@@ -520,7 +496,7 @@ export default function Sidebar(props: SidebarProps) {
                 {item?.plotName}
               </Typography>
               <Typography level="body-sm" color="success">
-                &mdash; Quadrats: {item?.numQuadrats}
+                {' — '}Quadrats: {item?.numQuadrats}
               </Typography>
             </Stack>
           </Option>
@@ -563,7 +539,7 @@ export default function Sidebar(props: SidebarProps) {
                 {item?.plotName}
               </Typography>
               <Typography level="body-sm" color="neutral">
-                &mdash; No Quadrats
+                {' — '}No Quadrats
               </Typography>
             </Stack>
           </Option>
@@ -579,6 +555,7 @@ export default function Sidebar(props: SidebarProps) {
         required
         size="md"
         data-testid="plot-select-component"
+        sx={{ width: '100%', minWidth: 0 }}
         aria-label="Select a Plot"
         renderValue={renderPlotValue}
         value={currentPlot?.plotID ?? null}
@@ -592,6 +569,7 @@ export default function Sidebar(props: SidebarProps) {
         }}
         onClose={() => setPlotDropdownOpen(false)}
         onChange={async (event: React.SyntheticEvent | null, newValue: number | null) => {
+          if (isProgrammaticSelectClear(event, newValue)) return;
           event?.preventDefault();
           const selectedPlot = plotListContext?.find(plot => plot?.plotID === newValue) || undefined;
           await handlePlotSelection(selectedPlot);
@@ -632,7 +610,7 @@ export default function Sidebar(props: SidebarProps) {
         placeholder="Select a Site"
         name="None"
         required
-        sx={{ marginRight: '1em' }}
+        sx={{ width: '100%', minWidth: 0 }}
         size={'md'}
         renderValue={renderSiteValue}
         data-testid={'site-select-component'}
@@ -644,7 +622,8 @@ export default function Sidebar(props: SidebarProps) {
           setCensusDropdownOpen(false);
         }}
         onClose={() => setSiteDropdownOpen(false)}
-        onChange={async (_event: React.SyntheticEvent | null, newValue: number | null) => {
+        onChange={async (event: React.SyntheticEvent | null, newValue: number | null) => {
+          if (isProgrammaticSelectClear(event, newValue)) return;
           const selectedSite = newValue ? siteListContext?.find(site => site?.siteID === newValue) : undefined;
           await handleSiteSelection(selectedSite);
         }}
@@ -652,10 +631,10 @@ export default function Sidebar(props: SidebarProps) {
         <List>
           <ListItem sticky className="sidebar-item">
             <Typography level="body-xs" textTransform="uppercase">
-              Deselect Site (will trigger app reset!):
+              Clear selection:
             </Typography>
           </ListItem>
-          <Option key="none" value={null as unknown as number} aria-label="Deselect site, will trigger application reset">
+          <Option key="none" value={null as unknown as number} aria-label="Clear site selection">
             None
           </Option>
         </List>
@@ -677,30 +656,32 @@ export default function Sidebar(props: SidebarProps) {
             </Option>
           ))}
         </List>
-        <ListDivider role="none" />
-        <List sx={{ '--ListItemDecorator-size': '28px' }}>
-          <ListItem id="other-sites-group" sticky className="sidebar-item">
-            <Typography
-              level="body-xs"
-              textTransform="uppercase"
-              aria-live="polite"
-              aria-label={`Other Sites section, ${otherSites.length} sites not available to you`}
-            >
-              Other Sites ({otherSites.length})
-            </Typography>
-          </ListItem>
-          {otherSites.map(site => (
-            <Option
-              key={site.siteID}
-              value={site.siteID}
-              disabled
-              data-testid={'site-selection-option-other'}
-              aria-label={`${site.siteName} site, not accessible to current user`}
-            >
-              {site.siteName}
-            </Option>
-          ))}
-        </List>
+        {otherSites.length > 0 && [
+          <ListDivider key="other-sites-divider" role="none" />,
+          <List key="other-sites-list" sx={{ '--ListItemDecorator-size': '28px' }}>
+            <ListItem id="other-sites-group" sticky className="sidebar-item">
+              <Typography
+                level="body-xs"
+                textTransform="uppercase"
+                aria-live="polite"
+                aria-label={`Other Sites section, ${otherSites.length} sites not available to you`}
+              >
+                Other Sites ({otherSites.length})
+              </Typography>
+            </ListItem>
+            {otherSites.map(site => (
+              <Option
+                key={site.siteID}
+                value={site.siteID}
+                disabled
+                data-testid={'site-selection-option-other'}
+                aria-label={`${site.siteName} site, not accessible to current user`}
+              >
+                {site.siteName}
+              </Option>
+            ))}
+          </List>
+        ]}
       </Select>
     );
   };
@@ -735,12 +716,12 @@ export default function Sidebar(props: SidebarProps) {
         case '/errors':
           return !isAllValiditiesTrue;
         case '/subquadrats':
-          return !validity['quadrats'];
+          return validityReady && !validity['quadrats'];
         case '/quadratpersonnel':
-          return !validity['quadrats'];
+          return validityReady && !validity['quadrats'];
         default:
           const dataKey = validityMapping[linkHref];
-          return dataKey !== undefined && !validity[dataKey];
+          return validityReady && dataKey !== undefined && !validity[dataKey];
       }
     } else {
       // Check for main links
@@ -748,9 +729,9 @@ export default function Sidebar(props: SidebarProps) {
         case '/summary':
           return !isAllValiditiesTrue;
         case '/subquadrats':
-          return !validity['quadrats'];
+          return validityReady && !validity['quadrats'];
         case '/quadratpersonnel':
-          return !validity['quadrats'];
+          return validityReady && !validity['quadrats'];
         default:
           return false;
       }
@@ -759,7 +740,7 @@ export default function Sidebar(props: SidebarProps) {
 
   return (
     <>
-      <Stack direction={'row'} sx={{ display: 'flex', width: 'fit-content' }}>
+      <Stack direction={'row'} sx={{ display: 'flex', width: '100%', maxWidth: '100vw', minWidth: 0 }}>
         <Box
           component="nav"
           ref={sidebarRef}
@@ -771,7 +752,9 @@ export default function Sidebar(props: SidebarProps) {
             top: 0,
             left: 0,
             height: '100vh',
-            width: `${sidebarWidth}px`,
+            width: { xs: '100%', md: `${sidebarWidth}px` },
+            maxWidth: '100vw',
+            boxSizing: 'border-box',
             p: 2,
             flexShrink: 0,
             display: 'flex',
@@ -800,7 +783,7 @@ export default function Sidebar(props: SidebarProps) {
           <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
               <Stack direction={'column'} sx={{ marginRight: '1em' }}>
-                <Typography level="h1">
+                <Typography level="h2">
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <Box sx={{ marginRight: 1.5 }}>
                       <RainbowIcon />
@@ -849,28 +832,27 @@ export default function Sidebar(props: SidebarProps) {
                   )}
                   {session?.user?.userStatus === 'global' && (
                     <>
-                      <ListItemButton
-                        selected={pathname === '/admin/provision'}
-                        color={pathname === '/admin/provision' ? 'primary' : undefined}
-                        onClick={() => router.push('/admin/provision')}
-                        sx={{ borderRadius: 'sm', mb: 0.5 }}
-                        aria-label="Navigate to Provision New Site"
-                      >
-                        <AddCircleOutlineIcon />
+                      <Typography level="body-xs" sx={{ color: 'neutral.400', mb: 0.5, fontWeight: 600, textTransform: 'uppercase' }}>
+                        Administration
+                      </Typography>
+                      {ADMIN_NAV.map(item => (
+                        <ListItemButton
+                          key={item.href}
+                          component={NextLink}
+                          href={item.href}
+                          selected={pathname === item.href}
+                          color={pathname === item.href ? 'primary' : undefined}
+                          sx={{ borderRadius: 'sm', mb: 0.5 }}
+                        >
+                          {item.icon}
+                          <ListItemContent>
+                            <Typography level="title-sm">{item.label}</Typography>
+                          </ListItemContent>
+                        </ListItemButton>
+                      ))}
+                      <ListItemButton component={NextLink} href="/dashboard" aria-label="Back to app" sx={{ borderRadius: 'sm', mb: 1 }}>
                         <ListItemContent>
-                          <Typography level="title-sm">Provision Site</Typography>
-                        </ListItemContent>
-                      </ListItemButton>
-                      <ListItemButton
-                        selected={pathname === '/admin/provision/runs'}
-                        color={pathname === '/admin/provision/runs' ? 'primary' : undefined}
-                        onClick={() => router.push('/admin/provision/runs')}
-                        sx={{ borderRadius: 'sm', mb: 1 }}
-                        aria-label="Navigate to Provisioning Runs"
-                      >
-                        <FormatListBulletedIcon />
-                        <ListItemContent>
-                          <Typography level="title-sm">Provisioning Runs</Typography>
+                          <Typography level="title-sm">Back to app</Typography>
                         </ListItemContent>
                       </ListItemButton>
                     </>
@@ -905,7 +887,7 @@ export default function Sidebar(props: SidebarProps) {
                           sx={{
                             minWidth: 28,
                             minHeight: 28,
-                            '&:hover': { bgcolor: 'danger.softBg', color: 'danger.500' }
+                            '&:hover': { bgcolor: 'danger.softBg', color: 'danger.400' }
                           }}
                           aria-label="Clear plot selection"
                         >
@@ -935,7 +917,7 @@ export default function Sidebar(props: SidebarProps) {
                               sx={{
                                 minWidth: 28,
                                 minHeight: 28,
-                                '&:hover': { bgcolor: 'danger.softBg', color: 'danger.500' }
+                                '&:hover': { bgcolor: 'danger.softBg', color: 'danger.400' }
                               }}
                               aria-label="Clear census selection"
                             >
@@ -945,7 +927,7 @@ export default function Sidebar(props: SidebarProps) {
                         )}
                       </Box>
                       {currentCensus && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
                           <ValidationStatusBadge
                             schema={currentSite?.schemaName}
                             plotID={currentPlot?.plotID}
@@ -1013,46 +995,75 @@ export default function Sidebar(props: SidebarProps) {
                         case '/errors':
                           return !isAllValiditiesTrue;
                         case '/subquadrats':
-                          return !validity['quadrats'];
+                          return validityReady && !validity['quadrats'];
                         case '/quadratpersonnel':
-                          return !validity['quadrats'];
+                          return validityReady && !validity['quadrats'];
                         default:
                           return false;
                       }
+                    };
+
+                    const focusMainContent = () => {
+                      setTimeout(() => {
+                        const mainContent = document.getElementById('main-content');
+                        if (mainContent) {
+                          mainContent.focus();
+                          mainContent.scrollIntoView();
+                        }
+                      }, 100);
+                    };
+
+                    // Cmd/ctrl/shift/alt-click and middle-click on a real anchor open a new
+                    // tab/window — the current tab does not navigate, so same-tab side effects
+                    // (census clear, focus move, availability gate) must not run.
+                    const isModifiedClick = (e: React.MouseEvent) => e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0;
+
+                    // Disabled nav items render as plain divs with no href (see component=/href=
+                    // below), so browser link affordances (open in new tab, middle-click) have
+                    // nothing to follow. This capture-phase handler is the runtime backstop:
+                    // MUI's useButton skips a disabled item's `onClick` WITHOUT calling
+                    // preventDefault(), so a bubble-phase onClick could never block a stray
+                    // href on a disabled item — capture-phase can.
+                    const preventNavigationIfDisabled = (isDisabled: boolean) => (e: React.MouseEvent) => {
+                      if (isDisabled) {
+                        e.preventDefault();
+                      }
+                    };
+
+                    const handleEnabledNavClick = (e: React.MouseEvent) => {
+                      if (isModifiedClick(e)) return;
+                      focusMainContent();
                     };
 
                     if (item.expanded.length === 0) {
                       const isDashboard = item.href === '/dashboard';
                       const isLinkDisabled = isDashboard ? false : getDisabledState(item.href);
                       const isDataIncomplete = isDashboard ? false : shouldApplyTooltip(item);
+                      const isNavDisabledWithoutSelection = currentPlot === undefined || currentCensus === undefined || isLinkDisabled;
 
-                      const handleDashboardClick = async () => {
-                        await handleCensusSelection(undefined);
-                        router.push('/dashboard');
-                        setTimeout(() => {
-                          const mainContent = document.getElementById('main-content');
-                          if (mainContent) {
-                            mainContent.focus();
-                            mainContent.scrollIntoView();
+                      const handleDashboardClick = (e: React.MouseEvent) => {
+                        if (isModifiedClick(e)) return;
+                        // Same-tab navigation must wait for the census-clear dispatch:
+                        // letting the NextLink navigate immediately mounts the dashboard
+                        // with the census still selected, so it fetches census-scoped
+                        // metrics that then flash and vanish when the clear lands.
+                        e.preventDefault();
+                        void (async () => {
+                          try {
+                            await handleCensusSelection(undefined);
+                          } catch (error) {
+                            ailogger.error('Failed to clear census selection before dashboard navigation', error instanceof Error ? error : undefined);
+                            return;
                           }
-                        }, 100);
-                      };
-
-                      const handleNavClick = () => {
-                        if (!isLinkDisabled) {
                           router.push(item.href);
-                          setTimeout(() => {
-                            const mainContent = document.getElementById('main-content');
-                            if (mainContent) {
-                              mainContent.focus();
-                              mainContent.scrollIntoView();
-                            }
-                          }, 100);
-                        }
+                          focusMainContent();
+                        })();
                       };
 
                       // Dashboard button is always visible, other non-expanding items require site+plot
-                      const transitionIn = isDashboard ? true : currentSite !== undefined && currentPlot !== undefined;
+                      // Keep the information architecture visible before selection; unavailable
+                      // destinations are shown disabled instead of disappearing.
+                      const transitionIn = true;
 
                       return (
                         <TransitionComponent key={item.href} in={transitionIn} direction="down">
@@ -1060,6 +1071,8 @@ export default function Sidebar(props: SidebarProps) {
                             {isDashboard ? (
                               <Box sx={{ display: 'flex', flex: 1 }} data-testid={'dashboard-nav-wrapper'}>
                                 <ListItemButton
+                                  component={NextLink}
+                                  href={item.href}
                                   selected={pathname === item.href && !currentCensus}
                                   data-testid={`navigate-list-item-button-nonexpanding-${item.href}`}
                                   sx={{ flex: 1, width: '100%' }}
@@ -1076,12 +1089,16 @@ export default function Sidebar(props: SidebarProps) {
                               <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : ''} arrow disableHoverListener={!isDataIncomplete}>
                                 <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-defined-box-wrapper'}>
                                   <ListItemButton
+                                    key={`${item.href}-${isNavDisabledWithoutSelection ? 'locked' : 'link'}`}
+                                    component={isNavDisabledWithoutSelection ? 'div' : NextLink}
+                                    href={isNavDisabledWithoutSelection ? undefined : item.href}
                                     selected={pathname === item.href}
                                     data-testid={`navigate-list-item-button-nonexpanding-${item.href}`}
                                     sx={{ flex: 1, width: '100%' }}
                                     disabled={isLinkDisabled}
                                     color={pathname === item.href ? 'primary' : undefined}
-                                    onClick={handleNavClick}
+                                    onClickCapture={preventNavigationIfDisabled(isLinkDisabled)}
+                                    onClick={handleEnabledNavClick}
                                   >
                                     <Badge
                                       color="danger"
@@ -1099,20 +1116,24 @@ export default function Sidebar(props: SidebarProps) {
                                 </Box>
                               </Tooltip>
                             ) : (
-                              <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-undefined-box-wrapper'}>
-                                <ListItemButton
-                                  selected={pathname === item.href}
-                                  sx={{ flex: 1, width: '100%' }}
-                                  disabled={currentPlot === undefined || currentCensus === undefined || isLinkDisabled}
-                                  color={pathname === item.href ? 'primary' : undefined}
-                                  onClick={handleNavClick}
-                                >
-                                  <Icon />
-                                  <ListItemContent>
-                                    <Typography level={'title-sm'}>{item.label}</Typography>
-                                  </ListItemContent>
-                                </ListItemButton>
-                              </Box>
+                              <Tooltip title={`Choose a ${currentSite === undefined ? 'site' : currentPlot === undefined ? 'plot' : 'census'} to unlock`} arrow>
+                                <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-undefined-box-wrapper'}>
+                                  <ListItemButton
+                                    component="div"
+                                    selected={pathname === item.href}
+                                    sx={{ flex: 1, width: '100%' }}
+                                    disabled={isNavDisabledWithoutSelection}
+                                    color={pathname === item.href ? 'primary' : undefined}
+                                    onClickCapture={preventNavigationIfDisabled(isNavDisabledWithoutSelection)}
+                                    onClick={handleEnabledNavClick}
+                                  >
+                                    <LockOutlined />
+                                    <ListItemContent>
+                                      <Typography level={'title-sm'}>{item.label}</Typography>
+                                    </ListItemContent>
+                                  </ListItemButton>
+                                </Box>
+                              </Tooltip>
                             )}
                           </ListItem>
                         </TransitionComponent>
@@ -1120,11 +1141,11 @@ export default function Sidebar(props: SidebarProps) {
                     } else {
                       const isParentDataIncomplete = item.expanded.some(subItem => {
                         const dataKey = validityMapping[subItem.href];
-                        return dataKey !== undefined && !validity[dataKey];
+                        return validityReady && dataKey !== undefined && !validity[dataKey];
                       });
 
                       return (
-                        <TransitionComponent key={item.href} in={currentSite !== undefined && currentPlot !== undefined} direction="down">
+                        <TransitionComponent key={item.href} in={true} direction="down">
                           <ListItem nested data-testid={`navigate-list-item-expanding-${item.label}`}>
                             <SimpleToggler
                               renderToggle={MenuRenderToggle(
@@ -1146,7 +1167,39 @@ export default function Sidebar(props: SidebarProps) {
                                   const isMeasurementsViewLink = link.href === '/summary' || link.href === '/errors';
                                   const isDataIncomplete = shouldApplyTooltip(item, link.href);
                                   const isLinkDisabled = getDisabledState(link.href);
+                                  const isSubLinkDisabledWithoutSelection =
+                                    currentPlot === undefined || (item.href !== '/fixeddatainput' && currentCensus === undefined) || isLinkDisabled;
                                   const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (isMeasurementsViewLink && !isAllValiditiesTrue));
+
+                                  const handleSubLinkClick = (e: React.MouseEvent) => {
+                                    if (link.href === '/postvalidation') {
+                                      // Modified clicks open the anchor's href in a new tab NATIVELY:
+                                      // a window.open() issued after an awaited fetch runs outside the
+                                      // click's transient user activation and gets popup-blocked
+                                      // (Safari always; Chrome once the fetch outlives the activation
+                                      // window). The destination page handles the no-measurements case
+                                      // itself — it must, since it is directly addressable by URL.
+                                      if (isModifiedClick(e)) return;
+                                      // Same-tab navigation stays gated on the async availability
+                                      // check, so it preventDefault()s and navigates programmatically
+                                      // once the fetch resolves.
+                                      e.preventDefault();
+                                      void (async () => {
+                                        const response = await fetch(
+                                          `/api/cmprevalidation/postvalidation/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}`
+                                        );
+                                        if (response.ok) {
+                                          router.push(item.href + link.href);
+                                          focusMainContent();
+                                        } else {
+                                          alert('No measurements found!');
+                                        }
+                                      })();
+                                      return;
+                                    }
+                                    if (isModifiedClick(e)) return;
+                                    focusMainContent();
+                                  };
                                   return (
                                     <TransitionComponent key={link.href} in={!!toggle} direction="down">
                                       <ListItem data-testid={`navigate-list-item-expanded-${item.label}-${link.label}`}>
@@ -1156,6 +1209,9 @@ export default function Sidebar(props: SidebarProps) {
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
                                             <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-defined-box-wrapper'}>
                                               <ListItemButton
+                                                key={`${item.href}${link.href}-${isLinkDisabled ? 'locked' : 'link'}`}
+                                                component={isLinkDisabled ? 'div' : NextLink}
+                                                href={isLinkDisabled ? undefined : item.href + link.href}
                                                 data-testid={`navigate-list-item-expanded-button-${item.label}-${link.label}-${link.href}`}
                                                 sx={{ flex: 1, width: '100%' }}
                                                 selected={pathname === item.href + link.href}
@@ -1163,39 +1219,8 @@ export default function Sidebar(props: SidebarProps) {
                                                 disabled={isLinkDisabled}
                                                 onMouseEnter={navPreloadHandlers[link.href]}
                                                 onFocus={navPreloadHandlers[link.href]}
-                                                onClick={async () => {
-                                                  if (link.href === '/postvalidation') {
-                                                    const response = await fetch(
-                                                      `/api/cmprevalidation/postvalidation/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}`
-                                                    );
-                                                    if (response.ok) {
-                                                      router.push(item.href + link.href);
-                                                      // Move focus to main content after navigation
-                                                      setTimeout(() => {
-                                                        const mainContent = document.getElementById('main-content');
-                                                        if (mainContent) {
-                                                          mainContent.focus();
-                                                          mainContent.scrollIntoView();
-                                                        }
-                                                      }, 100);
-                                                      return;
-                                                    } else {
-                                                      alert('No measurements found!');
-                                                      return;
-                                                    }
-                                                  } else if (!isLinkDisabled) {
-                                                    router.push(item.href + link.href);
-                                                    // Move focus to main content after navigation
-                                                    setTimeout(() => {
-                                                      const mainContent = document.getElementById('main-content');
-                                                      if (mainContent) {
-                                                        mainContent.focus();
-                                                        mainContent.scrollIntoView();
-                                                      }
-                                                    }, 100);
-                                                    return;
-                                                  }
-                                                }}
+                                                onClickCapture={preventNavigationIfDisabled(isLinkDisabled)}
+                                                onClick={handleSubLinkClick}
                                               >
                                                 <Badge
                                                   color={isMeasurementsViewLink ? 'warning' : 'danger'}
@@ -1225,36 +1250,29 @@ export default function Sidebar(props: SidebarProps) {
                                             </Box>
                                           </Tooltip>
                                         ) : (
-                                          <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-undefined-box-wrapper'}>
-                                            <ListItemButton
-                                              sx={{ flex: 1, width: '100%' }}
-                                              selected={pathname == item.href + link.href}
-                                              color={pathname === item.href ? 'primary' : undefined}
-                                              disabled={
-                                                currentPlot === undefined || (item.href !== '/fixeddatainput' && currentCensus === undefined) || isLinkDisabled
-                                              }
-                                              onMouseEnter={navPreloadHandlers[link.href]}
-                                              onFocus={navPreloadHandlers[link.href]}
-                                              onClick={() => {
-                                                if (!isLinkDisabled) {
-                                                  router.push(item.href + link.href);
-                                                  // Move focus to main content after navigation
-                                                  setTimeout(() => {
-                                                    const mainContent = document.getElementById('main-content');
-                                                    if (mainContent) {
-                                                      mainContent.focus();
-                                                      mainContent.scrollIntoView();
-                                                    }
-                                                  }, 100);
-                                                }
-                                              }}
-                                            >
-                                              <SubIcon />
-                                              <ListItemContent>
-                                                <Typography level={'title-sm'}>{link.label}</Typography>
-                                              </ListItemContent>
-                                            </ListItemButton>
-                                          </Box>
+                                          <Tooltip
+                                            title={`Choose a ${currentSite === undefined ? 'site' : currentPlot === undefined ? 'plot' : 'census'} to unlock`}
+                                            arrow
+                                          >
+                                            <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-undefined-box-wrapper'}>
+                                              <ListItemButton
+                                                component="div"
+                                                sx={{ flex: 1, width: '100%' }}
+                                                selected={pathname == item.href + link.href}
+                                                color={pathname === item.href ? 'primary' : undefined}
+                                                disabled={isSubLinkDisabledWithoutSelection}
+                                                onMouseEnter={navPreloadHandlers[link.href]}
+                                                onFocus={navPreloadHandlers[link.href]}
+                                                onClickCapture={preventNavigationIfDisabled(isSubLinkDisabledWithoutSelection)}
+                                                onClick={handleEnabledNavClick}
+                                              >
+                                                <LockOutlined />
+                                                <ListItemContent>
+                                                  <Typography level={'title-sm'}>{link.label}</Typography>
+                                                </ListItemContent>
+                                              </ListItemButton>
+                                            </Box>
+                                          </Tooltip>
                                         )}
                                       </ListItem>
                                     </TransitionComponent>
@@ -1274,16 +1292,6 @@ export default function Sidebar(props: SidebarProps) {
           <Divider orientation={'horizontal'} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
         </Box>
-        <CensusDeletionModal
-          open={isClearDropdownOpen}
-          onClose={() => {
-            setIsClearDropdownOpen(false);
-            setCensusToDelete(null);
-          }}
-          onDelete={handleCensusDelete}
-          census={censusToDelete}
-          isDeleting={isDeletingCensus}
-        />
       </Stack>
     </>
   );

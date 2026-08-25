@@ -56,9 +56,9 @@ describe('Data Viewing and Browsing', () => {
 
     openViewFullTable();
 
-    cy.contains('[role="row"]', 'TREE101').should('contain', 'RUBI04');
-    cy.contains('[role="row"]', 'TREE102').should('contain', 'ANOPKL');
-    cy.contains('[role="row"]', 'TREE103').should('contain', 'CECR01');
+    cy.gridRowShouldContain('TREE101', 'RUBI04');
+    cy.gridRowShouldContain('TREE102', 'ANOPKL');
+    cy.gridRowShouldContain('TREE103', 'CECR01');
     cy.get('input[placeholder="Search All Fields..."]').should('be.visible');
     cy.get('[aria-label="Export as CSV"]').should('exist');
     cy.get('[aria-label="More actions"]').should('be.visible');
@@ -79,9 +79,9 @@ describe('Data Viewing and Browsing', () => {
 
     openViewFullTable();
 
-    cy.contains('[role="row"]', 'TREE001').should('be.visible');
+    cy.gridRowShouldContain('TREE001');
     cy.get('[aria-label*="next page"]').click({ force: true });
-    cy.contains('[role="row"]', 'TREE011').should('be.visible');
+    cy.gridRowShouldContain('TREE011');
 
     cy.get('[aria-label="Export as CSV"]').scrollIntoView().click({ force: true });
     cy.wait('@filterIsolatedGridRows');
@@ -110,6 +110,6 @@ describe('Data Viewing and Browsing', () => {
     cy.get('[data-testid="selected-site-name"]').should('contain', 'Luquillo');
     cy.get('[data-testid="selected-plot-name"]').should('contain', 'Luquillo Main Plot');
     cy.get('[data-testid="selected-census-plotcensusnumber"]').should('contain', 'Census: 5');
-    cy.contains('[role="row"]', 'TREE101').should('contain', 'RUBI04');
+    cy.gridRowShouldContain('TREE101', 'RUBI04');
   });
 });

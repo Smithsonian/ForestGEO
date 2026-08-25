@@ -25,7 +25,7 @@ import VerifiedIcon from '@mui/icons-material/Verified';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import QueryStatsIcon from '@mui/icons-material/QueryStats';
 import moment from 'moment';
-import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
+import { PostValidationQueriesRDS } from '@/lib/db/definitions/validations';
 
 // ============================================================================
 // Types
@@ -74,12 +74,23 @@ export interface QueryStatusIndicatorProps {
 // Helper Functions
 // ============================================================================
 
-function parseQueryResults(query: PostValidationQueriesRDS): { count: number; status: 'success' | 'failure' | 'pending' } {
-  if (!query.lastRunStatus) {
+const QUERY_RUN_SUCCESS = 'success';
+const QUERY_RUN_FAILURE = 'failure';
+
+function buildPostValidationQueriesUrl(schema: string, plotID?: number, censusID?: number): string {
+  return `/api/fetchall/postvalidationqueries/${plotID ?? 0}/${censusID ?? 0}?schema=${encodeURIComponent(schema)}`;
+}
+
+function hasMatchingRunContext(query: PostValidationQueriesRDS, plotID?: number, censusID?: number): boolean {
+  return plotID !== undefined && censusID !== undefined && query.lastRunPlotID === plotID && query.lastRunCensusID === censusID;
+}
+
+function parseQueryResults(query: PostValidationQueriesRDS, plotID?: number, censusID?: number): { count: number; status: 'success' | 'failure' | 'pending' } {
+  if (!query.lastRunStatus || !hasMatchingRunContext(query, plotID, censusID)) {
     return { count: 0, status: 'pending' };
   }
 
-  if (query.lastRunStatus === 'failure') {
+  if (query.lastRunStatus === QUERY_RUN_FAILURE) {
     return { count: 0, status: 'failure' };
   }
 
@@ -94,9 +105,13 @@ function parseQueryResults(query: PostValidationQueriesRDS): { count: number; st
 function getOverallStatus(stats: DataQualityStats): 'excellent' | 'good' | 'warning' | 'issues' | 'pending' {
   if (stats.pendingQueries === stats.totalQueries) return 'pending';
   if (stats.failedQueries > 0) return 'issues';
+  if (stats.pendingQueries === 0 && stats.passedQueries === stats.totalQueries) return 'excellent';
 
-  const passRate = stats.passedQueries / (stats.totalQueries - stats.pendingQueries);
-  if (passRate >= 1) return 'excellent';
+  // Pass rate is over queries that actually RAN: never-run (pending) queries are
+  // not failures, so a partially-run census with zero failed queries must not
+  // degrade to 'warning'.
+  const ranQueries = stats.totalQueries - stats.pendingQueries;
+  const passRate = ranQueries > 0 ? stats.passedQueries / ranQueries : 0;
   if (passRate >= 0.8) return 'good';
   return 'warning';
 }
@@ -155,8 +170,9 @@ function QueryStatusIndicator({ status, size = 'sm' }: QueryStatusIndicatorProps
   );
 }
 
-function QueryListItem({ query }: { query: PostValidationQueriesRDS }) {
-  const { count, status } = parseQueryResults(query);
+function QueryListItem({ query, plotID, censusID }: { query: PostValidationQueriesRDS; plotID?: number; censusID?: number }) {
+  const { count, status } = parseQueryResults(query, plotID, censusID);
+  const isCurrentRun = hasMatchingRunContext(query, plotID, censusID);
 
   return (
     <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 0.75 }}>
@@ -179,7 +195,7 @@ function QueryListItem({ query }: { query: PostValidationQueriesRDS }) {
           {count} results
         </Chip>
       )}
-      {query.lastRunAt && (
+      {isCurrentRun && query.lastRunAt && (
         <Typography level="body-xs" color="neutral" sx={{ fontSize: '0.6rem' }}>
           {moment(query.lastRunAt).fromNow()}
         </Typography>
@@ -193,27 +209,6 @@ function DataQualitySkeleton() {
 }
 
 // ============================================================================
-// Placeholder Data (TODO: Re-enable API calls when post-validation is ready)
-// ============================================================================
-
-const PLACEHOLDER_QUERIES: PostValidationQueriesRDS[] = [
-  { id: 1, queryID: 1, queryName: 'Validation Query 1', isEnabled: true, lastRunStatus: undefined },
-  { id: 2, queryID: 2, queryName: 'Validation Query 2', isEnabled: true, lastRunStatus: undefined },
-  { id: 3, queryID: 3, queryName: 'Validation Query 3', isEnabled: true, lastRunStatus: undefined },
-  { id: 4, queryID: 4, queryName: 'Validation Query 4', isEnabled: true, lastRunStatus: undefined },
-  { id: 5, queryID: 5, queryName: 'Validation Query 5', isEnabled: true, lastRunStatus: undefined }
-];
-
-const PLACEHOLDER_STATS: DataQualityStats = {
-  totalQueries: 5,
-  passedQueries: 0,
-  failedQueries: 0,
-  pendingQueries: 5,
-  lastRunAt: undefined,
-  queries: PLACEHOLDER_QUERIES
-};
-
-// ============================================================================
 // Main Component
 // ============================================================================
 
@@ -223,65 +218,54 @@ export default function DataQualityCard({
   censusID,
   isLoading = false,
   stats: preloadedStats,
-  onRefresh: _onRefresh,
+  onRefresh,
   defaultExpanded = false,
   compact = false
 }: DataQualityCardProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  // TODO: Re-enable actual data fetching when post-validation is ready
-  // const [localStats, setLocalStats] = useState<DataQualityStats | null>(preloadedStats || null);
-  const [localStats, setLocalStats] = useState<DataQualityStats | null>(PLACEHOLDER_STATS);
+  const [localStats, setLocalStats] = useState<DataQualityStats | null>(preloadedStats || null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [fetchError, _setFetchError] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // TODO: Re-enable API fetch when post-validation is ready
-  // Fetch stats if not preloaded
   const fetchStats = useCallback(async () => {
-    // Placeholder implementation - just use placeholder data
-    setLocalStats(PLACEHOLDER_STATS);
+    if (!schema) return;
 
-    // Original implementation commented out:
-    // if (!schema) return;
-    //
-    // try {
-    //   setFetchError(null);
-    //   const response = await fetch(`/api/fetchall/postvalidationqueries/${plotID ?? 0}/${censusID ?? 0}?schema=${schema}`, { method: 'GET' });
-    //
-    //   if (!response.ok) {
-    //     throw new Error('Failed to fetch validation queries');
-    //   }
-    //
-    //   const queries: PostValidationQueriesRDS[] = await response.json();
-    //
-    //   // Calculate stats from queries
-    //   const enabledQueries = queries.filter(q => q.isEnabled);
-    //   const passed = enabledQueries.filter(q => q.lastRunStatus === 'success').length;
-    //   const failed = enabledQueries.filter(q => q.lastRunStatus === 'failure').length;
-    //   const pending = enabledQueries.filter(q => !q.lastRunStatus).length;
-    //
-    //   // Find most recent run
-    //   const lastRun = enabledQueries.filter(q => q.lastRunAt).sort((a, b) => new Date(b.lastRunAt!).getTime() - new Date(a.lastRunAt!).getTime())[0];
-    //
-    //   setLocalStats({
-    //     totalQueries: enabledQueries.length,
-    //     passedQueries: passed,
-    //     failedQueries: failed,
-    //     pendingQueries: pending,
-    //     lastRunAt: lastRun?.lastRunAt,
-    //     queries: enabledQueries
-    //   });
-    // } catch (error) {
-    //   setFetchError(error instanceof Error ? error.message : 'Unknown error');
-    // }
-  }, []);
+    try {
+      setFetchError(null);
+      const response = await fetch(buildPostValidationQueriesUrl(schema, plotID, censusID), { method: 'GET' });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch validation queries (HTTP ${response.status})`);
+      }
+
+      const queries: PostValidationQueriesRDS[] = await response.json();
+
+      const enabledQueries = queries.filter(q => q.isEnabled);
+      const passed = enabledQueries.filter(q => hasMatchingRunContext(q, plotID, censusID) && q.lastRunStatus === QUERY_RUN_SUCCESS).length;
+      const failed = enabledQueries.filter(q => hasMatchingRunContext(q, plotID, censusID) && q.lastRunStatus === QUERY_RUN_FAILURE).length;
+      const pending = enabledQueries.length - passed - failed;
+
+      const lastRun = enabledQueries
+        .filter(q => hasMatchingRunContext(q, plotID, censusID) && q.lastRunAt)
+        .sort((a, b) => new Date(b.lastRunAt!).getTime() - new Date(a.lastRunAt!).getTime())[0];
+
+      setLocalStats({
+        totalQueries: enabledQueries.length,
+        passedQueries: passed,
+        failedQueries: failed,
+        pendingQueries: pending,
+        lastRunAt: lastRun?.lastRunAt,
+        queries: enabledQueries
+      });
+    } catch (error) {
+      setFetchError(error instanceof Error ? error.message : String(error));
+    }
+  }, [schema, plotID, censusID]);
 
   useEffect(() => {
-    // TODO: Re-enable when post-validation is ready
-    // if (!preloadedStats && schema) {
-    //   fetchStats();
-    // }
-    // For now, just set placeholder stats
-    setLocalStats(PLACEHOLDER_STATS);
+    if (!preloadedStats && schema) {
+      fetchStats();
+    }
   }, [preloadedStats, schema, fetchStats]);
 
   const stats = preloadedStats || localStats;
@@ -291,15 +275,13 @@ export default function DataQualityCard({
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      // TODO: Re-enable when post-validation is ready
-      // if (onRefresh) {
-      //   await onRefresh();
-      // }
-      // await fetchStats();
-
-      // Placeholder: simulate a brief delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setLocalStats(PLACEHOLDER_STATS);
+      setFetchError(null);
+      if (onRefresh) {
+        await onRefresh();
+      }
+      await fetchStats();
+    } catch (error) {
+      setFetchError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsRefreshing(false);
     }
@@ -461,7 +443,7 @@ export default function DataQualityCard({
             </Typography>
             <Box sx={{ maxHeight: 200, overflowY: 'auto' }}>
               {stats.queries.map((query, index) => (
-                <QueryListItem key={query.queryID || index} query={query} />
+                <QueryListItem key={query.queryID || index} query={query} plotID={plotID} censusID={censusID} />
               ))}
             </Box>
           </Box>

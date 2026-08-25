@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useState } from 'react';
 import { Box, Card, Chip, Stack, Typography } from '@mui/joy';
-import TransactionAwarePQueue from '@/config/transactionawarequeue';
+import TransactionAwarePQueue from '@/lib/db/transactionawarequeue';
 
 interface TransactionMonitorProps {
   queue?: TransactionAwarePQueue;

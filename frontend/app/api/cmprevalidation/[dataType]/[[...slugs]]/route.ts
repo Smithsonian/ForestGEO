@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { format } from 'mysql2/promise';
+import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -25,8 +26,8 @@ function parsePositiveInt(value: string | undefined): number | undefined {
 
 // datatype: table name
 // expecting 1) schema 2) plotID 3) plotCensusNumber
-export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
-  const params = await props.params;
+async function getHandler(_request: NextRequest, context: RouteContext) {
+  const params = (await context.params) as { dataType: string; slugs?: string[] };
 
   // Validate required parameters exist
   if (!params.slugs || !params.dataType) {
@@ -54,7 +55,9 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
     });
   }
 
-  // SECURITY: Validate schema against whitelist to prevent SQL injection
+  // defense-in-depth: withRouteAuthz already validated schema membership before
+  // this handler ran; this whitelist check stays as a redundant guard on the
+  // schema identifier routed through safeFormatQuery below.
   if (!isValidSchema(schema)) {
     ailogger.error(`[cmprevalidation API] Invalid schema provided: ${schema}`);
     return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), {
@@ -85,8 +88,9 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
     switch (params.dataType) {
       case 'attributes':
       case 'species': {
-        // Use backtick-escaped identifiers for schema/table (already validated)
-        const baseQuery = `SELECT 1 FROM \`${schema}\`.\`${params.dataType}\` dt LIMIT 1`;
+        // Schema routed through safeFormatQuery (?? -> escaped identifier); dataType is
+        // whitelisted by isValidDataType above so it is safe to interpolate directly.
+        const baseQuery = safeFormatQuery(schema, `SELECT 1 FROM ??.\`${params.dataType}\` dt LIMIT 1`);
         const baseResults = await connection.executeQuery(baseQuery);
         if (baseResults.length === 0) {
           return new NextResponse(null, {
@@ -99,8 +103,8 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         // Personnel check passes without query
         break;
       case 'quadrats': {
-        // Use parameterized query for user-provided values
-        const query = format(`SELECT 1 FROM \`${schema}\`.quadrats q WHERE q.PlotID = ? LIMIT 1`, [plotID]);
+        // Schema routed through safeFormatQuery; user-provided PlotID stays parameterized.
+        const query = format(safeFormatQuery(schema, `SELECT 1 FROM ??.quadrats q WHERE q.PlotID = ? LIMIT 1`), [plotID]);
         const results = await connection.executeQuery(query);
         if (results.length === 0) {
           return new NextResponse(null, {
@@ -110,16 +114,20 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         break;
       }
       case 'postvalidation': {
-        // Use parameterized query for all user-provided values
+        // Schema routed through safeFormatQuery (?? -> escaped identifier); all
+        // user-provided values stay parameterized.
         const pvQuery = format(
-          `SELECT 1 FROM \`${schema}\`.coremeasurements cm
-           JOIN \`${schema}\`.census c ON c.CensusID = cm.CensusID
-           JOIN \`${schema}\`.plots p ON p.PlotID = c.PlotID
+          safeFormatQuery(
+            schema,
+            `SELECT 1 FROM ??.coremeasurements cm
+           JOIN ??.census c ON c.CensusID = cm.CensusID
+           JOIN ??.plots p ON p.PlotID = c.PlotID
            WHERE p.PlotID = ?
            AND c.CensusID IN (
-             SELECT CensusID FROM \`${schema}\`.census
+             SELECT CensusID FROM ??.census
              WHERE PlotID = ? AND PlotCensusNumber = ?
-           ) LIMIT 1`,
+           ) LIMIT 1`
+          ),
           [plotID, plotID, plotCensusNumber]
         );
         const pvResults = await connection.executeQuery(pvQuery);
@@ -131,20 +139,24 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         break;
       }
       case 'failedmeasurements': {
-        // Use parameterized query for all user-provided values
+        // Schema routed through safeFormatQuery (?? -> escaped identifier); all
+        // user-provided values stay parameterized.
         const fmQuery = format(
-          `SELECT 1
-           FROM \`${schema}\`.coremeasurements cm
-           JOIN \`${schema}\`.census c ON c.CensusID = cm.CensusID
-           JOIN \`${schema}\`.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
-           JOIN \`${schema}\`.measurement_errors me ON me.ErrorID = mel.ErrorID
+          safeFormatQuery(
+            schema,
+            `SELECT 1
+           FROM ??.coremeasurements cm
+           JOIN ??.census c ON c.CensusID = cm.CensusID
+           JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+           JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
            WHERE c.PlotID = ?
              AND c.PlotCensusNumber = ?
              AND c.IsActive IS TRUE
              AND cm.StemGUID IS NULL
              AND mel.IsResolved = FALSE
              AND me.ErrorSource = 'ingestion'
-           LIMIT 1`,
+           LIMIT 1`
+          ),
           [plotID, plotCensusNumber]
         );
         const fmResults = await connection.executeQuery(fmQuery);
@@ -173,3 +185,5 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
     await connection.closeConnection();
   }
 }
+
+export const GET = withRouteAuthz('cmprevalidation/[dataType]/[[...slugs]]', getHandler, { schema: fromPathSegment('slugs', 0) });

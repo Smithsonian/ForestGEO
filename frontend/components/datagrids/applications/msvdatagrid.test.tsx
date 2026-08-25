@@ -1,21 +1,30 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MeasurementsSummaryViewDataGrid from './msvdatagrid';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 
-vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
+const { routerReplaceMock, sessionState } = vi.hoisted(() => ({
+  routerReplaceMock: vi.fn(),
+  sessionState: { userStatus: 'global' }
+}));
+
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { userStatus: sessionState.userStatus } } })
+}));
+
+vi.mock('@/lib/db/definitions/core', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return actual;
 });
 
-vi.mock('@/config/sqlrdsdefinitions/views', async importOriginal => {
+vi.mock('@/lib/db/definitions/views', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return actual;
 });
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
-    replace: vi.fn()
+    replace: routerReplaceMock
   })
 }));
 
@@ -43,17 +52,44 @@ vi.mock('@/components/datagrids/measurementscommons', () => ({
   default: vi.fn(() => <div data-testid="measurements-commons" />)
 }));
 
+const failedMeasurementsModalMock = vi.fn((_props: Record<string, any>) => null);
 vi.mock('@/components/client/modals/failedmeasurementsmodal', () => ({
-  default: () => null
+  default: (props: any) => failedMeasurementsModalMock(props)
 }));
 
 vi.mock('@/ailogger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }));
 
+function mockFailedRowCount(recordCount: number) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/failedmeasurements/count/')) {
+        return { ok: true, json: async () => ({ recordCount }) } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    })
+  );
+}
+
+function latestCommonsProps(): Record<string, any> | undefined {
+  const mockedMeasurementsCommons = vi.mocked(MeasurementsCommons);
+  return mockedMeasurementsCommons.mock.calls.at(-1)?.[0] as Record<string, any> | undefined;
+}
+
+function latestModalProps(): Record<string, any> | undefined {
+  return failedMeasurementsModalMock.mock.calls.at(-1)?.[0] as Record<string, any> | undefined;
+}
+
 describe('MeasurementsSummaryViewDataGrid', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
+    sessionState.userStatus = 'global';
+    // Default: no failed rows, so pre-existing tests see no recovery button.
+    mockFailedRowCount(0);
   });
 
   it('renders the summary grid without a pre-applied visible filter by default', () => {
@@ -74,5 +110,79 @@ describe('MeasurementsSummaryViewDataGrid', () => {
     const renderedProps = mockedMeasurementsCommons.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
 
     expect(renderedProps?.initialVisibleFilters).toEqual(['errors']);
+  });
+
+  it('offers a Fix Failed Rows button when failed measurements exist, and clicking it opens the modal', async () => {
+    mockFailedRowCount(3);
+    render(<MeasurementsSummaryViewDataGrid />);
+
+    await waitFor(() => {
+      const buttons = latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>;
+      expect(buttons.some(button => button.label === 'Fix Failed Rows')).toBe(true);
+    });
+
+    const fixButton = (latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>).find(button => button.label === 'Fix Failed Rows');
+    expect(fixButton?.badgeCount).toBe(3);
+    expect(fixButton?.prominentWarning).toBe(true);
+    expect(latestModalProps()?.open).toBe(false);
+
+    act(() => {
+      fixButton?.onClick();
+    });
+
+    expect(latestModalProps()?.open).toBe(true);
+  });
+
+  it('hides the Fix Failed Rows button when there are no failed measurements', async () => {
+    render(<MeasurementsSummaryViewDataGrid />);
+
+    // Allow the count fetch to settle before asserting absence.
+    await waitFor(() => {
+      expect(vi.mocked(global.fetch)).toHaveBeenCalled();
+    });
+    const buttons = latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>;
+    expect(buttons.some(button => button.label === 'Fix Failed Rows')).toBe(false);
+  });
+
+  it('does not offer failed-row recovery to pending users', async () => {
+    sessionState.userStatus = 'pending';
+    mockFailedRowCount(3);
+    render(<MeasurementsSummaryViewDataGrid />);
+
+    const buttons = latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>;
+    expect(buttons.some(button => button.label === 'Fix Failed Rows')).toBe(false);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('opens the failed-measurements modal on mount when autoOpenFailedMeasurements is set', async () => {
+    render(<MeasurementsSummaryViewDataGrid autoOpenFailedMeasurements />);
+
+    await waitFor(() => {
+      expect(latestModalProps()?.open).toBe(true);
+    });
+  });
+
+  it('closes and strips a deep-link query without waiting on another count request', async () => {
+    render(<MeasurementsSummaryViewDataGrid autoOpenFailedMeasurements failedMeasurementsCloseRedirectHref="/measurementshub/summary" />);
+    await waitFor(() => expect(latestModalProps()?.open).toBe(true));
+    await waitFor(() => expect(vi.mocked(global.fetch)).toHaveBeenCalled());
+    const callsBeforeClose = vi.mocked(global.fetch).mock.calls.length;
+
+    await act(async () => {
+      await latestModalProps()?.handleCloseModal();
+    });
+
+    expect(latestModalProps()?.open).toBe(false);
+    expect(routerReplaceMock).toHaveBeenCalledWith('/measurementshub/summary');
+    expect(vi.mocked(global.fetch)).toHaveBeenCalledTimes(callsBeforeClose);
+  });
+
+  it('surfaces an invalid count response instead of rendering a misleading badge', async () => {
+    mockFailedRowCount(-2);
+    render(<MeasurementsSummaryViewDataGrid />);
+
+    await waitFor(() => expect(screen.getByText(/unable to load the failed-measurement count/i)).toBeInTheDocument());
+    const buttons = latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>;
+    expect(buttons.some(button => button.label === 'Fix Failed Rows')).toBe(false);
   });
 });

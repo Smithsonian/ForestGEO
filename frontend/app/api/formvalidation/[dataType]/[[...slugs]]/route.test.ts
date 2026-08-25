@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 // Import after mocks
 import { GET } from './route'; // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 // ─── Mocks (hoisted) ───────────────────────────────────────────────────────────
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   // If test env already provided a singleton, reuse it; otherwise create a stub
   const candidate =
@@ -40,8 +40,14 @@ vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
 }));
 
+// withRouteAuthz calls auth(); a 'global' session clears the per-site gate so
+// these handler-behavior tests exercise the wrapped GET end-to-end.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
 // Mock schema validation to accept test schemas
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     return ['myschema', 'testschema', 'catdb', 's'].includes(schema);
   })

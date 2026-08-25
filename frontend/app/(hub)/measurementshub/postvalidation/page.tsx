@@ -5,7 +5,7 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import React, { useCallback, useEffect, useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { Box, Button, Checkbox, Table, Typography, useTheme } from '@mui/joy';
-import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
+import { PostValidationQueriesRDS } from '@/lib/db/definitions/validations';
 import { Paper, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import { Done } from '@mui/icons-material';
 import { useLoading } from '@/app/contexts/loadingprovider';
@@ -240,16 +240,10 @@ export default function PostValidationPage() {
                     />
                   </TableCell>
                   <TableCell>Query Name</TableCell>
-                  <TableCell
-                    sx={{
-                      width: '45%'
-                    }}
-                  >
-                    Query Definition
-                  </TableCell>
                   <TableCell>Description</TableCell>
                   <TableCell>Last Run At</TableCell>
                   <TableCell>Last Run Result</TableCell>
+                  <TableCell sx={{ width: '30%' }}>Query details</TableCell>
                 </TableRow>
               </TableHead>
 

@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTestDatabase, teardownTestDatabase, loadSchema, DEFAULT_TEST_CONFIG } from '../../tests/setup/local-db-setup';
-import { checkFinishedCensus, MAX_DISPLAY_FAILURES } from './precondition';
+import { checkFinishedCensus, MAX_DISPLAY_FAILURES, partitionPreconditionFailures, isBlockingPreconditionKind, type PreconditionFailure } from './precondition';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -81,6 +81,7 @@ describe('checkFinishedCensus', () => {
     expect(result.ok, 'expected ok=true for a fully valid census').toBe(true);
     if (result.ok) {
       expect(result.count, 'count should reflect the single exportable row').toBe(1);
+      expect(result.totalActiveCount, 'the single seed row is the only active measurement').toBe(1);
     }
   });
 
@@ -275,46 +276,33 @@ describe('checkFinishedCensus', () => {
     }
   });
 
-  it('fails with missing-taxonomy-fields when species.SpeciesName is empty string', async () => {
+  it('allows an empty SpeciesName because destination taxonomy resolves on mnemonic', async () => {
     await conn.query("UPDATE species SET SpeciesName = '' WHERE SpeciesID = 1");
 
     const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
 
-    expect(result.ok, 'expected ok=false when SpeciesName is empty string').toBe(false);
-    if (!result.ok) {
-      const failure = result.reasons.find(r => r.kind === 'missing-taxonomy-fields');
-      expect(failure, 'missing-taxonomy-fields failure should be present for empty SpeciesName').toBeDefined();
-    }
+    expect(result.ok, 'SpeciesName is not part of destination lookup').toBe(true);
   });
 
-  it('fails with missing-taxonomy-fields when genus.Genus is NULL', async () => {
+  it('allows a NULL Genus because destination taxonomy resolves on mnemonic', async () => {
     await conn.query('UPDATE genus SET Genus = NULL WHERE GenusID = 1');
 
     const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
 
-    expect(result.ok, 'expected ok=false when Genus is NULL').toBe(false);
-    if (!result.ok) {
-      const failure = result.reasons.find(r => r.kind === 'missing-taxonomy-fields');
-      expect(failure, 'missing-taxonomy-fields failure should be present for NULL Genus').toBeDefined();
-    }
+    expect(result.ok, 'Genus is not part of destination lookup').toBe(true);
   });
 
-  it('fails with missing-taxonomy-fields when family.Family is NULL', async () => {
+  it('allows a NULL Family because destination taxonomy resolves on mnemonic', async () => {
     await conn.query('UPDATE family SET Family = NULL WHERE FamilyID = 1');
 
     const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
 
-    expect(result.ok, 'expected ok=false when Family is NULL').toBe(false);
-    if (!result.ok) {
-      const failure = result.reasons.find(r => r.kind === 'missing-taxonomy-fields');
-      expect(failure, 'missing-taxonomy-fields failure should be present for NULL Family').toBeDefined();
-    }
+    expect(result.ok, 'Family is not part of destination lookup').toBe(true);
   });
 
   it('does not fail for subspecies rows (SubspeciesName IS NOT NULL is allowed)', async () => {
     // Subspecies rows are supported per Suzanne; presence of SubspeciesName alone
-    // must not trigger a rejection. All required fields (SpeciesCode, SpeciesName,
-    // Genus, Family) are still populated.
+    // must not trigger a rejection. SpeciesCode is the only required lookup field.
     await conn.query("UPDATE species SET SubspeciesName = 'foobarius' WHERE SpeciesID = 1");
 
     const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
@@ -326,13 +314,33 @@ describe('checkFinishedCensus', () => {
   // Check 7: string-too-long
   // -------------------------------------------------------------------------
 
-  it('fails with string-too-long when TreeTag exceeds 10 characters (CTFS Tree.Tag limit)', async () => {
-    // trees.TreeTag is varchar(20), so 11-char value is within app schema but over CTFS limit.
+  it('passes an 11-character TreeTag (within the new CTFS Tree.Tag limit of 20)', async () => {
+    // trees.TreeTag is varchar(20); 11 chars is now within the CTFS Tree.Tag limit.
     await conn.query("UPDATE trees SET TreeTag = '12345678901' WHERE TreeID = 1");
 
     const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
 
-    expect(result.ok, 'expected ok=false for 11-char TreeTag').toBe(false);
+    expect(result.ok, 'expected ok=true for 11-char TreeTag under the 20-char limit').toBe(true);
+  });
+
+  it('passes a 20-character TreeTag (exactly at the new CTFS Tree.Tag limit)', async () => {
+    await conn.query("UPDATE trees SET TreeTag = '12345678901234567890' WHERE TreeID = 1");
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'expected ok=true for 20-char TreeTag exactly at the limit').toBe(true);
+  });
+
+  it('fails with string-too-long when TreeTag exceeds 20 characters (CTFS Tree.Tag limit)', async () => {
+    // The seed trees.TreeTag column is varchar(20), so a 21-char value would be
+    // truncated on insert and never trip the check. Widen the column for this
+    // test only (the test DB is dropped per run, so no restore is needed).
+    await conn.query('ALTER TABLE trees MODIFY COLUMN TreeTag VARCHAR(40)');
+    await conn.query("UPDATE trees SET TreeTag = '123456789012345678901' WHERE TreeID = 1");
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'expected ok=false for 21-char TreeTag over the 20-char limit').toBe(false);
     if (!result.ok) {
       const failure = result.reasons.find(r => r.kind === 'string-too-long');
       expect(failure, 'string-too-long failure should be present for oversized TreeTag').toBeDefined();
@@ -429,6 +437,122 @@ describe('checkFinishedCensus', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Check 8: insufficient-exportable-rows (proportional gate)
+  // -------------------------------------------------------------------------
+
+  it('blocks with insufficient-exportable-rows when quality exclusions leave less than half the census', async () => {
+    // Seed: 1 exportable row. Add 2 unvalidated rows → 1 of 3 active rows exportable
+    // (33%), below MIN_EXPORTABLE_FRACTION. Before the proportional gate this
+    // published "successfully" while silently omitting most of the census.
+    await conn.query(
+      `INSERT INTO coremeasurements
+         (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
+       VALUES (201, 1, 1, FALSE, '2024-07-01', 10.1, 1.3, 1),
+              (202, 1, 1, FALSE, '2024-07-01', 10.2, 1.3, 1)`
+    );
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'expected ok=false when only 1 of 3 active rows is exportable').toBe(false);
+    if (!result.ok) {
+      const failure = result.reasons.find(r => r.kind === 'insufficient-exportable-rows');
+      expect(failure, 'insufficient-exportable-rows failure should be present').toBeDefined();
+      expect(failure!.message, 'message should carry the exact shortfall').toContain('1 of 3');
+      const { blocking, warnings } = partitionPreconditionFailures(result.reasons);
+      expect(
+        blocking.map(r => r.kind),
+        'the proportional gate must BLOCK, not warn'
+      ).toEqual(['insufficient-exportable-rows']);
+      expect(
+        warnings.map(r => r.kind),
+        'the underlying quality warning is preserved'
+      ).toEqual(['not-validated']);
+      expect(result.count, 'exportable count is reported for the audit log').toBe(1);
+      expect(result.totalActiveCount, 'total active count is reported for the audit log').toBe(3);
+    }
+  });
+
+  it('does not block when the exportable fraction is exactly at MIN_EXPORTABLE_FRACTION', async () => {
+    // 1 exportable + 1 unvalidated → exactly the floor. The gate blocks strictly
+    // below MIN_EXPORTABLE_FRACTION, so this census proceeds on the warn path.
+    await conn.query(
+      `INSERT INTO coremeasurements
+         (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
+       VALUES (201, 1, 1, FALSE, '2024-07-01', 10.1, 1.3, 1)`
+    );
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'census is not perfectly clean, so ok=false').toBe(false);
+    if (!result.ok) {
+      const { blocking, warnings } = partitionPreconditionFailures(result.reasons);
+      expect(blocking, 'nothing blocks at exactly the floor').toEqual([]);
+      expect(warnings.map(r => r.kind)).toEqual(['not-validated']);
+      expect(result.count).toBe(1);
+      expect(result.totalActiveCount).toBe(2);
+    }
+  });
+
+  it('does not count inactive measurements toward the proportional gate', async () => {
+    // An IsActive=0 row is invisible to the export AND to the census total, so it
+    // must not drag the exportable fraction below the floor.
+    await conn.query(
+      `INSERT INTO coremeasurements
+         (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
+       VALUES (201, 1, 1, FALSE, '2024-07-01', 10.1, 1.3, 0),
+              (202, 1, 1, FALSE, '2024-07-01', 10.2, 1.3, 0)`
+    );
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'inactive rows should not affect the gate at all').toBe(true);
+    if (result.ok) {
+      expect(result.count).toBe(1);
+      expect(result.totalActiveCount, 'inactive rows are excluded from the census total').toBe(1);
+    }
+  });
+
+  it('uses the full export join graph when counting exportable measurements', async () => {
+    // QuadratID is nullable in the app schema. The actual export uses an inner
+    // quadrats join, so this otherwise-valid row disappears from selectMeasurements.
+    // The gate must count it the same way and block the would-be empty artifact.
+    await conn.query('UPDATE stems SET QuadratID = NULL WHERE StemGUID = 1');
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'a row omitted by the export join graph cannot pass the gate').toBe(false);
+    if (!result.ok) {
+      expect(result.reasons.map(reason => reason.kind)).toContain('zero-exportable-rows');
+      expect(result.count, 'the exportable count must match the actual export join').toBe(0);
+      expect(result.totalActiveCount).toBe(1);
+    }
+  });
+
+  it('still reports the proportional failure when another blocking check already failed', async () => {
+    // Dry runs promise a complete preview. An unknown attribute is already blocking,
+    // but the later proportional check must still run and report that only 1/3 rows
+    // would be exported.
+    await conn.query("UPDATE cmattributes SET Code = 'UNKNOWN' WHERE CoreMeasurementID = 1");
+    await conn.query(
+      `INSERT INTO coremeasurements
+         (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
+       VALUES (201, 1, 1, FALSE, '2024-07-01', 10.1, 1.3, 1),
+              (202, 1, 1, FALSE, '2024-07-01', 10.2, 1.3, 1)`
+    );
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const kinds = result.reasons.map(reason => reason.kind);
+      expect(kinds).toContain('unknown-attribute-code');
+      expect(kinds).toContain('insufficient-exportable-rows');
+      expect(result.count).toBe(1);
+      expect(result.totalActiveCount).toBe(3);
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // Cap behaviour: MAX_DISPLAY_FAILURES
   // -------------------------------------------------------------------------
 
@@ -455,6 +579,63 @@ describe('checkFinishedCensus', () => {
       expect(failure, 'not-validated failure should be present').toBeDefined();
       expect(failure!.coreMeasurementIds.length, `coreMeasurementIds must be capped at ${MAX_DISPLAY_FAILURES}`).toBeLessThanOrEqual(MAX_DISPLAY_FAILURES);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 10C: an all-quality-warning census still catches "nothing left to export"
+  // -------------------------------------------------------------------------
+
+  it('reports BOTH the quality warning AND zero-exportable-rows when the only row is unvalidated', async () => {
+    // The single seed row is unvalidated → excluded by the export filter → zero
+    // exportable rows. Under the warn-don't-block policy the zero-rows gate must still
+    // run (it no longer short-circuits on the warning), so a would-be empty publish
+    // is caught rather than slipping through as a warning-only proceed.
+    await conn.query('UPDATE coremeasurements SET IsValidated = FALSE WHERE CoreMeasurementID = 1');
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const kinds = result.reasons.map(r => r.kind);
+      expect(kinds, 'the quality warning is preserved').toContain('not-validated');
+      expect(kinds, 'zero-exportable-rows still fires alongside the warning').toContain('zero-exportable-rows');
+      const { blocking, warnings } = partitionPreconditionFailures(result.reasons);
+      expect(warnings.map(r => r.kind)).toEqual(['not-validated']);
+      expect(blocking.map(r => r.kind)).toEqual(['zero-exportable-rows']);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 10C: block-vs-warn classification (pure)
+  // -------------------------------------------------------------------------
+
+  it('classifies data-quality kinds as warnings and destination-integrity kinds as blocking', () => {
+    // Data-quality: rows the export already excludes → warn, don't block.
+    for (const kind of ['not-validated', 'unresolved-error', 'no-stem-guid', 'inactive-join'] as const) {
+      expect(isBlockingPreconditionKind(kind), `${kind} should be a WARNING`).toBe(false);
+    }
+    // Destination-integrity: an artifact violating these breaks the CTFS load → block.
+    for (const kind of [
+      'unknown-attribute-code',
+      'missing-taxonomy-fields',
+      'string-too-long',
+      'zero-exportable-rows',
+      'insufficient-exportable-rows'
+    ] as const) {
+      expect(isBlockingPreconditionKind(kind), `${kind} should be BLOCKING`).toBe(true);
+    }
+  });
+
+  it('partitions a mixed reason list preserving per-bucket order', () => {
+    const reasons: PreconditionFailure[] = [
+      { kind: 'not-validated', message: 'w1', coreMeasurementIds: [1] },
+      { kind: 'string-too-long', message: 'b1', coreMeasurementIds: [2] },
+      { kind: 'no-stem-guid', message: 'w2', coreMeasurementIds: [3] },
+      { kind: 'missing-taxonomy-fields', message: 'b2', coreMeasurementIds: [4] }
+    ];
+    const { blocking, warnings } = partitionPreconditionFailures(reasons);
+    expect(warnings.map(r => r.message)).toEqual(['w1', 'w2']);
+    expect(blocking.map(r => r.message)).toEqual(['b1', 'b2']);
   });
 
   // -------------------------------------------------------------------------

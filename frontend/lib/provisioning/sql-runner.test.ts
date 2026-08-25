@@ -4,9 +4,9 @@ import { readFileSync } from 'fs';
 import mysql from 'mysql2/promise';
 import { splitSqlFile, executeSqlFile, STATEMENT_PREVIEW_MAX_LENGTH } from './sql-runner';
 
-const TABLES_FILE = path.join(process.cwd(), 'sqlscripting/tablestructures.sql');
-const PROCS_FILE = path.join(process.cwd(), 'sqlscripting/storedprocedures.sql');
-const QUERIES_FILE = path.join(process.cwd(), 'sqlscripting/corequeries.sql');
+const TABLES_FILE = path.join(process.cwd(), 'db/sql/tablestructures.sql');
+const PROCS_FILE = path.join(process.cwd(), 'db/sql/storedprocedures.sql');
+const QUERIES_FILE = path.join(process.cwd(), 'db/sql/corequeries.sql');
 
 describe('splitSqlFile', () => {
   it('parses tablestructures.sql into statements with line numbers', () => {
@@ -25,14 +25,23 @@ describe('splitSqlFile', () => {
   it('preserves stored procedure bodies across DELIMITER blocks', () => {
     const content = readFileSync(PROCS_FILE, 'utf-8');
     const stmts = splitSqlFile(content);
-    // The actual DDL uses "CREATE\n    DEFINER = ... PROCEDURE bulkingestionprocess" across multiple lines
     const bulkIngestion = stmts.find(s => /CREATE[\s\S]*?PROCEDURE\s+`?bulkingestionprocess/i.test(s.sql));
     expect(bulkIngestion).toBeDefined();
     expect(bulkIngestion!.sql).toContain('BEGIN');
     expect(bulkIngestion!.sql).toContain('END');
-    // Verify exactly one procedure definition — the DDL uses "CREATE\n    DEFINER = ... PROCEDURE name"
-    // so we match on the procedure name appearing exactly once rather than the literal "CREATE PROCEDURE"
     expect((bulkIngestion!.sql.match(/PROCEDURE\s+`?bulkingestionprocess/gi) ?? []).length).toBe(1);
+  });
+
+  it('uses the deployment account as the definer for every stored procedure', () => {
+    const statements = splitSqlFile(readFileSync(PROCS_FILE, 'utf-8'));
+    const procedures = statements.filter(statement => /CREATE\s+PROCEDURE\b/i.test(statement.sql));
+
+    expect(procedures).toHaveLength(10);
+    for (const procedure of procedures) {
+      expect(procedure.sql).toMatch(/SQL SECURITY DEFINER/i);
+      expect(procedure.sql).not.toMatch(/DEFINER\s*=/i);
+      expect(procedure.sql).not.toMatch(/azureroot/i);
+    }
   });
 
   it('parses corequeries.sql without errors', () => {

@@ -30,9 +30,10 @@ const theme = extendTheme({
       palette: {
         // Override default text colors to meet WCAG AA accessibility standards
         text: {
-          primary: designTokens.colors.earthBrown[200], // #e7e5e4 - high contrast on black
-          secondary: designTokens.colors.earthBrown[300], // #d6d3d1 - 7.8:1 contrast
-          tertiary: designTokens.colors.earthBrown[300]
+          primary: designTokens.colors.earthBrown[100], // #f5f5f4 - highest contrast on black
+          secondary: designTokens.colors.earthBrown[200], // #e7e5e4
+          tertiary: designTokens.colors.earthBrown[300], // #d6d3d1
+          icon: designTokens.colors.earthBrown[300]
         },
 
         // Background palette
@@ -241,12 +242,12 @@ const theme = extendTheme({
 
     // Tooltip
     JoyTooltip: {
+      // leaveDelay is a Tooltip prop, not CSS, and sx here is merged onto the
+      // WRAPPED CHILD -- putting either in sx made every tooltipped control
+      // unclickable (pointer-events: none) and emitted a bogus leave-delay rule.
       defaultProps: {
         disableTouchListener: true,
-        sx: {
-          leaveDelay: 100,
-          pointerEvents: 'none'
-        }
+        leaveDelay: 100
       },
       styleOverrides: {
         root: ({ theme }) => ({
@@ -254,20 +255,19 @@ const theme = extendTheme({
           fontSize: designTokens.typography.fontSize.sm,
           padding: `${designTokens.spacing.xs} ${designTokens.spacing.sm}`,
           borderRadius: theme.vars.radius.sm,
-          maxWidth: '300px'
+          maxWidth: '300px',
+          // The bubble itself must not swallow the pointer; the child keeps its own.
+          pointerEvents: 'none'
         })
       }
     },
 
-    // Modal
-    JoyModal: {
-      styleOverrides: {
-        root: {
-          zIndex: designTokens.zIndex.modal
-        }
-      }
-    },
-
+    // Modal layering is deliberately left to Joy. Joy draws modal and popup
+    // z-indexes from one internally-consistent --joy-zIndex-* scale, and a
+    // Select/Menu listbox opened inside a dialog depends on that relationship.
+    // Pinning the modal root to a raw number broke it: listbox options rendered
+    // behind the dialog's own content. Adopting the designTokens scale here
+    // would mean setting the WHOLE scale, not one member of it.
     JoyModalDialog: {
       styleOverrides: {
         root: ({ theme }) => ({

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from '@/lib/ingestion/temporary-measurements';
 
 /**
  * Unified Changelog Tracking System Tests
@@ -9,9 +10,14 @@ import ConnectionManager from '@/config/connectionmanager';
  * - Single-row edits via datagrid EditToolbar (PATCH/DELETE operations)
  * - File uploads (INSERT operations with batch tracking)
  *
+ * Entries are written by the handlers themselves, inside the mutation's own
+ * transaction. No database trigger is involved — none has existed on any schema
+ * since 2025-05-12.
+ *
  * Exclusions:
  * - Bulk census deletions (would flood the log with thousands of entries)
- * - System-generated changes (auto-calculations, triggers firing from other triggers)
+ * - Raw-SQL changes made outside the app, which only a trigger or the binlog
+ *   could catch
  *
  * Test Coverage:
  * 1. Single-row UPDATE operations create ONE changelog entry
@@ -22,9 +28,10 @@ import ConnectionManager from '@/config/connectionmanager';
  */
 
 // ========== Mocks ==========
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   validateSchemaOrThrow: vi.fn(),
   safeFormatQuery: vi.fn((schema, query) => query),
+  safeEscapeId: vi.fn((identifier: string) => `\`${identifier}\``),
   isValidSchema: vi.fn(() => true)
 }));
 
@@ -52,8 +59,8 @@ vi.mock('mysql2/promise', () => ({
   })
 }));
 
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
@@ -73,6 +80,17 @@ vi.mock('@/config/connectionmanager', async () => {
     executeQuery: vi.fn(async () => []),
     closeConnection: vi.fn(async () => {})
   };
+
+  // The PATCH path now runs inside ConnectionManager.withTransaction and issues
+  // its statements via the scoped TxExecutor (tx.query). Model that faithfully:
+  // open a real transaction id, hand the callback a TxExecutor whose query
+  // delegates to the same executeQuery spy the assertions inspect, then commit.
+  instance.withTransaction = vi.fn(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) => {
+    const transactionId = await instance.beginTransaction();
+    const result = await fn({ query: (sql: string, params?: unknown[]) => instance.executeQuery(sql, params), id: transactionId });
+    await instance.commitTransaction(transactionId);
+    return result;
+  });
 
   const getInstance = vi.fn(() => instance);
 
@@ -102,7 +120,7 @@ vi.mock('@/app/actions/cookiemanager', () => ({
 
 vi.mock('@/auth', () => ({
   auth: vi.fn(async () => ({
-    user: { id: 'test-user-id', email: 'test@example.com' }
+    user: { id: 'test-user-id', email: 'test@example.com', userStatus: 'global' }
   }))
 }));
 
@@ -124,7 +142,7 @@ vi.mock('@/config/uploadsessiontracker', () => ({
 
 // Import handlers AFTER mocks
 import { PATCH, DELETE } from '@/config/macros/coreapifunctions';
-import { GET as CLEARCENSUS_GET } from '../clearcensus/route';
+import { POST as CLEARCENSUS_POST } from '../clearcensus/route';
 import { POST as SQLPACKETLOAD_POST } from '../sqlpacketload/route';
 
 // ========== Helpers ==========
@@ -158,6 +176,9 @@ function mockMeasurementUploadQueries(
   exec
     .mockResolvedValueOnce([{ PlotID: 1 }])
     .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+    // ensureTemporaryMeasurementsSourceFormatColumn: information_schema column existence check
+    // (count > 0 means the SourceFormat column already exists, so no ALTER TABLE runs).
+    .mockResolvedValueOnce([{ count: 1 }])
     .mockResolvedValueOnce([{ count: preInsertCount }])
     .mockResolvedValueOnce({})
     .mockResolvedValueOnce([{ count: postInsertCount }]);
@@ -174,6 +195,7 @@ function mockMeasurementUploadQueries(
 describe('Unified Changelog Tracking System', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
   });
 
   describe('1. Single-Row UPDATE via EditToolbar', () => {
@@ -185,11 +207,13 @@ describe('Unified Changelog Tracking System', () => {
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query
-        .mockResolvedValueOnce([{ Count: 1 }]); // COUNT query
+        .mockResolvedValueOnce([{ Code: 'A', Description: 'Old Description', Status: 'alive' }]) // locked pre-update snapshot
+        .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query (matched one row -> passes the zero-row guard)
+        .mockResolvedValueOnce([{ Code: 'A', Description: 'New Description', Status: 'alive' }]) // persisted post-update snapshot
+        .mockResolvedValueOnce({}); // unifiedchangelog INSERT
 
-      const oldRow = { code: 'A', description: 'Old Description', status: 'alive' };
-      const newRow = { code: 'A', description: 'New Description', status: 'alive' };
+      const oldRow = { Code: 'A', Description: 'Old Description', Status: 'alive' };
+      const newRow = { Code: 'A', Description: 'New Description', Status: 'alive' };
 
       const req = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {
         oldRow,
@@ -206,7 +230,11 @@ describe('Unified Changelog Tracking System', () => {
       const updateCall = exec.mock.calls.find(call => String(call[0]).includes('UPDATE') && String(call[0]).includes('attributes'));
       expect(updateCall).toBeDefined();
 
-      // Once triggers are enabled, this would create ONE changelog entry via trigger
+      // Exactly one changelog entry, written by the handler inside the same
+      // transaction as the UPDATE.
+      const changelogCalls = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog'));
+      expect(changelogCalls).toHaveLength(1);
+      expect(changelogCalls[0][1]).toEqual(expect.arrayContaining(['attributes', 'UPDATE']));
       expect(commit).toHaveBeenCalledWith('tx-1');
     });
 
@@ -217,11 +245,13 @@ describe('Unified Changelog Tracking System', () => {
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query
-        .mockResolvedValueOnce([{ Count: 1 }]); // COUNT query
+        .mockResolvedValueOnce([{ PersonnelID: 1, FirstName: 'John', LastName: 'Doe', Role: 'researcher' }]) // locked pre-update snapshot
+        .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query (matched one row -> passes the zero-row guard)
+        .mockResolvedValueOnce([{ PersonnelID: 1, FirstName: 'John', LastName: 'Doe', Role: 'lead researcher' }]) // persisted post-update snapshot
+        .mockResolvedValueOnce({}); // unifiedchangelog INSERT
 
-      const oldRow = { personnelID: 1, firstName: 'John', lastName: 'Doe', role: 'researcher' };
-      const newRow = { personnelID: 1, firstName: 'John', lastName: 'Doe', role: 'lead researcher' };
+      const oldRow = { PersonnelID: 1, FirstName: 'John', LastName: 'Doe', Role: 'researcher' };
+      const newRow = { PersonnelID: 1, FirstName: 'John', LastName: 'Doe', Role: 'lead researcher' };
 
       const req = makeRequest('http://localhost/api/fixeddata/personnel/testschema/personnelID', 'PATCH', {
         oldRow,
@@ -231,7 +261,9 @@ describe('Unified Changelog Tracking System', () => {
       const res = await PATCH(req, makeParams('personnel', ['testschema', 'personnelID']));
 
       expect(res.status).toBe(HTTPResponses.OK);
-      expect(exec).toHaveBeenCalled();
+      const changelogCalls = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog'));
+      expect(changelogCalls).toHaveLength(1);
+      expect(changelogCalls[0][1]).toEqual(expect.arrayContaining(['personnel', 'UPDATE']));
       expect(commit).toHaveBeenCalledWith('tx-2');
     });
   });
@@ -242,7 +274,12 @@ describe('Unified Changelog Tracking System', () => {
 
       const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-3');
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-      const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({ affectedRows: 1 }); // DELETE query
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        // DELETE reads the row it is about to remove so the changelog can record
+        // its real prior state, then issues the DELETE.
+        .mockResolvedValueOnce([{ Code: 'B', Description: 'To Delete', Status: 'dead' }])
+        .mockResolvedValueOnce({ affectedRows: 1 });
 
       const rowToDelete = { code: 'B', description: 'To Delete', status: 'dead' };
 
@@ -260,7 +297,11 @@ describe('Unified Changelog Tracking System', () => {
       const deleteCall = exec.mock.calls.find(call => String(call[0]).includes('DELETE') && String(call[0]).includes('attributes'));
       expect(deleteCall).toBeDefined();
 
-      // Once triggers are enabled, this would create ONE changelog entry via trigger
+      // Exactly one changelog entry, written by the handler inside the same
+      // transaction as the DELETE.
+      const changelogCalls = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog'));
+      expect(changelogCalls).toHaveLength(1);
+      expect(changelogCalls[0][1]).toEqual(expect.arrayContaining(['attributes', 'DELETE']));
       expect(commit).toHaveBeenCalledWith('tx-3');
     });
   });
@@ -271,18 +312,24 @@ describe('Unified Changelog Tracking System', () => {
 
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-4');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-      const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({});
+      vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+      // clearcensus flow: resolve target plot, latest-census guard, destructive CALL
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ PlotID: 1 }])
+        .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 1, MaxPlotCensusNumber: 1 }])
+        .mockResolvedValueOnce({});
 
-      const req = makeRequest('http://localhost/api/clearcensus?schema=testschema&censusID=5&type=full');
+      const req = makeRequest('http://localhost/api/clearcensus', 'POST', { schema: 'testschema', censusID: 5, type: 'full' });
 
-      const res = await CLEARCENSUS_GET(req);
+      const res = await CLEARCENSUS_POST(req);
 
       expect(res.status).toBe(HTTPResponses.OK);
       const body = await res.json();
       expect(body).toEqual({ message: 'Census cleared successfully' });
 
       // Verify the stored procedure is called with correct parameters
-      const [sql, params] = exec.mock.calls[0];
+      const [sql, params] = exec.mock.calls[2];
       expect(String(sql)).toMatch(/CALL testschema\.clearcensusfull\((5|\?)\);?/i);
       expect(params).toEqual([]);
 
@@ -296,16 +343,22 @@ describe('Unified Changelog Tracking System', () => {
 
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-5');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-      const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({});
+      vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
+      // clearcensus flow: resolve target plot, latest-census guard, destructive CALL
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ PlotID: 1 }])
+        .mockResolvedValueOnce([{ PlotID: 1, PlotCensusNumber: 1, MaxPlotCensusNumber: 1 }])
+        .mockResolvedValueOnce({});
 
-      const req = makeRequest('http://localhost/api/clearcensus?schema=testschema&censusID=7&type=msmts');
+      const req = makeRequest('http://localhost/api/clearcensus', 'POST', { schema: 'testschema', censusID: 7, type: 'msmts' });
 
-      const res = await CLEARCENSUS_GET(req);
+      const res = await CLEARCENSUS_POST(req);
 
       expect(res.status).toBe(HTTPResponses.OK);
 
       // Verify the stored procedure is called
-      const [sql, params] = exec.mock.calls[0];
+      const [sql, params] = exec.mock.calls[2];
       expect(String(sql)).toMatch(/CALL testschema\.clearcensusmsmts\((7|\?)\);?/i);
       expect(params).toEqual([]);
 
@@ -538,6 +591,9 @@ describe('Unified Changelog Tracking System', () => {
       expect(res1!.status).toBe(HTTPResponses.OK);
 
       vi.clearAllMocks();
+      // The SourceFormat column check caches per schema; reset so the second upload
+      // re-issues it and consumes the mock response queued by mockMeasurementUploadQueries.
+      resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
 
       // Second file upload
       _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-9b');
@@ -576,23 +632,28 @@ describe('Unified Changelog Tracking System', () => {
 
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-10a').mockResolvedValueOnce('tx-10b');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
-      const exec = vi
-        .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce({ affectedRows: 1 })
-        .mockResolvedValueOnce([{ Count: 1 }])
-        .mockResolvedValueOnce({ affectedRows: 1 })
-        .mockResolvedValueOnce([{ Count: 1 }]);
+      // Both PATCHes run under Promise.all, so their reads and UPDATE statements
+      // interleave in a non-deterministic order. Model the persisted state by key
+      // instead of relying on a fixed call sequence.
+      const exec = vi.spyOn(cm, 'executeQuery').mockImplementation(async (sql: string, params?: unknown[]) => {
+        if (String(sql).includes('UPDATE')) return { affectedRows: 1 };
+        if (String(sql).includes('unifiedchangelog')) return {};
+
+        const key = params?.[0] === 'B' ? 'B' : 'A';
+        const postUpdateRead = exec.mock.calls.filter(call => String(call[0]).includes('UPDATE')).length >= 1;
+        return [{ Code: key, Description: `${postUpdateRead ? 'New' : 'Old'} ${key}` }];
+      });
 
       // User 1 edits row A
       const req1 = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {
-        oldRow: { code: 'A', description: 'Old A' },
-        newRow: { code: 'A', description: 'New A' }
+        oldRow: { Code: 'A', Description: 'Old A' },
+        newRow: { Code: 'A', Description: 'New A' }
       });
 
       // User 2 edits row B
       const req2 = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {
-        oldRow: { code: 'B', description: 'Old B' },
-        newRow: { code: 'B', description: 'New B' }
+        oldRow: { Code: 'B', Description: 'Old B' },
+        newRow: { Code: 'B', Description: 'New B' }
       });
 
       const [res1, res2] = await Promise.all([

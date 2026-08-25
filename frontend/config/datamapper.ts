@@ -20,16 +20,18 @@ import {
   StemResult,
   TreeRDS,
   TreeResult
-} from '@/config/sqlrdsdefinitions/taxonomies';
-import { PlotRDS, PlotsResult, QuadratRDS, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
+} from '@/lib/db/definitions/taxonomies';
+import { PlotRDS, PlotsResult, QuadratRDS, QuadratResult } from '@/lib/db/definitions/zones';
 import {
   AllTaxonomiesViewRDS,
   AllTaxonomiesViewResult,
   MeasurementsSummaryRDS,
   MeasurementsSummaryResult,
+  StemTaxonomiesViewRDS,
+  StemTaxonomiesViewResult,
   ViewFullTableRDS,
   ViewFullTableResult
-} from '@/config/sqlrdsdefinitions/views';
+} from '@/lib/db/definitions/views';
 import {
   PostValidationQueriesRDS,
   PostValidationQueriesResult,
@@ -37,9 +39,9 @@ import {
   ValidationChangelogResult,
   ValidationProceduresRDS,
   ValidationProceduresResult
-} from '@/config/sqlrdsdefinitions/validations';
-import { CensusRDS, CensusResult } from '@/config/sqlrdsdefinitions/timekeeping';
-import { PersonnelRDS, PersonnelResult, QuadratPersonnelRDS, QuadratPersonnelResult, RoleRDS, RoleResult } from '@/config/sqlrdsdefinitions/personnel';
+} from '@/lib/db/definitions/validations';
+import { CensusRDS, CensusResult } from '@/lib/db/definitions/timekeeping';
+import { PersonnelRDS, PersonnelResult, QuadratPersonnelRDS, QuadratPersonnelResult, RoleRDS, RoleResult } from '@/lib/db/definitions/personnel';
 import {
   AttributesRDS,
   AttributesResult,
@@ -53,9 +55,9 @@ import {
   StagingCoreMeasurementsResult,
   UnifiedChangelogRDS,
   UnifiedChangelogResult
-} from '@/config/sqlrdsdefinitions/core';
-import { AdminSiteRDS, AdminSiteResult, AdminUserRDS, AdminUserResult } from '@/config/sqlrdsdefinitions/admin';
-import { AdminUserSiteRelationRDS, AdminUserSiteRelationResult } from './sqlrdsdefinitions/admin';
+} from '@/lib/db/definitions/core';
+import { AdminSiteRDS, AdminSiteResult, AdminUserRDS, AdminUserResult } from '@/lib/db/definitions/admin';
+import { AdminUserSiteRelationRDS, AdminUserSiteRelationResult } from '@/lib/db/definitions/admin';
 
 export function parseDate(date: any): Date | undefined {
   if (!date) return undefined;
@@ -226,6 +228,8 @@ class MapperFactory {
       // tables
       case 'alltaxonomiesview':
         return new GenericMapper<AllTaxonomiesViewRDS, AllTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'stemtaxonomiesview':
+        return new GenericMapper<StemTaxonomiesViewRDS, StemTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
       case 'attributes':
         return new GenericMapper<AttributesRDS, AttributesResult>() as unknown as IDataMapper<RDS, Result>;
       case 'census':

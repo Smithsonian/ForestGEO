@@ -1,9 +1,10 @@
 {
-  "name": "ForestGEO",
-  "lockfileVersion": 3,
-  "requires": true,
-  "packages": {},
-  "dependencies": {
-    "next": "^16.0.7"
+  "name": "forestgeo",
+  "private": true,
+  "description": "Root manifest. The application lives in frontend/.",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "test": "npm --prefix frontend run test:all"
   }
 }

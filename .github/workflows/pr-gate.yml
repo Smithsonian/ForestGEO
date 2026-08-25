@@ -1,0 +1,81 @@
+name: PR Gate
+
+on:
+  pull_request:
+    branches: [main, forestgeo-app-development]
+  workflow_dispatch:
+
+concurrency:
+  group: pr-gate-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build and lint gate
+        run: npm run build:check
+        working-directory: frontend
+
+      - name: Dependency-cycle gate
+        run: node scripts/check-cycles.mjs
+        working-directory: frontend
+
+      - name: Any-escape count gate
+        run: node scripts/check-any-count.mjs
+        working-directory: frontend
+
+      - name: Unit tests
+        run: npm run test:unit
+        working-directory: frontend
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    services:
+      mysql:
+        image: mysql:8.0.36
+        env:
+          MYSQL_ROOT_PASSWORD: testpassword
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root -ptestpassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Integration tests
+        run: npm run test:integration
+        working-directory: frontend
+        env:
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_PORT: "3306"
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: testpassword

@@ -5,8 +5,17 @@
  * artifact rendering, and identifier utilities.
  */
 
-export { checkFinishedCensus, type PreconditionResult, type PreconditionFailure, type PreconditionFailureKind } from './precondition';
+export {
+  checkFinishedCensus,
+  partitionPreconditionFailures,
+  isBlockingPreconditionKind,
+  WARNING_PRECONDITION_KINDS,
+  MIN_EXPORTABLE_FRACTION,
+  type PreconditionResult,
+  type PreconditionFailure,
+  type PreconditionFailureKind
+} from './precondition';
 export { selectMeasurements, type SelectResult, type SelectInput } from './select-measurements';
-export { renderArtifact, type RenderArtifactInput, type RenderArtifactResult } from './render-procedure';
+export { renderArtifact, renderRebuildViewFullTableArtifact, type RenderArtifactInput, type RenderArtifactResult } from './render-procedure';
 export { buildProcedureName, buildLockName, deterministicSuffix } from './identifier-safety';
 export { exportableMeasurementBaseWhere, exportableMeasurementSelect } from './exportable-measurement';

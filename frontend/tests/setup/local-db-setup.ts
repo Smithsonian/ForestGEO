@@ -201,7 +201,11 @@ export async function createTestDatabase(config: TestDatabaseConfig = DEFAULT_TE
 
     await connection.query(`DROP DATABASE IF EXISTS \`${config.database}\``);
     await connection.query(`CREATE DATABASE \`${config.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
-    await connection.query(`USE \`${config.database}\``);
+    // changeUser (not `USE`) so mysql2 records the database on
+    // connection.config.database — a plain USE query switches the session
+    // server-side but leaves config.database undefined, which let callers
+    // tear down against `undefined` and leak the real database.
+    await connection.changeUser({ database: config.database });
 
     log.debug(` Test database created: ${config.database}`);
 
@@ -222,7 +226,7 @@ export async function createTestDatabase(config: TestDatabaseConfig = DEFAULT_TE
  * Loads database schema from SQL file
  */
 export async function loadSchema(connection: mysql.Connection): Promise<void> {
-  const schemaPath = path.join(process.cwd(), 'sqlscripting', 'tablestructures.sql');
+  const schemaPath = path.join(process.cwd(), 'db/sql', 'tablestructures.sql');
 
   if (!fs.existsSync(schemaPath)) {
     throw new Error(`Schema file not found: ${schemaPath}`);
@@ -277,7 +281,7 @@ export async function loadSchema(connection: mysql.Connection): Promise<void> {
  * These are the SQL definitions for post-ingestion validations executed via the API.
  */
 export async function loadValidationDefinitions(connection: mysql.Connection): Promise<void> {
-  const coreQueriesPath = path.join(process.cwd(), 'sqlscripting', 'corequeries.sql');
+  const coreQueriesPath = path.join(process.cwd(), 'db/sql', 'corequeries.sql');
 
   if (!fs.existsSync(coreQueriesPath)) {
     log.warn(`Core queries file not found: ${coreQueriesPath} - skipping validation definitions`);
@@ -391,7 +395,7 @@ export async function loadValidationDefinitions(connection: mysql.Connection): P
  * 3. Execute each procedure separately
  */
 export async function loadStoredProcedures(connection: mysql.Connection): Promise<void> {
-  const proceduresPath = path.join(process.cwd(), 'sqlscripting', 'storedprocedures.sql');
+  const proceduresPath = path.join(process.cwd(), 'db/sql', 'storedprocedures.sql');
 
   if (!fs.existsSync(proceduresPath)) {
     throw new Error(`Stored procedures file not found: ${proceduresPath}`);
@@ -765,6 +769,22 @@ export async function teardownTestDatabase(
     return;
   }
 
+  // A missing name means DROP DATABASE IF EXISTS `undefined` — which succeeds,
+  // drops nothing, and leaks the real database. Close the connection so the
+  // throw itself doesn't leak, then fail loudly. The 'undefined' literal
+  // catches names built by string-interpolating an undefined value.
+  if (!config.database || config.database === 'undefined') {
+    try {
+      await connection.end();
+    } catch {
+      // connection may already be closed; the error below is the signal
+    }
+    throw new Error(
+      `teardownTestDatabase requires an explicit database name; received ${JSON.stringify(config.database)}. ` +
+        `Pass the name used at createTestDatabase time.`
+    );
+  }
+
   try {
     await connection.query(`DROP DATABASE IF EXISTS \`${config.database}\``);
     log.debug(` Test database dropped: ${config.database}`);
@@ -799,7 +819,7 @@ export async function teardownTestDatabase(
  *   stems → quadrats (preserved)
  *   trees → species (preserved), census
  */
-const MEASUREMENT_TABLES_DELETE_ORDER = [
+export const MEASUREMENT_TABLES_DELETE_ORDER = [
   'measurement_error_log', // Leaf: depends on coremeasurements + measurement_errors
   'cmattributes', // Leaf: depends on coremeasurements
   'coremeasurements', // Parent of measurement_error_log, cmattributes; child of stems
@@ -888,6 +908,7 @@ export async function insertTestMeasurements(
     date: string;
     codes?: string;
     comments?: string;
+    publishedStemID?: number | null;
   }>,
   options: {
     censusID?: number;
@@ -905,8 +926,8 @@ export async function insertTestMeasurements(
     await connection.query(
       `INSERT INTO temporarymeasurements
        (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName,
-        LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments, PublishedStemID)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         fileID,
         batchID,
@@ -922,7 +943,8 @@ export async function insertTestMeasurements(
         meas.hom,
         meas.date,
         meas.codes || null,
-        meas.comments || null
+        meas.comments || null,
+        meas.publishedStemID ?? null
       ]
     );
   }
@@ -1563,6 +1585,29 @@ export async function runValidationForTest(
     return false;
   }
 
+  // Mirrors prepareValidationRun (processorhelperfunctions.tsx): reset rows
+  // this validation previously failed back to pending so the definition
+  // re-examines them, then clear their stale error links.
+  const resetStaleFailuresQuery = `
+    UPDATE coremeasurements cm
+    JOIN census c ON cm.CensusID = c.CensusID
+    JOIN measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+    JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+    SET cm.IsValidated = NULL
+    WHERE me.ErrorSource = 'validation'
+      AND me.ErrorCode = CAST(? AS CHAR)
+      AND mel.IsResolved = FALSE
+      AND cm.IsValidated = FALSE
+      AND cm.StemGUID IS NOT NULL
+      AND cm.IsActive = TRUE
+      ${params.censusID ? 'AND cm.CensusID = ?' : ''}
+      ${params.plotID ? 'AND c.PlotID = ?' : ''}
+  `;
+  const scopeParams: (number | undefined)[] = [validationID];
+  if (params.censusID) scopeParams.push(params.censusID);
+  if (params.plotID) scopeParams.push(params.plotID);
+  await connection.query(resetStaleFailuresQuery, scopeParams);
+
   // Clear stale validation errors for this validation
   const cleanupQuery = `
     DELETE mel FROM measurement_error_log mel
@@ -1576,10 +1621,7 @@ export async function runValidationForTest(
       ${params.censusID ? 'AND cm.CensusID = ?' : ''}
       ${params.plotID ? 'AND c.PlotID = ?' : ''}
   `;
-  const cleanupParams: (number | undefined)[] = [validationID];
-  if (params.censusID) cleanupParams.push(params.censusID);
-  if (params.plotID) cleanupParams.push(params.plotID);
-  await connection.query(cleanupQuery, cleanupParams);
+  await connection.query(cleanupQuery, scopeParams);
 
   // Format the validation query with parameter replacements
   // We're already connected to the test database, so no schema prefix is needed

@@ -26,7 +26,7 @@ export async function setupValidations(connection: mysql.Connection, schema: str
     console.log('🔄 Loading validation queries...');
 
     // Read corequeries.sql
-    const sqlPath = path.join(process.cwd(), 'sqlscripting', 'corequeries.sql');
+    const sqlPath = path.join(process.cwd(), 'db/sql', 'corequeries.sql');
 
     if (!fs.existsSync(sqlPath)) {
       console.warn(`⚠ corequeries.sql not found at ${sqlPath}`);

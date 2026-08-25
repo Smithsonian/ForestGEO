@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import { updateValidatedRows } from '@/components/processors/processorhelperfunctions';
+import { fromBody, fromQuery, withRouteAuthz } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function POST(request: NextRequest) {
+async function postHandler(request: NextRequest) {
   try {
     const { schema, plotID, censusID } = await request.json();
     if (!schema) throw new Error('no schema variable provided!');
@@ -24,8 +25,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// POST reads the schema from the JSON body; GET (deprecated) reads it from the
+// query string. Each method enforces per-site authz via its own resolver.
+export const POST = withRouteAuthz('validations/updatepassedvalidations', postHandler, { schema: fromBody('schema') });
+
 /** @deprecated Use POST instead. Kept for backward compatibility with old validation path. */
-export async function GET(request: NextRequest) {
+async function getHandler(request: NextRequest) {
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('no schema variable provided!');
   const plotIDParam = request.nextUrl.searchParams.get('plotID');
@@ -45,3 +50,5 @@ export async function GET(request: NextRequest) {
     });
   }
 }
+
+export const GET = withRouteAuthz('validations/updatepassedvalidations', getHandler, { schema: fromQuery('schema') });

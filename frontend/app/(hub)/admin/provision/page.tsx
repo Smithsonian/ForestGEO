@@ -8,10 +8,10 @@ import SiteForm from '@/components/provisioning/SiteForm';
 import PlotForm from '@/components/provisioning/PlotForm';
 import QuadratPlanner from '@/components/provisioning/QuadratPlanner';
 import Review from '@/components/provisioning/Review';
-import { generateGrid } from '@/lib/provisioning/grid-generator';
-import { ProvisioningPlotSchema, ProvisioningQuadratsSchema, ProvisioningSiteSchema } from '@/lib/provisioning/input-schema';
-import { findFirstOverlap } from '@/lib/provisioning/geometry';
-import type { ProvisioningInput } from '@/lib/provisioning/types';
+import { ProvisioningPlotSchema, ProvisioningSiteSchema } from '@/lib/provisioning/input-schema';
+import { quadratLayoutIsValid } from '@/lib/provisioning/quadrat-layout-gate';
+import type { ProvisioningPlotInput, ProvisioningInput } from '@/lib/provisioning/types';
+import { applyAreaDerivation, resolvePlotAreaChange, type AreaMode } from '@/lib/provisioning/area';
 
 const STEPS = ['Site', 'Plot', 'Quadrats', 'Review'] as const;
 
@@ -71,37 +71,13 @@ function deriveCanAdvance(step: number, input: ProvisioningInput): boolean {
   }
 }
 
-function quadratLayoutIsValid(input: ProvisioningInput): boolean {
-  if (!ProvisioningQuadratsSchema.safeParse(input.quadrats).success) return false;
-
-  if (input.quadrats.mode === 'grid') {
-    try {
-      generateGrid(input.plot, input.quadrats);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  const rows = input.quadrats.rows;
-  if (rows.length === 0) return false;
-  for (const row of rows) {
-    if (row.startX < 0 || row.startY < 0) return false;
-    if (row.startX + row.dimensionX > input.plot.dimensionX) return false;
-    if (row.startY + row.dimensionY > input.plot.dimensionY) return false;
-  }
-
-  if (findFirstOverlap(rows)) return false;
-
-  return true;
-}
-
 export default function ProvisionWizardPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
   const [step, setStep] = useState(0);
   const [input, setInput] = useState<ProvisioningInput>(DEFAULT_INPUT);
+  const [areaMode, setAreaMode] = useState<AreaMode>('derived');
   const [showStepErrors, setShowStepErrors] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -149,6 +125,19 @@ export default function ProvisionWizardPage() {
     setStep(prev => prev - 1);
   }
 
+  function handlePlotChange(plot: ProvisioningPlotInput, requestedMode?: AreaMode) {
+    const resolved = resolvePlotAreaChange(plot, areaMode, requestedMode);
+    setAreaMode(resolved.areaMode);
+    setInput(prev => ({ ...prev, plot: resolved.plot }));
+  }
+
+  function handleAreaModeChange(next: AreaMode) {
+    setAreaMode(next);
+    if (next === 'derived') {
+      setInput(prev => ({ ...prev, plot: applyAreaDerivation(prev.plot, 'derived') }));
+    }
+  }
+
   async function handleSubmit() {
     setSubmitting(true);
     setSubmitError(null);
@@ -192,7 +181,9 @@ export default function ProvisionWizardPage() {
       case STEP_SITE_INDEX:
         return <SiteForm value={input.site} onChange={site => setInput(prev => ({ ...prev, site }))} showErrors={showStepErrors} />;
       case STEP_PLOT_INDEX:
-        return <PlotForm value={input.plot} onChange={plot => setInput(prev => ({ ...prev, plot }))} showErrors={showStepErrors} />;
+        return (
+          <PlotForm value={input.plot} areaMode={areaMode} onAreaModeChange={handleAreaModeChange} onChange={handlePlotChange} showErrors={showStepErrors} />
+        );
       case STEP_QUADRATS_INDEX:
         return (
           <QuadratPlanner
@@ -222,10 +213,6 @@ export default function ProvisionWizardPage() {
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 800, mx: 'auto', width: '100%' }}>
-      <Typography level="h2" sx={{ mb: 3 }}>
-        Provision New Site
-      </Typography>
-
       <Stepper sx={{ mb: 4 }} aria-label="Provisioning wizard steps">
         {STEPS.map((label, index) => (
           <Step
@@ -246,7 +233,14 @@ export default function ProvisionWizardPage() {
         ))}
       </Stepper>
 
-      <Box sx={{ mb: 4 }}>{renderStepContent()}</Box>
+      <Box sx={{ mb: 4 }}>
+        {showStepErrors && !canAdvance && (
+          <Alert color="warning" variant="soft" sx={{ mb: 2 }} aria-live="polite">
+            Complete the highlighted required fields before continuing to the next step.
+          </Alert>
+        )}
+        {renderStepContent()}
+      </Box>
 
       <Divider sx={{ mb: 2 }} />
 

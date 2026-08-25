@@ -1,28 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import moment from 'moment';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
-import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { updatePostValidationLastRun } from '@/lib/postvalidationlastrun';
+import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ schema: string; plotID: string; censusID: string; queryID: string }> }) {
-  const params = await props.params;
-  const { schema } = params;
-  const plotID = parseInt(params.plotID, 10);
-  const censusID = parseInt(params.censusID, 10);
-  const queryID = parseInt(params.queryID, 10);
+function parsePositiveIntegerParam(value: string | undefined): number | undefined {
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+async function handler(_request: NextRequest, context: RouteContext) {
+  const params = await context.params;
+  const schema = params.schema as string;
+  const plotID = parsePositiveIntegerParam(params.plotID as string | undefined);
+  const censusID = parsePositiveIntegerParam(params.censusID as string | undefined);
+  const queryID = parsePositiveIntegerParam(params.queryID as string | undefined);
   let transactionID: string | undefined = undefined;
 
   // Validate all parameters
-  if (!schema || isNaN(plotID) || isNaN(censusID) || isNaN(queryID)) {
+  if (!schema || !plotID || !censusID || !queryID) {
     return new NextResponse(JSON.stringify({ error: 'Missing or invalid parameters' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  // SQL Injection Prevention: Validate schema against whitelist
+  // defense-in-depth: withRouteAuthz validates the schema before this handler
+  // runs, but the stored QueryDefinition below is interpolated raw (not through
+  // safeFormatQuery), so keep this local guard as a hard guarantee.
   if (!isValidSchema(schema)) {
     ailogger.warn(`Invalid schema attempted: ${schema}`);
     return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), { status: HTTPResponses.INVALID_REQUEST });
@@ -60,18 +70,27 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ sche
 
     const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
     const successResults = JSON.stringify(queryResults);
-    // Use parameterized query for UPDATE
-    const successUpdate = safeFormatQuery(schema, 'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = ? WHERE QueryID = ?');
-    await connectionManager.executeQuery(successUpdate, [currentTime, successResults, 'success', queryID]);
+    await updatePostValidationLastRun(connectionManager, schema, {
+      queryID,
+      plotID,
+      censusID,
+      ranAt: currentTime,
+      status: 'success',
+      result: successResults
+    });
     await connectionManager.commitTransaction(transactionID ?? '');
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
     await connectionManager.rollbackTransaction(transactionID ?? '');
     if (e.message === 'failure') {
       const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-      // Use parameterized query for UPDATE
-      const failureUpdate = safeFormatQuery(schema, 'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunStatus = ? WHERE QueryID = ?');
-      await connectionManager.executeQuery(failureUpdate, [currentTime, 'failure', queryID]);
+      await updatePostValidationLastRun(connectionManager, schema, {
+        queryID,
+        plotID,
+        censusID,
+        ranAt: currentTime,
+        status: 'failure'
+      });
       return new NextResponse(null, { status: HTTPResponses.OK }); // if the query itself fails, that isn't a good enough reason to return a crash. It should just be logged.
     }
     ailogger.error('Error in postvalidation query:', e.message, {
@@ -88,3 +107,5 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ sche
     await connectionManager.closeConnection();
   }
 }
+
+export const GET = withRouteAuthz('postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]', handler, { schema: fromPath('schema') });

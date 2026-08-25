@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
-import ConnectionManager from '@/config/connectionmanager';
-import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { FileRow } from '@/config/macros/formdetails';

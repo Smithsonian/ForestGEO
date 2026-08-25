@@ -15,13 +15,13 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros';
 
-vi.mock('@/config/connectionmanager', async () => {
+vi.mock('@/lib/db/connectionmanager', async () => {
   // Pull whatever the environment currently exports
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}));
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}));
 
   // Decide what looks like the active singleton
   const candidate =
@@ -54,6 +54,16 @@ vi.mock('@/config/connectionmanager', async () => {
     getInstance
   };
 });
+
+// The route enforces per-site authz inline (auth() + assertSchemaAccess) before
+// touching the DB. This suite exercises the SQL/transaction logic, so it runs as
+// a global admin (assertSchemaAccess bypasses membership for admins). The 403
+// out-of-scope path is covered by the bulkcrud authz integration test.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({
+    user: { email: 'bulkcrud-test@forestgeo.test', userStatus: 'global', sites: [] }
+  }))
+}));
 
 // Mock just local helpers
 vi.mock('@/components/processors/processorhelperfunctions', () => ({

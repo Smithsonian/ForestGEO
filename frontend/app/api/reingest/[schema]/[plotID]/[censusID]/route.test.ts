@@ -1,14 +1,44 @@
 // app/api/reingest/[schema]/[plotID]/[censusID]/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NextResponse } from 'next/server';
 import { GET, POST } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
-vi.mock('@/config/connectionmanager', () => {
+// Sentinel values placed only on the first mock row so we can assert they survive the staging INSERT.
+const FIRST_ROW_RAW_CODES = 'AL';
+const FIRST_ROW_RAW_PUBLISHED_STEM_ID = 5001;
+
+// Reads the column position out of the staging INSERT's own column list, so payload assertions
+// track the real layout instead of hard-coded offsets that break silently on column reordering.
+function stagingInsertColumnIndex(insertSQL: string, columnName: string): number {
+  const columnList = insertSQL.match(/temporarymeasurements\s*\(([^)]+)\)/i)?.[1] ?? '';
+  return columnList
+    .split(',')
+    .map(column => column.trim())
+    .indexOf(columnName);
+}
+
+const { authMock, assertSchemaAccessMock } = vi.hoisted(() => ({
+  authMock: vi.fn(),
+  assertSchemaAccessMock: vi.fn()
+}));
+
+vi.mock('@/auth', () => ({
+  auth: authMock
+}));
+
+vi.mock('@/lib/authz', () => ({
+  assertSchemaAccess: assertSchemaAccessMock
+}));
+
+vi.mock('@/lib/db/connectionmanager', () => {
   const executeQuery = vi.fn();
   const closeConnection = vi.fn();
   const cleanupStaleTransactions = vi.fn();
   const acquireApplicationLock = vi.fn();
-  const withTransaction = vi.fn(async (fn: (transactionID: string) => Promise<unknown>) => fn('test-transaction-id'));
+  const withTransaction = vi.fn(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+    fn({ query: (sql: string, params?: unknown[]) => executeQuery(sql, params), id: 'test-transaction-id' })
+  );
   const instance = {
     executeQuery,
     closeConnection,
@@ -70,7 +100,8 @@ function mockUnresolvedRows(count: number) {
     MeasuredDBH: 12.3,
     MeasuredHOM: 1.3,
     MeasurementDate: '2024-01-01',
-    RawCodes: idx === 0 ? 'AL' : null,
+    RawCodes: idx === 0 ? FIRST_ROW_RAW_CODES : null,
+    RawPublishedStemID: idx === 0 ? FIRST_ROW_RAW_PUBLISHED_STEM_ID : null,
     RawComments: null
   }));
 }
@@ -85,7 +116,14 @@ describe('reingest API routes', () => {
     mockConnectionManager.cleanupStaleTransactions.mockResolvedValue(undefined);
     mockConnectionManager.acquireApplicationLock.mockResolvedValue(true);
     mockConnectionManager.closeConnection.mockResolvedValue(undefined);
-    mockConnectionManager.withTransaction.mockImplementation(async (fn: (transactionID: string) => Promise<unknown>) => fn('test-transaction-id'));
+    mockConnectionManager.withTransaction.mockImplementation(
+      async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+        fn({ query: (sql: string, params?: unknown[]) => mockConnectionManager.executeQuery(sql, params), id: 'test-transaction-id' })
+    );
+    authMock.mockResolvedValue({
+      user: { id: 'site-user', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] }
+    });
+    assertSchemaAccessMock.mockReturnValue(null);
 
     const { validateContextualValues } = await import('@/lib/contextvalidation');
     mockValidateContextualValues = validateContextualValues as any;
@@ -135,6 +173,52 @@ describe('reingest API routes', () => {
       const body = await res.json();
       expect(body.rowsMoved).toBe(0);
       expect(body.responseMessage).toMatch(/No failed measurement rows/i);
+    });
+  });
+
+  describe('URL fallback authorization', () => {
+    beforeEach(() => {
+      mockValidateContextualValues.mockResolvedValue({
+        success: false,
+        response: NextResponse.json({ error: 'context missing' }, { status: 400 })
+      });
+    });
+
+    it('returns 401 when context validation fails and the URL fallback has no session', async () => {
+      authMock.mockResolvedValueOnce(null);
+
+      const res = await POST(makeRequest('POST'), makeParams());
+
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.code).toBe('UNAUTHENTICATED');
+      expect(mockConnectionManager.withTransaction).not.toHaveBeenCalled();
+      expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    });
+
+    it('returns the schema-access denial before staging any rows', async () => {
+      assertSchemaAccessMock.mockReturnValueOnce(NextResponse.json({ error: 'denied' }, { status: 403 }));
+
+      const res = await POST(makeRequest('POST'), makeParams());
+
+      expect(res.status).toBe(403);
+      expect(assertSchemaAccessMock).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing');
+      expect(mockConnectionManager.withTransaction).not.toHaveBeenCalled();
+      expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    });
+
+    it('uses the authorized URL schema fallback when context cookies are missing', async () => {
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce(mockUnresolvedRows(1))
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ affectedRows: 1, insertId: 1 });
+
+      const res = await POST(makeRequest('POST'), makeParams());
+
+      expect(res.status).toBe(200);
+      expect(authMock).toHaveBeenCalled();
+      expect(assertSchemaAccessMock).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing');
+      expect(mockConnectionManager.withTransaction).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -276,9 +360,17 @@ describe('reingest API routes', () => {
 
       expect(insertCall).toBeDefined();
       expect(insertCall[0]).toContain('Codes');
+      expect(insertCall[0]).toContain('PublishedStemID');
       const valuesParam = insertCall[1]?.[0];
       expect(Array.isArray(valuesParam)).toBe(true);
-      expect(valuesParam[0][13]).toBe('AL'); // Codes value preserved in insert payload
+
+      const codesIndex = stagingInsertColumnIndex(String(insertCall[0]), 'Codes');
+      const publishedStemIdIndex = stagingInsertColumnIndex(String(insertCall[0]), 'PublishedStemID');
+      expect(codesIndex).toBeGreaterThanOrEqual(0);
+      expect(publishedStemIdIndex).toBeGreaterThanOrEqual(0);
+
+      expect(valuesParam[0][codesIndex]).toBe(FIRST_ROW_RAW_CODES); // Codes value preserved in insert payload
+      expect(valuesParam[0][publishedStemIdIndex]).toBe(FIRST_ROW_RAW_PUBLISHED_STEM_ID); // RawPublishedStemID preserved
     });
   });
 });

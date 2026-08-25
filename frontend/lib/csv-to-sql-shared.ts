@@ -64,9 +64,9 @@ export interface MeasurementStagingRow {
   Mnemonic: string;
   QuadratName: string;
   PlotCensusNumber: string;
-  Family: string;
-  Genus: string;
-  SpeciesName: string;
+  Family: string | null;
+  Genus: string | null;
+  SpeciesName: string | null;
   SpeciesAuthority: string | null;
   SubspeciesName: string | null;
   DBH: number | null;

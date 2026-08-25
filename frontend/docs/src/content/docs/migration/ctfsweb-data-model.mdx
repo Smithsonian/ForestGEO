@@ -5,7 +5,17 @@ description: Comprehensive reference for the CTFSWeb database structure, tables,
 
 import { Aside, Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
 
-This document provides a comprehensive reference for the CTFSWeb data model—the foundation for ForestGEO's census data management system. Whether you're migrating from CTFSWeb or learning how ForestGEO structures forest inventory data, this guide explains the core concepts, table structures, and relationships.
+This document is a reference for the **legacy CTFSWeb data model** — the system many sites are
+migrating away from. It is here so you can read your existing CTFSWeb database and understand
+what your data meant before it moved.
+
+:::caution
+**This describes CTFSWeb, not ForestGEO.** The table and column names below are CTFSWeb's.
+ForestGEO renamed several of them, dropped others, and changed one relationship that matters a
+great deal during migration — trees are census-scoped in ForestGEO but not in CTFSWeb. Each
+section flags the difference where there is one. For ForestGEO's own structure, see the
+[CTFSWeb vs ForestGEO Comparison](/ForestGEO/migration/ctfsweb-forestgeo-comparison/).
+:::
 
 ## Core Terminology
 
@@ -49,7 +59,7 @@ Site
     A 20×20 meter square section of the plot. Identified by column (StartX) and row (StartY) coordinates.
   </Card>
   <Card title="Tree" icon="tree">
-    An individual tree tracked by a permanent aluminum tag. Trees persist across censuses; measurements are linked by TreeID.
+    An individual tree tracked by a permanent aluminum tag. In CTFSWeb a tree is one row that persists across every census. In ForestGEO each census gets its own tree row, matched by TreeTag.
   </Card>
   <Card title="Stem" icon="branch">
     A single stem of a tree. Multi-stemmed trees have one record per stem, each with its own StemTag (e.g., "1", "2", "A", "B").
@@ -122,8 +132,14 @@ Represents an individual tree tracked across all censuses.
 | `QuadratID` | Reference to quadrat location | 42 |
 | `SpeciesID` | Reference to species identification | 156 |
 
-<Aside type="note">
-Trees are identified by their **TreeTag** (the physical tag) but tracked internally by **TreeID**. The same tree has the same TreeID across all censuses.
+<Aside type="caution">
+In CTFSWeb, trees are identified by their **TreeTag** (the physical tag) and tracked internally
+by **TreeID**, and the same tree keeps the same TreeID across all censuses.
+
+**ForestGEO does not work this way.** Its `trees` table carries a `CensusID`, with uniqueness on
+`(TreeTag, SpeciesID, CensusID)` — so one physical tree produces a *new* row with a *new* TreeID
+in every census, and the tag is what ties them together. Any migration script or query that
+assumes a stable TreeID will be wrong against a ForestGEO schema.
 </Aside>
 
 ### Stem
@@ -340,6 +356,13 @@ Status codes may vary slightly between sites. Always check your site's specific 
 ## Report Tables (Views)
 
 Two primary views combine data from multiple tables for analysis.
+
+:::caution
+Both views below are **CTFSWeb's**. ForestGEO has its own `viewfulltable` with differently named
+columns (see the note in the
+[Data Specifications Guide](/ForestGEO/migration/ctfsweb-data-specs/#viewfulltable-structure)),
+and it has no `ViewTaxonomy` — the equivalents are `alltaxonomiesview` and `stemtaxonomiesview`.
+:::
 
 ### ViewFullTable
 

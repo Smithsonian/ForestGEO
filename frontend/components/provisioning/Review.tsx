@@ -12,7 +12,10 @@ function buildQuadratsSummary(quadrats: ProvisioningInput['quadrats']): string {
   if (quadrats.mode === 'grid') {
     return `Grid mode: ${quadrats.quadratSizeX}×${quadrats.quadratSizeY} m, naming = ${quadrats.namingPattern}`;
   }
-  return `CSV mode: ${quadrats.rows.length} ${quadrats.rows.length === 1 ? 'row' : 'rows'}`;
+  if (quadrats.mode === 'none') {
+    return 'None: no quadrats created now — upload them later from the Quadrats page';
+  }
+  return `CSV mode: ${quadrats.rows.length} ${quadrats.rows.length === 1 ? 'row' : 'rows'}, coordinates identify each quadrat's south-west corner`;
 }
 
 export default function Review({ value }: ReviewProps) {
@@ -64,6 +67,7 @@ export default function Review({ value }: ReviewProps) {
         </Typography>
         <Typography>
           <b>Global coordinates:</b> ({value.plot.globalX}, {value.plot.globalY}, {value.plot.globalZ}) {value.plot.defaultCoordinateUnits}
+          {value.plot.globalCoordinatesEPSG !== undefined && <> &mdash; EPSG:{value.plot.globalCoordinatesEPSG}</>}
         </Typography>
         <Typography>
           <b>DBH units:</b> {value.plot.defaultDBHUnits} &mdash; <b>HOM units:</b> {value.plot.defaultHOMUnits}

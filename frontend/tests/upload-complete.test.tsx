@@ -42,7 +42,7 @@ vi.mock('@/app/contexts/compat-hooks', () => ({
   useOrgCensusDispatch: () => mockCensusDispatch
 }));
 
-vi.mock('@/config/sqlrdsdefinitions/timekeeping', () => ({
+vi.mock('@/lib/db/definitions/timekeeping', () => ({
   createAndUpdateCensusList: (...args: any[]) => mockCreateAndUpdateCensusList(...args),
   reconcileCurrentCensusSelection: (...args: any[]) => mockReconcileCurrentCensusSelection(...args)
 }));

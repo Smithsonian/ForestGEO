@@ -29,7 +29,15 @@ export default defineConfig({
             { label: 'Quick Start', slug: 'quick-start' },
             { label: 'Getting Started', slug: 'getting-started' },
             { label: 'Navigation, Dashboard & Tools', slug: 'navigation-dashboard-tools' },
+            { label: 'Preparing Your Data File', slug: 'preparing-your-data' },
             { label: 'Adding Historical Data', slug: 'adding-historical-data' }
+          ]
+        },
+        {
+          label: 'Supporting Data',
+          items: [
+            { label: 'Overview', slug: 'starting/understanding-supporting-data' },
+            { label: 'Species List', slug: 'starting/understanding-species' }
           ]
         },
         {
@@ -37,7 +45,7 @@ export default defineConfig({
           items: [
             { label: 'Upload Process Breakdown', slug: 'upload-process-breakdown' },
             { label: 'Publishing a Census to the Smithsonian DB', slug: 'publishing-census-to-smithsonian-db' },
-            { label: 'Understanding SAPD Datagrids', slug: 'understanding-sapd-datagrids' }
+            { label: 'Understanding the Data Grids', slug: 'understanding-sapd-datagrids' }
           ]
         },
         {
@@ -70,16 +78,8 @@ export default defineConfig({
           ]
         },
         {
-          label: 'Documentation Framework',
-          collapsed: true,
-          items: [
-            { label: 'Framework Overview', slug: 'framework/documentation-framework-overview' },
-            { label: 'Table of Contents Outline', slug: 'framework/documentation-toc-outline' },
-            { label: 'Glossary of Terms', slug: 'framework/glossary-of-terms' },
-            { label: 'Process Flows Reference', slug: 'framework/process-flows-reference' },
-            { label: 'Non-Technical User Guide', slug: 'framework/non-technical-user-guide-outline' },
-            { label: 'Core Systems Reference', slug: 'framework/core-systems-reference' }
-          ]
+          label: 'Glossary of Terms',
+          slug: 'framework/glossary-of-terms'
         }
       ],
       head: [

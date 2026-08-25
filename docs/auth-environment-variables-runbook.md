@@ -183,6 +183,35 @@ When login works with Microsoft but the app still lands on a blank or inert `/da
 5. If needed, compare with local `.env.local`
 6. If needed, update GitHub environment secrets so future deploys stay aligned
 
+## 8b. Rotating dev's AUTH_SECRET to differ from production (2026-07-20 hardening)
+
+Decision (2026-07-20): the cross-site single sign-on behavior is accepted as expected, but
+dev and prod should NOT share the session-signing secret. If they share `AUTH_SECRET`, a
+session token minted by the softer dev environment is cryptographically valid on the live
+site. Rotating dev's secret to a distinct value closes that.
+
+First, confirm whether they are actually shared (optional but informative): copy a live
+`__Secure-authjs.session-token` cookie value and replay it against dev —
+`curl -s https://forestgeo-development.azurewebsites.net/api/auth/session -H "Cookie: __Secure-authjs.session-token=<live-value>"`.
+A session JSON back = shared secret (rotate); `null` = already distinct (done). The token
+is the raw cookie value only — do not include the surrounding braces some cookie inspectors
+display, or the token reads as malformed and dev returns a misleading `null`.
+
+**Verified 2026-07-21:** replaying a live production JWE against dev returned `null` — dev
+rejects a prod-minted token, so the two environments already use distinct `AUTH_SECRET`
+values. No rotation is required at this time; the steps below are retained for future use
+(e.g. if the environments are ever re-provisioned from a shared secret).
+
+To rotate (operator action — engineering cannot change Azure/GitHub secrets):
+1. Generate a new value: `openssl rand -base64 33`.
+2. GitHub → repo Settings → Environments → `development_temp` → update `AUTH_SECRET`.
+3. Azure Portal → App Service `forestgeo-development` → Settings → Environment variables →
+   set `AUTH_SECRET` to the same new value → Apply → restart the App Service.
+4. Leave `production`'s `AUTH_SECRET` untouched. Verify a fresh dev login still works and
+   that the replay test above now returns `null`.
+
+Note: existing dev sessions are invalidated by the rotation — dev users re-login once.
+
 ## 9. Current lesson from this incident
 
 The observed failure pattern was:

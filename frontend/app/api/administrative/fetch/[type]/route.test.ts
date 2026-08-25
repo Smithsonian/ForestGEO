@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
-  executeQuery: vi.fn(async () => []),
+  executeQuery: vi.fn(async (): Promise<any> => []),
   beginTransaction: vi.fn(async () => 'tx-1'),
   commitTransaction: vi.fn(async () => {}),
   rollbackTransaction: vi.fn(async () => {}),
@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/auth', () => ({ auth: mocks.auth }));
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({
       executeQuery: mocks.executeQuery,
@@ -69,6 +69,13 @@ describe('/api/administrative/fetch/[type] auth gate', () => {
     expect(res.status).toBe(200);
   });
 
+  it('user administration admits db admins as well as global admins', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'db@x', userStatus: 'db admin' } });
+    const res = await GET(makeReq('http://x/api/administrative/fetch/users'), params('users'));
+    expect(res.status).toBe(200);
+    expect(mocks.executeQuery).toHaveBeenCalled();
+  });
+
   it('GET → preserves paginated format toggle when ?email= is present', async () => {
     mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
     const res = await GET(makeReq('http://x/api/administrative/fetch/users?email=ignored'), params('users'));
@@ -92,6 +99,72 @@ describe('/api/administrative/fetch/[type] auth gate', () => {
     expect(res.status).toBe(401);
     expect(mocks.executeQuery).not.toHaveBeenCalled();
     expect(mocks.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects resource names outside the administrative allow-list', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    const res = await POST(makeReq('http://x/api/administrative/fetch/secrets', { newRow: { value: 'x' } }), params('secrets'));
+    expect(res.status).toBe(400);
+    expect(mocks.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('validates new users and returns the database user id', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    mocks.executeQuery.mockResolvedValueOnce({ insertId: 42 });
+    const res = await POST(
+      makeReq('http://x/api/administrative/fetch/users', {
+        newRow: { firstName: ' Ada ', lastName: ' Lovelace ', email: 'ADA@example.com', notifications: true, userStatus: 'field crew' }
+      }),
+      params('users')
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ userID: 42 });
+    expect(mocks.executeQuery).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO catalog.users'),
+      ['Ada', 'Lovelace', 'ada@example.com', true, 'field crew'],
+      'tx-1'
+    );
+  });
+
+  it('rejects malformed new users without executing an insert', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    const res = await POST(
+      makeReq('http://x/api/administrative/fetch/users', {
+        newRow: { firstName: '', lastName: '', email: 'not-an-email', notifications: 'yes', userStatus: 'owner' }
+      }),
+      params('users')
+    );
+    expect(res.status).toBe(400);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+    expect(mocks.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('DELETE → accepts the camelCase identifier the mapped grid rows send', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    const res = await DELETE(makeReq('http://x/api/administrative/fetch/users', { newRow: { id: 3, userID: 5, firstName: 'Ada' } }), params('users'));
+    expect(res.status).toBe(200);
+    expect(mocks.executeQuery).toHaveBeenCalledWith(expect.stringMatching(/DELETE FROM.*WHERE.*UserID.* = 5/s), undefined, 'tx-1');
+  });
+
+  it('DELETE → 400 when the row carries no usable identifier', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    const res = await DELETE(makeReq('http://x/api/administrative/fetch/users', { newRow: { firstName: 'Ada' } }), params('users'));
+    expect(res.status).toBe(400);
+    expect(mocks.beginTransaction).not.toHaveBeenCalled();
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('POST → strips grid scaffold fields and demaps the row before inserting a site', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    const res = await POST(
+      makeReq('http://x/api/administrative/fetch/sites', { newRow: { id: 'uuid-1', isNew: true, siteName: 'BCI', schemaName: 'forestgeo_bci' } }),
+      params('sites')
+    );
+    expect(res.status).toBe(200);
+    expect(mocks.demapData).toHaveBeenCalledWith([{ siteName: 'BCI', schemaName: 'forestgeo_bci', id: 'uuid-1' }]);
+    const insertQuery = mocks.executeQuery.mock.calls[0][0] as unknown as string;
+    expect(insertQuery).toContain('INSERT INTO');
+    expect(insertQuery).not.toContain('isNew');
   });
 
   it('PATCH → 403 when non-admin', async () => {

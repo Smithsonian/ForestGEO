@@ -5,13 +5,15 @@ import CloseIcon from '@mui/icons-material/Close';
 import { useEffect, useState } from 'react';
 
 import UploadParent from '../uploadsystem/uploadparent';
-import { FormType } from '@/config/macros/formdetails';
+import { FormType, SourceFormat, getDataGridForForm } from '@/config/macros/formdetails';
 import { UploadMode, UploadModeLabels } from '@/config/uploadmodes';
+import RenderGridFormExplanations from '@/components/client/rendergridformexplanations';
 
 interface UPMProps {
   isUploadModalOpen: boolean;
   handleCloseUploadModal: () => void;
   formType: FormType;
+  sourceFormat?: SourceFormat;
   skipToProcessing?: boolean;
   onUploadComplete?: () => void;
 }
@@ -34,9 +36,12 @@ function getRevisionMatchLabel(formType: FormType): string {
 }
 
 export default function UploadParentModal(props: UPMProps) {
-  const { formType, handleCloseUploadModal, isUploadModalOpen, skipToProcessing, onUploadComplete } = props;
+  const { formType, sourceFormat = SourceFormat.csv, handleCloseUploadModal, isUploadModalOpen, skipToProcessing, onUploadComplete } = props;
+  const isArcgisMode = sourceFormat === SourceFormat.arcgis_xlsx;
+  const overrideUploadForm = isArcgisMode ? FormType.measurements : formType;
   const requiresModeSelection = !skipToProcessing;
   const revisionMatchLabel = getRevisionMatchLabel(formType);
+  const referenceGridType = getDataGridForForm(overrideUploadForm);
   const [uploadMode, setUploadMode] = useState<UploadMode | undefined>(requiresModeSelection ? undefined : UploadMode.CLEAN_REUPLOAD);
 
   useEffect(() => {
@@ -68,7 +73,7 @@ export default function UploadParentModal(props: UPMProps) {
           aria-describedby="upload-dialog-description"
         >
           <IconButton
-            aria-label={`Close ${formType} upload dialog`}
+            aria-label={isArcgisMode ? 'Close ArcGIS workbook upload dialog' : `Close ${formType} upload dialog`}
             onClick={handleCloseUploadModal}
             sx={{ position: 'absolute', top: 8, right: 8 }}
             onKeyDown={event => {
@@ -81,11 +86,20 @@ export default function UploadParentModal(props: UPMProps) {
             <CloseIcon />
           </IconButton>
           <div id="upload-dialog-title" className="sr-only">
-            {formType.charAt(0).toUpperCase() + formType.slice(1)} File Upload Dialog
+            {isArcgisMode ? 'Upload an ArcGIS workbook (.xlsx)' : `${formType.charAt(0).toUpperCase() + formType.slice(1)} File Upload Dialog`}
           </div>
           <div id="upload-dialog-description" className="sr-only">
-            Upload {formType} data files to the ForestGEO database system. Navigate using Tab key, activate buttons with Enter or Space.
+            {isArcgisMode
+              ? 'Upload an ArcGIS Field Maps .xlsx workbook to the ForestGEO database system. Navigate using Tab key, activate buttons with Enter or Space.'
+              : `Upload ${formType} data files to the ForestGEO database system. Navigate using Tab key, activate buttons with Enter or Space.`}
           </div>
+          {!isArcgisMode && referenceGridType && <RenderGridFormExplanations datagridType={referenceGridType} />}
+          {isArcgisMode && (
+            <Typography level="body-sm" sx={{ pr: 5 }}>
+              Select one ArcGIS Field Maps <strong>.xlsx</strong> workbook. The workbook preflight will inspect its sheets and map ArcGIS columns before any
+              data is changed.
+            </Typography>
+          )}
           {uploadMode ? (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {requiresModeSelection && (
@@ -103,16 +117,19 @@ export default function UploadParentModal(props: UPMProps) {
               )}
               <UploadParent
                 onReset={handleCloseUploadModal}
-                overrideUploadForm={formType}
+                overrideUploadForm={overrideUploadForm}
                 overrideUploadMode={uploadMode}
+                overrideSourceFormat={sourceFormat}
                 skipToProcessing={skipToProcessing}
                 onUploadComplete={onUploadComplete}
               />
             </Box>
           ) : (
             <Stack spacing={2} sx={{ py: 3, px: 1 }}>
-              <Typography level="h3">Choose Upload Mode</Typography>
-              <Typography level="body-sm">Select how this {formType} CSV should be applied.</Typography>
+              <Typography level="h3">{isArcgisMode ? 'Confirm Import Mode' : 'Choose Upload Mode'}</Typography>
+              <Typography level="body-sm">
+                {isArcgisMode ? 'ArcGIS workbooks are imported as a clean re-upload.' : `Select how this ${formType} CSV should be applied.`}
+              </Typography>
               <Card variant="outlined">
                 <CardContent>
                   <Stack spacing={1}>
@@ -122,7 +139,11 @@ export default function UploadParentModal(props: UPMProps) {
                         Destructive
                       </Chip>
                     </Box>
-                    <Typography level="body-sm">Deletes all existing {formType} data, then inserts the uploaded file as the new source of truth.</Typography>
+                    <Typography level="body-sm">
+                      {isArcgisMode
+                        ? 'Deletes all existing measurements for the selected census, then inserts the uploaded workbook as the new source of truth.'
+                        : `Deletes all existing ${formType} data, then inserts the uploaded file as the new source of truth.`}
+                    </Typography>
                   </Stack>
                 </CardContent>
                 <CardActions sx={{ justifyContent: 'flex-start' }}>
@@ -131,26 +152,28 @@ export default function UploadParentModal(props: UPMProps) {
                   </Button>
                 </CardActions>
               </Card>
-              <Card variant="outlined">
-                <CardContent>
-                  <Stack spacing={1}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography level="title-md">{UploadModeLabels[UploadMode.REVISIONS]}</Typography>
-                      <Chip color="success" size="sm">
-                        Recommended
-                      </Chip>
-                    </Box>
-                    <Typography level="body-sm">
-                      Updates existing records matched by {revisionMatchLabel} (case-insensitive) and adds any new rows from the file.
-                    </Typography>
-                  </Stack>
-                </CardContent>
-                <CardActions sx={{ justifyContent: 'flex-start' }}>
-                  <Button variant="outlined" onClick={() => setUploadMode(UploadMode.REVISIONS)}>
-                    Use Revisions Upload
-                  </Button>
-                </CardActions>
-              </Card>
+              {!isArcgisMode && (
+                <Card variant="outlined">
+                  <CardContent>
+                    <Stack spacing={1}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography level="title-md">{UploadModeLabels[UploadMode.REVISIONS]}</Typography>
+                        <Chip color="success" size="sm">
+                          Recommended
+                        </Chip>
+                      </Box>
+                      <Typography level="body-sm">
+                        Updates existing records matched by {revisionMatchLabel} (case-insensitive) and adds any new rows from the file.
+                      </Typography>
+                    </Stack>
+                  </CardContent>
+                  <CardActions sx={{ justifyContent: 'flex-start' }}>
+                    <Button variant="outlined" onClick={() => setUploadMode(UploadMode.REVISIONS)}>
+                      Use Revisions Upload
+                    </Button>
+                  </CardActions>
+                </Card>
+              )}
             </Stack>
           )}
         </ModalDialog>

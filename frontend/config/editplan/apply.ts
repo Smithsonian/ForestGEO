@@ -11,7 +11,7 @@
 // `applyEditInTransaction` under their own outer transaction + scope lock.
 // They MUST NOT loop over `applyEdit` — each call would try to re-acquire
 // the same scope lock on a new inner transaction and fail-fast (timeout 0).
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import type { UserAuthRoles } from '@/config/macros';
 import { EditPlanDataType, ApplyResult, EditPlan } from './types';
 import { analyzeEdit, assertEditPlanCanApply } from './analyzer';

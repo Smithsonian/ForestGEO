@@ -1,21 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
+import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function GET(
-  request: NextRequest,
-  props: {
-    params: Promise<{ schema: string; plotID: string; censusID: string }>;
-  }
-) {
-  const { schema, plotID, censusID } = await props.params;
+// Phase-3: user→schema membership via guard; requireUploadSessionOwnership retains plot/census token ownership.
+async function handler(request: NextRequest, context: RouteContext) {
+  const { schema, plotID, censusID } = (await context.params) as { schema: string; plotID: string; censusID: string };
   const sessionId = request.headers.get('x-upload-session-id');
   const numericPlotID = Number(plotID);
   const numericCensusID = Number(censusID);
@@ -78,3 +75,5 @@ export async function GET(
     return new NextResponse(JSON.stringify({ error: 'Failed to fetch batches', details: error.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   }
 }
+
+export const GET = withRouteAuthz('setupbulkprocessor/[schema]/[plotID]/[censusID]', handler, { schema: fromPath('schema') });

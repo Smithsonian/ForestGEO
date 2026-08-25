@@ -1,6 +1,6 @@
 import { readFile } from 'fs/promises';
 import type { Pool } from 'mysql2/promise';
-import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 
 export const STATEMENT_PREVIEW_MAX_LENGTH = 200;
 

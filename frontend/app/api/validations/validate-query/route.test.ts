@@ -1,14 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
+
+const ROUTE_CONTEXT = { params: Promise.resolve({}) };
+
+// Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
+// A 'global' admin passes the per-site access gate.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
 
 vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() }
 }));
 
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}));
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}));
 
   const instance = {
     executeQuery: vi.fn(async () => []),
@@ -48,7 +56,8 @@ describe('POST /api/validations/validate-query', () => {
     executeQuery.mockResolvedValueOnce([{ ROUTINE_NAME: 'RunSharedCrossCensusLocationValidations' }]).mockResolvedValueOnce([]);
 
     const response = await POST(
-      makeRequest('forestgeo_testing', 'CALL forestgeo_testing.RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 1, 0)')
+      makeRequest('forestgeo_testing', 'CALL forestgeo_testing.RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 1, 0)'),
+      ROUTE_CONTEXT
     );
 
     expect(response.status).toBe(HTTPResponses.OK);
@@ -68,7 +77,10 @@ describe('POST /api/validations/validate-query', () => {
     const connectionManager = (ConnectionManager as any).getInstance();
     vi.spyOn(connectionManager, 'closeConnection').mockResolvedValue(undefined);
 
-    const response = await POST(makeRequest('forestgeo_testing', 'CALL other_schema.RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 1, 0)'));
+    const response = await POST(
+      makeRequest('forestgeo_testing', 'CALL other_schema.RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 1, 0)'),
+      ROUTE_CONTEXT
+    );
 
     expect(response.status).toBe(HTTPResponses.OK);
     await expect(response.json()).resolves.toEqual({

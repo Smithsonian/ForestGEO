@@ -1,4 +1,4 @@
-import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
+import { FamilyResult, GenusResult, SpeciesResult } from '@/lib/db/definitions/taxonomies';
 import { createError, handleUpsert } from '@/config/utils';
 import { SpecialProcessingProps } from '@/config/macros';
 

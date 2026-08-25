@@ -7,7 +7,7 @@ import { DataGridSignals, FormType } from '@/config/macros/formdetails';
 import { Autocomplete, AutocompleteOption, Box, createFilterOptions, ListItemDecorator } from '@mui/joy';
 import RenderFormExplanations from '@/components/client/renderformexplanations';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import { RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
+import { RoleRDS } from '@/lib/db/definitions/personnel';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { GridRenderEditCellParams, useGridApiContext } from '@mui/x-data-grid';
 import { Add } from '@mui/icons-material';

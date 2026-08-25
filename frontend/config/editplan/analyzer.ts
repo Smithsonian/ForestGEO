@@ -1,4 +1,4 @@
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import type { UserAuthRoles } from '@/config/macros';
 import { EditPlan, EditPlanDataType, Effect, FieldChange, PreviewError, RoleForbiddenFieldPreviewError, SEVERITY_RANK, Severity } from './types';
@@ -8,7 +8,7 @@ import { applyCoordinateRules } from './rules/coordinates';
 import { applyAttributeRules } from './rules/attributes';
 import { canonicalizeEditPayload, rejectDisallowedFields, EditSurface, isFieldEditableByRole, PER_COLUMN_DECIMAL_PRECISION, isDateField } from './fieldpolicy';
 import { hashPlan } from './planhash';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 // MySQL2 returns DECIMAL columns as strings (e.g. '3.500000') and DATE/DATETIME
 // columns as Date objects. The client sends numbers and 'YYYY-MM-DD' strings.

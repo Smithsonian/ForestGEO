@@ -1,9 +1,10 @@
 import { HTTPResponses } from '@/config/macros';
 import { format } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
+import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -20,8 +21,8 @@ function isValidDataType(dataType: string): boolean {
 // slugs: schema, columnName, value ONLY
 // needs to match dynamic format established by other slug routes!
 // refit to match entire rows, using dataType convention to determine what columns need testing?
-export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
-  const params = await props.params;
+async function getHandler(_request: NextRequest, context: RouteContext) {
+  const params = (await context.params) as { dataType: string; slugs?: string[] };
 
   // Validate slugs parameter
   if (!params.slugs || params.slugs.length !== 3) {
@@ -45,7 +46,9 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
     });
   }
 
-  // SQL Injection Prevention: Validate schema against whitelist
+  // defense-in-depth: withRouteAuthz already validated schema membership before
+  // this handler ran; this whitelist check stays as a redundant guard on the
+  // raw identifier interpolation below.
   if (!isValidSchema(schema)) {
     ailogger.warn(`Invalid schema attempted in formvalidation: ${schema}`);
     return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), { status: HTTPResponses.INVALID_REQUEST });
@@ -74,3 +77,5 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
     await connectionManager.closeConnection();
   }
 }
+
+export const GET = withRouteAuthz('formvalidation/[dataType]/[[...slugs]]', getHandler, { schema: fromPathSegment('slugs', 0) });

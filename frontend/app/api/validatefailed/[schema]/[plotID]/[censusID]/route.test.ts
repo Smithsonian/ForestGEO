@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
+// A 'global' admin passes the per-site access gate.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
 const {
   mockExecuteQuery,
   mockBeginTransaction,
@@ -16,7 +22,7 @@ const {
   mockRefreshIngestionErrorsForMeasurement: vi.fn()
 }));
 
-vi.mock('@/config/connectionmanager', () => ({
+vi.mock('@/lib/db/connectionmanager', () => ({
   default: {
     getInstance: () => ({
       executeQuery: mockExecuteQuery,
@@ -28,8 +34,9 @@ vi.mock('@/config/connectionmanager', () => ({
   }
 }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
-  validateSchemaOrThrow: vi.fn()
+vi.mock('@/lib/db/sqlsecurity', () => ({
+  validateSchemaOrThrow: vi.fn(),
+  isValidSchema: vi.fn(() => true)
 }));
 
 vi.mock('@/config/measurementerrors', () => ({

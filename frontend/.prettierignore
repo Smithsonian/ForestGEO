@@ -6,6 +6,11 @@ node_modules/
 out/
 build/
 
+# Generated artifacts (gitignored)
+graphify-out/
+cypress/downloads/
+cypress/screenshots/
+
 # Documentation site (has its own prettier config and dependencies)
 docs/
 

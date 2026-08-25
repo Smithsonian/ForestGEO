@@ -25,6 +25,7 @@ import {
   GridColDef,
   GridEventListener,
   GridPaginationModel,
+  GridRenderEditCellParams,
   GridRowEditStopReasons,
   GridRowModes,
   GridRowModesModel,
@@ -36,11 +37,15 @@ import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import CallSplitIcon from '@mui/icons-material/CallSplit';
+import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
+import Link from 'next/link';
 import {
   ContradictionType,
   CONTRADICTION_LABELS,
   DEFAULT_ERROR_EXPLORER_FILTERS,
   ErrorExplorerDetailsResponse,
+  ErrorComparisonContext,
   ErrorExplorerFacetsResponse,
   ErrorExplorerFilters,
   ErrorExplorerQueryResponse,
@@ -54,12 +59,18 @@ import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollb
 import { useInfiniteGridRows, type UseInfiniteGridRowsResult } from '@/components/datagrids/hooks/useinfinitegridrows';
 import ContradictionComparisonPanel from './contradictioncomparisonpanel';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
-import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
+import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import { isMuiRowEditCancelled } from '@/lib/muirowedit';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast from '@/components/editplan/undotoast';
 import { buildEditableFieldsDiffWithMetaForSurface } from '@/components/datagrids/measurementscommonsutils';
 import { isFieldEditableByRole } from '@/config/editplan/fieldpolicy';
+
+// Wide grids column-virtualize off-screen cells out of the DOM, so Cypress
+// assertions against unscrolled columns (e.g. the far-right Codes edit cell)
+// can never observe them. Same e2e-only escape hatch as
+// components/datagrids/isolateddatagridcommons.tsx; production is unchanged.
+const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
 
 const DEFAULT_FACETS: ErrorExplorerFacetsResponse = {
   messages: [],
@@ -120,11 +131,19 @@ interface ExplorerScope {
   schema: string;
   plotID: number;
   censusID: number;
+  censusIDs: number[];
 }
 
 function getFilterStorageKey(schema?: string, plotID?: number, censusID?: number) {
   if (!schema || !plotID || !censusID) return null;
   return `errors-explorer-filters:${schema}:${plotID}:${censusID}`;
+}
+
+const EXPORT_CSV_FALLBACK_FILENAME = 'errors.csv';
+
+export function extractFilenameFromContentDisposition(headerValue: string | null): string {
+  const match = headerValue?.match(/filename="([^"]+)"/);
+  return match?.[1] ?? EXPORT_CSV_FALLBACK_FILENAME;
 }
 
 function renderPreviewCell(value: string | null | undefined, lines = 2) {
@@ -187,6 +206,18 @@ export function getMaterializedCodesValue(row?: Partial<CodesRow> | null): strin
   return normalizeCodeValue(row?.attributes);
 }
 
+export function formatOptionalMeasurement(value: number | null | undefined): string {
+  return value == null ? '' : Number(value).toFixed(2);
+}
+
+export function formatErrorComparison(comparison: ErrorComparisonContext, currentHOM: number | null | undefined): string {
+  if (comparison.priorCensusID == null && comparison.priorDBH == null && comparison.priorHOM == null) return 'Comparison unavailable';
+  return (
+    `Prior census ${comparison.priorCensusID ?? '—'}: DBH ${comparison.priorDBH ?? '—'}, HOM ${comparison.priorHOM ?? '—'}` +
+    (comparison.priorHOM != null && currentHOM != null && comparison.homChanged ? ' (HOM changed)' : '')
+  );
+}
+
 export function hasCodesMismatch(row?: Partial<CodesRow> | null): boolean {
   const uploadedCodes = joinCodesArray(parseCodesString(getUploadedCodesValue(row)));
   const materializedCodes = joinCodesArray(parseCodesString(getMaterializedCodesValue(row)));
@@ -200,11 +231,6 @@ function getCodesMismatchMessage(row?: Partial<CodesRow> | null): string {
   }
 
   return getMaterializedCodesValue(row) ? 'Some uploaded codes were not materialized.' : 'No valid codes were materialized. Check invalid codes or delimiters.';
-}
-
-function getCodesEditValue(row?: Partial<CodesRow> | null, currentValue?: string | null): string {
-  const editedValue = normalizeCodeValue(currentValue);
-  return editedValue || getUploadedCodesValue(row);
 }
 
 function renderCodesChips(codesValue: string, emptyLabel = '—') {
@@ -224,6 +250,35 @@ function renderCodesChips(codesValue: string, emptyLabel = '—') {
   );
 }
 
+function CodesEditCell({ params, options }: { params: GridRenderEditCellParams<ErrorExplorerRow, string>; options: string[] }) {
+  // Show the uploaded codes as the correction target without writing them into
+  // MUI's row-edit state. Row mode initializes every editable field and saves
+  // all of them, so a column-level valueGetter/valueSetter would otherwise
+  // mutate Attributes when the user edits only DBH, Description, etc.
+  const [selectedCodes, setSelectedCodes] = useState(() => parseCodesString(getUploadedCodesValue(params.row)));
+
+  return (
+    <Autocomplete
+      sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
+      multiple
+      freeSolo
+      autoHighlight
+      clearOnBlur={false}
+      options={options}
+      value={selectedCodes}
+      isOptionEqualToValue={(option, value) => option === value}
+      onChange={(_event, next) => {
+        setSelectedCodes(next);
+        void params.api.setEditCellValue({
+          id: params.id,
+          field: params.field,
+          value: joinCodesArray(next)
+        });
+      }}
+    />
+  );
+}
+
 function mergeEditedRow(existingRow: ErrorExplorerRow, updatedRow: ErrorExplorerRow): ErrorExplorerRow {
   return {
     ...existingRow,
@@ -238,6 +293,15 @@ export default function ErrorsExplorer() {
   const currentCensus = useOrgCensusContext();
   const { data: session } = useSession();
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+  const activeCensusIDsKey = Array.from(new Set((currentCensus?.dateRanges ?? []).map(range => range.censusID).filter(censusID => censusID > 0))).join(',');
+  const activeCensusIDs = useMemo(
+    () =>
+      activeCensusIDsKey
+        .split(',')
+        .map(Number)
+        .filter(censusID => censusID > 0),
+    [activeCensusIDsKey]
+  );
   // Keep the grid affordances aligned with editplan authorization: pending
   // users cannot edit, and species-code edits stay admin-only.
   const userStatus = session?.user?.userStatus;
@@ -254,16 +318,17 @@ export default function ErrorsExplorer() {
       const fallbackPlotID = typeof fallbackRow?.plotID === 'number' && fallbackRow.plotID > 0 ? fallbackRow.plotID : null;
       const fallbackCensusID = typeof fallbackRow?.censusID === 'number' && fallbackRow.censusID > 0 ? fallbackRow.censusID : null;
       const plotID = currentPlot?.plotID ?? fallbackPlotID;
-      const censusID = activeCensusID ?? fallbackCensusID;
+      const censusID = fallbackCensusID ?? activeCensusID;
       if (!plotID || !censusID) return null;
 
       return {
         schema: currentSite.schemaName,
         plotID,
-        censusID
+        censusID,
+        censusIDs: fallbackCensusID ? [fallbackCensusID] : activeCensusIDs.length > 0 ? activeCensusIDs : [censusID]
       };
     },
-    [activeCensusID, currentPlot?.plotID, currentSite?.schemaName]
+    [activeCensusID, activeCensusIDs, currentPlot?.plotID, currentSite?.schemaName]
   );
 
   const [filters, setFilters] = useState<ErrorExplorerFilters>(DEFAULT_ERROR_EXPLORER_FILTERS);
@@ -273,8 +338,10 @@ export default function ErrorsExplorer() {
   const [details, setDetails] = useState<ErrorExplorerDetailsResponse | null>(null);
   const [selectedMeasurementID, setSelectedMeasurementID] = useState<number | null>(null);
   const [loadingRows, setLoadingRows] = useState(false);
+  const [hasLoadedRows, setHasLoadedRows] = useState(false);
   const [loadingFacets, setLoadingFacets] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [isExportingCsv, setIsExportingCsv] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
   const [selectableOpts, setSelectableOpts] = useState<{ codes: string[] }>({ codes: [] });
@@ -319,6 +386,7 @@ export default function ErrorsExplorer() {
       const scope = scopeOverride ?? resolveExplorerScope();
       if (!scope) return;
       setLoadingRows(true);
+      setHasLoadedRows(false);
       setErrorMessage(null);
       try {
         const response = await fetch('/api/errors/explorer/query', {
@@ -329,6 +397,7 @@ export default function ErrorsExplorer() {
             schema: scope.schema,
             plotID: scope.plotID,
             censusID: scope.censusID,
+            censusIDs: scope.censusIDs,
             page: paginationModel.page,
             pageSize: paginationModel.pageSize,
             filters
@@ -339,6 +408,7 @@ export default function ErrorsExplorer() {
           throw new Error('error' in data ? data.error : 'Failed to load errors');
         }
         setResults(data);
+        setHasLoadedRows(true);
         if (selectedMeasurementID && !data.rows.some(row => row.coreMeasurementID === selectedMeasurementID)) {
           setDetails(current => (current?.row?.coreMeasurementID === selectedMeasurementID ? null : current));
         }
@@ -367,6 +437,7 @@ export default function ErrorsExplorer() {
             schema: scope.schema,
             plotID: scope.plotID,
             censusID: scope.censusID,
+            censusIDs: scope.censusIDs,
             filters
           })
         });
@@ -385,6 +456,50 @@ export default function ErrorsExplorer() {
     },
     [filters, resolveExplorerScope]
   );
+
+  const handleExportCsv = useCallback(async () => {
+    const scope = resolveExplorerScope();
+    if (!scope) {
+      setErrorMessage('Explorer scope is not available');
+      return;
+    }
+    setIsExportingCsv(true);
+    setErrorMessage(null);
+    let objectUrl: string | null = null;
+    let anchor: HTMLAnchorElement | null = null;
+    try {
+      const response = await fetch('/api/errors/explorer/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schema: scope.schema,
+          plotID: scope.plotID,
+          censusID: scope.censusID,
+          censusIDs: scope.censusIDs,
+          filters
+        })
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ error: 'Failed to export errors' }));
+        throw new Error('error' in data ? data.error : 'Failed to export errors');
+      }
+      const blob = await response.blob();
+      const filename = extractFilenameFromContentDisposition(response.headers.get('Content-Disposition'));
+      objectUrl = URL.createObjectURL(blob);
+      anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+    } catch (error) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      setErrorMessage(`Export failed: ${errorObj.message}`);
+    } finally {
+      anchor?.remove();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setIsExportingCsv(false);
+    }
+  }, [filters, resolveExplorerScope]);
 
   const fetchDetails = useCallback(
     async (measurementID: number, scopeOverride?: ExplorerScope | null, signal?: AbortSignal) => {
@@ -500,9 +615,10 @@ export default function ErrorsExplorer() {
       return;
     }
     const controller = new AbortController();
-    fetchDetails(selectedMeasurementID, undefined, controller.signal).catch(() => undefined);
+    const selectedRow = results.rows.find(row => row.coreMeasurementID === selectedMeasurementID);
+    fetchDetails(selectedMeasurementID, resolveExplorerScope(selectedRow), controller.signal).catch(() => undefined);
     return () => controller.abort();
-  }, [fetchDetails, selectedMeasurementID]);
+  }, [fetchDetails, resolveExplorerScope, results.rows, selectedMeasurementID]);
 
   useEffect(() => {
     if (!currentSite?.schemaName) return;
@@ -614,6 +730,7 @@ export default function ErrorsExplorer() {
           schema: scope.schema,
           plotID: scope.plotID,
           censusID: scope.censusID,
+          censusIDs: scope.censusIDs,
           page: p,
           pageSize: ps,
           filters
@@ -630,7 +747,7 @@ export default function ErrorsExplorer() {
 
   const infiniteResetKey = useMemo(() => {
     const scope = resolveExplorerScope();
-    return JSON.stringify({ filters, schema: scope?.schema, plotID: scope?.plotID, censusID: scope?.censusID });
+    return JSON.stringify({ filters, schema: scope?.schema, plotID: scope?.plotID, censusIDs: scope?.censusIDs });
   }, [filters, resolveExplorerScope]);
 
   const infinite = useInfiniteGridRows<GridRowModel>({
@@ -863,6 +980,43 @@ export default function ErrorsExplorer() {
         valueFormatter: (value: number | null | undefined) => Number(value ?? 0).toFixed(2)
       },
       {
+        field: 'priorDBH',
+        headerName: 'Prior DBH',
+        width: 100,
+        type: 'number',
+        editable: false,
+        sortable: false,
+        align: 'right',
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => formatOptionalMeasurement(value)
+      },
+      {
+        field: 'priorHOM',
+        headerName: 'Prior HOM',
+        width: 100,
+        type: 'number',
+        editable: false,
+        sortable: false,
+        align: 'right',
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => formatOptionalMeasurement(value)
+      },
+      {
+        field: 'homChanged',
+        headerName: 'HOM Changed',
+        width: 130,
+        editable: false,
+        sortable: false,
+        align: 'center',
+        headerAlign: 'center',
+        renderCell: params =>
+          (params.row as ErrorExplorerRow).homChanged ? (
+            <Chip size="sm" color="warning" variant="soft">
+              HOM changed
+            </Chip>
+          ) : null
+      },
+      {
         field: 'description',
         headerName: 'Description',
         minWidth: 220,
@@ -896,29 +1050,20 @@ export default function ErrorsExplorer() {
             </Stack>
           );
         },
-        renderEditCell: params => (
-          <Autocomplete
-            sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
-            multiple
-            freeSolo
-            autoHighlight
-            clearOnBlur={false}
-            options={[...selectableOpts.codes].sort((a, b) => a.localeCompare(b))}
-            value={parseCodesString(getCodesEditValue(params.row as ErrorExplorerRow, params.value as string | undefined))}
-            isOptionEqualToValue={(o, v) => o === v}
-            onChange={(_event, next) => {
-              params.api.setEditCellValue({
-                id: params.id,
-                field: params.field,
-                value: joinCodesArray(next)
-              });
-            }}
-          />
-        )
+        renderEditCell: params => <CodesEditCell params={params} options={[...selectableOpts.codes].sort((a, b) => a.localeCompare(b))} />
       }
     ],
     [canEditRows, canEditSpeciesCode, rowModesModel, selectableOpts]
   );
+
+  const showEmptySuccess = results.summary.total === 0 && hasLoadedRows && !loadingRows;
+  const hasNarrowingFilters =
+    filters.source !== 'all' ||
+    filters.exactMessages.length > 0 ||
+    filters.affectedFields.length > 0 ||
+    filters.contradictionOnly ||
+    filters.contradictionTypes.length > 0 ||
+    filters.quickSearch.trim().length > 0;
 
   return (
     <Stack spacing={2} sx={{ width: '100%' }}>
@@ -944,44 +1089,94 @@ export default function ErrorsExplorer() {
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
         <Card variant="soft" sx={{ minWidth: 140 }}>
           <Typography level="body-xs">Matching rows</Typography>
-          <Typography level="h3">{results.summary.total}</Typography>
+          {loadingRows && !hasLoadedRows ? (
+            <CircularProgress size="sm" aria-label="Loading matching rows" />
+          ) : (
+            <Typography level="h3">{results.summary.total}</Typography>
+          )}
         </Card>
         <Card variant="soft" color="primary" sx={{ minWidth: 140 }}>
           <Typography level="body-xs">Validation</Typography>
-          <Typography level="h3">{results.summary.validation}</Typography>
+          {loadingRows && !hasLoadedRows ? (
+            <CircularProgress size="sm" aria-label="Loading validation count" />
+          ) : (
+            <Typography level="h3">{results.summary.validation}</Typography>
+          )}
         </Card>
         <Card variant="soft" color="warning" sx={{ minWidth: 140 }}>
           <Typography level="body-xs">Ingestion</Typography>
-          <Typography level="h3">{results.summary.ingestion}</Typography>
+          {loadingRows && !hasLoadedRows ? (
+            <CircularProgress size="sm" aria-label="Loading ingestion count" />
+          ) : (
+            <Typography level="h3">{results.summary.ingestion}</Typography>
+          )}
+          {/* Ingestion errors cannot be cleared by editing or rerunning
+              validations here — the row must be corrected and reingested via
+              the Failed Measurements workflow. */}
+          {canEditRows && !loadingRows && results.summary.ingestion > 0 && (
+            <Button
+              component={Link}
+              href="/measurementshub/summary?openFailed=1"
+              size="sm"
+              variant="solid"
+              color="warning"
+              startDecorator={<BuildCircleOutlinedIcon />}
+              data-testid="errorsexplorer-fix-failed-link"
+            >
+              Fix failed uploads
+            </Button>
+          )}
         </Card>
         <Card variant="soft" color="danger" sx={{ minWidth: 160 }}>
           <Typography level="body-xs">Contradictions</Typography>
-          <Typography level="h3">{results.summary.contradictions}</Typography>
+          {loadingRows && !hasLoadedRows ? (
+            <CircularProgress size="sm" aria-label="Loading contradiction count" />
+          ) : (
+            <Typography level="h3">{results.summary.contradictions}</Typography>
+          )}
         </Card>
       </Stack>
 
       <Sheet variant="outlined" sx={{ p: 2, borderRadius: 'md' }}>
         <Stack spacing={2}>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ flexWrap: 'wrap' }}>
-            {ERROR_EXPLORER_PRESETS.map(preset => (
-              <Chip
-                key={preset.id}
-                variant={filters.presetId === preset.id ? 'solid' : 'soft'}
-                color={filters.presetId === preset.id ? 'primary' : 'neutral'}
-                role="button"
-                tabIndex={0}
-                onClick={() => handlePresetClick(preset.id)}
-                onKeyDown={(e: React.KeyboardEvent) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    handlePresetClick(preset.id);
-                  }
-                }}
-                sx={{ cursor: 'pointer' }}
-              >
-                {preset.label}
-              </Chip>
-            ))}
+          <Stack
+            direction={{ xs: 'column', md: 'row' }}
+            spacing={1}
+            sx={{ flexWrap: 'wrap', justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'center' } }}
+          >
+            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+              {ERROR_EXPLORER_PRESETS.map(preset => (
+                <Chip
+                  key={preset.id}
+                  variant={filters.presetId === preset.id ? 'solid' : 'soft'}
+                  color={filters.presetId === preset.id ? 'primary' : 'neutral'}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handlePresetClick(preset.id)}
+                  onKeyDown={(e: React.KeyboardEvent) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handlePresetClick(preset.id);
+                    }
+                  }}
+                  sx={{ cursor: 'pointer' }}
+                >
+                  {preset.label}
+                </Chip>
+              ))}
+            </Stack>
+            <Button
+              size="sm"
+              variant="outlined"
+              color="neutral"
+              startDecorator={<FileDownloadOutlinedIcon />}
+              loading={isExportingCsv}
+              disabled={isExportingCsv}
+              onClick={handleExportCsv}
+              data-testid="errorsexplorer-export-csv"
+            >
+              Export CSV
+            </Button>
           </Stack>
 
           <Stack direction={{ xs: 'column', xl: 'row' }} spacing={1.5}>
@@ -1158,55 +1353,75 @@ export default function ErrorsExplorer() {
         }}
       >
         <Sheet variant="outlined" sx={{ flex: 1, minWidth: 0, borderRadius: 'md', p: 1 }}>
-          <StyledDataGrid
-            aria-label="Measurement Errors"
-            apiRef={explorerApiRef}
-            autoHeight={false}
-            rows={(isInfiniteOn ? infinite.rows : results.rows) as any[]}
-            columns={columns}
-            loading={isInfiniteOn ? infinite.isLoading : loadingRows}
-            rowCount={isInfiniteOn ? infinite.rows.length : results.totalRows}
-            paginationMode="server"
-            paginationModel={paginationModel}
-            onPaginationModelChange={setPaginationModel}
-            pageSizeOptions={[25, 50, 100]}
-            editMode="row"
-            rowModesModel={rowModesModel}
-            onRowModesModelChange={setRowModesModel}
-            processRowUpdate={wrappedProcessRowUpdate}
-            onProcessRowUpdateError={handleProcessRowUpdateError}
-            onRowEditStop={handleRowEditStop}
-            onRowClick={params => setSelectedMeasurementID(Number(params.row.coreMeasurementID))}
-            slots={explorerGridSlots}
-            rowHeight={68}
-            sx={{
-              minHeight: 640,
-              '& .MuiDataGrid-cell': {
-                alignItems: 'center',
-                py: 0.75,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden'
-              },
-              '& .MuiDataGrid-columnHeaderTitle': {
-                fontWeight: 700
-              },
-              '& .MuiDataGrid-row.Mui-selected': {
-                outline: '1px solid',
-                outlineColor: 'var(--joy-palette-primary-outlinedBorder)',
-                backgroundColor: 'rgba(59, 130, 246, 0.08)'
-              }
-            }}
-          />
-          <InfiniteGridScrollBridge
-            apiRef={explorerApiRef}
-            enabled={isInfiniteOn}
-            onLoadMore={infinite.loadMore}
-            observeKey={`${infinite.rows.length}:${infinite.totalRows}:${infinite.isLoadingMore}`}
-          />
+          {showEmptySuccess ? (
+            <Stack
+              data-testid="errors-explorer-empty-success"
+              alignItems="center"
+              justifyContent="center"
+              spacing={1}
+              sx={{ minHeight: 300, textAlign: 'center', p: 3 }}
+            >
+              <Typography level="h3" color="success">
+                {hasNarrowingFilters ? 'No unresolved errors match the current filters' : 'No unresolved errors in this census ✓'}
+              </Typography>
+              <Typography level="body-sm">{hasNarrowingFilters ? 'Adjust or clear the filters to review other errors.' : 'This census is clear.'}</Typography>
+              <Typography level="body-xs">Page 1 of 1</Typography>
+            </Stack>
+          ) : (
+            <StyledDataGrid
+              aria-label="Measurement Errors"
+              apiRef={explorerApiRef}
+              autoHeight={false}
+              disableVirtualization={E2E_DISABLE_VIRTUALIZATION}
+              rows={(isInfiniteOn ? infinite.rows : results.rows) as any[]}
+              columns={columns}
+              loading={isInfiniteOn ? infinite.isLoading : loadingRows}
+              rowCount={isInfiniteOn ? infinite.rows.length : results.totalRows}
+              paginationMode="server"
+              paginationModel={paginationModel}
+              onPaginationModelChange={setPaginationModel}
+              pageSizeOptions={[25, 50, 100]}
+              editMode="row"
+              rowModesModel={rowModesModel}
+              onRowModesModelChange={setRowModesModel}
+              processRowUpdate={wrappedProcessRowUpdate}
+              onProcessRowUpdateError={handleProcessRowUpdateError}
+              onRowEditStop={handleRowEditStop}
+              onRowClick={params => setSelectedMeasurementID(Number(params.row.coreMeasurementID))}
+              slots={explorerGridSlots}
+              rowHeight={68}
+              sx={{
+                minHeight: 640,
+                '& .MuiDataGrid-cell': {
+                  alignItems: 'center',
+                  py: 0.75,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden'
+                },
+                '& .MuiDataGrid-columnHeaderTitle': {
+                  fontWeight: 700
+                },
+                '& .MuiDataGrid-row.Mui-selected': {
+                  outline: '1px solid',
+                  outlineColor: 'var(--joy-palette-primary-outlinedBorder)',
+                  backgroundColor: 'rgba(59, 130, 246, 0.08)'
+                }
+              }}
+            />
+          )}
+          {!showEmptySuccess && (
+            <InfiniteGridScrollBridge
+              apiRef={explorerApiRef}
+              enabled={isInfiniteOn}
+              onLoadMore={infinite.loadMore}
+              observeKey={`${infinite.rows.length}:${infinite.totalRows}:${infinite.isLoadingMore}`}
+            />
+          )}
         </Sheet>
 
         <Sheet
           variant="soft"
+          data-testid="errors-explorer-row-details"
           sx={{
             width: '100%',
             minHeight: 320,
@@ -1369,6 +1584,11 @@ export default function ErrorsExplorer() {
                           </Stack>
                         )}
                         {error.procedureName && <Typography level="body-xs">Procedure: {error.procedureName}</Typography>}
+                        {error.comparison && (
+                          <Typography level="body-xs" sx={{ color: 'text.tertiary' }}>
+                            {formatErrorComparison(error.comparison, details.row?.measuredHOM)}
+                          </Typography>
+                        )}
                       </Stack>
                     </Card>
                   ))}

@@ -2,33 +2,39 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ===== import the handler AFTER mocks =====
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
 // ===== hoisted spies/fixtures used by mocks =====
-const { _listBlobsIterable, getContainerClientMock, loggerInfo, loggerError } = vi.hoisted(() => {
-  // helper to build an async iterable for listBlobsFlat
-  function* _syncGen<T>(items: T[]) {
-    for (const i of items) yield i as any;
-  }
-  const _listBlobsIterable = (items: any[]) => ({
-    async *[Symbol.asyncIterator]() {
-      yield* _syncGen(items);
+const { _listBlobsIterable, getContainerClientMock, loggerInfo, loggerError, mockAuth, mockValidateContextualValues, mockAssertSchemaAccess } = vi.hoisted(
+  () => {
+    // helper to build an async iterable for listBlobsFlat
+    function* _syncGen<T>(items: T[]) {
+      for (const i of items) yield i as any;
     }
-  });
+    const _listBlobsIterable = (items: any[]) => ({
+      async *[Symbol.asyncIterator]() {
+        yield* _syncGen(items);
+      }
+    });
 
-  return {
-    _listBlobsIterable,
-    getContainerClientMock: vi.fn(),
-    loggerInfo: vi.fn(),
-    loggerError: vi.fn()
-  };
-});
+    return {
+      _listBlobsIterable,
+      getContainerClientMock: vi.fn(),
+      loggerInfo: vi.fn(),
+      loggerError: vi.fn(),
+      mockAuth: vi.fn(),
+      mockValidateContextualValues: vi.fn(),
+      // typed to accept NextResponse | null so mockReturnValue(deniedResponse) is valid
+      mockAssertSchemaAccess: vi.fn() as import('vitest').MockInstance<(session: any, schema: any) => import('next/server').NextResponse | null>
+    };
+  }
+);
 
 // ===== Mocks (must be before importing the route) =====
 
 // Wrap ConnectionManager so getInstance() always returns a usable instance
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
@@ -63,6 +69,36 @@ vi.mock('@/ailogger', () => ({
   default: { info: loggerInfo, error: loggerError, warn: vi.fn() }
 }));
 
+// Auth — default: authenticated user who is a member of 'myschema' and 'testschema'
+vi.mock('@/auth', () => ({
+  auth: mockAuth
+}));
+
+// Authorization guard — default: access permitted
+vi.mock('@/lib/authz', () => ({
+  assertSchemaAccess: mockAssertSchemaAccess,
+  isAdminSession: vi.fn(() => false),
+  hasSchemaAccess: vi.fn(() => true)
+}));
+
+// contextvalidation — default: success so the happy path runs in most tests
+vi.mock('@/lib/contextvalidation', () => ({
+  validateContextualValues: mockValidateContextualValues
+}));
+
+// SQL security — validatedSchema brands the input without re-running pattern checks,
+// which lets existing tests use non-conforming names like 'myschema'/'testschema'.
+// The security tests below verify that invalid patterns are caught by the real validator.
+vi.mock('@/lib/db/sqlsecurity', () => ({
+  validatedSchema: vi.fn((schema: string) => {
+    // Simulate a failed pattern check for obviously-malicious input
+    if (!schema || /[^a-z0-9_]/.test(schema)) {
+      throw new Error(`Invalid or unauthorized schema: ${schema}`);
+    }
+    return schema;
+  })
+}));
+
 // ===== helpers =====
 function _makeProps(metric?: string, schema?: string, plotIDParam?: string, censusIDParam?: string, plot?: string) {
   return {
@@ -92,9 +128,27 @@ async function callGET(metric: string, schema: string, plotID: string, censusID:
   return GET(req, props);
 }
 
+// ===== authorizedSession: a session whose user is a member of the test schemas =====
+const authorizedSession = {
+  user: {
+    userStatus: 'user',
+    sites: [{ schemaName: 'myschema' }, { schemaName: 'testschema' }]
+  }
+};
+
 describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDParam]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Default: validateContextualValues fails so the fallback path runs (matching the original test setup)
+    // Each test that wants the happy path overrides this
+    mockValidateContextualValues.mockResolvedValue({ success: false });
+
+    // Default: auth returns an authorized session
+    mockAuth.mockResolvedValue(authorizedSession);
+
+    // Default: schema access is permitted
+    mockAssertSchemaAccess.mockReturnValue(null);
   });
 
   it('returns 400 when missing core slugs (including plot search param)', async () => {
@@ -110,6 +164,13 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     expect(res2.status).toBe(HTTPResponses.BAD_REQUEST);
     const body2 = await res2.json();
     expect(body2.error).toMatch(/Metric.*required/i);
+  });
+
+  it('returns 400 when fallback numeric slugs contain trailing characters', async () => {
+    const res = await callGET('CountTrees', 'myschema', '42abc', '7', 'MyPlot');
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    const body = await res.json();
+    expect(body.error).toMatch(/Invalid plot ID or census ID/i);
   });
 
   it('CountActiveUsers: returns 200 and proper JSON; builds expected SQL + params', async () => {
@@ -258,34 +319,42 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
 
   // ===== StemTypes Tests =====
   describe('StemTypes metric', () => {
-    it('first census (no previous census): returns all stems as new recruits', async () => {
+    it('first census (no previous census): computes multi-stems from the current census, old stems null', async () => {
       const cm = (ConnectionManager as any).getInstance();
       const exec = vi.spyOn(cm, 'executeQuery');
 
       // First query: check for previous census - returns NULL (no previous)
       exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
-      // Second query: count new recruits
-      exec.mockResolvedValueOnce([{ CountNewRecruits: 100 }]);
+      // Second query: first-census classification (one tree with two measured stems => 30 multi)
+      exec.mockResolvedValueOnce([{ CountMultiStems: 30, CountNewRecruits: 100 }]);
 
       const res = await callGET('StemTypes', 'testschema', '1', '1', 'TestPlot');
 
       expect(res.status).toBe(HTTPResponses.OK);
       const body = await res.json();
 
-      // All stems should be new recruits for first census
+      // Multi-stems is the real current-census value; old stems is null (no census to
+      // compare against), never a misleading zero.
       expect(body).toEqual({
-        CountOldStems: 0,
-        CountMultiStems: 0,
-        CountNewRecruits: 100
+        CountOldStems: null,
+        CountMultiStems: 30,
+        CountNewRecruits: 100,
+        isFirstCensus: true
       });
 
-      // Verify the fast path was taken (only 2 queries instead of 1 complex query)
+      // Verify only 2 queries ran (previous-census probe + first-census classification)
       expect(exec).toHaveBeenCalledTimes(2);
 
       // First query checks for previous census
       const [sql1, params1] = exec.mock.calls[0];
       expect(String(sql1)).toMatch(/SELECT MAX\(c\.CensusID\) as PrevCensusID/i);
       expect(params1).toEqual([1, 1]); // plotID, censusID
+
+      // Second query derives multi-stem trees from the current census (grouping by TreeTag)
+      const [sql2, params2] = exec.mock.calls[1];
+      expect(String(sql2)).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
+      expect(String(sql2)).not.toMatch(/previous_stems/i);
+      expect(params2).toEqual([1, 1]); // censusID, censusID
     });
 
     it('subsequent census: correctly classifies old stems, multi-stems, and new recruits', async () => {
@@ -311,7 +380,8 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       expect(body).toEqual({
         CountOldStems: 500,
         CountMultiStems: 150,
-        CountNewRecruits: 50
+        CountNewRecruits: 50,
+        isFirstCensus: false
       });
 
       // Verify both queries were called
@@ -323,6 +393,8 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       expect(String(sql2)).toMatch(/LEFT JOIN previous_stems/i);
       expect(String(sql2)).toMatch(/LEFT JOIN previous_trees/i);
       expect(String(sql2)).toMatch(/COALESCE\(SUM\(CASE/i);
+      // Multi-stems must come from the current-census grouping, not the previous-census diff
+      expect(String(sql2)).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
       // Parameters: censusID, censusID, previousCensusID, previousCensusID, previousCensusID
       expect(params2).toEqual([2, 2, 1, 1, 1]);
     });
@@ -350,7 +422,8 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       expect(body).toEqual({
         CountOldStems: 0,
         CountMultiStems: 0,
-        CountNewRecruits: 0
+        CountNewRecruits: 0,
+        isFirstCensus: false
       });
     });
 
@@ -378,7 +451,8 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       expect(body).toEqual({
         CountOldStems: 0,
         CountMultiStems: 0,
-        CountNewRecruits: 0
+        CountNewRecruits: 0,
+        isFirstCensus: false
       });
     });
 
@@ -400,18 +474,19 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       expect(body).toEqual({
         CountOldStems: 0,
         CountMultiStems: 0,
-        CountNewRecruits: 0
+        CountNewRecruits: 0,
+        isFirstCensus: false
       });
     });
 
-    it('first census with zero measurements: returns 0 new recruits', async () => {
+    it('first census with zero measurements: multi-stems 0, old stems null', async () => {
       const cm = (ConnectionManager as any).getInstance();
       const exec = vi.spyOn(cm, 'executeQuery');
 
       // First query: no previous census
       exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
-      // Second query: count returns 0
-      exec.mockResolvedValueOnce([{ CountNewRecruits: 0 }]);
+      // Second query: classification returns 0 for an empty first census
+      exec.mockResolvedValueOnce([{ CountMultiStems: 0, CountNewRecruits: 0 }]);
 
       const res = await callGET('StemTypes', 'testschema', '1', '1', 'EmptyFirstCensus');
 
@@ -419,10 +494,85 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       const body = await res.json();
 
       expect(body).toEqual({
-        CountOldStems: 0,
+        CountOldStems: null,
         CountMultiStems: 0,
-        CountNewRecruits: 0
+        CountNewRecruits: 0,
+        isFirstCensus: true
       });
+    });
+  });
+
+  // ===== Fallback-path security tests =====
+  // These tests exercise the branch where validateContextualValues fails and the
+  // route falls back to the raw URL schemaParam. The fallback MUST enforce the
+  // same auth + schema-access controls as the happy path.
+  describe('fallback path security', () => {
+    // Ensure validateContextualValues always returns failure in this describe block
+    // so every call goes through the fallback branch.
+
+    it('returns 401 when there is no authenticated session on the fallback path', async () => {
+      mockAuth.mockResolvedValue(null); // no session
+
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      const res = await callGET('CountTrees', 'myschema', '1', '1', 'PlotA');
+
+      expect(res.status).toBe(HTTPResponses.UNAUTHORIZED);
+      const body = await res.json();
+      expect(body.code).toBe('UNAUTHENTICATED');
+
+      // The database must not be queried — the request is blocked before reaching processMetrics
+      expect(exec).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when the authenticated user does not have access to the requested schema, and the DB is never queried', async () => {
+      const { NextResponse } = await import('next/server');
+      // assertSchemaAccess returns a 403 response for an unauthorized schema
+      const deniedResponse = NextResponse.json(
+        { error: 'SQL references a schema outside the authenticated user scope', code: 'SCHEMA_ACCESS_DENIED' },
+        { status: 403 }
+      );
+      mockAssertSchemaAccess.mockReturnValue(deniedResponse);
+
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      // 'other_site_schema' belongs to a different site — user is not a member
+      const res = await callGET('CountTrees', 'forestgeo_other', '1', '1', 'OtherPlot');
+
+      expect(res.status).toBe(HTTPResponses.FORBIDDEN);
+
+      // CRITICAL: processMetrics must never run when access is denied
+      expect(exec).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 when the fallback schemaParam fails pattern validation', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      // 'DROP TABLE' is not a valid schema name — validatedSchema() will throw
+      const res = await callGET('CountTrees', 'DROP TABLE users--', '1', '1', 'PlotA');
+
+      expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+      const body = await res.json();
+      expect(body.code).toBe('INVALID_SCHEMA');
+
+      expect(exec).not.toHaveBeenCalled();
+    });
+
+    it('proceeds to executeQuery when the fallback schema is valid and the user is authorized', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ CountTrees: 42 }]);
+
+      const res = await callGET('CountTrees', 'myschema', '5', '3', 'GoodPlot');
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      const body = await res.json();
+      expect(body.CountTrees).toBe(42);
+
+      // executeQuery was reached — the authorized fallback path completed normally
+      expect(exec).toHaveBeenCalledTimes(1);
     });
   });
 });

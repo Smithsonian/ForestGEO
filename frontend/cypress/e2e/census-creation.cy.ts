@@ -163,21 +163,15 @@ describe('Census Creation & Management', () => {
     it('should show census cards for existing censuses', () => {
       selectFirstSiteAndPlot();
 
-      // Wait for the censuses overview section to load
-      cy.get(SELECTORS.CENSUS_SELECT, { timeout: TIMEOUTS.PAGE_LOAD }).should('be.visible');
+      // Open the census selector
+      cy.get(SELECTORS.CENSUS_SELECT, { timeout: TIMEOUTS.PAGE_LOAD }).should('be.visible').click();
 
-      // Check if census options exist in the dropdown
-      cy.get(SELECTORS.CENSUS_SELECT).click();
+      // The e2e fixture (tests/setup/e2e-seed.ts → seedSampleData) deterministically
+      // seeds exactly one census — PlotCensusNumber 1 — so the selector MUST list it.
+      // Asserting on the seeded value (rather than skipping when the list is empty)
+      // makes this test fail loudly if the census dropdown stops populating.
+      cy.get('[role="listbox"]:visible', { timeout: TIMEOUTS.SELECTOR_POPULATE }).contains('[role="option"]', 'Census: 1').should('be.visible');
 
-      // Wait for listbox portal and check options
-      cy.get('[role="listbox"]', { timeout: TIMEOUTS.SELECTOR_POPULATE }).then($listbox => {
-        const censusOptions = $listbox.find('[role="option"]');
-        if (censusOptions.length > 0) {
-          cy.log(`Found ${censusOptions.length} existing census(es)`);
-        } else {
-          cy.log('No existing censuses found — plot is empty');
-        }
-      });
       // Close dropdown
       cy.get('body').type('{esc}');
     });
@@ -185,25 +179,19 @@ describe('Census Creation & Management', () => {
     it('should select a census and navigate to the full dashboard view', () => {
       selectFirstSiteAndPlot();
 
-      // Open census selector and try to pick the first option
+      // Open the census selector (`:visible` avoids stale hidden listboxes left
+      // over from the site/plot selects).
       cy.get(SELECTORS.CENSUS_SELECT, { timeout: TIMEOUTS.PAGE_LOAD }).click();
 
-      // Census listbox portal: find visible options (avoid stale hidden listboxes from site/plot)
-      cy.get('[role="listbox"]:visible', { timeout: TIMEOUTS.SELECTOR_POPULATE }).then($listbox => {
-        const censusOptions = $listbox.find('[role="option"]');
-        if (censusOptions.length > 0) {
-          // Select the first census
-          cy.wrap(censusOptions).first().click({ force: true });
+      // Select the seeded census (PlotCensusNumber 1). The fixture guarantees it
+      // exists, so the selection must succeed and surface the census in the sidebar.
+      cy.get('[role="listbox"]:visible', { timeout: TIMEOUTS.SELECTOR_POPULATE }).contains('[role="option"]', 'Census: 1').click({ force: true });
 
-          // Verify census is selected
-          cy.get(SELECTORS.SELECTED_CENSUS, { timeout: TIMEOUTS.UI_TRANSITION }).should('exist');
+      // Census is now the active scope...
+      cy.get(SELECTORS.SELECTED_CENSUS, { timeout: TIMEOUTS.UI_TRANSITION }).should('contain', 'Census: 1');
 
-          // Dashboard should now show either the stats view or empty state
-          cy.get('[role="region"][aria-label="Dashboard page container"]').should('be.visible');
-        } else {
-          cy.log('Skipping: no censuses available to select');
-        }
-      });
+      // ...and the dashboard renders its page container.
+      cy.get('[role="region"][aria-label="Dashboard page container"]').should('be.visible');
     });
   });
 

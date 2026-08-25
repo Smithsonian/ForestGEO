@@ -1,17 +1,18 @@
 import { NextRequest } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ schema: string }> }) {
-  const params = await props.params;
-  const schema = params.schema;
+async function handler(_request: NextRequest, context: RouteContext) {
+  const params = await context.params;
+  const schema = params.schema as string;
   if (!schema) throw new Error('no schema variable provided!');
-  const query = `SELECT table_name, column_name 
-    FROM information_schema.columns 
+  const query = `SELECT table_name, column_name
+    FROM information_schema.columns
     WHERE table_schema = ?`;
   const connectionManager = ConnectionManager.getInstance();
   try {
@@ -24,3 +25,5 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ sche
     await connectionManager.closeConnection();
   }
 }
+
+export const GET = withRouteAuthz('structure/[schema]', handler);

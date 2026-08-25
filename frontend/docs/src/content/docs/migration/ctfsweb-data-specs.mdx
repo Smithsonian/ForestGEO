@@ -28,7 +28,15 @@ Before uploading census measurements, certain **fixed data files** must be estab
 
 ## File Format Specifications
 
-All files use **tab-delimited format** with the following conventions:
+:::caution
+**These are CTFSWeb's file conventions**, documented so you can read the exports you already
+have. ForestGEO does not ingest a set of fixed `.txt` files — supporting data is entered and
+uploaded per grid in the app, and measurement files may be comma-, tab-, semicolon- or
+pipe-delimited, with the delimiter detected for you. See
+[Upload Process Breakdown](/ForestGEO/upload-process-breakdown/).
+:::
+
+All CTFSWeb files use **tab-delimited format** with the following conventions:
 
 - First row contains column headers (exact names required)
 - One record per row
@@ -304,7 +312,10 @@ These are flagged but don't prevent processing. Review and correct if possible.
 | **Species change** | Different species than previous census | Re-identification; correction |
 
 <Aside type="caution">
-**Critical Validation Rules**:
+**CTFSWeb screening conventions.** These are field-protocol rules from the legacy system, not
+checks ForestGEO runs. Of the four, only the second has a direct ForestGEO equivalent
+(validation 9, `ValidateFindTreeStemsInDifferentQuadrats`):
+
 1. Every tree must have exactly one main stem (blank StemTag)
 2. All stems of a tree must be in the same quadrat
 3. Dead trees must have had a prior alive measurement
@@ -315,7 +326,12 @@ These are flagged but don't prevent processing. Review and correct if possible.
 
 ## Growth Thresholds
 
-Standard thresholds for flagging potential measurement errors:
+<Aside type="caution">
+The thresholds below are **CTFSWeb's**, kept here so you can interpret existing screening
+reports. ForestGEO uses different ones — see the table underneath.
+</Aside>
+
+CTFSWeb screening thresholds:
 
 | Metric | Warning Threshold | Error Threshold |
 |--------|-------------------|-----------------|
@@ -323,13 +339,36 @@ Standard thresholds for flagging potential measurement errors:
 | DBH increase per year | > 75mm/year | > 150mm/year |
 | Position change | > 2m from previous | > 5m from previous |
 
+What ForestGEO actually checks:
+
+| Metric | Threshold | Validation |
+|--------|-----------|------------|
+| DBH growth | > 65 mm between censuses (absolute, not per year) | 1 |
+| DBH shrinkage | > 5% of the previous measurement | 2 |
+| Absolute DBH ceiling | > 3500 mm (350 cm) | 15 |
+| Position change | > 10 m from the previous census | 18 |
+| DBH against species bounds | outside the limits you set per species | 11 |
+
+ForestGEO has no second "error" tier — a threshold is either crossed or it isn't, and crossing
+one records a finding against the row rather than rejecting it.
+
 ---
 
 ## ViewFullTable Structure
 
 The denormalized report view combines data from all tables. This is the primary format for data analysis and export.
 
-### Complete Column List
+:::caution
+**The column list below is CTFSWeb's.** ForestGEO also has a `viewfulltable`, but its columns are
+named differently and it carries considerably more of them. The ones migrators most often trip
+over: coordinates are `StemLocalX` / `StemLocalY` rather than `QX` / `QY` (and there are no
+computed `PX` / `PY` / `GX` / `GY` columns); measurements are `MeasuredDBH` / `MeasuredHOM`
+rather than `DBH` / `HOM`; the date is `MeasurementDate`, not `ExactDate`; the stem key is
+`StemGUID`, not `StemID`; and there are no `TreeStatus` / `StemStatus` / `MeasurementStatus`
+columns, because status lives in `cmattributes` as one or more attribute codes per measurement.
+:::
+
+### Complete Column List (CTFSWeb)
 
 | Column | Source Table | Description |
 |--------|--------------|-------------|
@@ -367,6 +406,11 @@ The denormalized report view combines data from all tables. This is the primary 
 
 Comprehensive taxonomic information for species lookup.
 
+:::caution
+`ViewTaxonomy` is a **CTFSWeb** view. ForestGEO's equivalents are `alltaxonomiesview` and
+`stemtaxonomiesview`, which the Species List grid reads from.
+:::
+
 ### Complete Column List
 
 | Column | Description |
@@ -390,25 +434,31 @@ Comprehensive taxonomic information for species lookup.
 
 <Steps>
 
-1. **Prepare fixed data files**
+1. **Set up supporting data in the app**
 
-   Ensure species.txt, quadrat.txt, personnel.txt, and codes.txt are complete and validated.
+   Species, quadrats and stem codes must all hold at least one record before measurements can be
+   uploaded. Enter them under **Stem & Plot Details**, either through each grid's Manual Entry
+   Form or by uploading a CSV from its toolbar. Personnel are optional.
 
 2. **Format census data**
 
-   Convert to tab-delimited format with required columns and proper date formatting (YYYY-MM-DD).
+   Include `tag`, `stemtag`, `spcode`, `quadrat` and `date` on every row, plus `lx` and `ly` so the
+   stem can be placed. Dates go in as `YYYY-MM-DD`. Header names are matched leniently, so capitalisation and separators do not
+   need to match exactly.
 
 3. **Run preliminary validation**
 
    Check for duplicate tags, invalid codes, and missing required fields locally before upload.
 
-4. **Upload fixed data first**
+4. **Upload census data**
 
-   Fixed data must be ingested before census measurements.
+   Open **Census Hub → View Data**, click **Upload**, and choose an upload mode. For a census
+   being loaded for the first time, that is **Clean Re-Upload**.
 
-5. **Upload census data**
+5. **Review what didn't land**
 
-   Submit measurement file and review validation report.
+   Check **Census Hub → View Errors** for rows that could not be resolved, and correct them
+   inline or as a Revisions upload.
 
 6. **Resolve fatal errors**
 

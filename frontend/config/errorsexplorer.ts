@@ -1,4 +1,4 @@
-import type { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
+import type { MeasurementsSummaryRDS } from '@/lib/db/definitions/views';
 
 export type ErrorExplorerSource = 'all' | 'validation' | 'ingestion';
 export type ContradictionType = 'duplicate_tag_stem' | 'same_batch_conflict';
@@ -32,9 +32,18 @@ export interface ErrorExplorerQueryRequest {
   schema: string;
   plotID: number;
   censusID: number;
+  /** All physical census rows represented by the selected plot census. */
+  censusIDs?: number[];
   page: number;
   pageSize: number;
   filters: ErrorExplorerFilters;
+}
+
+export interface ErrorComparisonContext {
+  priorCensusID: number | null;
+  priorDBH: number | null;
+  priorHOM: number | null;
+  homChanged: boolean;
 }
 
 export interface ErrorDetailRecord {
@@ -43,6 +52,7 @@ export interface ErrorDetailRecord {
   message: string;
   fields: string[];
   procedureName?: string | null;
+  comparison: ErrorComparisonContext | null;
 }
 
 export interface ErrorExplorerRow extends MeasurementsSummaryRDS {
@@ -63,6 +73,12 @@ export interface ErrorExplorerRow extends MeasurementsSummaryRDS {
   // Authoritative failure flag derived from coremeasurements.StemGUID — must be
   // computed server-side because measurementssummary.StemGUID can drift stale.
   isFailedRow: boolean;
+  // Comparison context of the first visible ValidationID 1/2 occurrence (ascending
+  // code order), independent of raw-row/grouping order. See buildComparison in _shared.ts.
+  priorCensusID?: number | null;
+  priorDBH?: number | null;
+  priorHOM?: number | null;
+  homChanged?: boolean;
 }
 
 export interface ErrorExplorerSummary {
@@ -209,6 +225,8 @@ export const INGESTION_ERROR_FIELD_MAP: Record<string, string[]> = {
   MISSING_FIELD_SPECIESCODE: ['speciesCode'],
   MISSING_FIELD_QUADRATNAME: ['quadratName'],
   MISSING_FIELD_DATE: ['measurementDate'],
+  MISSING_FIELD_LOCALX: ['stemLocalX'],
+  MISSING_FIELD_LOCALY: ['stemLocalY'],
   INVALID_QUADRAT: ['quadratName'],
   INVALID_SPECIES: ['speciesCode'],
   QUADRAT_MISMATCH: ['quadratName'],
@@ -222,6 +240,8 @@ export const INGESTION_ERROR_FIELD_MAP: Record<string, string[]> = {
   INVALID_COORDINATE: ['stemLocalX', 'stemLocalY'],
   FIELD_TOO_LONG: [],
   MISSING_MEASUREMENT_DATA: ['measuredDBH', 'measuredHOM'],
+  // No field is at fault — the upload was cut off before the row was judged.
+  INTERRUPTED_UPLOAD: [],
   SQL_EXCEPTION: [],
   SAME_BATCH_SPECIES_CONFLICT: ['treeTag', 'speciesCode']
 };

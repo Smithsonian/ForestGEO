@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
-import { getConn } from '@/components/processors/processormacros';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { getConn } from '@/lib/db/primitives';
 import { auth } from '@/auth';
-import { requireSession, getSessionUserId } from '@/lib/auth-helpers';
+import { getSessionUserId } from '@/lib/auth-helpers';
+import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
-import { checkFinishedCensus, selectMeasurements, renderArtifact } from '@/lib/ctfs-export';
+import { checkFinishedCensus, partitionPreconditionFailures, selectMeasurements, renderArtifact, type PreconditionFailure } from '@/lib/ctfs-export';
+import { userCanExportSchema, userIsAdmin } from '@/lib/ctfs-export/export-permissions';
 import type { Session } from 'next-auth';
 
 // Force Node.js runtime — mysql2 and the ctfs-export renderer are not compatible
 // with the Edge Runtime.
 export const runtime = 'nodejs';
-
-type RouteProps = { params: Promise<{ schema: string; plotID: string; censusID: string }> };
 
 // ---------------------------------------------------------------------------
 // Permission helpers
@@ -31,23 +31,8 @@ type RouteProps = { params: Promise<{ schema: string; plotID: string; censusID: 
 //     non-reload only.
 // ---------------------------------------------------------------------------
 
-function userCanExportSchema(session: Session, schema: string): boolean {
-  const role = session.user?.userStatus;
-  if (userIsAdmin(session)) {
-    return true;
-  }
-  if (role !== 'lead technician') {
-    return false;
-  }
-  return (session.user?.sites ?? []).some(site => site.schemaName === schema);
-}
-
 function userCanReload(session: Session): boolean {
   return userIsAdmin(session);
-}
-
-function userIsAdmin(session: Session): boolean {
-  return session.user?.userStatus === 'global' || session.user?.userStatus === 'db admin';
 }
 
 function buildDownloadFilename(destinationPlotId: number, plotCensusNumber: string, timestampMs: number): string {
@@ -58,27 +43,34 @@ function buildDownloadFilename(destinationPlotId: number, plotCensusNumber: stri
     .replace(/[^A-Za-z0-9_-]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
-  return `ctfs-export-${destinationPlotId}-${censusSlug}-${timestampMs}.sql`;
+  return `smithsonian-export-${destinationPlotId}-${censusSlug}-${timestampMs}.sql`;
 }
 
 // ---------------------------------------------------------------------------
 // Route handler
 // ---------------------------------------------------------------------------
 
-export async function GET(request: NextRequest, props: RouteProps): Promise<NextResponse> {
-  // --- Authentication ---
+async function handler(request: NextRequest, context: RouteContext): Promise<NextResponse> {
+  const params = await context.params;
+  const schema = params.schema as string;
+  const plotID = params.plotID as string;
+  const censusID = params.censusID as string;
+
+  // withRouteAuthz already authenticated the session and enforced per-site
+  // access (schema membership); re-read the session here for identity and the
+  // additional export-role gate below.
   const session = await auth();
-  const authError = requireSession(session);
-  if (authError) return authError;
 
-  const { schema, plotID, censusID } = await props.params;
-
-  // --- Schema validation ---
+  // defense-in-depth: withRouteAuthz validates the schema before this handler
+  // runs; this local check keeps the safeFormatQuery calls below well-defined.
   if (!isValidSchema(schema)) {
     return NextResponse.json({ error: 'Invalid schema name' }, { status: HTTPResponses.BAD_REQUEST });
   }
 
-  // --- Schema-level export permission ---
+  // Additional export-role restriction beyond the guard's schema-membership
+  // check: assertSchemaAccess admits ANY member of the schema, but only admins
+  // and lead technicians may export (userCanExportSchema). A field-crew member
+  // passes the guard yet is denied here.
   if (!userCanExportSchema(session!, schema)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: HTTPResponses.FORBIDDEN });
   }
@@ -114,7 +106,15 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
 
   // --- Database work ---
   const conn = await getConn();
+  let transactionActive = false;
   try {
+    // The proportional gate and the selected artifact must observe one database
+    // snapshot. Pool sessions can inherit READ COMMITTED from other workflows, so
+    // set the next transaction explicitly before beginning the read transaction.
+    await conn.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+    await conn.beginTransaction();
+    transactionActive = true;
+
     // Resolve PlotCensusNumber and verify (plotID, censusID) belongs to this
     // schema. The combined WHERE prevents path-traversal across schemas: a
     // CensusID from another schema returns no row here.
@@ -124,11 +124,38 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
       return NextResponse.json({ error: 'Census not found' }, { status: HTTPResponses.NOT_FOUND });
     }
     const plotCensusNumber = String(censusRows[0].PlotCensusNumber);
+    const userId = getSessionUserId(session!);
 
-    // Precondition: census must be fully validated and clean before export.
+    // Precondition gate (Task 10C, ratified 2026-07-20: warn on data-quality, keep
+    // destination-integrity blocking). Data-quality failures (rows the export already
+    // excludes) surface as non-blocking warnings and the publish proceeds; only
+    // destination-integrity failures — an artifact that would break the on-prem CTFS
+    // load — still 400. A Dry run keeps its prior behavior: NOTHING blocks, everything
+    // (including would-be blockers) is surfaced as a warning preview.
     const precondition = await checkFinishedCensus(conn, { schema, plotId: appPlotId, censusId: appCensusId });
+    let preconditionWarnings: PreconditionFailure[] = [];
     if (!precondition.ok) {
-      return NextResponse.json({ error: 'Census is not finished', reasons: precondition.reasons }, { status: HTTPResponses.BAD_REQUEST });
+      const { blocking, warnings } = partitionPreconditionFailures(precondition.reasons);
+      if (blocking.length > 0 && !reloadDryRun) {
+        ailogger.warn('ctfs-sql export blocked by preconditions', {
+          userId,
+          schema,
+          appPlotId,
+          destinationPlotId,
+          appCensusId,
+          plotCensusNumber,
+          exportableMeasurementCount: precondition.count,
+          totalActiveMeasurements: precondition.totalActiveCount,
+          preconditionBlockingKinds: blocking.map(reason => reason.kind),
+          preconditionWarningKinds: warnings.map(reason => reason.kind),
+          allowReload,
+          reloadDryRun
+        });
+        return NextResponse.json({ error: 'Census cannot be published', reasons: blocking }, { status: HTTPResponses.BAD_REQUEST });
+      }
+      // Non-dry real publish with only quality warnings → surface those warnings and
+      // proceed. Dry run → surface every reason (blockers included) as a preview.
+      preconditionWarnings = reloadDryRun ? precondition.reasons : warnings;
     }
 
     // Fetch measurement + attribute rows from the app database.
@@ -137,6 +164,11 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
       plotId: appPlotId,
       censusId: appCensusId
     });
+
+    // Close the consistent-read snapshot as soon as all database reads finish;
+    // rendering the in-memory artifact does not need to keep a transaction open.
+    await conn.commit();
+    transactionActive = false;
 
     // Render the complete SQL artifact.
     const { sql, procedureName, lockName } = renderArtifact({
@@ -149,12 +181,16 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
       reloadDryRun,
       generatedAt,
       measurementRows,
-      attributeRows
+      attributeRows,
+      preconditionWarnings
     });
 
     const filename = buildDownloadFilename(destinationPlotId, plotCensusNumber, generatedAt.getTime());
-    const userId = getSessionUserId(session!);
 
+    // totalActiveMeasurements and the warning kinds make the shortfall durable:
+    // measurementCount alone reads as a success even when quality warnings excluded
+    // rows, and the X-CTFS-Precondition-Warnings header only survives as long as the
+    // operator's modal. The counts come from the same snapshot as the artifact rows.
     ailogger.info('ctfs-sql export generated', {
       userId,
       schema,
@@ -163,26 +199,47 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
       appCensusId,
       plotCensusNumber,
       measurementCount: measurementRows.length,
+      totalActiveMeasurements: precondition.totalActiveCount,
+      preconditionWarningKinds: preconditionWarnings.map(w => w.kind),
       attributeCount: attributeRows.length,
       allowReload,
       reloadDryRun,
+      generatedAt: generatedAt.toISOString(),
       procedureName,
       lockName,
       filename
     });
 
-    return new NextResponse(sql, {
-      status: HTTPResponses.OK,
-      headers: {
-        'Content-Type': 'application/sql; charset=utf-8',
-        'Content-Disposition': `attachment; filename=${filename}`
-      }
-    });
+    const responseHeaders: Record<string, string> = {
+      'Content-Type': 'application/sql; charset=utf-8',
+      'Content-Disposition': `attachment; filename=${filename}`
+    };
+    if (preconditionWarnings.length > 0) {
+      // JSON-encoded so the modal can render a non-blocking warning panel
+      // without a second request. Exact totals are intentionally NOT reported —
+      // checkFinishedCensus returns capped CoreMeasurementID samples only.
+      responseHeaders['X-CTFS-Precondition-Warnings'] = JSON.stringify(
+        preconditionWarnings.map(w => ({ kind: w.kind, message: w.message, coreMeasurementIds: w.coreMeasurementIds }))
+      );
+    }
+
+    return new NextResponse(sql, { status: HTTPResponses.OK, headers: responseHeaders });
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
     ailogger.error('ctfs-sql export failed', error, { schema, appPlotId, appCensusId });
     return NextResponse.json({ error: error.message || 'Export failed' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
+    if (transactionActive) {
+      try {
+        await conn.rollback();
+      } catch (rollbackErr: unknown) {
+        const rollbackError = rollbackErr instanceof Error ? rollbackErr : new Error(String(rollbackErr));
+        ailogger.error('ctfs-sql export transaction rollback failed', rollbackError, { schema, appPlotId, appCensusId });
+        conn.destroy();
+      }
+    }
     conn.release();
   }
 }
+
+export const GET = withRouteAuthz('export/ctfs-sql/[schema]/[plotID]/[censusID]', handler, { schema: fromPath('schema') });

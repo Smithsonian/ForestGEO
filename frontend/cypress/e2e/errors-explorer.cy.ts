@@ -88,7 +88,10 @@ function openRowDetails(text: string) {
 
 describe('Errors Explorer', () => {
   beforeEach(() => {
-    cy.setupForestGEOUser('standardUser');
+    // Editing a species code is a taxonomic-identity change, which the app
+    // restricts to global / db-admin roles (isFieldEditableByRole). Authenticate
+    // as a global admin so the speciesCode cell is editable in these tests.
+    cy.setupForestGEOUser('adminUser');
     cy.mockCoreDataValidity();
   });
 
@@ -209,7 +212,12 @@ describe('Errors Explorer', () => {
 
     cy.wait('@fetchErrorDetails');
     cy.contains('Row 304').should('be.visible');
-    cy.contains('Linked conflicting row').should('be.visible');
+    // Scope to the details panel: the same description text also renders in the
+    // grid's far-right Description cell, which the e2e disableVirtualization
+    // flag keeps in the DOM where it sits horizontally clipped by the grid's
+    // scroll container — an unscoped contains() matches that cell first and
+    // fails visibility.
+    cy.get('[data-testid="errors-explorer-row-details"]').contains('Linked conflicting row').should('be.visible');
   });
 
   it('keeps the updated species code visible after saving an error row', () => {
@@ -232,7 +240,11 @@ describe('Errors Explorer', () => {
       cy.get('[aria-label="Save"]').click();
     });
 
-    cy.wait('@saveErrorRow').its('request.body.newRow.speciesCode').should('eq', 'ANOPKL');
+    // Committing the edit opens the PreviewDialog (a SpeciesCode change is `warn`
+    // severity); applying it commits via the edit-plan apply endpoint.
+    cy.wait('@previewEdit');
+    cy.get('[data-testid="edit-preview-apply"]').click();
+    cy.wait('@applyEdit').its('request.body.newRow.SpeciesCode').should('eq', 'ANOPKL');
     cy.wait('@refreshMeasurementsSummary');
     cy.wait('@fetchErrorsExplorerRows');
 
@@ -242,10 +254,10 @@ describe('Errors Explorer', () => {
   it('surfaces save failures without refreshing away the unsaved draft', () => {
     mockErrorsExplorerApi({
       rows: [invalidSpeciesRow],
-      patchHandler: requestBody => ({
+      applyHandler: ({ targetID }) => ({
         statusCode: 500,
         body: {
-          message: `Failed to update row ${requestBody.newRow.coreMeasurementID}`
+          message: `Failed to update row ${targetID}`
         }
       })
     });
@@ -263,7 +275,9 @@ describe('Errors Explorer', () => {
       cy.get('[aria-label="Save"]').click();
     });
 
-    cy.wait('@saveErrorRow');
+    cy.wait('@previewEdit');
+    cy.get('[data-testid="edit-preview-apply"]').click();
+    cy.wait('@applyEdit');
     cy.contains('Failed to update row 101').should('be.visible');
     cy.get('@errorRow').find('[data-field="speciesCode"] input').should('have.value', 'ANOPKL');
     cy.get('@refreshMeasurementsSummary.all').should('have.length', 0);

@@ -21,6 +21,7 @@ import {
   renderPostLoadViewFullTableCall
 } from '../csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../csv-to-sql-shared';
+import type { PreconditionFailure } from './precondition';
 import { buildProcedureName, buildLockName } from './identifier-safety';
 
 const MEASUREMENTS_TABLE = 'staging_measurements';
@@ -41,6 +42,12 @@ export interface RenderArtifactInput {
   generatedAt: Date;
   measurementRows: MeasurementStagingRow[];
   attributeRows: AttributeStagingRow[];
+  /**
+   * Precondition failures to surface as NON-BLOCKING warnings in a dry-run
+   * artifact header (D6). Ignored for non-dry-run renders. Each line names the
+   * kind, message, and the sampled CoreMeasurementIDs (capped upstream).
+   */
+  preconditionWarnings?: PreconditionFailure[];
 }
 
 export interface RenderArtifactResult {
@@ -84,17 +91,26 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
   });
 
   // Header carries generation metadata between BEGIN HEADER and END HEADER markers
+  const warningLines =
+    input.reloadDryRun && input.preconditionWarnings && input.preconditionWarnings.length > 0
+      ? [
+          '-- DRY-RUN PRECONDITION WARNINGS (would block a real publish):',
+          ...input.preconditionWarnings.map(w => `--   ${w.kind} - ${w.message} - listed CoreMeasurementIDs: ${w.coreMeasurementIds.join(', ')}`)
+        ]
+      : [];
+
   const header = [
     '-- BEGIN HEADER',
     `-- Generated: ${input.generatedAt.toISOString()}`,
     `-- Source schema: ${input.schema}`,
     `-- Source app PlotID: ${input.appPlotId}`,
-    `-- Destination CTFS PlotID: ${input.destinationPlotId}`,
+    `-- Destination Smithsonian PlotID: ${input.destinationPlotId}`,
     `-- App CensusID: ${input.appCensusId}`,
     `-- PlotCensusNumber: ${input.plotCensusNumber}`,
     `-- Measurement rows: ${input.measurementRows.length}`,
     `-- Attribute rows: ${input.attributeRows.length}`,
     `-- Options: allowReload=${input.allowReload} reloadDryRun=${input.reloadDryRun}`,
+    ...warningLines,
     '-- END HEADER',
     ''
   ].join('\n');
@@ -103,7 +119,8 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
     renderStage0({
       destinationPlotId: input.destinationPlotId,
       censusNumber: input.plotCensusNumber,
-      allowReload: effectiveAllowReload
+      allowReload: effectiveAllowReload,
+      includeViewFullTableProbe: false
     })
   ];
 
@@ -138,12 +155,10 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
 
   const body = stages.join('\n\n');
 
-  // The ViewFullTable rebuild CALL must run OUTSIDE the procedure body — it
-  // executes DROP/CREATE TABLE inside ctfsweb_webuser.CreateFullView, which
-  // would cause implicit commits inside the load procedure's transaction.
-  // The Stage 0 install probe SIGNALs earlier if CreateFullView is missing,
-  // so reaching the post-procedure CALL line implies the proc exists.
-  // Dry-run skips both because no data is loaded.
+  // The publish artifact no longer rebuilds ViewFullTable (D5): the rebuild is a
+  // separate operator-triggered step (renderRebuildViewFullTableArtifact). The
+  // publish path therefore emits neither the CreateFullView install probe (see
+  // includeViewFullTableProbe: false above) nor the post-load CALL.
   const envelope = renderProcedureEnvelope({
     procedureName,
     lockName,
@@ -151,9 +166,60 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
     body
   });
 
-  const postProcedure = input.reloadDryRun ? '' : '\n' + renderPostLoadViewFullTableCall();
-
-  const sql = header + envelope + postProcedure;
+  const sql = header + envelope;
 
   return { sql, procedureName, lockName };
+}
+
+// ---------------------------------------------------------------------------
+// Standalone ViewFullTable rebuild artifact (D5)
+// ---------------------------------------------------------------------------
+
+const REBUILD_PROBE_PROCEDURE = 'rebuild_viewfulltable_probe';
+
+/**
+ * Compose the standalone "Rebuild ViewFullTable" artifact.
+ *
+ * Decoupled from publish (D5): the publish artifact no longer rebuilds the
+ * reporting view, so operators run this separately after confirming a load.
+ *
+ * The artifact is INPUT-INDEPENDENT — it carries no plot/census/destination
+ * fields and no timestamp, so it is byte-identical for every caller (only the
+ * endpoint's audit record varies). The rebuild targets DATABASE(), so it
+ * rebuilds whichever destination DB the operator runs it against.
+ *
+ * The CreateFullView install probe SIGNALs (with the install hint) if the
+ * helper is missing. SIGNAL and the declared scalar are only valid inside a
+ * compound statement, so the probe is wrapped in a real one-shot procedure
+ * (CREATE / CALL / DROP) rather than pasted at top level. The actual rebuild
+ * CALL runs AFTER the probe procedure is dropped — CreateFullView does DDL
+ * (DROP/CREATE TABLE) and must not run inside another procedure's transaction.
+ */
+export function renderRebuildViewFullTableArtifact(): string {
+  const probe = `DROP PROCEDURE IF EXISTS ${REBUILD_PROBE_PROCEDURE};
+
+DELIMITER //
+CREATE PROCEDURE ${REBUILD_PROBE_PROCEDURE}()
+BEGIN
+  DECLARE _viewfulltable_installed INT DEFAULT 0;
+
+  -- Fail fast if the destination has not installed the rebuild helper.
+  SELECT COUNT(*) INTO _viewfulltable_installed
+    FROM information_schema.ROUTINES
+    WHERE ROUTINE_SCHEMA = 'ctfsweb_webuser'
+      AND ROUTINE_NAME = 'CreateFullView'
+      AND ROUTINE_TYPE = 'PROCEDURE';
+  IF _viewfulltable_installed = 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'ctfsweb_webuser.CreateFullView missing. Source creating_ViewFullTable.sql into the destination MySQL, then retry.';
+  END IF;
+END //
+DELIMITER ;
+
+CALL ${REBUILD_PROBE_PROCEDURE}();
+DROP PROCEDURE ${REBUILD_PROBE_PROCEDURE};
+`;
+
+  // renderPostLoadViewFullTableCall() emits the CALL + status SELECT.
+  return probe + '\n' + renderPostLoadViewFullTableCall();
 }

@@ -1,0 +1,335 @@
+import type { FileRow } from '@/config/macros/formdetails';
+import { joinMultiSourceValues } from '@/lib/column-mapping/resolution';
+import { excelSerialToISODate } from './excel-date';
+import { CODE_COLUMN_PREFIX, normalizeHeader, resolveColumn } from './schema';
+import type { ArcgisCell, ArcgisRow, ArcgisWorkbook, TransformResult, TransformWarning } from './types';
+
+// Expand JS exponential notation (e.g. "1e-7", "1e+21") into a plain decimal string with the same
+// exact digits. Downstream SQL/SP parsing expects plain decimals, not exponential floats.
+function expandExponential(text: string): string {
+  const match = text.match(/^([+-]?)(\d+)(?:\.(\d+))?e([+-]?\d+)$/i);
+  if (!match) return text;
+  const [, sign, intDigits, fracDigits = '', expDigits] = match;
+  const exponent = Number(expDigits);
+  const digits = intDigits + fracDigits;
+  const pointIndex = intDigits.length + exponent;
+  let result: string;
+  if (pointIndex <= 0) {
+    result = `0.${'0'.repeat(-pointIndex)}${digits}`;
+  } else if (pointIndex >= digits.length) {
+    result = digits + '0'.repeat(pointIndex - digits.length);
+  } else {
+    result = `${digits.slice(0, pointIndex)}.${digits.slice(pointIndex)}`;
+  }
+  if (result.includes('.')) result = result.replace(/0+$/, '').replace(/\.$/, '');
+  return `${sign}${result}`;
+}
+
+// Render numeric cells without exponential notation. Generic identifiers/tags use this path so exact
+// integers are not rounded while moving through the ArcGIS transform.
+function numberToPlainString(value: number): string {
+  if (!Number.isFinite(value)) return String(value);
+  return expandExponential(String(value));
+}
+
+// IEEE 754 double-precision carries ~15.9 significant digits; rounding decimal measurement values to
+// 15 collapses representation noise the double could never faithfully store.
+const DOUBLE_SIGNIFICANT_DIGITS = 15;
+
+// Render numeric measurement cells as plain decimals. Integer values are preserved exactly as JS
+// represents them; fractional values get float-noise cleanup before exponent expansion.
+function numberToCanonicalDecimalString(value: number): string {
+  if (!Number.isFinite(value)) return String(value);
+  if (Number.isInteger(value)) return numberToPlainString(value);
+  return expandExponential(String(Number(value.toPrecision(DOUBLE_SIGNIFICANT_DIGITS))));
+}
+
+function cellToString(value: ArcgisCell): string | null {
+  if (value === null || value === undefined) return null;
+  const text = value instanceof Date ? excelSerialToISODate(value) : typeof value === 'number' ? numberToPlainString(value) : value.trim();
+  return text === '' ? null : text;
+}
+
+function decimalCellToString(value: ArcgisCell): string | null {
+  if (value === null || value === undefined) return null;
+  const text = value instanceof Date ? excelSerialToISODate(value) : typeof value === 'number' ? numberToCanonicalDecimalString(value) : value.trim();
+  return text === '' ? null : text;
+}
+
+function dateToIso(value: ArcgisCell): string | null {
+  const isBlank = value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
+  return isBlank ? null : excelSerialToISODate(value);
+}
+
+const NORMALIZED_CODE_PREFIX = normalizeHeader(CODE_COLUMN_PREFIX);
+
+function joinCodes(row: ArcgisRow): string {
+  const values: (string | null)[] = [];
+  for (const [key, value] of Object.entries(row)) {
+    if (!normalizeHeader(key).startsWith(NORMALIZED_CODE_PREFIX)) continue;
+    values.push(cellToString(value));
+  }
+  return joinMultiSourceValues(values) ?? '';
+}
+
+interface CanonicalInput {
+  tag: string | null;
+  stemtag: string | null;
+  spcode: string | null;
+  quadrat: string | null;
+  lx: string | null;
+  ly: string | null;
+  dbh: string | null;
+  hom: string | null;
+  date: string | null;
+  codes: string;
+  comments: string | null;
+  publishedstemid: string | null;
+}
+
+// Canonical fields the bulkingestionprocess stored procedure treats as required (recording a
+// failure when null/blank): tree/stem tags, species code, measurement date, and quadrat-local
+// coordinates (the null-coordinate rule added in a sibling SP task). `quadrat` is intentionally
+// EXCLUDED here: blank quadrats are already surfaced via the BLANK_QUADRAT warning/count, so
+// folding them into missing-required too would double-count the same row.
+const SP_REQUIRED_FIELDS = ['tag', 'stemtag', 'spcode', 'date', 'lx', 'ly'] as const;
+
+function toFileRow(input: CanonicalInput): FileRow {
+  return {
+    tag: input.tag,
+    stemtag: input.stemtag,
+    spcode: input.spcode,
+    quadrat: input.quadrat,
+    lx: input.lx,
+    ly: input.ly,
+    dbh: input.dbh,
+    hom: input.hom,
+    date: input.date,
+    codes: input.codes,
+    comments: input.comments,
+    publishedstemid: input.publishedstemid
+  };
+}
+
+export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): TransformResult {
+  const rows: FileRow[] = [];
+  const warnings: TransformWarning[] = [];
+  let blankQuadratCount = 0;
+  let tagMismatchCount = 0;
+  let orphanStemsEmitted = 0;
+  let stemsJoined = 0;
+  let duplicateTreeTags = 0;
+  let duplicateGlobalIds = 0;
+  let missingRequired = 0;
+
+  const field = (row: ArcgisRow, name: string): ArcgisCell => resolveColumn(row, name) as ArcgisCell;
+
+  // Forecast the SP's missing-required failures on the EMITTED canonical row (post-inheritance),
+  // pushing one MISSING_REQUIRED warning per blank required field and bumping the shared count.
+  // This is a PREVIEW only: the row is still emitted; the SP records it as the actual failure.
+  const collectMissingRequired = (row: FileRow, sheet: 'trees' | 'stems', rowIndex: number, globalId: string | null) => {
+    for (const key of SP_REQUIRED_FIELDS) {
+      const value = row[key];
+      if (value === null || value === '') {
+        missingRequired += 1;
+        warnings.push({
+          type: 'MISSING_REQUIRED',
+          message: `${sheet === 'trees' ? 'Tree' : 'Stem'} ${globalId ?? '(no GlobalID)'} is missing a required ${key}; row still emitted for downstream validation.`,
+          globalId,
+          sheet,
+          rowIndex,
+          value: key
+        });
+      }
+    }
+  };
+
+  // Build the GlobalID -> tree index; first occurrence wins (Map.set on a later dup would overwrite,
+  // so we skip already-seen ids) and any repeat GlobalID is reported as a duplicate.
+  const treeIndex = new Map<string, ArcgisRow>();
+  trees.forEach((tree, rowIndex) => {
+    const globalId = cellToString(field(tree, 'GlobalID'));
+    if (!globalId) return;
+    if (treeIndex.has(globalId)) {
+      duplicateGlobalIds += 1;
+      warnings.push({
+        type: 'DUPLICATE_GLOBAL_ID',
+        message: `Tree GlobalID ${globalId} appears more than once; the first occurrence wins for stem joins.`,
+        globalId,
+        sheet: 'trees',
+        rowIndex,
+        value: globalId
+      });
+      return;
+    }
+    treeIndex.set(globalId, tree);
+  });
+
+  const seenTreeTags = new Set<string>();
+
+  trees.forEach((tree, rowIndex) => {
+    const globalId = cellToString(field(tree, 'GlobalID'));
+    const quadrat = cellToString(field(tree, 'quadrat'));
+    const tag = cellToString(field(tree, 'tag'));
+    const spcode = cellToString(field(tree, 'spcode'));
+
+    if (quadrat === null) {
+      blankQuadratCount += 1;
+      warnings.push({
+        type: 'BLANK_QUADRAT',
+        message: `Tree ${globalId ?? '(no GlobalID)'} has a blank quadrat label; passed through blank.`,
+        globalId,
+        sheet: 'trees',
+        rowIndex,
+        value: null
+      });
+    }
+
+    if (tag !== null) {
+      if (seenTreeTags.has(tag)) {
+        duplicateTreeTags += 1;
+        warnings.push({
+          type: 'DUPLICATE_TREE_TAG',
+          message: `Tree tag ${tag} appears more than once across tree rows.`,
+          globalId,
+          sheet: 'trees',
+          rowIndex,
+          value: tag
+        });
+      }
+      seenTreeTags.add(tag);
+    }
+
+    const row = toFileRow({
+      tag,
+      stemtag: cellToString(field(tree, 'StemTag')),
+      spcode,
+      quadrat,
+      lx: decimalCellToString(field(tree, 'lx')),
+      ly: decimalCellToString(field(tree, 'ly')),
+      dbh: decimalCellToString(field(tree, 'DBH_CURRENT')),
+      hom: decimalCellToString(field(tree, 'HOM')),
+      date: dateToIso(field(tree, 'Date_measured')),
+      codes: joinCodes(tree),
+      comments: cellToString(field(tree, 'notes')),
+      publishedstemid: cellToString(field(tree, 'publishedstemid'))
+    });
+    collectMissingRequired(row, 'trees', rowIndex, globalId);
+    rows.push(row);
+  });
+
+  stems.forEach((stem, rowIndex) => {
+    const stemGlobalId = cellToString(field(stem, 'GlobalID'));
+    const parentGlobalId = cellToString(field(stem, 'ParentGlobalID'));
+    const parent = parentGlobalId ? treeIndex.get(parentGlobalId) : undefined;
+
+    if (!parent) {
+      // Orphan by GlobalID: emit a canonical row from the stem's OWN values (no parent to inherit
+      // from, so no coordinates). The SP resolves stems to trees by TreeTag, so this may still
+      // resolve by tag; if not, it is recorded as a failure downstream. We never silently drop it.
+      orphanStemsEmitted += 1;
+      warnings.push({
+        type: 'ORPHAN_STEM',
+        message: `Stem ${stemGlobalId ?? '(no GlobalID)'} references parent ${parentGlobalId ?? '(none)'} with no matching tree row; emitted with its own tag/quadrat and no coordinates — will be resolved by tag or recorded as a failure downstream.`,
+        globalId: stemGlobalId,
+        sheet: 'stems',
+        rowIndex,
+        value: parentGlobalId
+      });
+
+      const orphanQuadrat = cellToString(field(stem, 'quadrat'));
+      if (orphanQuadrat === null) {
+        blankQuadratCount += 1;
+        warnings.push({
+          type: 'BLANK_QUADRAT',
+          message: `Stem ${stemGlobalId ?? '(no GlobalID)'} has a blank quadrat label; passed through blank.`,
+          globalId: stemGlobalId,
+          sheet: 'stems',
+          rowIndex,
+          value: null
+        });
+      }
+
+      const orphanRow = toFileRow({
+        tag: cellToString(field(stem, 'tag')),
+        stemtag: cellToString(field(stem, 'StemTag')),
+        spcode: cellToString(field(stem, 'spcode')),
+        quadrat: orphanQuadrat,
+        lx: null,
+        ly: null,
+        dbh: decimalCellToString(field(stem, 'DBH_CURRENT')),
+        hom: decimalCellToString(field(stem, 'HOM')),
+        date: dateToIso(field(stem, 'Date_measured')),
+        codes: joinCodes(stem),
+        comments: cellToString(field(stem, 'notes')),
+        publishedstemid: cellToString(field(stem, 'publishedstemid'))
+      });
+      collectMissingRequired(orphanRow, 'stems', rowIndex, stemGlobalId);
+      rows.push(orphanRow);
+      return;
+    }
+
+    stemsJoined += 1;
+    const parentTag = cellToString(field(parent, 'tag'));
+    const stemOwnTag = cellToString(field(stem, 'tag'));
+    if (stemOwnTag && parentTag && stemOwnTag !== parentTag) {
+      tagMismatchCount += 1;
+      warnings.push({
+        type: 'TAG_MISMATCH',
+        message: `Stem ${stemGlobalId ?? '(no GlobalID)'} tag ${stemOwnTag} differs from parent tree tag ${parentTag}; parent tag used.`,
+        globalId: stemGlobalId,
+        sheet: 'stems',
+        rowIndex,
+        value: stemOwnTag
+      });
+    }
+
+    const quadrat = cellToString(field(parent, 'quadrat'));
+    if (quadrat === null) {
+      blankQuadratCount += 1;
+      warnings.push({
+        type: 'BLANK_QUADRAT',
+        message: `Stem ${stemGlobalId ?? '(no GlobalID)'} inherits a blank quadrat from its parent tree.`,
+        globalId: stemGlobalId,
+        sheet: 'stems',
+        rowIndex,
+        value: null
+      });
+    }
+
+    const spcode = cellToString(field(stem, 'spcode'));
+
+    const row = toFileRow({
+      tag: parentTag,
+      stemtag: cellToString(field(stem, 'StemTag')),
+      spcode,
+      quadrat,
+      lx: decimalCellToString(field(parent, 'lx')),
+      ly: decimalCellToString(field(parent, 'ly')),
+      dbh: decimalCellToString(field(stem, 'DBH_CURRENT')),
+      hom: decimalCellToString(field(stem, 'HOM')),
+      date: dateToIso(field(stem, 'Date_measured')),
+      codes: joinCodes(stem),
+      comments: cellToString(field(stem, 'notes')),
+      publishedstemid: cellToString(field(stem, 'publishedstemid'))
+    });
+    collectMissingRequired(row, 'stems', rowIndex, stemGlobalId);
+    rows.push(row);
+  });
+
+  return {
+    rows,
+    warnings,
+    summary: {
+      treesTransformed: trees.length,
+      stemsJoined,
+      blankQuadratCount,
+      tagMismatchCount,
+      orphanStemsEmitted,
+      duplicateTreeTags,
+      duplicateGlobalIds,
+      missingRequired,
+      totalRows: rows.length
+    }
+  };
+}

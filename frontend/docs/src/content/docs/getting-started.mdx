@@ -62,13 +62,13 @@ Here is an explanation of each of the highlighted objects:
 4. Entry mode -- by default, this is set to **single entry** -- that is, users only have to submit data once for it to be accepted.
    However, the entry mode can also be set to **double entry**, wherein users must submit data twice for it to be accepted once.
 
-:::note
-You **currently** cannot use a site's overview card to select a site! You must use the dropdown to select a site and continue to plot selection.
+:::tip
+You can select a site either way — click its overview card, or use the sidebar dropdown. Plots and censuses behave the same way.
 :::
 
 #### The Sites Dropdown
 
-The sites dropdown should be used to select sites. This is currently the **only** way to continue to the plot selection mechanism!
+The sites dropdown is the quickest way to switch sites once you know which one you want.
 
 ![site dropdown view](../../assets/site-dropdown-view.png)
 
@@ -140,12 +140,13 @@ As you review the census overview, you will see that there are specific actions 
 
 ![panama - cocoli - census overview numbered](../../assets/census-overview-numbered.jpg)
 
-1. **Delete your census** -- this will open a new modal view that will allow you to delete the selected census. You will see options for partial and full deletion, but please **only**
-   use the partial deletion at this time!
+1. **Delete your census** -- this opens a confirmation modal with two buttons, **Delete Census**
+   and **Cancel**. Deleting removes the census's measurements; your shared supporting data
+   (species, quadrats, stem codes) is left untouched, because every census draws on the same pool.
 
-:::danger
-The **full** deletion option is currently disabled! The system is currently designed to use the **same** pool of supporting data for **all** censuses! Deleting all supporting data
-while there are other censuses present in the system will cause those censuses to become corrupted.
+:::caution
+Only the most recent census can be deleted, and only by a **global** or **database administrator**
+account. Earlier censuses are preserved as historical data.
 :::
 
 2. **Start new census** - select this to create a new census for new measurements!
@@ -154,11 +155,25 @@ while there are other censuses present in the system will cause those censuses t
 A new census cannot be created if an existing census has **no** data!
 :::
 
-With this in mind, you will need to create a census before you can begin entering data. After opening the Census dropdown, click on the **Add New Census** button to automatically add a new census:
+With this in mind, you will need to create a census before you can begin entering data. With a
+site and plot selected, the dashboard lists that plot's censuses — click the dashed **Start New
+Census** card to create one.
 
 ![add new census](../../assets/add-new-census.png)
 
-Creating a new census will also trigger a selection reset. Please re-select your prior selections, and you should be able to see your new census displayed.
+:::note
+The **Census** dropdown in the sidebar switches between censuses that already exist. It has no
+create action — new censuses are always made from the dashboard card.
+:::
+
+A short form asks for a **description**, a **start date**, and optionally an **end date**. Once
+you confirm, the new census appears in the list and is selected for you.
+
+:::tip
+Before you upload measurements into a new census, read [Preparing Your Data
+File](/ForestGEO/preparing-your-data/) — most upload problems are decided by how the file was put
+together, before you ever open this application.
+:::
 
 ## Navigation Interface
 
@@ -171,7 +186,10 @@ Once you select a **site** and a **plot**, you should see the following appear b
 ![disabled nav view -- only site and plot selected](../../assets/plot-selected-nav-disabled.png)
 
 :::note
-Note: The navigation interface will be disabled when a census is not selected! You **must** select a census to access the various pages on the application
+**Stem & Plot Details** is available as soon as you have a site and a plot — that is where you
+set up species, quadrats, and stem codes before any census exists. **Census Hub** stays disabled
+until you select a census. Destinations you cannot reach yet are shown greyed out rather than
+hidden, so the menu keeps its shape as you go.
 :::
 
 ### Navigation Menu -- Enabled State
@@ -209,6 +227,10 @@ Completing this will create a GitHub Issue ticket for further review!
 
 ## Next Steps
 
-Please continue on to the Understanding Supporting Data page!
+Please continue on to the Understanding Supporting Data page, or jump straight to preparing your
+measurement file for upload.
 
-<LinkCard title="Understanding Supporting Data" href="/ForestGEO/starting/understanding-supporting-data"/>
+<CardGrid>
+  <LinkCard title="Understanding Supporting Data" href="/ForestGEO/starting/understanding-supporting-data"/>
+  <LinkCard title="Preparing Your Data File" href="/ForestGEO/preparing-your-data/"/>
+</CardGrid>

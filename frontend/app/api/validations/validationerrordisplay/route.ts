@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CMError } from '@/config/macros/uploadsystemmacros';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { fromQuery, withRouteAuthz } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest) {
+async function handler(request: NextRequest) {
   const conn = ConnectionManager.getInstance();
   const schema = request.nextUrl.searchParams.get('schema');
   const plotIDParam = request.nextUrl.searchParams.get('plotIDParam');
@@ -16,7 +18,9 @@ export async function GET(request: NextRequest) {
   if (!schema) throw new Error('No schema variable provided!');
 
   try {
-    const validationErrorsQuery = `
+    const validationErrorsQuery = safeFormatQuery(
+      schema,
+      `
       SELECT
           cm.CoreMeasurementID AS CoreMeasurementID,
           GROUP_CONCAT(COALESCE(ve.ValidationID, me.ErrorID) ORDER BY COALESCE(ve.ValidationID, me.ErrorID)) AS ValidationErrorIDs,
@@ -31,19 +35,20 @@ export async function GET(request: NextRequest) {
             SEPARATOR '||'
           ) AS Criteria
       FROM
-          ${schema}.measurement_error_log AS cve
+          ??.measurement_error_log AS cve
       JOIN
-          ${schema}.measurement_errors me ON me.ErrorID = cve.ErrorID AND me.ErrorSource = 'validation' AND cve.IsResolved = FALSE
+          ??.measurement_errors me ON me.ErrorID = cve.ErrorID AND me.ErrorSource = 'validation' AND cve.IsResolved = FALSE
       JOIN
-          ${schema}.coremeasurements cm ON cve.MeasurementID = cm.CoreMeasurementID
+          ??.coremeasurements cm ON cve.MeasurementID = cm.CoreMeasurementID
       LEFT JOIN
-          ${schema}.sitespecificvalidations AS ve ON me.ErrorCode = CAST(ve.ValidationID AS CHAR)
-      JOIN ${schema}.census c ON cm.CensusID = c.CensusID AND c.IsActive IS TRUE
-      JOIN ${schema}.plots p ON c.PlotID = p.PlotID
+          ??.sitespecificvalidations AS ve ON me.ErrorCode = CAST(ve.ValidationID AS CHAR)
+      JOIN ??.census c ON cm.CensusID = c.CensusID AND c.IsActive IS TRUE
+      JOIN ??.plots p ON c.PlotID = p.PlotID
       WHERE p.PlotID = ? AND c.PlotCensusNumber = ?
       GROUP BY
           cm.CoreMeasurementID;
-    `;
+    `
+    );
     const validationErrorsRows = await conn.executeQuery(validationErrorsQuery, [plotIDParam, censusPCNParam]);
 
     const parsedValidationErrors: CMError[] = validationErrorsRows.map((row: any) => ({
@@ -72,3 +77,5 @@ export async function GET(request: NextRequest) {
     await conn.closeConnection();
   }
 }
+
+export const GET = withRouteAuthz('validations/validationerrordisplay', handler, { schema: fromQuery('schema') });

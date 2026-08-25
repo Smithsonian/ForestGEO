@@ -7,6 +7,10 @@ export const runtime = 'nodejs';
 
 // Temporary diagnostic route for validating long-lived streamed requests on
 // non-production hosts without exercising the validation SQL path itself.
+// The heartbeat stream is the mechanism under test: it is what carries a
+// request past Azure App Service's ~240s load-balancer idle timeout, which no
+// app setting can raise. maxDuration is advisory only (Next.js records it in
+// the build manifest; only Vercel enforces it) and just documents the ceiling.
 export const maxDuration = 960;
 
 const DEFAULT_DURATION_SECONDS = 12 * 60;

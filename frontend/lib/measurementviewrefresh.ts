@@ -1,5 +1,5 @@
-import type ConnectionManager from '@/config/connectionmanager';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import type ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 function normalizeCoreMeasurementIDs(coreMeasurementIDs: readonly number[]): number[] {
   const unique = new Set<number>();
@@ -112,6 +112,7 @@ function buildViewFullTableInsertSelect(whereClause: string): string {
                                           PlotGlobalX,
                                           PlotGlobalY,
                                           PlotGlobalZ,
+                                          PlotGlobalCoordinatesEPSG,
                                           PlotShape,
                                           PlotDescription,
                                           PlotDefaultDimensionUnits,
@@ -168,6 +169,7 @@ function buildViewFullTableInsertSelect(whereClause: string): string {
             p.GlobalX                                           AS PlotGlobalX,
             p.GlobalY                                           AS PlotGlobalY,
             p.GlobalZ                                           AS PlotGlobalZ,
+            p.GlobalCoordinatesEPSG                             AS PlotGlobalCoordinatesEPSG,
             p.PlotShape                                         AS PlotShape,
             p.PlotDescription                                   AS PlotDescription,
             p.DefaultDimensionUnits                             AS PlotDimensionUnits,

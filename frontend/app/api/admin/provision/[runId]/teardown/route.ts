@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { parseRunId, requireGlobalAdmin, provisioningErrorResponse } from '@/lib/provisioning/route-helpers';
 import { ProvisioningError } from '@/lib/provisioning/errors';
-import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { teardownProvisionedSite } from '@/lib/provisioning/orchestrator';
 import { HTTPResponses } from '@/config/macros';
 
@@ -35,7 +35,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ runId
 
   let catalogPool;
   try {
-    catalogPool = getPoolMonitorInstance().pool;
+    catalogPool = await getPoolMonitorInstance().getUsablePool();
   } catch (err) {
     return provisioningErrorResponse(new ProvisioningError('Database unavailable', 'database_unavailable', { cause: err }));
   }

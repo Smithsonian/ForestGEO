@@ -3,12 +3,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { FileRowSet } from '@/config/macros/formdetails';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
-import { Plot } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { Plot } from '@/lib/db/definitions/zones';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import ailogger from '@/ailogger';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { generateShortBatchID } from '@/config/utils';
+import { auth } from '@/auth';
+import { assertSchemaAccess } from '@/lib/authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -27,6 +29,20 @@ export async function POST(request: NextRequest) {
   if (!rows) {
     return new NextResponse('No rows provided', { status: 400 });
   }
+
+  // Per-site authorization enforced INLINE rather than via `withRouteAuthz` +
+  // `fromBody('schema')`. This route accepts a potentially large `fileRowSet`
+  // bulk payload; `fromBody` clones and fully re-parses the whole body to read
+  // one field, doubling parse cost on the hot bulk path. The handler already
+  // parsed the body above, so we reuse the resolved `schema` directly. The
+  // meta-test (app/api/route-policy.test.ts) recognises the
+  // `assertSchemaAccess` + `if (denied) return denied` pair as a valid signal.
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthenticated', code: 'UNAUTHENTICATED' }, { status: HTTPResponses.UNAUTHORIZED });
+  }
+  const denied = assertSchemaAccess(session, schema);
+  if (denied) return denied;
 
   // Validate schema to prevent SQL injection
   let insertSQL: string, bulkProcessSQL: string;

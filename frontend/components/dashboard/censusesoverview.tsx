@@ -10,7 +10,7 @@
 import React from 'react';
 import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, LinearProgress, IconButton } from '@mui/joy';
 import { ContentSkeleton } from '@/components/loading';
-import { OrgCensusRDS, CensusDateRange } from '@/config/sqlrdsdefinitions/timekeeping';
+import { OrgCensusRDS, CensusDateRange } from '@/lib/db/definitions/timekeeping';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import ScheduleIcon from '@mui/icons-material/Schedule';
@@ -432,7 +432,7 @@ function AddCensusCard({ onAdd }: { onAdd: () => void }) {
         >
           <AddIcon sx={{ fontSize: 28 }} />
         </Avatar>
-        <Typography level="title-md" sx={{ fontWeight: 600, color: 'primary.700' }}>
+        <Typography level="title-md" sx={{ fontWeight: 600, color: 'primary.300' }}>
           Start New Census
         </Typography>
         <Typography level="body-sm" color="neutral">

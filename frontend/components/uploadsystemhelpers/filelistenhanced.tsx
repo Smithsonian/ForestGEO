@@ -7,6 +7,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
+import { DelimiterIssue } from './delimiterdetection';
 
 interface FileListEnhancedProps extends FileListProps {
   expectedHeaders?: string[];
@@ -14,7 +15,8 @@ interface FileListEnhancedProps extends FileListProps {
   onDelimiterChange: (fileName: string, delimiter: string) => void;
   selectedDelimiters: Record<string, string>;
   onRemoveFile: (fileIndex: number) => void;
-  onValidationStatusChange?: (fileName: string, isValid: boolean, issues: string[]) => void;
+  onValidationStatusChange?: (fileName: string, isValid: boolean, issues: DelimiterIssue[], detectedHeaders: string[]) => void;
+  isArcgisWorkbook?: boolean;
 }
 
 export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
@@ -27,7 +29,8 @@ export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
     onDelimiterChange,
     selectedDelimiters,
     onRemoveFile,
-    onValidationStatusChange
+    onValidationStatusChange,
+    isArcgisWorkbook
   } = props;
 
   const [expandedPreview, setExpandedPreview] = useState<Record<number, boolean>>({});
@@ -112,6 +115,7 @@ export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
                   </Stack>
                   <Button
                     component="span"
+                    data-testid={`remove-file-${index}`}
                     onClick={e => {
                       e.stopPropagation();
                       onRemoveFile(index);
@@ -183,7 +187,12 @@ export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
                     onDelimiterChange={delimiter => onDelimiterChange(file.name, delimiter)}
                     initialDelimiter={selectedDelimiters[file.name]}
                     showPreview={expandedPreview[index]}
-                    onValidationStatusChange={onValidationStatusChange ? (isValid, issues) => onValidationStatusChange(file.name, isValid, issues) : undefined}
+                    onValidationStatusChange={
+                      onValidationStatusChange
+                        ? (isValid, issues, detectedHeaders) => onValidationStatusChange(file.name, isValid, issues, detectedHeaders)
+                        : undefined
+                    }
+                    isArcgisWorkbook={isArcgisWorkbook}
                   />
                 </Stack>
               </Stack>

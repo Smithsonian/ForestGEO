@@ -5,7 +5,7 @@ import { FailedMeasurementsGridColumns, preprocessor } from '@/components/client
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { GridColDef, GridRenderEditCellParams, GridRowModel, useGridApiRef } from '@mui/x-data-grid';
-import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
+import { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
 import { EditMeasurements } from '@/components/datagrids/measurementscommons';
 import { Box, Button, Chip, Stack, Tooltip, Typography } from '@mui/joy';
 import { failureErrorMapping } from '@/config/datagridhelpers';
@@ -19,7 +19,7 @@ import { invalidateAfter } from '@/lib/query';
 import ValidationCheckModal from '@/components/client/modals/validationcheckmodal';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
-import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
+import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast from '@/components/editplan/undotoast';
 import { buildEditableFieldsDiffForSurface } from '@/components/datagrids/measurementscommonsutils';

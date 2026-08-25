@@ -11,7 +11,7 @@
 
 import { Select, Option, Typography, Stack, SelectOption, Box, ListItem, ListDivider } from '@mui/joy';
 import { useAppStore } from '@/config/store/appstore';
-import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { Plot } from '@/lib/db/definitions/zones';
 import React, { useMemo, useCallback, useState } from 'react';
 import { CheckCircle, Cancel } from '@mui/icons-material';
 
@@ -113,8 +113,8 @@ export default function PlotSelector() {
             px: 1.5
           }}
         >
-          <CheckCircle sx={{ fontSize: 16, color: 'success.500' }} />
-          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.500', fontWeight: 'lg' }}>
+          <CheckCircle sx={{ fontSize: 16, color: 'success.400' }} />
+          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.400', fontWeight: 'lg' }}>
             With Quadrats ({plotsWithQuadrats.length})
           </Typography>
         </ListItem>
@@ -198,7 +198,7 @@ export default function PlotSelector() {
       }}
       onClose={() => setIsDropdownOpen(false)}
       onChange={handlePlotChange}
-      data-testid="plot-select-component"
+      data-testid="plot-select-component-modern"
       aria-label="Select a Plot. Required field for accessing measurement tools"
       slotProps={{
         listbox: {

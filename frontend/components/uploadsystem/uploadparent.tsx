@@ -1,13 +1,14 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
 import { Box, Typography } from '@mui/joy';
 import ContextValidationGuard from '@/components/shared/ContextValidationGuard';
 import UploadParseFiles from '@/components/uploadsystem/segments/uploadparsefiles';
+import UploadAsyncJob from '@/components/uploadsystem/segments/uploadasyncjob';
 import UploadFireSQL from '@/components/uploadsystem/segments/uploadfiresql';
 import UploadError from '@/components/uploadsystem/segments/uploaderror';
 import UploadValidation from '@/components/uploadsystem/segments/uploadvalidation';
@@ -19,9 +20,11 @@ import UploadComplete from '@/components/uploadsystem/segments/uploadcomplete';
 import UploadReingestion from '@/components/uploadsystem/segments/uploadreingestion';
 import UploadRevisionMatch from '@/components/uploadsystem/segments/uploadrevisionmatch';
 import UploadRevisionApply from '@/components/uploadsystem/segments/uploadrevisionapply';
+import UploadArcgisPreflight from '@/components/uploadsystem/segments/uploadarcgispreflight';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import ailogger from '@/ailogger';
 import { useFileManagement } from '@/app/hooks/usefilemanagement';
+import { ColumnMapping } from '@/lib/column-mapping/types';
 import { useUploadState } from '@/app/hooks/useuploadstate';
 import { useErrorHandling } from '@/app/hooks/useerrorhandling';
 import { ErrorBoundary } from '@/components/errorboundary';
@@ -29,6 +32,10 @@ import { UploadMode } from '@/config/uploadmodes';
 import { canonicalizeRevisionRow, normalizeRevisionHeader } from '@/components/uploadsystemhelpers/revisionfileparse';
 import { EMPTY_REVISION_MATCH_COUNTS, RevisionInvalidRow, RevisionMatchedRow, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { BulkEditPlan } from '@/config/editplan/types';
+import type { ArcgisImportReference } from '@/lib/arcgis/types';
+import type { QuadratOverlapAcknowledgment } from '@/lib/provisioning/types';
+import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
+import { useAsyncUploadFeature } from '@/app/hooks/useasyncuploadfeature';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -102,22 +109,43 @@ interface UploadParentProps {
   onReset: () => void;
   overrideUploadForm?: FormType;
   overrideUploadMode?: UploadMode;
+  overrideSourceFormat?: SourceFormat;
   skipToProcessing?: boolean;
   onUploadComplete?: () => void;
 }
 
 function UploadParentInner(props: UploadParentProps) {
-  const { onReset, overrideUploadForm, overrideUploadMode, skipToProcessing, onUploadComplete } = props;
+  const { onReset, overrideUploadForm, overrideUploadMode, overrideSourceFormat, skipToProcessing, onUploadComplete } = props;
 
   // Custom hooks for state management
   const fileManagement = useFileManagement();
-  const uploadState = useUploadState(overrideUploadForm, skipToProcessing, overrideUploadMode);
+  const uploadState = useUploadState(overrideUploadForm, skipToProcessing, overrideUploadMode, overrideSourceFormat);
+  const { setReviewState: setUploadReviewState } = uploadState;
   const errorHandling = useErrorHandling();
 
   // Remaining local state (not managed by custom hooks)
   const [parsedData, setParsedData] = useState<FileCollectionRowSet>({});
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
   const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
+  // The uploader's confirmation that overlapping quadrat footprints reflect field measurements.
+  // Held here (rather than inside UploadParseFiles) because it is confirmed in UploadParseFiles but
+  // UploadFireSQL, in a later ReviewStates screen, must still see it when it sends the requests.
+  // Quadrats form only.
+  const [quadratOverlapAcknowledgment, setQuadratOverlapAcknowledgment] = useState<QuadratOverlapAcknowledgment | null>(null);
+  const [serverQuadratOverlapSummaries, setServerQuadratOverlapSummaries] = useState<QuadratOverlapSummary[]>([]);
+  const clearServerQuadratOverlapSummaries = useCallback(() => setServerQuadratOverlapSummaries([]), []);
+  const handleQuadratOverlapAcknowledgmentRequired = useCallback(
+    (summaries: QuadratOverlapSummary[]) => {
+      setQuadratOverlapAcknowledgment(null);
+      setServerQuadratOverlapSummaries(previous => {
+        const bySignature = new Map(previous.map(summary => [summary.layoutSignature, summary]));
+        summaries.forEach(summary => bySignature.set(summary.layoutSignature, summary));
+        return [...bySignature.values()];
+      });
+      setUploadReviewState(ReviewStates.UPLOAD_FILES);
+    },
+    [setUploadReviewState]
+  );
   const [showFailedMeasurementsModal, setShowFailedMeasurementsModal] = useState(false);
   const [isReingestionMode, setIsReingestionMode] = useState(false);
   const [revisionMatchResult, setRevisionMatchResult] = useState<RevisionUploadResponse | null>(null);
@@ -127,6 +155,18 @@ function UploadParentInner(props: UploadParentProps) {
   // revisionRolePolicy and block. Surface this at the parse step so the user
   // doesn't reach the match review only to fail at Apply.
   const [revisionRolePreflightWarning, setRevisionRolePreflightWarning] = useState<string | null>(null);
+  const [arcgisImportSession, setArcgisImportSession] = useState<ArcgisImportReference | null>(null);
+  const [columnMappings, setColumnMappings] = useState<Record<string, ColumnMapping>>({});
+  const setColumnMappingForFile = useCallback((fileName: string, mapping: ColumnMapping) => {
+    setColumnMappings(prev => ({ ...prev, [fileName]: mapping }));
+  }, []);
+  const dropColumnMapping = useCallback((fileName: string) => {
+    setColumnMappings(prev => {
+      if (!(fileName in prev)) return prev;
+      const { [fileName]: _dropped, ...rest } = prev;
+      return rest;
+    });
+  }, []);
 
   // Track if we've already initialized reingestion to prevent re-triggering
   const reingestionInitializedRef = useRef(false);
@@ -139,6 +179,10 @@ function UploadParentInner(props: UploadParentProps) {
 
   const currentPlotID = _currentPlot?.plotID ?? null;
   const currentCensusID = _currentCensus?.dateRanges?.[0]?.censusID ?? null;
+  const asyncUploadEnabled = useAsyncUploadFeature({
+    schema: currentSite?.schemaName,
+    formType: uploadState.state.uploadForm
+  });
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -173,10 +217,14 @@ function UploadParentInner(props: UploadParentProps) {
       // Reset to start state when in invalid state
       uploadState.resetToStart();
       fileManagement.clearFiles();
+      setColumnMappings({});
       setParsedData({});
       setIsReingestionMode(false);
       setRevisionMatchResult(null);
       setRevisionConfirmNewRows(false);
+      setArcgisImportSession(null);
+      setQuadratOverlapAcknowledgment(null);
+      setServerQuadratOverlapSummaries([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadState.state.uploadForm, uploadState.state.reviewState]);
@@ -201,10 +249,14 @@ function UploadParentInner(props: UploadParentProps) {
   async function handleReturnToStart() {
     uploadState.resetToStart();
     fileManagement.clearFiles();
+    setColumnMappings({});
     setParsedData({});
     setIsReingestionMode(false);
     setRevisionMatchResult(null);
     setRevisionConfirmNewRows(false);
+    setArcgisImportSession(null);
+    setQuadratOverlapAcknowledgment(null);
+    setServerQuadratOverlapSummaries([]);
   }
 
   async function resetError() {
@@ -213,14 +265,27 @@ function UploadParentInner(props: UploadParentProps) {
 
   // Function to handle file addition
   const handleAddFile = (newFile: FileWithPath) => {
+    setArcgisImportSession(null);
+    setQuadratOverlapAcknowledgment(null);
+    setServerQuadratOverlapSummaries([]);
     fileManagement.addFile(newFile);
   };
 
   const handleRemoveFile = (fileIndex: number) => {
+    setArcgisImportSession(null);
+    setQuadratOverlapAcknowledgment(null);
+    setServerQuadratOverlapSummaries([]);
+    const removed = fileManagement.files[fileIndex];
+    if (removed) dropColumnMapping(removed.name);
     fileManagement.removeFile(fileIndex);
   };
 
   const handleReplaceFile = async (fileIndex: number, newFile: FileWithPath) => {
+    setArcgisImportSession(null);
+    setQuadratOverlapAcknowledgment(null);
+    setServerQuadratOverlapSummaries([]);
+    const replaced = fileManagement.files[fileIndex];
+    if (replaced) dropColumnMapping(replaced.name);
     fileManagement.replaceFile(fileIndex, newFile);
   };
 
@@ -255,7 +320,16 @@ function UploadParentInner(props: UploadParentProps) {
   }
 
   async function handleInitialSubmit() {
-    if (uploadState.state.uploadMode === UploadMode.REVISIONS && uploadState.state.uploadForm === FormType.measurements) {
+    if (uploadState.state.uploadForm === FormType.quadrats && fileManagement.files.length !== 1) {
+      errorHandling.setError(new Error('Quadrat uploads require exactly one file. Remove extra files or select a single complete quadrat file.'));
+      uploadState.setReviewState(ReviewStates.ERRORS);
+      return;
+    }
+
+    if (uploadState.state.sourceFormat === SourceFormat.arcgis_xlsx) {
+      setArcgisImportSession(null);
+      uploadState.setReviewState(ReviewStates.ARCGIS_PREFLIGHT);
+    } else if (uploadState.state.uploadMode === UploadMode.REVISIONS && uploadState.state.uploadForm === FormType.measurements) {
       try {
         const stagedParsedData = await parseRevisionFiles();
         setParsedData(stagedParsedData);
@@ -384,6 +458,7 @@ function UploadParentInner(props: UploadParentProps) {
           <UploadParseFiles
             uploadForm={uploadState.state.uploadForm}
             uploadMode={uploadState.state.uploadMode}
+            sourceFormat={uploadState.state.sourceFormat}
             acceptedFiles={fileManagement.files}
             dataViewActive={uploadState.state.dataViewActive}
             setDataViewActive={uploadState.setDataViewActive}
@@ -393,6 +468,30 @@ function UploadParentInner(props: UploadParentProps) {
             handleReplaceFile={handleReplaceFile}
             selectedDelimiters={selectedDelimiters}
             setSelectedDelimiters={setSelectedDelimiters}
+            columnMappings={columnMappings}
+            setColumnMappingForFile={setColumnMappingForFile}
+            quadratOverlapAcknowledgment={quadratOverlapAcknowledgment}
+            setQuadratOverlapAcknowledgment={setQuadratOverlapAcknowledgment}
+            serverQuadratOverlapSummaries={serverQuadratOverlapSummaries}
+            clearServerQuadratOverlapSummaries={clearServerQuadratOverlapSummaries}
+          />
+        );
+      case ReviewStates.ARCGIS_PREFLIGHT:
+        return (
+          <UploadArcgisPreflight
+            acceptedFiles={fileManagement.files}
+            schema={currentSite?.schemaName || ''}
+            plotID={currentPlotID ?? 0}
+            censusID={currentCensusID ?? 0}
+            onProceed={importSession => {
+              setArcgisImportSession(importSession);
+              uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+            }}
+            onBack={() => uploadState.setReviewState(ReviewStates.UPLOAD_FILES)}
+            onError={error => {
+              errorHandling.setError(error);
+              uploadState.setReviewState(ReviewStates.ERRORS);
+            }}
           />
         );
       case ReviewStates.UPLOAD_SQL:
@@ -406,13 +505,34 @@ function UploadParentInner(props: UploadParentProps) {
             />
           );
         }
+        if (asyncUploadEnabled) {
+          return (
+            <UploadAsyncJob
+              acceptedFiles={fileManagement.files}
+              parsedData={parsedData}
+              uploadForm={uploadState.state.uploadForm}
+              uploadMode={uploadState.state.uploadMode}
+              sourceFormat={uploadState.state.sourceFormat}
+              selectedDelimiters={selectedDelimiters}
+              columnMappings={columnMappings}
+              arcgisImportSession={arcgisImportSession}
+              setReviewState={uploadState.setReviewState}
+              setIsDataUnsaved={uploadState.setIsDataUnsaved}
+              setUploadError={(error: any) => errorHandling.setError(error)}
+              setErrorComponent={errorHandling.setErrorComponent}
+              onClose={onReset}
+            />
+          );
+        }
         return (
           <UploadFireSQL
             personnelRecording={uploadState.state.personnelRecording}
             acceptedFiles={fileManagement.files}
             uploadForm={uploadState.state.uploadForm}
             uploadMode={uploadState.state.uploadMode}
+            sourceFormat={uploadState.state.sourceFormat}
             parsedData={parsedData}
+            arcgisImportSession={arcgisImportSession}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
             schema={currentSite?.schemaName || ''}
@@ -422,6 +542,9 @@ function UploadParentInner(props: UploadParentProps) {
             setErrorComponent={errorHandling.setErrorComponent}
             setAllRowToCMID={setAllRowToCMID}
             selectedDelimiters={selectedDelimiters}
+            columnMappings={columnMappings}
+            quadratOverlapAcknowledgment={quadratOverlapAcknowledgment}
+            onQuadratOverlapAcknowledgmentRequired={handleQuadratOverlapAcknowledgmentRequired}
           />
         );
       case ReviewStates.REVISION_MATCH:
@@ -476,6 +599,7 @@ function UploadParentInner(props: UploadParentProps) {
           <UploadFireAzure
             acceptedFiles={fileManagement.files}
             uploadForm={uploadState.state.uploadForm}
+            sourceFormat={uploadState.state.sourceFormat}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
             setUploadError={(error: any) => errorHandling.setError(error)}
@@ -514,14 +638,10 @@ function UploadParentInner(props: UploadParentProps) {
       <>
         <FailedMeasurementsModal
           open={showFailedMeasurementsModal}
-          setReingested={reingested => {
-            if (reingested) {
+          handleCloseModal={async ({ dataChanged = false } = {}) => {
+            if (dataChanged) {
               ailogger.info('Failed measurements were reingested successfully');
-              // Close modal and return to start for reingestion processing
-              setShowFailedMeasurementsModal(false);
             }
-          }}
-          handleCloseModal={async () => {
             ailogger.info('Closing failed measurements modal');
             setShowFailedMeasurementsModal(false);
           }}

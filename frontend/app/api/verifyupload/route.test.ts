@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
 const { loggerInfo, loggerError } = vi.hoisted(() => ({
   loggerInfo: vi.fn(),
   loggerError: vi.fn()
 }));
 
-vi.mock('@/config/connectionmanager', () => {
+// Route is now wrapped by withRouteAuthz, so auth() + isValidSchema run before
+// the handler. A 'global' admin passes the per-site access gate.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
+vi.mock('@/lib/db/connectionmanager', () => {
   const executeQuery = vi.fn();
   const closeConnection = vi.fn().mockResolvedValue(undefined);
   const instance = { executeQuery, closeConnection };
@@ -18,7 +24,8 @@ vi.mock('@/config/connectionmanager', () => {
   };
 });
 
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
+  isValidSchema: vi.fn(() => true),
   safeFormatQuery: vi.fn((schema: string, sql: string) => sql.replace(/\?\?/g, schema))
 }));
 
@@ -39,6 +46,8 @@ function makeRequest(query: Record<string, string>) {
 }
 
 describe('GET /api/verifyupload', () => {
+  const emptyCtx = { params: Promise.resolve({}) };
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -54,7 +63,8 @@ describe('GET /api/verifyupload', () => {
         batchID: 'batch-131',
         plotID: '22',
         censusID: '6'
-      })
+      }),
+      emptyCtx
     );
 
     expect(res.status).toBe(200);
@@ -84,7 +94,8 @@ describe('GET /api/verifyupload', () => {
         fileName: 'SERC_census1_2025.csv',
         plotID: '22',
         censusID: '3'
-      })
+      }),
+      emptyCtx
     );
 
     expect(res.status).toBe(200);

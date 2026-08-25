@@ -1,7 +1,39 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
+// SECURITY: never ship a production build with the e2e bypass enabled. NEXT_PUBLIC_E2E_TESTING gates
+// both the e2e-upload-harness route and the e2e-credentials auth bypass, and because it is a
+// NEXT_PUBLIC_ var it is inlined into the client bundle at build time — so a single mis-set
+// production build would ship both live. Fail the build loudly instead of relying on process discipline.
+if (process.env.NODE_ENV === 'production' && process.env.NEXT_PUBLIC_E2E_TESTING === 'true') {
+  throw new Error(
+    'Refusing to build: NEXT_PUBLIC_E2E_TESTING=true with NODE_ENV=production would ship the e2e upload harness and auth bypass to a live deployment. Unset NEXT_PUBLIC_E2E_TESTING for production builds.'
+  );
+}
+
 const withBundleAnalyzer = require('@next/bundle-analyzer')({
   enabled: process.env.ANALYZE === 'true'
 });
+
+// Enforce only the low-risk CSP directives that should not affect Next/MUI
+// runtime behavior. Keep the broader policy report-only until its violations
+// are observed and tightened.
+const SECURITY_CSP_ENFORCED = ["base-uri 'self'", "object-src 'none'", "frame-ancestors 'none'"].join('; ');
+
+// Report-Only Content-Security-Policy. `script-src`/`style-src` intentionally
+// allow 'unsafe-inline' (and 'unsafe-eval') because Next's runtime and
+// MUI/emotion inject inline scripts/styles. `connect-src` whitelists the Azure
+// Application Insights ingestion/live endpoints the browser telemetry beacons to.
+const SECURITY_CSP_REPORT_ONLY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "style-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "connect-src 'self' https://*.applicationinsights.azure.com https://*.in.applicationinsights.azure.com https://*.monitor.azure.com",
+  "form-action 'self'"
+].join('; ');
 
 /** @type {import('next').NextConfig} */
 const nextConfig = withBundleAnalyzer({
@@ -150,7 +182,7 @@ const nextConfig = withBundleAnalyzer({
   images: {
     unoptimized: true
   },
-  // Cache headers for static assets (animations)
+  // Cache headers for static assets (animations) + baseline security headers on every response.
   async headers() {
     return [
       {
@@ -162,19 +194,47 @@ const nextConfig = withBundleAnalyzer({
             value: 'public, max-age=31536000, immutable'
           }
         ]
+      },
+      {
+        // Defense-in-depth response headers for the whole app. A narrow CSP
+        // enforces anti-framing / anti-object / anti-base-tag protections now;
+        // the broader CSP remains Report-Only so it can be tightened after
+        // telemetry shows whether any runtime sources are still missing.
+        source: '/:path*',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=(), browsing-topics=()'
+          },
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=63072000; includeSubDomains; preload'
+          },
+          {
+            key: 'Content-Security-Policy',
+            value: SECURITY_CSP_ENFORCED
+          },
+          {
+            key: 'Content-Security-Policy-Report-Only',
+            value: SECURITY_CSP_REPORT_ONLY
+          }
+        ]
       }
     ];
   },
   output: 'standalone',
-  // sqlscripting/*.sql is loaded at runtime by lib/provisioning/sql-runner.ts via
-  // path.join(process.cwd(), 'sqlscripting/...'). Next.js cannot statically detect
+  // db/sql/*.sql is loaded at runtime by lib/provisioning/sql-runner.ts via
+  // path.join(process.cwd(), 'db/sql/...'). Next.js cannot statically detect
   // these dynamic paths, so we must tell file-tracing to include the folder in the
   // standalone bundle. Without this, provisioning fails on Azure with ENOENT.
   // The orchestrator bootstrap runs from instrumentation as well as from the
   // /api/admin/provision routes, so include the folder for both.
   outputFileTracingIncludes: {
-    '/api/admin/provision/**/*': ['./sqlscripting/**/*'],
-    '/instrumentation': ['./sqlscripting/**/*']
+    '/api/admin/provision/**/*': ['./db/sql/**/*'],
+    '/instrumentation': ['./db/sql/**/*']
   },
   reactStrictMode: true,
   distDir: 'build'

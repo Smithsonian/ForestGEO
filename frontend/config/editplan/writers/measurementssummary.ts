@@ -8,7 +8,7 @@
 // The writer runs INSIDE an outer transaction (owned by `applyEditInTransaction`
 // or a batch caller such as revision apply). It MUST NOT begin, commit, or
 // rollback transactions, and it MUST NOT close the connection.
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
 import { EditPlan } from '../types';
 import type { ApplyInTransactionInput } from '../apply';
@@ -17,8 +17,9 @@ import { computeTreeStemState, resolveMeasurementSummaryQuadratID, resolveMeasur
 import { refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
 import { refreshMeasurementViewsForCoreMeasurements, refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { handleUpsert } from '@/config/utils';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
-import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { CMAttributesResult } from '@/lib/db/definitions/core';
+import { parseAttributeCodes } from '../rules/attributes';
 
 export interface WriterResult {
   updatedIDs: Record<string, number>;
@@ -573,12 +574,7 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
   // --- Attributes change — rebuild cmattributes rows (DELETE + re-INSERT)
   if (changedFields.has('Attributes')) {
     changesFound = true;
-    const attrsValue = newValues.Attributes;
-    const rawAttrsString = attrsValue === null || attrsValue === undefined ? '' : String(attrsValue);
-    const parsedCodes = rawAttrsString
-      .split(';')
-      .map(code => code.trim())
-      .filter(Boolean);
+    const parsedCodes = parseAttributeCodes(newValues.Attributes);
     await cm.executeQuery(safeFormatQuery(schema, `DELETE FROM ??.cmattributes WHERE CoreMeasurementID = ?`), [coreMeasurementID], txID);
     for (const code of parsedCodes) {
       await handleUpsert<CMAttributesResult>(

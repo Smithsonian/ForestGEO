@@ -13,9 +13,9 @@
 
 import { PoolConnection } from 'mysql2/promise';
 import { createHash } from 'node:crypto';
-import { getConn, runQuery } from '@/components/processors/processormacros';
+import { getConn, runQuery } from '@/lib/db/primitives';
 import ailogger from '@/ailogger';
-import ConnectionManager from './connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 
 /**
@@ -294,6 +294,7 @@ export async function ensureUploadSessionsTable(schema: string): Promise<void> {
       error_message TEXT,
       idempotency_key VARCHAR(255),
       mode VARCHAR(32),
+      census_replacement_completed_at TIMESTAMP NULL DEFAULT NULL,
       active_scope_key VARCHAR(255)
         GENERATED ALWAYS AS (
           CASE

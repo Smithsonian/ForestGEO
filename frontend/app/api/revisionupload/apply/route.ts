@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
-import ConnectionManager from '@/config/connectionmanager';
-import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { HTTPResponses } from '@/config/macros';
 import { FileRow } from '@/config/macros/formdetails';
 import { generateShortBatchID } from '@/config/utils';
@@ -735,7 +735,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       plotID: normalizedPlotID,
       censusID: normalizedCensusID
     });
-    const result = await connectionManager.withTransaction(async (transactionID: string) => {
+    const result = await connectionManager.withTransaction(async tx => {
+      // Migration bridge: this callback drives legacy helpers still typed against
+      // the transaction-id string. Bind it once here rather than touching every call.
+      const transactionID = tx.id;
       ailogger.info(`${logPrefix} transaction callback entered in ${Date.now() - transactionStartedAt}ms (tx=${transactionID})`);
       await assertNoConflictingApplyActivity(connectionManager, schema, normalizedPlotID, normalizedCensusID, transactionID);
 

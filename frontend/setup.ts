@@ -2,10 +2,10 @@
 import { afterEach, expect } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest'; // <-- auto-extends expect for Vitest
-import '@/testing/db-mocks';
-import '@/testing/bg-mocks';
-import '@/testing/platform-mocks';
-import '@/testing/auth-mocks';
+import '@/tests/mocks/db-mocks';
+import '@/tests/mocks/bg-mocks';
+import '@/tests/mocks/platform-mocks';
+import '@/tests/mocks/auth-mocks';
 import * as matchers from '@testing-library/jest-dom/matchers';
 
 afterEach(() => {

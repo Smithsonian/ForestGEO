@@ -21,7 +21,7 @@ import {
   GridToolbarProps,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, AlertColor, AlertPropsColorOverrides, Snackbar } from '@mui/material';
+import { Alert, Snackbar } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
@@ -56,6 +56,7 @@ import {
   getGridID,
   MeasurementsCommonsProps,
   PendingAction,
+  RowControlBreakdown,
   sortRowsByMeasurementDate,
   VisibleFilter
 } from '@/config/datagridhelpers';
@@ -78,22 +79,21 @@ import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { getGridTypeLabel } from '@/config/macros/siteconfigs';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import { formatHeader, InputChip } from '@/components/client/datagridcolumns';
-import { OverridableStringUnion } from '@mui/types';
 import ValidationOverrideModal from '@/components/client/modals/validationoverridemodal';
-import { MeasurementsSummaryResult } from '@/config/sqlrdsdefinitions/views';
+import { MeasurementsSummaryResult } from '@/lib/db/definitions/views';
 import MapperFactory from '@/config/datamapper';
-import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
+import { AttributesRDS, AttributesResult } from '@/lib/db/definitions/core';
 import ValidationCore from '@/components/client/validationcore';
 import { ArrowRightAlt, CallSplit, Forest, Grass } from '@mui/icons-material';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { EditToolbar } from '../client/datagridelements';
-import CustomGridPagination from '@/components/datagrids/customgridpagination';
+import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
 import { getSelectableOptionsForField, loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
-import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
+import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast from '@/components/editplan/undotoast';
 import { isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
@@ -108,17 +108,28 @@ import {
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
+  selectMeasurementStateSnackbar,
   shouldRefreshMeasurementsAfterValidationTransition,
   shouldUseAutoMeasurementRowHeight,
   toServerMeasurementFilterModel
 } from './measurementscommonsutils';
-import { buildMeasurementVisibleConditionSql } from '@/config/measurementstatefilters';
+import { buildMeasurementStateCountsSql } from '@/config/measurementstatefilters';
 
 // Stable reference to prevent infinite resize observer loop in MUI DataGrid
 const AUTO_ROW_HEIGHT = () => 'auto' as const;
 const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
 const FIREFOX_FIXED_ROW_HEIGHT = 112;
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
+
+function describeMeasurementRow(row: GridRowModel | null): string {
+  if (!row) return 'this measurement';
+  const treeTag = row.treeTag ?? row.TreeTag;
+  const stemTag = row.stemTag ?? row.StemTag;
+  const measuredValue = row.measuredDBH ?? row.MeasuredDBH ?? row.dbh ?? row.DBH;
+  const identity = [treeTag && `tree ${treeTag}`, stemTag && `stem ${stemTag}`].filter(Boolean).join(', ');
+  const value = measuredValue !== undefined && measuredValue !== null && measuredValue !== '' ? ` (DBH ${measuredValue})` : '';
+  return identity ? `${identity}${value}` : `this measurement${value}`;
+}
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -192,6 +203,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     actionId: null
   });
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [pendingDeleteRow, setPendingDeleteRow] = useState<GridRowModel | null>(null);
   const [isValidationModalOpen, setIsValidationModalOpen] = useState(false);
   const [isValidationOverrideModalOpen, setIsValidationOverrideModalOpen] = useState(false);
   const [isResetValidationModalOpen, setIsResetValidationModalOpen] = useState(false);
@@ -243,7 +255,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [hasLoadedGrid, setHasLoadedGrid] = useState(false);
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
   const [invalidCount, setInvalidCount] = useState<number>(0);
+  const [invalidBreakdown, setInvalidBreakdown] = useState<RowControlBreakdown>({ unresolvedLogged: 0, failedNoLog: 0 });
   const [validationErrorCount, setValidationErrorCount] = useState<number>(0);
+  const [revalidatableErrorCount, setRevalidatableErrorCount] = useState<number>(0);
   const [validCount, setValidCount] = useState<number>(0);
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [otCount, setOTCount] = useState<number>(0);
@@ -324,13 +338,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     if (!currentSite?.schemaName || !currentPlot || !currentCensus) return;
 
     try {
-      const validCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'valid');
-      const invalidCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'errors');
-      const pendingCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'pending');
-      const query = `SELECT SUM(CASE WHEN ${validCondition} THEN 1 ELSE 0 END) AS CountValid,
-                            SUM(CASE WHEN ${invalidCondition} THEN 1 ELSE 0 END) AS CountInvalid,
-                            SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountValidationErrors,
-                            SUM(CASE WHEN ${pendingCondition} THEN 1 ELSE 0 END) AS CountPending,
+      const stateCountsProjection = buildMeasurementStateCountsSql(currentSite.schemaName, 'vft');
+      const query = `SELECT ${stateCountsProjection},
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('old tree'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountOldTrees,
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('new recruit'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountNewRecruits,
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('multi stem'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountMultiStems
@@ -348,25 +357,38 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       const data = await response.json();
       const countsData = data[0];
 
-      setValidCount(Number(countsData.CountValid) || 0);
-      setInvalidCount(Number(countsData.CountInvalid) || 0);
-      setValidationErrorCount(Number(countsData.CountValidationErrors) || 0);
-      setPendingCount(Number(countsData.CountPending) || 0);
+      const unresolvedLoggedCount = Number(countsData.CountUnresolvedLogged) || 0;
+      const failedNoLogCount = Number(countsData.CountFailedNoLog) || 0;
+      const pendingValidationCount = Number(countsData.CountPending) || 0;
+      const validMeasurementCount = Number(countsData.CountValid) || 0;
+      const overridableCount = Number(countsData.CountOverridable) || 0;
+
+      setValidCount(validMeasurementCount);
+      // The errors toggle filters on (IsValidated = FALSE OR unresolved log entry), which is exactly
+      // CountUnresolvedLogged + CountFailedNoLog — the badge must equal the rows the toggle shows.
+      setInvalidCount(unresolvedLoggedCount + failedNoLogCount);
+      setInvalidBreakdown({ unresolvedLogged: unresolvedLoggedCount, failedNoLog: failedNoLogCount });
+      // Feeds the override menu item — CountOverridable mirrors the override modal's
+      // UPDATE predicate (IsValidated = FALSE OR IS NULL) exactly, and the menu copy
+      // describes it as "failed or not-yet-validated" (never just "failed").
+      setValidationErrorCount(overridableCount);
+      // Feeds the Run Validations menu item — CountRevalidatable mirrors
+      // prepareValidationRun's reset predicate, so the action stays disabled when
+      // the only failures are ingestion failures a rerun cannot clear.
+      setRevalidatableErrorCount(Number(countsData.CountRevalidatable) || 0);
+      setPendingCount(pendingValidationCount);
       setOTCount(Number(countsData.CountOldTrees) || 0);
       setMSCount(Number(countsData.CountMultiStems) || 0);
       setNRCount(Number(countsData.CountNewRecruits) || 0);
 
-      const counts = [
-        { count: Number(countsData.CountInvalid) || 0, message: `${countsData.CountInvalid} row(s) with unresolved errors detected.`, severity: 'warning' },
-        { count: Number(countsData.CountPending) || 0, message: `${countsData.CountPending} row(s) pending validation.`, severity: 'info' },
-        { count: Number(countsData.CountValid) || 0, message: `${countsData.CountValid} row(s) passed validation.`, severity: 'success' }
-      ];
-      const highestCount = counts.reduce((prev, current) => (current.count > prev.count ? current : prev));
-      if (highestCount.count !== null) {
-        setSnackbar({
-          children: highestCount.message,
-          severity: highestCount.severity as OverridableStringUnion<AlertColor, AlertPropsColorOverrides> | undefined
-        });
+      const snackbarByState = selectMeasurementStateSnackbar({
+        unresolvedLogged: unresolvedLoggedCount,
+        failedNoLog: failedNoLogCount,
+        pending: pendingValidationCount,
+        valid: validMeasurementCount
+      });
+      if (snackbarByState) {
+        setSnackbar({ children: snackbarByState.message, severity: snackbarByState.severity });
       }
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
@@ -537,11 +559,11 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const PaginationSlot = useMemo(() => {
     if (!enablePageJump && !enableInfiniteScroll) return undefined;
-    const Slot = () => <CustomGridPagination infiniteScroll={infiniteScrollDescriptor} />;
+    const Slot = () => <CustomGridPagination gridType={gridType} infiniteScroll={infiniteScrollDescriptor} />;
     Slot.displayName = 'CustomGridPaginationSlot';
     (Slot as unknown as { infiniteScroll?: typeof infiniteScrollDescriptor }).infiniteScroll = infiniteScrollDescriptor;
     return Slot;
-  }, [enablePageJump, enableInfiniteScroll, infiniteScrollDescriptor]);
+  }, [enablePageJump, enableInfiniteScroll, gridType, infiniteScrollDescriptor]);
 
   useEffect(() => {
     if (gridError) {
@@ -889,6 +911,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       const row = rows.find(row => String(row.id) === String(actionId));
       if (row) {
         if (actionType === 'delete') {
+          setPendingDeleteRow(row);
           setIsDeleteDialogOpen(true);
         } else {
           setIsDialogOpen(true);
@@ -906,6 +929,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const handleConfirmAction = async () => {
     setIsDialogOpen(false);
     setIsDeleteDialogOpen(false);
+    setPendingDeleteRow(null);
     if (pendingAction.actionType === 'save' && pendingAction.actionId !== null && promiseArguments) {
       await performSaveAction(pendingAction.actionId);
     } else if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
@@ -918,6 +942,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const handleCancelAction = () => {
     setIsDialogOpen(false);
     setIsDeleteDialogOpen(false);
+    setPendingDeleteRow(null);
     if (promiseArguments) {
       promiseArguments.reject(new Error('Action cancelled by user'));
     }
@@ -982,22 +1007,30 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       setSnackbar({ children: 'Error: Site context not available', severity: 'error' });
       return;
     }
-    // destructive mutation — global overlay blocks UI for the duration of the API call
-    setLoading(true, 'Deleting...');
-    const deletionID = rows.find(row => String(row.id) === String(id))?.id;
-    if (!deletionID) return;
+    const deletionRow = rows.find(row => String(row.id) === String(id));
+    const deletionID = deletionRow?.id;
+    if (!deletionID) {
+      setSnackbar({ children: 'Error: The row to delete is no longer available', severity: 'error' });
+      return;
+    }
     const deleteQuery = createDeleteQuery(currentSite.schemaName, gridType, getGridID(gridType), deletionID);
-    const response = await fetch(deleteQuery, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        oldRow: undefined,
-        newRow: rows.find(row => String(row.id) === String(id))!
-      })
-    });
-    setLoading(false);
+    let response: Response;
+    setLoading(true, 'Deleting...');
+    try {
+      response = await fetch(deleteQuery, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ oldRow: undefined, newRow: deletionRow })
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Network request failed';
+      setSnackbar({ children: `Error: ${message}`, severity: 'error' });
+      return;
+    } finally {
+      setLoading(false);
+    }
     if (!response.ok) {
       const error = await response.json();
       if (response.status === HTTPResponses.FOREIGN_KEY_CONFLICT) {
@@ -1135,7 +1168,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 : type === 'Edit'
                   ? `Edit this row`
                   : type === 'Delete'
-                    ? 'Delete this row (cannot be undone!)'
+                    ? 'Delete this row'
                     : undefined
           }
           arrow
@@ -1396,7 +1429,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                   color="danger"
                   variant="solid"
                   sx={{
-                    color: 'error.main',
                     fontSize: '0.75rem',
                     mt: 1,
                     whiteSpace: 'normal',
@@ -1623,7 +1655,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 paginationModel={paginationModel}
                 rowCount={gridRowCount}
                 onRowCountChange={handleRowCountChange}
-                pageSizeOptions={[10, 25, 50, 100]}
+                pageSizeOptions={DEFAULT_PAGE_SIZE_OPTIONS}
                 sortModel={sortModel}
                 onSortModelChange={handleSortModelChange}
                 filterModel={gridFilterModel}
@@ -1667,10 +1699,11 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                           }
                         }}
                         pendingCount={pendingCount}
-                        errorCount={validationErrorCount}
+                        overridableCount={validationErrorCount}
+                        revalidatableCount={revalidatableErrorCount}
                       />
                     ),
-                    errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount },
+                    errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount, breakdown: invalidBreakdown },
                     validControls: { show: showValidRows, toggle: setShowValidRows, count: validCount },
                     pendingControls: { show: showPendingRows, toggle: setShowPendingRows, count: pendingCount },
                     otControls: { show: showOT, toggle: setShowOT, count: otCount },
@@ -1703,7 +1736,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           )}
         </Box>
         {!!snackbar && (
-          <Snackbar open anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
+          <Snackbar open anchorOrigin={{ vertical: 'top', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
             <Alert {...snackbar} onClose={handleCloseSnackbar} />
           </Snackbar>
         )}
@@ -1760,7 +1793,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             onClose={handleCancelAction}
             onConfirm={handleConfirmAction}
             title="Confirm Deletion"
-            content="Are you sure you want to delete this row? This action cannot be undone."
+            content={`Delete ${describeMeasurementRow(pendingDeleteRow)}? This action cannot be undone.`}
           />
         )}
         {isValidationModalOpen && (

@@ -1,10 +1,12 @@
 import { HTTPResponses } from '@/config/macros';
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import moment from 'moment';
-import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { refreshMeasurementsSummaryForScope, refreshViewFullTableForScope } from '@/lib/measurementviewrefresh';
+import { updatePostValidationLastRun } from '@/lib/postvalidationlastrun';
+import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -16,6 +18,17 @@ type ValidView = (typeof VALID_VIEWS)[number];
 
 function isValidView(view: string): view is ValidView {
   return VALID_VIEWS.includes(view as ValidView);
+}
+
+function parsePositiveInteger(value: unknown): number | undefined {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  }
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 /**
@@ -71,28 +84,39 @@ async function _executePostValidationQueries(
         const queryResults = await connectionManager.executeQuery(formattedQuery);
 
         if (queryResults && queryResults.length > 0) {
-          // Query succeeded with results - use parameterized query
+          // Query succeeded with results
           const successResults = JSON.stringify(queryResults);
-          const updateQuery = safeFormatQuery(
-            schema,
-            'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = ? WHERE QueryID = ?'
-          );
-          await connectionManager.executeQuery(updateQuery, [currentTime, successResults, 'success', queryID]);
+          await updatePostValidationLastRun(connectionManager, schema, {
+            queryID,
+            plotID,
+            censusID,
+            ranAt: currentTime,
+            status: 'success',
+            result: successResults
+          });
           stats.success++;
         } else {
           // Query succeeded but returned no results (treated as failure/no issues found)
-          const updateQuery = safeFormatQuery(
-            schema,
-            'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = NULL, LastRunStatus = ? WHERE QueryID = ?'
-          );
-          await connectionManager.executeQuery(updateQuery, [currentTime, 'failure', queryID]);
+          await updatePostValidationLastRun(connectionManager, schema, {
+            queryID,
+            plotID,
+            censusID,
+            ranAt: currentTime,
+            status: 'failure',
+            result: null
+          });
           stats.failed++;
         }
       } catch (queryError) {
         // Query execution failed
         ailogger.error(`Post-validation query ${queryID} failed:`, queryError instanceof Error ? queryError : undefined);
-        const updateQuery = safeFormatQuery(schema, 'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunStatus = ? WHERE QueryID = ?');
-        await connectionManager.executeQuery(updateQuery, [currentTime, 'failure', queryID]);
+        await updatePostValidationLastRun(connectionManager, schema, {
+          queryID,
+          plotID,
+          censusID,
+          ranAt: currentTime,
+          status: 'failure'
+        });
         stats.failed++;
       }
     }
@@ -103,15 +127,16 @@ async function _executePostValidationQueries(
   return stats;
 }
 
-export async function POST(request: NextRequest, props: { params: Promise<{ view: string; schema: string }> }) {
-  const params = await props.params;
+async function handler(request: NextRequest, context: RouteContext) {
+  const params = await context.params;
   if (!params.schema || params.schema === 'undefined' || !params.view || params.view === 'undefined') {
     return new NextResponse(JSON.stringify({ error: 'Missing schema or view parameter' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const { view, schema } = params;
+  const view = params.view as string;
+  const schema = params.schema as string;
 
-  // SQL Injection Prevention: Validate schema against whitelist
+  // defense-in-depth: withRouteAuthz validates schema before this handler runs
   if (!isValidSchema(schema)) {
     ailogger.warn(`Invalid schema attempted in refreshviews: ${schema}`);
     return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), { status: HTTPResponses.INVALID_REQUEST });
@@ -130,12 +155,15 @@ export async function POST(request: NextRequest, props: { params: Promise<{ view
 
   try {
     const body = await request.json().catch(() => ({}));
-    const parsedPlotID = Number(body.plotID);
-    const parsedCensusID = Number(body.censusID);
-
-    _plotID = Number.isInteger(parsedPlotID) ? parsedPlotID : undefined;
-    _censusID = Number.isInteger(parsedCensusID) ? parsedCensusID : undefined;
+    const hasPlotID = body.plotID !== undefined;
+    const hasCensusID = body.censusID !== undefined;
+    _plotID = parsePositiveInteger(body.plotID);
+    _censusID = parsePositiveInteger(body.censusID);
     _runPostValidation = body.runPostValidation === true;
+
+    if (hasPlotID !== hasCensusID || ((hasPlotID || hasCensusID || _runPostValidation) && (_plotID === undefined || _censusID === undefined))) {
+      return new NextResponse(JSON.stringify({ error: 'plotID and censusID must be strict positive integers' }), { status: HTTPResponses.INVALID_REQUEST });
+    }
   } catch {
     // No body provided, that's fine
   }
@@ -164,9 +192,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ view
       }
 
       await connectionManager.commitTransaction(transactionID ?? '');
+      transactionID = undefined;
 
-      // TODO: Post-validation query execution temporarily disabled for refactoring
-      const postValidationStats = null;
+      const postValidationStats =
+        _runPostValidation && _plotID != null && _censusID != null ? await _executePostValidationQueries(connectionManager, schema, _plotID, _censusID) : null;
 
       return new NextResponse(
         JSON.stringify({
@@ -176,7 +205,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ view
         { status: HTTPResponses.OK }
       );
     } catch (e) {
-      await connectionManager.rollbackTransaction(transactionID ?? '');
+      if (transactionID) {
+        await connectionManager.rollbackTransaction(transactionID);
+      }
 
       const isLockTimeout = e instanceof Error && e.message.includes('Lock wait timeout exceeded');
       if (isLockTimeout && attempt < MAX_LOCK_RETRIES) {
@@ -199,3 +230,5 @@ export async function POST(request: NextRequest, props: { params: Promise<{ view
   // Should not be reached, but TypeScript needs a return
   throw new Error('Unexpected: retry loop exhausted without returning or throwing');
 }
+
+export const POST = withRouteAuthz('refreshviews/[view]/[schema]', handler, { schema: fromPath('schema') });

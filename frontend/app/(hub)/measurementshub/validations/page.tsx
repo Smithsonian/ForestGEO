@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
-import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
+import { ValidationProceduresRDS } from '@/lib/db/definitions/validations';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
 import { useTheme } from '@mui/joy';
@@ -192,7 +192,7 @@ export default function ValidationsPage() {
               <TableCell sx={{ width: '12%' }}>Validation</TableCell>
               <TableCell sx={{ width: '18%' }}>Description</TableCell>
               <TableCell sx={{ width: '12%' }}>Affecting Criteria</TableCell>
-              <TableCell sx={{ width: '44%' }}>Query</TableCell>
+              <TableCell sx={{ width: '44%' }}>Query details</TableCell>
               <TableCell sx={{ width: '8%' }}>Actions</TableCell>
             </TableRow>
           </TableHead>

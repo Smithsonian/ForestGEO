@@ -3,14 +3,20 @@ import { HTTPResponses } from '@/config/macros';
 import { NextRequest } from 'next/server';
 // --------- Import the handler AFTER mocks ---------
 import { POST } from './route';
-import ConnectionManager from '@/config/connectionmanager'; // --------- Helpers ---------
+import ConnectionManager from '@/lib/db/connectionmanager'; // --------- Helpers ---------
 
 // --------- Mocks (must be BEFORE importing the route) ---------
 
+// Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
+// A 'global' admin passes the per-site access gate.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
 // Singleton-safe ConnectionManager wrapper that respects your setup mocks.
 // Guarantees getInstance() returns an object with the needed methods.
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}));
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}));
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
@@ -47,7 +53,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 // Mock schema validation to accept test schemas
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     return ['myschema', 'testschema'].includes(schema);
   }),
@@ -143,6 +149,67 @@ describe('POST /api/refreshviews/[view]/[schema]', () => {
     expect(exec).not.toHaveBeenCalledWith('CALL `myschema`.RefreshMeasurementsSummary()');
     expect(commit).toHaveBeenCalledWith('tx-3');
     expect(rollback).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 400 when scoped refresh IDs are malformed', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const begin = vi.spyOn(cm, 'beginTransaction');
+
+    const request = new NextRequest('http://localhost', {
+      method: 'POST',
+      body: JSON.stringify({ plotID: '17abc', censusID: 42, runPostValidation: true })
+    });
+
+    const res = await POST(request, makeProps('measurementssummary', 'myschema'));
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(begin).not.toHaveBeenCalled();
+  });
+
+  it('measurementssummary with runPostValidation executes and scopes post-validation last-run status', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-pv');
+    const exec = vi.spyOn(cm, 'executeQuery');
+    const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+    const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
+    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+
+    exec
+      // scoped measurementssummary refresh
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      // fetch enabled postvalidation query definitions
+      .mockResolvedValueOnce([
+        { QueryID: 9, QueryDefinition: 'SELECT * FROM ${schema}.issues WHERE PlotID = ${currentPlotID} AND CensusID = ${currentCensusID}' }
+      ])
+      // run postvalidation query
+      .mockResolvedValueOnce([{ IssueID: 1 }])
+      // update last-run status with context
+      .mockResolvedValueOnce(undefined);
+
+    const request = new NextRequest('http://localhost', {
+      method: 'POST',
+      body: JSON.stringify({ plotID: 17, censusID: 42, runPostValidation: true })
+    });
+
+    const res = await POST(request, makeProps('measurementssummary', 'myschema'));
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    const body = await res.json();
+    expect(body.postValidation).toEqual({ executed: 1, success: 1, failed: 0 });
+    expect(begin).toHaveBeenCalledTimes(1);
+    expect(commit).toHaveBeenCalledWith('tx-pv');
+    expect(rollback).not.toHaveBeenCalled();
+
+    const formattedValidationSql = String(exec.mock.calls[3]?.[0]);
+    expect(formattedValidationSql).toContain('PlotID = 17');
+    expect(formattedValidationSql).toContain('CensusID = 42');
+
+    const [updateSql, updateParams] = exec.mock.calls[4];
+    expect(String(updateSql)).toMatch(/LastRunPlotID = \?/i);
+    expect(String(updateSql)).toMatch(/LastRunCensusID = \?/i);
+    expect(updateParams).toEqual([expect.any(String), JSON.stringify([{ IssueID: 1 }]), 'success', 17, 42, 9]);
     expect(close).toHaveBeenCalledTimes(1);
   });
 

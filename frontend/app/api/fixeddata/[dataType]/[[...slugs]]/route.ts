@@ -2,17 +2,22 @@ import MapperFactory from '@/config/datamapper';
 import { format } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { getGridID } from '@/config/servergridhelpers';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
+import { DELETE as coreApiDelete, PATCH as coreApiPatch, POST as coreApiPost } from '@/config/macros/coreapifunctions';
+import { fromPathSegment, type RouteContext, withRouteAuthz } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export { POST, PATCH, DELETE } from '@/config/macros/coreapifunctions';
+// Shape of the resolved catch-all params for this slug route; the re-exported
+// coreapifunctions CRUD handlers expect exactly this props shape.
+type SlugRouteProps = { params: Promise<{ dataType: string; slugs?: string[] }> };
+const ROUTE_KEY = 'fixeddata/[dataType]/[[...slugs]]';
 
 // Valid data types that can be queried via this endpoint
 const VALID_DATA_TYPES = [
@@ -26,6 +31,7 @@ const VALID_DATA_TYPES = [
   'quadrats',
   'personnel',
   'alltaxonomiesview',
+  'stemtaxonomiesview',
   'stems',
   'roles',
   'census'
@@ -44,13 +50,11 @@ function parseOptionalPositiveInt(value: string | undefined): number | undefined
 }
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
-export async function GET(
+async function getHandler(
   _request: NextRequest,
-  props: {
-    params: Promise<{ dataType: string; slugs?: string[] }>;
-  }
+  context: RouteContext
 ): Promise<NextResponse<{ output: any[]; deprecated?: any[]; totalCount: number; finishedQuery: string } | { error: string }>> {
-  const params = await props.params;
+  const params = (await context.params) as { dataType: string; slugs?: string[] };
 
   // Validate slugs parameter — minimum 3 (schema, page, pageSize); plotID and plotCensusNumber are optional
   if (!params.slugs || params.slugs.length < 3) {
@@ -67,7 +71,9 @@ export async function GET(
     });
   }
 
-  // SQL Injection Prevention: Validate schema against whitelist
+  // defense-in-depth: withRouteAuthz already validated schema membership before
+  // this handler ran; this whitelist check stays as a redundant guard on the
+  // schema identifiers routed through safeFormatQuery below.
   if (!isValidSchema(schema)) {
     ailogger.warn(`Invalid schema attempted in fixeddata: ${schema}`);
     return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), { status: HTTPResponses.INVALID_REQUEST });
@@ -96,18 +102,18 @@ export async function GET(
       case 'sitesspecificvalidations':
         paginatedQuery = `
           SELECT SQL_CALC_FOUND_ROWS * 
-          FROM ${schema}.sitespecificvalidations LIMIT ?, ?;`; // validation procedures is special
+          FROM ??.sitespecificvalidations LIMIT ?, ?;`; // validation procedures is special
         queryParams.push(page * pageSize, pageSize);
         break;
       case 'specieslimits':
-        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS pdt.* FROM ${schema}.${params.dataType} pdt WHERE pdt.SpeciesID = ? AND pdt.IsActive IS TRUE LIMIT ?, ?`;
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS pdt.* FROM ??.${params.dataType} pdt WHERE pdt.SpeciesID = ? AND pdt.IsActive IS TRUE LIMIT ?, ?`;
         queryParams.push(speciesID, page * pageSize, pageSize);
         break;
       case 'unifiedchangelog':
         paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS uc.* FROM ${schema}.${params.dataType} uc
-            LEFT JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
-            LEFT JOIN ${schema}.census c ON uc.CensusID = c.CensusID AND c.IsActive IS TRUE
+            SELECT SQL_CALC_FOUND_ROWS uc.* FROM ??.${params.dataType} uc
+            LEFT JOIN ??.plots p ON uc.PlotID = p.PlotID
+            LEFT JOIN ??.census c ON uc.CensusID = c.CensusID AND c.IsActive IS TRUE
             WHERE (uc.PlotID = ? OR uc.PlotID IS NULL)
               AND (c.PlotID = ? AND c.PlotCensusNumber = ? OR uc.CensusID IS NULL)
             ORDER BY uc.ChangeTimestamp DESC
@@ -117,14 +123,14 @@ export async function GET(
       case 'failedmeasurements':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS fm.*
           FROM (${buildFailedMeasurementsSelectQuery(schema)}) fm
-          JOIN ${schema}.census c ON fm.CensusID = c.CensusID AND c.IsActive IS TRUE
+          JOIN ??.census c ON fm.CensusID = c.CensusID AND c.IsActive IS TRUE
           WHERE fm.PlotID = ?
             AND c.PlotID = ?
             AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'viewfulltable':
-        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ? ORDER BY CoreMeasurementID ASC LIMIT ?, ?`;
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ??.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ? ORDER BY CoreMeasurementID ASC LIMIT ?, ?`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'attributes':
@@ -132,7 +138,7 @@ export async function GET(
       case 'quadrats':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS dt.*
-              FROM ${schema}.${params.dataType} dt
+              FROM ??.${params.dataType} dt
             ORDER BY dt.${demappedGridID} ASC LIMIT ?, ?;`;
         queryParams.push(page * pageSize, pageSize);
         break;
@@ -140,41 +146,51 @@ export async function GET(
         if (plotCensusNumber !== undefined && plotID !== undefined) {
           paginatedQuery = `
               SELECT SQL_CALC_FOUND_ROWS p.*, EXISTS(
-                SELECT 1 FROM ${schema}.censusactivepersonnel cap
-                  JOIN ${schema}.census c ON cap.CensusID = c.CensusID
+                SELECT 1 FROM ??.censusactivepersonnel cap
+                  JOIN ??.census c ON cap.CensusID = c.CensusID
                   WHERE cap.PersonnelID = p.PersonnelID
                     AND c.PlotCensusNumber = ? and c.PlotID = ?
                 ) AS CensusActive
-              FROM ${schema}.${params.dataType} p
+              FROM ??.${params.dataType} p
               ORDER BY p.${demappedGridID} ASC LIMIT ?, ?;`;
           queryParams.push(plotCensusNumber, plotID, page * pageSize, pageSize);
         } else {
           paginatedQuery = `
               SELECT SQL_CALC_FOUND_ROWS p.*
-              FROM ${schema}.${params.dataType} p
+              FROM ??.${params.dataType} p
               ORDER BY p.${demappedGridID} ASC LIMIT ?, ?;`;
           queryParams.push(page * pageSize, pageSize);
         }
         break;
       case 'alltaxonomiesview':
-        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS atv.* FROM ${schema}.${params.dataType} atv
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS atv.* FROM ??.${params.dataType} atv
             ORDER BY atv.SpeciesCode ASC LIMIT ?, ?;`;
+        queryParams.push(page * pageSize, pageSize);
+        break;
+      case 'stemtaxonomiesview':
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS stv.* FROM ??.${params.dataType} stv
+            ORDER BY stv.StemTag ASC LIMIT ?, ?;`;
         queryParams.push(page * pageSize, pageSize);
         break;
       case 'stems':
       case 'roles':
-        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} WHERE IsActive IS TRUE LIMIT ?, ?`;
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ??.${params.dataType} WHERE IsActive IS TRUE LIMIT ?, ?`;
         queryParams.push(page * pageSize, pageSize);
         break;
       case 'census':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS *
-            FROM ${schema}.census
+            FROM ??.census
             WHERE PlotID = ? AND IsActive IS TRUE LIMIT ?, ?`;
         queryParams.push(plotID, page * pageSize, pageSize);
         break;
       // No default needed - dataType is validated against VALID_DATA_TYPES whitelist above
     }
+
+    // Route the schema identifier (?? placeholders) through safeFormatQuery before
+    // the value-placeholder accounting below, so the remaining `?` count matches
+    // queryParams exactly.
+    paginatedQuery = safeFormatQuery(schema, paginatedQuery);
 
     // Ensure query parameters match the placeholders in the query
     if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
@@ -216,3 +232,24 @@ export async function GET(
     await connectionManager.closeConnection();
   }
 }
+
+// The re-exported coreapifunctions POST/PATCH/DELETE handlers use their own
+// narrower props type; wrap them so the guard's RouteContext callback signature
+// matches. Each write path is guarded with the same per-site authz as GET, so an
+// out-of-scope schema is a 403 before any SQL/transaction runs.
+async function postHandler(request: NextRequest, context: RouteContext) {
+  return coreApiPost(request, context as unknown as SlugRouteProps);
+}
+
+async function patchHandler(request: NextRequest, context: RouteContext) {
+  return coreApiPatch(request, context as unknown as SlugRouteProps);
+}
+
+async function deleteHandler(request: NextRequest, context: RouteContext) {
+  return coreApiDelete(request, context as unknown as SlugRouteProps);
+}
+
+export const GET = withRouteAuthz(ROUTE_KEY, getHandler, { schema: fromPathSegment('slugs', 0) });
+export const POST = withRouteAuthz(ROUTE_KEY, postHandler, { schema: fromPathSegment('slugs', 0) });
+export const PATCH = withRouteAuthz(ROUTE_KEY, patchHandler, { schema: fromPathSegment('slugs', 0) });
+export const DELETE = withRouteAuthz(ROUTE_KEY, deleteHandler, { schema: fromPathSegment('slugs', 0) });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -13,10 +14,11 @@ interface ValidationResponse {
   warnings: string[];
 }
 
-export async function POST(request: NextRequest) {
+async function handler(request: NextRequest, _context: RouteContext) {
   const connectionManager = ConnectionManager.getInstance();
   const schema = request.nextUrl.searchParams.get('schema');
 
+  // defense-in-depth: guard validates schema first; retained to narrow the type below.
   if (!schema) {
     return NextResponse.json({ isValid: false, errors: ['No schema provided'], warnings: [] }, { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -128,6 +130,8 @@ export async function POST(request: NextRequest) {
     await connectionManager.closeConnection();
   }
 }
+
+export const POST = withRouteAuthz('validations/validate-query', handler, { schema: fromQuery('schema') });
 
 // Helper function to extract table references from SQL query
 function extractTableReferences(query: string): string[] {

@@ -3,34 +3,35 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { title } from '@/config/primitives';
 import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
-import { Box, IconButton, Stack, Typography, useTheme } from '@mui/joy';
+import { Box, Drawer, IconButton, Menu, MenuItem, Stack, Typography, useTheme } from '@mui/joy';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import Divider from '@mui/joy/Divider';
-import { useLoading } from '@/app/contexts/loadingprovider';
-import { useAsyncOperation } from '@/hooks/useAsyncOperation';
-import { useLoadState, combineLoadStates } from '@/hooks/useLoadState';
+import { useAsyncOperation } from '@/app/hooks/useAsyncOperation';
+import { useLoadState, combineLoadStates } from '@/app/hooks/useLoadState';
 import {
   useOrgCensusContext,
   useOrgCensusDispatch,
   usePlotContext,
-  usePlotDispatch,
   useSiteContext,
-  useSiteDispatch,
   useOrgCensusListDispatch,
   usePlotListDispatch,
   useQuadratListDispatch,
   useSiteListDispatch
 } from '@/app/contexts/compat-hooks';
 import { useHasHydrated } from '@/config/store/appstore';
-import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
+import { DOCUMENTATION_URL, getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
+import { LOGIN_FAILURE_REASONS } from '@/config/loginfailurereasons';
 import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
-import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
+import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/lib/db/definitions/timekeeping';
 import ReactDOM from 'react-dom';
 import ailogger from '@/ailogger';
 // Eager load for maximum speed (bundle size not a concern)
 import Sidebar from '@/components/sidebar';
 import Header from '@/components/header';
+import { MOBILE_SIDEBAR_TOGGLE_EVENT } from '@/config/utils';
+import UploadJobStatusBadge from '@/components/client/uploadjobstatusbadge';
 
 function renderSwitch(endpoint: string) {
   const commonStyle = {
@@ -52,8 +53,6 @@ function renderSwitch(endpoint: string) {
 }
 
 export default function HubLayout({ children }: { children: React.ReactNode }) {
-  const { setLoading } = useLoading();
-
   // Hook declarations first
   const censusListDispatch = useOrgCensusListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
@@ -64,8 +63,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const hasHydrated = useHasHydrated();
-  const siteDispatch = useSiteDispatch();
-  const plotDispatch = usePlotDispatch();
   const censusDispatch = useOrgCensusDispatch();
   const { data: session } = useSession();
   const previousSiteRef = useRef<string | undefined>(undefined);
@@ -81,12 +78,23 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   // Aggregate load state
   const { allLoaded: coreDataLoaded, anyError: hasLoadError } = combineLoadStates([siteListLoad, plotListLoad, censusListLoad, quadratListLoad]);
 
-  const [manualReset, setManualReset] = useState(false);
   const [isSidebarVisible, setSidebarVisible] = useState(!!session);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [helpMenuAnchor, setHelpMenuAnchor] = useState<HTMLElement | null>(null);
   const pathname = usePathname() ?? '';
   const { isPulsing } = useLockAnimation();
+
+  useEffect(() => {
+    const toggleMobileSidebar = () => setMobileSidebarOpen(open => !open);
+    window.addEventListener(MOBILE_SIDEBAR_TOGGLE_EVENT, toggleMobileSidebar);
+    return () => window.removeEventListener(MOBILE_SIDEBAR_TOGGLE_EVENT, toggleMobileSidebar);
+  }, []);
+
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [pathname]);
 
   // API path convention: /api/fetchall/{resource}/{plotID}/{censusNumber}?schema={schemaName}
   // - plotID=0 and censusNumber=0 means "no filter" (fetch all)
@@ -190,32 +198,36 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const { execute: executeFetchSiteList } = useAsyncOperation(fetchSiteListFn, {
     loadingMessage: 'Loading Sites...',
     category: 'api',
+    suppressGlobalLoading: true,
     preventDuplicates: true
   });
 
   const { execute: executeLoadPlotData } = useAsyncOperation(fetchPlotDataFn, {
     loadingMessage: 'Loading plot data...',
     category: 'api',
+    suppressGlobalLoading: true,
     preventDuplicates: true
   });
 
   const { execute: executeLoadCensusData } = useAsyncOperation(fetchCensusDataFn, {
     loadingMessage: 'Loading census data...',
     category: 'api',
+    suppressGlobalLoading: true,
     preventDuplicates: true
   });
 
   const { execute: executeLoadQuadratData } = useAsyncOperation(fetchQuadratDataFn, {
     loadingMessage: 'Loading quadrat data...',
     category: 'api',
+    suppressGlobalLoading: true,
     preventDuplicates: true
   });
 
   useEffect(() => {
     if (session?.user?.permissionsUnavailable) {
-      redirect('/loginfailed?reason=permissions-unavailable');
+      redirect(`/loginfailed?reason=${session.user.permissionsFailureReason ?? LOGIN_FAILURE_REASONS.PERMISSIONS_UNAVAILABLE}`);
     }
-  }, [session?.user?.permissionsUnavailable]);
+  }, [session?.user?.permissionsUnavailable, session?.user?.permissionsFailureReason]);
 
   // Fetch site list after hydration when session exists
   // IMPORTANT: Wait for Zustand hydration before fetching to avoid race conditions
@@ -257,43 +269,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     // Intentionally exclude executeLoadQuadratData from deps to prevent loops
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSite, currentPlot, currentCensus, quadratListLoad.isIdle, hasHydrated]);
-
-  // Handle manual reset logic
-  useEffect(() => {
-    async function clearContexts() {
-      if (currentSite) {
-        if (siteDispatch) await siteDispatch({ site: undefined });
-      }
-      if (currentPlot) {
-        if (plotDispatch) await plotDispatch({ plot: undefined });
-      }
-      if (currentCensus) {
-        if (censusDispatch) await censusDispatch({ census: undefined });
-      }
-    }
-
-    if (manualReset) {
-      // destructive mutation — global overlay blocks UI for the duration of the API call
-      setLoading(true, 'Manual refresh beginning...');
-
-      clearContexts()
-        .then(() => {
-          // Reset all load states to idle - triggers refetch
-          siteListLoad.reset();
-          plotListLoad.reset();
-          censusListLoad.reset();
-          quadratListLoad.reset();
-        })
-        .catch(error => {
-          ailogger.error('Manual reset failed:', error);
-        })
-        .finally(() => {
-          setManualReset(false);
-          setLoading(false);
-        });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manualReset, currentSite, currentPlot, currentCensus]);
 
   // Clear lists and reload data when site, plot, or census changes
   useEffect(() => {
@@ -371,6 +346,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   }, [session]);
 
   const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up('md'), { noSsr: true });
 
   // Detect if on admin page
   const isAdminPage = pathname?.includes('/admin') ?? false;
@@ -388,27 +364,28 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       <a href="#main-content" className="skip-to-main">
         Skip to main content
       </a>
-      <Box
-        component="nav"
-        role="navigation"
-        aria-label="Site navigation"
-        className={`sidebar ${isSidebarVisible ? 'visible' : 'hidden'} ${isPulsing ? `animate-fade-blur-in` : ``}`}
-        sx={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          height: '100vh',
-          zIndex: 1000
-        }}
-      >
-        <Sidebar
-          setCensusListLoaded={censusListLoad.reset}
-          siteListLoaded={siteListLoad.isLoaded}
-          coreDataLoaded={coreDataLoaded}
-          setManualReset={setManualReset}
-        />
-      </Box>
-      <Header />
+      {hasHydrated &&
+        (isDesktop ? (
+          <Box
+            component="nav"
+            role="navigation"
+            aria-label="Site navigation"
+            className={`sidebar ${isSidebarVisible ? 'visible' : 'hidden'} ${isPulsing ? `animate-fade-blur-in` : ``}`}
+            sx={{ position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 1000 }}
+          >
+            <Sidebar setCensusListLoaded={censusListLoad.reset} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
+          </Box>
+        ) : (
+          <Drawer
+            open={mobileSidebarOpen}
+            onClose={() => setMobileSidebarOpen(false)}
+            size="sm"
+            slotProps={{ content: { sx: { width: 'min(92vw, 360px)', maxWidth: '100vw', overflowX: 'hidden' } } }}
+          >
+            <Sidebar setCensusListLoaded={censusListLoad.reset} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
+          </Drawer>
+        ))}
+      <Header onOpenSidebar={() => setMobileSidebarOpen(true)} isSidebarOpen={mobileSidebarOpen} />
       <Box
         component="main"
         className="MainContent"
@@ -424,13 +401,27 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           flexShrink: 1,
           overflow: 'hidden',
           minHeight: 'calc(100vh - var(--Header-height) - 30px)',
-          marginLeft: isSidebarVisible ? 'calc(var(--Sidebar-width) + 5px)' : '0',
+          marginLeft: { xs: 0, md: isSidebarVisible ? 'calc(var(--Sidebar-width) + 5px)' : 0 },
           transition: 'margin-left 0.3s ease-in-out',
           '&:focus': {
             outline: 'none'
           }
         }}
       >
+        {currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID && (
+          <Box
+            sx={{
+              width: '100%',
+              px: 1,
+              pt: 1,
+              position: 'sticky',
+              top: 'var(--Header-height)',
+              zIndex: 900
+            }}
+          >
+            <UploadJobStatusBadge schema={currentSite.schemaName} plotID={currentPlot.plotID} censusID={currentCensus.dateRanges[0].censusID} />
+          </Box>
+        )}
         <Box
           sx={{
             display: 'flex',
@@ -484,7 +475,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             className={isPulsing ? 'animate-fade-blur-in' : ''}
           >
             <Typography
-              level="h1"
+              level="title-lg"
+              component="div"
               sx={{
                 color: 'plum',
                 display: 'inline-block',
@@ -497,8 +489,10 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             </Typography>
           </Stack>
           <IconButton
-            aria-label={'Click here to open the feedback modal and create a Github issue for developer review'}
-            onClick={() => setIsFeedbackModalOpen(true)}
+            aria-label="Help"
+            aria-haspopup="menu"
+            aria-expanded={Boolean(helpMenuAnchor)}
+            onClick={event => setHelpMenuAnchor(event.currentTarget)}
             className={isPulsing ? 'animate-pulse-no-opacity' : ''}
             sx={{
               position: 'fixed',
@@ -521,6 +515,19 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           >
             <HelpOutlineOutlinedIcon fontSize="large" />
           </IconButton>
+          <Menu anchorEl={helpMenuAnchor} open={Boolean(helpMenuAnchor)} onClose={() => setHelpMenuAnchor(null)} placement="top-end">
+            <MenuItem component="a" href={DOCUMENTATION_URL} target="_blank" rel="noreferrer" onClick={() => setHelpMenuAnchor(null)}>
+              Documentation
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                setHelpMenuAnchor(null);
+                setIsFeedbackModalOpen(true);
+              }}
+            >
+              Report an issue
+            </MenuItem>
+          </Menu>
         </Box>
       </Box>
       <GithubFeedbackModal open={isFeedbackModalOpen} onClose={() => setIsFeedbackModalOpen(false)} />

@@ -20,7 +20,20 @@ interface ValidationActionsMenuProps {
   onResetValidations: () => void;
   onRefreshView: () => Promise<void>;
   pendingCount?: number;
-  errorCount?: number;
+  /**
+   * Rows the override action will flip to valid (IsValidated FALSE OR NULL):
+   * genuinely failed rows PLUS never-validated ones. The copy must not call
+   * these all "failed" — that misreports pending rows as failures.
+   */
+  overridableCount?: number;
+  /**
+   * Failed rows a rerun can actually re-examine (IsValidated = FALSE, real
+   * stem, unresolved validation-source error) — prepareValidationRun's reset
+   * predicate. Excludes ingestion failures (StemGUID NULL), which no
+   * validation run can clear, so they must not make the run action look
+   * actionable.
+   */
+  revalidatableCount?: number;
   disabled?: boolean;
 }
 
@@ -30,7 +43,8 @@ export default function ValidationActionsMenu({
   onResetValidations,
   onRefreshView,
   pendingCount = 0,
-  errorCount = 0
+  overridableCount = 0,
+  revalidatableCount = 0
 }: ValidationActionsMenuProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -47,20 +61,27 @@ export default function ValidationActionsMenu({
     {
       id: 'run-validations',
       label: 'Run Validations',
-      description: pendingCount > 0 ? `Validate ${pendingCount} pending row(s)` : 'No pending rows to validate',
+      description:
+        pendingCount > 0
+          ? `Validate ${pendingCount} pending row(s)`
+          : revalidatableCount > 0
+            ? `Re-check ${revalidatableCount} failed row(s)`
+            : 'No rows to validate',
       icon: <CloudSync />,
       onClick: onRunValidations,
       color: 'primary',
-      disabled: pendingCount === 0
+      // A rerun re-examines failed rows too (prepareValidationRun resets this
+      // validation's error carriers), so failed-only states stay actionable.
+      disabled: pendingCount === 0 && revalidatableCount === 0
     },
     {
       id: 'override-validations',
-      label: 'Override Failed Validations',
-      description: errorCount > 0 ? `Force ${errorCount} failed row(s) to pass` : 'No failed rows to override',
+      label: 'Override Validations',
+      description: overridableCount > 0 ? `Force ${overridableCount} failed or not-yet-validated row(s) to pass` : 'No rows to override',
       icon: <GppGoodOutlined />,
       onClick: onOverrideValidations,
       color: 'warning',
-      disabled: errorCount === 0
+      disabled: overridableCount === 0
     },
     {
       id: 'reset-validations',

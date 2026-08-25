@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
-import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
+import { AdminSiteRDS, AdminUserRDS } from '@/lib/db/definitions/admin';
 import {
   Autocomplete,
   Avatar,
@@ -432,7 +432,7 @@ export default function UsersToSitesPage() {
           borderColor: 'divider'
         }}
       >
-        <Typography level="body-sm" sx={{ color: 'neutral.600', display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+        <Typography level="body-sm" sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           {users.length} users · {sites.length} sites · {userSiteRelations.length} assignments
           {hasChanges && (
             <Chip size="sm" color="warning" variant="soft" sx={{ fontWeight: 600, ml: 1 }}>
@@ -763,7 +763,7 @@ export default function UsersToSitesPage() {
                   )}
 
                   {availableSites.length === 0 && assignedSites.length > 0 && (
-                    <Typography level="body-xs" sx={{ color: 'success.600', fontWeight: 600, textAlign: 'center', py: 0.75 }}>
+                    <Typography level="body-xs" sx={{ color: 'success.400', fontWeight: 600, textAlign: 'center', py: 0.75 }}>
                       ✓ Access to all sites
                     </Typography>
                   )}
@@ -854,7 +854,7 @@ export default function UsersToSitesPage() {
                 {getAvailableSites(detailModalUser.userID ?? 0).length > 0 && (
                   <>
                     <Divider sx={{ my: 2.5 }} />
-                    <Typography level="title-sm" sx={{ mb: 1.5, color: 'neutral.600' }}>
+                    <Typography level="title-sm" sx={{ mb: 1.5, color: 'text.secondary' }}>
                       Add Sites
                     </Typography>
                     <Autocomplete

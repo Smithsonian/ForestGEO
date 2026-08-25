@@ -1,10 +1,12 @@
 import MapperFactory from '@/config/datamapper';
 import { handleUpsert } from '@/config/utils';
-import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/config/sqlrdsdefinitions/views';
-import ConnectionManager from '@/config/connectionmanager';
+import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/lib/db/definitions/views';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
+import type { UpsertOperation } from '@/config/utils';
 
 // need to try integrating this into validation system:
 
@@ -66,11 +68,25 @@ interface UpdateQueryConfig {
   fieldList: FieldList;
 }
 
+/**
+ * Reports one slice's upsert to the caller. `operation` distinguishes a created
+ * row from an overwritten one, which the changelog must record faithfully — a
+ * hardcoded INSERT would claim a taxon was created every time one was edited.
+ */
+export type SliceUpsertObserver<Result> = (slice: {
+  sliceKey: string;
+  id: number;
+  operation: UpsertOperation;
+  rowData: Partial<Result>;
+}) => Promise<void> | void;
+
 export async function handleUpsertForSlices<Result>(
   connectionManager: ConnectionManager,
   schema: string,
   newRow: Partial<Result>,
-  config: UpdateQueryConfig
+  config: UpdateQueryConfig,
+  transactionID?: string,
+  onSliceUpsert?: SliceUpsertObserver<Result>
 ): Promise<Record<string, number>> {
   const insertedIds: Record<string, number> = {};
 
@@ -106,7 +122,9 @@ export async function handleUpsertForSlices<Result>(
     ailogger.info('inserting rowData: ', rowData);
 
     // Perform the upsert and store the resulting ID
-    insertedIds[sliceKey] = (await handleUpsert<Result>(connectionManager, schema, sliceKey, rowData, primaryKey as keyof Result)).id;
+    const { id, operation } = await handleUpsert<Result>(connectionManager, schema, sliceKey, rowData, primaryKey as keyof Result, transactionID);
+    insertedIds[sliceKey] = id;
+    await onSliceUpsert?.({ sliceKey, id, operation, rowData });
   }
 
   return insertedIds;
@@ -314,6 +332,11 @@ type CombinedCrossCensusLocationValidationResult = {
   error?: string;
 };
 
+export interface ValidationProcedureDefinition {
+  procedureName: string;
+  definition: string;
+}
+
 function mysqlBoolToBoolean(value: any): boolean {
   if (Buffer.isBuffer(value)) return value[0] === 1;
   return Boolean(value);
@@ -340,6 +363,38 @@ async function prepareValidationRun(
     `Validation ${validationProcedureName}`
   );
 
+  const censusID = params.p_CensusID ?? null;
+  const plotID = params.p_PlotID ?? null;
+
+  // Rows this validation previously failed must be re-examined on a rerun, or
+  // a correction elsewhere (e.g. renaming one half of a duplicate-tag pair)
+  // can never clear the partner row's stale error: validation definitions only
+  // process IsValidated IS NULL rows, so a row stuck at FALSE would keep its
+  // unresolved error forever. Reset only THIS validation's unresolved-error
+  // carriers — other validations' verdicts stay untouched, and rows overridden
+  // to TRUE or failed at ingestion (StemGUID IS NULL) are excluded.
+  const resetStaleFailuresQuery = `
+    UPDATE ${schema}.coremeasurements cm
+    JOIN ${schema}.census c ON cm.CensusID = c.CensusID
+    JOIN ${schema}.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+    JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
+    SET cm.IsValidated = NULL
+    WHERE me.ErrorSource = ?
+      AND me.ErrorCode = ?
+      AND mel.IsResolved = FALSE
+      AND cm.IsValidated = FALSE
+      AND cm.StemGUID IS NOT NULL
+      AND cm.IsActive = TRUE
+      AND (? IS NULL OR cm.CensusID = ?)
+      AND (? IS NULL OR c.PlotID = ?)
+  `;
+  const resetResult: any = await connectionManager.executeQuery(
+    resetStaleFailuresQuery,
+    [VALIDATION_ERROR_SOURCE, String(validationProcedureID), censusID, censusID, plotID, plotID],
+    transactionID
+  );
+  const resetRowCount = Number(resetResult?.affectedRows ?? 0);
+
   const cleanupQuery = `
     DELETE cme FROM ${schema}.measurement_error_log cme
     JOIN ${schema}.measurement_errors me ON me.ErrorID = cme.ErrorID
@@ -352,15 +407,13 @@ async function prepareValidationRun(
       AND (? IS NULL OR cm.CensusID = ?)
       AND (? IS NULL OR c.PlotID = ?)
   `;
-  const censusID = params.p_CensusID ?? null;
-  const plotID = params.p_PlotID ?? null;
   await connectionManager.executeQuery(
     cleanupQuery,
     [VALIDATION_ERROR_SOURCE, String(validationProcedureID), censusID, censusID, plotID, plotID],
     transactionID
   );
 
-  ailogger.info(`[${validationProcedureName}] Cleared stale errors before re-validation`);
+  ailogger.info(`[${validationProcedureName}] Reset ${resetRowCount} previously-failed row(s) and cleared stale errors before re-validation`);
 }
 
 function formatValidationQuery(schema: string, cursorQuery: string, validationProcedureID: number, params: ValidationExecutionParams): string {
@@ -392,12 +445,24 @@ function formatValidationQuery(schema: string, cursorQuery: string, validationPr
     .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
 }
 
+/**
+ * Loads the server-owned validation procedure row for a validation by its
+ * ValidationID. Replaces trusting a client-supplied cursorQuery.
+ * Returns null when no enabled validation matches.
+ */
+export async function loadValidationDefinition(schema: string, validationProcedureID: number): Promise<ValidationProcedureDefinition | null> {
+  const connectionManager = ConnectionManager.getInstance();
+  const sql = safeFormatQuery(schema, 'SELECT ProcedureName, Definition FROM ??.sitespecificvalidations WHERE ValidationID = ? AND IsEnabled = 1 LIMIT 1;');
+  const rows: Array<{ ProcedureName: string; Definition: string }> = await connectionManager.executeQuery(sql, [validationProcedureID]);
+  return rows.length > 0 ? { procedureName: rows[0].ProcedureName, definition: rows[0].Definition } : null;
+}
+
 // Generalized runValidation function
 export async function runValidation(
   validationProcedureID: number,
   validationProcedureName: string,
   schema: string,
-  cursorQuery: string,
+  definition: string,
   params: ValidationExecutionParams = {}
 ): Promise<boolean> {
   const connectionManager = ConnectionManager.getInstance();
@@ -415,7 +480,7 @@ export async function runValidation(
       await prepareValidationRun(connectionManager, schema, validationProcedureID, validationProcedureName, transactionID, params);
 
       // STEP 2: Dynamically replace SQL variables with actual TypeScript input values
-      const formattedCursorQuery = formatValidationQuery(schema, cursorQuery, validationProcedureID, params);
+      const formattedCursorQuery = formatValidationQuery(schema, definition, validationProcedureID, params);
 
       // STEP 3: Execute the validation query to insert new errors
       const finalCursorQuery =

@@ -21,7 +21,7 @@ let teardownProvisionedSite!: TeardownFn;
 let abortRun!: AbortFn;
 
 const TEST_SCHEMA = 'forestgeo_teardown_test';
-const CATALOG_DDL = join(process.cwd(), 'sqlscripting/catalog-provisioning-tables.sql');
+const CATALOG_DDL = join(process.cwd(), 'db/sql/catalog-provisioning-tables.sql');
 
 describe('teardownProvisionedSite / abortRun (integration)', () => {
   let pool: mysql.Pool;

@@ -21,7 +21,8 @@ import { initTablesStep, deployProceduresStep, seedValidationsStep } from '@/lib
 import type { StepContext, ProvisioningInput } from '@/lib/provisioning/types';
 
 const TEST_SCHEMA = TEST_SCHEMA_PREFIX + 'meta';
-const CURRENT_SCHEMA_VERSION = '2026-05-13';
+const CURRENT_SCHEMA_VERSION = '2026-08-04';
+const CURRENT_PROCEDURES_VERSION = '2026-08-04-procs';
 const STALE_SCHEMA_VERSION = '2020-01-01';
 const META_TABLE = '_provisioning_meta';
 // Mirrors lib/provisioning/steps/sql-steps.ts:EXPECTED_VALIDATION_COUNT.
@@ -151,13 +152,13 @@ describe('schema-version stamping (alreadyDone)', () => {
 
     it('returns false when ProceduresDeployedAt is null', async () => {
       await createMetaTable();
-      await insertMetaRow(CURRENT_SCHEMA_VERSION, { TablesDeployedAt: true });
+      await insertMetaRow(CURRENT_PROCEDURES_VERSION);
       expect(await deployProceduresStep.alreadyDone(buildCtx())).toBe(false);
     });
 
     it('returns false when meta is stamped but only one of N expected procedures exists', async () => {
       await createMetaTable();
-      await insertMetaRow(CURRENT_SCHEMA_VERSION, { ProceduresDeployedAt: true });
+      await insertMetaRow(CURRENT_PROCEDURES_VERSION, { ProceduresDeployedAt: true });
       // Create exactly one procedure — not all required ones.
       await pool.query(`CREATE PROCEDURE \`${TEST_SCHEMA}\`.bulkingestionprocess() BEGIN SELECT 1; END`);
       expect(await deployProceduresStep.alreadyDone(buildCtx())).toBe(false);
@@ -165,7 +166,7 @@ describe('schema-version stamping (alreadyDone)', () => {
 
     it('returns true when meta is stamped AND all REQUIRED_PROCEDURES exist', async () => {
       await createMetaTable();
-      await insertMetaRow(CURRENT_SCHEMA_VERSION, { ProceduresDeployedAt: true });
+      await insertMetaRow(CURRENT_PROCEDURES_VERSION, { ProceduresDeployedAt: true });
       // Create all 10 required procedures (case-insensitive names).
       const procedures = [
         'bulkingestionprocess',
@@ -183,6 +184,33 @@ describe('schema-version stamping (alreadyDone)', () => {
         await pool.query(`CREATE PROCEDURE \`${TEST_SCHEMA}\`.\`${proc}\`() BEGIN SELECT 1; END`);
       }
       expect(await deployProceduresStep.alreadyDone(buildCtx())).toBe(true);
+    });
+
+    it('returns false when a required procedure belongs to a different definer', async () => {
+      await createMetaTable();
+      await insertMetaRow(CURRENT_PROCEDURES_VERSION, { ProceduresDeployedAt: true });
+      const procedures = [
+        'bulkingestionprocess',
+        'bulkingestioncollapser',
+        'clearcensusfull',
+        'clearcensusmsmts',
+        'RefreshMeasurementsSummary',
+        'RefreshViewFullTable',
+        'RunSharedDBHChangeValidations',
+        'RunSharedCrossCensusLocationValidations',
+        'reinsertdefaultvalidations',
+        'reinsertdefaultpostvalidations'
+      ];
+      for (const proc of procedures) {
+        await pool.query(`CREATE PROCEDURE \`${TEST_SCHEMA}\`.\`${proc}\`() BEGIN SELECT 1; END`);
+      }
+      const [identityRows]: any = await pool.query(`SELECT CURRENT_USER() AS currentUser`);
+      const [currentUser, currentHost] = String(identityRows[0].currentUser).split('@');
+      const staleHost = currentHost === '%' ? 'localhost' : '%';
+      await pool.query(`DROP PROCEDURE \`${TEST_SCHEMA}\`.bulkingestionprocess`);
+      await pool.query(`CREATE DEFINER = ?@? PROCEDURE \`${TEST_SCHEMA}\`.bulkingestionprocess() BEGIN SELECT 1; END`, [currentUser, staleHost]);
+
+      expect(await deployProceduresStep.alreadyDone(buildCtx())).toBe(false);
     });
   });
 
@@ -246,7 +274,7 @@ describe('schema-version stamping (alreadyDone)', () => {
       await initTablesStep.run(ctx);
       await deployProceduresStep.run(ctx);
       const [rows]: any = await pool.query(`SELECT ProceduresDeployedAt FROM \`${TEST_SCHEMA}\`.\`${META_TABLE}\` WHERE SchemaVersion = ?`, [
-        CURRENT_SCHEMA_VERSION
+        CURRENT_PROCEDURES_VERSION
       ]);
       expect(rows[0].ProceduresDeployedAt).not.toBeNull();
       expect(await deployProceduresStep.alreadyDone(ctx)).toBe(true);

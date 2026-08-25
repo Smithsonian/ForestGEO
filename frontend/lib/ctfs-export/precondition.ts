@@ -8,16 +8,39 @@
  * identifiers via `quoteSchema`; CensusID bound via `?` placeholder). Schema names
  * are validated against a strict regex before being backtick-quoted, preventing
  * SQL injection through schema name interpolation.
+ *
+ * Task 10C (ratified interim 2026-07-20 — IMPLEMENTED): publish preconditions are split
+ * into WARNING vs BLOCKING kinds (see WARNING_PRECONDITION_KINDS below). Data-quality
+ * failures surface as warnings and the publish proceeds; destination-integrity failures
+ * still 400. The classification lives in this module and the gating in the CTFS export
+ * route; a dry run continues to surface everything as a preview.
+ *
+ * TODO (full validation-tier feature, still deferred): an authorized, AUDITED operator
+ * override that can consciously publish past a destination-integrity blocker, enforced
+ * server-side so stale UI cannot bypass it. Until that exists, the blocking kinds are a
+ * hard stop — do NOT reclassify any of them to a warning to work around a stuck publish,
+ * because a warning-only export of those kinds ships broken data to the on-prem CTFS MySQL.
  */
 
 import type { Connection } from 'mysql2/promise';
 import { exportableMeasurementBaseWhere } from './exportable-measurement';
+import { TREE_TAG_MAX_WIDTH } from '../csv-to-sql-v2';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 export const MAX_DISPLAY_FAILURES = 50;
+
+/**
+ * Minimum fraction of a census's active measurements that must be exportable for a
+ * real publish to proceed. Below this, the publish blocks with
+ * `insufficient-exportable-rows` instead of silently shipping a sliver of the census
+ * as an apparent success (e.g. a census that is 99.7% unvalidated would otherwise
+ * publish 0.3% of its rows and report success). Quality warnings still cover smaller
+ * shortfalls — this gate only catches the "most of the census is missing" case.
+ */
+export const MIN_EXPORTABLE_FRACTION = 0.5;
 
 // Backtick-quoting a schema name is safe only when the name is restricted to
 // letters, digits, and underscores. MySQL allows broader identifier characters,
@@ -26,8 +49,10 @@ export const MAX_DISPLAY_FAILURES = 50;
 const SCHEMA_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 // CTFS destination column widths that bound source values at export time.
+// treeTag is shared with the generated procedure's Stage 0 probe and Stage 5
+// length check via TREE_TAG_MAX_WIDTH so the gates can never drift.
 const CTFS_LIMITS = {
-  treeTag: 10,
+  treeTag: TREE_TAG_MAX_WIDTH,
   stemTag: 32,
   quadratName: 8,
   tsmCode: 10,
@@ -49,7 +74,8 @@ export type PreconditionFailureKind =
   | 'unknown-attribute-code'
   | 'missing-taxonomy-fields'
   | 'string-too-long'
-  | 'zero-exportable-rows';
+  | 'zero-exportable-rows'
+  | 'insufficient-exportable-rows';
 
 export interface PreconditionFailure {
   kind: PreconditionFailureKind;
@@ -64,7 +90,63 @@ export interface PreconditionInput {
   censusId: number;
 }
 
-export type PreconditionResult = { ok: true; count: number } | { ok: false; reasons: PreconditionFailure[] };
+/**
+ * `count` is the number of exportable measurements and `totalActiveCount` the number of
+ * active measurements in the census (exportable or not). Both are always present: all
+ * checks run so dry-run previews and audit events report the complete failure set and
+ * exact shortfall.
+ */
+export type PreconditionResult =
+  | { ok: true; count: number; totalActiveCount: number }
+  | { ok: false; reasons: PreconditionFailure[]; count: number; totalActiveCount: number };
+
+/**
+ * Publish-gate policy (Task 10C, ratified 2026-07-20: "warn on quality, keep structural
+ * blocking"). Two kinds of precondition failure:
+ *
+ *  - WARNING kinds are data-quality notices about rows the export ALREADY excludes via
+ *    exportableMeasurementBaseWhere (IsValidated=TRUE, StemGUID NOT NULL, active joins).
+ *    Surfacing them and letting the publish proceed drops nothing the artifact would have
+ *    carried — the operator is simply told which rows won't be exported.
+ *  - BLOCKING kinds are destination-integrity constraints. An artifact that violates them
+ *    fails to load into, or silently truncates data in, the on-prem CTFS MySQL:
+ *      • unknown-attribute-code — the row IS exported (base WHERE does not filter on
+ *        attributes) carrying a code the destination's TSMAttributes cannot resolve;
+ *      • missing-taxonomy-fields — the destination mnemonic lookup cannot run;
+ *      • string-too-long — a value overflows a narrower CTFS column;
+ *      • zero-exportable-rows — an empty/meaningless artifact;
+ *      • insufficient-exportable-rows — quality exclusions leave less than
+ *        MIN_EXPORTABLE_FRACTION of the census's active rows, so a "successful" publish
+ *        would silently omit most of the census.
+ *    These stay blocking so the "warn, don't block" relaxation can never ship broken data
+ *    to CTFS.
+ */
+export const WARNING_PRECONDITION_KINDS: ReadonlySet<PreconditionFailureKind> = new Set<PreconditionFailureKind>([
+  'not-validated',
+  'unresolved-error',
+  'no-stem-guid',
+  'inactive-join'
+]);
+
+export function isBlockingPreconditionKind(kind: PreconditionFailureKind): boolean {
+  return !WARNING_PRECONDITION_KINDS.has(kind);
+}
+
+/**
+ * Split precondition failures into the ones that must block a real publish and the ones
+ * that only warrant a warning. Preserves input order within each bucket.
+ */
+export function partitionPreconditionFailures(reasons: PreconditionFailure[]): {
+  blocking: PreconditionFailure[];
+  warnings: PreconditionFailure[];
+} {
+  const blocking: PreconditionFailure[] = [];
+  const warnings: PreconditionFailure[] = [];
+  for (const reason of reasons) {
+    (isBlockingPreconditionKind(reason.kind) ? blocking : warnings).push(reason);
+  }
+  return { blocking, warnings };
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -97,9 +179,10 @@ async function gatherIds(conn: Connection, sql: string, params: unknown[]): Prom
 /**
  * Run all 8 "Finished Census" precondition checks against `(schema, censusId)`.
  *
- * Returns `{ ok: true, count }` when no disqualifying rows exist, where `count`
- * is the number of exportable measurements. Returns `{ ok: false, reasons }` with
- * one `PreconditionFailure` per triggered check.
+ * Returns `{ ok: true, count, totalActiveCount }` when no disqualifying rows exist,
+ * where `count` is the number of exportable measurements and `totalActiveCount` the
+ * number of active measurements in the census. Returns `{ ok: false, reasons }` with
+ * one `PreconditionFailure` per triggered check (plus both counts when check 8 ran).
  *
  * All queries use parameterized `?` for the censusId and backtick-quoted schema
  * names (validated by regex). No raw string concatenation of user-supplied values.
@@ -219,10 +302,9 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
     });
   }
 
-  // Check 6: Missing taxonomy fields needed for destination lookup.
-  // Required: SpeciesCode, SpeciesName, genus.Genus, family.Family.
-  // Subspecies rows (SubspeciesName IS NOT NULL) are allowed — they get a destination
-  // SubSpecies lookup; the check does not reject them.
+  // Check 6: Missing mnemonic needed for destination taxonomy lookup.
+  // SpeciesName, Genus, and Family are descriptive context only: the Smithsonian
+  // contract confirmed by Suzanne resolves current Species/SubSpecies on Mnemonic.
   const missingTaxonomyIds = await gatherIds(
     conn,
     `SELECT cm.CoreMeasurementID
@@ -234,19 +316,14 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
        JOIN ${s}.genus   gn  ON gn.GenusID   = sp.GenusID
        JOIN ${s}.family  fam ON fam.FamilyID = gn.FamilyID
       WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
-        AND (
-          sp.SpeciesCode IS NULL OR sp.SpeciesCode = ''
-          OR sp.SpeciesName IS NULL  OR sp.SpeciesName = ''
-          OR gn.Genus       IS NULL  OR gn.Genus = ''
-          OR fam.Family     IS NULL  OR fam.Family = ''
-        )
+        AND (sp.SpeciesCode IS NULL OR sp.SpeciesCode = '')
       LIMIT ?`,
     [input.plotId, input.censusId, fetchLimit]
   );
   if (missingTaxonomyIds.length > 0) {
     reasons.push({
       kind: 'missing-taxonomy-fields',
-      message: 'Species row is missing taxonomy fields required for destination lookup (SpeciesCode, SpeciesName, Genus, Family)',
+      message: 'Species row is missing SpeciesCode required for destination mnemonic lookup',
       coreMeasurementIds: missingTaxonomyIds
     });
   }
@@ -254,7 +331,7 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
   // Check 7: Destination-bound value exceeds CTFS legacy column width.
   // Source column widths in the app schema may be larger than CTFS column widths.
   // Specific limits (from spec):
-  //   Tree.Tag 10, Stem.StemTag 32, Quadrat.QuadratName 8, TSMAttributes.TSMCode 10,
+  //   Tree.Tag 20, Stem.StemTag 32, Quadrat.QuadratName 8, TSMAttributes.TSMCode 10,
   //   DBH.Comments 128, Species.Mnemonic / SubSpecies.Mnemonic 10,
   //   taxonomy names 64, taxonomy authorities 128.
   // App coremeasurements.Description maps to CTFS DBH.Comments (128 char limit).
@@ -302,41 +379,73 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
     });
   }
 
-  // If any checks failed, return the accumulated failure list immediately.
-  // Check 8 (zero rows) only makes sense when no other disqualifiers exist.
-  if (reasons.length > 0) {
-    return { ok: false, reasons };
-  }
-
-  // Check 8: Zero exportable rows remain after all filters. Uses the shared
-  // "exportable measurement" base WHERE so this precondition matches the
-  // filter that selectMeasurements applies — preventing drift between "I
-  // would let you export this" and "here's what would actually export."
-  // Aliases: cm = coremeasurements, c = census, s = stems, t = trees (matching
-  // exportableMeasurementBaseWhere conventions). Bound params: [censusId, plotId].
+  // Check 8: Zero (or too few) exportable rows remain after all filters. Uses the
+  // same full join graph and shared WHERE clause as selectMeasurements. The joins
+  // beyond stems/trees matter because their foreign keys are nullable: counting a
+  // validated row with no quadrat/species/taxonomy join would otherwise let the gate
+  // pass even though the actual export silently drops that row.
+  // Bound params: [censusId, plotId].
   const [countRows] = await conn.query<any[]>(
     `SELECT COUNT(*) AS n
        FROM ${s}.coremeasurements cm
        JOIN ${s}.census c ON c.CensusID = cm.CensusID
        JOIN ${s}.stems s  ON s.StemGUID = cm.StemGUID
        JOIN ${s}.trees t  ON t.TreeID   = s.TreeID
+       JOIN ${s}.quadrats q  ON q.QuadratID = s.QuadratID
+       JOIN ${s}.species sp  ON sp.SpeciesID = t.SpeciesID
+       JOIN ${s}.genus gn    ON gn.GenusID = sp.GenusID
+       JOIN ${s}.family fam  ON fam.FamilyID = gn.FamilyID
       WHERE ${exportableMeasurementBaseWhere}`,
     [input.censusId, input.plotId]
   );
   const count = Number((countRows as Array<{ n: number }>)[0].n);
 
+  const [totalRows] = await conn.query<any[]>(
+    `SELECT COUNT(*) AS n
+       FROM ${s}.coremeasurements cm
+       JOIN ${s}.census c ON c.CensusID = cm.CensusID
+      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1`,
+    [input.plotId, input.censusId]
+  );
+  const totalActiveCount = Number((totalRows as Array<{ n: number }>)[0].n);
+
   if (count === 0) {
-    return {
-      ok: false,
-      reasons: [
-        {
-          kind: 'zero-exportable-rows',
-          message: 'No exportable rows remain after applying all filters',
-          coreMeasurementIds: []
-        }
-      ]
-    };
+    // Preserve any accumulated WARNING reasons alongside the blocking zero-rows
+    // failure so the operator sees the full picture (what's wrong AND that nothing
+    // is left to export).
+    reasons.push({
+      kind: 'zero-exportable-rows',
+      message: 'No exportable rows remain after applying all filters',
+      coreMeasurementIds: []
+    });
+    return { ok: false, reasons, count, totalActiveCount };
   }
 
-  return { ok: true, count };
+  // A census where quality exclusions eat the majority of the rows must not publish
+  // as an apparent success — the WARNING kinds above only describe what the export
+  // excludes, and on a real publish they surface in a dismissible header. Blocking
+  // here forces the operator to resolve the exclusions (or consciously dry-run)
+  // instead of shipping a fraction of the census.
+  if (count < totalActiveCount * MIN_EXPORTABLE_FRACTION) {
+    const excluded = totalActiveCount - count;
+    const percent = ((count / totalActiveCount) * 100).toFixed(1);
+    reasons.push({
+      kind: 'insufficient-exportable-rows',
+      message:
+        `Only ${count} of ${totalActiveCount} active measurements are exportable (${percent}%); ` +
+        `publishing would silently omit ${excluded} rows. A real publish requires at least ` +
+        `${MIN_EXPORTABLE_FRACTION * 100}% of the census to be exportable.`,
+      coreMeasurementIds: []
+    });
+    return { ok: false, reasons, count, totalActiveCount };
+  }
+
+  // Rows exist. If only WARNING reasons accumulated, the census is not perfectly
+  // clean (ok=false) but nothing here is blocking — the route surfaces these as
+  // warnings and proceeds. ok=true is reserved for a fully clean census.
+  if (reasons.length > 0) {
+    return { ok: false, reasons, count, totalActiveCount };
+  }
+
+  return { ok: true, count, totalActiveCount };
 }

@@ -366,6 +366,8 @@ describe('Accessibility Audit', () => {
 
       cy.visit('/admin/users');
 
+      // User rows render read-only until explicitly placed in edit mode.
+      cy.contains('button', 'Edit', { timeout: 10000 }).first().click();
       cy.get('input[name="firstName"]', { timeout: 10000 }).first().focus();
       cy.focused().should('have.attr', 'name', 'firstName');
 

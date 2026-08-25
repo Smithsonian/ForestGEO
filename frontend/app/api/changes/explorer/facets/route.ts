@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { queryRecentChangesFacets } from '../_shared';
+import { fromBody, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 
 export const runtime = 'nodejs';
@@ -12,7 +13,7 @@ interface FacetsRequestBody {
   plotID?: number;
 }
 
-export async function POST(request: NextRequest) {
+async function handler(request: NextRequest, _context: RouteContext) {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
@@ -20,6 +21,7 @@ export async function POST(request: NextRequest) {
     const schema = body.schema ?? '';
     const plotID = Number(body.plotID ?? 0);
 
+    // defense-in-depth: withRouteAuthz already validated body.schema; retained to narrow the type.
     if (!isValidSchema(schema)) {
       return NextResponse.json({ error: 'Invalid schema' }, { status: HTTPResponses.INVALID_REQUEST });
     }
@@ -37,3 +39,5 @@ export async function POST(request: NextRequest) {
     await connectionManager.closeConnection();
   }
 }
+
+export const POST = withRouteAuthz('changes/explorer/facets', handler, { schema: fromBody('schema') });

@@ -10,7 +10,7 @@
 import React, { useMemo } from 'react';
 import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, Divider, IconButton } from '@mui/joy';
 import { ContentSkeleton } from '@/components/loading';
-import { PlotRDS } from '@/config/sqlrdsdefinitions/zones';
+import { PlotRDS } from '@/lib/db/definitions/zones';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import CropSquareIcon from '@mui/icons-material/CropSquare';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
@@ -438,7 +438,7 @@ function AddPlotCard({ onAdd }: { onAdd: () => void }) {
         >
           <AddIcon sx={{ fontSize: 28 }} />
         </Avatar>
-        <Typography level="title-md" sx={{ fontWeight: 600, color: 'primary.700' }}>
+        <Typography level="title-md" sx={{ fontWeight: 600, color: 'primary.300' }}>
           Add New Plot
         </Typography>
         <Typography level="body-sm" color="neutral">
@@ -530,7 +530,7 @@ export default function PlotsOverview({ plots, siteName, isLoading = false, onPl
         <Box sx={{ mb: 3 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
             <CheckCircleIcon sx={{ color: 'success.500', fontSize: 18 }} />
-            <Typography level="title-sm" sx={{ fontWeight: 600, color: 'success.700' }}>
+            <Typography level="title-sm" sx={{ fontWeight: 600, color: 'success.400' }}>
               With Quadrats
             </Typography>
             <Chip size="sm" variant="soft" color="success">
@@ -555,7 +555,7 @@ export default function PlotsOverview({ plots, siteName, isLoading = false, onPl
         <Box>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
             <CancelIcon sx={{ color: 'neutral.500', fontSize: 18 }} />
-            <Typography level="title-sm" sx={{ fontWeight: 600, color: 'neutral.600' }}>
+            <Typography level="title-sm" sx={{ fontWeight: 600, color: 'text.secondary' }}>
               Without Quadrats
             </Typography>
             <Chip size="sm" variant="soft" color="neutral">

@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["cypress", "node"]
+  },
+  "include": ["support/column-mapping-helpers.ts", "e2e/column-mapping/**/*.ts", "e2e/column-mapping-realdb/**/*.ts"],
+  "exclude": ["node_modules"]
+}

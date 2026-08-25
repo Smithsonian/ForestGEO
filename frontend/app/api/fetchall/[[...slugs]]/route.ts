@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { getErrorMessage, getErrorCode, errorMessageContains, toError } from '@/lib/errorhelpers';
+import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { FETCHALL_ALLOWED_TABLES, INVALID_DATATYPE_CODE } from './constants';
+import { auth } from '@/auth';
+import { requireSession } from '@/lib/auth-helpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -25,8 +29,12 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
   const slugPlotID = parsePositiveInt(plotIDParam);
   const slugPCN = parsePositiveInt(pcnParam);
 
-  // Sites live in the catalog schema and don't require a site-specific schema
+  // Sites live in the catalog schema and don't require a site-specific schema,
+  // but the catalog must never be enumerable by an unauthenticated caller.
   if (dataType === 'sites') {
+    const sessionError = requireSession(await auth());
+    if (sessionError) return sessionError;
+
     const connectionManager = ConnectionManager.getInstance();
     try {
       const results = await connectionManager.executeQuery('SELECT * FROM catalog.sites');
@@ -153,7 +161,13 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
         ORDER BY SpeciesCode`;
       results = await connectionManager.executeQuery(query);
     } else {
-      const query = `SELECT * FROM ${schema}.${dataType}`;
+      if (!FETCHALL_ALLOWED_TABLES.has(dataType)) {
+        return NextResponse.json(
+          { error: `Data type '${dataType}' is not available for this endpoint.`, code: INVALID_DATATYPE_CODE },
+          { status: HTTPResponses.BAD_REQUEST }
+        );
+      }
+      const query = safeFormatQuery(schema, `SELECT * FROM ??.${safeEscapeId(dataType)}`);
       results = await connectionManager.executeQuery(query);
     }
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });

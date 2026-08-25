@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GridLogicOperator } from '@mui/x-data-grid';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
+  ALL_VALID_SNACKBAR_MESSAGE,
   areGridSortModelsEqual,
   buildEditableFieldsDiff,
   buildEditableFieldsDiffWithMetaForSurface,
@@ -10,9 +11,13 @@ import {
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
   mergeMeasurementFilterModel,
+  PENDING_VALIDATION_SNACKBAR_MESSAGE,
+  RESET_THEN_VALIDATE_SNACKBAR_MESSAGE,
+  selectMeasurementStateSnackbar,
   shouldRefreshMeasurementsAfterValidationTransition,
   shouldUseAutoMeasurementRowHeight,
-  toServerMeasurementFilterModel
+  toServerMeasurementFilterModel,
+  UNRESOLVED_ERRORS_SNACKBAR_MESSAGE
 } from './measurementscommonsutils';
 
 describe('MeasurementsCommons - Bug Fix Tests', () => {
@@ -350,6 +355,53 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
       const result = buildEditableFieldsDiffWithMetaForSurface({ ...OLD_ROW, description: 'desc' }, OLD_ROW, 'measurementssummary');
       expect(result.diff).toEqual({});
       expect(result.roundedNoOpFields).toEqual([]);
+    });
+  });
+
+  describe('selectMeasurementStateSnackbar: one taxonomy for grid state messaging (F9)', () => {
+    it('warns about unresolved logged errors with the Errors-Explorer-matching count, even when other buckets are larger', () => {
+      const snackbar = selectMeasurementStateSnackbar({ unresolvedLogged: 4, failedNoLog: 100, pending: 200, valid: 300 });
+
+      expect(snackbar).toEqual({ severity: 'warning', message: UNRESOLVED_ERRORS_SNACKBAR_MESSAGE(4) });
+      expect(snackbar?.message).toBe('4 row(s) with unresolved errors — open View Errors to resolve them.');
+    });
+
+    it('prompts a validation-state reset when every not-yet-validated row is FALSE-no-log (walkthrough census: 23,322 FALSE rows, empty log)', () => {
+      // Run Validations is disabled at pendingCount === 0 and the procedures only process
+      // IsValidated IS NULL rows, so "run validations" alone would be a dead end here.
+      const snackbar = selectMeasurementStateSnackbar({ unresolvedLogged: 0, failedNoLog: 23322, pending: 0, valid: 10108 });
+
+      expect(snackbar).toEqual({ severity: 'info', message: RESET_THEN_VALIDATE_SNACKBAR_MESSAGE(23322) });
+      expect(snackbar?.message).toBe('23322 row(s) not yet validated — reset validation states, then run validations.');
+    });
+
+    it('keeps the run-validations prompt when pending rows exist, summing pending and failed-no-log rows', () => {
+      const snackbar = selectMeasurementStateSnackbar({ unresolvedLogged: 0, failedNoLog: 5, pending: 7, valid: 3 });
+
+      expect(snackbar).toEqual({ severity: 'info', message: PENDING_VALIDATION_SNACKBAR_MESSAGE(12) });
+      expect(snackbar?.message).toBe('12 row(s) not yet validated — run validations to check them.');
+    });
+
+    it('uses the run-validations prompt for a pending-only census', () => {
+      const snackbar = selectMeasurementStateSnackbar({ unresolvedLogged: 0, failedNoLog: 0, pending: 9, valid: 0 });
+
+      expect(snackbar).toEqual({ severity: 'info', message: PENDING_VALIDATION_SNACKBAR_MESSAGE(9) });
+    });
+
+    it('reports success only when every row is valid', () => {
+      const snackbar = selectMeasurementStateSnackbar({ unresolvedLogged: 0, failedNoLog: 0, pending: 0, valid: 42 });
+
+      expect(snackbar).toEqual({ severity: 'success', message: ALL_VALID_SNACKBAR_MESSAGE(42) });
+    });
+
+    it('returns null for an empty census so no misleading snackbar is shown', () => {
+      expect(selectMeasurementStateSnackbar({ unresolvedLogged: 0, failedNoLog: 0, pending: 0, valid: 0 })).toBeNull();
+    });
+
+    it('prioritizes warning over info over success', () => {
+      expect(selectMeasurementStateSnackbar({ unresolvedLogged: 1, failedNoLog: 1, pending: 1, valid: 1 })?.severity).toBe('warning');
+      expect(selectMeasurementStateSnackbar({ unresolvedLogged: 0, failedNoLog: 1, pending: 1, valid: 1 })?.severity).toBe('info');
+      expect(selectMeasurementStateSnackbar({ unresolvedLogged: 0, failedNoLog: 0, pending: 0, valid: 1 })?.severity).toBe('success');
     });
   });
 

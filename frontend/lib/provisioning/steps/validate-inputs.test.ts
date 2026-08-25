@@ -2,6 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { validateInputsStep } from './validate-inputs';
 import type { StepContext, ProvisioningInput } from '../types';
+import {
+  buildQuadratOverlapAcknowledgment,
+  QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+  validateQuadratCollectionDetailed
+} from '../quadrat-collection-validation';
 
 const CATALOG_SCHEMA = 'catalog';
 
@@ -220,6 +225,43 @@ describe('validateInputsStep', () => {
       pool
     );
     await expect(validateInputsStep.run(ctx)).rejects.toThrow(/overlap/);
+  });
+
+  it('accepts overlapping CSV rows when the stored payload carries the overlap acknowledgment', async () => {
+    // The acknowledgment travels inside the run payload, so a re-dispatched (retried) run
+    // with acknowledged field-measurement overlaps must not fail at validate_inputs.
+    const input = makeInput({
+      quadrats: {
+        mode: 'csv',
+        rows: [
+          { quadratName: 'A', startX: 0, startY: 0, dimensionX: 20, dimensionY: 20 },
+          { quadratName: 'B', startX: 10, startY: 10, dimensionX: 20, dimensionY: 20 }
+        ]
+      }
+    });
+    if (input.quadrats.mode !== 'csv') throw new Error('expected csv mode');
+    const summary = validateQuadratCollectionDetailed(input.quadrats.rows, input.plot).overlapSummary;
+    if (!summary) throw new Error('expected overlap summary');
+    input.quadrats.overlapAcknowledgment = buildQuadratOverlapAcknowledgment([summary.layoutSignature]);
+    const ctx = makeCtx(input, pool);
+    await expect(validateInputsStep.run(ctx)).resolves.toBeUndefined();
+  });
+
+  it('acknowledgment does not bypass non-overlap defects (out-of-bounds row still rejects)', async () => {
+    const ctx = makeCtx(
+      makeInput({
+        quadrats: {
+          mode: 'csv',
+          rows: [{ quadratName: 'A', startX: 90, startY: 0, dimensionX: 20, dimensionY: 20 }],
+          overlapAcknowledgment: {
+            statement: QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+            layoutSignatures: ['quadrat-layout-v1-0000000000000000']
+          }
+        }
+      }),
+      pool
+    );
+    await expect(validateInputsStep.run(ctx)).rejects.toThrow(/extends past plot/);
   });
 
   it('rejects out-of-bounds CSV rows (X)', async () => {

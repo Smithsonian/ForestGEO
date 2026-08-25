@@ -21,7 +21,7 @@ describe('Upload File Management', () => {
       files: [
         buildUploadedFile({ name: 'measurements-2024-06-15.csv', user: 'Field Crew', formType: 'measurements' }),
         buildUploadedFile({ name: 'species-update-2024-06-16.csv', user: 'Lead Tech', formType: 'species' }),
-        buildUploadedFile({ name: 'arcgis-review.xlsx', user: 'GIS Analyst', formType: 'arcgis_xlsx' })
+        buildUploadedFile({ name: 'arcgis-review.xlsx', user: 'GIS Analyst', formType: 'measurements' })
       ]
     });
 
@@ -30,11 +30,11 @@ describe('Upload File Management', () => {
     cy.wait('@fetchUploadedFiles').then(interception => {
       const url = new URL(interception.request.url);
       expect(url.searchParams.get('plotID')).to.equal('1');
-      expect(url.searchParams.get('plotName')).to.equal('Luquillo Main Plot');
+      expect(url.searchParams.get('plotName')).to.equal(null);
       expect(url.searchParams.get('census')).to.equal('5');
     });
 
-    cy.contains('Accessing Container: plot1-census5').should('be.visible');
+    cy.contains('Accessing Container: luquillo-plot1-census5').should('be.visible');
     cy.contains('File Count').should('be.visible');
     cy.contains('File Name').should('be.visible');
     cy.contains('measurements-2024-06-15.csv').should('be.visible');
@@ -62,7 +62,7 @@ describe('Upload File Management', () => {
     cy.url().should('include', '/measurementshub/uploadedfiles');
   });
 
-  it('downloads a file using the current id-based container name and legacy fallback', () => {
+  it('downloads a file letting the server derive the schema-scoped container name', () => {
     mockUploadedFilesApi({
       files: [buildUploadedFile({ name: 'measurements-2024-06-15.csv' })],
       downloadUrlBuilder: () => '/measurementshub/uploadedfiles#download-complete'
@@ -79,7 +79,7 @@ describe('Upload File Management', () => {
       const url = new URL(interception.request.url);
       expect(url.searchParams.get('schema')).to.equal('luquillo');
       expect(url.searchParams.get('plotID')).to.equal('1');
-      expect(url.searchParams.get('plotName')).to.equal('Luquillo Main Plot');
+      expect(url.searchParams.get('plotName')).to.equal(null);
       expect(url.searchParams.get('census')).to.equal('5');
       expect(url.searchParams.get('filename')).to.equal('measurements-2024-06-15.csv');
       expect(url.searchParams.get('container')).to.equal(null);
@@ -105,7 +105,7 @@ describe('Upload File Management', () => {
       const url = new URL(interception.request.url);
       expect(url.searchParams.get('schema')).to.equal('luquillo');
       expect(url.searchParams.get('plotID')).to.equal('1');
-      expect(url.searchParams.get('plotName')).to.equal('Luquillo Main Plot');
+      expect(url.searchParams.get('plotName')).to.equal(null);
       expect(url.searchParams.get('census')).to.equal('5');
       expect(url.searchParams.get('filename')).to.equal('measurements-2024-06-15.csv');
       expect(url.searchParams.get('container')).to.equal(null);

@@ -23,8 +23,8 @@ import {
   UploadSessionOwnershipError
 } from '@/config/uploadsessiontracker';
 import ailogger from '@/ailogger';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
-import ConnectionManager from '@/config/connectionmanager';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { auth } from '@/auth';
 import { getSessionUserId, getSessionUserIds, requireAdmin, requireSession } from '@/lib/auth-helpers';
@@ -133,10 +133,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Generate idempotency key if file hash provided
     const idempotencyKey = fileHash ? generateUploadSessionIdempotencyKey(schema, parsedPlotId, parsedCensusId, userId, fileHash, mode) : undefined;
 
-    const uploadSession = await connectionManager.withTransaction(async transactionID => {
+    const uploadSession = await connectionManager.withTransaction(async tx => {
       const scopeLockAcquired = await connectionManager.acquireApplicationLock(
         buildMeasurementScopeLockName(schema, parsedPlotId, parsedCensusId),
-        transactionID,
+        tx.id,
         MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS
       );
 

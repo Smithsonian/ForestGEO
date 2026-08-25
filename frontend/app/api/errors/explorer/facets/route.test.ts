@@ -1,14 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
+
+const ROUTE_CONTEXT = { params: Promise.resolve({}) };
+
+// Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
+// A 'global' admin passes the per-site access gate.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
 
 vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() }
 }));
 
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}));
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}));
   const instance = {
     beginTransaction: vi.fn(async () => 'tx-1'),
     executeQuery: vi.fn(async () => []),
@@ -115,7 +123,8 @@ describe('POST /api/errors/explorer/facets', () => {
             quickSearch: ''
           }
         })
-      }) as any
+      }) as any,
+      ROUTE_CONTEXT
     );
 
     expect(response.status).toBe(HTTPResponses.OK);

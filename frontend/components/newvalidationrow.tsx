@@ -4,8 +4,8 @@ import React, { useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { Box, TableCell, TableRow, TextField } from '@mui/material';
 import { Cancel, Save, Code } from '@mui/icons-material';
-import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
-import { IconButton, Switch, Tooltip, CircularProgress, Snackbar, Button as JoyButton } from '@mui/joy';
+import { ValidationProceduresRDS } from '@/lib/db/definitions/validations';
+import { IconButton, Switch, Tooltip, CircularProgress, Snackbar, Button as JoyButton, Stack, Typography } from '@mui/joy';
 import CodeEditor from '@/components/client/codeeditor';
 
 interface NewValidationRowProps {
@@ -21,6 +21,7 @@ interface NewValidationRowProps {
 const NewValidationRow: React.FC<NewValidationRowProps> = ({ validation, onValidationChange, onSave, onCancel, schemaDetails, isDarkMode, schema }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; color: 'success' | 'danger' | 'warning' }>({
     open: false,
     message: '',
@@ -192,28 +193,36 @@ WHERE cm.IsValidated IS NULL
         {/* Definition / Editor */}
         <TableCell sx={{ position: 'relative' }}>
           <Box sx={{ width: '100%', minHeight: '150px' }} aria-label="Code editor container">
-            {!validation.definition && (
-              <Box sx={{ mb: 1, display: 'flex', justifyContent: 'flex-end' }}>
-                <JoyButton size="sm" variant="outlined" startDecorator={<Code />} onClick={handleUseTemplate} sx={{ fontSize: '0.75rem' }}>
-                  Use Template
+            <Stack spacing={1}>
+              <Typography level="body-sm">
+                Start with the standard measurement-error template, then open Advanced only if the SQL needs customization.
+              </Typography>
+              {!validation.definition && (
+                <JoyButton size="sm" variant="solid" startDecorator={<Code />} onClick={handleUseTemplate}>
+                  Use template
                 </JoyButton>
-              </Box>
-            )}
-            <CodeEditor
-              value={validation.definition || ''}
-              height="150px"
-              setValue={value => onValidationChange('definition', value)}
-              schemaDetails={schemaDetails}
-              isDarkMode={isDarkMode}
-              readOnly={false}
-              schema={schema}
-              enableValidation={true}
-              showFormatButton={true}
-              showTestButton={true}
-              testButtonLabel={isTesting ? 'Testing...' : 'Test Query'}
-              onTestQuery={handleTestQuery}
-              aria-label="New validation script editor"
-            />
+              )}
+              <JoyButton size="sm" variant="outlined" onClick={() => setAdvancedOpen(open => !open)} aria-expanded={advancedOpen}>
+                {advancedOpen ? 'Hide advanced SQL' : 'Advanced SQL'}
+              </JoyButton>
+              {advancedOpen && (
+                <CodeEditor
+                  value={validation.definition || ''}
+                  height="150px"
+                  setValue={value => onValidationChange('definition', value)}
+                  schemaDetails={schemaDetails}
+                  isDarkMode={isDarkMode}
+                  readOnly={false}
+                  schema={schema}
+                  enableValidation={true}
+                  showFormatButton={true}
+                  showTestButton={true}
+                  testButtonLabel={isTesting ? 'Testing...' : 'Test Query'}
+                  onTestQuery={handleTestQuery}
+                  aria-label="New validation script editor"
+                />
+              )}
+            </Stack>
           </Box>
         </TableCell>
 

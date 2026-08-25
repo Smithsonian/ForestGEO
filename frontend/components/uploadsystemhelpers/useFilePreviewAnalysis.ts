@@ -7,12 +7,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DelimiterDetectionResult, DelimiterValidationResult, detectDelimiter, validateDelimiter } from './delimiterdetection';
+import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
 
 export interface UseFilePreviewAnalysisProps {
   file: File;
   expectedHeaders?: string[];
   onDelimiterChange: (delimiter: string) => void;
   initialDelimiter?: string;
+  isArcgisWorkbook?: boolean;
 }
 
 export interface UseFilePreviewAnalysisResult {
@@ -22,6 +24,7 @@ export interface UseFilePreviewAnalysisResult {
   validationResult: DelimiterValidationResult | null;
   isAnalyzing: boolean;
   previewData: string[][];
+  papaHeaders: string[] | null;
   handleDelimiterChange: (newDelimiter: string | null) => void;
 }
 
@@ -40,18 +43,32 @@ export function useFilePreviewAnalysis({
   file,
   expectedHeaders,
   onDelimiterChange,
-  initialDelimiter
+  initialDelimiter,
+  isArcgisWorkbook = false
 }: UseFilePreviewAnalysisProps): UseFilePreviewAnalysisResult {
   const [selectedDelimiter, setSelectedDelimiter] = useState<string>(initialDelimiter || ',');
   const [detectionResult, setDetectionResult] = useState<DelimiterDetectionResult | null>(null);
   const [validationResult, setValidationResult] = useState<DelimiterValidationResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(true);
   const [previewData, setPreviewData] = useState<string[][]>([]);
+  const [papaHeaders, setPapaHeaders] = useState<string[] | null>(null);
   const previousDelimiterRef = useRef<string>('');
 
   // Auto-detect delimiter on component mount
   useEffect(() => {
     const analyzeFile = async () => {
+      // ArcGIS .xlsx uploads are binary workbooks; CSV delimiter/header validation
+      // does not apply. Report a valid result so the flow can reach pre-flight,
+      // where readArcgisWorkbook performs the real validation. This bypass is
+      // scoped to ArcGIS uploads only: a non-ArcGIS .xlsx must still fail CSV
+      // validation since the downstream Papa parser cannot read a binary workbook.
+      if (isArcgisWorkbook && /\.xlsx$/i.test(file.name)) {
+        setDetectionResult(null);
+        setValidationResult({ isValid: true, delimiter: selectedDelimiter, issues: [], preview: [] });
+        setPreviewData([]);
+        setIsAnalyzing(false);
+        return;
+      }
       setIsAnalyzing(true);
       try {
         const detection = await detectDelimiter(file);
@@ -80,7 +97,29 @@ export function useFilePreviewAnalysis({
 
     analyzeFile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, initialDelimiter]);
+  }, [file, initialDelimiter, isArcgisWorkbook]);
+
+  // Papa Parse is the single authoritative source of CSV header identity: the headers reported
+  // to the mapping flow must be exactly what the upload's Papa.parse will key rows against.
+  useEffect(() => {
+    // Clear immediately so a stale header row parsed with the previous delimiter
+    // never outlives its delimiter while the new read is in flight.
+    setPapaHeaders(null);
+    if (isArcgisWorkbook) {
+      return;
+    }
+    let cancelled = false;
+    extractCsvHeaderRow(file, selectedDelimiter)
+      .then(headers => {
+        if (!cancelled) setPapaHeaders(headers);
+      })
+      .catch(() => {
+        if (!cancelled) setPapaHeaders(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [file, selectedDelimiter, isArcgisWorkbook]);
 
   // Revalidate when delimiter changes (but not on initial mount)
   useEffect(() => {
@@ -118,6 +157,7 @@ export function useFilePreviewAnalysis({
     validationResult,
     isAnalyzing,
     previewData,
+    papaHeaders,
     handleDelimiterChange
   };
 }

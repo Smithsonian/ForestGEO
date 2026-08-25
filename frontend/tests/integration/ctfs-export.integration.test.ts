@@ -18,14 +18,14 @@
  * Prerequisites: docker compose up -d mysql
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import { splitSqlFile } from '../../lib/provisioning/sql-runner';
-import { checkFinishedCensus, selectMeasurements, renderArtifact } from '../../lib/ctfs-export';
+import { checkFinishedCensus, selectMeasurements, renderArtifact, renderRebuildViewFullTableArtifact } from '../../lib/ctfs-export';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,7 +34,7 @@ const __dirname = path.dirname(__filename);
 // Paths
 // ---------------------------------------------------------------------------
 
-const APP_TABLES_PATH = path.resolve(__dirname, '../../sqlscripting/tablestructures.sql');
+const APP_TABLES_PATH = path.resolve(__dirname, '../../db/sql/tablestructures.sql');
 const APP_SEED_PATH = path.resolve(__dirname, '../fixtures/ctfs-export/app-db-seed.sql');
 const CTFS_DDL_PATH = path.resolve(__dirname, '../fixtures/csv-to-sql-v2/canonical-ddl.sql');
 const CTFSWEB_STUB_PATH = path.resolve(__dirname, '../fixtures/ctfs-export/install-ctfsweb-stub.sql');
@@ -230,10 +230,36 @@ async function executeCtfsSql(ctfsConn: mysql.Connection, sql: string): Promise<
 // Test suites
 // ---------------------------------------------------------------------------
 
+// Every database created by this file, so the file-level afterAll can prove
+// each one was dropped. This tripwire exists because a teardown that passed
+// `connection.config.database` (undefined after `USE` — mysql2 never updates
+// it) silently executed DROP DATABASE `undefined` and leaked 26 schemas per
+// green run, bloating information_schema and slowing every later run.
+const createdDatabases: string[] = [];
+
+afterAll(async () => {
+  if (createdDatabases.length === 0) return;
+  const conn = await mysql.createConnection({
+    host: DEFAULT_TEST_CONFIG.host,
+    user: DEFAULT_TEST_CONFIG.user,
+    password: DEFAULT_TEST_CONFIG.password,
+    port: DEFAULT_TEST_CONFIG.port
+  });
+  try {
+    const [rows] = await conn.query<mysql.RowDataPacket[]>('SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN (?)', [createdDatabases]);
+    const leaked = rows.map(r => r.SCHEMA_NAME as string);
+    expect(leaked, `Databases leaked by this file (teardown failed to drop them): ${leaked.join(', ')}`).toEqual([]);
+  } finally {
+    await conn.end();
+  }
+});
+
 describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
   let appConn: mysql.Connection;
   let ctfsConn: mysql.Connection;
   let appSchema: string;
+  let appDbName: string;
+  let ctfsDbName: string;
 
   // Each beforeEach builds two fresh databases with unique names so test
   // collisions are impossible even when vitest retries or reruns.
@@ -241,8 +267,9 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
     // Schema names must match safeFormatQuery's forestgeo_/catalog allowlist —
     // selectMeasurements validates the schema through the project-wide helper.
     const stamp = `${process.pid}_${Date.now()}`;
-    const appDbName = `forestgeo_cte_app_${stamp}`;
-    const ctfsDbName = `forestgeo_cte_ctfs_${stamp}`;
+    appDbName = `forestgeo_cte_app_${stamp}`;
+    ctfsDbName = `forestgeo_cte_ctfs_${stamp}`;
+    createdDatabases.push(appDbName, ctfsDbName);
 
     const appCfg = { ...DEFAULT_TEST_CONFIG, database: appDbName };
     const ctfsCfg = { ...DEFAULT_TEST_CONFIG, database: ctfsDbName };
@@ -260,14 +287,14 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
   afterEach(async () => {
     if (appConn) {
       try {
-        await teardownTestDatabase(appConn, { database: appConn.config.database as string });
+        await teardownTestDatabase(appConn, { database: appDbName });
       } catch {
         // best-effort cleanup
       }
     }
     if (ctfsConn) {
       try {
-        await teardownTestDatabase(ctfsConn, { database: ctfsConn.config.database as string });
+        await teardownTestDatabase(ctfsConn, { database: ctfsDbName });
       } catch {
         // best-effort cleanup
       }
@@ -500,28 +527,9 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
   // ViewFullTable handling
   // -------------------------------------------------------------------------
 
-  it('post-load CALLs the installed ctfsweb_webuser.CreateFullView (no longer a SELECT instruction)', async () => {
-    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
-    for (const stmt of splitSqlFile(ctfsSeed)) {
-      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
-    }
-
-    const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
-    // The artifact itself must contain a real CALL outside the load procedure.
-    expect(artifact.sql).toMatch(/CALL ctfsweb_webuser\.CreateFullView\(DATABASE\(\), 'ViewFullTable'\);/);
-
-    const resultSets = await executeCtfsSql(ctfsConn, artifact.sql);
-    // The stub procedure SELECTs a sentinel scope so we can verify it ran.
-    const stubResultSet = resultSets.find(rs => rs.length > 0 && rs[0].scope === 'ctfsweb_webuser.CreateFullView (test stub)');
-    expect(stubResultSet, 'post-load CALL must execute the installed stub procedure').toBeDefined();
-
-    // And a final 'completed' sentinel from renderPostLoadViewFullTableCall.
-    const completedSet = resultSets.find(rs => rs.length > 0 && rs[0].scope === 'ViewFullTable rebuild' && rs[0].status === 'completed');
-    expect(completedSet, 'post-load step must emit the "completed" sentinel').toBeDefined();
-  });
-
-  it('refuses to load when ctfsweb_webuser.CreateFullView is missing', async () => {
-    // Remove the stub to simulate an un-provisioned destination.
+  it('publish artifact does not call or probe CreateFullView and succeeds when the helper is missing', async () => {
+    // Remove the stub to simulate an un-provisioned destination. Publish should
+    // still load data; rebuilding ViewFullTable is now a separate artifact.
     await ctfsConn.query('DROP PROCEDURE IF EXISTS ctfsweb_webuser.CreateFullView');
 
     const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
@@ -530,11 +538,81 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
     }
 
     const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
-    await expect(executeCtfsSql(ctfsConn, artifact.sql)).rejects.toThrow(/creating_ViewFullTable\.sql/);
+    expect(artifact.sql).not.toMatch(/CreateFullView/);
+    expect(artifact.sql).not.toMatch(/creating_ViewFullTable\.sql/);
 
-    // And no data should have landed — Stage 0 SIGNAL fires before Stage 1.
+    await executeCtfsSql(ctfsConn, artifact.sql);
     const after = await captureCtfsCounts(ctfsConn);
-    expect(after.dbh, 'no DBH rows must be inserted when probe fails').toBe(0);
+    expect(after.dbh, 'publish must insert data even when CreateFullView is absent').toBe(1);
+  });
+
+  it('standalone rebuild artifact probes and CALLs the installed ctfsweb_webuser.CreateFullView', async () => {
+    const resultSets = await executeCtfsSql(ctfsConn, renderRebuildViewFullTableArtifact());
+
+    const stubResultSet = resultSets.find(rs => rs.length > 0 && rs[0].scope === 'ctfsweb_webuser.CreateFullView (test stub)');
+    expect(stubResultSet, 'rebuild artifact must execute the installed stub procedure').toBeDefined();
+
+    const completedSet = resultSets.find(rs => rs.length > 0 && rs[0].scope === 'ViewFullTable rebuild' && rs[0].status === 'completed');
+    expect(completedSet, 'rebuild artifact must emit the "completed" sentinel').toBeDefined();
+  });
+
+  it('standalone rebuild artifact fails fast when ctfsweb_webuser.CreateFullView is missing', async () => {
+    await ctfsConn.query('DROP PROCEDURE IF EXISTS ctfsweb_webuser.CreateFullView');
+
+    await expect(executeCtfsSql(ctfsConn, renderRebuildViewFullTableArtifact())).rejects.toThrow(/creating_ViewFullTable\.sql/);
+  });
+
+  // -------------------------------------------------------------------------
+  // 20-character tree tags (D4)
+  // -------------------------------------------------------------------------
+
+  it('exports a 20-character tree tag against the migrated destination (Tree.Tag varchar(20))', async () => {
+    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
+    for (const stmt of splitSqlFile(ctfsSeed)) {
+      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
+    }
+
+    // The canonical fixture now models the migrated CTFS destination
+    // (Tree.Tag varchar(20)), so no per-test ALTER is needed.
+    await appConn.query(`UPDATE \`${appSchema}\`.trees SET TreeTag = '12345678901234567890' WHERE TreeID = 1`);
+
+    const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
+    expect(artifact.sql).toMatch(/CHAR_LENGTH\(Tag\) > 20/);
+
+    await executeCtfsSql(ctfsConn, artifact.sql);
+    const [treeRows] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT Tag FROM Tree WHERE Tag = ?', ['12345678901234567890']);
+    expect(treeRows).toHaveLength(1);
+  });
+
+  it('publish fails at the Stage 0a probe when the destination Tree.Tag is still char(10) (un-migrated)', async () => {
+    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
+    for (const stmt of splitSqlFile(ctfsSeed)) {
+      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
+    }
+
+    // Simulate a destination that predates the Tag widen migration. Even a
+    // short, valid tag must be refused because the probe checks the COLUMN
+    // width, not the value — loading would otherwise truncate or error later.
+    await ctfsConn.query('ALTER TABLE Tree MODIFY COLUMN Tag char(10)');
+
+    const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
+    await expect(executeCtfsSql(ctfsConn, artifact.sql)).rejects.toThrow(/Tree\.Tag is missing or narrower than 20 chars/);
+  });
+
+  it('dry run also fails at the Stage 0a probe against an un-migrated char(10) destination (no false green)', async () => {
+    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
+    for (const stmt of splitSqlFile(ctfsSeed)) {
+      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
+    }
+
+    await ctfsConn.query('ALTER TABLE Tree MODIFY COLUMN Tag char(10)');
+
+    // The dry-run artifact skips Stages 1-10, so this Stage 0a probe is the only
+    // destination-width check a dry run runs. It must still reject — otherwise a
+    // dry run reports success and the real publish later truncates/errors.
+    const dryRunArtifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1', reloadDryRun: true });
+    expect(dryRunArtifact.sql).not.toMatch(/Stage 1:/);
+    await expect(executeCtfsSql(ctfsConn, dryRunArtifact.sql)).rejects.toThrow(/Tree\.Tag is missing or narrower than 20 chars/);
   });
 });
 
@@ -564,11 +642,14 @@ describe('ctfs-export perf baseline', () => {
   let appConn: mysql.Connection;
   let ctfsConn: mysql.Connection;
   let appSchema: string;
+  let appDbName: string;
+  let ctfsDbName: string;
 
   beforeEach(async () => {
     const stamp = `${process.pid}_${Date.now()}`;
-    const appDbName = `forestgeo_perf_app_${stamp}`;
-    const ctfsDbName = `forestgeo_perf_ctfs_${stamp}`;
+    appDbName = `forestgeo_perf_app_${stamp}`;
+    ctfsDbName = `forestgeo_perf_ctfs_${stamp}`;
+    createdDatabases.push(appDbName, ctfsDbName);
 
     appConn = await createTestDatabase({ ...DEFAULT_TEST_CONFIG, database: appDbName });
     ctfsConn = await createTestDatabase({ ...DEFAULT_TEST_CONFIG, database: ctfsDbName });
@@ -582,14 +663,14 @@ describe('ctfs-export perf baseline', () => {
   afterEach(async () => {
     if (appConn) {
       try {
-        await teardownTestDatabase(appConn, { database: appConn.config.database as string });
+        await teardownTestDatabase(appConn, { database: appDbName });
       } catch {
         /* best-effort */
       }
     }
     if (ctfsConn) {
       try {
-        await teardownTestDatabase(ctfsConn, { database: ctfsConn.config.database as string });
+        await teardownTestDatabase(ctfsConn, { database: ctfsDbName });
       } catch {
         /* best-effort */
       }
@@ -644,19 +725,25 @@ describe('ctfs-export perf baseline', () => {
     // 1000 new stems + the one from the seed → 1001 DBH rows.
     expect(await countCtfsRows(ctfsConn, 'DBH', 'CensusID = 1')).toBe(ROW_COUNT + 1);
 
-    const fixtureDir = path.dirname(PERF_BASELINE_PATH);
-    if (!existsSync(fixtureDir)) mkdirSync(fixtureDir, { recursive: true });
+    // Record the wall-clock baseline only when explicitly refreshing it. The
+    // baseline is a git-tracked fixture; writing it on every run produced
+    // spurious diffs (and dropped the file's trailing newline). Refresh on
+    // purpose with UPDATE_PERF_BASELINE=1.
+    if (process.env.UPDATE_PERF_BASELINE) {
+      const fixtureDir = path.dirname(PERF_BASELINE_PATH);
+      if (!existsSync(fixtureDir)) mkdirSync(fixtureDir, { recursive: true });
 
-    const existing = existsSync(PERF_BASELINE_PATH) ? JSON.parse(readFileSync(PERF_BASELINE_PATH, 'utf8')) : {};
-    existing['1k-smoke'] = {
-      rows: ROW_COUNT,
-      buildMs,
-      executeMs: execMs,
-      totalMs,
-      artifactBytes,
-      recordedAt: new Date().toISOString()
-    };
-    writeFileSync(PERF_BASELINE_PATH, JSON.stringify(existing, null, 2));
+      const existing = existsSync(PERF_BASELINE_PATH) ? JSON.parse(readFileSync(PERF_BASELINE_PATH, 'utf8')) : {};
+      existing['1k-smoke'] = {
+        rows: ROW_COUNT,
+        buildMs,
+        executeMs: execMs,
+        totalMs,
+        artifactBytes,
+        recordedAt: new Date().toISOString()
+      };
+      writeFileSync(PERF_BASELINE_PATH, JSON.stringify(existing, null, 2) + '\n');
+    }
 
     // Sanity-only assertion: we recorded a positive duration. No budget.
     expect(totalMs).toBeGreaterThan(0);

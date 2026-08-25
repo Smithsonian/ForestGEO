@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import { PoolConnection } from 'mysql2/promise';
-import { getConn, runQuery } from '@/components/processors/processormacros';
+import { getConn, runQuery } from '@/lib/db/primitives';
 import ailogger from '@/ailogger';
 import {
   runSessionCleanup,
@@ -24,7 +24,9 @@ import {
   findAbandonedSessionsNeedingCleanup,
   ensureUploadSessionsTable
 } from '@/config/uploadsessiontracker';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
+import { auth } from '@/auth';
+import { requireAdmin } from '@/lib/auth-helpers';
 
 /**
  * Cleanup result interface
@@ -128,7 +130,7 @@ async function findStaleTemporaryMeasurements(schema: string, _maxAgeHours: numb
 async function clearStaleTransactions(): Promise<number> {
   try {
     // Import dynamically to avoid circular dependencies
-    const { default: ConnectionManager } = await import('@/config/connectionmanager');
+    const { default: ConnectionManager } = await import('@/lib/db/connectionmanager');
     await ConnectionManager.getInstance().cleanupStaleTransactions();
     return 1; // Cleanup was attempted
   } catch (error: unknown) {
@@ -153,6 +155,10 @@ async function clearStaleTransactions(): Promise<number> {
  * }
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const session = await auth();
+  const adminError = requireAdmin(session);
+  if (adminError) return adminError;
+
   const startTime = Date.now();
   const result: CleanupResult = {
     sessionsMarkedAbandoned: 0,
@@ -288,6 +294,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
  *   - schema: string (required)
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const session = await auth();
+  const adminError = requireAdmin(session);
+  if (adminError) return adminError;
+
   try {
     const { searchParams } = new URL(request.url);
     const schema = searchParams.get('schema');

@@ -5,7 +5,7 @@ import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { QuadratGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
-import { QuadratRDS } from '@/config/sqlrdsdefinitions/zones';
+import { QuadratRDS } from '@/lib/db/definitions/zones';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { usePlotContext } from '@/app/contexts/compat-hooks';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';

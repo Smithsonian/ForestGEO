@@ -4,8 +4,8 @@ import React from 'react';
 import { Box, TableCell, TableRow, Typography } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
-import { Checkbox, IconButton, Textarea, Tooltip } from '@mui/joy';
+import { PostValidationQueriesRDS } from '@/lib/db/definitions/validations';
+import { Button, Checkbox, IconButton, Tooltip } from '@mui/joy';
 import { Done } from '@mui/icons-material';
 import moment from 'moment/moment';
 import { darken } from '@mui/system';
@@ -36,7 +36,12 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
   selectedResults,
   schemaDetails
 }) => {
-  const formattedResults = JSON.stringify(JSON.parse(postValidation.lastRunResult ?? '{}'), null, 2);
+  let formattedResults = postValidation.lastRunResult ?? '{}';
+  try {
+    formattedResults = JSON.stringify(JSON.parse(formattedResults), null, 2);
+  } catch {
+    // Preserve non-JSON server output verbatim instead of crashing the row.
+  }
   const successColor = !isDarkMode ? 'rgba(54, 163, 46, 0.3)' : darken('rgba(54,163,46,0.6)', 0.7);
   const failureColor = !isDarkMode ? 'rgba(255, 0, 0, 0.3)' : darken('rgba(255,0,0,0.6)', 0.7);
 
@@ -110,6 +115,17 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
         >
           <TableCell>{postValidation.queryName}</TableCell>
         </Tooltip>
+        <TableCell>{postValidation.description || '—'}</TableCell>
+        <TableCell>{postValidation.lastRunAt ? moment(postValidation.lastRunAt).format('MMM D, YYYY, h:mm A') : 'Never run'}</TableCell>
+        <TableCell
+          sx={{
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis'
+          }}
+        >
+          {postValidation.lastRunResult || 'No results'}
+        </TableCell>
         <TableCell>
           <Box
             sx={{
@@ -134,22 +150,9 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
                 readOnly={true}
               />
             ) : (
-              <Textarea
-                aria-label={'display for postvalidation query definition'}
-                minRows={1}
-                maxRows={3}
-                value={postValidation.queryDefinition!.replace(/\${(.*?)}/g, (_match: any, p1: string) =>
-                  String(replacements[p1 as keyof typeof replacements] ?? '')
-                )}
-                disabled
-                sx={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  width: '100%',
-                  resize: 'none'
-                }}
-              />
+              <Button size="sm" variant="outlined" onClick={() => handleExpandClick(postValidation.queryID!)}>
+                View query
+              </Button>
             )}
             <Box
               sx={{
@@ -163,17 +166,6 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
               </IconButton>
             </Box>
           </Box>
-        </TableCell>
-        <TableCell>{postValidation.description}</TableCell>
-        <TableCell>{postValidation.lastRunAt && <>{moment(postValidation.lastRunAt).toString()}</>}</TableCell>
-        <TableCell
-          sx={{
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis'
-          }}
-        >
-          {postValidation.lastRunResult || 'No results'}
         </TableCell>
       </TableRow>
 

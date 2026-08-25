@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest) {
+async function handler(request: NextRequest, _context: RouteContext) {
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) {
     return new NextResponse(JSON.stringify({ error: 'no schema variable provided' }), {
@@ -16,18 +17,9 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // SECURITY: Validate schema against whitelist to prevent SQL injection
-  if (!isValidSchema(schema)) {
-    ailogger.error(`[postvalidation API] Invalid schema provided: ${schema}`);
-    return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), {
-      status: HTTPResponses.INVALID_REQUEST
-    });
-  }
-
   const connectionManager = ConnectionManager.getInstance();
   try {
-    // Schema is validated, safe to use in query (with backtick escaping for extra safety)
-    const query = `SELECT QueryID, QueryName, Description FROM \`${schema}\`.postvalidationqueries WHERE IsEnabled IS TRUE;`;
+    const query = safeFormatQuery(schema, 'SELECT QueryID, QueryName, Description FROM ??.postvalidationqueries WHERE IsEnabled IS TRUE;');
     const results = await connectionManager.executeQuery(query);
     if (results.length === 0) {
       return new NextResponse(JSON.stringify({ message: 'No queries found' }), {
@@ -52,3 +44,5 @@ export async function GET(request: NextRequest) {
     await connectionManager.closeConnection();
   }
 }
+
+export const GET = withRouteAuthz('postvalidation', handler, { schema: fromQuery('schema') });

@@ -11,7 +11,7 @@ import { verifyStep } from './verify';
  * ordered AFTER all schema-initialization steps so the catalog never points
  * at an empty or partial schema.
  *
- * Note: `apply_migrations` is deliberately absent. The current sqlscripting/
+ * Note: `apply_migrations` is deliberately absent. The current db/sql/
  * tablestructures.sql already contains every column/table that the unified
  * measurements migrations (16-58) introduce; running them against a fresh
  * schema would fail with "already exists" errors.

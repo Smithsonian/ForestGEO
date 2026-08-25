@@ -6,22 +6,23 @@
  * ALL rows in the collision group as hard failures with error code
  * DUPLICATE_TAG_STEMTAG.
  *
- * Follows the existing content-assertion pattern used by
- * sql-procedure-fix.cy.ts. A true end-to-end test against a live DB
+ * NOTE: this is a static content-assertion (it greps tablestructures.sql),
+ * not a behavioral end-to-end test. A true end-to-end test against a live DB
  * requires running the migration and invoking bulkingestionprocess — see
  * docs/superpowers/specs/cypress-real-db-testing-follow-up.md for the
- * plan to add that capability.
+ * plan to add that capability. Until then this belongs alongside the
+ * integration suite's behavioral coverage rather than in cypress/e2e.
  */
 
 describe('Duplicate TreeTag/StemTag Detection (Stage 2b)', () => {
   it('registers the DUPLICATE_TAG_STEMTAG error code in tablestructures.sql', () => {
-    cy.readFile('sqlscripting/tablestructures.sql').then(content => {
+    cy.readFile('db/sql/tablestructures.sql').then(content => {
       expect(content).to.include("('ingestion', 'DUPLICATE_TAG_STEMTAG', 'Duplicate TreeTag/StemTag within upload batch')");
     });
   });
 
   it('adds Stage 2b within-batch collision detection to bulkingestionprocess', () => {
-    cy.readFile('sqlscripting/storedprocedures.sql').then(content => {
+    cy.readFile('db/sql/storedprocedures.sql').then(content => {
       // The new temp tables exist.
       expect(content).to.include('CREATE TEMPORARY TABLE tag_stemtag_collision_groups');
       expect(content).to.include('CREATE TEMPORARY TABLE tag_stemtag_collision_failures');
@@ -50,7 +51,7 @@ describe('Duplicate TreeTag/StemTag Detection (Stage 2b)', () => {
   });
 
   it('ships migration 49 to register the error code on existing schemas', () => {
-    cy.readFile('db-migrations/unified-measurements-migrations/49_add_duplicate_tag_stemtag_detection.sql').then(content => {
+    cy.readFile('db/migrations/unified-measurements-migrations/49_add_duplicate_tag_stemtag_detection.sql').then(content => {
       expect(content).to.include('INSERT IGNORE INTO measurement_errors');
       expect(content).to.include("'DUPLICATE_TAG_STEMTAG'");
     });
@@ -58,7 +59,7 @@ describe('Duplicate TreeTag/StemTag Detection (Stage 2b)', () => {
 
   it('does not dismantle the existing Stage 2a exact-duplicate detection', () => {
     // Regression guard: the new block is additive. Stage 2a must still exist.
-    cy.readFile('sqlscripting/storedprocedures.sql').then(content => {
+    cy.readFile('db/sql/storedprocedures.sql').then(content => {
       expect(content).to.include('CREATE TEMPORARY TABLE duplicate_failures');
       expect(content).to.include("'DUPLICATE_ENTRY'");
     });

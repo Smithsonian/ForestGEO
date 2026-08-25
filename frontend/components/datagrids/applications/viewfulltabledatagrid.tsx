@@ -3,7 +3,7 @@
 
 import React, { useState } from 'react';
 import { ViewFullTableGridColumns } from '@/components/client/datagridcolumns';
-import { ViewFullTableRDS } from '@/config/sqlrdsdefinitions/views';
+import { ViewFullTableRDS } from '@/lib/db/definitions/views';
 import { useSiteContext } from '@/app/contexts/compat-hooks';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { CachedOutlined } from '@mui/icons-material';
@@ -41,6 +41,7 @@ export default function ViewFullTableDataGrid() {
     plotGlobalX: 0,
     plotGlobalY: 0,
     plotGlobalZ: 0,
+    plotGlobalCoordinatesEPSG: 0,
     plotShape: '',
     plotDescription: '',
     plotDefaultDimensionUnits: '',

@@ -87,7 +87,7 @@ export function DefaultContextFallback({ missing, onRetry }: { missing: string[]
             level="body-md"
             sx={{
               textTransform: 'capitalize',
-              color: 'warning.500',
+              color: 'warning.400',
               fontWeight: 'md'
             }}
           >

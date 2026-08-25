@@ -1,7 +1,7 @@
 import type { Session } from 'next-auth';
 import MapperFactory from '@/config/datamapper';
 import type { UserAuthRoles } from '@/config/macros';
-import type { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
+import type { SitesRDS, SitesResult } from '@/lib/db/definitions/zones';
 import ailogger from '@/ailogger';
 
 const USER_AUTH_ROLES = new Set<UserAuthRoles>(['global', 'db admin', 'lead technician', 'field crew', 'pending']);

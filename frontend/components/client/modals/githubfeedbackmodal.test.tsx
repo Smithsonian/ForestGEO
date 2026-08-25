@@ -5,7 +5,7 @@ import { createGitHubIssue } from '@/app/actions/github';
 
 // The component destructures { submitForm, isSubmitting } from useFormSubmission.
 const mockUseFormSubmission = vi.fn();
-vi.mock('@/hooks/useAsyncOperation', () => ({
+vi.mock('@/app/hooks/useAsyncOperation', () => ({
   useFormSubmission: (...args: unknown[]) => mockUseFormSubmission(...args)
 }));
 

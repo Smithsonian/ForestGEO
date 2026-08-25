@@ -79,3 +79,12 @@ th {
   background-color: var(--sl-color-gray-2);
   color: var(--sl-color-black);
 }
+
+/* The global --sl-color-white override (set at :root above) forces white
+   admonition body text in light mode, which is unreadable on the pale callout
+   backgrounds (e.g. caution ≈ hsl(41, 90%, 88%)). Pin admonition text to the
+   dark color in light mode. Fixes all four admonition types (note/tip/caution/
+   danger), which share the bug. */
+:root[data-theme='light'] .starlight-aside {
+  color: var(--sl-color-black);
+}

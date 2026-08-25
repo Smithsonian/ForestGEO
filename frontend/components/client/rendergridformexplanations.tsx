@@ -31,9 +31,10 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
     .trim();
 
   const mappedForm = getFormForDataGrid(datagridType);
+  const mappedFormHeaders = mappedForm ? TableHeadersByFormType[mappedForm] : [];
 
-  const formMatches = TableHeadersByFormType[mappedForm].find(obj => obj.label === 'status')?.explanation?.match(categoryRegex);
-  const formCleanedString = TableHeadersByFormType[mappedForm]
+  const formMatches = mappedFormHeaders.find(obj => obj.label === 'status')?.explanation?.match(categoryRegex);
+  const formCleanedString = mappedFormHeaders
     .find(obj => obj.label === 'status')
     ?.explanation?.replace(categoryRegex, '')
     .replace(/\s*,\s*/g, '')
@@ -85,7 +86,7 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                 color: 'primary.solidBg'
               }}
             >
-              🔄 Understanding Grid and Upload Form Headers
+              Header reference
             </Typography>
             <Typography id="accordion-help-text" level="body-xs" sx={{ display: 'none' }} aria-hidden="true">
               Expand to view detailed header mappings between grid and form
@@ -118,7 +119,7 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                   fontWeight: 600
                 }}
               >
-                💡 <strong>Pro Tip:</strong> Form headers are <strong>bold</strong> if required for upload!
+                <strong>Tip:</strong> Form headers are <strong>bold</strong> if required for upload!
               </FormHelperText>
             </Box>
 
@@ -168,7 +169,7 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                           fontSize: '0.7rem'
                         }}
                       >
-                        📊 Grid Header
+                        Grid header
                       </Chip>
                       {header.category === 'required' && (
                         <Chip
@@ -239,7 +240,7 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                         fontSize: '0.7rem'
                       }}
                     >
-                      ⬇️ MAPS TO
+                      Maps to
                     </Chip>
                   </Divider>
 
@@ -256,7 +257,7 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                         fontSize: '0.7rem'
                       }}
                     >
-                      📝 Form Header
+                      Form header
                     </Chip>
                     <Typography
                       id={`form-header-label-${index}`}

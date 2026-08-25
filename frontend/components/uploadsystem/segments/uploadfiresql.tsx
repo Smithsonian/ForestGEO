@@ -2,8 +2,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
-import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
-import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
+import {
+  FileCollectionRowSet,
+  FileRow,
+  FileRowSet,
+  FormType,
+  getTableHeaders,
+  RequiredTableHeadersByFormType,
+  SourceFormat
+} from '@/config/macros/formdetails';
+import { Alert, Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import Papa, { ParseResult } from 'papaparse';
 import moment from 'moment';
@@ -26,6 +34,38 @@ import {
 import { abortChunkProcessingAfterPermanentUploadFailure, shouldTimeoutPausedParser } from '@/components/uploadsystemhelpers/uploadqueueguards';
 import { generateShortBatchID } from '@/config/utils';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
+import { chooseEffectiveCsvMapping, headerBasisMatches, type CsvMappingRejectionCode } from '@/lib/column-mapping/mapping';
+import type { ColumnMapping } from '@/lib/column-mapping/types';
+import { extractCsvHeaderRow } from '@/lib/column-mapping/csv-headers';
+import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, resolveHeaders, transformHeaderFromPlan } from '@/lib/column-mapping/resolution';
+import { aliasesFor, makeLegacyCsvHeaderKey } from '@/lib/column-mapping/fields';
+import { transformMeasurementValue, validateMeasurementRow } from '@/lib/column-mapping/measurement-rows';
+import { UploadMode } from '@/config/uploadmodes';
+import { evaluateUploadReconciliation, type UploadReconciliationVerdict } from '@/lib/ingestion/reconciliation';
+import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
+import { parseQuadratOverlapSummaries } from '@/lib/ingestion/quadrat-overlap-contract';
+
+const CSV_MAPPING_REJECTION_SENTENCE: Record<CsvMappingRejectionCode, string> = {
+  stale: 'the saved column mapping was built from different headers',
+  invalid: 'the saved column mapping is no longer valid for this file'
+};
+
+class UploadReconciliationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UploadReconciliationError';
+  }
+}
+
+class QuadratOverlapAcknowledgmentRequiredClientError extends Error {
+  constructor(
+    message: string,
+    readonly overlapSummaries: QuadratOverlapSummary[]
+  ) {
+    super(message);
+    this.name = 'QuadratOverlapAcknowledgmentRequiredClientError';
+  }
+}
 
 function createAbortError(message: string): Error {
   const error = new Error(message);
@@ -78,11 +118,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   acceptedFiles,
   uploadForm,
   uploadMode,
+  sourceFormat,
   setIsDataUnsaved,
   schema,
   setUploadError,
   setReviewState,
-  selectedDelimiters
+  selectedDelimiters,
+  arcgisImportSession,
+  columnMappings,
+  quadratOverlapAcknowledgment,
+  onQuadratOverlapAcknowledgmentRequired
 }) => {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -127,6 +172,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [uploaded, setUploaded] = useState<boolean>(false);
   const [processed, setProcessed] = useState<boolean>(false);
   const [_verificationStatus, setVerificationStatus] = useState<string>('');
+  // Per-file notices shown when upload-time mapping resolution differs from what the user reviewed.
+  const [mappingWarnings, setMappingWarnings] = useState<string[]>([]);
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
   const [verificationStep, setVerificationStep] = useState<number>(0);
   const [totalVerificationSteps, setTotalVerificationSteps] = useState<number>(0);
@@ -137,7 +184,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const uploadRunningRef = useRef<boolean>(false);
   const batchProcessingStartedRef = useRef<boolean>(false);
   const lastPreparedUploadAttemptRef = useRef<string>('');
-
   // Transaction-aware queue for managing concurrent operations
   const queue = useMemo(() => createTransactionAwareQueue(connectionLimit), [connectionLimit]);
 
@@ -149,6 +195,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   // Track expected row counts per file for end-to-end verification
   const expectedRowCounts = useRef<Map<string, number>>(new Map());
   const expectedTemporaryRowCounts = useRef<Map<string, number>>(new Map());
+  const persistedRejectedRowCounts = useRef<Map<string, number>>(new Map());
+  // Pre-stage rejections the SERVER persisted inside its own commit transaction (ArcGIS
+  // dropped-duplicate rows). These land under the file's real batchID, so verifysession
+  // already counts them in failedCount — they satisfy the rejected-row accounting check
+  // but must NOT be added to the reconciliation's failedRecords a second time.
+  const serverAccountedRejectedRowCounts = useRef<Map<string, number>>(new Map());
   const measurementBatchIDs = useRef<Map<string, string>>(new Map());
 
   const getRequiredUploadSessionId = useCallback((): string => {
@@ -186,12 +238,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     return [
       uploadForm ?? 'no-form',
       uploadMode ?? 'no-mode',
+      sourceFormat ?? SourceFormat.csv,
       schema ?? 'no-schema',
       currentPlotID ?? 'no-plot',
       currentCensusID ?? 'no-census',
-      fileSignature
+      fileSignature,
+      sourceFormat === SourceFormat.arcgis_xlsx ? (arcgisImportSession?.importSessionId ?? 'no-arcgis-session') : 'no-arcgis-session'
     ].join('::');
-  }, [acceptedFiles, currentCensusID, currentPlotID, schema, selectedDelimiters, uploadForm, uploadMode]);
+  }, [acceptedFiles, arcgisImportSession?.importSessionId, currentCensusID, currentPlotID, schema, selectedDelimiters, sourceFormat, uploadForm, uploadMode]);
 
   const _generateErrorRowId = (row: FileRow) =>
     `row-${Object.values(row)
@@ -268,6 +322,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const buildClientResponseError = useCallback(
     async (response: Response, context: string): Promise<Error> => {
       const payload = await readResponsePayload(response);
+      const overlapSummaries = parseQuadratOverlapSummaries(payload);
+      if (response.status === 400 && overlapSummaries) {
+        return new QuadratOverlapAcknowledgmentRequiredClientError(getApiErrorMessage(payload) ?? 'Quadrat overlaps require acknowledgment.', overlapSummaries);
+      }
       const uploadSessionConflict = parseUploadSessionConflict(payload);
 
       if (response.status === 409 && uploadSessionConflict?.restartRequired) {
@@ -366,47 +424,49 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   );
 
   const pushErrorRowsToFailedMeasurements = useCallback(
-    async (errorRows: FileRow[], fileName: string) => {
-      if (errorRows.length === 0) return;
+    async (errorRows: FileRow[], fileName: string): Promise<number> => {
+      if (errorRows.length === 0) return 0;
 
-      try {
-        const failedMeasurementsData = errorRows.map(row => ({
-          plotID: currentPlot?.plotID ?? -1,
-          censusID: currentCensus?.dateRanges?.[0]?.censusID ?? -1,
-          tag: row.tag || null,
-          stemTag: row.stemtag || null,
-          spCode: row.spcode || null,
-          quadrat: row.quadrat || null,
-          x: row.lx || null,
-          y: row.ly || null,
-          dbh: row.dbh || null,
-          hom: row.hom || null,
-          date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
-          codes: row.codes || null,
-          comments: row.comments || null,
-          failureReasons: row.failureReason || 'Unknown error'
-        }));
+      const failedMeasurementsData = errorRows.map(row => ({
+        plotID: currentPlot?.plotID ?? -1,
+        censusID: currentCensus?.dateRanges?.[0]?.censusID ?? -1,
+        tag: row.tag || null,
+        stemTag: row.stemtag || null,
+        spCode: row.spcode || null,
+        quadrat: row.quadrat || null,
+        x: row.lx || null,
+        y: row.ly || null,
+        dbh: row.dbh || null,
+        hom: row.hom || null,
+        date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
+        codes: row.codes || null,
+        comments: row.comments || null,
+        failureReasons: row.failureReason || 'Unknown error'
+      }));
 
-        const response = await fetchWithTimeout(
-          `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges?.[0]?.censusID}?fileID=${encodeURIComponent(fileName)}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(failedMeasurementsData)
-          },
-          30000
-        );
+      const response = await fetchWithTimeout(
+        `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges?.[0]?.censusID}?fileID=${encodeURIComponent(fileName)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(failedMeasurementsData)
+        },
+        30000
+      );
 
-        if (!response.ok) {
-          throw new Error(`Failed to push error rows to failedmeasurements: ${response.status}`);
-        }
-
-        ailogger.info(`Successfully pushed ${errorRows.length} error rows from ${fileName} to failedmeasurements table`);
-      } catch (error: unknown) {
-        const errorObj = error instanceof Error ? error : new Error(String(error));
-        ailogger.error(`Failed to push error rows from ${fileName} to failedmeasurements:`, errorObj);
-        // Don't throw - we don't want to stop the upload process because of error row insertion failures
+      if (!response.ok) {
+        throw new Error(`Failed to persist ${errorRows.length} rejected row(s) for ${fileName}: HTTP ${response.status}`);
       }
+
+      const payload = (await response.json()) as { rowCount?: unknown };
+      const persistedCount = Number(payload.rowCount);
+      if (!Number.isInteger(persistedCount) || persistedCount !== errorRows.length) {
+        throw new Error(`Rejected-row persistence mismatch for ${fileName}: sent ${errorRows.length}, API confirmed ${String(payload.rowCount)}.`);
+      }
+
+      persistedRejectedRowCounts.current.set(fileName, (persistedRejectedRowCounts.current.get(fileName) ?? 0) + persistedCount);
+      ailogger.info(`Persisted ${persistedCount} rejected row(s) from ${fileName} for final reconciliation`);
+      return persistedCount;
     },
     [currentPlot?.plotID, currentCensus?.dateRanges, schema, fetchWithTimeout]
   );
@@ -494,7 +554,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   }, [uploadForm, processed, completedChunks, processedChunks, verificationStep, uploaded, totalChunks, totalBatches, isVerifying, totalVerificationSteps]);
 
   const uploadToSql = useCallback(
-    async (fileData: FileCollectionRowSet, fileName: string, batchID?: string, _retryCount = 0) => {
+    async (
+      fileData: FileCollectionRowSet | null,
+      fileName: string,
+      batchID?: string,
+      rawPayload?: { rawRows: FileRow[]; csvHeaders: string[]; mapping: ColumnMapping | null; delimiter: string }
+    ) => {
       if (!isMountedRef.current) {
         throw createAbortError(`Upload cancelled before starting ${fileName}`);
       }
@@ -522,17 +587,38 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 'Content-Type': 'application/json',
                 'x-upload-session-id': getRequiredUploadSessionId()
               },
-              body: JSON.stringify({
-                schema,
-                formType: uploadForm,
-                uploadMode,
-                fileName,
-                plot: currentPlot,
-                census: currentCensus,
-                user: session?.user?.name ?? null,
-                fileRowSet: fileData[fileName],
-                ...(batchID ? { batchID } : {})
-              })
+              body: JSON.stringify(
+                rawPayload
+                  ? {
+                      schema,
+                      formType: uploadForm,
+                      quadratOverlapAcknowledgment: uploadForm === FormType.quadrats ? quadratOverlapAcknowledgment : undefined,
+                      sourceFormat: sourceFormat ?? SourceFormat.csv,
+                      uploadMode,
+                      fileName,
+                      plot: currentPlot,
+                      census: currentCensus,
+                      user: session?.user?.name ?? null,
+                      rawRows: rawPayload.rawRows,
+                      csvHeaders: rawPayload.csvHeaders,
+                      mapping: rawPayload.mapping,
+                      delimiter: rawPayload.delimiter,
+                      ...(batchID ? { batchID } : {})
+                    }
+                  : {
+                      schema,
+                      formType: uploadForm,
+                      quadratOverlapAcknowledgment: uploadForm === FormType.quadrats ? quadratOverlapAcknowledgment : undefined,
+                      sourceFormat: sourceFormat ?? SourceFormat.csv,
+                      uploadMode,
+                      fileName,
+                      plot: currentPlot,
+                      census: currentCensus,
+                      user: session?.user?.name ?? null,
+                      fileRowSet: fileData?.[fileName] ?? {},
+                      ...(batchID ? { batchID } : {})
+                    }
+              )
             },
             300000
           ); // 5 minute timeout for large batches
@@ -641,12 +727,97 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       // If we reach here, all retries failed but error wasn't thrown (shouldn't happen)
       throw new Error(`Upload failed for ${fileName} after ${maxRetries + 1} attempts`);
     },
-    [uploadForm, uploadMode, currentPlot, currentCensus, session, schema, fetchWithTimeout, getRequiredUploadSessionId, isMountedRef, buildClientResponseError]
+    [
+      uploadForm,
+      sourceFormat,
+      uploadMode,
+      currentPlot,
+      currentCensus,
+      session,
+      schema,
+      quadratOverlapAcknowledgment,
+      fetchWithTimeout,
+      getRequiredUploadSessionId,
+      isMountedRef,
+      buildClientResponseError
+    ]
+  );
+
+  const submitArcgisImportSession = useCallback(
+    async (file: File, batchID?: string) => {
+      if (!arcgisImportSession) {
+        throw new Error(`ArcGIS submit failed: no import session found for ${file.name}. Re-run the pre-flight step.`);
+      }
+      if (arcgisImportSession.fileName !== file.name) {
+        throw new Error(`ArcGIS submit failed: import session file ${arcgisImportSession.fileName} does not match selected file ${file.name}.`);
+      }
+      if (arcgisImportSession.rowCount <= 0) {
+        throw new Error(`ArcGIS submit failed: import session ${arcgisImportSession.importSessionId} contains no rows.`);
+      }
+      // Seed expected-row-count maps so the post-upload verification block and session
+      // reconciliation cover ArcGIS uploads the same way they cover Papa-parsed CSV uploads.
+      const stagedRowCount = arcgisImportSession.rowCount;
+      expectedRowCounts.current.set(file.name, stagedRowCount);
+      expectedTemporaryRowCounts.current.set(file.name, stagedRowCount);
+
+      const response = await fetchWithTimeout(
+        `/api/arcgis/commit`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-upload-session-id': getRequiredUploadSessionId() },
+          body: JSON.stringify({
+            schema,
+            plotID: currentPlot?.plotID,
+            censusID: currentCensus?.dateRanges?.[0]?.censusID,
+            importSessionId: arcgisImportSession.importSessionId,
+            fileName: file.name,
+            batchID,
+            uploadMode
+          })
+        },
+        300000
+      );
+      if (!response.ok) {
+        throw await buildClientResponseError(response, `committing ArcGIS import for ${file.name}`);
+      }
+      const payload = (await response.json()) as { rowCount?: number; alreadyCommitted?: boolean };
+      const committedTemporaryRows = Number.isFinite(Number(payload.rowCount)) ? Number(payload.rowCount) : stagedRowCount;
+      expectedTemporaryRowCounts.current.set(file.name, committedTemporaryRows);
+      // Rows the commit dropped (INSERT IGNORE duplicates) were persisted by the server as
+      // unresolved failure rows inside the same transaction — a successful commit means they
+      // are durably accounted for, and the final reconciliation verdict still checks the
+      // actual DB counts. Record them so the rejected-row accounting check accepts the file.
+      const serverAccountedRejections = stagedRowCount - committedTemporaryRows;
+      if (serverAccountedRejections > 0) {
+        serverAccountedRejectedRowCounts.current.set(file.name, serverAccountedRejections);
+        ailogger.info(`ArcGIS commit for ${file.name}: ${serverAccountedRejections} dropped row(s) persisted server-side as unresolved failures.`);
+      }
+      if (payload.alreadyCommitted) {
+        ailogger.info(`ArcGIS import session ${arcgisImportSession.importSessionId} was already committed; continuing idempotently.`);
+      }
+      if (isMountedRef.current) setCompletedChunks(prev => prev + 1);
+    },
+    [
+      arcgisImportSession,
+      schema,
+      currentPlot,
+      currentCensus,
+      uploadMode,
+      fetchWithTimeout,
+      getRequiredUploadSessionId,
+      buildClientResponseError,
+      isMountedRef,
+      setCompletedChunks
+    ]
   );
 
   const parseFileInChunks = useCallback(
     async (file: File, delimiter: string, estimatedChunkCount: number, fileBatchID?: string) => {
       queue.clear();
+      if (sourceFormat === SourceFormat.arcgis_xlsx) {
+        await submitArcgisImportSession(file, fileBatchID);
+        return;
+      }
       const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
       const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
       const parsingInvalidRows: FileRow[] = [];
@@ -654,8 +825,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         extraColumnRows: 0,
         extraColumnSample: null as string | null,
         invalidDateCount: 0,
-        invalidDateSamples: new Set<string>()
+        invalidDateSamples: new Set<string>(),
+        mappingFallbackReason: undefined as string | undefined
       };
+      let csvHeaders: string[] | null = null;
 
       if (!expectedHeaders || !requiredHeaders) {
         ailogger.error(`No headers defined for form type: ${uploadForm}`);
@@ -663,6 +836,24 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
         }
         return;
+      }
+
+      // Read the header row up front, outside the delimiter-validation try/catch below, so a
+      // failed read cannot be swallowed and silently downgrade a confirmed mapping to legacy
+      // header heuristics. For mapping-required uploads a failed read aborts the whole upload.
+      const mappingRequired = uploadForm === FormType.measurements && uploadMode !== UploadMode.REVISIONS;
+      try {
+        csvHeaders = await extractCsvHeaderRow(file, delimiter);
+      } catch (headerReadError) {
+        const err = headerReadError instanceof Error ? headerReadError : new Error(String(headerReadError));
+        if (mappingRequired) {
+          throw markFatalUploadError(
+            new Error(
+              `Could not read the header row of ${file.name} (${err.message}); upload blocked because the column mapping cannot be verified against the file.`
+            )
+          );
+        }
+        ailogger.warn(`Header extraction failed for ${file.name}; continuing with legacy header handling.`, err);
       }
 
       // Validate delimiter and headers before parsing
@@ -673,13 +864,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           expectedHeaders.map(h => h.label)
         );
         if (!validation.isValid) {
-          ailogger.warn(`Delimiter validation issues for file ${file.name}:`, validation.issues);
+          ailogger.warn(
+            `Delimiter validation issues for file ${file.name}:`,
+            validation.issues.map(i => i.message)
+          );
           // Log issues but continue parsing - user may have non-standard format that still works
         }
 
-        // Enhanced header validation with mapping feedback
-        if (validation.preview && validation.preview.length > 0) {
-          const csvHeaders = validation.preview[0];
+        // Enhanced header validation with mapping feedback. Headers come from the same
+        // Papa-based extractor that seeded the mapping UI, so the mapping plan and the
+        // upload's Papa.parse agree on header identity by construction.
+        if (csvHeaders && validation.preview && validation.preview.length > 0) {
           const requiredHeaderLabels = requiredHeaders.map(h => h.label);
           const mappingResults: string[] = [];
           const missingRequired: string[] = [];
@@ -714,196 +909,57 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         ailogger.error(`Error validating delimiter for file ${file.name}:`, error instanceof Error ? error : new Error(String(error)));
       }
 
-      const transformHeader = (header: string) => {
-        const normalizedHeader = header
-          .trim()
-          .toLowerCase()
-          .replace(/[_\s-]/g, '');
-
-        // Map common header variations to expected field names
-        const headerMappings: Record<string, string> = {
-          tag: 'tag',
-          treetag: 'tag',
-          stemtag: 'stemtag',
-          stem: 'stemtag',
-          spcode: 'spcode',
-          species: 'spcode',
-          speciescode: 'spcode',
-          sp: 'spcode',
-          quadrat: 'quadrat',
-          quad: 'quadrat',
-          quadratname: 'quadrat',
-          lx: 'lx',
-          localx: 'lx',
-          x: 'lx',
-          xcoord: 'lx',
-          ly: 'ly',
-          localy: 'ly',
-          y: 'ly',
-          ycoord: 'ly',
-          dbh: 'dbh',
-          diameter: 'dbh',
-          hom: 'hom',
-          height: 'hom',
-          heightofmeasurement: 'hom',
-          date: 'date',
-          measurementdate: 'date',
-          dateof: 'date',
-          codes: 'codes',
-          code: 'codes',
-          attributes: 'codes',
-          attributecodes: 'codes',
-          comments: 'comments',
-          comment: 'comments',
-          description: 'comments',
-          notes: 'comments'
-        };
-
-        const mappedHeader = headerMappings[normalizedHeader];
-        if (mappedHeader) {
-          return mappedHeader;
-        }
-
-        // If no mapping found, return normalized header (lowercase, no underscores/spaces/hyphens)
-        // This ensures consistent key names for processPersonnel, processSpecies, etc.
-        return normalizedHeader;
-      };
-      const validateRow = (row: FileRow): boolean => {
-        const errors: string[] = [];
-        let extraData = false;
-
-        const missingFields = requiredHeaders.filter(header => {
-          const value = row[header.label];
-          return value === null || value === '' || value === 'NA' || value === 'NULL';
-        });
-        if (missingFields.length > 0) {
-          errors.push(`Missing required fields: ${missingFields.map(f => f.label).join(', ')}`);
-        }
-
-        if (row['__parsed_extra'] !== undefined) {
-          // Extra columns are common when re-uploading exported data with
-          // reference columns like stemID, treeID, or errors. Track once per file
-          // instead of logging once per row.
-          parsingDiagnostics.extraColumnRows += 1;
-          if (!parsingDiagnostics.extraColumnSample) {
-            parsingDiagnostics.extraColumnSample = JSON.stringify(row['__parsed_extra']);
-          }
-          extraData = true;
-        }
-
-        // Enhanced duplicate detection reporting
-        if (uploadForm === 'measurements') {
-          const { tag, stemtag } = row;
-          if (tag && stemtag) {
-            // Check for suspicious tag values that might indicate parsing issues
-            const tagStr = String(tag);
-            const stemtagStr = String(stemtag);
-
-            if (tagStr.includes(delimiter) || stemtagStr.includes(delimiter)) {
-              errors.push(`Tag values contain delimiter character "${delimiter}": tag="${tagStr}", stemtag="${stemtagStr}". This suggests parsing error.`);
+      // Non-measurements forms and revision uploads only. The measurements flow resolves headers
+      // through lib/column-mapping/resolution (seeded mapping when the user confirmed none). The
+      // legacy fallback (makeLegacyCsvHeaderKey) scopes the CSV_ALIASES source of truth to the form:
+      // measurements (incl. revisions) alias; other forms identity-normalize so a taxonomy `species`
+      // column is not hijacked into `spcode`.
+      const mappingFlowActive = mappingRequired && csvHeaders !== null && csvHeaders.length > 0;
+      // When the mapping flow is active the server is the single authority over how columns are
+      // keyed: the client ships raw rows and the server resolves/keys/validates them. Legacy
+      // (non-measurements / revisions) uploads keep keying locally below.
+      const serverResolves = mappingFlowActive;
+      const headerPlan = mappingFlowActive
+        ? (() => {
+            const chosen = chooseEffectiveCsvMapping(columnMappings?.[file.name], csvHeaders!);
+            const clause = chosen.reasonCode ? CSV_MAPPING_REJECTION_SENTENCE[chosen.reasonCode] : undefined;
+            if (clause) {
+              parsingDiagnostics.mappingFallbackReason = clause;
+              const userWarning = `${file.name}: ${clause}, so its columns were matched automatically from the file's headers instead.`;
+              if (isMountedRef.current) {
+                // Deduplicate so a restarted upload attempt does not repeat the same notice.
+                setMappingWarnings(prev => (prev.includes(userWarning) ? prev : [...prev, userWarning]));
+              }
             }
+            return resolveHeaders(csvHeaders!, chosen.mapping, aliasesFor(SourceFormat.csv), CSV_RESOLVE_OPTIONS);
+          })()
+        : null;
+      // On the server-resolved path we send raw headers + raw string values so the server is
+      // authoritative over keying; Papa treats `undefined` transforms as identity.
+      const transformHeader = serverResolves ? undefined : headerPlan ? transformHeaderFromPlan(headerPlan) : makeLegacyCsvHeaderKey(uploadForm as FormType);
 
-            if (tagStr.length > 50 || stemtagStr.length > 50) {
-              errors.push(
-                `Unusually long tag values detected: tag="${tagStr.slice(0, 30)}...", stemtag="${stemtagStr.slice(0, 30)}...". This may indicate concatenated fields due to parsing error.`
-              );
+      // Per-cell transform delegates to the shared pure function. The shared function returns the
+      // original string when a measurement date fails to parse; detect that here to preserve the
+      // invalid-date diagnostics the inline transform used to record.
+      const transform = serverResolves
+        ? undefined
+        : (value: string, field: string) => {
+            const transformed = transformMeasurementValue(value, field, uploadForm as FormType) as string;
+            if (uploadForm === FormType.measurements && field === 'date' && transformed === value && value !== 'NA' && value !== 'NULL' && value !== '') {
+              parsingDiagnostics.invalidDateCount += 1;
+              if (parsingDiagnostics.invalidDateSamples.size < 3) {
+                parsingDiagnostics.invalidDateSamples.add(value);
+              }
             }
-          }
-        }
-
-        for (const [key, value] of Object.entries(row)) {
-          if (value !== null && !['tag', 'stemtag'].includes(key)) {
-            // tags and stemtags are NOT decimals
-            const num = parseFloat(value);
-            if (!isNaN(num) && (num < 0 || num > 999999.999999)) {
-              errors.push(`Decimal value for ${key} is out of range: ${value}`);
-            }
-          }
-        }
-
-        const rejectRow = errors.length > 0;
-        if (rejectRow) {
-          parsingInvalidRows.push({
-            ...row,
-            failureReason: errors.join('|'),
-            ...(extraData ? { excessData: row['__parsed_extra'] } : {})
-          });
-        }
-
-        return !rejectRow;
-      };
-
-      const transform = (value: string, field: string) => {
-        if (value === 'NA' || value === 'NULL' || value === '') return null;
-
-        // Enhanced date handling with multiple format support
-        if (uploadForm === FormType.measurements && field === 'date') {
-          const dateFormats = [
-            'YYYY-MM-DD',
-            'MM/DD/YYYY',
-            'DD/MM/YYYY',
-            'YYYY/MM/DD',
-            'MM-DD-YYYY',
-            'DD-MM-YYYY',
-            'YYYY.MM.DD',
-            'MM.DD.YYYY',
-            'DD.MM.YYYY',
-            'MMMM DD, YYYY',
-            'MMM DD, YYYY',
-            'DD MMM YYYY',
-            'DD MMMM YYYY',
-            'YYYY-MM-DD HH:mm:ss',
-            'MM/DD/YYYY HH:mm:ss',
-            'DD/MM/YYYY HH:mm:ss',
-            'YYYY-MM-DDTHH:mm:ss',
-            'YYYY-MM-DDTHH:mm:ss.SSS',
-            'YYYY-MM-DDTHH:mm:ss.SSSZ'
-          ];
-
-          // Try each format
-          for (const format of dateFormats) {
-            const parsed = moment(value.trim(), format, true);
-            if (parsed.isValid()) {
-              return parsed.toDate();
-            }
-          }
-
-          // Try moment's flexible parsing as fallback
-          const flexible = moment(value.trim());
-          if (flexible.isValid()) {
-            return flexible.toDate();
-          }
-
-          parsingDiagnostics.invalidDateCount += 1;
-          if (parsingDiagnostics.invalidDateSamples.size < 3) {
-            parsingDiagnostics.invalidDateSamples.add(value);
-          }
-          return value; // Return original value if parsing fails
-        }
-
-        // Enhanced coordinate precision handling
-        if (uploadForm === FormType.measurements && (field === 'lx' || field === 'ly')) {
-          const numValue = parseFloat(value);
-          if (!isNaN(numValue)) {
-            // Round to 6 decimal places for coordinate precision
-            return Math.round(numValue * 1000000) / 1000000;
-          }
-        }
-
-        // Enhanced numeric field handling
-        if (uploadForm === FormType.measurements && (field === 'dbh' || field === 'hom')) {
-          const numValue = parseFloat(value);
-          if (!isNaN(numValue)) {
-            // Round to 2 decimal places for measurement precision
-            return Math.round(numValue * 100) / 100;
-          }
-        }
-
-        return value;
-      };
+            return transformed;
+          };
 
       let totalRows = 0;
       let actualChunkCount = 0;
+      // Server-resolved path bookkeeping: the server returns the rows it rejected, so the client
+      // tracks that count for row-reconciliation instead of computing invalid rows locally.
+      let serverFailingRowsCount = 0;
+      let serverCsvHeaders: string[] = csvHeaders ?? [];
       let firstChunkUploadError: Error | null = null;
       let chunkProcessingError: Error | null = null;
       const chunkTasks = new Set<Promise<void>>();
@@ -915,12 +971,43 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           delimiter: delimiter,
           header: true,
           skipEmptyLines: true,
-          chunkSize: chunkSize,
+          // Quadrat plots are bounded to 10,000 rows. Upload each quadrat file as one request so
+          // overlap validation and its acknowledgment are atomic at file scope rather than
+          // committing earlier chunks before a later chunk discovers a new overlap.
+          chunkSize: uploadForm === FormType.quadrats ? Math.max(file.size + 1, chunkSize) : chunkSize,
           transformHeader,
           transform,
           chunk(results: ParseResult<FileRow>, parser) {
             actualChunkCount += 1;
             totalRows += results.data.length;
+            if (serverResolves && actualChunkCount === 1) {
+              // Capture the parsed header row once so every chunk ships the same authoritative
+              // header list to the server. Fall back to the up-front extracted headers.
+              serverCsvHeaders = Array.isArray(results.meta.fields) ? results.meta.fields : (csvHeaders ?? []);
+            }
+            // The mapping plan + signature were validated against the up-front extracted header basis
+            // (csvHeaders, read with Papa header:false). The server keys rows against THIS chunk's
+            // header:true fields (serverCsvHeaders), which RENAMES duplicate headers (dbh,dbh ->
+            // dbh,dbh_1). If the two bases diverge at any position the client validated a mapping the
+            // server cannot reproduce, so duplicate/renamed columns would be keyed differently than the
+            // user reviewed. Abort rather than upload a misaligned file.
+            if (serverResolves && actualChunkCount === 1 && csvHeaders && !headerBasisMatches(csvHeaders, serverCsvHeaders)) {
+              const divergence = new Error(
+                `Header basis mismatch for ${file.name}: the column mapping was validated against [${csvHeaders.join(', ')}] ` +
+                  `but the upload parser produced [${serverCsvHeaders.join(', ')}]. Duplicate or renamed column headers make the ` +
+                  `mapping ambiguous — give each column a unique header and re-review the mapping before uploading.`
+              );
+              // Mirror the file's fatal-error pattern: record the error, then abort. Papa's
+              // parser.abort() synchronously invokes the `complete` callback below, which
+              // rejects this upload's Promise with chunkProcessingError — so the error must
+              // be recorded BEFORE abort() and no chunk task may be queued for this data.
+              markFatalUploadError(divergence);
+              if (!chunkProcessingError) {
+                chunkProcessingError = divergence;
+              }
+              parser.abort();
+              return;
+            }
             const chunkTask = (async () => {
               try {
                 if (!isMountedRef.current) {
@@ -952,29 +1039,57 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   parser.resume();
                 }
 
-                const validRows: FileRow[] = [];
-                results.data.forEach(row => {
-                  if (validateRow(row)) {
-                    validRows.push(row);
-                  }
-                });
+                // Server-resolved (measurements mapping) path: ship the chunk's raw rows untouched
+                // and let the server key + validate them. Legacy path keys + validates locally.
+                let fileCollectionRowSet: FileCollectionRowSet | null = null;
+                if (!serverResolves) {
+                  const validRows: FileRow[] = [];
+                  results.data.forEach(rawRow => {
+                    const row = headerPlan ? collapseRowWithPlan(rawRow, headerPlan) : rawRow;
+                    const verdict = validateMeasurementRow(row, requiredHeaders, delimiter, uploadForm as FormType);
+                    if (verdict.hasExtraColumns) {
+                      // Extra columns are common when re-uploading exported data with reference
+                      // columns like stemID, treeID, or errors. Track once per file, not per row.
+                      parsingDiagnostics.extraColumnRows += 1;
+                      if (!parsingDiagnostics.extraColumnSample) {
+                        parsingDiagnostics.extraColumnSample = JSON.stringify(row['__parsed_extra']);
+                      }
+                    }
+                    if (verdict.valid) {
+                      validRows.push(row);
+                    } else {
+                      parsingInvalidRows.push({
+                        ...row,
+                        failureReason: verdict.failureReason ?? 'Unknown error',
+                        ...(verdict.hasExtraColumns ? { excessData: row['__parsed_extra'] } : {})
+                      });
+                    }
+                  });
 
-                if (validRows.length === 0) {
-                  // Increment completedChunks even if there is nothing to upload.
+                  if (validRows.length === 0) {
+                    // Increment completedChunks even if there is nothing to upload.
+                    setCompletedChunks(prev => prev + 1);
+                    parser.resume();
+                    return;
+                  }
+
+                  const fileRowSet: FileRowSet = {};
+                  validRows.forEach(row => {
+                    const rowId = `row-${v4()}`;
+                    fileRowSet[rowId] = row;
+                  });
+
+                  fileCollectionRowSet = {
+                    [file.name]: fileRowSet
+                  };
+                } else if (results.data.length === 0) {
+                  // Nothing parsed in this chunk; mirror the legacy empty-chunk short-circuit.
                   setCompletedChunks(prev => prev + 1);
                   parser.resume();
                   return;
                 }
 
-                const fileRowSet: FileRowSet = {};
-                validRows.forEach(row => {
-                  const rowId = `row-${v4()}`;
-                  fileRowSet[rowId] = row;
-                });
-
-                const fileCollectionRowSet: FileCollectionRowSet = {
-                  [file.name]: fileRowSet
-                };
+                const rawChunkRows = results.data;
 
                 queue.add(async () => {
                   if (!isMountedRef.current) {
@@ -986,7 +1101,25 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   }
 
                   try {
-                    await uploadToSql(fileCollectionRowSet, file.name, fileBatchID);
+                    if (serverResolves) {
+                      const data = await uploadToSql(null, file.name, fileBatchID, {
+                        rawRows: rawChunkRows,
+                        csvHeaders: serverCsvHeaders,
+                        mapping: columnMappings?.[file.name] ?? null,
+                        delimiter
+                      });
+                      if (data?.failingRows?.length) {
+                        serverFailingRowsCount += data.failingRows.length;
+                        await pushErrorRowsToFailedMeasurements(data.failingRows, file.name);
+                      }
+                      const ignoredColumnCount = Number(data?.mappingDiagnostics?.ignoredColumnCount ?? 0);
+                      if (ignoredColumnCount > 0 && isMountedRef.current) {
+                        const warning = `${file.name}: ${ignoredColumnCount} unmatched column(s) were ignored by the active column mapping and were not ingested.`;
+                        setMappingWarnings(prev => (prev.includes(warning) ? prev : [...prev, warning]));
+                      }
+                    } else {
+                      await uploadToSql(fileCollectionRowSet, file.name, fileBatchID);
+                    }
                   } catch (error: unknown) {
                     const errorObj = error instanceof Error ? error : new Error(String(error));
                     if (errorObj.name === 'AbortError') {
@@ -1066,8 +1199,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             ailogger.info(`All database operations completed for ${file.name}`);
             if (parsingInvalidRows.length > 0) {
               ailogger.warn(`Found ${parsingInvalidRows.length} invalid rows from ${file.name}, pushing directly to failedmeasurements table`);
-              // Push error rows directly to failedmeasurements table instead of storing in component state
-              await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
+              // Push error rows directly to failedmeasurements table instead of storing in component state.
+              // Papa discards this async callback's promise, so a throw here would leave the wrapping
+              // Promise unsettled and hang the upload forever — route the failure into reject instead.
+              try {
+                await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
+              } catch (persistError: unknown) {
+                const persistErrObj = persistError instanceof Error ? persistError : new Error(String(persistError));
+                ailogger.error(`Rejected-row persistence failed for ${file.name}:`, persistErrObj);
+                reject(persistErrObj);
+                return;
+              }
             }
 
             if (parsingDiagnostics.extraColumnRows > 0) {
@@ -1084,18 +1226,27 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               );
             }
 
+            if (parsingDiagnostics.mappingFallbackReason) {
+              ailogger.warn(
+                `Saved column mapping for ${file.name} was not used: ${parsingDiagnostics.mappingFallbackReason}; columns were seeded from the file's headers instead.`
+              );
+            }
+
             // Store expected row count for end-to-end verification
             expectedRowCounts.current.set(file.name, totalRows);
 
-            // Enhanced processing summary
-            const validRowsCount = totalRows - parsingInvalidRows.length;
+            // Enhanced processing summary. On the server-resolved path invalid rows are the ones
+            // the server rejected (returned in failingRows); on the legacy path they are the rows
+            // the client itself rejected during validation.
+            const invalidCount = serverResolves ? serverFailingRowsCount : parsingInvalidRows.length;
+            const validRowsCount = totalRows - invalidCount;
             expectedTemporaryRowCounts.current.set(file.name, validRowsCount);
             const processingEfficiency = totalRows > 0 ? ((validRowsCount / totalRows) * 100).toFixed(1) : '0';
 
             ailogger.info(`Enhanced CSV processing completed for ${file.name}:`);
             ailogger.info(`  • Total rows processed: ${totalRows} (stored for verification)`);
             ailogger.info(`  • Valid rows: ${validRowsCount}`);
-            ailogger.info(`  • Invalid/rejected rows: ${parsingInvalidRows.length}`);
+            ailogger.info(`  • Invalid/rejected rows: ${invalidCount}`);
             ailogger.info(`  • Processing efficiency: ${processingEfficiency}%`);
             ailogger.info(`  • Header mapping: Enhanced (order-independent)`);
             ailogger.info(`  • Date format support: Multi-format enabled`);
@@ -1112,6 +1263,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     },
     [
       uploadForm,
+      sourceFormat,
       currentPlot?.usesSubquadrats,
       setReviewState,
       queue,
@@ -1121,9 +1273,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       uploadToSql,
       setCompletedChunks,
       setTotalChunks,
+      setMappingWarnings,
       pushErrorRowsToFailedMeasurements,
       waitForAllOperationsToComplete,
-      markFatalUploadError
+      markFatalUploadError,
+      submitArcgisImportSession,
+      columnMappings,
+      uploadMode
     ]
   );
 
@@ -1148,6 +1304,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       uploadStartedRef.current = false;
       batchProcessingStartedRef.current = false;
       fatalUploadErrorRef.current = null;
+      persistedRejectedRowCounts.current.clear();
+      serverAccountedRejectedRowCounts.current.clear();
       measurementBatchIDs.current.clear();
       return;
     }
@@ -1159,6 +1317,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       fatalUploadErrorRef.current = null;
       expectedRowCounts.current.clear();
       expectedTemporaryRowCounts.current.clear();
+      persistedRejectedRowCounts.current.clear();
+      serverAccountedRejectedRowCounts.current.clear();
       measurementBatchIDs.current.clear();
       setTotalOperations(0);
       setCompletedOperations(0);
@@ -1172,6 +1332,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       setVerificationStatus('');
       setVerificationStep(0);
       setTotalVerificationSteps(0);
+      // Clear stale mapping notices from a prior attempt so corrected re-uploads do not show
+      // warnings that no longer apply to this run.
+      setMappingWarnings([]);
       ailogger.info(`Prepared fresh upload attempt: ${uploadAttemptKey}`);
       return;
     }
@@ -1193,7 +1356,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Clear expected row counts from any previous upload
         expectedRowCounts.current.clear();
         expectedTemporaryRowCounts.current.clear();
-
+        persistedRejectedRowCounts.current.clear();
+        serverAccountedRejectedRowCounts.current.clear();
         if (fatalUploadErrorRef.current) {
           throw fatalUploadErrorRef.current;
         }
@@ -1238,7 +1402,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         for (const file of acceptedFiles) {
           let delimiter: string;
 
-          if (selectedDelimiters[file.name]) {
+          if (sourceFormat === SourceFormat.arcgis_xlsx) {
+            delimiter = '';
+            ailogger.info(`File ${file.name}: Skipping delimiter detection for ArcGIS workbook upload`);
+          } else if (selectedDelimiters[file.name]) {
             delimiter = selectedDelimiters[file.name];
             ailogger.info(`File ${file.name}: Using user-selected delimiter "${delimiter}"`);
           } else {
@@ -1270,9 +1437,18 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Step 2: Estimate chunk counts from file size. The real parser adjusts
         // the total if PapaParse produces a different number of chunks.
         for (const file of acceptedFiles) {
-          const estimatedCount = estimateChunkCount(file as File);
+          let estimatedCount: number;
+          if (sourceFormat === SourceFormat.arcgis_xlsx) {
+            if (!arcgisImportSession || arcgisImportSession.fileName !== file.name || arcgisImportSession.rowCount <= 0) {
+              throw new Error(`ArcGIS upload is missing a valid pre-flight import session for ${file.name}`);
+            }
+            estimatedCount = 1;
+            ailogger.info(`File ${file.name}: Estimated ${estimatedCount} commit step from ${arcgisImportSession.rowCount} staged ArcGIS row(s)`);
+          } else {
+            estimatedCount = estimateChunkCount(file as File);
+            ailogger.info(`File ${file.name}: Estimated ${estimatedCount} chunk(s) from ${file.size} bytes`);
+          }
           estimatedChunkCounts.set(file.name, estimatedCount);
-          ailogger.info(`File ${file.name}: Estimated ${estimatedCount} chunk(s) from ${file.size} bytes`);
           setTotalChunks(prev => prev + estimatedCount);
         }
 
@@ -1417,6 +1593,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             return;
           }
 
+          if (error instanceof QuadratOverlapAcknowledgmentRequiredClientError) {
+            ailogger.info('Quadrat upload paused for overlap acknowledgment; returning to the file review step.');
+            cancelSession(true).catch(cancelErr => {
+              ailogger.warn(`Failed to cancel paused quadrat upload session: ${cancelErr.message}`);
+            });
+            if (isMountedRef.current) {
+              onQuadratOverlapAcknowledgmentRequired(error.overlapSummaries);
+            }
+            return;
+          }
+
           ailogger.error('runUploads failed:', error);
           if (!isUploadSessionRestartRequiredError(error)) {
             // Cancel the session and clean up staged temp data on error.
@@ -1455,7 +1642,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     estimateChunkCount,
     isApplicationInsightsError,
     isMountedRef,
+    onQuadratOverlapAcknowledgmentRequired,
     parseFileInChunks,
+    arcgisImportSession,
     processed,
     queue,
     schema,
@@ -1467,6 +1656,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     uploadAttemptKey,
     uploaded,
     uploadForm,
+    sourceFormat,
     waitForAllOperationsToComplete
   ]);
 
@@ -1856,67 +2046,125 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             let totalSessionProcessed = 0;
             let totalSessionFailed = 0;
             let totalExpectedRows = 0;
-            let dataIntegrityIssuesFound = false;
+            // Reconciliation extends bulkingestionprocess's batch check to the original
+            // source file: staged successes + staged failures + durably persisted
+            // pre-stage rejections must equal the parsed source-row total.
+            const reconciliationMismatches: { fileID: string; verdict: UploadReconciliationVerdict }[] = [];
+            const unverifiableFiles: string[] = [];
 
             for (let fileIndex = 0; fileIndex < acceptedFiles.length; fileIndex++) {
               const file = acceptedFiles[fileIndex];
               const fileID = file.name;
 
-              // Get expected row count from parsing phase
-              const expectedForFile = expectedRowCounts.current.get(fileID) || 0;
-              totalExpectedRows += expectedForFile;
+              // Reconcile the original source total. Rows rejected before staging count only
+              // when their persistence is confirmed: client-persisted rejections via
+              // /api/batchedupload's durable row count, server-persisted rejections (ArcGIS
+              // dropped duplicates) via the commit transaction that wrote them.
+              const stagedRowsForFile = expectedTemporaryRowCounts.current.get(fileID) || 0;
+              const sourceRowsForFile = expectedRowCounts.current.get(fileID) || 0;
+              const persistedRejectedRows = persistedRejectedRowCounts.current.get(fileID) || 0;
+              const serverAccountedRejectedRows = serverAccountedRejectedRowCounts.current.get(fileID) || 0;
+              const expectedRejectedRows = sourceRowsForFile - stagedRowsForFile;
+              const fileBatchID = measurementBatchIDs.current.get(fileID) || null;
+              totalExpectedRows += sourceRowsForFile;
+
+              if (expectedRejectedRows < 0 || persistedRejectedRows + serverAccountedRejectedRows !== expectedRejectedRows) {
+                unverifiableFiles.push(fileID);
+                ailogger.error(
+                  `Rejected-row reconciliation mismatch for ${fileID}: ${sourceRowsForFile} source - ${stagedRowsForFile} staged = ` +
+                    `${expectedRejectedRows} expected rejected, but ${persistedRejectedRows} client-persisted + ` +
+                    `${serverAccountedRejectedRows} server-persisted were confirmed.`
+                );
+              }
 
               try {
-                const sessionVerifyResponse = await fetch(
-                  `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}&fileID=${encodeURIComponent(fileID)}`
-                );
+                // Batch-scoped verification: pass batchID so the counts are for THIS upload's
+                // batch, not a cumulative plot/census total.
+                const batchScopeParam = fileBatchID ? `&batchID=${encodeURIComponent(fileBatchID)}` : '';
+                const sessionVerifyUrl = `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}&fileID=${encodeURIComponent(fileID)}${batchScopeParam}`;
 
-                if (sessionVerifyResponse.ok) {
+                // The verify GET is read-only, so retrying cannot double-apply anything.
+                // Without a retry, one transient blip here fails an upload whose ingestion
+                // has already committed — and re-uploading the same file would then surface
+                // every row as a DUPLICATE_TAG_CONFLICT_EXISTING failure.
+                const maxVerifyRetries = 2;
+                const verifyRetryDelayMs = 2000;
+                let sessionVerifyResponse: Response | null = null;
+                for (let verifyAttempt = 0; verifyAttempt <= maxVerifyRetries; verifyAttempt++) {
+                  const attemptResponse = await fetch(sessionVerifyUrl).catch((fetchError: unknown) => {
+                    const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
+                    ailogger.warn(`Session verification attempt ${verifyAttempt + 1}/${maxVerifyRetries + 1} threw for ${fileID}: ${message}`);
+                    return null;
+                  });
+                  if (attemptResponse?.ok) {
+                    sessionVerifyResponse = attemptResponse;
+                    break;
+                  }
+                  if (attemptResponse) {
+                    ailogger.warn(`Session verification attempt ${verifyAttempt + 1}/${maxVerifyRetries + 1} for ${fileID}: HTTP ${attemptResponse.status}`);
+                  }
+                  if (verifyAttempt < maxVerifyRetries) {
+                    await new Promise(resolveDelay => setTimeout(resolveDelay, verifyRetryDelayMs));
+                  }
+                }
+
+                if (sessionVerifyResponse) {
                   const sessionData = await sessionVerifyResponse.json();
-                  totalSessionProcessed += sessionData.processedCount;
-                  totalSessionFailed += sessionData.failedCount;
+                  const processedCount = Number(sessionData.processedCount || 0);
+                  const failedCount = Number(sessionData.failedCount || 0);
+                  totalSessionProcessed += processedCount;
+                  totalSessionFailed += failedCount + persistedRejectedRows;
 
-                  const actualTotal = sessionData.processedCount + sessionData.failedCount;
-                  const discrepancy = expectedForFile - actualTotal;
+                  const verdict = evaluateUploadReconciliation({
+                    sourceRecords: sourceRowsForFile,
+                    successfulRecords: processedCount,
+                    failedRecords: failedCount + persistedRejectedRows
+                  });
 
-                  if (discrepancy !== 0) {
-                    dataIntegrityIssuesFound = true;
-                    ailogger.warn(
-                      `Data verification note for ${fileID}: Expected ${expectedForFile} rows from file, actual ${actualTotal} in database (${sessionData.processedCount} in coremeasurements + ${sessionData.failedCount} in failedmeasurements). Difference: ${discrepancy} row(s). This may be normal if rows were deduplicated or merged during processing.`
+                  if (!verdict.reconciled) {
+                    reconciliationMismatches.push({ fileID, verdict });
+                    ailogger.error(`Reconciliation mismatch for ${fileID}${fileBatchID ? ` (batch ${fileBatchID})` : ''}: ${verdict.detail}`);
+                  } else {
+                    ailogger.info(
+                      `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): reconciled — ${processedCount} succeeded + ${failedCount} staged failures + ` +
+                        `${persistedRejectedRows} pre-stage rejections = ${verdict.accountedRecords} of ${sourceRowsForFile} source rows ✓`
                     );
                   }
-
-                  ailogger.info(
-                    `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): Expected ${expectedForFile}, Actual ${actualTotal} (${sessionData.processedCount} succeeded, ${sessionData.failedCount} failed)${discrepancy !== 0 ? ` - Difference: ${discrepancy} rows` : ' ✓'}`
-                  );
                 } else {
-                  ailogger.warn(`Session verification request failed for file ${fileID}`);
+                  // A verification we could not complete is not proof of a clean upload; record
+                  // it so completion is blocked rather than optimistically reported as success.
+                  unverifiableFiles.push(fileID);
+                  ailogger.error(`Session verification failed for file ${fileID} after ${maxVerifyRetries + 1} attempts`);
                 }
               } catch (sessionError: unknown) {
                 const message = sessionError instanceof Error ? sessionError.message : String(sessionError);
-                ailogger.warn(`Error during session verification for ${fileID}: ${message}`);
+                unverifiableFiles.push(fileID);
+                ailogger.error(`Error during session verification for ${fileID}: ${message}`);
               }
             }
 
             const totalSessionAccounted = totalSessionProcessed + totalSessionFailed;
-            const totalDiscrepancy = totalExpectedRows - totalSessionAccounted;
 
-            // Log verification results - note that discrepancies may be normal due to deduplication
-            if (dataIntegrityIssuesFound || totalDiscrepancy !== 0) {
-              setVerificationStatus(
-                `Verification complete: ${totalSessionAccounted} rows in database (${totalSessionProcessed} succeeded, ${totalSessionFailed} failed). Note: ${Math.abs(totalDiscrepancy)} row difference from expected ${totalExpectedRows} - this may be due to deduplication or data merging.`
-              );
-              ailogger.info(
-                `Upload verification summary: Expected ${totalExpectedRows} rows from input files, ${totalSessionAccounted} rows in database. Difference of ${totalDiscrepancy} rows may be due to deduplication, merged stems, or data consolidation during processing.`
-              );
-            } else {
-              setVerificationStatus(
-                `✓ Verification complete: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed (${totalSessionAccounted} total - matches expected ${totalExpectedRows})`
-              );
-              ailogger.info(
-                `Upload verification summary: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed. Total: ${totalSessionAccounted} rows. Expected: ${totalExpectedRows} rows. ✓ Perfect match.`
+            if (reconciliationMismatches.length > 0 || unverifiableFiles.length > 0) {
+              const mismatchSummary = reconciliationMismatches.map(m => `${m.fileID}: ${m.verdict.detail}`).join(' | ');
+              const unverifiableSummary = unverifiableFiles.length > 0 ? ` Could not verify: ${unverifiableFiles.join(', ')}.` : '';
+              setVerificationStatus(`Upload blocked — data integrity check failed. ${mismatchSummary}${unverifiableSummary}`.trim());
+              // Throwing here routes into the collapser catch below, which rethrows to
+              // runProcessBatches().catch → ERRORS state, so the upload can NEVER be reported
+              // as a clean completion while rows are unaccounted for.
+              throw new UploadReconciliationError(
+                `Upload reconciliation failed: ${reconciliationMismatches.length} file(s) with unaccounted rows` +
+                  `${unverifiableFiles.length > 0 ? ` and ${unverifiableFiles.length} unverifiable file(s)` : ''}. ` +
+                  `${mismatchSummary}${unverifiableSummary}`.trim()
               );
             }
+
+            setVerificationStatus(
+              `✓ Verification complete: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed (${totalSessionAccounted} total - matches ${totalExpectedRows} source rows)`
+            );
+            ailogger.info(
+              `Upload verification summary: ${totalSessionProcessed} succeeded, ${totalSessionFailed} failed, ${totalSessionAccounted} accounted of ${totalExpectedRows} source rows. ✓ Every source row accounted for.`
+            );
           }
 
           if (isMountedRef.current) {
@@ -1924,6 +2172,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
         } catch (collapserError: unknown) {
           const message = collapserError instanceof Error ? collapserError.message : String(collapserError);
+          if (collapserError instanceof UploadReconciliationError) {
+            ailogger.error(`Upload reconciliation error: ${message}`);
+            throw collapserError;
+          }
           if (isMountedRef.current) {
             setVerificationStatus(`Data consolidation error: ${message}`);
           }
@@ -2098,6 +2350,22 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     return getAnimationUrl('growing-plant.lottie'); // fallback
   };
 
+  const mappingWarningsAlert =
+    mappingWarnings.length > 0 ? (
+      <Alert color="warning" variant="soft" sx={{ width: '100%', maxWidth: '600px', textAlign: 'left' }}>
+        <Box>
+          <Typography level="title-sm" color="warning">
+            Column mapping warnings
+          </Typography>
+          {mappingWarnings.map((warning, idx) => (
+            <Typography key={idx} level="body-sm" sx={{ mt: 0.5 }}>
+              {warning}
+            </Typography>
+          ))}
+        </Box>
+      </Alert>
+    ) : null;
+
   return (
     <>
       {!hasUploaded.current ? (
@@ -2214,6 +2482,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 Please do not close this window
               </Typography>
             </Box>
+
+            {mappingWarningsAlert}
           </Stack>
         </Box>
       ) : (
@@ -2227,8 +2497,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             mt: 4
           }}
         >
-          <Stack direction="column" sx={{ alignItems: 'center', textAlign: 'center' }}>
+          <Stack direction="column" spacing={2} sx={{ alignItems: 'center', textAlign: 'center' }}>
             <Typography level="title-md">Upload Complete</Typography>
+            {mappingWarningsAlert}
           </Stack>
         </Box>
       )}

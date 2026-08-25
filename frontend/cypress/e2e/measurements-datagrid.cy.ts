@@ -164,7 +164,7 @@ describe('Measurements Summary Grid', () => {
 
     cy.get('[aria-label="More actions"]').click();
     cy.contains('Run Validations').should('be.visible');
-    cy.contains('Override Failed Validations').should('be.visible');
+    cy.contains('Override Validations').should('be.visible');
     cy.contains('Reset All Validation States').should('be.visible').click();
 
     cy.contains('[role="alertdialog"]', 'Reset Validation States?').should('be.visible');

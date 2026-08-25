@@ -35,6 +35,8 @@ export const siteConfig = {
   version: 'Acacia' // needs to be updated as new versions are released
 };
 
+export const DOCUMENTATION_URL = 'https://smithsonian.github.io/ForestGEO/';
+
 type DataValidityKey = keyof UnifiedValidityFlags;
 
 // Define a mapping type that restricts keys to strings and values to keys of DataValidity
@@ -182,6 +184,8 @@ export function getEndpointHeaderName(endpoint: string): string {
       return 'Dashboard';
     case '/measurementshub/summary':
       return 'View Data';
+    case '/measurementshub/censusoverview':
+      return 'Census Overview';
     case '/measurementshub/errors':
       return 'View Errors';
     case '/measurementshub/postvalidation':
@@ -190,6 +194,8 @@ export function getEndpointHeaderName(endpoint: string): string {
       return 'Recent Changes';
     case '/measurementshub/validationhistory':
       return 'Validation History';
+    case '/measurementshub/uploadedfiles':
+      return 'Uploaded Files';
     case '/measurementshub/viewfulltable':
       return 'All Historical Data';
     case '/measurementshub/validations':
@@ -214,7 +220,10 @@ export function getEndpointHeaderName(endpoint: string): string {
       return 'User-Site Assignments';
     case '/admin/provision':
       return 'Provision New Site';
+    case '/admin/provision/runs':
+      return 'Provisioning Runs';
     default:
-      return '';
+      if (endpoint.startsWith('/admin/provision/')) return 'Provisioning Status';
+      return getGridTypeLabel(endpoint.split('/').filter(Boolean).at(-1) ?? 'ForestGEO');
   }
 }

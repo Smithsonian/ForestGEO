@@ -22,7 +22,7 @@
 import type { Connection } from 'mysql2/promise';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../csv-to-sql-shared';
 import { exportableMeasurementSelect, exportableMeasurementBaseWhere } from './exportable-measurement';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -89,9 +89,9 @@ export async function selectMeasurements(conn: Connection, input: SelectInput): 
     Mnemonic: String(r.Mnemonic),
     QuadratName: String(r.QuadratName),
     PlotCensusNumber: String(r.PlotCensusNumber),
-    Family: String(r.Family),
-    Genus: String(r.Genus),
-    SpeciesName: String(r.SpeciesName),
+    Family: r.Family == null ? null : String(r.Family),
+    Genus: r.Genus == null ? null : String(r.Genus),
+    SpeciesName: r.SpeciesName == null ? null : String(r.SpeciesName),
     SpeciesAuthority: r.SpeciesAuthority == null ? null : String(r.SpeciesAuthority),
     SubspeciesName: r.SubspeciesName == null ? null : String(r.SubspeciesName),
     DBH: r.DBH == null ? null : Number(r.DBH),

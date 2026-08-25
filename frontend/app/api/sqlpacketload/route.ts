@@ -1,24 +1,36 @@
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
-import { FileRow, FileRowSet } from '@/config/macros/formdetails';
+import { FileRow, FileRowSet, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
 import { NextRequest, NextResponse } from 'next/server';
-import { Plot } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { Plot } from '@/lib/db/definitions/zones';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
-import moment from 'moment/moment';
 import { generateShortBatchID, handleUpsert } from '@/config/utils';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { format } from 'mysql2/promise';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import crypto from 'crypto';
-import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
-import { FamilyResult, GenusResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { RoleResult } from '@/config/sqlrdsdefinitions/personnel';
+import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, type QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
+import { QuadratGeometryValidationError, QuadratOverlapAcknowledgmentRequiredError, writeQuadratUpload } from '@/lib/ingestion/quadrat-write-boundary';
+import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE } from '@/lib/ingestion/quadrat-overlap-contract';
+import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
+import { RoleResult } from '@/lib/db/definitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { assertSchemaAccess } from '@/lib/authz';
+import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
+import { MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
+import {
+  type FixedDataProcessingResult,
+  normalizeOptionalString,
+  normalizeRequiredString,
+  upsertAttributeRows,
+  upsertSpeciesRows
+} from '@/lib/uploads/reference-data-writers';
 
 /**
  * Generate idempotency key for a batch of data
@@ -48,28 +60,6 @@ function hashChunkContent(fileRowSet: FileRowSet): string {
   return crypto.createHash('sha256').update(data).digest('hex');
 }
 
-function buildUploadId(schema: string, plotID: number, censusID: number, fileID: string, batchID: string, purpose: string = 'upload'): string {
-  return crypto.createHash('sha256').update([schema, plotID, censusID, fileID, batchID, purpose].join('#')).digest('hex').slice(0, 40);
-}
-
-function isMissingTableError(error: unknown, tableName?: string): boolean {
-  if (!error || typeof error !== 'object') return false;
-
-  const candidate = error as { code?: string; message?: string; sqlMessage?: string };
-  const message = `${candidate.message ?? ''} ${candidate.sqlMessage ?? ''}`.toLowerCase();
-  const tableMatch = tableName ? message.includes(tableName.toLowerCase()) : true;
-
-  return (candidate.code === 'ER_NO_SUCH_TABLE' || message.includes("doesn't exist") || message.includes('does not exist')) && tableMatch;
-}
-
-function toNullableNumber(value: unknown): number | null {
-  if (value === undefined || value === null || value === '') return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-const TEMP_MEASUREMENT_INSERT_BATCH_SIZE = 1000;
-
 function toPositiveInteger(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null;
   const parsed = Number(value);
@@ -87,45 +77,66 @@ function buildMeasurementScopeErrorResponse(status: HTTPResponses, message: stri
   );
 }
 
-interface FixedDataProcessingResult {
-  insertedCount: number;
-  updatedCount: number;
-  skippedCount: number;
+async function insertQuadratOverlapAcknowledgmentEvent(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileName: string,
+  uploadMode: UploadMode,
+  uploadSessionId: string | null,
+  plotID: number | undefined,
+  censusID: number | undefined,
+  sessionUser: unknown,
+  summaries: QuadratOverlapSummary[],
+  transactionID: string
+): Promise<void> {
+  const changedBy = authenticatedSessionIdentity(sessionUser);
+  const layoutSignatures = summaries.map(summary => summary.layoutSignature).sort();
+  const recordID = crypto
+    .createHash('sha256')
+    .update([schema, plotID ?? '', censusID ?? '', fileName, uploadSessionId ?? '', ...layoutSignatures].join('#'))
+    .digest('hex')
+    .slice(0, 40);
+  const eventState = JSON.stringify({
+    statement: QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
+    acknowledgedBy: changedBy,
+    fileName,
+    uploadMode,
+    uploadSessionId,
+    summaries
+  });
+  // Keep acknowledgment provenance immutable and avoid the file_upload JSON merge entirely.
+  // The deterministic RecordID makes a retry of the same upload event idempotent.
+  const insertSQL = safeFormatQuery(
+    schema,
+    `INSERT INTO ??.unifiedchangelog
+       (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
+     SELECT ?, ?, 'INSERT', ?, NOW(), ?, ?, ?
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM ??.unifiedchangelog
+       WHERE TableName = 'quadrat_overlap_acknowledgment'
+         AND RecordID = ?
+         AND Operation = 'INSERT'
+     )`
+  );
+  await connectionManager.executeQuery(
+    insertSQL,
+    ['quadrat_overlap_acknowledgment', recordID, eventState, changedBy, plotID, censusID, recordID],
+    transactionID
+  );
 }
 
-function normalizeOptionalString(value: unknown): string | null {
-  if (value === undefined || value === null) return null;
-  const normalized = String(value).trim();
-  return normalized === '' ? null : normalized;
+function isSupportedUploadMode(value: unknown): value is UploadMode {
+  return value === UploadMode.CLEAN_REUPLOAD || value === UploadMode.REVISIONS;
 }
 
-function normalizeRequiredString(value: unknown): string {
-  return String(value ?? '').trim();
-}
-
-function findDuplicateSpeciesCodes(rows: FileRow[]): string[] {
-  const seen = new Set<string>();
-  const duplicates = new Set<string>();
-
-  for (const row of rows) {
-    const speciesCode = normalizeOptionalString(row.spcode)?.toLowerCase();
-    if (!speciesCode) continue;
-    if (seen.has(speciesCode)) {
-      duplicates.add(speciesCode);
-      continue;
-    }
-    seen.add(speciesCode);
+async function rollbackPreservingOriginalError(connectionManager: ConnectionManager, transactionID: string, context: Record<string, unknown>): Promise<void> {
+  try {
+    await connectionManager.rollbackTransaction(transactionID);
+  } catch (rollbackError: unknown) {
+    const error = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+    ailogger.error(`Failed to roll back transaction ${transactionID}; preserving the original upload error`, error, context);
   }
-
-  return Array.from(duplicates).sort();
-}
-
-function formatBlockedCleanReuploadValues(values: string[], maxValues: number = 20): string {
-  const uniqueValues = Array.from(new Set(values.map(value => String(value ?? '').trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right));
-
-  const truncatedValues = uniqueValues.slice(0, maxValues);
-  const remainingCount = uniqueValues.length - truncatedValues.length;
-  return truncatedValues.join(', ') + (remainingCount > 0 ? `, ...and ${remainingCount} more` : '');
 }
 
 function isRetryableUploadError(error: unknown): boolean {
@@ -144,321 +155,6 @@ function isRetryableUploadError(error: unknown): boolean {
 
 function getUploadRetryDelayMs(attemptNumber: number): number {
   return Math.min(1000 * Math.pow(2, attemptNumber - 1), 10000);
-}
-
-async function upsertAttributeRows(
-  connectionManager: ConnectionManager,
-  schema: string,
-  rows: FileRow[],
-  uploadMode: UploadMode,
-  transactionID: string
-): Promise<FixedDataProcessingResult> {
-  let insertedCount = 0;
-  let updatedCount = 0;
-  let skippedCount = 0;
-
-  if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-    const deleteSQL = format(`DELETE FROM ??.attributes WHERE IsActive = 1`, [schema]);
-    await connectionManager.executeQuery(deleteSQL, [], transactionID);
-  }
-
-  for (const row of rows) {
-    const code = normalizeRequiredString(row.code || row.codes);
-    if (!code) {
-      skippedCount += 1;
-      continue;
-    }
-
-    const description = normalizeOptionalString(row.description || row.comments);
-    const status = normalizeOptionalString(row.status);
-
-    if (uploadMode === UploadMode.REVISIONS) {
-      const existingSQL = format(`SELECT Code FROM ??.attributes WHERE LOWER(Code) = LOWER(?) AND IsActive = 1 LIMIT 1`, [schema]);
-      const existingRows = await connectionManager.executeQuery(existingSQL, [code], transactionID);
-
-      if (existingRows.length > 0) {
-        const existingCode = existingRows[0].Code;
-        const updateSQL = format(`UPDATE ??.attributes SET Code = ?, Description = ?, Status = ?, DeletedAt = NULL WHERE Code = ? AND IsActive = 1`, [schema]);
-        await connectionManager.executeQuery(updateSQL, [code, description, status, existingCode], transactionID);
-        updatedCount += 1;
-        continue;
-      }
-    }
-
-    const insertSQL = format(`INSERT INTO ??.attributes (Code, Description, Status, IsActive, DeletedAt) VALUES (?, ?, ?, 1, NULL)`, [schema]);
-    await connectionManager.executeQuery(insertSQL, [code, description, status], transactionID);
-    insertedCount += 1;
-  }
-
-  return { insertedCount, updatedCount, skippedCount };
-}
-
-async function upsertQuadratRows(
-  connectionManager: ConnectionManager,
-  schema: string,
-  plotID: number | undefined,
-  rows: FileRow[],
-  uploadMode: UploadMode,
-  transactionID: string
-): Promise<FixedDataProcessingResult> {
-  if (!plotID) {
-    throw new Error('PlotID is required for quadrat uploads');
-  }
-
-  let insertedCount = 0;
-  let updatedCount = 0;
-  let skippedCount = 0;
-
-  if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-    // CLEAN_REUPLOAD deletes every active quadrat in the plot before re-inserting
-    // the upload contents. Because stems references quadrats via ON DELETE CASCADE,
-    // removing a quadrat that is already in use would also destroy its stems and
-    // any downstream measurements, even if the same QuadratName appears again in
-    // the upload. Only allow this path when the plot has no stems attached to any
-    // active quadrat rows yet.
-    const blockingQuadratSQL = format(
-      `SELECT DISTINCT q.QuadratName
-       FROM ??.quadrats q
-       WHERE q.PlotID = ?
-         AND q.IsActive = 1
-         AND q.QuadratName IS NOT NULL
-         AND EXISTS (
-           SELECT 1
-           FROM ??.stems s
-           WHERE s.QuadratID = q.QuadratID
-         )
-       ORDER BY q.QuadratName`,
-      [schema, schema]
-    );
-    const blockingQuadratRows = await connectionManager.executeQuery(blockingQuadratSQL, [plotID], transactionID);
-    const blockingQuadratNames = Array.isArray(blockingQuadratRows)
-      ? blockingQuadratRows.map((row: any) => String(row.QuadratName ?? '').trim()).filter(Boolean)
-      : [];
-
-    if (blockingQuadratNames.length > 0) {
-      throw new Error(
-        `Clean re-upload refused: active quadrat rows in plot ${plotID} are already referenced ` +
-          `by stems for the following QuadratName value(s): ${formatBlockedCleanReuploadValues(blockingQuadratNames)}. ` +
-          `Deleting quadrats would cascade-delete stems and downstream measurements even if the same names appear in the upload. ` +
-          `Use Revisions Upload instead.`
-      );
-    }
-
-    const deleteSQL = format(`DELETE FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1`, [schema]);
-    await connectionManager.executeQuery(deleteSQL, [plotID], transactionID);
-  }
-
-  for (const row of rows) {
-    const quadratName = normalizeRequiredString(row.quadrat);
-    if (!quadratName) {
-      skippedCount += 1;
-      continue;
-    }
-
-    const payload = {
-      StartX: row.startx,
-      StartY: row.starty,
-      DimensionX: row.dimx,
-      DimensionY: row.dimy,
-      Area: row.area,
-      QuadratShape: normalizeOptionalString(row.quadratshape)
-    };
-
-    if (uploadMode === UploadMode.REVISIONS) {
-      const existingSQL = format(`SELECT QuadratID FROM ??.quadrats WHERE PlotID = ? AND LOWER(QuadratName) = LOWER(?) AND IsActive = 1 LIMIT 1`, [schema]);
-      const existingRows = await connectionManager.executeQuery(existingSQL, [plotID, quadratName], transactionID);
-
-      if (existingRows.length > 0) {
-        const updateSQL = format(
-          `UPDATE ??.quadrats
-           SET QuadratName = ?, StartX = ?, StartY = ?, DimensionX = ?, DimensionY = ?, Area = ?, QuadratShape = ?, DeletedAt = NULL
-           WHERE QuadratID = ?`,
-          [schema]
-        );
-        await connectionManager.executeQuery(
-          updateSQL,
-          [quadratName, payload.StartX, payload.StartY, payload.DimensionX, payload.DimensionY, payload.Area, payload.QuadratShape, existingRows[0].QuadratID],
-          transactionID
-        );
-        updatedCount += 1;
-        continue;
-      }
-    }
-
-    const insertSQL = format(
-      `INSERT INTO ??.quadrats
-       (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape, IsActive, DeletedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL)`,
-      [schema]
-    );
-    await connectionManager.executeQuery(
-      insertSQL,
-      [plotID, quadratName, payload.StartX, payload.StartY, payload.DimensionX, payload.DimensionY, payload.Area, payload.QuadratShape],
-      transactionID
-    );
-    insertedCount += 1;
-  }
-
-  return { insertedCount, updatedCount, skippedCount };
-}
-
-async function upsertSpeciesRows(
-  connectionManager: ConnectionManager,
-  schema: string,
-  rows: FileRow[],
-  uploadMode: UploadMode,
-  transactionID: string
-): Promise<FixedDataProcessingResult> {
-  let insertedCount = 0;
-  let updatedCount = 0;
-  let skippedCount = 0;
-
-  const duplicateSpeciesCodes = findDuplicateSpeciesCodes(rows);
-  if (duplicateSpeciesCodes.length > 0) {
-    throw new Error(`Species upload contains duplicate SpeciesCode values: ${duplicateSpeciesCodes.join(', ')}`);
-  }
-
-  if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-    // CLEAN_REUPLOAD deletes every active species row before re-inserting the file.
-    // That DELETE is only safe when no live records depend on those SpeciesIDs yet.
-    // trees and specieslimits both reference species via ON DELETE CASCADE, so
-    // including the same SpeciesCode in the upload does NOT preserve downstream data:
-    // the delete would still remove the dependent rows before the replacement
-    // SpeciesID exists. Block the mode entirely once any active species row is in use.
-    const blockingSpeciesSQL = format(
-      `SELECT DISTINCT s.SpeciesCode
-       FROM ??.species s
-       WHERE s.IsActive = 1
-         AND s.SpeciesCode IS NOT NULL
-         AND (
-           EXISTS (
-             SELECT 1
-             FROM ??.trees t
-             WHERE t.SpeciesID = s.SpeciesID
-           )
-           OR EXISTS (
-             SELECT 1
-             FROM ??.specieslimits sl
-             WHERE sl.SpeciesID = s.SpeciesID
-           )
-         )
-       ORDER BY s.SpeciesCode`,
-      [schema, schema, schema]
-    );
-    const blockingSpeciesRows = await connectionManager.executeQuery(blockingSpeciesSQL, [], transactionID);
-    const blockingCodes = Array.isArray(blockingSpeciesRows) ? blockingSpeciesRows.map((row: any) => String(row.SpeciesCode ?? '').trim()).filter(Boolean) : [];
-
-    if (blockingCodes.length > 0) {
-      throw new Error(
-        `Clean re-upload refused: active species rows are already referenced by trees or species limits ` +
-          `for the following SpeciesCode value(s): ${formatBlockedCleanReuploadValues(blockingCodes)}. ` +
-          `Deleting species would cascade-delete dependent records even if the same codes appear in the upload. ` +
-          `Use Revisions Upload instead.`
-      );
-    }
-
-    const deleteSQL = format(`DELETE FROM ??.species WHERE IsActive = 1`, [schema]);
-    await connectionManager.executeQuery(deleteSQL, [], transactionID);
-  }
-
-  for (const row of rows) {
-    const speciesCode = normalizeRequiredString(row.spcode);
-    if (!speciesCode) {
-      skippedCount += 1;
-      continue;
-    }
-
-    let familyID: number | undefined;
-    if (normalizeOptionalString(row.family)) {
-      familyID = (
-        await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family: normalizeOptionalString(row.family)! }, 'FamilyID', transactionID)
-      ).id;
-    }
-
-    let genusID: number | undefined;
-    if (normalizeOptionalString(row.genus)) {
-      const genusPayload: Partial<GenusResult> = {
-        Genus: normalizeOptionalString(row.genus)!
-      };
-      if (familyID) {
-        genusPayload.FamilyID = familyID;
-      }
-      genusID = (await handleUpsert<GenusResult>(connectionManager, schema, 'genus', genusPayload, 'GenusID', transactionID)).id;
-    }
-
-    const speciesPayload = {
-      GenusID: genusID ?? null,
-      SpeciesName: normalizeOptionalString(row.species),
-      SubspeciesName: normalizeOptionalString(row.subspecies),
-      IDLevel: normalizeOptionalString(row.idlevel),
-      SpeciesAuthority: normalizeOptionalString(row.authority),
-      SubspeciesAuthority: normalizeOptionalString(row.subauthority)
-    };
-
-    if (uploadMode === UploadMode.REVISIONS) {
-      const existingSQL = format(`SELECT SpeciesID FROM ??.species WHERE LOWER(SpeciesCode) = LOWER(?) AND IsActive = 1 ORDER BY SpeciesID`, [schema]);
-      const existingRows = await connectionManager.executeQuery(existingSQL, [speciesCode], transactionID);
-
-      if (existingRows.length > 1) {
-        throw new Error(`Duplicate active species rows already exist for SpeciesCode "${speciesCode}". Remove the duplicates before uploading revisions.`);
-      }
-
-      if (existingRows.length > 0) {
-        // REVISIONS source-of-truth semantics: every column that the species upload
-        // CSV format can carry is overwritten unconditionally. Fields the row omits
-        // are normalized to NULL by normalizeOptionalString and so wipe whatever was
-        // previously in the database. This is intentional -- the user explicitly
-        // chose Option (a) ("Replace the whole row") when this behavior was
-        // confirmed. If the CSV format ever grows new columns, add them here to
-        // keep the overwrite semantics complete.
-        const updateSQL = format(
-          `UPDATE ??.species
-           SET SpeciesCode = ?, GenusID = ?, SpeciesName = ?, SubspeciesName = ?, IDLevel = ?, SpeciesAuthority = ?, SubspeciesAuthority = ?, DeletedAt = NULL
-           WHERE SpeciesID = ?`,
-          [schema]
-        );
-        await connectionManager.executeQuery(
-          updateSQL,
-          [
-            speciesCode,
-            speciesPayload.GenusID,
-            speciesPayload.SpeciesName,
-            speciesPayload.SubspeciesName,
-            speciesPayload.IDLevel,
-            speciesPayload.SpeciesAuthority,
-            speciesPayload.SubspeciesAuthority,
-            existingRows[0].SpeciesID
-          ],
-          transactionID
-        );
-        updatedCount += 1;
-        continue;
-      }
-    }
-
-    const insertSQL = format(
-      `INSERT INTO ??.species
-       (GenusID, SpeciesCode, SpeciesName, SubspeciesName, IDLevel, SpeciesAuthority, SubspeciesAuthority, IsActive, DeletedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL)`,
-      [schema]
-    );
-    await connectionManager.executeQuery(
-      insertSQL,
-      [
-        speciesPayload.GenusID,
-        speciesCode,
-        speciesPayload.SpeciesName,
-        speciesPayload.SubspeciesName,
-        speciesPayload.IDLevel,
-        speciesPayload.SpeciesAuthority,
-        speciesPayload.SubspeciesAuthority
-      ],
-      transactionID
-    );
-    insertedCount += 1;
-  }
-
-  return { insertedCount, updatedCount, skippedCount };
 }
 
 async function upsertPersonnelRows(
@@ -687,316 +383,6 @@ async function validateMeasurementUploadScope(
   return { plotID: resolvedPlotID, censusID: resolvedCensusID };
 }
 
-interface DroppedMeasurementCandidate {
-  rowOrdinal: number;
-  existingBatch: string | null;
-}
-
-type DroppedMeasurementRow = FileRow & {
-  failureReason: string;
-  sourceRowIndex: number;
-};
-
-function normalizeMeasurementDate(value: unknown): string | null {
-  return value ? moment(value).format('YYYY-MM-DD') : null;
-}
-
-function collectMeasurementValidationIssues(row: FileRow): string[] {
-  const issues: string[] = [];
-  if (!row.tag || row.tag.trim() === '') issues.push('empty TreeTag');
-  if (!row.spcode || row.spcode.trim() === '') issues.push('empty SpeciesCode');
-  if (!row.quadrat || row.quadrat.trim() === '') issues.push('empty QuadratName');
-  if (row.dbh !== undefined && row.dbh !== null && (isNaN(Number(row.dbh)) || Number(row.dbh) < 0)) issues.push(`invalid DBH value: ${row.dbh}`);
-  if (row.hom !== undefined && row.hom !== null && (isNaN(Number(row.hom)) || Number(row.hom) < 0)) issues.push(`invalid HOM value: ${row.hom}`);
-  if (row.lx !== undefined && row.lx !== null && isNaN(Number(row.lx))) issues.push(`invalid LocalX value: ${row.lx}`);
-  if (row.ly !== undefined && row.ly !== null && isNaN(Number(row.ly))) issues.push(`invalid LocalY value: ${row.ly}`);
-  return issues;
-}
-
-function buildDroppedMeasurementFailureReason(row: FileRow, existingBatch: string | null): string {
-  if (existingBatch) {
-    return `Duplicate row: TreeTag=${row.tag}, StemTag=${row.stemtag || 'null'}, Quadrat=${row.quadrat} already exists in batch ${existingBatch}`;
-  }
-
-  const issues = collectMeasurementValidationIssues(row);
-  if (issues.length > 0) {
-    return `Data validation failed: ${issues.join('; ')}`;
-  }
-
-  return `Row dropped by INSERT IGNORE - possible constraint violation (Tag=${row.tag}, Quadrat=${row.quadrat}, Date=${normalizeMeasurementDate(row.date)})`;
-}
-
-function buildTemporaryMeasurementInsertParams(
-  row: FileRow,
-  fileName: string,
-  batchID: string,
-  sessionId: string | null,
-  plotID: number,
-  censusID: number
-): (string | number | null)[] {
-  const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments } = row;
-  const formattedDate = normalizeMeasurementDate(date);
-  const parsedLx = lx !== undefined && lx !== null && lx !== '' && !isNaN(Number(lx)) ? Number(lx) : null;
-  const parsedLy = ly !== undefined && ly !== null && ly !== '' && !isNaN(Number(ly)) ? Number(ly) : null;
-
-  return [
-    fileName,
-    batchID,
-    sessionId,
-    plotID,
-    censusID,
-    tag ?? null,
-    stemtag || null,
-    spcode ?? null,
-    quadrat ?? null,
-    parsedLx,
-    parsedLy,
-    dbh ?? null,
-    hom ?? null,
-    formattedDate,
-    codes ?? null,
-    comments ?? null
-  ];
-}
-
-async function insertTemporaryMeasurementsInBatches(
-  connectionManager: ConnectionManager,
-  schema: string,
-  rows: FileRow[],
-  fileName: string,
-  batchID: string,
-  sessionId: string | null,
-  plotID: number,
-  censusID: number,
-  transactionID: string
-): Promise<void> {
-  const insertSQLPrefix = format(
-    `INSERT IGNORE INTO ??.temporarymeasurements
-      (FileID, BatchID, SessionID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
-      VALUES `,
-    [schema]
-  );
-
-  for (let start = 0; start < rows.length; start += TEMP_MEASUREMENT_INSERT_BATCH_SIZE) {
-    const slice = rows.slice(start, start + TEMP_MEASUREMENT_INSERT_BATCH_SIZE);
-    const placeholders = slice.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
-    const values = slice.flatMap(row => buildTemporaryMeasurementInsertParams(row, fileName, batchID, sessionId, plotID, censusID));
-    await connectionManager.executeQuery(`${insertSQLPrefix}${placeholders}`, values, transactionID);
-  }
-}
-
-async function cleanupStaleMeasurementBatchesForFile(
-  connectionManager: ConnectionManager,
-  schema: string,
-  fileName: string,
-  batchID: string,
-  plotID: number,
-  censusID: number,
-  transactionID: string
-): Promise<number> {
-  const cleanupSQL = format(
-    `DELETE FROM ??.temporarymeasurements
-     WHERE FileID = ?
-       AND PlotID = ?
-       AND CensusID = ?
-       AND BatchID <> ?`,
-    [schema]
-  );
-  const cleanupResult = await connectionManager.executeQuery(cleanupSQL, [fileName, plotID, censusID, batchID], transactionID);
-  const deletedRows = Number((cleanupResult as { affectedRows?: number })?.affectedRows ?? 0);
-
-  if (deletedRows > 0) {
-    ailogger.warn(
-      `Removed ${deletedRows} stale temporarymeasurement row(s) for ${fileName} before starting batch ${batchID}. ` +
-        `This prevents a retry from inheriting abandoned batches for the same plot/census.`
-    );
-  }
-
-  return deletedRows;
-}
-
-/**
- * Clean up all data from previous uploads for the same plot/census scope.
- * Clean measurement uploads are census replacements: a new upload fully replaces
- * any earlier measurement batches for that census, even if the filename changed.
- *
- * Removes: validation error links, coremeasurements, failedmeasurements (if legacy table exists), uploadmetrics
- */
-async function cleanupPreviousFileUploads(
-  connectionManager: ConnectionManager,
-  schema: string,
-  fileName: string,
-  currentBatchID: string,
-  plotID: number,
-  censusID: number,
-  transactionID: string
-): Promise<number> {
-  const findBatchesSQL = format(
-    `SELECT batchID FROM ??.uploadmetrics
-     WHERE plotID = ? AND censusID = ? AND batchID <> ?`,
-    [schema]
-  );
-  const previousBatches = await connectionManager.executeQuery(findBatchesSQL, [plotID, censusID, currentBatchID], transactionID);
-
-  if (!Array.isArray(previousBatches) || previousBatches.length === 0) return 0;
-
-  const oldBatchIDs = previousBatches.map((row: { batchID: string }) => row.batchID);
-  const placeholders = oldBatchIDs.map(() => '?').join(', ');
-
-  // Delete validation error links linked to old coremeasurements from previous uploads
-  // in the same census scope, regardless of the original filename.
-  // Prefer the unified measurement_error_log table, but fall back to cmverrors in legacy schemas.
-  const deleteValidationErrorsSQL = format(
-    `DELETE mel FROM ??.measurement_error_log mel
-     INNER JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
-     WHERE cm.CensusID = ? AND cm.UploadBatchID IN (${placeholders})`,
-    [schema, schema]
-  );
-  try {
-    await connectionManager.executeQuery(deleteValidationErrorsSQL, [censusID, ...oldBatchIDs], transactionID);
-  } catch (error: unknown) {
-    if (!isMissingTableError(error, 'measurement_error_log')) {
-      throw error;
-    }
-
-    const deleteLegacyValidationErrorsSQL = format(
-      `DELETE e FROM ??.cmverrors e
-       INNER JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = e.CoreMeasurementID
-       WHERE cm.CensusID = ? AND cm.UploadBatchID IN (${placeholders})`,
-      [schema, schema]
-    );
-    await connectionManager.executeQuery(deleteLegacyValidationErrorsSQL, [censusID, ...oldBatchIDs], transactionID);
-  }
-
-  // Delete old coremeasurements
-  const deleteCmSQL = format(
-    `DELETE FROM ??.coremeasurements
-     WHERE CensusID = ? AND UploadBatchID IN (${placeholders})`,
-    [schema]
-  );
-  const cmResult = await connectionManager.executeQuery(deleteCmSQL, [censusID, ...oldBatchIDs], transactionID);
-  const deletedCmRows = Number((cmResult as { affectedRows?: number })?.affectedRows ?? 0);
-
-  // Delete old failedmeasurements
-  const deleteFailedSQL = format(
-    `DELETE FROM ??.failedmeasurements
-     WHERE CensusID = ? AND BatchID IN (${placeholders})`,
-    [schema]
-  );
-  try {
-    await connectionManager.executeQuery(deleteFailedSQL, [censusID, ...oldBatchIDs], transactionID);
-  } catch (error: unknown) {
-    if (!isMissingTableError(error, 'failedmeasurements')) {
-      throw error;
-    }
-    ailogger.info(`Skipping failedmeasurements cleanup for ${fileName}: legacy table does not exist in ${schema}`);
-  }
-
-  // Delete old uploadmetrics so the stored procedure won't skip the new batch
-  const deleteMetricsSQL = format(
-    `DELETE FROM ??.uploadmetrics
-     WHERE plotID = ? AND censusID = ? AND batchID IN (${placeholders})`,
-    [schema]
-  );
-  await connectionManager.executeQuery(deleteMetricsSQL, [plotID, censusID, ...oldBatchIDs], transactionID);
-
-  if (deletedCmRows > 0) {
-    ailogger.info(
-      `Clean re-upload for ${fileName}: removed ${deletedCmRows} coremeasurement(s) and associated errors ` +
-        `from ${oldBatchIDs.length} previous batch(es) for census ${censusID}`
-    );
-  }
-
-  return deletedCmRows;
-}
-
-async function findDroppedMeasurementCandidates(
-  connectionManager: ConnectionManager,
-  schema: string,
-  fileName: string,
-  batchID: string,
-  plotID: number,
-  censusID: number,
-  chunkRows: FileRow[],
-  transactionID: string
-): Promise<DroppedMeasurementCandidate[]> {
-  const tempTable = 'dropped_row_candidates';
-  await connectionManager.executeQuery(`DROP TEMPORARY TABLE IF EXISTS ${tempTable}`, [], transactionID);
-  await connectionManager.executeQuery(
-    `CREATE TEMPORARY TABLE ${tempTable} (
-      RowOrdinal INT NOT NULL PRIMARY KEY,
-      TreeTag VARCHAR(20) NULL,
-      StemTag VARCHAR(10) NULL,
-      SpeciesCode VARCHAR(25) NULL,
-      QuadratName VARCHAR(255) NULL,
-      MeasurementDate DATE NULL,
-      INDEX idx_dropped_row_candidates_match (TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate),
-      INDEX idx_dropped_row_candidates_duplicate (TreeTag, StemTag, QuadratName)
-    ) ENGINE=MEMORY`,
-    [],
-    transactionID
-  );
-
-  try {
-    const insertWidth = 6;
-    const insertBatchSize = 500;
-    for (let start = 0; start < chunkRows.length; start += insertBatchSize) {
-      const slice = chunkRows.slice(start, start + insertBatchSize);
-      const placeholders = slice.map(() => `(${Array(insertWidth).fill('?').join(',')})`).join(', ');
-      const params = slice.flatMap((row, index) => [
-        start + index + 1,
-        row.tag ?? null,
-        row.stemtag || null,
-        row.spcode ?? null,
-        row.quadrat ?? null,
-        normalizeMeasurementDate(row.date)
-      ]);
-
-      await connectionManager.executeQuery(
-        `INSERT INTO ${tempTable} (RowOrdinal, TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate) VALUES ${placeholders}`,
-        params,
-        transactionID
-      );
-    }
-
-    const droppedRowsSQL = format(
-      `SELECT drc.RowOrdinal as rowOrdinal,
-              MIN(dup.BatchID) as existingBatch
-       FROM ${tempTable} drc
-       LEFT JOIN ??.temporarymeasurements tm
-         ON tm.FileID = ?
-        AND tm.BatchID = ?
-        AND tm.TreeTag <=> drc.TreeTag
-        AND tm.StemTag <=> drc.StemTag
-        AND tm.SpeciesCode <=> drc.SpeciesCode
-        AND tm.QuadratName <=> drc.QuadratName
-        AND tm.MeasurementDate <=> drc.MeasurementDate
-       LEFT JOIN ??.temporarymeasurements dup
-         ON dup.FileID = ?
-        AND dup.PlotID = ?
-        AND dup.CensusID = ?
-        AND dup.TreeTag <=> drc.TreeTag
-        AND dup.StemTag <=> drc.StemTag
-        AND dup.QuadratName <=> drc.QuadratName
-       WHERE tm.id IS NULL
-       GROUP BY drc.RowOrdinal
-       ORDER BY drc.RowOrdinal`,
-      [schema, schema]
-    );
-
-    const results = await connectionManager.executeQuery(droppedRowsSQL, [fileName, batchID, fileName, plotID, censusID], transactionID);
-
-    return Array.isArray(results) ? (results as DroppedMeasurementCandidate[]) : [];
-  } finally {
-    try {
-      await connectionManager.executeQuery(`DROP TEMPORARY TABLE IF EXISTS ${tempTable}`, [], transactionID);
-    } catch (cleanupError: unknown) {
-      const message = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-      ailogger.warn(`Failed to clean up ${tempTable}: ${message}`);
-    }
-  }
-}
-
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
@@ -1025,6 +411,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return NextResponse.json({ error: 'Request body must be a JSON object', code: 'INVALID_REQUEST_BODY' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+
   const schema: string = body.schema;
 
   // SQL Injection Prevention: Validate schema against whitelist
@@ -1038,23 +428,58 @@ export async function POST(request: NextRequest) {
       { status: HTTPResponses.INVALID_REQUEST }
     );
   }
+
+  // Phase-3: user→schema membership enforced INLINE rather than via `withRouteAuthz` +
+  // `fromBody('schema')`. This route accepts a potentially large upload body; `fromBody`
+  // clones and fully re-parses the whole body to read one field, doubling parse cost on
+  // the hot upload path. The handler already parsed the body and authenticated the session
+  // above, so we reuse the resolved `schema` and `session` directly. The measurements branch
+  // below retains `requireUploadSessionOwnership` for plot/census token ownership — this adds
+  // the missing user→schema check on top. The meta-test (app/api/route-policy.test.ts)
+  // recognises the `assertSchemaAccess` + `if (denied) return denied` pair as a valid signal.
+  const denied = assertSchemaAccess(session!, schema);
+  if (denied) return denied;
+
   const formType: string = body.formType;
+  const sourceFormat = normalizeSourceFormat(body.sourceFormat ?? SourceFormat.csv);
+  if (sourceFormat !== SourceFormat.csv) {
+    return new NextResponse(
+      JSON.stringify({
+        responseMessage: 'Invalid source format',
+        error: `sourceFormat must be ${SourceFormat.csv}`
+      }),
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
+  if (body.uploadMode !== undefined && !isSupportedUploadMode(body.uploadMode)) {
+    return NextResponse.json(
+      {
+        error: `uploadMode must be ${UploadMode.CLEAN_REUPLOAD} or ${UploadMode.REVISIONS}`,
+        code: 'INVALID_UPLOAD_MODE'
+      },
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
   const uploadMode = normalizeUploadMode(body.uploadMode);
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
   const user: string = body.user;
-  const fileRowSet: FileRowSet = body.fileRowSet;
+  const fileRowSet: FileRowSet = body.fileRowSet ?? {};
   const fileName: string = body.fileName;
+  // Optional RAW-rows path (#6, server half): when present, the server re-resolves/keys/validates
+  // CSV headers via the shared pipeline instead of trusting client-computed keys in fileRowSet.
+  const rawRows: Record<string, string>[] | undefined = Array.isArray(body.rawRows) ? body.rawRows : undefined;
+  const csvHeaders: string[] = Array.isArray(body.csvHeaders) ? body.csvHeaders : [];
+  const clientMapping: unknown = body.mapping;
+  const csvDelimiter: string = typeof body.delimiter === 'string' && body.delimiter.length > 0 ? body.delimiter : ',';
   let transactionID: string | undefined;
   const failingRows: Set<FileRow> = new Set<FileRow>();
   const connectionManager = ConnectionManager.getInstance();
   const maxRetries = 3;
   let retryCount = 0;
+  const sessionId = request.headers.get('x-upload-session-id');
   if (formType === 'measurements') {
-    const chunkRows = Object.values(fileRowSet ?? {});
-    const rowCount = chunkRows.length;
     const batchID = body.batchID || generateShortBatchID();
-    const sessionId = request.headers.get('x-upload-session-id');
     let scopeValidation: Awaited<ReturnType<typeof validateMeasurementUploadScope>>;
     try {
       scopeValidation = await validateMeasurementUploadScope(connectionManager, schema, fileName, batchID, plot, census);
@@ -1100,272 +525,99 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    const contentHash = hashChunkContent(fileRowSet);
-    const idempotencyKey = generateIdempotencyKey(fileName, resolvedPlotID, resolvedCensusID, rowCount, contentHash);
+    // SERVER-RESOLUTION STAGE (#6): when the client sends RAW rows, the server is authoritative
+    // over CSV header resolution (stageMeasurementChunk re-keys/validates via the shared
+    // lib/column-mapping pipeline). Gated on rawRows + non-revisions so the legacy fileRowSet path
+    // is byte identical. Revisions uploads keep their existing measurementID-matching path untouched.
+    const useServerResolution = rawRows !== undefined && uploadMode !== UploadMode.REVISIONS;
+    if (useServerResolution) {
+      // Reject a malformed/tampered mapping at the wire boundary (parity with the arcgis preflight route).
+      if (clientMapping !== undefined && clientMapping !== null && !isColumnMappingShape(clientMapping)) {
+        return new NextResponse(JSON.stringify({ responseMessage: 'Invalid mapping payload', fileName, batchID }), { status: HTTPResponses.INVALID_REQUEST });
+      }
+    }
 
-    // NOTE:
-    // Sample-row duplicate short-circuit checks were removed because they could
-    // falsely classify unique chunks as duplicates. We now always ingest the chunk
-    // and rely on downstream dedupe + explicit dropped-row tracking.
+    // Captured before any DB write inside stageMeasurementChunk so error responses can still
+    // report the resolution's parse rejects after a rollback.
+    let resolutionInvalidRows: FileRow[] = [];
+    // Surfaced from the staging result so silently-dropped columns / unparseable inputs are
+    // visible to the client instead of vanishing.
+    let mappingDiagnostics: { invalidDateValues: string[]; extraColumnRows: number; ignoredColumnCount: number } | null = null;
 
     // Retry logic for database operations
     while (retryCount <= maxRetries) {
       try {
         transactionID = await connectionManager.beginTransaction();
 
-        // Count rows BEFORE insert so we can measure the delta (important when
-        // multiple chunks share a single BatchID under batch consolidation).
-        const expectedRowCount = chunkRows.length;
-        const countSQL = format(`SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [schema]);
-        const preInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
-        const preInsertCount = preInsertResult[0]?.count || 0;
-
-        // A retry of the same file should not inherit stale batches that were left
-        // behind by an earlier interrupted upload for the same plot/census.
-        if (preInsertCount === 0) {
-          if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-            // Clean up data from any previous uploads for this census.
-            // Clean re-upload is census replacement, not filename replacement.
-            await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
-          }
-
-          await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
-        }
-
-        await insertTemporaryMeasurementsInBatches(
-          connectionManager,
+        const stageResult = await stageMeasurementChunk(connectionManager, {
           schema,
-          chunkRows,
           fileName,
           batchID,
-          sessionId,
-          resolvedPlotID,
-          resolvedCensusID,
-          transactionID
-        );
-
-        // CRITICAL FIX: Verify expected vs actual row count to detect silent data loss from INSERT IGNORE
-        const postInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
-        const postInsertCount = postInsertResult[0]?.count || 0;
-        const actualInsertedCount = postInsertCount - preInsertCount;
-
-        // Check for discrepancy - this would indicate INSERT IGNORE silently dropped rows
-        const droppedRowCount = expectedRowCount - actualInsertedCount;
-
-        if (droppedRowCount > 0) {
-          ailogger.error(
-            `DATA INTEGRITY WARNING: Expected ${expectedRowCount} rows but only ${actualInsertedCount} were inserted for ${fileName}-${batchID}. ` +
-              `${droppedRowCount} row(s) were silently dropped by INSERT IGNORE (likely duplicates). This indicates potential data loss!`
-          );
-
-          const droppedCandidates = await findDroppedMeasurementCandidates(
-            connectionManager,
-            schema,
-            fileName,
-            batchID,
-            resolvedPlotID,
-            resolvedCensusID,
-            chunkRows,
-            transactionID
-          );
-          const droppedRows: DroppedMeasurementRow[] = droppedCandidates.map(candidate => {
-            const row = chunkRows[candidate.rowOrdinal - 1];
-            return Object.assign({}, row, {
-              failureReason: buildDroppedMeasurementFailureReason(row, candidate.existingBatch),
-              sourceRowIndex: candidate.rowOrdinal
-            }) as DroppedMeasurementRow;
-          });
-
-          if (droppedRows.length !== droppedRowCount) {
-            ailogger.warn(
-              `Dropped-row batch detection identified ${droppedRows.length} of ${droppedRowCount} dropped row(s) for ${fileName}-${batchID}. ` +
-                `Persisted unresolved ingestion errors may be incomplete for this chunk.`
-            );
+          plotID: resolvedPlotID,
+          censusID: resolvedCensusID,
+          uploadMode,
+          sourceFormat,
+          rawRows: rawRows ?? [],
+          csvHeaders,
+          delimiter: csvDelimiter,
+          storedMapping: isColumnMappingShape(clientMapping) ? clientMapping : undefined,
+          uploadSessionID: sessionId,
+          transactionID,
+          preKeyedRows: useServerResolution ? undefined : Object.values(fileRowSet ?? {}),
+          changedBy: user,
+          onInvalidRows: invalidRows => {
+            resolutionInvalidRows = invalidRows;
           }
-
-          // Persist dropped rows as unresolved ingestion errors in coremeasurements.
-          if (droppedRows.length > 0) {
-            try {
-              await insertIngestionFailureRows(
-                connectionManager,
-                schema,
-                droppedRows.map(row => ({
-                  plotID: resolvedPlotID,
-                  censusID: resolvedCensusID,
-                  tag: row.tag,
-                  stemTag: row.stemtag || null,
-                  spCode: row.spcode,
-                  quadrat: row.quadrat,
-                  x: toNullableNumber(row.lx),
-                  y: toNullableNumber(row.ly),
-                  dbh: toNullableNumber(row.dbh),
-                  hom: toNullableNumber(row.hom),
-                  date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
-                  codes: row.codes || null,
-                  comments: null,
-                  fileID: fileName,
-                  batchID,
-                  sourceRowIndex: row.sourceRowIndex,
-                  failureReason: row.failureReason || 'Unknown error during insert'
-                })),
-                transactionID
-              );
-              ailogger.info(`Persisted ${droppedRows.length} dropped rows as unresolved ingestion errors for ${fileName}-${batchID}`);
-            } catch (failedInsertError: any) {
-              ailogger.error(`Failed to persist dropped rows as unresolved ingestion errors (attempt 1): ${failedInsertError.message}`);
-
-              // Retry once before giving up
-              try {
-                await insertIngestionFailureRows(
-                  connectionManager,
-                  schema,
-                  droppedRows.map(row => ({
-                    plotID: resolvedPlotID,
-                    censusID: resolvedCensusID,
-                    tag: row.tag,
-                    stemTag: row.stemtag || null,
-                    spCode: row.spcode,
-                    quadrat: row.quadrat,
-                    x: toNullableNumber(row.lx),
-                    y: toNullableNumber(row.ly),
-                    dbh: toNullableNumber(row.dbh),
-                    hom: toNullableNumber(row.hom),
-                    date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
-                    codes: row.codes || null,
-                    comments: null,
-                    fileID: fileName,
-                    batchID,
-                    sourceRowIndex: row.sourceRowIndex,
-                    failureReason: row.failureReason || 'Unknown error during insert'
-                  })),
-                  transactionID
-                );
-                ailogger.info(`Retry successful: persisted ${droppedRows.length} dropped rows as unresolved ingestion errors for ${fileName}-${batchID}`);
-              } catch (retryError: any) {
-                ailogger.error(`Failed to persist dropped rows as unresolved ingestion errors (attempt 2): ${retryError.message}`);
-
-                // Critical: log to uploadintegrityalerts so data loss is not silent.
-                try {
-                  const alertUploadId = buildUploadId(
-                    schema,
-                    resolvedPlotID,
-                    resolvedCensusID,
-                    fileName,
-                    batchID,
-                    'failed-insert-to-unresolved-coremeasurements'
-                  );
-                  const alertSQL = format(
-                    `INSERT INTO ??.uploadintegrityalerts
-                     (uploadId, fileID, batchID, plotID, censusID, type, message, severity,
-                      sourceRecords, processedRecords, failedRecords, missingRecords)
-                     VALUES (?, ?, ?, ?, ?, 'FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS', ?, 'critical', ?, ?, ?, ?)`,
-                    [schema]
-                  );
-                  const alertMessage = JSON.stringify({
-                    error: retryError.message,
-                    droppedRowCount: droppedRows.length,
-                    timestamp: new Date().toISOString(),
-                    note: 'These rows were dropped during upload and could not be persisted as unresolved ingestion errors'
-                  });
-                  await connectionManager.executeQuery(
-                    alertSQL,
-                    [
-                      alertUploadId,
-                      fileName,
-                      batchID,
-                      resolvedPlotID,
-                      resolvedCensusID,
-                      alertMessage,
-                      expectedRowCount,
-                      actualInsertedCount,
-                      droppedRows.length,
-                      0
-                    ],
-                    transactionID
-                  );
-                  ailogger.error(`Logged failed insert to uploadintegrityalerts for ${fileName}-${batchID}`);
-                } catch (alertError: any) {
-                  ailogger.error(`CRITICAL: Failed to log data loss to uploadintegrityalerts: ${alertError.message}. Dropped rows: ${droppedRows.length}`);
-                }
-              }
-            }
-          }
-        } else {
-          ailogger.info(`Successfully inserted ${actualInsertedCount} rows for ${fileName}-${batchID} (expected: ${expectedRowCount}, no data loss detected)`);
-        }
-
-        // Track file upload in unifiedchangelog (single row per file, not per batch)
-        try {
-          // Check if we've already logged this file upload - use format() for schema
-          const existingEntrySQL = format(
-            `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
-             WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?
-             ORDER BY ChangeID DESC LIMIT 1`,
-            [schema]
-          );
-          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, resolvedCensusID], transactionID);
-
-          if (existingEntry.length === 0) {
-            // First batch for this file - insert new entry
-            const uploadMetadata = JSON.stringify({
-              fileName,
-              formType,
-              uploadMode,
-              rowCount: actualInsertedCount,
-              droppedCount: droppedRowCount,
-              batchCount: 1
-            });
-            const insertChangelogSQL = format(
-              `INSERT INTO ??.unifiedchangelog
-              (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
-              VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
-              [schema]
-            );
-            await connectionManager.executeQuery(
-              insertChangelogSQL,
-              ['file_upload', fileName, 'INSERT', uploadMetadata, user, resolvedPlotID, resolvedCensusID],
-              transactionID
-            );
-          } else {
-            // Subsequent batch - update the existing entry with accumulated count
-            // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
-            const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
-            metadata.uploadMode = uploadMode;
-            metadata.rowCount = (metadata.rowCount || 0) + actualInsertedCount;
-            metadata.droppedCount = (metadata.droppedCount || 0) + droppedRowCount;
-            metadata.batchCount = (metadata.batchCount || 1) + 1;
-            const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
-            await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
-          }
-        } catch (logError: any) {
-          // Log but don't fail the upload if changelog tracking fails
-          ailogger.error('Failed to log file upload to changelog', logError);
-        }
+        });
+        mappingDiagnostics = stageResult.diagnostics;
 
         await connectionManager.commitTransaction(transactionID);
         transactionID = undefined;
 
+        // On the rawRows path fileRowSet is `{}`, which would make the hash constant across distinct
+        // chunks and break idempotency. Hash the rows actually being inserted instead.
+        const effectiveRowSet: FileRowSet = rawRows
+          ? Object.fromEntries(stageResult.stagedRows.map((row, index) => [`row-${index}`, row] as const))
+          : fileRowSet;
+        const contentHash = hashChunkContent(effectiveRowSet);
+        const idempotencyKey = generateIdempotencyKey(fileName, resolvedPlotID, resolvedCensusID, stageResult.stagedRows.length, contentHash);
+
         return new NextResponse(
           JSON.stringify({
             responseMessage:
-              droppedRowCount > 0
-                ? `Bulk insert completed with ${droppedRowCount} row(s) dropped - check unresolved ingestion errors`
+              stageResult.droppedCount > 0
+                ? `Bulk insert completed with ${stageResult.droppedCount} row(s) dropped - check unresolved ingestion errors`
                 : `Bulk insert to SQL completed`,
-            failingRows: Array.from(failingRows),
-            insertedCount: actualInsertedCount,
-            expectedCount: expectedRowCount,
-            droppedCount: droppedRowCount,
-            dataIntegrityWarning: droppedRowCount > 0,
+            failingRows: stageResult.invalidRows,
+            insertedCount: stageResult.insertedCount,
+            expectedCount: stageResult.expectedCount,
+            droppedCount: stageResult.droppedCount,
+            dataIntegrityWarning: stageResult.droppedCount > 0,
             transactionCompleted: true,
             batchID: batchID,
             uploadMode,
-            idempotencyKey
+            idempotencyKey,
+            ...(mappingDiagnostics ? { mappingDiagnostics } : {})
           }),
           { status: HTTPResponses.OK }
         );
       } catch (e: any) {
         if (transactionID) {
-          await connectionManager.rollbackTransaction(transactionID);
+          const failedTransactionID = transactionID;
+          transactionID = undefined;
+          await rollbackPreservingOriginalError(connectionManager, failedTransactionID, {
+            schema,
+            formType,
+            fileName,
+            uploadMode,
+            branch: 'measurements'
+          });
+        }
+
+        if (e instanceof MeasurementChunkResolutionError) {
+          return new NextResponse(JSON.stringify({ responseMessage: 'Header plan misalignment for the uploaded file', fileName, batchID }), {
+            status: HTTPResponses.UNPROCESSABLE_ENTITY
+          });
         }
 
         retryCount++;
@@ -1380,7 +632,7 @@ export async function POST(request: NextRequest) {
         return new NextResponse(
           JSON.stringify({
             responseMessage: `Error processing file ${fileName}: ${e.message}`,
-            failingRows: Array.from(failingRows),
+            failingRows: resolutionInvalidRows,
             retryCount
           }),
           { status: HTTPResponses.INTERNAL_SERVER_ERROR }
@@ -1398,7 +650,17 @@ export async function POST(request: NextRequest) {
         transactionID = await connectionManager.beginTransaction();
 
         if (formType === 'quadrats') {
-          fixedDataProcessingResult = await upsertQuadratRows(connectionManager, schema, plot?.plotID, uploadRows, uploadMode, transactionID);
+          const overlapAcknowledgment: unknown = body.quadratOverlapAcknowledgment;
+          fixedDataProcessingResult = await writeQuadratUpload(
+            connectionManager,
+            schema,
+            plot?.plotID,
+            uploadRows,
+            uploadMode,
+            overlapAcknowledgment,
+            body.coordinateReferenceCorner,
+            transactionID
+          );
         } else if (formType === 'attributes') {
           fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
         } else if (formType === 'species') {
@@ -1434,9 +696,6 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        await connectionManager.commitTransaction(transactionID ?? '');
-        transactionID = undefined;
-
         // Track file upload in unifiedchangelog (single row per file)
         try {
           const batchRowCount = Object.keys(fileRowSet).length;
@@ -1449,7 +708,7 @@ export async function POST(request: NextRequest) {
              ORDER BY ChangeID DESC LIMIT 1`,
             [schema]
           );
-          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID]);
+          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID], transactionID);
 
           if (existingEntry.length === 0) {
             // First batch for this file - insert new entry
@@ -1469,24 +728,64 @@ export async function POST(request: NextRequest) {
               VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
               [schema]
             );
-            await connectionManager.executeQuery(insertChangelogSQL, ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID]);
+            await connectionManager.executeQuery(
+              insertChangelogSQL,
+              ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID],
+              transactionID
+            );
           } else {
             // Subsequent batch - update the existing entry with accumulated count
             // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
             const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
-            metadata.uploadMode = uploadMode;
+            // Preserve the user's initial mode across chunked fixed-data uploads. Later
+            // quadrat chunks intentionally execute as revisions after the first clean-reset
+            // chunk, but the file-level changelog must continue to say clean_reupload.
+            metadata.uploadMode = metadata.uploadMode || uploadMode;
+            metadata.lastChunkMode = uploadMode;
             metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
             metadata.insertedCount = (metadata.insertedCount || 0) + fixedDataProcessingResult.insertedCount;
             metadata.updatedCount = (metadata.updatedCount || 0) + fixedDataProcessingResult.updatedCount;
             metadata.skippedCount = (metadata.skippedCount || 0) + fixedDataProcessingResult.skippedCount;
             metadata.batchCount = (metadata.batchCount || 1) + 1;
             const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
-            await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID]);
+            await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
+          }
+
+          if (fixedDataProcessingResult.acknowledgedOverlapSummaries?.length) {
+            await insertQuadratOverlapAcknowledgmentEvent(
+              connectionManager,
+              schema,
+              fileName,
+              uploadMode,
+              sessionId,
+              plot?.plotID,
+              censusID,
+              session?.user,
+              fixedDataProcessingResult.acknowledgedOverlapSummaries,
+              transactionID
+            );
           }
         } catch (logError: any) {
-          // Log but don't fail the upload if changelog tracking fails
           ailogger.error('Failed to log file upload to changelog', logError);
+          // The changelog now shares the data transaction, so a transaction-fatal error here
+          // (deadlock, lock-wait timeout, lost connection -- e.g. two concurrent chunks racing
+          // on the same changelog row) may have rolled the WHOLE transaction back. Swallowing
+          // it would let the commit below no-op "succeed" and return 200 while this chunk's
+          // data rows were silently lost. Rethrow so the outer catch rolls back cleanly and
+          // the retry loop re-runs the chunk.
+          if (isRetryableUploadError(logError)) {
+            throw logError;
+          }
+          // An overlap acknowledgment is part of the write authorization and provenance, not
+          // optional telemetry. Keep it in the same transaction so an audit failure rolls the
+          // quadrat data back. Preserve the legacy best-effort behavior for unrelated uploads.
+          if (fixedDataProcessingResult.acknowledgedOverlapSummaries?.length) {
+            throw new Error(`Failed to persist quadrat overlap acknowledgment: ${logError instanceof Error ? logError.message : String(logError)}`);
+          }
         }
+
+        await connectionManager.commitTransaction(transactionID ?? '');
+        transactionID = undefined;
 
         return new NextResponse(
           JSON.stringify({
@@ -1502,8 +801,49 @@ export async function POST(request: NextRequest) {
         );
       } catch (error: any) {
         if (transactionID) {
-          await connectionManager.rollbackTransaction(transactionID);
+          const failedTransactionID = transactionID;
           transactionID = undefined;
+          await rollbackPreservingOriginalError(connectionManager, failedTransactionID, {
+            schema,
+            formType,
+            fileName,
+            uploadMode,
+            branch: 'fixed-data'
+          });
+        }
+
+        // Unacknowledged overlaps are a confirm-and-retry condition, not a data error: the
+        // client re-submits the same file with the acknowledgment flag once the uploader
+        // confirms the overlaps reflect field measurements. Distinct code so the UI can react.
+        if (error instanceof QuadratOverlapAcknowledgmentRequiredError) {
+          ailogger.warn(`Quadrat upload for ${fileName} requires overlap acknowledgment: ${error.message}`, {
+            schema,
+            plotID: plot?.plotID ?? null,
+            uploadMode,
+            code: QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE
+          });
+          return NextResponse.json(
+            {
+              error: error.message,
+              code: QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE,
+              overlapSummaries: [error.overlapSummary]
+            },
+            { status: HTTPResponses.INVALID_REQUEST }
+          );
+        }
+
+        // A geometry validation failure is a client error, never a retryable infrastructure
+        // failure -- check for it BEFORE retryCount/isRetryableUploadError so it can never be
+        // retried and never falls through to the generic 503 responses below.
+        if (error instanceof QuadratGeometryValidationError) {
+          ailogger.warn(`Rejected quadrat upload for ${fileName}: ${error.message}`, {
+            schema,
+            plotID: plot?.plotID ?? null,
+            uploadMode,
+            rowCount: uploadRows.length,
+            code: 'INVALID_QUADRAT_GEOMETRY'
+          });
+          return NextResponse.json({ error: error.message, code: 'INVALID_QUADRAT_GEOMETRY' }, { status: HTTPResponses.INVALID_REQUEST });
         }
 
         retryCount++;

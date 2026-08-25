@@ -1,6 +1,6 @@
 import type { Session } from 'next-auth';
-import ConnectionManager from '@/config/connectionmanager';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
 import { ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS, STALE_VALIDATION_RUN_THRESHOLD_MINUTES } from '@/config/measurementscopepolicy';
 import { getErrorCode } from '@/lib/errorhelpers';
@@ -38,11 +38,19 @@ function hasSchemaAccess(session: Session, schema: string): boolean {
   return (session.user?.sites ?? []).some(site => site.schemaName === schema);
 }
 
-async function assertPlotCensusExists(cm: ConnectionManager, schema: string, plotID: number, censusID: number): Promise<void> {
+/**
+ * Existence check that also reports the scope's PlotCensusNumber. A missing or
+ * unusable number is NOT an authorization failure: `census.PlotCensusNumber` is
+ * nullable and legacy/ctfsweb-imported rows carry NULL, and most callers only
+ * need to know the plot/census exists and belongs to the user. Callers that
+ * genuinely require the number (blob container naming) reject the null
+ * themselves.
+ */
+async function resolvePlotCensusNumber(cm: ConnectionManager, schema: string, plotID: number, censusID: number): Promise<number | null> {
   const rows = await cm.executeQuery(
     safeFormatQuery(
       schema,
-      `SELECT 1 AS ok
+      `SELECT c.PlotCensusNumber
        FROM ??.census c
        WHERE c.PlotID = ?
          AND c.CensusID = ?
@@ -55,6 +63,8 @@ async function assertPlotCensusExists(cm: ConnectionManager, schema: string, plo
   if (!Array.isArray(rows) || rows.length === 0) {
     throw new ScopeAccessError('plot/census scope is not available');
   }
+  const plotCensusNumber = Number(rows[0].PlotCensusNumber);
+  return Number.isSafeInteger(plotCensusNumber) && plotCensusNumber > 0 ? plotCensusNumber : null;
 }
 
 async function probeActiveUploadSession(cm: ConnectionManager, schema: string, plotID: number, censusID: number, transactionID?: string): Promise<void> {
@@ -135,12 +145,16 @@ async function probeActiveValidationRun(cm: ConnectionManager, schema: string, p
  * CoreMeasurementID + CensusID + PlotID + StemGUID shape and translates a
  * missed lookup to TargetNotFoundError (→ 404).
  */
-export async function assertCanEditMeasurementScope(cm: ConnectionManager, session: Session, input: MeasurementScopeInput): Promise<void> {
+export async function assertCanEditMeasurementScope(
+  cm: ConnectionManager,
+  session: Session,
+  input: MeasurementScopeInput
+): Promise<{ plotCensusNumber: number | null }> {
   if (!hasSchemaAccess(session, input.schema)) {
     throw new ScopeAccessError();
   }
 
-  await assertPlotCensusExists(cm, input.schema, input.plotID, input.censusID);
+  return { plotCensusNumber: await resolvePlotCensusNumber(cm, input.schema, input.plotID, input.censusID) };
 }
 
 /**

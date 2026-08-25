@@ -1,0 +1,362 @@
+name: Nightly Regression
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-regression-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full-cypress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      mysql:
+        image: mysql:8.0.36
+        env:
+          MYSQL_ROOT_PASSWORD: testpassword
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root -ptestpassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      - name: Create .env for E2E testing
+        run: |
+          cat > frontend/.env <<'ENVEOF'
+          AUTH_SECRET=e2e-ci-secret
+          AUTH_URL=http://localhost:3000
+          AZURE_SQL_USER=root
+          AZURE_SQL_PASSWORD=testpassword
+          AZURE_SQL_SERVER=127.0.0.1
+          AZURE_SQL_PORT=3306
+          AZURE_SQL_CATALOG_SCHEMA=catalog
+          NEXT_PUBLIC_E2E_TESTING=true
+          NODE_ENV=development
+          PORT=3000
+          ENVEOF
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Seed E2E database
+        run: npm run db:seed:e2e
+        working-directory: frontend
+        env:
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_PORT: "3306"
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: testpassword
+
+      - name: Install Cypress binary
+        run: npx cypress install
+        working-directory: frontend
+
+      - name: Run full Cypress suite
+        run: npm run test:e2e:ci
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_E2E_TESTING: "true"
+
+      - name: Upload Cypress screenshots on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: nightly-cypress-screenshots
+          path: frontend/cypress/screenshots
+          retention-days: 14
+
+      - name: Upload Cypress videos
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-cypress-videos
+          path: frontend/cypress/videos
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Full real-DB suite (nightly tier of the e2e-tests.yml realdb-smoke gate).
+  #
+  # Runs EVERY spec under cypress/e2e/column-mapping-realdb/** — including
+  # resolve-and-remove.cy.ts, whose edit-APPLY step needs the edit-plan fresh-
+  # authorization poll. That poll (config/editplan/authorization.ts) has no e2e
+  # bypass by design; here AUTH_FUNCTIONS_POLL_URL points at the hard-gated
+  # test-only stub /api/e2e-auth-poll served by the same dev server (404s unless
+  # NEXT_PUBLIC_E2E_TESTING=true && NODE_ENV!=production, so it is inert in any
+  # real deployment). The PR-gate realdb-smoke job stays upload-only.
+  #
+  # SPEC ASSIGNMENT — resolve-and-remove runs NIGHTLY (not PR) per the
+  # regression-hardening plan Task 11: measured local runtime 2026-07-20 was
+  # 36s Cypress time for the full two-spec suite (csv-mapping 15s +
+  # resolve-and-remove 21s, ~45s wall with dev-server startup). The edit-apply
+  # flow adds a browser-driven grid edit + three DB polling loops, so it lives
+  # here until a few nightly runs establish its CI-runner variance; promote to
+  # the PR realdb-smoke job once that variance is known.
+  # ---------------------------------------------------------------------------
+  realdb-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      mysql:
+        image: mysql:8.0.36
+        env:
+          MYSQL_ROOT_PASSWORD: testpassword
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root -ptestpassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      - name: Create .env for real-DB nightly
+        run: |
+          cat > frontend/.env <<'ENVEOF'
+          AUTH_SECRET=e2e-ci-secret
+          AUTH_URL=http://localhost:3000
+          AZURE_SQL_USER=root
+          AZURE_SQL_PASSWORD=testpassword
+          AZURE_SQL_SERVER=127.0.0.1
+          AZURE_SQL_PORT=3306
+          AZURE_SQL_CATALOG_SCHEMA=catalog
+          NEXT_PUBLIC_E2E_TESTING=true
+          NODE_ENV=development
+          PORT=3000
+          AUTH_FUNCTIONS_POLL_URL=http://localhost:3000/api/e2e-auth-poll
+          ENVEOF
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install Cypress binary
+        run: npx cypress install
+        working-directory: frontend
+
+      # Fail-closed guard: this job is the only CI coverage of the edit-apply
+      # correction flow. A rename/move must fail here, never pass vacuously.
+      - name: Assert real-DB specs are discoverable
+        run: |
+          REALDB_DIR="frontend/cypress/e2e/column-mapping-realdb"
+          REQUIRED_SPECS="csv-mapping-to-coremeasurements.cy.ts resolve-and-remove.cy.ts"
+          count=$(find "$REALDB_DIR" -maxdepth 1 -name '*.cy.ts' 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No real-DB specs found under $REALDB_DIR — this job would run zero specs. Refusing to pass vacuously."
+            exit 1
+          fi
+          for spec in $REQUIRED_SPECS; do
+            if [ ! -f "$REALDB_DIR/$spec" ]; then
+              echo "::error::Required real-DB spec '$REALDB_DIR/$spec' not found (renamed?). Update this job."
+              exit 1
+            fi
+          done
+          echo "Discovered $count real-DB spec file(s); requiring: $REQUIRED_SPECS"
+
+      # No `spec:` filter — the realdb config's own specPattern runs the whole
+      # column-mapping-realdb/** directory, so a newly added real-DB spec is
+      # picked up here automatically.
+      - name: Run full real-DB suite
+        uses: cypress-io/github-action@v6
+        with:
+          working-directory: frontend
+          start: npx next dev --turbo
+          wait-on: "http://localhost:3000"
+          wait-on-timeout: 120
+          browser: electron
+          headed: false
+          config-file: cypress.realdb.config.cjs
+        env:
+          NEXT_PUBLIC_E2E_TESTING: "true"
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_PORT: "3306"
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: testpassword
+
+      - name: Upload real-DB nightly screenshots on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: nightly-realdb-screenshots
+          path: frontend/cypress/screenshots
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload real-DB nightly videos
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-realdb-videos
+          path: frontend/cypress/videos
+          retention-days: 14
+          if-no-files-found: ignore
+
+  component:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install Cypress binary
+        run: npx cypress install
+        working-directory: frontend
+
+      - name: Cypress component tests
+        run: npm run test:component
+        working-directory: frontend
+
+      - name: Upload component screenshots on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: nightly-component-screenshots
+          path: frontend/cypress/screenshots
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload component videos
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-component-videos
+          path: frontend/cypress/videos
+          retention-days: 14
+          if-no-files-found: ignore
+
+  stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    services:
+      mysql:
+        image: mysql:8.0.36
+        env:
+          MYSQL_ROOT_PASSWORD: testpassword
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root -ptestpassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      - name: Create .env for stress testing
+        run: |
+          cat > frontend/.env <<'ENVEOF'
+          AUTH_SECRET=e2e-ci-secret
+          AUTH_URL=http://localhost:3000
+          AZURE_SQL_USER=root
+          AZURE_SQL_PASSWORD=testpassword
+          AZURE_SQL_SERVER=127.0.0.1
+          AZURE_SQL_PORT=3306
+          AZURE_SQL_CATALOG_SCHEMA=catalog
+          NEXT_PUBLIC_E2E_TESTING=true
+          NODE_ENV=development
+          PORT=3000
+          ENVEOF
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Seed E2E database
+        run: npm run db:seed:e2e
+        working-directory: frontend
+        env:
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_PORT: "3306"
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: testpassword
+
+      - name: Workshop stress smoke
+        run: npm run stress:workshop:local
+        working-directory: frontend
+        env:
+          STRESS_DURATION: 15s
+          STRESS_VUS_PER_SITE: "1"
+          STRESS_MAX_SITES: "2"
+          STRESS_MIN_SITES: "1"
+          STRESS_PROFILE: smoke
+
+      - name: Upload stress results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-stress-results
+          # Must match the harness DEFAULT_OUTPUT_DIR (frontend/test-results/stress); the previous
+          # path (frontend/tests/stress/results) never existed, so the artifact was always empty.
+          path: frontend/test-results/stress
+          retention-days: 14
+          if-no-files-found: ignore
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Coverage snapshot
+        run: npm run test:coverage
+        working-directory: frontend
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-coverage
+          path: frontend/coverage
+          retention-days: 14
+          if-no-files-found: ignore

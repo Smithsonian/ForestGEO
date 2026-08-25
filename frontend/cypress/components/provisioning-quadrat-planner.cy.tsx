@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import QuadratPlanner from '@/components/provisioning/QuadratPlanner';
-import type { ProvisioningInput, QuadratConfig } from '@/lib/provisioning/types';
+import type { ProvisioningPlotInput, QuadratConfig } from '@/lib/provisioning/types';
 
-type PlotValue = ProvisioningInput['plot'];
+type PlotValue = ProvisioningPlotInput;
 
 const PLOT_100x100: PlotValue = {
   plotName: 'Test Plot',
   dimensionX: 100,
   dimensionY: 100,
-  area: 1,
+  area: 10000,
   globalX: 0,
   globalY: 0,
   globalZ: 0,
@@ -16,7 +16,7 @@ const PLOT_100x100: PlotValue = {
   description: '',
   defaultDimensionUnits: 'm',
   defaultCoordinateUnits: 'm',
-  defaultAreaUnits: 'ha',
+  defaultAreaUnits: 'm2',
   defaultDBHUnits: 'mm',
   defaultHOMUnits: 'm'
 };
@@ -184,8 +184,10 @@ describe('QuadratPlanner', () => {
 
       uploadCsvFixture('quadrats-overlapping.csv');
 
-      // Wait for DOM update after async file read
-      cy.contains('overlap').should('be.visible');
+      // Both quadrat names must appear so the message identifies which quadrat overlaps
+      // which — a bare "overlaps with ..." with no subject is a regression (see
+      // fixtures/quadrats-overlapping.csv: rows "A" and "B" overlap).
+      cy.contains('Quadrat "A" overlaps quadrat "B"').should('be.visible');
     });
 
     it('shows bounds error when out-of-bounds CSV is uploaded', () => {
@@ -308,6 +310,33 @@ describe('QuadratPlanner', () => {
         const lastCall = calls[calls.length - 1];
         expect(lastCall.args[0].mode).to.equal('grid');
       });
+    });
+  });
+
+  describe('South-west coordinate convention', () => {
+    it('states the required convention in the upload helper text', () => {
+      const onChangeSpy = cy.stub().as('onChange');
+      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
+
+      cy.contains("startX/startY must be each quadrat's south-west (lower-left) corner").should('be.visible');
+    });
+
+    it('offers no control for declaring a different reference corner', () => {
+      const onChangeSpy = cy.stub().as('onChange');
+      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
+
+      cy.contains('label', "Which corner does each row's StartX/StartY identify?").should('not.exist');
+    });
+
+    it('rejects a file whose coordinates name the north-east corner', () => {
+      const onChangeSpy = cy.stub().as('onChange');
+      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
+
+      // quadrats-out-of-bounds.csv: A,90,0,20,20 in a 100x100 plot reaches x=110.
+      uploadCsvFixture('quadrats-out-of-bounds.csv');
+
+      cy.get('[aria-label="CSV load success"]').should('not.exist');
+      cy.contains(/validation (error|errors) found/).should('be.visible');
     });
   });
 });

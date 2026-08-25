@@ -48,14 +48,14 @@ next-env.d.ts
 .github/workflows/new-file-upload-system_forestgeo-livesite.yml
 /.fleet
 /frontend/sampledata
-/frontend/scripts
 /frontend/.vscode
 /documentation/.obsidian
 /documentation/.obsidian/*
 frontend/liquibase/
 
 *.sh
-!frontend/db-migrations/unified-measurements-migrations/run-branch-refresh.sh
+!frontend/db/migrations/unified-measurements-migrations/run-branch-refresh.sh
+!scripts/verify-clone-runnable.sh
 *.properties
 .jscpd
 CLAUDE.md
@@ -66,11 +66,19 @@ frontend/docs/.vscode/**
 .logs/*
 
 # DB migration backups and generated SQL
+frontend/db/migrations/unified-measurements-migrations/backups/
 frontend/db-migrations/unified-measurements-migrations/backups/
-frontend/db-migrations/unified-measurements-migrations/branch_refresh_00_ensure_upload_tracking_tables.sql
+frontend/backups/
+*deployment_log*.txt
+frontend/db/migrations/unified-measurements-migrations/branch_refresh_00_ensure_upload_tracking_tables.sql
 # superpowers scratch (plans, specs, mockups) — ignored everywhere
 superpowers/
 .superpowers/
+!docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/notes/
+docs/superpowers/notes/*
+!docs/superpowers/notes/2026-07-hydration-mismatch.md
 
 # personal weekly work notes — synced to Obsidian, not source-controlled
 weekly-notes/

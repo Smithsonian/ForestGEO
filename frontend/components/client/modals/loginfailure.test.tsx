@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import LoginFailed from './loginfailure';
-import { signOut } from 'next-auth/react';
+import { signOut, useSession } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
+import ailogger from '@/ailogger';
 
 // Mock next-auth/react
 vi.mock('next-auth/react', () => ({
-  signOut: vi.fn()
+  signOut: vi.fn(),
+  useSession: vi.fn()
 }));
 
 // Mock next/navigation
@@ -18,16 +20,19 @@ vi.mock('next/navigation', () => ({
 // Mock ailogger
 vi.mock('@/ailogger', () => ({
   default: {
-    error: vi.fn()
+    error: vi.fn(),
+    event: vi.fn()
   }
 }));
 
 describe('LoginFailed - Functional Tests', () => {
   const mockSignOut = signOut as unknown as ReturnType<typeof vi.fn>;
+  const mockUseSession = useSession as unknown as ReturnType<typeof vi.fn>;
   const mockUseSearchParams = useSearchParams as unknown as ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseSession.mockReturnValue({ data: null, status: 'unauthenticated' });
 
     // Mock sessionStorage and localStorage
     global.sessionStorage = {
@@ -77,6 +82,66 @@ describe('LoginFailed - Functional Tests', () => {
       expect(screen.getByText(/could not reach the authentication service/i)).toBeInTheDocument();
       // Raw slug must NOT appear in the DOM — only the friendly mapped message.
       expect(screen.queryByText(/permissions-unavailable/i)).not.toBeInTheDocument();
+    });
+
+    it('MUST display actionable non-transient message for user-not-provisioned slug', () => {
+      mockUseSearchParams.mockReturnValue({
+        get: vi.fn().mockReturnValue('user-not-provisioned')
+      });
+
+      render(<LoginFailed />);
+
+      expect(screen.getByText(/no forestgeo account has been set up/i)).toBeInTheDocument();
+      // Must NOT show the transient-outage message — an unprovisioned user
+      // retrying forever was exactly the bug this slug exists to fix.
+      expect(screen.queryByText(/could not reach the authentication service/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/user-not-provisioned/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/contact a forestgeo administrator to request access/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
+    });
+
+    it('MUST emit a telemetry event carrying the exact session email claim and reason slug', () => {
+      mockUseSearchParams.mockReturnValue({
+        get: vi.fn().mockReturnValue('user-not-provisioned')
+      });
+      mockUseSession.mockReturnValue({ data: { user: { email: '72325639@nebraska.edu' } }, status: 'authenticated' });
+
+      render(<LoginFailed />);
+
+      // The email property must be the verbatim claim — it is the string an
+      // administrator has to copy into catalog.users to unblock the user.
+      expect(ailogger.event).toHaveBeenCalledWith('login-failure-displayed', {
+        reason: 'user-not-provisioned',
+        email: '72325639@nebraska.edu'
+      });
+    });
+
+    it('MUST emit telemetry with placeholders when session is absent and reason is missing', () => {
+      mockUseSearchParams.mockReturnValue({
+        get: vi.fn().mockReturnValue(null)
+      });
+
+      render(<LoginFailed />);
+
+      expect(ailogger.event).toHaveBeenCalledWith('login-failure-displayed', {
+        reason: 'none',
+        email: 'unknown'
+      });
+    });
+
+    it('MUST truncate attacker-length reason slugs before forwarding to telemetry', () => {
+      const longReason = 'A'.repeat(500);
+      mockUseSearchParams.mockReturnValue({
+        get: vi.fn().mockReturnValue(longReason)
+      });
+
+      render(<LoginFailed />);
+
+      const eventMock = ailogger.event as unknown as ReturnType<typeof vi.fn>;
+      const forwardedReason = eventMock.mock.calls[0][1].reason as string;
+      expect(forwardedReason).toHaveLength(100);
+      expect(forwardedReason).toBe('A'.repeat(100));
     });
 
     it('MUST fall through to default message for unknown reason slug', () => {

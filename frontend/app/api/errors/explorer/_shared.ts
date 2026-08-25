@@ -1,8 +1,9 @@
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import {
   ContradictionType,
   dedupeNumbers,
   dedupeStrings,
+  ErrorComparisonContext,
   ErrorDetailRecord,
   ErrorExplorerDetailsResponse,
   ErrorExplorerFacetsResponse,
@@ -12,11 +13,11 @@ import {
   ErrorExplorerRow,
   INGESTION_ERROR_FIELD_MAP
 } from '@/config/errorsexplorer';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 type ExplorerConnection = ReturnType<typeof ConnectionManager.getInstance>;
 
-interface RawErrorOccurrenceRow {
+export interface RawErrorOccurrenceRow {
   CoreMeasurementID: number;
   PlotID: number;
   CensusID: number;
@@ -51,6 +52,11 @@ interface RawErrorOccurrenceRow {
   DisplayMessage: string;
   ValidationCriteria?: string | null;
   ProcedureName?: string | null;
+  // DECIMAL(12,6)/INT snapshot columns off measurement_error_log — mysql2 may
+  // return the DECIMAL columns as strings, so callers must coerce with Number().
+  PriorCensusID?: number | null;
+  PriorDBH?: number | string | null;
+  PriorHOM?: number | string | null;
 }
 
 interface ContradictionInfo {
@@ -59,7 +65,7 @@ interface ContradictionInfo {
   relatedMeasurementIDs: number[];
 }
 
-interface GroupedErrorRow {
+export interface GroupedErrorRow {
   baseRow: ErrorExplorerRow;
   allErrors: ErrorDetailRecord[];
   contradictions: ContradictionInfo[];
@@ -92,6 +98,20 @@ function getOccurrenceFields(source: 'validation' | 'ingestion', errorCode: stri
     return criteriaFields.length > 0 ? criteriaFields : (VALIDATION_ERROR_FIELD_FALLBACK_MAP[errorCode] ?? []);
   }
   return INGESTION_ERROR_FIELD_MAP[errorCode] ?? [];
+}
+
+const DBH_CHANGE_VALIDATION_CODES = new Set(['1', '2']);
+
+function buildComparison(rawRow: RawErrorOccurrenceRow): ErrorComparisonContext | null {
+  if (rawRow.ErrorSource !== 'validation' || !DBH_CHANGE_VALIDATION_CODES.has(String(rawRow.ErrorCode))) return null;
+  const priorHOM = rawRow.PriorHOM ?? null;
+  const currentHOM = rawRow.MeasuredHOM ?? null;
+  return {
+    priorCensusID: rawRow.PriorCensusID != null ? Number(rawRow.PriorCensusID) : null,
+    priorDBH: rawRow.PriorDBH != null ? Number(rawRow.PriorDBH) : null,
+    priorHOM: priorHOM != null ? Number(priorHOM) : null,
+    homChanged: priorHOM != null && currentHOM != null && Number(priorHOM) !== Number(currentHOM)
+  };
 }
 
 function parseMeasurementIDs(value: string | null | undefined): number[] {
@@ -169,22 +189,31 @@ function buildRawErrorsQuery(schema: string): string {
             ms.UserDefinedFields,
             cm.UploadFileID,
             cm.UploadBatchID,
-            me.ErrorSource,
-            me.ErrorCode,
-            COALESCE(NULLIF(ve.Description, ''), me.ErrorMessage) AS DisplayMessage,
+            mel.PriorCensusID,
+            mel.PriorDBH,
+            mel.PriorHOM,
+            COALESCE(me.ErrorSource, 'ingestion') AS ErrorSource,
+            COALESCE(me.ErrorCode, 'failed_no_log') AS ErrorCode,
+            COALESCE(
+              NULLIF(ve.Description, ''),
+              me.ErrorMessage,
+              'Measurement is marked invalid but has no unresolved error log entry.'
+            ) AS DisplayMessage,
             COALESCE(NULLIF(ve.Criteria, ''), '') AS ValidationCriteria,
             COALESCE(NULLIF(ve.ProcedureName, ''), '') AS ProcedureName
-     FROM ??.measurement_error_log mel
-     JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
-     JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
+     FROM ??.coremeasurements cm
      JOIN ??.measurementssummary ms ON ms.CoreMeasurementID = cm.CoreMeasurementID
+     LEFT JOIN ??.measurement_error_log mel
+       ON mel.MeasurementID = cm.CoreMeasurementID
+      AND COALESCE(mel.IsResolved, FALSE) = FALSE
+     LEFT JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
      LEFT JOIN ??.sitespecificvalidations ve
        ON me.ErrorSource = 'validation'
       AND me.ErrorCode = CAST(ve.ValidationID AS CHAR)
      WHERE ms.PlotID = ?
        AND ms.CensusID = ?
-       AND COALESCE(mel.IsResolved, FALSE) = FALSE
        AND COALESCE(cm.IsActive, TRUE) = TRUE
+       AND (mel.MeasurementID IS NOT NULL OR ms.IsValidated = FALSE)
      ORDER BY ms.CoreMeasurementID ASC, me.ErrorSource ASC, me.ErrorCode ASC`
   );
 }
@@ -279,7 +308,8 @@ function groupErrorRows(rawRows: RawErrorOccurrenceRow[], contradictionMap: Map<
       code: String(rawRow.ErrorCode),
       message: rawRow.DisplayMessage,
       fields: getOccurrenceFields(rawRow.ErrorSource, String(rawRow.ErrorCode), rawRow.ValidationCriteria),
-      procedureName: rawRow.ProcedureName ?? null
+      procedureName: rawRow.ProcedureName ?? null,
+      comparison: buildComparison(rawRow)
     };
 
     const existing = grouped.get(measurementID);
@@ -402,6 +432,10 @@ function toDisplayRow(groupedRow: GroupedErrorRow, filters: ErrorExplorerFilters
   const visibleErrors = matchingErrors.length > 0 ? matchingErrors : groupedRow.allErrors;
   const visibleContradictions = getVisibleContradictions(groupedRow.contradictions, filters, preferredContradictionType);
 
+  const comparisonSource = [...visibleErrors]
+    .filter(error => error.comparison !== null && error.source === 'validation')
+    .sort((a, b) => Number(a.code) - Number(b.code))[0];
+
   return {
     ...groupedRow.baseRow,
     primaryErrorMessage: visibleErrors[0]?.message ?? groupedRow.baseRow.primaryErrorMessage,
@@ -415,7 +449,11 @@ function toDisplayRow(groupedRow: GroupedErrorRow, filters: ErrorExplorerFilters
     contradictionGroupKey: visibleContradictions.primaryType
       ? (groupedRow.contradictions.find(contradiction => contradiction.type === visibleContradictions.primaryType)?.groupKey ?? null)
       : null,
-    relatedMeasurementIDs: visibleContradictions.relatedMeasurementIDs
+    relatedMeasurementIDs: visibleContradictions.relatedMeasurementIDs,
+    priorCensusID: comparisonSource?.comparison?.priorCensusID ?? null,
+    priorDBH: comparisonSource?.comparison?.priorDBH ?? null,
+    priorHOM: comparisonSource?.comparison?.priorHOM ?? null,
+    homChanged: comparisonSource?.comparison?.homChanged ?? false
   };
 }
 
@@ -447,17 +485,31 @@ function buildSummary(rows: GroupedErrorRow[], filters: ErrorExplorerFilters): E
   };
 }
 
-export async function fetchGroupedErrorRows(connectionManager: ExplorerConnection, schema: string, plotID: number, censusID: number) {
-  const [rawRows, contradictionMap] = await Promise.all([
-    connectionManager.executeQuery(buildRawErrorsQuery(schema), [plotID, censusID]) as Promise<RawErrorOccurrenceRow[]>,
-    buildContradictionMap(connectionManager, schema, plotID, censusID)
-  ]);
+export async function fetchGroupedErrorRows(connectionManager: ExplorerConnection, schema: string, plotID: number, censusIDs: number | number[]) {
+  const uniqueCensusIDs = Array.from(new Set((Array.isArray(censusIDs) ? censusIDs : [censusIDs]).filter(censusID => censusID > 0)));
+  const groupedByCensus = await Promise.all(
+    uniqueCensusIDs.map(async censusID => {
+      const [rawRows, contradictionMap] = await Promise.all([
+        connectionManager.executeQuery(buildRawErrorsQuery(schema), [plotID, censusID]) as Promise<RawErrorOccurrenceRow[]>,
+        buildContradictionMap(connectionManager, schema, plotID, censusID)
+      ]);
+      return groupErrorRows(rawRows, contradictionMap);
+    })
+  );
 
-  return groupErrorRows(rawRows, contradictionMap);
+  return groupedByCensus.reduce((combined, groupedRows) => {
+    groupedRows.forEach((row, measurementID) => combined.set(measurementID, row));
+    return combined;
+  }, new Map<number, GroupedErrorRow>());
 }
 
 export async function queryErrorExplorer(connectionManager: ExplorerConnection, request: ErrorExplorerQueryRequest): Promise<ErrorExplorerQueryResponse> {
-  const groupedRows = await fetchGroupedErrorRows(connectionManager, request.schema, request.plotID, request.censusID);
+  const groupedRows = await fetchGroupedErrorRows(
+    connectionManager,
+    request.schema,
+    request.plotID,
+    request.censusIDs?.length ? request.censusIDs : request.censusID
+  );
   const filteredRows = buildFilteredRows(groupedRows, request.filters).sort(sortRows);
   const start = request.page * request.pageSize;
   const paginatedRows = filteredRows.slice(start, start + request.pageSize).map(row => toDisplayRow(row, request.filters));
@@ -469,11 +521,75 @@ export async function queryErrorExplorer(connectionManager: ExplorerConnection, 
   };
 }
 
+export interface ErrorExportRow {
+  CoreMeasurementID: number;
+  TreeTag: string;
+  StemTag: string;
+  SpeciesCode: string;
+  QuadratName: string;
+  MeasurementDate: string;
+  MeasuredDBH: number | '';
+  MeasuredHOM: number | '';
+  ErrorSource: string;
+  ErrorCode: string;
+  ErrorMessage: string;
+  PriorCensusID: number | '';
+  PriorDBH: number | '';
+  PriorHOM: number | '';
+  HOMChanged: 'true' | 'false' | '';
+}
+
+// A blank HOMChanged means "the two HOM values were never comparable", never
+// "compared and unchanged". comparison.homChanged is a two-state display flag —
+// false there only means "show no HOM-changed warning" — so the export cannot
+// print it verbatim without asserting a comparison that may not have happened:
+// legacy Validation 1/2 rows predate the prior-census snapshot entirely, and
+// either census may simply carry no HOM.
+function formatHOMChangedForExport(comparison: ErrorComparisonContext | null, currentHOM: number | null | undefined): ErrorExportRow['HOMChanged'] {
+  if (comparison?.priorHOM == null || currentHOM == null) return '';
+  return comparison.homChanged ? 'true' : 'false';
+}
+
+// One row per error occurrence (not per measurement) — a measurement with three
+// unresolved errors produces three CSV rows, each carrying its own comparison
+// context. Sort mirrors queryErrorExplorer's unfiltered grid order so the
+// export reads the same top-to-bottom as the grid the user was looking at.
+export function buildErrorExportRows(groupedRows: Map<number, GroupedErrorRow>, filters: ErrorExplorerFilters): ErrorExportRow[] {
+  return buildFilteredRows(groupedRows, filters)
+    .sort(sortRows)
+    .flatMap(row =>
+      materializeMatchingErrors(row, filters).map(
+        (error): ErrorExportRow => ({
+          CoreMeasurementID: Number(row.baseRow.coreMeasurementID),
+          TreeTag: row.baseRow.treeTag ?? '',
+          StemTag: row.baseRow.stemTag ?? '',
+          SpeciesCode: row.baseRow.speciesCode ?? '',
+          QuadratName: row.baseRow.quadratName ?? '',
+          MeasurementDate: row.baseRow.measurementDate ?? '',
+          MeasuredDBH: row.baseRow.measuredDBH ?? '',
+          MeasuredHOM: row.baseRow.measuredHOM ?? '',
+          ErrorSource: error.source,
+          ErrorCode: error.code,
+          ErrorMessage: error.message,
+          PriorCensusID: error.comparison?.priorCensusID ?? '',
+          PriorDBH: error.comparison?.priorDBH ?? '',
+          PriorHOM: error.comparison?.priorHOM ?? '',
+          HOMChanged: formatHOMChangedForExport(error.comparison, row.baseRow.measuredHOM)
+        })
+      )
+    );
+}
+
 export async function buildErrorExplorerFacets(
   connectionManager: ExplorerConnection,
-  request: Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'filters'>
+  request: Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'censusIDs' | 'filters'>
 ): Promise<ErrorExplorerFacetsResponse> {
-  const groupedRows = await fetchGroupedErrorRows(connectionManager, request.schema, request.plotID, request.censusID);
+  const groupedRows = await fetchGroupedErrorRows(
+    connectionManager,
+    request.schema,
+    request.plotID,
+    request.censusIDs?.length ? request.censusIDs : request.censusID
+  );
   const scopedRows = Array.from(groupedRows.values()).filter(row => {
     if (request.filters.source !== 'all' && !row.allErrors.some(error => error.source === request.filters.source)) {
       return false;
@@ -585,3 +701,5 @@ export async function buildErrorExplorerDetails(
     relatedRows
   };
 }
+
+export { groupErrorRows as groupErrorRowsForTest, toDisplayRow as toDisplayRowForTest };

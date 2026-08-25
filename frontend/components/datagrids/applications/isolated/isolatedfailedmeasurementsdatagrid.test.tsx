@@ -30,32 +30,32 @@ vi.mock('@mui/x-data-grid', () => ({
 }));
 
 // Mock dependencies - use importOriginal to preserve all exports
-vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
+vi.mock('@/lib/db/definitions/core', async importOriginal => {
   const actual = (await importOriginal()) as any;
   return actual;
 });
 
-vi.mock('@/config/sqlrdsdefinitions/views', async importOriginal => {
+vi.mock('@/lib/db/definitions/views', async importOriginal => {
   const actual = (await importOriginal()) as any;
   return actual;
 });
 
-vi.mock('@/config/sqlrdsdefinitions/zones', async importOriginal => {
+vi.mock('@/lib/db/definitions/zones', async importOriginal => {
   const actual = (await importOriginal()) as any;
   return actual;
 });
 
-vi.mock('@/config/sqlrdsdefinitions/personnel', async importOriginal => {
+vi.mock('@/lib/db/definitions/personnel', async importOriginal => {
   const actual = (await importOriginal()) as any;
   return actual;
 });
 
-vi.mock('@/config/sqlrdsdefinitions/taxonomies', async importOriginal => {
+vi.mock('@/lib/db/definitions/taxonomies', async importOriginal => {
   const actual = (await importOriginal()) as any;
   return actual;
 });
 
-vi.mock('@/config/sqlrdsdefinitions/unifiedchangelog', async importOriginal => {
+vi.mock('@/lib/db/definitions/unifiedchangelog', async importOriginal => {
   const actual = (await importOriginal()) as any;
   return actual;
 });
@@ -103,7 +103,7 @@ const mockCancelDialog = vi.fn();
 let mockEditFlowArgs: any = null;
 let mockEditFlowDialogState: any = { open: false, plan: null, busy: false };
 
-vi.mock('@/hooks/useEditPreviewFlow', () => ({
+vi.mock('@/app/hooks/useEditPreviewFlow', () => ({
   useEditPreviewFlow: (args: any) => {
     mockEditFlowArgs = args;
     return {

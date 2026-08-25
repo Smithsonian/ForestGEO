@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { requireGlobalAdmin, provisioningErrorResponse } from '@/lib/provisioning/route-helpers';
 import { ProvisioningError } from '@/lib/provisioning/errors';
-import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { ProvisioningInputSchema } from '@/lib/provisioning/input-schema';
 import { startRun } from '@/lib/provisioning/orchestrator';
 import { HTTPResponses } from '@/config/macros';
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
 
   let catalogPool;
   try {
-    catalogPool = getPoolMonitorInstance().pool;
+    catalogPool = await getPoolMonitorInstance().getUsablePool();
   } catch (err) {
     return provisioningErrorResponse(new ProvisioningError('Database unavailable', 'database_unavailable', { cause: err }));
   }

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within as _within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import NewValidationRow from './newvalidationrow';
-import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
+import { ValidationProceduresRDS } from '@/lib/db/definitions/validations';
 
 // Mock CodeEditor component
 vi.mock('@/components/client/codeeditor', () => ({
@@ -77,8 +77,10 @@ describe('NewValidationRow - Functional Tests', () => {
       expect(criteriaField).toHaveAccessibleName();
     });
 
-    it('MUST have accessible label for code editor', () => {
+    it('MUST have accessible label for code editor', async () => {
+      const user = userEvent.setup();
       render(<NewValidationRow {...defaultProps} />);
+      await user.click(screen.getByRole('button', { name: /advanced sql/i }));
 
       const codeEditor = screen.getByTestId('code-editor');
       expect(codeEditor).toHaveAttribute('aria-label', 'New validation script editor');
@@ -306,17 +308,23 @@ describe('NewValidationRow - Functional Tests', () => {
   });
 
   describe('Code Editor Integration', () => {
-    it('MUST render code editor component', () => {
+    it('MUST keep the code editor behind the Advanced control', async () => {
+      const user = userEvent.setup();
       render(<NewValidationRow {...defaultProps} />);
+
+      expect(screen.queryByTestId('code-editor')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /advanced sql/i }));
 
       const codeEditor = screen.getByTestId('code-editor');
       expect(codeEditor).toBeInTheDocument();
     });
 
-    it('MUST pass current definition to code editor', () => {
+    it('MUST pass current definition to code editor', async () => {
+      const user = userEvent.setup();
       const validation = { ...mockValidation, definition: 'SELECT * FROM test' };
 
       render(<NewValidationRow {...defaultProps} validation={validation} />);
+      await user.click(screen.getByRole('button', { name: /advanced sql/i }));
 
       const codeEditor = screen.getByTestId('code-editor');
       expect(codeEditor).toHaveValue('SELECT * FROM test');
@@ -326,6 +334,7 @@ describe('NewValidationRow - Functional Tests', () => {
       const user = userEvent.setup();
 
       render(<NewValidationRow {...defaultProps} />);
+      await user.click(screen.getByRole('button', { name: /advanced sql/i }));
 
       const codeEditor = screen.getByTestId('code-editor');
       await user.type(codeEditor, 'SELECT *');
@@ -333,16 +342,20 @@ describe('NewValidationRow - Functional Tests', () => {
       expect(mockOnValidationChange).toHaveBeenCalled();
     });
 
-    it('MUST pass schema details to code editor', () => {
+    it('MUST pass schema details to code editor', async () => {
+      const user = userEvent.setup();
       render(<NewValidationRow {...defaultProps} />);
+      await user.click(screen.getByRole('button', { name: /advanced sql/i }));
 
       // Code editor should be rendered (schema details passed via props)
       const codeEditor = screen.getByTestId('code-editor');
       expect(codeEditor).toBeInTheDocument();
     });
 
-    it('MUST set code editor to editable state', () => {
+    it('MUST set code editor to editable state', async () => {
+      const user = userEvent.setup();
       render(<NewValidationRow {...defaultProps} />);
+      await user.click(screen.getByRole('button', { name: /advanced sql/i }));
 
       const codeEditor = screen.getByTestId('code-editor');
       expect(codeEditor).not.toHaveAttribute('readonly');
@@ -470,16 +483,20 @@ describe('NewValidationRow - Functional Tests', () => {
   });
 
   describe('Dark Mode Support', () => {
-    it('MUST pass isDarkMode prop to code editor', () => {
+    it('MUST pass isDarkMode prop to code editor', async () => {
+      const user = userEvent.setup();
       render(<NewValidationRow {...defaultProps} isDarkMode={true} />);
+      await user.click(screen.getByRole('button', { name: /advanced sql/i }));
 
       // Code editor should render (isDarkMode passed via props)
       const codeEditor = screen.getByTestId('code-editor');
       expect(codeEditor).toBeInTheDocument();
     });
 
-    it('MUST pass isDarkMode=false to code editor in light mode', () => {
+    it('MUST pass isDarkMode=false to code editor in light mode', async () => {
+      const user = userEvent.setup();
       render(<NewValidationRow {...defaultProps} isDarkMode={false} />);
+      await user.click(screen.getByRole('button', { name: /advanced sql/i }));
 
       const codeEditor = screen.getByTestId('code-editor');
       expect(codeEditor).toBeInTheDocument();

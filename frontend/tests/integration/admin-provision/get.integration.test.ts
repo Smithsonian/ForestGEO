@@ -29,8 +29,8 @@ vi.mock('@/ailogger', () => ({ default: mocks.ailogger }));
 vi.mock('@/auth', () => ({ auth: mocks.auth }));
 
 let testPool: Pool;
-vi.mock('@/config/poolmonitorsingleton', () => ({
-  getPoolMonitorInstance: () => ({ pool: testPool })
+vi.mock('@/lib/db/poolmonitorsingleton', () => ({
+  getPoolMonitorInstance: () => ({ pool: testPool, getUsablePool: async () => testPool })
 }));
 
 import { GET } from '@/app/api/admin/provision/[runId]/route';

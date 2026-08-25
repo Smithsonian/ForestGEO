@@ -26,14 +26,16 @@ const levelToSeverityCode: Record<LogLevel, number> = {
  * Core logger that emits to Application Insights and also falls back to console
  */
 class Logger {
-  private readonly ai: ApplicationInsights | null = null;
-
-  constructor() {
+  // Resolved lazily on every access: this module is imported at page-chunk
+  // load, which races the Providers useEffect that calls initializeAppInsights.
+  // Capturing the instance once in a constructor left `ai` permanently null
+  // whenever the logger module loaded first, silently dropping all telemetry.
+  private get ai(): ApplicationInsights | null {
     try {
-      this.ai = getAppInsights();
+      return getAppInsights();
     } catch (error) {
-      console.warn('[ailogger] Failed to initialize Application Insights:', error);
-      this.ai = null;
+      console.warn('[ailogger] Failed to get Application Insights instance:', error);
+      return null;
     }
   }
 

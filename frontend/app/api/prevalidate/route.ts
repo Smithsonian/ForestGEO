@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { FileRow } from '@/config/macros/formdetails';
 import ailogger from '@/ailogger';
-import { auth } from '@/auth';
-import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import moment from 'moment/moment';
-import { requireSession } from '@/lib/auth-helpers';
+import { fromBody, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database compatibility
 export const runtime = 'nodejs';
@@ -42,12 +41,7 @@ interface PrevalidateResponse {
  * - Foreign key references exist (species codes, quadrats)
  * - Value ranges are reasonable
  */
-export async function POST(request: NextRequest) {
-  // Authentication check
-  const session = await auth();
-  const authError = requireSession(session);
-  if (authError) return authError;
-
+async function handler(request: NextRequest, _context: RouteContext) {
   let body;
   try {
     body = await request.json();
@@ -64,6 +58,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // defense-in-depth: withRouteAuthz already validated body.schema; retained to narrow the type for safeFormatQuery.
   if (!isValidSchema(schema)) {
     return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -214,3 +209,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withRouteAuthz('prevalidate', handler, { schema: fromBody('schema') });

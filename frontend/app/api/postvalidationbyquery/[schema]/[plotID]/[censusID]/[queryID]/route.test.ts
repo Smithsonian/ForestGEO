@@ -3,13 +3,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ---- Import after mocks ----
 import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager'; // ---- Helpers ----
+import ConnectionManager from '@/lib/db/connectionmanager'; // ---- Helpers ----
 
 // ---- Mocks (must be declared before importing the route) ----
 
+// withRouteAuthz now wraps GET and calls auth(); a 'global' admin session
+// passes the per-site access gate so the handler-level assertions below run.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({
+    user: { email: 'route-test@forestgeo.test', userStatus: 'global', sites: [] }
+  }))
+}));
+
 // Stable, shared ConnectionManager singleton
-vi.mock('@/config/connectionmanager', async () => {
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
 
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
@@ -56,7 +64,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 // Mock schema validation to accept test schemas
-vi.mock('@/config/utils/sqlsecurity', () => ({
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     return ['myschema', 'testschema'].includes(schema);
   }),
@@ -91,6 +99,10 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
 
     // plotID invalid (NaN)
     res = await GET(dummyReq, makeProps('myschema', 'abc', '20', '5'));
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+
+    // plotID malformed (parseInt would otherwise accept this as 10)
+    res = await GET(dummyReq, makeProps('myschema', '10abc', '20', '5'));
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
 
     // censusID missing
@@ -153,7 +165,9 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
     const [updateSQL, updateParams] = exec.mock.calls[2];
     expect(String(updateSQL)).toMatch(/UPDATE `myschema`\.postvalidationqueries/i);
     expect(String(updateSQL)).toMatch(/LastRunStatus = \?/i);
-    expect(updateParams).toEqual(['2025-01-02 03:04:05', JSON.stringify([{ RowID: 1 }, { RowID: 2 }]), 'success', 5]);
+    expect(String(updateSQL)).toMatch(/LastRunPlotID = \?/i);
+    expect(String(updateSQL)).toMatch(/LastRunCensusID = \?/i);
+    expect(updateParams).toEqual(['2025-01-02 03:04:05', JSON.stringify([{ RowID: 1 }, { RowID: 2 }]), 'success', 10, 20, 5]);
 
     expect(_begin).toHaveBeenCalledWith();
     expect(commit).toHaveBeenCalledWith('tx-1');
@@ -182,11 +196,44 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
     const [failureSQL, failureParams] = exec.mock.calls[2];
     expect(String(failureSQL)).toMatch(/UPDATE `myschema`\.postvalidationqueries/i);
     expect(String(failureSQL)).toMatch(/LastRunStatus = \?/i);
-    expect(failureParams).toEqual(['2025-01-02 03:04:05', 'failure', 5]);
+    expect(String(failureSQL)).toMatch(/LastRunPlotID = \?/i);
+    expect(String(failureSQL)).toMatch(/LastRunCensusID = \?/i);
+    expect(failureParams).toEqual(['2025-01-02 03:04:05', 'failure', 10, 20, 5]);
 
     expect(begin).toHaveBeenCalledTimes(1);
     expect(rollback).toHaveBeenCalledWith('tx-2');
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('200 on unmigrated schema (missing LastRunPlotID column): retries with unscoped UPDATE instead of returning 500', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery');
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-3');
+    const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+    vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+
+    const unknownColumn = new Error("Unknown column 'LastRunPlotID' in 'field list'") as Error & { code?: string; errno?: number };
+    unknownColumn.code = 'ER_BAD_FIELD_ERROR';
+    unknownColumn.errno = 1054;
+
+    // 1) QueryDefinition
+    exec.mockResolvedValueOnce([{ QueryDefinition: 'SELECT * FROM ${schema}.t WHERE PlotID = ${currentPlotID} AND CensusID = ${currentCensusID}' }]);
+    // 2) formatted query -> rows
+    exec.mockResolvedValueOnce([{ RowID: 1 }]);
+    // 3) scoped UPDATE fails: schema has not had migration 61 applied
+    exec.mockRejectedValueOnce(unknownColumn);
+    // 4) legacy unscoped UPDATE succeeds
+    exec.mockResolvedValueOnce(undefined as any);
+
+    const res = await GET(dummyReq, makeProps('myschema', '10', '20', '5'));
+    expect(res.status).toBe(HTTPResponses.OK);
+
+    expect(exec).toHaveBeenCalledTimes(4);
+    const [fallbackSQL, fallbackParams] = exec.mock.calls[3];
+    expect(String(fallbackSQL)).toMatch(/UPDATE `myschema`\.postvalidationqueries/i);
+    expect(String(fallbackSQL)).not.toMatch(/LastRunPlotID|LastRunCensusID/i);
+    expect(fallbackParams).toEqual(['2025-01-02 03:04:05', JSON.stringify([{ RowID: 1 }]), 'success', 5]);
+    expect(commit).toHaveBeenCalledWith('tx-3');
   });
 
   it('500 on unexpected error; rolls back (if tx id present) and closes', async () => {

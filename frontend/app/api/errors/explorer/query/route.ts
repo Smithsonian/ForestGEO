@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { DEFAULT_ERROR_EXPLORER_FILTERS, ErrorExplorerQueryRequest } from '@/config/errorsexplorer';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { queryErrorExplorer } from '../_shared';
+import { fromBody, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import ailogger from '@/ailogger';
 
 export const runtime = 'nodejs';
@@ -13,6 +14,7 @@ function parseRequest(body: Partial<ErrorExplorerQueryRequest>): ErrorExplorerQu
     schema: body.schema ?? '',
     plotID: Number(body.plotID ?? 0),
     censusID: Number(body.censusID ?? 0),
+    censusIDs: Array.from(new Set((body.censusIDs ?? []).map(Number).filter(censusID => Number.isInteger(censusID) && censusID > 0))),
     page: Math.max(0, Number(body.page ?? 0)),
     pageSize: Math.min(100, Math.max(10, Number(body.pageSize ?? 25))),
     filters: {
@@ -25,11 +27,12 @@ function parseRequest(body: Partial<ErrorExplorerQueryRequest>): ErrorExplorerQu
   };
 }
 
-export async function POST(request: NextRequest) {
+async function handler(request: NextRequest, _context: RouteContext) {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
     const body = parseRequest(await request.json());
+    // defense-in-depth: withRouteAuthz already validated body.schema; retained to narrow the type.
     if (!isValidSchema(body.schema)) {
       return NextResponse.json({ error: 'Invalid schema' }, { status: HTTPResponses.INVALID_REQUEST });
     }
@@ -47,3 +50,5 @@ export async function POST(request: NextRequest) {
     await connectionManager.closeConnection();
   }
 }
+
+export const POST = withRouteAuthz('errors/explorer/query', handler, { schema: fromBody('schema') });

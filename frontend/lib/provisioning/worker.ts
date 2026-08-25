@@ -19,6 +19,7 @@
  *     any `running` rows whose heartbeat is older than HEARTBEAT_STALE_MS or null.
  */
 import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 // `runProvisioning` is imported lazily inside `dispatchRun` to avoid a
 // module-load circular import between worker.ts ↔ orchestrator.ts. The
 // orchestrator imports `dispatchRun` at module load; if worker.ts also
@@ -50,6 +51,10 @@ export function getWorkerPid(): string {
 async function writeHeartbeat(catalogPool: Pool, runId: number): Promise<void> {
   if (shuttingDown) return;
   try {
+    // Provisioning retains the raw pool for the lifetime of the run. Keep the
+    // monitor's idle deadline aligned with this heartbeat so an hour-long schema
+    // operation cannot have its catalog pool ended underneath it.
+    getPoolMonitorInstance().signalActivity();
     await catalogPool.query(`UPDATE catalog.provisioning_runs SET WorkerHeartbeatAt = NOW() WHERE RunID = ? AND Status = 'running' AND WorkerPID = ?`, [
       runId,
       WORKER_PID

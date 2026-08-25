@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // Import after mocks
 import { POST } from './route';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 
 // -------------------- hoisted spies (safe for vi.mock factories) --------------------
 const { mapDataSpy, singlePostSpy, filterStubSpy, searchStubSpy } = vi.hoisted(() => ({
@@ -33,11 +33,14 @@ vi.mock('@/config/macros/coreapifunctions', () => ({
   DELETE: vi.fn()
 }));
 
-// Mock schema validation to accept test schemas
-vi.mock('@/config/utils/sqlsecurity', () => ({
+// Mock schema validation to accept test schemas. safeFormatQuery mirrors the real
+// implementation's ?? -> escaped-identifier substitution so finishedQuery
+// assertions reflect the backtick-wrapped schema the route now emits.
+vi.mock('@/lib/db/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
     return ['myschema', 'testschema', 'schema_a', 'schema_b', 'schema_c', 'schema_d'].includes(schema);
-  })
+  }),
+  safeFormatQuery: vi.fn((schema: string, query: string) => query.replace(/\?\?/g, `\`${schema}\``))
 }));
 
 // Mock logger
@@ -45,9 +48,15 @@ vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
 }));
 
-vi.mock('@/config/connectionmanager', async () => {
+// withRouteAuthz calls auth(); a 'global' session clears the per-site gate so
+// these handler-behavior tests exercise the wrapped POST end-to-end.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({ user: { userStatus: 'global', sites: [] } }))
+}));
+
+vi.mock('@/lib/db/connectionmanager', async () => {
   // Try to reuse your test setup's singleton if present
-  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+  const actual = await vi.importActual<any>('@/lib/db/connectionmanager').catch(() => ({}) as any);
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance?.()) ||
     (actual?.default && typeof actual.default.getInstance === 'function' && actual.default.getInstance?.()) ||
@@ -105,6 +114,8 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     const [forwardReq, forwardProps] = singlePostSpy.mock.calls[0] as any[];
     expect(forwardReq).toBe(req);
     expect(forwardProps).toBe(props);
+    expect(forwardReq.bodyUsed).toBe(false);
+    await expect(forwardReq.clone().json()).resolves.toEqual({ newRow: { some: 'data' } });
 
     expect(res.status).toBe(201);
     const j = await res.json();
@@ -112,11 +123,15 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
   });
 
   it('returns 400 if slugs missing or fewer than 3', async () => {
+    // slugs undefined => no schema at slugs[0], so withRouteAuthz rejects at the
+    // guard (INVALID_SCHEMA) before the handler's own slug-count check runs.
     const res1 = await POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', undefined as any));
     expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
     const body1 = await res1.json();
-    expect(body1.error).toMatch(/slugs not received/i);
+    expect(body1.code).toBe('INVALID_SCHEMA');
 
+    // A valid schema at slugs[0] passes the guard, so the handler's slug-count
+    // check is what returns the 400 here.
     const res2 = await POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', ['myschema', '0']));
     expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
     const body2 = await res2.json();
@@ -124,10 +139,11 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
   });
 
   it('returns 400 if core slugs schema/page/pageSize invalid', async () => {
+    // Undefined schema slug is rejected by the guard (INVALID_SCHEMA) first.
     const res1 = await POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', [undefined as any, '0', '25', '1', '2']));
     expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
     const body1 = await res1.json();
-    expect(body1.error).toMatch(/core slugs/i);
+    expect(body1.code).toBe('INVALID_SCHEMA');
 
     const res2 = await POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', ['myschema', undefined as any, '25', '1', '2']));
     expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
@@ -164,7 +180,7 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
 
     // finishedQuery shows our prepared query + params
     expect(String(body.finishedQuery)).toMatch(/FORMATTED_SQL:/);
-    expect(String(body.finishedQuery)).toMatch(/FROM myschema\.sitespecificvalidations/);
+    expect(String(body.finishedQuery)).toMatch(/FROM `myschema`\.sitespecificvalidations/);
     // LIMIT params: page*pageSize=50, pageSize=50
     const expectedOffset = PAGE * PAGE_SIZE;
     expect(String(body.finishedQuery)).toMatch(new RegExp(`::PARAMS:\\[${expectedOffset},${PAGE_SIZE}\\]$`));
@@ -351,7 +367,7 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     expect(res.status).toBe(HTTPResponses.OK);
 
     const body = await res.json();
-    expect(String(body.finishedQuery)).toMatch(/FROM myschema\.personnel p/i);
+    expect(String(body.finishedQuery)).toMatch(/FROM `myschema`\.personnel p/i);
     expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[9,77,100,50\]/);
   });
 

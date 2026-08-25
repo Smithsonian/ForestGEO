@@ -1,11 +1,12 @@
 // api/reingestsinglefailure/[schema]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { generateShortBatchID } from '@/config/utils';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
+import { fromPath, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -21,13 +22,10 @@ function serializeJsonParam(value: unknown): string | null {
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-export async function GET(
-  _request: NextRequest,
-  props: {
-    params: Promise<{ schema: string; targetRowID: string }>;
-  }
-) {
-  const { schema, targetRowID } = await props.params;
+async function handler(_request: NextRequest, context: RouteContext) {
+  const params = await context.params;
+  const schema = params.schema as string;
+  const targetRowID = params.targetRowID as string;
   if (!schema || !targetRowID) {
     return new NextResponse(JSON.stringify({ error: 'Missing required parameters: schema, targetRowID' }), { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -51,7 +49,7 @@ export async function GET(
     shiftQuery = safeFormatQuery(
       schema,
       `INSERT INTO ??.temporarymeasurements
-        (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+        (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments, PublishedStemID)
        SELECT
          ? AS FileID,
          ? AS BatchID,
@@ -67,7 +65,8 @@ export async function GET(
          cm.MeasuredHOM,
          cm.MeasurementDate,
          cm.RawCodes,
-         cm.RawComments
+         cm.RawComments,
+         cm.RawPublishedStemID
        FROM ??.coremeasurements cm
        JOIN ??.census c ON c.CensusID = cm.CensusID
        WHERE cm.CoreMeasurementID = ?
@@ -121,6 +120,7 @@ export async function GET(
          RawX,
          RawY,
          RawCodes,
+         RawPublishedStemID,
          RawComments,
          IsActive
        FROM ??.coremeasurements
@@ -157,6 +157,7 @@ export async function GET(
            orig.RawX = ?,
            orig.RawY = ?,
            orig.RawCodes = ?,
+           orig.RawPublishedStemID = ?,
            orig.RawComments = ?,
            orig.IsActive = ?
        WHERE orig.CoreMeasurementID = ?`
@@ -237,6 +238,7 @@ export async function GET(
         snapshot.RawX,
         snapshot.RawY,
         snapshot.RawCodes,
+        snapshot.RawPublishedStemID,
         snapshot.RawComments,
         snapshot.IsActive,
         targetMeasurementID
@@ -266,3 +268,5 @@ export async function GET(
     }
   }
 }
+
+export const GET = withRouteAuthz('reingestsinglefailure/[schema]/[targetRowID]', handler, { schema: fromPath('schema') });

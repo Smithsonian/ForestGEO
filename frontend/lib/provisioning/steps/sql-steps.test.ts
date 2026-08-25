@@ -81,16 +81,17 @@ describe('SQL-file steps', () => {
       `SELECT SchemaVersion, TablesDeployedAt, ProceduresDeployedAt, ValidationsDeployedAt
        FROM \`${SCHEMA_NAME}\`.\`_provisioning_meta\``
     );
-    expect(rows).toHaveLength(1);
-    expect(rows[0].SchemaVersion).toBe('2026-05-13');
-    expect(rows[0].TablesDeployedAt).not.toBeNull();
-    expect(rows[0].ProceduresDeployedAt).not.toBeNull();
-    expect(rows[0].ValidationsDeployedAt).not.toBeNull();
+    expect(rows).toHaveLength(2);
+    const schemaRow = rows.find((row: any) => row.SchemaVersion === '2026-08-04');
+    const proceduresRow = rows.find((row: any) => row.SchemaVersion === '2026-08-04-procs');
+    expect(schemaRow.TablesDeployedAt).not.toBeNull();
+    expect(schemaRow.ValidationsDeployedAt).not.toBeNull();
+    expect(proceduresRow.ProceduresDeployedAt).not.toBeNull();
   });
 
   it('init_tables alreadyDone: false when meta exists with stale version but objects are present', async () => {
     // Replace the current row with a stale version. alreadyDone should return false
-    // because no row matches SCHEMA_VERSION = '2026-05-13'.
+    // because no row matches SCHEMA_VERSION = '2026-08-04'.
     await ctx.sitePool!.query(`DELETE FROM \`${SCHEMA_NAME}\`.\`_provisioning_meta\``);
     await ctx.sitePool!.query(
       `INSERT INTO \`${SCHEMA_NAME}\`.\`_provisioning_meta\` (SchemaVersion, TablesDeployedAt, ProceduresDeployedAt, ValidationsDeployedAt)

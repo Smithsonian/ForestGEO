@@ -22,42 +22,49 @@ const columns = standardizeGridColumns([
     field: 'siteName',
     headerName: 'Site Name',
     flex: 0.3,
+    minWidth: 170,
     editable: true
   },
   {
     field: 'schemaName',
     headerName: 'Schema Name',
     flex: 0.5,
+    minWidth: 190,
     editable: true
   },
   {
     field: 'sqDimX',
     headerName: 'Subquadrat Dimension X',
     flex: 0.3,
+    minWidth: 195,
     editable: true
   },
   {
     field: 'sqDimY',
     headerName: 'Subquadrat Dimension Y',
     flex: 0.3,
+    minWidth: 195,
     editable: true
   },
   {
     field: 'defaultUOMDBH',
     headerName: 'Default DBH UOM',
     flex: 0.3,
+    minWidth: 155,
     editable: true
   },
   {
     field: 'defaultUOMHOM',
     headerName: 'Default HOM UOM',
     flex: 0.3,
+    minWidth: 155,
     editable: true
   },
   {
     field: 'doubleDataEntry',
     headerName: 'Double Data Entry?',
     flex: 0.25,
+    minWidth: 175,
     editable: true
   }
 ]);

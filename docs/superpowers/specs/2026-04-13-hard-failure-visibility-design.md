@@ -144,8 +144,8 @@ If pursued later:
 
 | File | Changes |
 |------|---------|
-| `frontend/sqlscripting/storedprocedures.sql` | Ensure supported hard failures consistently create unresolved `measurement_error_log` rows |
-| `frontend/db-migrations/` or repair script location | Seed missing still-supported hard-failure codes and backfill orphan unresolved rows |
+| `frontend/db/sql/storedprocedures.sql` | Ensure supported hard failures consistently create unresolved `measurement_error_log` rows |
+| `frontend/db/migrations/` or repair script location | Seed missing still-supported hard-failure codes and backfill orphan unresolved rows |
 | `frontend/config/macros/coreapifunctions.ts` | Recompute and persist `UserDefinedFields.treestemstate` after successful inline correction |
 
 ### Secondary follow-on work
@@ -154,14 +154,14 @@ If pursued later:
 |------|---------|
 | `frontend/app/api/refreshviews/[view]/[schema]/route.ts` | Add scoped `viewfulltable` refresh for historical data |
 | `frontend/components/errors/errorsexplorer.tsx` | Call scoped `viewfulltable` refresh after correction |
-| `frontend/sqlscripting/storedprocedures.sql` and/or refresh routes | Expose `RawCodes` if we decide to surface dropped invalid codes |
+| `frontend/db/sql/storedprocedures.sql` and/or refresh routes | Expose `RawCodes` if we decide to surface dropped invalid codes |
 
 ### Optional cleanup
 
 | File | Changes |
 |------|---------|
-| `frontend/sqlscripting/tablestructures.sql` | Nullable foreign keys / key-shape cleanup for `measurementssummary` |
-| `frontend/db-migrations/` | Separate migration for nullable-foreign-key cleanup |
+| `frontend/db/sql/tablestructures.sql` | Nullable foreign keys / key-shape cleanup for `measurementssummary` |
+| `frontend/db/migrations/` | Separate migration for nullable-foreign-key cleanup |
 
 ## What Does NOT Change
 

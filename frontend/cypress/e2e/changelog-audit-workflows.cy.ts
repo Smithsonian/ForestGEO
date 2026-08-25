@@ -560,7 +560,18 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
 
       cy.intercept('POST', '/api/query', {
         statusCode: 200,
-        body: [{ CountValid: 1, CountErrors: 0, CountPending: 0, CountOldTrees: 1, CountNewRecruits: 0, CountMultiStems: 0 }]
+        body: [
+          {
+            CountValid: 1,
+            CountFailedNoLog: 0,
+            CountUnresolvedLogged: 0,
+            CountPending: 0,
+            CountOverridable: 0,
+            CountOldTrees: 1,
+            CountNewRecruits: 0,
+            CountMultiStems: 0
+          }
+        ]
       }).as('validationCounts');
 
       cy.intercept('GET', '/api/validations/validationerrordisplay?*', {

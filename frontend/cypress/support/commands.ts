@@ -200,6 +200,26 @@ Cypress.Commands.add('loginViaCredentials', (email = 'e2e-admin@forestgeo.si.edu
   });
 });
 
+/**
+ * Asserts that a data-grid row identified by `rowText` is present (and, when
+ * `cellText` is given, that the row also contains `cellText`).
+ *
+ * Wide grids (e.g. View All Historical Data has 53 columns; treeTag is column
+ * #37, speciesCode #43) would column-virtualize their off-screen cells out of
+ * the DOM — with legible per-column minWidths no single scroll position renders
+ * both identity columns at once. IsolatedDataGridCommons therefore disables
+ * virtualization under the e2e harness (NEXT_PUBLIC_E2E_TESTING), so every cell
+ * is in the DOM and content can be asserted directly; `exist` rather than
+ * `be.visible` because a cell scrolled out of the pane is still legitimate.
+ */
+Cypress.Commands.add('gridRowShouldContain', (rowText: string, cellText?: string) => {
+  if (cellText !== undefined) {
+    cy.contains('[role="row"]', rowText).should('contain', cellText);
+  } else {
+    cy.contains('[role="row"]', rowText).should('exist');
+  }
+});
+
 declare global {
   namespace Cypress {
     interface Chainable {
@@ -212,6 +232,11 @@ declare global {
        * Sets a real session cookie — no intercept mocking needed.
        */
       loginViaCredentials(email?: string, userStatus?: string): Chainable<void>;
+      /**
+       * Assert a wide-grid row is present (and optionally contains cellText),
+       * scrolling the grid right first so column-virtualized cells render.
+       */
+      gridRowShouldContain(rowText: string, cellText?: string): Chainable<void>;
     }
   }
 }

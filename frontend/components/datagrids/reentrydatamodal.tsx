@@ -94,7 +94,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
         } else if (column.type === 'date') {
           acc[key] = null; // Normalize date fields to null
         } else if (column.type === 'singleSelect') {
-          const fieldSelectionOptions = getFieldSelectionOptions(key) as string[];
+          const fieldSelectionOptions = getFieldSelectionOptions(key) as readonly string[];
           if (fieldSelectionOptions.includes('m')) {
             acc[key] = 'm'; // Default unit for specific fields
           } else if (fieldSelectionOptions.includes('m2')) {

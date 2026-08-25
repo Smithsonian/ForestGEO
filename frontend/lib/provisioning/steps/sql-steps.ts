@@ -2,31 +2,33 @@ import path from 'path';
 import mysql, { type PoolOptions } from 'mysql2/promise';
 import type { ProvisioningStep, StepContext } from '../types';
 import { executeSqlFile } from '../sql-runner';
-import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 
-const TABLES_FILE = () => path.join(process.cwd(), 'sqlscripting/tablestructures.sql');
-const PROCS_FILE = () => path.join(process.cwd(), 'sqlscripting/storedprocedures.sql');
-const QUERIES_FILE = () => path.join(process.cwd(), 'sqlscripting/corequeries.sql');
+const TABLES_FILE = () => path.join(process.cwd(), 'db/sql/tablestructures.sql');
+const PROCS_FILE = () => path.join(process.cwd(), 'db/sql/storedprocedures.sql');
+const QUERIES_FILE = () => path.join(process.cwd(), 'db/sql/corequeries.sql');
 
 /**
- * Schema version stamp. Bump this date when DDL, stored procedures, or seeded
- * validations change in a way that requires re-running provisioning. The
- * `alreadyDone` checks compare this to the `SchemaVersion` row in
- * `_provisioning_meta` so partial or stale deploys are reprovisioned.
+ * Table/validation and procedure stamps are intentionally independent. Table
+ * DDL is not fully idempotent, so a procedure-only change must not make
+ * initTablesStep replay tablestructures.sql against an existing schema.
+ * _provisioning_meta keys rows on the version string, so when both are bumped
+ * for the same change the two constants must still differ or the stamps
+ * collapse into one row.
  */
-const SCHEMA_VERSION = '2026-05-13';
+const SCHEMA_VERSION = '2026-08-04';
+const PROCEDURES_SCHEMA_VERSION = '2026-08-04-procs';
 const META_TABLE = '_provisioning_meta';
 
 const VALIDATIONS_TABLE = 'sitespecificvalidations';
 const REQUIRED_TABLES = ['plots', 'census', 'quadrats', 'coremeasurements', 'measurement_errors', 'uploadmetrics', 'validation_runs'] as const;
-const REQUIRED_VIEWS = ['uploaddatalossreport'] as const;
+export const REQUIRED_VIEWS = ['uploaddatalossreport'] as const;
 
 /**
  * Canonical list of stored procedures defined in storedprocedures.sql.
- * Discovered by grepping `DEFINER ... PROCEDURE <name>` declarations.
  * Names are case-insensitively compared against information_schema.routines.
  */
-const REQUIRED_PROCEDURES = [
+export const REQUIRED_PROCEDURES = [
   'bulkingestionprocess',
   'bulkingestioncollapser',
   'clearcensusfull',
@@ -69,7 +71,7 @@ async function ensureMetaTable(ctx: StepContext): Promise<void> {
   );
 }
 
-async function readMetaRow(ctx: StepContext): Promise<ProvisioningMetaRow | null> {
+async function readMetaRow(ctx: StepContext, schemaVersion: string = SCHEMA_VERSION): Promise<ProvisioningMetaRow | null> {
   if (!ctx.sitePool) return null;
   try {
     const [rows]: any = await ctx.sitePool.query(
@@ -77,7 +79,7 @@ async function readMetaRow(ctx: StepContext): Promise<ProvisioningMetaRow | null
        FROM \`${ctx.schemaName}\`.\`${META_TABLE}\`
        WHERE SchemaVersion = ?
        LIMIT 1`,
-      [SCHEMA_VERSION]
+      [schemaVersion]
     );
     return (rows[0] as ProvisioningMetaRow) ?? null;
   } catch {
@@ -86,26 +88,36 @@ async function readMetaRow(ctx: StepContext): Promise<ProvisioningMetaRow | null
   }
 }
 
-async function writeMetaTimestamp(ctx: StepContext, column: 'TablesDeployedAt' | 'ProceduresDeployedAt' | 'ValidationsDeployedAt'): Promise<void> {
+async function writeMetaTimestamp(
+  ctx: StepContext,
+  column: 'TablesDeployedAt' | 'ProceduresDeployedAt' | 'ValidationsDeployedAt',
+  schemaVersion: string = SCHEMA_VERSION
+): Promise<void> {
   if (!ctx.sitePool) return;
   validateSchemaOrThrow(ctx.schemaName);
   await ctx.sitePool.query(
     `INSERT INTO \`${ctx.schemaName}\`.\`${META_TABLE}\` (SchemaVersion, ${column})
      VALUES (?, NOW())
      ON DUPLICATE KEY UPDATE ${column} = NOW()`,
-    [SCHEMA_VERSION]
+    [schemaVersion]
   );
 }
 
 async function hasAllRequiredProcedures(ctx: StepContext): Promise<boolean> {
   if (!ctx.sitePool) return false;
   const [rows]: any = await ctx.sitePool.query(
-    `SELECT LOWER(routine_name) AS name FROM information_schema.routines
+    `SELECT LOWER(routine_name) AS name,
+            LOWER(definer) AS definer,
+            LOWER(CURRENT_USER()) AS deployment_account
+       FROM information_schema.routines
      WHERE routine_schema = ? AND routine_type = 'PROCEDURE'`,
     [ctx.schemaName]
   );
-  const existing = new Set(rows.map((r: any) => String(r.name ?? r.NAME ?? '').toLowerCase()));
-  return REQUIRED_PROCEDURES.every(name => existing.has(name.toLowerCase()));
+  const expectedDefiner = String(rows[0]?.deployment_account ?? rows[0]?.DEPLOYMENT_ACCOUNT ?? '').toLowerCase();
+  if (!expectedDefiner) return false;
+
+  const existing = new Map(rows.map((r: any) => [String(r.name ?? r.NAME ?? '').toLowerCase(), String(r.definer ?? r.DEFINER ?? '').toLowerCase()]));
+  return REQUIRED_PROCEDURES.every(name => existing.get(name.toLowerCase()) === expectedDefiner);
 }
 
 function buildSitePool(schemaName: string): mysql.Pool {
@@ -205,7 +217,7 @@ export const deployProceduresStep: ProvisioningStep = {
   label: 'Deploy stored procedures',
   async alreadyDone(ctx: StepContext): Promise<boolean> {
     if (!ctx.sitePool) return false;
-    const meta = await readMetaRow(ctx);
+    const meta = await readMetaRow(ctx, PROCEDURES_SCHEMA_VERSION);
     if (!meta || meta.ProceduresDeployedAt == null) return false;
     return hasAllRequiredProcedures(ctx);
   },
@@ -213,7 +225,7 @@ export const deployProceduresStep: ProvisioningStep = {
     if (!ctx.sitePool) throw new Error('sitePool not initialized');
     await executeSqlFile(ctx.sitePool, PROCS_FILE(), ctx.schemaName);
     await ensureMetaTable(ctx);
-    await writeMetaTimestamp(ctx, 'ProceduresDeployedAt');
+    await writeMetaTimestamp(ctx, 'ProceduresDeployedAt', PROCEDURES_SCHEMA_VERSION);
   }
 };
 

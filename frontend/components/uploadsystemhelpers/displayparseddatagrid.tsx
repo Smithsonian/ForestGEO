@@ -9,12 +9,12 @@ import { StyledDataGrid } from '@/config/styleddatagrid';
 import { FileCollectionRowSet, FileErrors, FileRow, FormType, getTableHeaders, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 import { usePlotContext } from '@/app/contexts/compat-hooks';
 import { Checkbox, Divider } from '@mui/joy';
-import { validateSpeciesFormRow } from '@/config/sqlrdsdefinitions/taxonomies';
-import { validateQuadratsRow } from '@/config/sqlrdsdefinitions/zones';
-import { validateMeasurementsRow } from '@/config/sqlrdsdefinitions/views';
-import { validatePersonnelRow } from '@/config/sqlrdsdefinitions/personnel';
+import { validateSpeciesFormRow } from '@/lib/db/definitions/taxonomies';
+import { validateQuadratsRow } from '@/lib/db/definitions/zones';
+import { validateMeasurementsRow } from '@/lib/db/definitions/views';
+import { validatePersonnelRow } from '@/lib/db/definitions/personnel';
 
-import { AttributeStatusOptions, validateAttributesRow } from '@/config/sqlrdsdefinitions/core';
+import { AttributeStatusOptions, validateAttributesRow } from '@/lib/db/definitions/core';
 
 const validationFunctions: Record<string, ValidationFunction> = {
   attributes: validateAttributesRow,

@@ -5,13 +5,12 @@
  */
 import { FileRejection, FileWithPath } from 'react-dropzone';
 import '@/styles/customtablesettings.css';
-import ConnectionManager from '@/config/connectionmanager';
-import { FileRow, FileRowSet } from '@/config/macros/formdetails';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { FileRow } from '@/config/macros/formdetails';
 import { processPersonnel } from '@/components/processors/processpersonnel';
 import { processSpecies } from '@/components/processors/processspecies';
-import { processBulkIngestion } from '@/components/processors/processbulkingestion';
-import { Plot } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { Plot } from '@/lib/db/definitions/zones';
+import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 
 export type ColumnStates = Record<string, boolean>;
 
@@ -30,6 +29,7 @@ export enum HTTPResponses {
   CONFLICT = 409,
   PRECONDITION_VALIDATION_FAILURE = 412,
   PAYLOAD_TOO_LARGE = 413,
+  LENGTH_REQUIRED = 411,
   UNPROCESSABLE_ENTITY = 422,
   LOCKED = 423,
   INTERNAL_SERVER_ERROR = 500,
@@ -99,8 +99,12 @@ export interface DropzoneProps {
 // These are in a separate file to avoid importing heavy dependencies in middleware
 export { bitToBoolean, booleanToBit } from './macros/bitconversion';
 
-export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
-export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
+export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'] as const;
+export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'] as const;
+
+/** IOGP assigns EPSG codes in this range; anything outside it is a typo, not a CRS. */
+export const EPSG_CODE_MIN = 1024;
+export const EPSG_CODE_MAX = 32767;
 
 export interface UnifiedValidityFlags {
   attributes: boolean;
@@ -126,16 +130,6 @@ export interface SpecialProcessingProps {
   fullName?: string;
 }
 
-export interface SpecialBulkProcessingProps {
-  connectionManager: ConnectionManager;
-  rowDataSet: FileRowSet;
-  schema: string;
-  plot?: Plot;
-  census?: OrgCensus;
-  quadratID?: number;
-  fullName?: string;
-}
-
 export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
   formType: string;
 }
@@ -144,7 +138,6 @@ export interface FileMapping {
   tableName: string;
   columnMappings: Record<string, string>;
   specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<void>;
-  bulkProcessing?: (props: Readonly<SpecialBulkProcessingProps>) => Promise<void>;
 }
 
 // Define the mappings for each file type
@@ -198,8 +191,9 @@ export const fileMappings: Record<string, FileMapping> = {
   measurements: {
     tableName: '', // Multiple tables involved
     columnMappings: {},
-    specialProcessing: undefined, // Individual record processing removed - using bulk processing only
-    bulkProcessing: processBulkIngestion
+    // Measurements are ingested exclusively by the bulkingestionprocess stored
+    // procedure (app/api/setupbulkprocessor) — there is no client-side processor.
+    specialProcessing: undefined
   }
 };
 

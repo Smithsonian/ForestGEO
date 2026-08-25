@@ -45,7 +45,7 @@ describe('assertCanEditMeasurementScope', () => {
 
   it('allows global users after the plot/census existence check passes', async () => {
     const cm = makeConnectionManager();
-    cm.executeQuery.mockResolvedValueOnce([{ ok: 1 }]);
+    cm.executeQuery.mockResolvedValueOnce([{ PlotCensusNumber: 7 }]);
 
     await expect(
       assertCanEditMeasurementScope(cm, makeSession({ userStatus: 'global', sites: [] }), {
@@ -53,7 +53,7 @@ describe('assertCanEditMeasurementScope', () => {
         plotID: 1,
         censusID: 2
       })
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ plotCensusNumber: 7 });
 
     expect(cm.executeQuery).toHaveBeenCalledTimes(1);
     expect(cm.executeQuery.mock.calls[0][0]).toContain('FROM `forestgeo_testing`.census');
@@ -70,6 +70,27 @@ describe('assertCanEditMeasurementScope', () => {
         censusID: 2
       })
     ).rejects.toBeInstanceOf(ScopeAccessError);
+  });
+
+  // census.PlotCensusNumber is nullable and legacy/ctfsweb-imported rows carry
+  // NULL. Authorization must not hinge on it — editing, revisions and upload
+  // sessions only need the scope to exist and belong to the user. Callers that
+  // genuinely need the number (blob container naming) reject the null.
+  it.each([
+    ['NULL', null],
+    ['zero', 0],
+    ['non-numeric', 'not-a-number']
+  ])('reports an unusable %s census number instead of denying access', async (_label, storedValue) => {
+    const cm = makeConnectionManager();
+    cm.executeQuery.mockResolvedValueOnce([{ PlotCensusNumber: storedValue }]);
+
+    await expect(
+      assertCanEditMeasurementScope(cm, makeSession(), {
+        schema: 'forestgeo_testing',
+        plotID: 1,
+        censusID: 2
+      })
+    ).resolves.toEqual({ plotCensusNumber: null });
   });
 });
 

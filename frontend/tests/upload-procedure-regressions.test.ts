@@ -16,20 +16,43 @@ function extractSqlSegment(sql: string, startMarker: string, endMarker: string):
   return sql.slice(start, end);
 }
 
-describe('upload procedure regressions', () => {
-  it('uses bounded hashed upload ids in bulkingestionprocess sources', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
-    const migrationSql = readSql('db-migrations/ctfs-migrations/15_deploy_bulkingestionprocess.sql');
+/**
+ * The retired legacy deployment copy. It used to DROP+CREATE its own
+ * `bulkingestionprocess`, kept in sync by hand — and drifted, ending up without
+ * the STRAIGHT_JOIN join-order fix or the DUPLICATE_TAG_CONFLICT_EXISTING
+ * feature. Nothing in the repo ran it, but sourcing it by hand would have
+ * installed that obsolete procedure over a current one.
+ *
+ * The contract is not "keep the second copy in sync" — it is that there is no
+ * second copy.
+ */
+const RETIRED_LEGACY_DEPLOYMENT_SQL = 'db/migrations/ctfs-migrations/15_deploy_bulkingestionprocess.sql';
 
-    for (const sql of [canonicalSql, migrationSql]) {
-      expect(sql).toContain("SET vUploadId = LEFT( SHA2( CONCAT_WS( '#', DATABASE()");
-      expect(sql).not.toContain("SET vUploadId = CONCAT(vFileID, '-', vBatchID);");
-      expect(sql).not.toContain("SET vUploadId = CONCAT(vFileIDSafe, '-', vBatchIDSafe);");
-    }
+describe('upload procedure regressions', () => {
+  it('uses bounded hashed upload ids in bulkingestionprocess', () => {
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+
+    expect(canonicalSql).toContain("SET vUploadId = LEFT( SHA2( CONCAT_WS( '#', DATABASE()");
+    expect(canonicalSql).not.toContain("SET vUploadId = CONCAT(vFileID, '-', vBatchID);");
+    expect(canonicalSql).not.toContain("SET vUploadId = CONCAT(vFileIDSafe, '-', vBatchIDSafe);");
   });
 
-  it('writes complete collapser deduplication alerts', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+  it('keeps bulkingestionprocess deployable from exactly one file', () => {
+    const legacySql = readSql(RETIRED_LEGACY_DEPLOYMENT_SQL);
+
+    expect(legacySql, 'the retired legacy migration must not be able to create the procedure').not.toMatch(
+      /CREATE\s+(OR REPLACE\s+)?(DEFINER\s*=\s*\S+\s+)?PROCEDURE/i
+    );
+    expect(legacySql, 'nor drop the live one').not.toMatch(/DROP\s+PROCEDURE/i);
+    expect(legacySql, 'it must point at the canonical source instead').toContain('db/sql/storedprocedures.sql');
+
+    // And the canonical file is still the thing that creates it.
+    expect(readSql('db/sql/storedprocedures.sql')).toMatch(/CREATE[\s\S]{0,120}PROCEDURE bulkingestionprocess/i);
+  });
+
+  it('preserves collapser duplicate conflicts and writes complete alerts', () => {
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+    const collapserSql = extractSqlSegment(canonicalSql, 'procedure bulkingestioncollapser', 'procedure clearcensusfull');
 
     expect(canonicalSql).toContain(
       'INSERT INTO uploadintegrityalerts (uploadId, fileID, batchID, plotID, censusID, type, message, severity, sourceRecords, processedRecords, failedRecords, missingRecords)'
@@ -37,40 +60,97 @@ describe('upload procedure regressions', () => {
     expect(canonicalSql).not.toContain('INSERT INTO uploadintegrityalerts (plotID, censusID, type, message, severity, failedRecords)');
     expect(canonicalSql).toContain("DECLARE vAlertFileID VARCHAR(50) DEFAULT '__collapser__';");
     expect(canonicalSql).toContain("SET vAlertBatchID = CONCAT('census-', vCensusID);");
+    expect(collapserSql).toContain("'COLLAPSER_STEM_DATE_CONFLICT'");
+    expect(collapserSql).toContain("'COLLAPSER_TREE_STEM_TAG_CONFLICT'");
+    expect(collapserSql).toContain('AND resolved = 0');
+    expect(collapserSql).toContain('IF EXISTS ( SELECT 1 FROM uploadintegrityalerts');
+    expect(collapserSql).toContain('ELSE INSERT INTO uploadintegrityalerts');
+    expect(collapserSql).toContain('preserved for user review');
+    expect(collapserSql).not.toContain('DELETE cm FROM coremeasurements');
+    expect(collapserSql).not.toContain('ROW_NUMBER() OVER');
+  });
+
+  it('surfaces cross-batch TreeTag/StemTag conflicts instead of inserting a second success', () => {
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+    const tableStructuresSql = readSql('db/sql/tablestructures.sql');
+    const collisionSql = extractSqlSegment(
+      canonicalSql,
+      'CREATE TEMPORARY TABLE existing_tag_stemtag_collision_failures',
+      'DROP TEMPORARY TABLE IF EXISTS existing_tag_stemtag_collision_failures'
+    );
+
+    expect(collisionSql).toContain("'DUPLICATE_TAG_CONFLICT_EXISTING'");
+    // STRAIGHT_JOIN (not INNER JOIN) is load-bearing: it pins the batch-driven join order
+    // so the optimizer can never flip to the trees x coremeasurements pair explosion that
+    // stalled the 2026-07-28 Harvard census upload (8s -> 1,500s+ per sub-batch).
+    expect(collisionSql).toMatch(
+      /FROM resolved_batch_rows rbr STRAIGHT_JOIN trees t_existing[\s\S]*STRAIGHT_JOIN stems s_existing[\s\S]*STRAIGHT_JOIN coremeasurements cm_existing_stem/
+    );
+    expect(collisionSql).not.toContain('INNER JOIN trees t_existing');
+    expect(collisionSql).not.toContain('INNER JOIN stems s_existing');
+    expect(collisionSql).not.toContain('INNER JOIN coremeasurements cm_existing_stem');
+    expect(canonicalSql).toContain('CREATE TEMPORARY TABLE prior_core_insert_failure_rows');
+    expect(collisionSql).toContain('LEFT JOIN prior_core_insert_failure_rows prior_failure');
+    expect(collisionSql).toContain('incoming row preserved for review');
+    expect(canonicalSql).toContain('SELECT COUNT(*) FROM existing_tag_stemtag_collision_failures');
+
+    // Pin the permanent indexes that make the forced batch-driven order one lookup per stage.
+    expect(tableStructuresSql).toContain('create index idx_trees_tag_census_active on trees (TreeTag, CensusID, IsActive)');
+    expect(tableStructuresSql).toContain('constraint ux_stems_treeid_stemtag_census unique (TreeID, StemTag, CensusID)');
+    expect(tableStructuresSql).toContain('constraint ux_measure_unique unique (StemGUID, CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM)');
   });
 
   it('cleans up stale failed sub-batches before retrying the same batch id', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain("AND status IN ('processing', 'failed')");
     expect(canonicalSql).toContain("WHERE batchID = vBatchID AND censusID = vCurrentCensusID AND status IN ('processing', 'failed');");
   });
 
   it('uses duplicate-tolerant stem inserts for within-batch stem collisions', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain(
-      'INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
+      'INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
     );
     expect(canonicalSql).not.toContain(
-      'INSERT INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
+      'INSERT INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
     );
   });
 
   it('degrades duplicate coremeasurement candidates to row-level failures', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain('CREATE TEMPORARY TABLE source_row_insert_conflicts AS');
     expect(canonicalSql).toContain("'Measurement insert skipped: source row resolved to multiple candidate measurements'");
     expect(canonicalSql).toContain(
-      'INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields, UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawCodes, RawComments, SourceRowIndex, IsActive)'
+      'INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields, UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)'
     );
     expect(canonicalSql).toContain('FROM core_insert_candidates cic ORDER BY cic.id;');
     expect(canonicalSql).toContain('core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements');
   });
 
+  it('does not mislabel classified core insert failures as orphaned measurements', () => {
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+
+    expect(canonicalSql).toContain('IF EXISTS(SELECT 1 FROM orphaned_rows) THEN');
+    expect(canonicalSql).not.toContain('IF EXISTS(SELECT 1 FROM core_insert_failures) OR EXISTS(SELECT 1 FROM orphaned_rows) THEN');
+    expect(canonicalSql).toContain('SET @orphaned_filtered = (SELECT COUNT(*) FROM orphaned_rows)');
+  });
+
+  it('backfills uploaded PublishedStemID through stem resolution with conflict guards', () => {
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+    const tableStructuresSql = readSql('db/sql/tablestructures.sql');
+
+    expect(canonicalSql).toContain('srr.UploadedPublishedStemID AS PublishedStemID');
+    expect(canonicalSql).toContain("'PUBLISHED_STEMID_CONFLICT'");
+    expect(canonicalSql).toContain('SET s_target.PublishedStemID = rbr.PublishedStemID');
+    expect(canonicalSql).toContain('RawCodes, RawPublishedStemID, RawComments');
+    expect(tableStructuresSql).toContain("('ingestion', 'PUBLISHED_STEMID_CONFLICT'");
+  });
+
   it('builds a deduped previous-census lookup before cross-census location validation aggregation', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain('CREATE TEMPORARY TABLE current_cross_census_previous_map');
     expect(canonicalSql).toContain('INSERT INTO current_cross_census_previous_map (CurrentCensusID, PreviousCensusID)');
@@ -86,7 +166,7 @@ describe('upload procedure regressions', () => {
   });
 
   it('uses PlotCensusNumber for previous-census selection and user-facing messages', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain('DECLARE vCurrentPlotCensusNumber INT DEFAULT NULL;');
     expect(canonicalSql).toContain('DECLARE vPreviousPlotCensusNumber INT DEFAULT NULL;');
@@ -101,8 +181,8 @@ describe('upload procedure regressions', () => {
   });
 
   it('keeps invalid attribute codes as soft validation 14 instead of hard-failing them', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
-    const tableStructuresSql = readSql('sqlscripting/tablestructures.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+    const tableStructuresSql = readSql('db/sql/tablestructures.sql');
 
     expect(canonicalSql).not.toContain("SELECT id, 'INVALID_ATTRIBUTE_CODE', FailureReason");
     expect(canonicalSql).toContain("ON me.ErrorSource = 'validation' AND me.ErrorCode = '14'");
@@ -112,9 +192,9 @@ describe('upload procedure regressions', () => {
   });
 
   it('rebuilds validation 14 from RawCodes during validation reruns', () => {
-    const coreQueriesSql = readSql('sqlscripting/corequeries.sql');
-    const procedureSql = readSql('sqlscripting/storedprocedures.sql');
-    const migrationSql = readSql('db-migrations/unified-measurements-migrations/53_reapply_validation14_rawcodes_replay.sql');
+    const coreQueriesSql = readSql('db/sql/corequeries.sql');
+    const procedureSql = readSql('db/sql/storedprocedures.sql');
+    const migrationSql = readSql('db/migrations/unified-measurements-migrations/53_reapply_validation14_rawcodes_replay.sql');
 
     const coreValidation14 = extractSqlSegment(
       coreQueriesSql,
@@ -136,10 +216,8 @@ describe('upload procedure regressions', () => {
   });
 
   it('ignores empty code tokens created by doubled or trailing semicolons', () => {
-    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
-    const ctfsMigrationSql = readSql('db-migrations/ctfs-migrations/15_deploy_bulkingestionprocess.sql');
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain("WHERE rcm.Codes IS NOT NULL AND TRIM(rcm.Codes) != '' AND TRIM(jt.code) != '';");
-    expect(ctfsMigrationSql).toContain("WHERE f.Codes is not null AND trim(f.Codes) != '' AND trim(jt.code) != '';");
   });
 });

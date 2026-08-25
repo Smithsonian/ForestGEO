@@ -187,3 +187,46 @@ export function createResetValidationStatesQuery(schema: string, plotID: number,
     format: true
   };
 }
+
+export const UNRESOLVED_ERRORS_SNACKBAR_MESSAGE = (count: number) => `${count} row(s) with unresolved errors — open View Errors to resolve them.`;
+export const PENDING_VALIDATION_SNACKBAR_MESSAGE = (count: number) => `${count} row(s) not yet validated — run validations to check them.`;
+export const RESET_THEN_VALIDATE_SNACKBAR_MESSAGE = (count: number) => `${count} row(s) not yet validated — reset validation states, then run validations.`;
+export const ALL_VALID_SNACKBAR_MESSAGE = (count: number) => `${count} row(s) passed validation.`;
+
+export interface MeasurementStateCounts {
+  unresolvedLogged: number;
+  failedNoLog: number;
+  pending: number;
+  valid: number;
+}
+
+export interface MeasurementStateSnackbar {
+  severity: 'warning' | 'info' | 'success';
+  message: string;
+}
+
+export function selectMeasurementStateSnackbar(counts: MeasurementStateCounts): MeasurementStateSnackbar | null {
+  if (counts.unresolvedLogged > 0) {
+    return { severity: 'warning', message: UNRESOLVED_ERRORS_SNACKBAR_MESSAGE(counts.unresolvedLogged) };
+  }
+
+  // failedNoLog rows count as "not yet validated": IsValidated defaults to FALSE
+  // (tablestructures.sql) and a FALSE row without a log entry can also be a hard
+  // failure whose error-log link was dropped (see migration
+  // 51_backfill_hard_failure_error_log.sql) — re-running validations re-surfaces
+  // either case, so that is the honest prompt.
+  const notYetValidated = counts.pending + counts.failedNoLog;
+  if (notYetValidated > 0) {
+    // FALSE-without-log rows carry no unresolved validation error, so they are outside
+    // prepareValidationRun's rerun reset (CountRevalidatable = 0) and the Run Validations menu
+    // entry stays disabled for them — "run validations" would be a dead end; prompt the reset first.
+    const message = counts.pending > 0 ? PENDING_VALIDATION_SNACKBAR_MESSAGE(notYetValidated) : RESET_THEN_VALIDATE_SNACKBAR_MESSAGE(notYetValidated);
+    return { severity: 'info', message };
+  }
+
+  if (counts.valid > 0) {
+    return { severity: 'success', message: ALL_VALID_SNACKBAR_MESSAGE(counts.valid) };
+  }
+
+  return null;
+}

@@ -11,21 +11,21 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <CardGrid stagger>
   <Card title="Stem Codes" icon="star">
-    A list of shorthand codes designating attributes that can assigned to a tree/stem object.
+    A list of shorthand codes designating attributes that can be assigned to a tree or stem.
 
-    [Learn More](understanding-stem-codes.mdx)
+    Stem codes, species, and quadrats must each hold at least one record before you can upload measurements.
   </Card>
   <Card title="Quadrats" icon="document">
     A breakdown of the plot into smaller, standardized area segments.
 
-    [Learn More](understanding-quadrats.mdx)
+    Quadrats belong to the **plot**, not to a census — once defined, they carry across every census in that plot.
   </Card>
   <Card title="Species" icon="warning">
     A list of species found in the plot. 
     
     Each species is assigned a shorthand **Species Code** to allow rapid assignment when actively recording statistics in the field.
 
-    [Learn More](understanding-species.mdx)
+    [Learn More](/ForestGEO/starting/understanding-species/)
   </Card>
   <Card title="Personnel" icon="open-book">
     A list of personnel working on the census. 
@@ -34,10 +34,8 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     how personnel are distributed job-wise across the census. 
 
 :::note 
-Personnel are **not required** to submit measurements! 
+Personnel are **not required** before you upload measurements. Only stem codes, species, and quadrats gate the measurements upload.
 :::
-
-    [Learn More](understanding-personnel.mdx)
   </Card>
 </CardGrid>
 
@@ -79,9 +77,9 @@ Please note the Show/Hide All and RESET buttons, along with the Search box.
 
 ##### #10 - Empty Columns Toggle
 
-In addition to the columns dropdown, the system **automatically** hides all columns that have **no values**! 
+In addition to the columns dropdown, this toggle collapses every column that holds **no values** in any row, so you can concentrate on the columns you actually populated.
 
-Clicking on the toggle will forcibly show all columns, regardless of content.
+On the supporting-data views, empty columns start out **visible** — click the toggle to hide them. The Species List and the measurements grid start out with empty columns already hidden, so on those the toggle works the other way round.
 
 #### Filtering Options
 
@@ -97,4 +95,14 @@ The type of filter options available to you will change depending on the type of
 
 ![string column filtration menu](../../../assets/string-filter-options.png)
 
-###### 
+Text columns offer the comparisons you would expect for words — *contains*, *does not contain*, *equals*, *starts with*, *ends with*, *is any of* — plus *is empty* and *is not empty* for finding gaps in your data.
+
+###### Numeric Column Filtration Options
+
+Numeric columns such as DBH, HOM, and the local coordinates swap those for arithmetic comparisons: *equals*, *does not equal*, *greater than*, *greater than or equal to*, *less than*, *less than or equal to*, and the same *is empty* / *is not empty* pair.
+
+Date columns behave the same way, comparing chronologically rather than numerically.
+
+##### #4 - Quick Search
+
+The search box filters across every column at once. **Type your term and press Enter to apply it** — results do not update as you type. Clearing the box and pressing Enter again restores the full view.

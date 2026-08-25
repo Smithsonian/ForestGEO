@@ -1,6 +1,6 @@
 import type { ProvisioningStep, StepContext } from '../types';
 import { ProvisioningError } from '../types';
-import { findFirstOverlap } from '../geometry';
+import { acknowledgmentCoversLayout, validateQuadratCollectionDetailed } from '../quadrat-collection-validation';
 
 const SCHEMA_PATTERN = /^forestgeo_[a-z0-9_]+$/;
 
@@ -66,24 +66,17 @@ export const validateInputsStep: ProvisioningStep = {
           { stepKey: 'validate_inputs' }
         );
       }
-    } else {
-      const rows = input.quadrats.rows;
-      for (const row of rows) {
-        if (row.startX < 0 || row.startY < 0) {
-          throw new ProvisioningError(`Quadrat "${row.quadratName}" has negative start coordinates`, 'invalid_input', { stepKey: 'validate_inputs' });
-        }
-        if (row.startX + row.dimensionX > input.plot.dimensionX) {
-          throw new ProvisioningError(`Quadrat "${row.quadratName}" extends past plot dimensionX`, 'invalid_input', { stepKey: 'validate_inputs' });
-        }
-        if (row.startY + row.dimensionY > input.plot.dimensionY) {
-          throw new ProvisioningError(`Quadrat "${row.quadratName}" extends past plot dimensionY`, 'invalid_input', { stepKey: 'validate_inputs' });
-        }
+    } else if (input.quadrats.mode === 'csv') {
+      // Overlaps the admin acknowledged as field measurements are not defects; every other
+      // issue kind fails the run.
+      const validation = validateQuadratCollectionDetailed(input.quadrats.rows, input.plot);
+      const overlapsAcknowledged =
+        validation.overlapSummary !== null && acknowledgmentCoversLayout(input.quadrats.overlapAcknowledgment, validation.overlapSummary.layoutSignature);
+      if (validation.fatalIssues.length > 0) {
+        throw new ProvisioningError(validation.fatalIssues[0].message, 'invalid_input', { stepKey: 'validate_inputs' });
       }
-      const overlap = findFirstOverlap(rows);
-      if (overlap) {
-        throw new ProvisioningError(`Quadrats "${overlap[0].quadratName}" and "${overlap[1].quadratName}" overlap`, 'invalid_input', {
-          stepKey: 'validate_inputs'
-        });
+      if (validation.overlapSummary && !overlapsAcknowledged) {
+        throw new ProvisioningError(validation.overlapSummary.pairs[0].message, 'invalid_input', { stepKey: 'validate_inputs' });
       }
     }
   }

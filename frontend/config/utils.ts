@@ -1,29 +1,14 @@
-import ConnectionManager from '@/config/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 // import ailogger from '@/ailogger';
 
-export const openSidebar = () => {
-  if (typeof document !== 'undefined') {
-    document.body.style.overflow = 'hidden';
-    document.documentElement.style.setProperty('--SideNavigation-slideIn', '1');
-  }
-};
+export const MOBILE_SIDEBAR_TOGGLE_EVENT = 'forestgeo:toggle-mobile-sidebar';
 
-export const closeSidebar = () => {
-  if (typeof document !== 'undefined') {
-    document.documentElement.style.removeProperty('--SideNavigation-slideIn');
-    document.body.style.removeProperty('overflow');
-  }
-};
-
+/**
+ * Backward-compatible event entry point for standalone Header renders.
+ * HubLayout owns the actual Drawer state; no document styles are mutated.
+ */
 export const toggleSidebar = () => {
-  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-    const slideIn = window.getComputedStyle(document.documentElement).getPropertyValue('--SideNavigation-slideIn');
-    if (slideIn) {
-      closeSidebar();
-    } else {
-      openSidebar();
-    }
-  }
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(MOBILE_SIDEBAR_TOGGLE_EVENT));
 };
 
 // Utility type to capitalize the first letter of each key
@@ -131,6 +116,8 @@ export function buildBulkUpsertQuery<T extends Record<string, any>>(schema: stri
   return { sql, params };
 }
 
+export type UpsertOperation = 'inserted' | 'updated' | 'unchanged';
+
 export async function handleUpsert<Result>(
   connectionManager: ConnectionManager,
   schema: string,
@@ -138,7 +125,7 @@ export async function handleUpsert<Result>(
   data: Partial<Result>,
   key: keyof Result,
   transactionID?: string
-): Promise<{ id: number; operation?: string }> {
+): Promise<{ id: number; operation: UpsertOperation }> {
   if (!Object.keys(data).length) {
     throw new Error(`No data provided for upsert operation on table ${tableName}`);
   }
@@ -188,7 +175,11 @@ export async function handleUpsert<Result>(
 
       if (searchResult.length > 0) {
         id = searchResult[0][key as keyof Result] as unknown as number;
-        return { id, operation: 'updated' };
+        // MySQL reports two affected rows when ON DUPLICATE KEY UPDATE changes
+        // an existing row. With CLIENT_FOUND_ROWS (the pool default), an
+        // identical duplicate reports one. Keep that distinction so audit
+        // consumers do not record a mutation for a no-op upsert.
+        return { id, operation: result.affectedRows === 1 ? 'unchanged' : 'updated' };
       } else {
         // ailogger.error(`Record not found after update. Data: ${JSON.stringify(trimmed)}, Query: ${findExistingQuery}, Values: ${values}`);
         throw new Error(`Upsert failed: Record in ${tableName} could not be found after update.`);

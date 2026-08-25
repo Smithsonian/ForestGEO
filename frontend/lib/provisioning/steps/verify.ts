@@ -32,6 +32,10 @@ export const verifyStep: ProvisioningStep = {
       throw new Error(`verify: expected 1 census row, got ${censusRows.length}`);
     }
 
+    // "None (add later)" deliberately provisions an empty quadrat table. The
+    // site, plot, and first census above remain the completion criteria for it.
+    if (ctx.input.quadrats.mode === 'none') return;
+
     const [quadratRows]: any = await ctx.sitePool.query(`SELECT COUNT(*) AS c FROM \`${ctx.schemaName}\`.quadrats WHERE PlotID = ?`, [ctx.state.plotId]);
     const count = Number(quadratRows[0]?.c ?? quadratRows[0]?.C ?? 0);
     if (count < MIN_EXPECTED_QUADRATS) {

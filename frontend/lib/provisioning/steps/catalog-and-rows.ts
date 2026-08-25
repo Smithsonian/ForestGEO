@@ -43,10 +43,10 @@ export const insertPlotStep: ProvisioningStep = {
     const [result]: any = await ctx.sitePool.query(
       `INSERT INTO \`${ctx.schemaName}\`.plots
         (PlotName, LocationName, CountryName, DimensionX, DimensionY, Area,
-         GlobalX, GlobalY, GlobalZ, PlotShape, PlotDescription,
+         GlobalX, GlobalY, GlobalZ, GlobalCoordinatesEPSG, PlotShape, PlotDescription,
          DefaultDimensionUnits, DefaultCoordinateUnits, DefaultAreaUnits,
          DefaultDBHUnits, DefaultHOMUnits)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         p.plotName,
         ctx.input.site.location,
@@ -57,6 +57,7 @@ export const insertPlotStep: ProvisioningStep = {
         p.globalX,
         p.globalY,
         p.globalZ,
+        p.globalCoordinatesEPSG ?? null,
         p.plotShape,
         p.description,
         p.defaultDimensionUnits,

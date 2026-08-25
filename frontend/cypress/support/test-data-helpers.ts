@@ -415,7 +415,8 @@ Cypress.Commands.add('openSidebarLink', (sectionLabel: string, linkLabel: string
 
   const expectedRoute = routeSuffixForSidebarLink(sectionLabel, linkLabel);
   if (expectedRoute) {
-    cy.url().should('include', expectedRoute);
+    // Cold Next route compilation in CI can exceed Cypress's default 4s retry window.
+    cy.url({ timeout: 15000 }).should('include', expectedRoute);
   }
 });
 
