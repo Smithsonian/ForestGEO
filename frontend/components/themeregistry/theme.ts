@@ -262,15 +262,12 @@ const theme = extendTheme({
       }
     },
 
-    // Modal
-    JoyModal: {
-      styleOverrides: {
-        root: {
-          zIndex: designTokens.zIndex.modal
-        }
-      }
-    },
-
+    // Modal layering is deliberately left to Joy. Joy draws modal and popup
+    // z-indexes from one internally-consistent --joy-zIndex-* scale, and a
+    // Select/Menu listbox opened inside a dialog depends on that relationship.
+    // Pinning the modal root to a raw number broke it: listbox options rendered
+    // behind the dialog's own content. Adopting the designTokens scale here
+    // would mean setting the WHOLE scale, not one member of it.
     JoyModalDialog: {
       styleOverrides: {
         root: ({ theme }) => ({
