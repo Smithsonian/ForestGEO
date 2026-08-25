@@ -881,6 +881,7 @@ create table if not exists measurement_errors
 );
 
 insert ignore into measurement_errors (ErrorSource, ErrorCode, ErrorMessage)
+-- No semicolon characters inside string literals anywhere in this file: the test schema loader splits statements naively on semicolons.
 values ('ingestion', 'MISSING_FIELD_TREETAG', 'Missing required field: TreeTag'),
        ('ingestion', 'MISSING_FIELD_STEMTAG', 'Missing required field: StemTag'),
        ('ingestion', 'MISSING_FIELD_SPECIESCODE', 'Missing required field: SpeciesCode'),
@@ -923,6 +924,9 @@ create table if not exists measurement_error_log
     CreatedAt     datetime default CURRENT_TIMESTAMP null,
     IsResolved    tinyint(1) default 0             not null,
     ResolvedAt    datetime                          null,
+    PriorCensusID int                               null,
+    PriorDBH      decimal(12, 6)                    null,
+    PriorHOM      decimal(12, 6)                    null,
     primary key (MeasurementID, ErrorID),
     constraint measurement_error_log_coremeasurements_fk
         foreign key (MeasurementID) references coremeasurements (CoreMeasurementID)

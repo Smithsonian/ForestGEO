@@ -63,10 +63,12 @@ capitalisation to tell two species apart.
 **Quadrat Name** — the subplot the stem sits in. Must already exist.
 
 **Local X / Local Y** — the stem's position *within its quadrat*, not within the plot. These are
-what let the application place a stem on the map and check it against the plot boundary.
+what let the application place a stem on the map and check it against the plot boundary. On a
+regular CSV upload they are required: a blank `lx` or `ly` fails the row before it's even staged
+for review, the same as a blank `tag` or `spcode` would.
 
 **DBH (Diameter at Breast Height)** — the primary measurement, taken at a standard 1.3 m. Units
-depend on the site. Leave it blank for a dead stem rather than entering zero.
+depend on the site. Never enter zero for a stem that wasn't measured — leave the cell empty.
 
 **HOM (Height of Measure)** — where you actually measured, when that differs from 1.3 m (buttress
 roots, irregular stems). Recording it keeps the next census comparable.
@@ -85,7 +87,7 @@ as in `LI;DY`.
 | `spcode` | **Yes** | Must exist in the Species List |
 | `quadrat` | **Yes** | Must exist in Quadrats |
 | `date` | **Yes** | `YYYY-MM-DD` |
-| `lx`, `ly` | Strongly recommended | Only *enforced* on ArcGIS imports, but without them the stem cannot be placed |
+| `lx`, `ly` | **Yes** | A blank cell fails the row on a regular CSV upload, before it's even staged for review |
 | `dbh`, `hom`, `codes`, `comments` | No | Leave blank rather than entering zero |
 
 Save as CSV, TSV or TXT. The delimiter is detected for you — comma, tab, semicolon or pipe — but
@@ -114,7 +116,7 @@ For the full column specifications, including the other upload forms, see
 | Duplicate tree tag + stem tag in one file | The same stem recorded twice | Each tree/stem pair must appear once per census |
 | Dates in a spreadsheet's default format | Excel reformats dates on save | Use `YYYY-MM-DD`, and check after saving |
 | DBH containing text or units | A value like `12.5 cm` | DBH must be numeric only |
-| Missing coordinates | They look optional | Supply `lx` and `ly` |
+| Missing coordinates | `lx`/`ly` are required on a CSV upload; a blank cell fails the row | Supply `lx` and `ly` |
 
 :::caution
 **The comma-versus-semicolon one is the quietest.** An unrecognised attribute code is only a soft
@@ -129,6 +131,23 @@ have them, open the file in a plain text editor to confirm they survived the sav
 
 ---
 
+## Minimum cleaning checklist
+
+A quick pass over the file before you upload catches most problems:
+
+- [ ] Tag, stem tag, and quadrat values are formatted the same way every time (same case, same
+  padding) throughout the file.
+- [ ] Leading zeros on tags and quadrat names survived saving — format those columns as **text**
+  in Excel before typing into them, or Excel will silently strip the zeros.
+- [ ] Every species code and every attribute code in the file already exists in the Species List
+  and Stem Codes list.
+- [ ] Every quadrat name in the file already exists in Quadrats.
+- [ ] Dates are `YYYY-MM-DD` and survived the save — Excel likes to reformat date columns.
+- [ ] Attribute codes are separated by **semicolons**, not commas.
+- [ ] No tree tag / stem tag pair appears twice in the file.
+
+---
+
 ## What happens next
 
 Once your file is ready, the upload itself asks you to choose a mode first — and one of them
@@ -136,13 +155,30 @@ deletes the census's existing measurements before inserting yours. Read
 [the upload walkthrough](/ForestGEO/upload-process-breakdown/) before your first upload into a
 census that already holds data.
 
-Afterwards, rows that could not be matched to a stem are kept with your original values and listed
-under **Census Hub → View Errors**. They are not lost, and correcting them does not mean starting
-over — see the [Failed Measurements Guide](/ForestGEO/errors/failed-measurements-guide/).
+Your rows then go through two separate kinds of check, and it matters which one a problem comes
+from:
 
-Automated checks run in the background once your rows are in, flagging things like implausible
-growth or a stem that has moved since the last census. They never block a row. The full list is in
+**Ingestion** decides whether a row can be resolved to a real stem at all — an unrecognised
+species code, a quadrat that doesn't exist, a missing required field. A row that fails ingestion
+never became a measurement, so it is kept with your original values under **Census Hub → View
+Errors** rather than compared against anything. Nothing is lost, and fixing it is not a
+from-scratch redo — see the [Failed Measurements Guide](/ForestGEO/errors/failed-measurements-guide/).
+
+**Validations** run afterward, against rows that *did* ingest successfully, and check the measured
+values themselves — implausible DBH growth or shrinkage against the previous census, a stem that
+moved further than expected, and similar. They never block a row; they flag it for review in View
+Errors alongside the measurement. The full list is in
 [Validations & Statistics](/ForestGEO/validations-statistics/).
+
+A growth or shrinkage check is skipped, not flagged either way, when the DBH it would need from
+either census is missing — there's nothing to compare. Sites that want every live stem to carry a
+DBH can ask their administrator to enable the "live stem missing DBH" check, which exists but is
+off by default.
+
+For DBH growth and shrinkage findings specifically, View Errors shows the prior census's DBH and
+HOM next to the current measurement, flags whether HOM changed between the two, and offers an
+Export CSV covering every flagged occurrence — see [Validation
+Errors](/ForestGEO/errors/validation-errors/) for the full detail.
 
 ---
 

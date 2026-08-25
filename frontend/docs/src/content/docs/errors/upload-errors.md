@@ -99,14 +99,12 @@ This guide covers errors that may occur during the file upload and processing st
 | "Missing required field: LocalY"          | `ly` column is empty        | Provide the quadrat-local Y coordinate |
 
 :::caution
-**The upload screen and the ingestion check disagree about two columns, so trust this list.**
+**Some header guides mark `stemtag`, `lx`, and `ly` as optional. They are not.**
 
-The header guide marks `stemtag` optional, but ingestion rejects any row whose StemTag is blank.
-Give every row a stem tag — most sites use `0` for a single-stemmed tree.
-
-Conversely, the missing-coordinate checks above only fire for **ArcGIS workbook imports**. A CSV
-row with no coordinates will ingest — but it will then be flagged by the plot-boundary and
-coordinate-drift validations, and it cannot be placed on the plot. Supply `lx` and `ly`.
+A blank `stemtag`, `lx`, or `ly` fails the row on an ordinary CSV upload exactly the same as a
+blank TreeTag, SpeciesCode, QuadratName, or MeasurementDate does — all seven appear as "Missing
+required field" above. Give every row a stem tag (most sites use `0` for a single-stemmed tree)
+and always supply coordinates.
 :::
 
 ### Field Length Errors

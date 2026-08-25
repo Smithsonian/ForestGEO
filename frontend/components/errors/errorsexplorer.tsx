@@ -38,12 +38,14 @@ import CancelIcon from '@mui/icons-material/Close';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import CallSplitIcon from '@mui/icons-material/CallSplit';
 import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import Link from 'next/link';
 import {
   ContradictionType,
   CONTRADICTION_LABELS,
   DEFAULT_ERROR_EXPLORER_FILTERS,
   ErrorExplorerDetailsResponse,
+  ErrorComparisonContext,
   ErrorExplorerFacetsResponse,
   ErrorExplorerFilters,
   ErrorExplorerQueryResponse,
@@ -137,6 +139,13 @@ function getFilterStorageKey(schema?: string, plotID?: number, censusID?: number
   return `errors-explorer-filters:${schema}:${plotID}:${censusID}`;
 }
 
+const EXPORT_CSV_FALLBACK_FILENAME = 'errors.csv';
+
+export function extractFilenameFromContentDisposition(headerValue: string | null): string {
+  const match = headerValue?.match(/filename="([^"]+)"/);
+  return match?.[1] ?? EXPORT_CSV_FALLBACK_FILENAME;
+}
+
 function renderPreviewCell(value: string | null | undefined, lines = 2) {
   const displayValue = value && value.trim().length > 0 ? value : '—';
 
@@ -195,6 +204,18 @@ export function getUploadedCodesValue(row?: Partial<CodesRow> | null): string {
 
 export function getMaterializedCodesValue(row?: Partial<CodesRow> | null): string {
   return normalizeCodeValue(row?.attributes);
+}
+
+export function formatOptionalMeasurement(value: number | null | undefined): string {
+  return value == null ? '' : Number(value).toFixed(2);
+}
+
+export function formatErrorComparison(comparison: ErrorComparisonContext, currentHOM: number | null | undefined): string {
+  if (comparison.priorCensusID == null && comparison.priorDBH == null && comparison.priorHOM == null) return 'Comparison unavailable';
+  return (
+    `Prior census ${comparison.priorCensusID ?? '—'}: DBH ${comparison.priorDBH ?? '—'}, HOM ${comparison.priorHOM ?? '—'}` +
+    (comparison.priorHOM != null && currentHOM != null && comparison.homChanged ? ' (HOM changed)' : '')
+  );
 }
 
 export function hasCodesMismatch(row?: Partial<CodesRow> | null): boolean {
@@ -320,6 +341,7 @@ export default function ErrorsExplorer() {
   const [hasLoadedRows, setHasLoadedRows] = useState(false);
   const [loadingFacets, setLoadingFacets] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [isExportingCsv, setIsExportingCsv] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
   const [selectableOpts, setSelectableOpts] = useState<{ codes: string[] }>({ codes: [] });
@@ -434,6 +456,50 @@ export default function ErrorsExplorer() {
     },
     [filters, resolveExplorerScope]
   );
+
+  const handleExportCsv = useCallback(async () => {
+    const scope = resolveExplorerScope();
+    if (!scope) {
+      setErrorMessage('Explorer scope is not available');
+      return;
+    }
+    setIsExportingCsv(true);
+    setErrorMessage(null);
+    let objectUrl: string | null = null;
+    let anchor: HTMLAnchorElement | null = null;
+    try {
+      const response = await fetch('/api/errors/explorer/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schema: scope.schema,
+          plotID: scope.plotID,
+          censusID: scope.censusID,
+          censusIDs: scope.censusIDs,
+          filters
+        })
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ error: 'Failed to export errors' }));
+        throw new Error('error' in data ? data.error : 'Failed to export errors');
+      }
+      const blob = await response.blob();
+      const filename = extractFilenameFromContentDisposition(response.headers.get('Content-Disposition'));
+      objectUrl = URL.createObjectURL(blob);
+      anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+    } catch (error) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      setErrorMessage(`Export failed: ${errorObj.message}`);
+    } finally {
+      anchor?.remove();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setIsExportingCsv(false);
+    }
+  }, [filters, resolveExplorerScope]);
 
   const fetchDetails = useCallback(
     async (measurementID: number, scopeOverride?: ExplorerScope | null, signal?: AbortSignal) => {
@@ -914,6 +980,43 @@ export default function ErrorsExplorer() {
         valueFormatter: (value: number | null | undefined) => Number(value ?? 0).toFixed(2)
       },
       {
+        field: 'priorDBH',
+        headerName: 'Prior DBH',
+        width: 100,
+        type: 'number',
+        editable: false,
+        sortable: false,
+        align: 'right',
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => formatOptionalMeasurement(value)
+      },
+      {
+        field: 'priorHOM',
+        headerName: 'Prior HOM',
+        width: 100,
+        type: 'number',
+        editable: false,
+        sortable: false,
+        align: 'right',
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => formatOptionalMeasurement(value)
+      },
+      {
+        field: 'homChanged',
+        headerName: 'HOM Changed',
+        width: 130,
+        editable: false,
+        sortable: false,
+        align: 'center',
+        headerAlign: 'center',
+        renderCell: params =>
+          (params.row as ErrorExplorerRow).homChanged ? (
+            <Chip size="sm" color="warning" variant="soft">
+              HOM changed
+            </Chip>
+          ) : null
+      },
+      {
         field: 'description',
         headerName: 'Description',
         minWidth: 220,
@@ -1036,26 +1139,44 @@ export default function ErrorsExplorer() {
 
       <Sheet variant="outlined" sx={{ p: 2, borderRadius: 'md' }}>
         <Stack spacing={2}>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ flexWrap: 'wrap' }}>
-            {ERROR_EXPLORER_PRESETS.map(preset => (
-              <Chip
-                key={preset.id}
-                variant={filters.presetId === preset.id ? 'solid' : 'soft'}
-                color={filters.presetId === preset.id ? 'primary' : 'neutral'}
-                role="button"
-                tabIndex={0}
-                onClick={() => handlePresetClick(preset.id)}
-                onKeyDown={(e: React.KeyboardEvent) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    handlePresetClick(preset.id);
-                  }
-                }}
-                sx={{ cursor: 'pointer' }}
-              >
-                {preset.label}
-              </Chip>
-            ))}
+          <Stack
+            direction={{ xs: 'column', md: 'row' }}
+            spacing={1}
+            sx={{ flexWrap: 'wrap', justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'center' } }}
+          >
+            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+              {ERROR_EXPLORER_PRESETS.map(preset => (
+                <Chip
+                  key={preset.id}
+                  variant={filters.presetId === preset.id ? 'solid' : 'soft'}
+                  color={filters.presetId === preset.id ? 'primary' : 'neutral'}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handlePresetClick(preset.id)}
+                  onKeyDown={(e: React.KeyboardEvent) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handlePresetClick(preset.id);
+                    }
+                  }}
+                  sx={{ cursor: 'pointer' }}
+                >
+                  {preset.label}
+                </Chip>
+              ))}
+            </Stack>
+            <Button
+              size="sm"
+              variant="outlined"
+              color="neutral"
+              startDecorator={<FileDownloadOutlinedIcon />}
+              loading={isExportingCsv}
+              disabled={isExportingCsv}
+              onClick={handleExportCsv}
+              data-testid="errorsexplorer-export-csv"
+            >
+              Export CSV
+            </Button>
           </Stack>
 
           <Stack direction={{ xs: 'column', xl: 'row' }} spacing={1.5}>
@@ -1463,6 +1584,11 @@ export default function ErrorsExplorer() {
                           </Stack>
                         )}
                         {error.procedureName && <Typography level="body-xs">Procedure: {error.procedureName}</Typography>}
+                        {error.comparison && (
+                          <Typography level="body-xs" sx={{ color: 'text.tertiary' }}>
+                            {formatErrorComparison(error.comparison, details.row?.measuredHOM)}
+                          </Typography>
+                        )}
                       </Stack>
                     </Card>
                   ))}

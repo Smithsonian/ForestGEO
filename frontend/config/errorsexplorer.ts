@@ -39,12 +39,20 @@ export interface ErrorExplorerQueryRequest {
   filters: ErrorExplorerFilters;
 }
 
+export interface ErrorComparisonContext {
+  priorCensusID: number | null;
+  priorDBH: number | null;
+  priorHOM: number | null;
+  homChanged: boolean;
+}
+
 export interface ErrorDetailRecord {
   source: Exclude<ErrorExplorerSource, 'all'>;
   code: string;
   message: string;
   fields: string[];
   procedureName?: string | null;
+  comparison: ErrorComparisonContext | null;
 }
 
 export interface ErrorExplorerRow extends MeasurementsSummaryRDS {
@@ -65,6 +73,12 @@ export interface ErrorExplorerRow extends MeasurementsSummaryRDS {
   // Authoritative failure flag derived from coremeasurements.StemGUID — must be
   // computed server-side because measurementssummary.StemGUID can drift stale.
   isFailedRow: boolean;
+  // Comparison context of the first visible ValidationID 1/2 occurrence (ascending
+  // code order), independent of raw-row/grouping order. See buildComparison in _shared.ts.
+  priorCensusID?: number | null;
+  priorDBH?: number | null;
+  priorHOM?: number | null;
+  homChanged?: boolean;
 }
 
 export interface ErrorExplorerSummary {
