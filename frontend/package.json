@@ -25,7 +25,7 @@
     "test:integration": "node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run --config vitest.integration.config.mts",
     "test:integration:azure": "dotenv -e .env.testing.azure -- node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run --config vitest.integration.config.mts",
     "test:component": "cypress run --component",
-    "test:e2e": "start-server-and-test dev http://localhost:3000 \"cypress run --e2e\"",
+    "test:e2e": "dotenv -v NEXT_PUBLIC_E2E_TESTING=true -- start-server-and-test dev http://localhost:3000 \"cypress run --e2e\"",
     "test:e2e:ci": "NEXT_PUBLIC_E2E_TESTING=true start-server-and-test 'NEXT_PUBLIC_E2E_TESTING=true next dev --turbo' http://localhost:3000 \"cypress run --e2e --headless --browser chrome\"",
     "test:e2e:demo": "NEXT_PUBLIC_E2E_TESTING=true start-server-and-test 'NEXT_PUBLIC_E2E_TESTING=true next dev --turbo' http://localhost:3000 \"cypress run --e2e --headed --browser electron --spec 'cypress/e2e/demo/**/*.cy.ts' --env demoMode=true,demoDelayMs=1400\"",
     "test:e2e:demo:headless": "NEXT_PUBLIC_E2E_TESTING=true start-server-and-test 'NEXT_PUBLIC_E2E_TESTING=true next dev --turbo' http://localhost:3000 \"cypress run --e2e --headless --browser electron --spec 'cypress/e2e/demo/**/*.cy.ts' --env demoMode=true,demoDelayMs=400\"",
