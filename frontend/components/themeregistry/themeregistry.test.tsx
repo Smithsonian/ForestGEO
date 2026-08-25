@@ -8,6 +8,8 @@ vi.mock('next/font/google', () => ({
   Source_Code_Pro: () => ({ style: { fontFamily: 'Source Code Pro' } })
 }));
 
+import Button from '@mui/joy/Button';
+import Tooltip from '@mui/joy/Tooltip';
 import Typography from '@mui/joy/Typography';
 import MaterialTypography from '@mui/material/Typography';
 import ThemeRegistry from './themeregistry';
@@ -107,5 +109,46 @@ describe('ThemeRegistry runtime composition', () => {
       `expected Material text.secondary to render as ${expectedColor} (earthBrown[200]); the rendered probe computed color:"${computedColor}" instead. ` +
         `This is the value materialDarkTheme.palette.text.secondary supplies via MaterialCssVarsProvider in themeregistry.tsx.`
     ).toBe(expectedColor);
+  });
+  // Regression: JoyTooltip.defaultProps.sx is merged onto the WRAPPED CHILD, not the
+  // tooltip bubble. Putting pointerEvents there made every tooltipped control in the app
+  // unclickable, which surfaced in CI as Cypress "pointer-events: none" failures on the
+  // kebab menu and as "covered by another element" wherever a transparent-to-hit-testing
+  // element let elementFromPoint fall through to whatever sat behind it.
+  it('leaves a tooltip-wrapped control clickable', () => {
+    const { getByRole } = render(
+      <ThemeRegistry>
+        <Tooltip title="More actions" placement="top" arrow>
+          <Button aria-label="More actions">More</Button>
+        </Tooltip>
+      </ThemeRegistry>
+    );
+
+    const button = getByRole('button', { name: 'More actions' });
+    const pointerEvents = getComputedStyle(button).pointerEvents;
+
+    expect(
+      pointerEvents,
+      `a tooltip-wrapped Button computed pointer-events:"${pointerEvents}". Anything other than auto/empty means the ` +
+        `JoyTooltip theme entry is leaking CSS onto its child again -- keep bubble-only styling in styleOverrides.root, ` +
+        `and keep Tooltip props like leaveDelay in defaultProps rather than sx.`
+    ).not.toBe('none');
+  });
+
+  // leaveDelay is a Tooltip prop; inside sx it was serialized as a CSS declaration.
+  it('does not emit leaveDelay as a CSS declaration', () => {
+    render(
+      <ThemeRegistry>
+        <Tooltip title="More actions">
+          <Button aria-label="More actions">More</Button>
+        </Tooltip>
+      </ThemeRegistry>
+    );
+
+    const styleText = Array.from(document.querySelectorAll('style'))
+      .map(tag => tag.textContent ?? '')
+      .join('\n');
+
+    expect(styleText, 'leave-delay is not a CSS property; finding it means a Tooltip prop was placed in sx again.').not.toContain('leave-delay');
   });
 });

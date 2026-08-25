@@ -242,12 +242,12 @@ const theme = extendTheme({
 
     // Tooltip
     JoyTooltip: {
+      // leaveDelay is a Tooltip prop, not CSS, and sx here is merged onto the
+      // WRAPPED CHILD -- putting either in sx made every tooltipped control
+      // unclickable (pointer-events: none) and emitted a bogus leave-delay rule.
       defaultProps: {
         disableTouchListener: true,
-        sx: {
-          leaveDelay: 100,
-          pointerEvents: 'none'
-        }
+        leaveDelay: 100
       },
       styleOverrides: {
         root: ({ theme }) => ({
@@ -255,7 +255,9 @@ const theme = extendTheme({
           fontSize: designTokens.typography.fontSize.sm,
           padding: `${designTokens.spacing.xs} ${designTokens.spacing.sm}`,
           borderRadius: theme.vars.radius.sm,
-          maxWidth: '300px'
+          maxWidth: '300px',
+          // The bubble itself must not swallow the pointer; the child keeps its own.
+          pointerEvents: 'none'
         })
       }
     },
