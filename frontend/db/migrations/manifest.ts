@@ -67,5 +67,9 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-08-04-02-add-plot-coordinate-epsg',
     file: 'schema-contract-repair/2026-08-04-02-add-plot-coordinate-epsg.sql'
+  },
+  {
+    id: '2026-08-07-01-rename-viewfulltable-stemid-to-stemguid',
+    file: 'schema-contract-repair/2026-08-07-01-rename-viewfulltable-stemid-to-stemguid.sql'
   }
 ] as const;

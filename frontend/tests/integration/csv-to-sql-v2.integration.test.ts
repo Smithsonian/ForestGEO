@@ -477,34 +477,88 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
   // Subspecies mapping
   // -------------------------------------------------------------------------
 
-  it('subspecies mapping: staging row with SubspeciesName resolves to Tree.SubSpeciesID', async () => {
-    // seed-census-1.sql inserts no SubSpecies rows. Insert one here.
-    // SpeciesID=1 (FOO / Foobaria / foo) is already seeded.
-    await connection.query("INSERT INTO SubSpecies (SubSpeciesID, SpeciesID, SubSpeciesName, Authority, CurrentTaxonFlag) VALUES (1, 1, 'foovar', 'L.', 1)");
+  // Mirrors Panama's real shape, confirmed by Suzanne Lao 2026-08-06: Species carries
+  // swars1 (Swartzia simplex) only, while SubSpecies carries both varieties, each under
+  // its own mnemonic. swars2 therefore exists in SubSpecies and nowhere else.
+  async function seedSwartziaTaxonomy() {
+    await connection.query(
+      "INSERT INTO Species (SpeciesID, GenusID, CurrentTaxonFlag, SpeciesName, Mnemonic, IDLevel) VALUES (10, 1, 1, 'simplex', 'swars1', 'species')"
+    );
+    await connection.query(
+      `INSERT INTO SubSpecies (SubSpeciesID, SpeciesID, SubSpeciesName, Mnemonic, Authority, CurrentTaxonFlag) VALUES
+         (10, 10, 'grandiflora', 'swars1', 'L.', 1),
+         (11, 10, 'ochnacea',    'swars2', 'L.', 1)`
+    );
+  }
 
-    const m = makeMeasurement({
-      Tag: 'SS1',
-      StemTag: '1',
-      Mnemonic: 'FOO',
-      Family: 'Testaceae',
-      Genus: 'Foobaria',
-      SpeciesName: 'foo',
-      SubspeciesName: 'foovar'
-      // SubspeciesAuthority dropped from staging — see csv-to-sql-shared.ts.
-    });
-    const artifact = buildArtifact({
-      destinationPlotId: DESTINATION_PLOT_ID,
-      censusNumber: CENSUS_NUMBER_1,
-      allowReload: false,
-      measurementRows: [m],
-      attributeRows: []
-    });
+  async function publishOne(m: MeasurementStagingRow) {
+    await executeArtifact(
+      connection,
+      buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_1,
+        allowReload: false,
+        measurementRows: [m],
+        attributeRows: []
+      })
+    );
+  }
 
-    await executeArtifact(connection, artifact);
+  it('a mnemonic held only in SubSpecies resolves to that subspecies and its parent species', async () => {
+    await seedSwartziaTaxonomy();
 
-    const [treeRows] = await connection.query<mysql.RowDataPacket[]>('SELECT SubSpeciesID FROM Tree WHERE Tag = ?', ['SS1']);
-    expect(treeRows).toHaveLength(1);
-    expect(treeRows[0].SubSpeciesID).toBe(1);
+    await publishOne(makeMeasurement({ Tag: 'SS2', StemTag: '1', Mnemonic: 'swars2', SpeciesName: 'simplex', SubspeciesName: 'ochnacea' }));
+
+    const [rows] = await connection.query<mysql.RowDataPacket[]>('SELECT SpeciesID, SubSpeciesID FROM Tree WHERE Tag = ?', ['SS2']);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].SpeciesID).toBe(10);
+    expect(rows[0].SubSpeciesID).toBe(11);
+  });
+
+  it('a mnemonic held in BOTH tables resolves to the subspecies, preserving the varietal identification', async () => {
+    await seedSwartziaTaxonomy();
+
+    // swars1 matches Species 10 and SubSpecies 10. Resolving to the bare species would
+    // silently discard var. grandiflora, which is the distinction the researchers keep.
+    await publishOne(makeMeasurement({ Tag: 'SS1', StemTag: '1', Mnemonic: 'swars1', SpeciesName: 'simplex' }));
+
+    const [rows] = await connection.query<mysql.RowDataPacket[]>('SELECT SpeciesID, SubSpeciesID FROM Tree WHERE Tag = ?', ['SS1']);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].SpeciesID).toBe(10);
+    expect(rows[0].SubSpeciesID).toBe(10);
+  });
+
+  it('rejects a mnemonic shared by an unrelated Species and SubSpecies instead of silently preferring the subspecies', async () => {
+    await connection.query(
+      "INSERT INTO Species (SpeciesID, GenusID, CurrentTaxonFlag, SpeciesName, Mnemonic, IDLevel) VALUES (20, 1, 1, 'conflicta', 'CROSS', 'species')"
+    );
+    await connection.query(
+      "INSERT INTO SubSpecies (SubSpeciesID, SpeciesID, SubSpeciesName, Mnemonic, Authority, CurrentTaxonFlag) VALUES (20, 2, 'conflictb', 'CROSS', 'L.', 1)"
+    );
+
+    await expect(publishOne(makeMeasurement({ Tag: 'XR1', StemTag: '1', Mnemonic: 'CROSS' }))).rejects.toThrow(/Validation failed/);
+
+    const [rows] = await connection.query<mysql.RowDataPacket[]>('SELECT TreeID FROM Tree WHERE Tag = ?', ['XR1']);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('a taxon renamed in the destination still resolves, because the mnemonic did not move', async () => {
+    // The regression for the 2026-08-05 Cocoli publish: the destination Species table
+    // retains every name ever used, so a census recorded under an older name resolved to
+    // nothing while matching on Family/Genus/SpeciesName. Only the mnemonic is stable.
+    await connection.query(
+      "INSERT INTO Species (SpeciesID, GenusID, CurrentTaxonFlag, SpeciesName, Mnemonic, IDLevel) VALUES (12, 1, 1, 'currentname', 'RENAM', 'species')"
+    );
+    await connection.query(
+      "INSERT INTO Species (SpeciesID, GenusID, CurrentTaxonFlag, SpeciesName, Mnemonic, IDLevel) VALUES (13, 1, 0, 'obsoletename', 'RENAM', 'species')"
+    );
+
+    await publishOne(makeMeasurement({ Tag: 'RN1', StemTag: '1', Mnemonic: 'RENAM', SpeciesName: 'obsoletename' }));
+
+    const [rows] = await connection.query<mysql.RowDataPacket[]>('SELECT SpeciesID, SubSpeciesID FROM Tree WHERE Tag = ?', ['RN1']);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].SpeciesID).toBe(12);
+    expect(rows[0].SubSpeciesID).toBeNull();
   });
 
   // -------------------------------------------------------------------------

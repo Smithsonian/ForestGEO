@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Alert,
   Box,
   Button,
   CircularProgress,
@@ -16,7 +17,8 @@ import {
   Typography
 } from '@mui/joy';
 import IsolatedFailedMeasurementsDataGrid from '@/components/datagrids/applications/isolated/isolatedfailedmeasurementsdatagrid';
-import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
@@ -24,60 +26,112 @@ import { invalidateAfter } from '@/lib/query';
 
 interface FailedMeasurementsModalProps {
   open: boolean;
-  setReingested: Dispatch<SetStateAction<boolean>>;
-  handleCloseModal: () => Promise<void>;
+  handleCloseModal: (options?: { dataChanged?: boolean }) => Promise<void>;
   autoCloseWhenEmpty?: boolean;
 }
 
 export default function FailedMeasurementsModal(props: FailedMeasurementsModalProps) {
-  const { open, setReingested, handleCloseModal, autoCloseWhenEmpty = true } = props;
+  const { open, handleCloseModal, autoCloseWhenEmpty = true } = props;
   const [isReingesting, setIsReingesting] = useState(false);
   const [isClearingFailed, setIsClearingFailed] = useState(false);
   const [isClearingTemp, setIsClearingTemp] = useState(false);
   const [confirmClearFailed, setConfirmClearFailed] = useState(false);
   const [confirmClearTemp, setConfirmClearTemp] = useState(false);
-  const [failedCount, setFailedCount] = useState<number | null>(null);
-  const [tempCount, setTempCount] = useState<number | null>(null);
+  const [countError, setCountError] = useState<string | null>(null);
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
+  const { data: session } = useSession();
+  const canRecoverRecords = Boolean(session?.user?.userStatus && session.user.userStatus !== 'pending');
+  const canClearRecords = session?.user?.userStatus === 'global' || session?.user?.userStatus === 'db admin';
+  const countsAbortControllerRef = useRef<AbortController | null>(null);
+  const wasOpenRef = useRef(false);
+  const hasDataChangesRef = useRef(false);
+  const countScope =
+    currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID
+      ? `${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`
+      : '';
+  const [recordCounts, setRecordCounts] = useState<{ scope: string; failed: number | null; temporary: number | null }>({
+    scope: '',
+    failed: null,
+    temporary: null
+  });
+  const failedCount = recordCounts.scope === countScope ? recordCounts.failed : null;
+  const tempCount = recordCounts.scope === countScope ? recordCounts.temporary : null;
 
   // Track mount state to prevent state updates after unmount
   const { isMountedRef } = useIsMounted();
 
   const fetchRecordCounts = useCallback(async () => {
+    countsAbortControllerRef.current?.abort();
+
     if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) {
-      return;
+      setRecordCounts({ scope: '', failed: null, temporary: null });
+      setCountError(null);
+      return false;
     }
+
+    const controller = new AbortController();
+    countsAbortControllerRef.current = controller;
+    const scope = `${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`;
 
     try {
-      // Get failed measurements count
-      const failedResponse = await fetch(
-        `/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges?.[0].censusID}`,
-        { method: 'GET' }
+      const failedCountRequest = fetch(
+        `/api/failedmeasurements/count/${encodeURIComponent(currentSite.schemaName)}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+        {
+          method: 'GET',
+          signal: controller.signal
+        }
       );
-      if (failedResponse.ok && isMountedRef.current) {
-        const failedData = await failedResponse.json();
-        if (isMountedRef.current) {
-          setFailedCount(failedData.recordCount);
+      const tempCountRequest = canClearRecords
+        ? fetch(
+            `/api/admin/clear/temporarymeasurements/${encodeURIComponent(currentSite.schemaName)}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+            { method: 'GET', signal: controller.signal }
+          )
+        : Promise.resolve(null);
+      const [failedResponse, tempResponse] = await Promise.all([failedCountRequest, tempCountRequest]);
+
+      if (!failedResponse.ok) {
+        throw new Error(`Failed-measurement count request returned ${failedResponse.status}`);
+      }
+      if (tempResponse && !tempResponse.ok) {
+        throw new Error(`Temporary-measurement count request returned ${tempResponse.status}`);
+      }
+
+      const failedData = await failedResponse.json();
+      const parsedFailedCount = failedData.recordCount;
+      if (typeof parsedFailedCount !== 'number' || !Number.isSafeInteger(parsedFailedCount) || parsedFailedCount < 0) {
+        throw new Error('Failed-measurement count response was invalid');
+      }
+
+      let parsedTempCount: number | null = null;
+      if (tempResponse) {
+        const tempData = await tempResponse.json();
+        parsedTempCount = tempData.recordCount;
+        if (typeof parsedTempCount !== 'number' || !Number.isSafeInteger(parsedTempCount) || parsedTempCount < 0) {
+          throw new Error('Temporary-measurement count response was invalid');
         }
       }
 
-      // Get temporary measurements count
-      const tempResponse = await fetch(
-        `/api/admin/clear/temporarymeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges?.[0].censusID}`,
-        { method: 'GET' }
-      );
-      if (tempResponse.ok && isMountedRef.current) {
-        const tempData = await tempResponse.json();
-        if (isMountedRef.current) {
-          setTempCount(tempData.recordCount);
-        }
+      if (isMountedRef.current && !controller.signal.aborted && countsAbortControllerRef.current === controller) {
+        setRecordCounts({ scope, failed: parsedFailedCount, temporary: parsedTempCount });
+        setCountError(null);
       }
-    } catch (error: any) {
-      ailogger.error('Failed to fetch record counts:', error);
+      return true;
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === 'AbortError') return false;
+      const err = error instanceof Error ? error : new Error(String(error));
+      ailogger.error(`Failed to fetch failed-measurement modal counts for ${scope}:`, err);
+      if (isMountedRef.current && !controller.signal.aborted && countsAbortControllerRef.current === controller) {
+        setCountError('Unable to load record counts. Recovery remains available.');
+      }
+      return false;
+    } finally {
+      if (countsAbortControllerRef.current === controller) {
+        countsAbortControllerRef.current = null;
+      }
     }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
+  }, [canClearRecords, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges?.[0]?.censusID, isMountedRef]);
 
   const handleClearFailedMeasurements = async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) {
@@ -99,7 +153,6 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
       const result = await response.json();
       ailogger.info('Failed measurements cleared:', result);
 
-      setReingested(true);
       setConfirmClearFailed(false);
 
       // Refresh counts
@@ -107,7 +160,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
 
       // Close modal if no records remaining
       if (result.recordsCleared > 0) {
-        await handleCloseModal();
+        await handleCloseModal({ dataChanged: true });
       }
     } catch (error: any) {
       ailogger.error('Failed to clear failed measurements:', error);
@@ -175,10 +228,9 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
         censusID: currentCensus.dateRanges?.[0].censusID
       });
 
-      // Close the failed measurements modal
-      await handleCloseModal();
-
-      setReingested(true);
+      // Tell the parent synchronously that its summary view is now stale. A
+      // parent state flag followed by close used to race React's next render.
+      await handleCloseModal({ dataChanged: true });
     } catch (error: any) {
       ailogger.error('Failed to run reingestion:', error);
       // Don't close modal on error so user can see what happened
@@ -189,22 +241,31 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
 
   // Fetch record counts when modal opens
   useEffect(() => {
-    if (open) {
-      fetchRecordCounts();
+    if (open && canRecoverRecords) {
+      if (!wasOpenRef.current) {
+        hasDataChangesRef.current = false;
+      }
+      wasOpenRef.current = true;
+      void fetchRecordCounts();
+    } else {
+      wasOpenRef.current = false;
+      countsAbortControllerRef.current?.abort();
+      setRecordCounts({ scope: '', failed: null, temporary: null });
+      setCountError(null);
     }
-  }, [open, fetchRecordCounts]);
+    return () => countsAbortControllerRef.current?.abort();
+  }, [canRecoverRecords, open, fetchRecordCounts]);
 
   // Auto-close modal when all failed measurements have been resolved
   // Note: Only auto-close when failedCount has been explicitly loaded (not null)
   // and equals 0, to prevent premature closing during initial load
   useEffect(() => {
     if (autoCloseWhenEmpty && open && failedCount !== null && failedCount === 0 && !isReingesting && !isClearingFailed && !isClearingTemp) {
-      ailogger.info('All failed measurements resolved - auto-closing modal and marking as reingested');
-      setReingested(true);
+      ailogger.info('All failed measurements resolved - auto-closing modal');
       // Use void to explicitly ignore the promise - the async close is fire-and-forget
-      void handleCloseModal();
+      void handleCloseModal({ dataChanged: hasDataChangesRef.current });
     }
-  }, [autoCloseWhenEmpty, open, failedCount, isReingesting, isClearingFailed, isClearingTemp, handleCloseModal, setReingested]);
+  }, [autoCloseWhenEmpty, open, failedCount, isReingesting, isClearingFailed, isClearingTemp, handleCloseModal]);
 
   return (
     <Modal open={open} onClose={() => {}}>
@@ -220,26 +281,36 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
         }}
         role="alertdialog"
       >
-        <ModalClose aria-label="Close failed measurements modal" onClick={handleCloseModal} />
+        <ModalClose aria-label="Close failed measurements modal" onClick={() => void handleCloseModal({ dataChanged: hasDataChangesRef.current })} />
         <DialogTitle sx={{ pb: 1 }}>Failed Measurements</DialogTitle>
         <DialogContent sx={{ flex: 1, overflow: 'hidden', p: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <Typography level="body-sm" sx={{ px: 3, py: 1, flexShrink: 0 }}>
-            The following measurements failed to be uploaded. You can edit individual measurements in this table, reingest all rows, or clear failed records
-            entirely.
+            {canRecoverRecords
+              ? 'The following measurements failed to be uploaded. You can edit individual measurements in this table or reingest all rows.'
+              : 'Your account has read-only access and cannot recover failed measurements.'}
+            {canRecoverRecords && canClearRecords ? ' Administrators can also permanently clear failed or temporary records.' : ''}
           </Typography>
-          <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 2, pb: 2 }}>
-            <IsolatedFailedMeasurementsDataGrid
-              onRowReingested={() => {
-                ailogger.info('Row successfully reingested - refreshing failed measurement count');
-                fetchRecordCounts();
-              }}
-            />
-          </Box>
+          {countError && (
+            <Alert color="warning" sx={{ mx: 3, mb: 1 }}>
+              {countError} {canClearRecords ? 'Destructive actions are disabled until the counts reload.' : 'Refresh the page to try again.'}
+            </Alert>
+          )}
+          {canRecoverRecords && (
+            <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 2, pb: 2 }}>
+              <IsolatedFailedMeasurementsDataGrid
+                onRowReingested={() => {
+                  ailogger.info('Row successfully reingested - refreshing failed measurement count');
+                  hasDataChangesRef.current = true;
+                  void fetchRecordCounts();
+                }}
+              />
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
           <Stack spacing={2} sx={{ width: '100%' }}>
             {/* Confirmation dialogs */}
-            {confirmClearFailed && (
+            {canClearRecords && confirmClearFailed && (
               <Sheet variant="soft" color="danger" sx={{ p: 2, borderRadius: 'sm' }}>
                 <Stack spacing={1}>
                   <Typography level="title-sm" color="danger">
@@ -260,7 +331,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
               </Sheet>
             )}
 
-            {confirmClearTemp && (
+            {canClearRecords && confirmClearTemp && (
               <Sheet variant="soft" color="warning" sx={{ p: 2, borderRadius: 'sm' }}>
                 <Stack spacing={1}>
                   <Typography level="title-sm" color="warning">
@@ -281,61 +352,67 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
               </Sheet>
             )}
 
-            <Stack direction="row" spacing={2} sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <Stack direction="row" spacing={2} sx={{ justifyContent: canClearRecords ? 'space-between' : 'flex-end', alignItems: 'center' }}>
               {/* Reset Controls */}
-              <Stack direction="row" spacing={1}>
-                <Button
-                  variant="soft"
-                  color="danger"
-                  size="sm"
-                  disabled={isReingesting || isClearingFailed || isClearingTemp || failedCount === 0}
-                  onClick={() => {
-                    fetchRecordCounts().then(() => {
-                      if (isMountedRef.current) {
-                        setConfirmClearFailed(true);
-                      }
-                    });
-                  }}
-                >
-                  Clear Failed ({failedCount ?? '?'})
-                </Button>
-                <Button
-                  variant="soft"
-                  color="warning"
-                  size="sm"
-                  disabled={isReingesting || isClearingFailed || isClearingTemp || tempCount === 0}
-                  onClick={() => {
-                    fetchRecordCounts().then(() => {
-                      if (isMountedRef.current) {
-                        setConfirmClearTemp(true);
-                      }
-                    });
-                  }}
-                >
-                  Clear Temp ({tempCount ?? '?'})
-                </Button>
-              </Stack>
+              {canClearRecords && (
+                <>
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      variant="soft"
+                      color="danger"
+                      size="sm"
+                      disabled={isReingesting || isClearingFailed || isClearingTemp || failedCount === null || failedCount === 0}
+                      onClick={() => {
+                        fetchRecordCounts().then(loaded => {
+                          if (loaded && isMountedRef.current) {
+                            setConfirmClearFailed(true);
+                          }
+                        });
+                      }}
+                    >
+                      Clear Failed ({failedCount ?? '?'})
+                    </Button>
+                    <Button
+                      variant="soft"
+                      color="warning"
+                      size="sm"
+                      disabled={isReingesting || isClearingFailed || isClearingTemp || tempCount === null || tempCount === 0}
+                      onClick={() => {
+                        fetchRecordCounts().then(loaded => {
+                          if (loaded && isMountedRef.current) {
+                            setConfirmClearTemp(true);
+                          }
+                        });
+                      }}
+                    >
+                      Clear Temp ({tempCount ?? '?'})
+                    </Button>
+                  </Stack>
 
-              <Divider orientation="vertical" />
+                  <Divider orientation="vertical" />
+                </>
+              )}
 
               {/* Main Actions */}
               <Stack direction="row" spacing={2}>
-                <Button
-                  variant="solid"
-                  color="primary"
-                  loading={isReingesting}
-                  loadingPosition="start"
-                  startDecorator={isReingesting ? <CircularProgress size="sm" /> : null}
-                  onClick={handleReingestAll}
-                  disabled={isReingesting || isClearingFailed || isClearingTemp}
-                  sx={{ minWidth: 160 }}
-                >
-                  {isReingesting ? 'Reingesting...' : 'Reingest All Rows'}
-                </Button>
+                {canRecoverRecords && (
+                  <Button
+                    variant="solid"
+                    color="primary"
+                    loading={isReingesting}
+                    loadingPosition="start"
+                    startDecorator={isReingesting ? <CircularProgress size="sm" /> : null}
+                    onClick={handleReingestAll}
+                    disabled={isReingesting || isClearingFailed || isClearingTemp || failedCount === 0}
+                    sx={{ minWidth: 160 }}
+                  >
+                    {isReingesting ? 'Reingesting...' : 'Reingest All Rows'}
+                  </Button>
+                )}
                 <Button
                   variant="soft"
                   color="neutral"
-                  onClick={handleCloseModal}
+                  onClick={() => void handleCloseModal({ dataChanged: hasDataChangesRef.current })}
                   disabled={isReingesting || isClearingFailed || isClearingTemp}
                   sx={{ minWidth: 100 }}
                 >

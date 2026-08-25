@@ -20,6 +20,7 @@ import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE } from '@/lib/ingestion/qu
 import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
 import { RoleResult } from '@/lib/db/definitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { assertSchemaAccess } from '@/lib/authz';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import { MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
@@ -74,16 +75,6 @@ function buildMeasurementScopeErrorResponse(status: HTTPResponses, message: stri
     }),
     { status }
   );
-}
-
-function authenticatedSessionIdentity(sessionUser: unknown): string {
-  if (!sessionUser || typeof sessionUser !== 'object' || Array.isArray(sessionUser)) return 'authenticated-user';
-  const record = sessionUser as Record<string, unknown>;
-  for (const key of ['email', 'name', 'id']) {
-    const value = record[key];
-    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
-  }
-  return 'authenticated-user';
 }
 
 async function insertQuadratOverlapAcknowledgmentEvent(

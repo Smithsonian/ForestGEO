@@ -638,14 +638,10 @@ function UploadParentInner(props: UploadParentProps) {
       <>
         <FailedMeasurementsModal
           open={showFailedMeasurementsModal}
-          setReingested={reingested => {
-            if (reingested) {
+          handleCloseModal={async ({ dataChanged = false } = {}) => {
+            if (dataChanged) {
               ailogger.info('Failed measurements were reingested successfully');
-              // Close modal and return to start for reingestion processing
-              setShowFailedMeasurementsModal(false);
             }
-          }}
-          handleCloseModal={async () => {
             ailogger.info('Closing failed measurements modal');
             setShowFailedMeasurementsModal(false);
           }}

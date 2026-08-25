@@ -217,9 +217,9 @@ export function selectMeasurementStateSnackbar(counts: MeasurementStateCounts): 
   // either case, so that is the honest prompt.
   const notYetValidated = counts.pending + counts.failedNoLog;
   if (notYetValidated > 0) {
-    // The validation procedures only process IsValidated IS NULL rows, and the Run Validations
-    // menu entry is disabled when pendingCount === 0 — so when every not-yet-validated row is
-    // FALSE-without-log, "run validations" would be a dead end; prompt the reset first.
+    // FALSE-without-log rows carry no unresolved validation error, so they are outside
+    // prepareValidationRun's rerun reset (CountRevalidatable = 0) and the Run Validations menu
+    // entry stays disabled for them — "run validations" would be a dead end; prompt the reset first.
     const message = counts.pending > 0 ? PENDING_VALIDATION_SNACKBAR_MESSAGE(notYetValidated) : RESET_THEN_VALIDATE_SNACKBAR_MESSAGE(notYetValidated);
     return { severity: 'info', message };
   }

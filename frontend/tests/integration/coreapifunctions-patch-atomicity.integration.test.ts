@@ -1,8 +1,8 @@
 /**
- * Regression: coreapifunctions PATCH write atomicity + session-variable scoping.
+ * Regression: coreapifunctions PATCH write atomicity + single-connection scoping.
  *
- * This proves the two defects fixed by routing the PATCH handler's writes through
- * ConnectionManager.withTransaction(tx => tx.query(...)) instead of bare
+ * This proves the two properties that routing the PATCH handler's writes through
+ * ConnectionManager.withTransaction(tx => tx.query(...)) buys, instead of bare
  * connectionManager.executeQuery(...):
  *
  *   1. ATOMICITY — the handler used to call executeQuery WITHOUT a transaction id,
@@ -11,33 +11,39 @@
  *      now uses (an INSERT followed by a deliberately-failing statement inside one
  *      withTransaction) and assert the INSERT is rolled back.
  *
- *   2. SESSION VARIABLE — the handler does `SET @CURRENT_CENSUS_ID = ?` then an
- *      UPDATE; the changelog trigger reads that session variable. When the SET and
- *      the read run on DIFFERENT connections (the old bug), the reader sees NULL.
- *      We assert that within a single withTransaction, a SET on tx.query is visible
- *      to a later tx.query read on the SAME connection — and that a fresh pool
- *      connection does NOT see it.
+ *   2. ONE CONNECTION — the handler issues its mutation AND its unifiedchangelog
+ *      write inside the same withTransaction. That is what makes the audit entry
+ *      atomic with the change it describes: a rolled-back edit must leave no log
+ *      row, and a log row must always correspond to a committed change. If the
+ *      changelog write ever drifted back to a fresh pool connection it would
+ *      autocommit independently, and a rolled-back edit would still be logged.
+ *      We assert an uncommitted changelog row is visible on the transaction's own
+ *      connection and INVISIBLE to a fresh pool connection until commit.
  *
- * This is the focused write-sequence proof the task calls for. Faithfully invoking
- * the full Next.js PATCH route (NextRequest + cookies + MapperFactory) adds little
- * over exercising the genuine ConnectionManager write path and would require heavy
- * route mocking, so we test the write sequence directly against real local MySQL.
+ * This file previously described property 2 as feeding a session variable
+ * (`SET @CURRENT_CENSUS_ID`) to "the changelog trigger". No trigger has existed
+ * on any schema since 2025-05-12, and the SET was removed along with that claim.
+ * The connection-scoping property it proved is real and now has a live consumer.
  *
  * SAFETY: identical guard to connectionmanager.integration.test.ts — the suite
  * HARD-FAILS before any write if the ConnectionManager pool host is not local.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { ChangelogOperation, recordMutation } from '@/lib/changelog/record-mutation';
 import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type TestDatabaseConfig } from '../setup/local-db-setup';
 import type { Connection } from 'mysql2/promise';
 
 const LOCAL_HOSTS = ['127.0.0.1', 'localhost'] as const;
 const TARGET_TABLE = 'patch_atomicity_probe';
+const CHANGELOG_TABLE = 'unifiedchangelog';
 
 // Sentinel labels keep a leaked row from one test from masquerading as another.
 const ATOMICITY_LABEL = 'atomicity-insert-should-roll-back';
 const MID_SEQUENCE_FAILURE = 'intentional-mid-sequence-failure';
-const SENTINEL_CENSUS_ID = 4242;
+const SCOPING_RECORD_ID = 'connection-scoping-probe';
+const HANDLER_SHAPE_RECORD_ID = 'handler-shape-probe';
+const TEST_CHANGED_BY = 'atomicity-suite@si.edu';
 
 let setupConnection: Connection | null = null;
 let config: TestDatabaseConfig;
@@ -48,6 +54,12 @@ const connectionManager = ConnectionManager.getInstance();
 /** Row count read OUTSIDE any transaction (fresh pool connection). */
 async function countLabelRows(label: string): Promise<number> {
   const rows = await connectionManager.executeQuery(`SELECT COUNT(*) AS total FROM \`${schema}\`.${TARGET_TABLE} WHERE Label = ?`, [label]);
+  return Number(rows[0].total);
+}
+
+/** Changelog row count read OUTSIDE any transaction (fresh pool connection). */
+async function countChangelogRows(recordID: string): Promise<number> {
+  const rows = await connectionManager.executeQuery(`SELECT COUNT(*) AS total FROM \`${schema}\`.${CHANGELOG_TABLE} WHERE RecordID = ?`, [recordID]);
   return Number(rows[0].total);
 }
 
@@ -64,8 +76,8 @@ beforeAll(async () => {
   config = setup.config;
   schema = config.database;
 
-  // FK-free target table so commit/rollback + session-variable scoping are the
-  // only things under test, mirroring the handler's "INSERT then UPDATE" shape.
+  // FK-free target table so commit/rollback is the only thing under test,
+  // mirroring the handler's "mutate then log" shape.
   await setupConnection.query(`DROP TABLE IF EXISTS \`${schema}\`.${TARGET_TABLE}`);
   await setupConnection.query(
     `CREATE TABLE \`${schema}\`.${TARGET_TABLE} (
@@ -80,7 +92,7 @@ afterAll(async () => {
   await teardownTestDatabase(setupConnection, config);
 });
 
-describe('coreapifunctions PATCH write sequence — atomicity + session-variable scoping', () => {
+describe('coreapifunctions PATCH write sequence — atomicity + single-connection scoping', () => {
   it('rolls back an earlier INSERT when a later statement in the same withTransaction fails', async () => {
     const before = await countLabelRows(ATOMICITY_LABEL);
     expect(before).toBe(0);
@@ -108,34 +120,60 @@ describe('coreapifunctions PATCH write sequence — atomicity + session-variable
     expect(after).toBe(0);
   });
 
-  it('keeps SET @CURRENT_CENSUS_ID visible to a later read on the SAME transaction connection', async () => {
-    const observed = await connectionManager.withTransaction(async tx => {
-      // The handler runs `SET @CURRENT_CENSUS_ID = ?` then the UPDATE on tx.query.
-      await tx.query(`SET @CURRENT_CENSUS_ID = ?`, [SENTINEL_CENSUS_ID]);
-      const rows = await tx.query(`SELECT @CURRENT_CENSUS_ID AS currentCensusId`);
-      return rows[0].currentCensusId === null ? null : Number(rows[0].currentCensusId);
+  it('keeps an uncommitted changelog write on the transaction connection, invisible to a fresh pool connection', async () => {
+    expect(await countChangelogRows(SCOPING_RECORD_ID)).toBe(0);
+
+    await connectionManager.withTransaction(async tx => {
+      await recordMutation({
+        tx,
+        schema,
+        tableName: TARGET_TABLE,
+        recordID: SCOPING_RECORD_ID,
+        operation: ChangelogOperation.UPDATE,
+        oldRowState: { Label: 'before' },
+        newRowState: { Label: 'after' },
+        changedBy: TEST_CHANGED_BY
+      });
+
+      // Same connection => visible.
+      const inTx = await tx.query(`SELECT COUNT(*) AS total FROM \`${schema}\`.${CHANGELOG_TABLE} WHERE RecordID = ?`, [SCOPING_RECORD_ID]);
+      expect(Number(inTx[0].total)).toBe(1);
+
+      // Fresh pool connection => NOT visible. This is the property that makes the
+      // audit entry atomic with the mutation: an independently-autocommitting
+      // changelog write would already be readable here, and would survive a
+      // rollback of the edit it claims to describe.
+      expect(await countChangelogRows(SCOPING_RECORD_ID)).toBe(0);
     });
 
-    // Same connection => the session variable is visible. This is exactly what the
-    // changelog trigger relied on and what the old separate-connection code broke.
-    expect(observed).toBe(SENTINEL_CENSUS_ID);
+    // Only after commit does the rest of the pool see it.
+    expect(await countChangelogRows(SCOPING_RECORD_ID)).toBe(1);
   });
 
-  it('drives the full handler write shape (SET @CURRENT_CENSUS_ID then UPDATE) on one connection and persists the update', async () => {
-    // Seed a row OUTSIDE the transaction, then update it through the same two-step
-    // sequence the PATCH handler now uses: a session-variable SET followed by the
-    // UPDATE, both on tx.query (same connection). Proves the UPDATE lands and that
-    // the SET preceding it does not strand the UPDATE on a different connection.
+  it('drives the full handler write shape (mutate then log) on one connection and persists both', async () => {
+    // Seed a row OUTSIDE the transaction, then drive the same two-step sequence
+    // the PATCH handler now uses: the UPDATE followed by the changelog write,
+    // both on tx (same connection). Proves the log entry lands with the change.
     const seedLabel = 'handler-shape-seed';
     const updatedLabel = 'handler-shape-updated';
     await connectionManager.executeQuery(`INSERT INTO \`${schema}\`.${TARGET_TABLE} (Label) VALUES (?)`, [seedLabel]);
 
     await connectionManager.withTransaction(async tx => {
-      await tx.query(`SET @CURRENT_CENSUS_ID = ?`, [SENTINEL_CENSUS_ID]);
       await tx.query(`UPDATE \`${schema}\`.${TARGET_TABLE} SET Label = ? WHERE Label = ?`, [updatedLabel, seedLabel]);
+      await recordMutation({
+        tx,
+        schema,
+        tableName: TARGET_TABLE,
+        recordID: HANDLER_SHAPE_RECORD_ID,
+        operation: ChangelogOperation.UPDATE,
+        oldRowState: { Label: seedLabel },
+        newRowState: { Label: updatedLabel },
+        changedBy: TEST_CHANGED_BY
+      });
     });
 
     expect(await countLabelRows(seedLabel)).toBe(0);
     expect(await countLabelRows(updatedLabel)).toBe(1);
+    expect(await countChangelogRows(HANDLER_SHAPE_RECORD_ID)).toBe(1);
   });
 });

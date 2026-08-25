@@ -1585,6 +1585,29 @@ export async function runValidationForTest(
     return false;
   }
 
+  // Mirrors prepareValidationRun (processorhelperfunctions.tsx): reset rows
+  // this validation previously failed back to pending so the definition
+  // re-examines them, then clear their stale error links.
+  const resetStaleFailuresQuery = `
+    UPDATE coremeasurements cm
+    JOIN census c ON cm.CensusID = c.CensusID
+    JOIN measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+    JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+    SET cm.IsValidated = NULL
+    WHERE me.ErrorSource = 'validation'
+      AND me.ErrorCode = CAST(? AS CHAR)
+      AND mel.IsResolved = FALSE
+      AND cm.IsValidated = FALSE
+      AND cm.StemGUID IS NOT NULL
+      AND cm.IsActive = TRUE
+      ${params.censusID ? 'AND cm.CensusID = ?' : ''}
+      ${params.plotID ? 'AND c.PlotID = ?' : ''}
+  `;
+  const scopeParams: (number | undefined)[] = [validationID];
+  if (params.censusID) scopeParams.push(params.censusID);
+  if (params.plotID) scopeParams.push(params.plotID);
+  await connection.query(resetStaleFailuresQuery, scopeParams);
+
   // Clear stale validation errors for this validation
   const cleanupQuery = `
     DELETE mel FROM measurement_error_log mel
@@ -1598,10 +1621,7 @@ export async function runValidationForTest(
       ${params.censusID ? 'AND cm.CensusID = ?' : ''}
       ${params.plotID ? 'AND c.PlotID = ?' : ''}
   `;
-  const cleanupParams: (number | undefined)[] = [validationID];
-  if (params.censusID) cleanupParams.push(params.censusID);
-  if (params.plotID) cleanupParams.push(params.plotID);
-  await connection.query(cleanupQuery, cleanupParams);
+  await connection.query(cleanupQuery, scopeParams);
 
   // Format the validation query with parameter replacements
   // We're already connected to the test database, so no schema prefix is needed

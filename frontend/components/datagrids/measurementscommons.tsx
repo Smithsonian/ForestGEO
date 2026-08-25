@@ -257,6 +257,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [invalidCount, setInvalidCount] = useState<number>(0);
   const [invalidBreakdown, setInvalidBreakdown] = useState<RowControlBreakdown>({ unresolvedLogged: 0, failedNoLog: 0 });
   const [validationErrorCount, setValidationErrorCount] = useState<number>(0);
+  const [revalidatableErrorCount, setRevalidatableErrorCount] = useState<number>(0);
   const [validCount, setValidCount] = useState<number>(0);
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [otCount, setOTCount] = useState<number>(0);
@@ -371,6 +372,10 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       // UPDATE predicate (IsValidated = FALSE OR IS NULL) exactly, and the menu copy
       // describes it as "failed or not-yet-validated" (never just "failed").
       setValidationErrorCount(overridableCount);
+      // Feeds the Run Validations menu item — CountRevalidatable mirrors
+      // prepareValidationRun's reset predicate, so the action stays disabled when
+      // the only failures are ingestion failures a rerun cannot clear.
+      setRevalidatableErrorCount(Number(countsData.CountRevalidatable) || 0);
       setPendingCount(pendingValidationCount);
       setOTCount(Number(countsData.CountOldTrees) || 0);
       setMSCount(Number(countsData.CountMultiStems) || 0);
@@ -1696,6 +1701,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                         }}
                         pendingCount={pendingCount}
                         overridableCount={validationErrorCount}
+                        revalidatableCount={revalidatableErrorCount}
                       />
                     ),
                     errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount, breakdown: invalidBreakdown },
