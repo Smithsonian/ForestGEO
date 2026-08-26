@@ -70,6 +70,33 @@ function hasDuplicateCleanup(row: RevisionMatchedRow): boolean {
   return (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0;
 }
 
+export type RevisionTabValue = 'changes' | 'duplicates' | 'new' | 'invalid' | 'unchanged';
+
+export interface RevisionRowCounts {
+  changes: number;
+  duplicates: number;
+  newRows: number;
+  invalid: number;
+  unchanged: number;
+}
+
+/**
+ * Selects the tab to open the revision review on. Every tab except 'changes' is
+ * conditionally rendered (its Tab/TabPanel only exist when that count is > 0), so this
+ * must only ever return a tab whose panel actually exists — otherwise MUI Joy's Tabs
+ * (uncontrolled, defaultValue read once at mount) locks onto a tab with no visible
+ * content and the review screen looks empty. 'changes' renders unconditionally and is
+ * therefore the only safe choice for the genuine all-empty case.
+ */
+export function resolveDefaultTabValue(counts: RevisionRowCounts): RevisionTabValue {
+  if (counts.changes > 0) return 'changes';
+  if (counts.duplicates > 0) return 'duplicates';
+  if (counts.newRows > 0) return 'new';
+  if (counts.invalid > 0) return 'invalid';
+  if (counts.unchanged > 0) return 'unchanged';
+  return 'changes';
+}
+
 export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchProps>) {
   const { matchedRows, newRows, invalidRows, counts, bulkPlan, preflightWarning, onApply, handleReturnToStart } = props;
 
@@ -94,7 +121,13 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
   const otherBlockingErrors = blockingErrors.filter(error => error.kind !== 'RoleForbiddenField');
   const planBlocked = bulkPlan?.canApply === false || blockingErrors.length > 0;
   const canApply = !planBlocked && (actionableMatchedRowCount > 0 || (confirmNewRows && newRows.length > 0));
-  const defaultTabValue = rowsWithChanges.length > 0 ? 'changes' : rowsWithDuplicateCleanupOnly.length > 0 ? 'duplicates' : 'changes';
+  const defaultTabValue = resolveDefaultTabValue({
+    changes: rowsWithChanges.length,
+    duplicates: rowsWithDuplicateCleanupOnly.length,
+    newRows: newRows.length,
+    invalid: invalidRows.length,
+    unchanged: rowsNoChanges.length
+  });
 
   return (
     <Stack spacing={3} sx={{ p: 3 }}>

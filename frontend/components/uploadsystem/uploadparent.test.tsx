@@ -9,12 +9,13 @@
  * Verifies integration between hooks and component logic
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import UploadParent from './uploadparent';
 import { FormType } from '@/config/macros/formdetails';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { UploadMode } from '@/config/uploadmodes';
 import React from 'react';
 
 // Mock AttributeStatusOptions and HC functions
@@ -181,7 +182,12 @@ vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
       ))}
       <button
         onClick={() => {
-          const mockFile = { name: 'test.csv', path: '/test.csv' };
+          // A real File (not a plain object) so that revision-mode's parseRevisionFiles,
+          // which runs Papa.parse over the file's content via jsdom's FileReader, has
+          // something to actually read. Non-revision tests only ever assert on
+          // file.name/file count, so this content is inert for them.
+          const mockFile = new File(['tag,stemtag,quadrat,dbh,date\nT001,S1,Q1,10,2024-01-01\n'], 'test.csv', { type: 'text/csv' });
+          Object.assign(mockFile, { path: '/test.csv' });
           handleAddFile(mockFile as any);
         }}
       >
@@ -521,5 +527,183 @@ describe('UploadParent - Hook Integration Tests', () => {
         expect(screen.getByTestId('upload-reingestion')).toBeInTheDocument();
       });
     });
+  });
+});
+
+describe('UploadParent - Revision Upload Default Tab Selection', () => {
+  const mockOnReset = vi.fn();
+
+  // /api/revisionupload and /api/revisionupload/apply are real, unmocked routes here --
+  // UploadRevisionMatch and UploadRevisionApply are NOT mocked above, so this exercises
+  // the actual review + apply UI, not a stand-in. Only fetch is intercepted.
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    originalFetch = global.fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  interface MockRevisionFetchOptions {
+    matchResponse: unknown;
+    applyResponse?: unknown;
+    /** Hold the match response until resolveMatch() is called, to observe the interstitial loading state. */
+    deferMatch?: boolean;
+  }
+
+  function mockRevisionUploadFetch(options: MockRevisionFetchOptions) {
+    const applyRequestBodies: Array<Record<string, unknown>> = [];
+    let releaseMatch: (() => void) | undefined;
+    const matchReady = options.deferMatch
+      ? new Promise<void>(resolve => {
+          releaseMatch = resolve;
+        })
+      : Promise.resolve();
+
+    const jsonResponse = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
+
+    const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === '/api/revisionupload/apply') {
+        applyRequestBodies.push(init?.body ? JSON.parse(init.body as string) : {});
+        return jsonResponse(options.applyResponse ?? {});
+      }
+
+      if (url === '/api/revisionupload') {
+        await matchReady;
+        return jsonResponse(options.matchResponse);
+      }
+
+      throw new Error(`Unexpected fetch call to ${url} in revision upload test`);
+    });
+
+    global.fetch = impl as unknown as typeof global.fetch;
+
+    return { applyRequestBodies, resolveMatch: () => releaseMatch?.() };
+  }
+
+  async function driveToRevisionMatch(user: ReturnType<typeof userEvent.setup>) {
+    render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} overrideUploadMode={UploadMode.REVISIONS} />);
+
+    await user.click(screen.getByText('Add File'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+
+    await user.click(screen.getByText('Continue Upload'));
+  }
+
+  it('opens on the New Rows tab for a new-only revision upload, and requires explicit confirmation before applying', async () => {
+    const user = userEvent.setup();
+
+    const newRowCsvRow = { tag: 'T001', stemtag: 'S1', quadrat: 'Q1', dbh: '10', date: '2024-01-01', spcode: null };
+    const matchResponse = {
+      matchedRows: [],
+      newRows: [{ csvRow: newRowCsvRow, csvIndex: 0, reason: 'no-match-key-in-db' }],
+      invalidRows: [],
+      counts: { matched: 0, matchedWithChanges: 0, new: 1, invalid: 0, total: 1 }
+    };
+    const applyResponse = {
+      updatedCount: 0,
+      skippedCount: 0,
+      insertedCount: 1,
+      deletedDuplicateCount: 0,
+      applyErrors: [],
+      validationPending: false
+    };
+    const { applyRequestBodies, resolveMatch } = mockRevisionUploadFetch({ matchResponse, applyResponse, deferMatch: true });
+
+    await driveToRevisionMatch(user);
+
+    // UploadRevisionMatch must not mount until the match response exists -- while the
+    // request is in flight, a matching-in-progress state should be visible instead.
+    await waitFor(() => expect(screen.getByText(/matching revision rows/i)).toBeInTheDocument());
+    expect(screen.queryByText('Confirm new row insertion')).not.toBeInTheDocument();
+
+    resolveMatch();
+
+    // This is the defect under test: UploadRevisionMatch used to mount with `?? []`
+    // empties before the match response existed, and MUI Joy's Tabs reads
+    // defaultValue only once (it is uncontrolled). With every count at zero on that
+    // first render, the tab-selection ternary (and now resolveDefaultTabValue) both
+    // land on 'changes' -- which locks the Tabs selection there permanently. Once the
+    // real newRows-only response lands, the New Rows tab exists in the TabList but its
+    // panel is never the selected one, so this text never renders and the wait below
+    // times out.
+    await waitFor(() => expect(screen.getByText('Confirm new row insertion')).toBeInTheDocument(), { timeout: 3000 });
+
+    const applyButton = screen.getByTestId('revision-match-apply');
+    expect(applyButton).toBeDisabled();
+
+    await user.click(screen.getByText('Confirm new row insertion'));
+    expect(applyButton).not.toBeDisabled();
+
+    await user.click(applyButton);
+
+    await waitFor(() => expect(applyRequestBodies).toHaveLength(1));
+    expect(applyRequestBodies[0].confirmNewRows).toBe(true);
+    expect(applyRequestBodies[0].newRows).toHaveLength(1);
+
+    await waitFor(() => expect(screen.getByText('Revisions Applied')).toBeInTheDocument());
+  });
+
+  it('opens on the Invalid tab for an invalid-only revision upload, and keeps Apply disabled', async () => {
+    const user = userEvent.setup();
+
+    const invalidCsvRow = { tag: 'T404', stemtag: 'S1', quadrat: 'Q1', dbh: '10', date: '2024-01-01' };
+    const matchResponse = {
+      matchedRows: [],
+      newRows: [],
+      invalidRows: [{ csvRow: invalidCsvRow, csvIndex: 0, reason: 'No matching identity found in the active census' }],
+      counts: { matched: 0, matchedWithChanges: 0, new: 0, invalid: 1, total: 1 }
+    };
+    mockRevisionUploadFetch({ matchResponse });
+
+    await driveToRevisionMatch(user);
+
+    // The Invalid tab has no intro copy of its own -- its row-level reason text is the
+    // signal that its panel (not Changes) is the one actually selected.
+    await waitFor(() => expect(screen.getByText('No matching identity found in the active census')).toBeInTheDocument(), { timeout: 3000 });
+    // MUI Joy's TabPanel omits its children entirely (not just CSS-hides them) when
+    // it isn't the selected tab, so the Changes panel's empty-state copy shouldn't
+    // exist in the DOM at all if Changes is not the tab that ended up selected.
+    expect(screen.queryByText('No rows with changes were found.')).not.toBeInTheDocument();
+
+    expect(screen.getByTestId('revision-match-apply')).toBeDisabled();
+  });
+
+  it('opens on the Unchanged tab for an unchanged-only revision upload, and keeps Apply disabled', async () => {
+    const user = userEvent.setup();
+
+    const unchangedCsvRow = { tag: 'T900', stemtag: 'S1', quadrat: 'Q1', dbh: '10', date: '2024-01-01' };
+    const matchResponse = {
+      matchedRows: [
+        {
+          csvIndex: 0,
+          csvRow: unchangedCsvRow,
+          coreMeasurementID: 900,
+          changes: {},
+          existingValues: { measuredDBH: 10, measuredHOM: null, measurementDate: '2024-01-01', rawCodes: null, description: null }
+        }
+      ],
+      newRows: [],
+      invalidRows: [],
+      counts: { matched: 1, matchedWithChanges: 0, new: 0, invalid: 0, total: 1 }
+    };
+    mockRevisionUploadFetch({ matchResponse });
+
+    await driveToRevisionMatch(user);
+
+    await waitFor(() => expect(screen.getByText('1 matched row had no field differences and will be skipped during apply.')).toBeInTheDocument(), {
+      timeout: 3000
+    });
+    // MUI Joy's TabPanel omits its children entirely (not just CSS-hides them) when
+    // it isn't the selected tab, so the Changes panel's empty-state copy shouldn't
+    // exist in the DOM at all if Changes is not the tab that ended up selected.
+    expect(screen.queryByText('No rows with changes were found.')).not.toBeInTheDocument();
+
+    expect(screen.getByTestId('revision-match-apply')).toBeDisabled();
   });
 });
