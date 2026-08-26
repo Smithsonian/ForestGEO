@@ -23,6 +23,7 @@ import { FileListEnhanced } from '@/components/uploadsystemhelpers/filelistenhan
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
 import { FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat, TableHeadersByFormType } from '@/config/macros/formdetails';
+import { MAX_MEASUREMENT_FILE_ID_LENGTH, measurementFileIDLength, measurementFileIDValidationError, sanitizeUploadFileName } from '@/lib/uploads/file-names';
 import InfoIcon from '@mui/icons-material/Info';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
@@ -445,6 +446,27 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     return issues;
   }, [acceptedFiles, sourceFormat]);
 
+  // temporarymeasurements.FileID is varchar(50) and every server write boundary
+  // rejects longer names. Surface it at selection time so the user is not told
+  // only after uploading, and so it blocks both the CSV and ArcGIS paths.
+  const fileNameLengthIssues = useMemo(() => {
+    if (uploadForm !== 'measurements') return [];
+    const issues: { fileName: string; issues: string[] }[] = [];
+    acceptedFiles.forEach(file => {
+      const rawError = measurementFileIDValidationError(file.name);
+      const storedFileName = sanitizeUploadFileName(file.name);
+      const storedError = measurementFileIDValidationError(storedFileName);
+      const error =
+        rawError ??
+        (storedError
+          ? `After unsupported characters are replaced, the stored file name would be ${measurementFileIDLength(storedFileName)} characters. ` +
+            `Measurement file names must be ${MAX_MEASUREMENT_FILE_ID_LENGTH} characters or fewer.`
+          : null);
+      if (error) issues.push({ fileName: file.name, issues: [error] });
+    });
+    return issues;
+  }, [acceptedFiles, uploadForm]);
+
   // A file passes when its own header validation succeeded, or when a confirmed column mapping
   // covers its header-coverage gaps (structural issues like inconsistent column counts still block).
   const fileEffectivelyValid = useCallback(
@@ -460,10 +482,11 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   // Check if all files have been validated and are valid
   const allFilesValid = useMemo(() => {
     if (acceptedFiles.length === 0) return false;
+    if (fileNameLengthIssues.length > 0) return false;
     // ArcGIS .xlsx uploads bypass CSV header validation; the workbook contents are validated at pre-flight.
     if (sourceFormat === SourceFormat.arcgis_xlsx) return arcgisValidationIssues.length === 0;
     return acceptedFiles.every(file => fileEffectivelyValid(file.name));
-  }, [acceptedFiles, arcgisValidationIssues.length, fileEffectivelyValid, sourceFormat]);
+  }, [acceptedFiles, arcgisValidationIssues.length, fileEffectivelyValid, fileNameLengthIssues.length, sourceFormat]);
 
   // Get all validation issues across all files
   const allValidationIssues = useMemo(() => {
@@ -479,8 +502,9 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
         }
       }
     });
-    return sourceFormat === SourceFormat.arcgis_xlsx ? [...arcgisValidationIssues, ...issues] : issues;
-  }, [acceptedFiles, arcgisValidationIssues, fileEffectivelyValid, fileValidationStatuses, mappingValidForFile, sourceFormat]);
+    const base = sourceFormat === SourceFormat.arcgis_xlsx ? [...arcgisValidationIssues, ...issues] : issues;
+    return [...fileNameLengthIssues, ...base];
+  }, [acceptedFiles, arcgisValidationIssues, fileEffectivelyValid, fileNameLengthIssues, fileValidationStatuses, mappingValidForFile, sourceFormat]);
 
   // Check if any file is still being analyzed (no validation status yet)
   const isAnalyzing = useMemo(() => {

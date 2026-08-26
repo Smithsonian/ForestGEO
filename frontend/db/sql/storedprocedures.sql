@@ -1553,7 +1553,7 @@ DELIMITER ;
 DROP PROCEDURE IF EXISTS bulkingestionprocess;
 DELIMITER $$
 
-CREATE PROCEDURE bulkingestionprocess(IN vFileID varchar(36), IN vBatchID varchar(36))
+CREATE PROCEDURE bulkingestionprocess(IN vFileID varchar(50), IN vBatchID varchar(36))
 SQL SECURITY DEFINER
 main_proc:
 BEGIN

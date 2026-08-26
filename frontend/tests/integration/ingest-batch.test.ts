@@ -224,11 +224,11 @@ describe('ingestBatch — integration', () => {
   // Helpers
   // -------------------------------------------------------------------------
 
-  async function stageFixtureRows(): Promise<void> {
+  async function stageFixtureRows(fileName: string = FILE_NAME): Promise<void> {
     const transactionID = await connectionManager.beginTransaction();
     const params: StageMeasurementChunkParams = {
       schema,
-      fileName: FILE_NAME,
+      fileName,
       batchID: BATCH_ID,
       plotID,
       censusID,
@@ -248,8 +248,8 @@ describe('ingestBatch — integration', () => {
     expect(result.invalidRows).toHaveLength(0);
   }
 
-  async function runIngestBatch(): Promise<IngestBatchResult> {
-    const result = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID: BATCH_ID });
+  async function runIngestBatch(fileName: string = FILE_NAME): Promise<IngestBatchResult> {
+    const result = await ingestBatch(connectionManager, { schema, fileID: fileName, batchID: BATCH_ID });
     console.log(
       `[ingestBatch] processedSubBatches=${result.processedSubBatches} totalRows=${result.totalRows} recovered=${result.recovered} ` +
         `noDataFound=${result.noDataFound} totalDurationMs=${result.totalDurationMs}`
@@ -262,14 +262,14 @@ describe('ingestBatch — integration', () => {
     return result;
   }
 
-  async function fetchBatchMeasurements(): Promise<RowDataPacket[]> {
+  async function fetchBatchMeasurements(fileName: string = FILE_NAME): Promise<RowDataPacket[]> {
     const [rows] = await connection.query<RowDataPacket[]>(
       `SELECT CoreMeasurementID, StemGUID, CensusID, UploadFileID, UploadBatchID,
               CAST(MeasuredDBH AS CHAR) AS DBHText, CAST(MeasurementDate AS CHAR) AS MeasurementDateText
        FROM coremeasurements
        WHERE UploadFileID = ? AND UploadBatchID = ?
        ORDER BY CoreMeasurementID`,
-      [FILE_NAME, BATCH_ID]
+      [fileName, BATCH_ID]
     );
     return rows;
   }
@@ -500,6 +500,18 @@ describe('ingestBatch — integration', () => {
       [FILE_NAME]
     );
     expect(Number(unresolvedRows[0].count)).toBe(0);
+  }, 60000);
+
+  it('ingests a 50-character filename through the real hashed GET_LOCK and stored procedure path', async () => {
+    const fileName = `${'f'.repeat(46)}.csv`;
+    expect(fileName).toHaveLength(50);
+    await stageFixtureRows(fileName);
+
+    const result = await runIngestBatch(fileName);
+
+    expect(result.noDataFound).toBe(false);
+    expect(result.subBatchResults[0].batchFailedButHandled).toBe(false);
+    expect(await fetchBatchMeasurements(fileName)).toHaveLength(EXPECTED_ROW_COUNT);
   }, 60000);
 
   // -------------------------------------------------------------------------

@@ -83,9 +83,9 @@ if (typeof File.prototype.arrayBuffer !== 'function') {
   };
 }
 
-function formRequest(fields: Record<string, string>, withFile = true) {
+function formRequest(fields: Record<string, string>, withFile = true, fileName = 'x.xlsx') {
   const fd = new FormData();
-  if (withFile) fd.append('file', new File([new Uint8Array([1, 2, 3])], 'x.xlsx'));
+  if (withFile) fd.append('file', new File([new Uint8Array([1, 2, 3])], fileName));
   for (const [k, v] of Object.entries(fields)) fd.append(k, v);
   const request = new Request('http://t/api/arcgis/preflight', { method: 'POST' });
   // jsdom's Request does not round-trip multipart bodies; stub formData() like the other route tests.
@@ -101,6 +101,16 @@ describe('POST /api/arcgis/preflight mapping', () => {
     mocks.isValidSchema.mockReturnValue(true);
     mocks.auth.mockResolvedValue({ user: { email: 'user@example.com' } });
     mocks.readArcgisSheetMetadata.mockResolvedValue(DESCRIBED_SHEETS);
+  });
+
+  it('rejects filenames longer than 50 characters before reading the workbook', async () => {
+    const fileName = `${'a'.repeat(46)}.xlsx`;
+    const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1' }, true, fileName) as any);
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: 'MEASUREMENT_FILE_NAME_TOO_LONG' });
+    expect(mocks.readArcgisWorkbookDetailed).not.toHaveBeenCalled();
+    expect(mocks.createArcgisImportSession).not.toHaveBeenCalled();
   });
 
   it('returns mapping_required status when detection fails and no mapping was provided', async () => {
