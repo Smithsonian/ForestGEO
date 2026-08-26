@@ -79,3 +79,53 @@ jobs:
           TEST_DB_PORT: "3306"
           TEST_DB_USER: root
           TEST_DB_PASSWORD: testpassword
+
+  # Until 2026-08-26 no workflow but the nightly ran the Cypress component suite, so 14
+  # specs had zero coverage on any branch and accumulated a production defect, a spec
+  # asserting removed copy, a spec that never satisfied a shipped confirmation gate, and
+  # a harness that silently no-ops. This job is also the recurrence guard for the
+  # case-sensitivity defect in cypress/support/shared-config.cjs: it runs on Linux.
+  # Needs no database and completes in roughly three minutes.
+  component:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install Cypress binary
+        run: npx cypress install
+        working-directory: frontend
+
+      # `cypress run --component` exits non-zero when no specs are found, so the runner
+      # already fails closed on a rename or a moved directory. No preflight step.
+      - name: Cypress component tests
+        run: npm run test:component
+        working-directory: frontend
+
+      - name: Upload component screenshots on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: pr-gate-component-screenshots
+          path: frontend/cypress/screenshots
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload component videos
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr-gate-component-videos
+          path: frontend/cypress/videos
+          retention-days: 7
+          if-no-files-found: ignore
