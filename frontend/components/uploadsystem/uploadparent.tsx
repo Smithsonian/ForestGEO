@@ -5,7 +5,7 @@ import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType
 import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
-import { Box, Typography } from '@mui/joy';
+import { Box, CircularProgress, Stack, Typography } from '@mui/joy';
 import ContextValidationGuard from '@/components/shared/ContextValidationGuard';
 import UploadParseFiles from '@/components/uploadsystem/segments/uploadparsefiles';
 import UploadAsyncJob from '@/components/uploadsystem/segments/uploadasyncjob';
@@ -30,7 +30,7 @@ import { useErrorHandling } from '@/app/hooks/useerrorhandling';
 import { ErrorBoundary } from '@/components/errorboundary';
 import { UploadMode } from '@/config/uploadmodes';
 import { canonicalizeRevisionRow, normalizeRevisionHeader } from '@/components/uploadsystemhelpers/revisionfileparse';
-import { EMPTY_REVISION_MATCH_COUNTS, RevisionInvalidRow, RevisionMatchedRow, RevisionUploadResponse } from '@/config/revisionuploadtypes';
+import { RevisionInvalidRow, RevisionMatchedRow, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { BulkEditPlan } from '@/config/editplan/types';
 import type { ArcgisImportReference } from '@/lib/arcgis/types';
 import type { QuadratOverlapAcknowledgment } from '@/lib/provisioning/types';
@@ -548,13 +548,25 @@ function UploadParentInner(props: UploadParentProps) {
           />
         );
       case ReviewStates.REVISION_MATCH:
+        // UploadRevisionMatch chooses its opening tab from row counts, and MUI Joy
+        // reads Tabs.defaultValue only on the uncontrolled mount. Mounting with the
+        // `?? []` empties while the match request is still in flight would lock the
+        // selection to the empty-state tab, so wait for the response instead.
+        if (!revisionMatchResult) {
+          return (
+            <Stack spacing={2} alignItems="center" sx={{ p: 3 }}>
+              <CircularProgress />
+              <Typography level="body-md">Matching revision rows&hellip;</Typography>
+            </Stack>
+          );
+        }
         return (
           <UploadRevisionMatch
-            matchedRows={revisionMatchResult?.matchedRows ?? []}
-            newRows={revisionMatchResult?.newRows ?? []}
-            invalidRows={revisionMatchResult?.invalidRows ?? []}
-            counts={revisionMatchResult?.counts ?? EMPTY_REVISION_MATCH_COUNTS}
-            bulkPlan={revisionMatchResult?.bulkPlan}
+            matchedRows={revisionMatchResult.matchedRows}
+            newRows={revisionMatchResult.newRows}
+            invalidRows={revisionMatchResult.invalidRows}
+            counts={revisionMatchResult.counts}
+            bulkPlan={revisionMatchResult.bulkPlan}
             schema={currentSite?.schemaName || ''}
             plotID={currentPlotID ?? 0}
             censusID={currentCensusID ?? 0}
