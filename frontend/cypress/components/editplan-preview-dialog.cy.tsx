@@ -100,8 +100,12 @@ describe('PreviewDialog (Cypress component)', () => {
     cy.get('[data-testid="edit-effect-rowcount-destructive-duplicate-merge"]').should('contain.text', '3 rows');
     cy.get('[data-testid="edit-effect-rowcount-warn-reparenting-stems"]').should('contain.text', '1 row');
 
-    // Apply calls onConfirm.
-    cy.get('[data-testid="edit-preview-apply"]').click();
+    // Apply is gated behind the typed-confirm token on destructive plans -- assert the
+    // gate holds before satisfying it. That is the property worth verifying at browser
+    // level; the vitest sibling (previewdialog.test.tsx:232) covers the jsdom path.
+    cy.get('[data-testid="edit-preview-apply"]').should('be.disabled');
+    cy.get('[data-testid="edit-preview-typed-confirm-input"]').type('APPLY');
+    cy.get('[data-testid="edit-preview-apply"]').should('not.be.disabled').click();
     cy.get('@onConfirm').should('have.been.calledOnce');
     cy.get('@onCancel').should('not.have.been.called');
   });
