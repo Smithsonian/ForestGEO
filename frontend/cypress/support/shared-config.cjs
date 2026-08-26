@@ -15,7 +15,7 @@ function getSharedWebpackConfig(dirname, envVars = {}) {
       alias: {
         '@/': path.resolve(dirname, './'),
         'next-auth/react': path.resolve(dirname, 'cypress/mocks/nextauthmock.js'),
-        'next/navigation': path.resolve(dirname, 'cypress/mocks/nextNavMock.js'),
+        'next/navigation': path.resolve(dirname, 'cypress/mocks/nextnavmock.js'),
         '@/ailogger': path.resolve(dirname, 'cypress/mocks/ailoggerMock.js'),
         '@/config/utils': path.resolve(dirname, 'cypress/mocks/utilsMock.js')
       },
