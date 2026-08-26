@@ -23,6 +23,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { applyCatalogMigrationsForTests } from './catalog-migrations';
 import { DEFAULT_TEST_CONFIG, log, setupTestDatabase, type TestDatabaseConfig } from './local-db-setup';
 
 /** Schema name the e2e spec documents as its backing site schema. */
@@ -84,6 +85,16 @@ async function seedE2EDatabase(): Promise<void> {
 
   try {
     await seedCatalog(connection);
+
+    // background_jobs/background_job_files/background_job_events come from a
+    // catalog migration, not from catalog-provisioning-tables.sql, so the seed
+    // drifted out from under that migration and every e2e run logged
+    // upload.sweeper.pass_failed warnings. Run the full ordered manifest through
+    // the same harness the integration suites use rather than naming one
+    // migration file here: the seed owns fixture data, the migration harness
+    // owns catalog schema evolution.
+    await applyCatalogMigrationsForTests();
+
     log.info('E2E fixture seeded successfully.');
   } finally {
     // Close the live connection but keep the seeded schemas — the app reads them.
