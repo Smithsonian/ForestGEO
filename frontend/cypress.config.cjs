@@ -2,18 +2,6 @@
 const path = require('path');
 const { defineConfig } = require('cypress');
 const { getSharedWebpackConfig, getLogTask } = require('./cypress/support/shared-config.cjs');
-const mysql = require('mysql2/promise');
-
-// Database connection configuration
-const DB_CONFIG = {
-  host: 'forestgeo-mysqldataserver.mysql.database.azure.com',
-  user: 'azureroot',
-  password: process.env.AZURE_SQL_PASSWORD,
-  database: 'forestgeo_testing',
-  port: 3306,
-  ssl: { rejectUnauthorized: false },
-  multipleStatements: true
-};
 
 module.exports = defineConfig({
   e2e: {
@@ -37,20 +25,7 @@ module.exports = defineConfig({
     setupNodeEvents(on, config) {
       // Add log task for ingestion report output
       on('task', {
-        log: getLogTask(),
-
-        // Database query task for E2E tests
-        async queryDB({ query }) {
-          const connection = await mysql.createConnection(DB_CONFIG);
-          try {
-            const [results] = await connection.execute(query);
-            await connection.end();
-            return results;
-          } catch (error) {
-            await connection.end();
-            throw error;
-          }
-        }
+        log: getLogTask()
       });
 
       // Set environment variable for Next.js dev server during E2E tests
