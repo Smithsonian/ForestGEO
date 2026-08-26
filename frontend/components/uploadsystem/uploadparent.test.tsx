@@ -1,5 +1,5 @@
 /**
- * UploadParent Component - Integration Tests
+ * UploadParent Component - Hook Integration Tests
  *
  * Tests the refactored UploadParent component with custom hooks:
  * - useFileManagement
@@ -10,10 +10,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within as _within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import UploadParent from './uploadparent';
 import { FormType } from '@/config/macros/formdetails';
+import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import React from 'react';
 
 // Mock AttributeStatusOptions and HC functions
@@ -136,9 +137,18 @@ vi.mock('@/components/shared/ContextValidationGuard', () => ({
   default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>
 }));
 
+// UploadParent gates UPLOAD_SQL behind a live feature-flag fetch
+// (`/api/features/async-upload`). That flag is irrelevant to these hook-integration
+// tests, and leaving it un-mocked makes every UPLOAD_SQL-reaching test depend on the
+// global fetch queue in tests/mocks/auth-mocks.ts having a response staged. Pin it to
+// disabled so every test deterministically renders UploadFireSQL (mocked below).
+vi.mock('@/app/hooks/useasyncuploadfeature', () => ({
+  useAsyncUploadFeature: () => false
+}));
+
 // Mock upload segment components
 vi.mock('@/components/uploadsystem/segments/uploadstart', () => ({
-  default: ({ uploadForm, setUploadForm, setReviewState: _setReviewState, personnelRecording, setPersonnelRecording }: any) => (
+  default: ({ uploadForm, setUploadForm, setReviewState, personnelRecording, setPersonnelRecording }: any) => (
     <div data-testid="upload-start">
       <button
         onClick={() => {
@@ -148,6 +158,10 @@ vi.mock('@/components/uploadsystem/segments/uploadstart', () => ({
       >
         Select Measurements
       </button>
+      {/* Mirrors the real UploadStart: selecting a form and finalizing are separate
+          steps (see FinalizeSelectionsButton in uploadstart.tsx), and only finalizing
+          advances reviewState to UPLOAD_FILES. */}
+      <button onClick={() => setReviewState(ReviewStates.UPLOAD_FILES)}>Finalize Selection</button>
       <span data-testid="upload-form-value">{uploadForm || 'none'}</span>
       <span data-testid="personnel-value">{personnelRecording || 'none'}</span>
     </div>
@@ -155,8 +169,9 @@ vi.mock('@/components/uploadsystem/segments/uploadstart', () => ({
 }));
 
 vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
-  default: ({ acceptedFiles, handleAddFile, handleRemoveFile, handleReplaceFile: _handleReplaceFile, handleInitialSubmit }: any) => (
+  default: ({ uploadForm, acceptedFiles, handleAddFile, handleRemoveFile, handleReplaceFile: _handleReplaceFile, handleInitialSubmit }: any) => (
     <div data-testid="upload-parse-files">
+      <div data-testid="upload-parse-files-form-value">{uploadForm || 'none'}</div>
       <div data-testid="file-count">{acceptedFiles.length}</div>
       {acceptedFiles.map((file: any, index: number) => (
         <div key={index} data-testid={`file-${index}`}>
@@ -177,14 +192,33 @@ vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
   )
 }));
 
+// Shared, test-controlled behavior for the UploadFireSQL mock. `vi.hoisted` is required
+// because `vi.mock` factories are hoisted above the rest of the module: a plain
+// module-scope `const` referenced inside the factory below would still be in its
+// temporal dead zone when the factory actually runs.
+const { mockUploadFireSqlBehavior } = vi.hoisted(() => ({
+  mockUploadFireSqlBehavior: {
+    mode: 'complete' as 'complete' | 'error',
+    errorMessage: 'Upload failed',
+    errorComponent: 'UploadFireSQL'
+  }
+}));
+
 vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => {
-  const MockUploadFireSQL = ({ acceptedFiles, personnelRecording, setReviewState }: any) => {
+  const MockUploadFireSQL = ({ acceptedFiles, personnelRecording, setReviewState, setUploadError, setErrorComponent }: any) => {
     React.useEffect(() => {
-      // Simulate successful upload
-      setTimeout(() => {
-        setReviewState('COMPLETE');
-      }, 100);
-    }, [setReviewState]);
+      if (mockUploadFireSqlBehavior.mode === 'error') {
+        // Mirrors the real UploadFireSQL: every error path pairs setUploadError with
+        // setReviewState(ERRORS) -- neither ever fires alone in production.
+        setUploadError(new Error(mockUploadFireSqlBehavior.errorMessage));
+        setErrorComponent(mockUploadFireSqlBehavior.errorComponent);
+        setReviewState(ReviewStates.ERRORS);
+        return;
+      }
+
+      const timer = setTimeout(() => setReviewState(ReviewStates.COMPLETE), 100);
+      return () => clearTimeout(timer);
+    }, [setReviewState, setUploadError, setErrorComponent]);
 
     return (
       <div data-testid="upload-fire-sql">
@@ -197,11 +231,12 @@ vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => {
 });
 
 vi.mock('@/components/uploadsystem/segments/uploaderror', () => ({
-  default: ({ error, component, resetError }: any) => (
+  default: ({ error, component, resetError, handleReturnToStart }: any) => (
     <div data-testid="upload-error">
       <div data-testid="error-message">{error?.message || 'Unknown error'}</div>
       <div data-testid="error-component">{component}</div>
       <button onClick={() => resetError()}>Clear Error</button>
+      <button onClick={() => handleReturnToStart()}>Return to Start</button>
     </div>
   )
 }));
@@ -231,12 +266,15 @@ vi.mock('@/components/uploadsystem/segments/uploadreingestion', () => ({
   default: () => <div data-testid="upload-reingestion">Reingestion</div>
 }));
 
-describe('UploadParent - Integration Tests', () => {
+describe('UploadParent - Hook Integration Tests', () => {
   const mockOnReset = vi.fn();
   const mockOnUploadComplete = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUploadFireSqlBehavior.mode = 'complete';
+    mockUploadFireSqlBehavior.errorMessage = 'Upload failed';
+    mockUploadFireSqlBehavior.errorComponent = 'UploadFireSQL';
   });
 
   describe('Hook Integration - useUploadState', () => {
@@ -244,8 +282,13 @@ describe('UploadParent - Integration Tests', () => {
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
 
       // When overrideUploadForm is provided, skip START and go directly to UPLOAD_FILES
-      // So upload-parse-files should be rendered
       expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument();
+
+      // Prove it's specifically the provided form that was initialized, not just
+      // any truthy value -- useUploadState.getInitialReviewState() skips START for
+      // any defined overrideUploadForm, so asserting presence alone would pass even
+      // if the wrong form type were threaded through.
+      expect(screen.getByTestId('upload-parse-files-form-value')).toHaveTextContent(FormType.measurements);
     });
 
     it('should start at START state when no overrideUploadForm', async () => {
@@ -272,8 +315,14 @@ describe('UploadParent - Integration Tests', () => {
       // START state - no overrideUploadForm
       expect(screen.getByTestId('upload-start')).toBeInTheDocument();
 
-      // Setup and transition to UPLOAD_FILES
+      // Select the form, then finalize (mirrors the real two-step UploadStart flow)
       await user.click(screen.getByText('Select Measurements'));
+      await user.click(screen.getByText('Finalize Selection'));
+
+      // Should have transitioned to UPLOAD_FILES
+      await waitFor(() => {
+        expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument();
+      });
 
       // Add file and progress
       await user.click(screen.getByText('Add File'));
@@ -344,39 +393,44 @@ describe('UploadParent - Integration Tests', () => {
 
     it('should clear all files when returning to start', async () => {
       const user = userEvent.setup();
+      mockUploadFireSqlBehavior.mode = 'error';
 
       // With overrideUploadForm, we skip START and go directly to UPLOAD_FILES
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
 
       await user.click(screen.getByText('Add File'));
-
       await waitFor(() => {
         expect(screen.getByTestId('file-count')).toHaveTextContent('1');
       });
 
-      // Reset should call useFileManagement.clearFiles
-      mockOnReset();
+      // Drive into the error state, then use handleReturnToStart -- the same
+      // production callback UploadError and UploadRevisionMatch use to reset the
+      // workflow -- to exercise useFileManagement.clearFiles.
+      await user.click(screen.getByText('Continue Upload'));
+      await waitFor(() => {
+        expect(screen.getByTestId('upload-error')).toBeInTheDocument();
+      });
 
-      // Note: We can't directly test clearFiles in this mock setup,
-      // but the integration is verified through the upload flow
+      await user.click(screen.getByText('Return to Start'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('upload-start')).toBeInTheDocument();
+      });
+
+      // Re-select the form and confirm the file list came back empty, proving
+      // clearFiles ran rather than merely resetting reviewState.
+      await user.click(screen.getByText('Select Measurements'));
+      await user.click(screen.getByText('Finalize Selection'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('file-count')).toHaveTextContent('0');
+      });
     });
   });
 
   describe('Hook Integration - useErrorHandling', () => {
     it('should handle errors via useErrorHandling.setError', async () => {
-      // Create a version that triggers error
-      vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => {
-        const MockUploadFireSQL = ({ setUploadError, setErrorComponent }: any) => {
-          React.useEffect(() => {
-            // Simulate error during upload
-            setUploadError(new Error('Upload failed'));
-            setErrorComponent('UploadFireSQL');
-          }, [setUploadError, setErrorComponent]);
-
-          return <div data-testid="upload-fire-sql">Processing...</div>;
-        };
-        return { default: MockUploadFireSQL };
-      });
+      mockUploadFireSqlBehavior.mode = 'error';
 
       const user = userEvent.setup();
 
@@ -397,19 +451,10 @@ describe('UploadParent - Integration Tests', () => {
     });
 
     it('should clear errors via useErrorHandling.clearError', async () => {
+      mockUploadFireSqlBehavior.mode = 'error';
+      mockUploadFireSqlBehavior.errorMessage = 'Test error';
+
       const user = userEvent.setup();
-
-      // Mock error state
-      vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => {
-        const MockUploadFireSQL = ({ setUploadError, setReviewState: _setReviewState }: any) => {
-          React.useEffect(() => {
-            setUploadError(new Error('Test error'));
-          }, [setUploadError]);
-
-          return <div data-testid="upload-fire-sql">Processing...</div>;
-        };
-        return { default: MockUploadFireSQL };
-      });
 
       // With overrideUploadForm, we skip START and go directly to UPLOAD_FILES
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
@@ -420,12 +465,16 @@ describe('UploadParent - Integration Tests', () => {
       await waitFor(() => {
         expect(screen.getByTestId('upload-error')).toBeInTheDocument();
       });
+      expect(screen.getByTestId('error-message')).toHaveTextContent('Test error');
 
       // Clear error
       await user.click(screen.getByText('Clear Error'));
 
-      // useErrorHandling.clearError should be called
-      // Error component should be cleared (mocked behavior)
+      // useErrorHandling.clearError should null out the error; UploadError's mocked
+      // fallback text proves the cleared state actually reached the component.
+      await waitFor(() => {
+        expect(screen.getByTestId('error-message')).toHaveTextContent('Unknown error');
+      });
     });
   });
 
@@ -462,34 +511,15 @@ describe('UploadParent - Integration Tests', () => {
       expect(mockOnUploadComplete).toHaveBeenCalledTimes(1);
     });
 
-    it('should skip to processing when skipToProcessing flag is set', () => {
+    it('should skip to processing when skipToProcessing flag is set', async () => {
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} skipToProcessing={true} />);
 
-      // useUploadState should initialize with UPLOAD_SQL state
-      // Component should show processing view immediately
-      // (Exact test depends on mock behavior)
-    });
-  });
-
-  describe('Data Unsaved Warning', () => {
-    it('should set isDataUnsaved flag during upload', async () => {
-      const user = userEvent.setup();
-      const beforeUnloadHandler = vi.fn();
-
-      // With overrideUploadForm, we skip START and go directly to UPLOAD_FILES
-      render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
-
-      // Add listener to verify beforeunload event
-      window.addEventListener('beforeunload', beforeUnloadHandler);
-
-      await user.click(screen.getByText('Add File'));
-      await user.click(screen.getByText('Continue Upload'));
-
-      // useUploadState.setIsDataUnsaved(true) should be called
-      // beforeunload handler should prevent navigation
-      // (Full test requires integration with browser events)
-
-      window.removeEventListener('beforeunload', beforeUnloadHandler);
+      // skipToProcessing routes UPLOAD_SQL through the reingestion segment instead of
+      // the normal file-upload segment (see the reingestion-init effect in
+      // uploadparent.tsx), bypassing START and UPLOAD_FILES entirely.
+      await waitFor(() => {
+        expect(screen.getByTestId('upload-reingestion')).toBeInTheDocument();
+      });
     });
   });
 });
