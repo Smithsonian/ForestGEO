@@ -1,6 +1,26 @@
 import path from 'path';
 
 /**
+ * Maximum canonical filename carried through the measurement-ingestion FileID
+ * chain. Keep this synchronized with temporarymeasurements.FileID,
+ * bulkingestionprocess.vFileID, uploadmetrics.fileID, and
+ * uploadintegrityalerts.fileID.
+ */
+export const MAX_MEASUREMENT_FILE_ID_LENGTH = 50;
+
+/** MySQL VARCHAR length is measured in characters, not UTF-16 code units. */
+export function measurementFileIDLength(fileName: string): number {
+  return Array.from(fileName).length;
+}
+
+export function measurementFileIDValidationError(fileName: string): string | null {
+  const length = measurementFileIDLength(fileName);
+  return length <= MAX_MEASUREMENT_FILE_ID_LENGTH
+    ? null
+    : `Measurement file names must be ${MAX_MEASUREMENT_FILE_ID_LENGTH} characters or fewer (received ${length}).`;
+}
+
+/**
  * Canonical blob-safe form of an uploaded file's name.
  *
  * `/api/files/upload` stores the blob under this name and echoes it back, so it

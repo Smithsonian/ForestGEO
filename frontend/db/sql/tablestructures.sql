@@ -626,7 +626,7 @@ create table if not exists temporarymeasurements
 (
     id              bigint unsigned auto_increment
         primary key,
-    FileID          varchar(36)                         null,
+    FileID          varchar(50)                         null,
     BatchID         varchar(36)                         not null,
     SessionID       varchar(64)                         null,
     SourceFormat    varchar(32) default 'csv'           not null,

@@ -23,6 +23,7 @@
  * loop moves the remaining rows to unresolved coremeasurements.
  */
 
+import crypto from 'crypto';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
@@ -90,6 +91,21 @@ const MYSQL_ERRNO_DEADLOCK = 1213; // ER_LOCK_DEADLOCK
  * ECONNRESET and CR_SERVER_LOST/2013 (network-layer loss) stay retryable.
  */
 const PROTOCOL_CONNECTION_LOST_CODE = 'PROTOCOL_CONNECTION_LOST';
+
+/**
+ * MySQL GET_LOCK names may not exceed 64 characters. Hash the full logical
+ * scope so a long filename cannot make lock acquisition fail, and include the
+ * schema so equivalent file/plot/census values at different sites do not
+ * serialize one another in the server-global advisory-lock namespace.
+ */
+export function buildIngestionLockName(schema: string, fileID: string, plotID: number, censusID: number): string {
+  const digest = crypto
+    .createHash('sha256')
+    .update(JSON.stringify([schema, fileID, plotID, censusID]))
+    .digest('hex')
+    .slice(0, 40);
+  return `upload:file:${digest}`;
+}
 
 /**
  * Thrown when the caller's isAborted probe fires between sub-batches.
@@ -614,7 +630,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       const totalRows = family.totalRows;
 
       // Acquire lock for setup phase
-      const lockKey = `upload:file:${fileID}:plot:${currentPlotID}:census:${currentCensusID}`;
+      const lockKey = buildIngestionLockName(schema, fileID, currentPlotID, currentCensusID);
       const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, tx.id, lockTimeoutMs);
       if (!lockAcquired) {
         throw new Error(`Failed to acquire application lock for file ${fileID}. Another upload may be in progress.`);

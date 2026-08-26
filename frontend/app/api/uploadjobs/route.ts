@@ -18,7 +18,7 @@ import { BackgroundJobScopeUnavailableError, IdempotencyKeyConflictError } from 
 import { isPrivilegedSession, MAX_UPLOAD_JOB_REQUEST_BYTES, parseOptionalPositiveInteger } from '@/lib/background-jobs/route-helpers';
 import { runJobIfClaimable } from '@/lib/background-jobs/worker';
 import { fromBody, fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
-import { attemptScopedBlobName, isValidUploadAttemptID, sanitizeUploadFileName } from '@/lib/uploads/file-names';
+import { attemptScopedBlobName, isValidUploadAttemptID, measurementFileIDValidationError, sanitizeUploadFileName } from '@/lib/uploads/file-names';
 import { getContainerClient } from '@/config/macros/azurestorage';
 import { getContainerName, SchemaContainerNameError } from '@/config/macros/containernames';
 import ailogger from '@/ailogger';
@@ -81,8 +81,17 @@ function validateSelectedDelimiters(value: unknown, ctx: z.RefinementCtx): void 
   }
 }
 
+const MeasurementFileNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .superRefine((fileName, ctx) => {
+    const error = measurementFileIDValidationError(fileName);
+    if (error) ctx.addIssue({ code: z.ZodIssueCode.custom, message: error });
+  });
+
 const UploadJobFileSchema = z.object({
-  fileName: z.string().trim().min(1).max(512),
+  fileName: MeasurementFileNameSchema,
   blobContainer: z.string().trim().min(1).max(255),
   blobName: z.string().trim().min(1).max(1024),
   contentType: z.string().trim().max(255).nullable().optional(),
@@ -100,7 +109,7 @@ const UploadJobFileSchema = z.object({
 
 const ArcgisImportSessionSchema = z.object({
   importSessionId: z.string().trim().min(1).max(255),
-  fileName: z.string().trim().min(1).max(512),
+  fileName: MeasurementFileNameSchema,
   rowCount: z.number().int().nonnegative().max(MYSQL_SIGNED_INT_MAX)
 });
 

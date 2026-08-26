@@ -222,7 +222,8 @@ describe('Stale-schema migrate + verify pipeline', () => {
   });
 
   it('(5) a production keyed insert + one-row bulkingestionprocess succeed against the repaired schema', async () => {
-    const fileID = 'schema-repair-f1';
+    const fileID = `${'f'.repeat(46)}.csv`;
+    expect(fileID).toHaveLength(50);
     const batchID = 'schema-repair-b1';
     const plotID = testData.plots[0].plotID;
     const censusID = testData.census[0].censusID;

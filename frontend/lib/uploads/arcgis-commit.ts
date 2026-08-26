@@ -34,6 +34,7 @@ import {
   insertTemporaryMeasurementsInBatches,
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
+import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
 
 const ARCGIS_COMMIT_INSERT_FAILURE_FALLBACK = 'Unknown error during insert';
 const CHANGELOG_TABLE_NAME = 'file_upload';
@@ -91,6 +92,16 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
       insertedCount = staged.rowCount;
       alreadyCommitted = true;
       return;
+    }
+
+    // The committed name comes from the stored session, not params.fileName, and
+    // arcgis_import_sessions.file_id is varchar(255) — wider than the FileID
+    // chain this row set is about to enter. Re-check at the write boundary so a
+    // session captured before the length contract existed fails with a readable
+    // error instead of ER_DATA_TOO_LONG mid-transaction.
+    const fileIDError = measurementFileIDValidationError(fileName);
+    if (fileIDError) {
+      throw new ArcgisImportSessionError(fileIDError, HTTPResponses.INVALID_REQUEST);
     }
 
     if (staged.rows.length === 0) {

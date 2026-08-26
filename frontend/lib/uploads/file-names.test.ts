@@ -12,6 +12,9 @@ import {
   describeUploadFileNameCollisions,
   findUploadFileNameCollisions,
   isValidUploadAttemptID,
+  MAX_MEASUREMENT_FILE_ID_LENGTH,
+  measurementFileIDLength,
+  measurementFileIDValidationError,
   sanitizeUploadFileName
 } from './file-names';
 
@@ -42,6 +45,22 @@ describe('sanitizeUploadFileName', () => {
   it('is idempotent — sanitizing a canonical name changes nothing', () => {
     const once = sanitizeUploadFileName('a b(1).csv');
     expect(sanitizeUploadFileName(once)).toBe(once);
+  });
+});
+
+describe('measurement FileID length contract', () => {
+  it('accepts 50 characters and rejects 51 with an actionable message', () => {
+    expect(measurementFileIDValidationError('a'.repeat(MAX_MEASUREMENT_FILE_ID_LENGTH))).toBeNull();
+
+    const error = measurementFileIDValidationError('a'.repeat(MAX_MEASUREMENT_FILE_ID_LENGTH + 1));
+    expect(error).toContain('50 characters or fewer');
+    expect(error).toContain('received 51');
+  });
+
+  it('counts Unicode characters rather than UTF-16 code units', () => {
+    expect(measurementFileIDLength('🌳'.repeat(25))).toBe(25);
+    expect(measurementFileIDValidationError('🌳'.repeat(50))).toBeNull();
+    expect(measurementFileIDLength('e\u0301')).toBe(2);
   });
 });
 

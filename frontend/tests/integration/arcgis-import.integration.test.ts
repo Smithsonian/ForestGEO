@@ -132,6 +132,7 @@ vi.mock('@/config/uploadsessiontracker', async () => {
 import { POST as commitPOST } from '@/app/api/arcgis/commit/route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
+import { MAX_MEASUREMENT_FILE_ID_LENGTH } from '@/lib/uploads/file-names';
 import { createArcgisImportSession } from '@/lib/arcgis/import-session';
 import { UploadMode } from '@/config/uploadmodes';
 import { HTTPResponses } from '@/config/macros';
@@ -484,7 +485,7 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     });
     const result = transformArcgisWorkbook(await readArcgisWorkbook(buffer));
 
-    // FileID is varchar(36); keep the generated name within that width.
+    // Keep the generated name within the canonical FileID width.
     const fileName = `arcgis-psid-${Date.now()}.xlsx`;
     const importReference = await createArcgisImportSession({ schema, plotID, censusID, userId: AUTH_USER_EMAIL, fileName, result });
     const batchID = `arcgis_psid_${Date.now()}`;
@@ -559,7 +560,7 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
   // auth/ownership guards — commitArcgisImport is invoked exactly as the
   // background worker will invoke it, and a same-batch retry must be a no-op.
   it('commitArcgisImport called directly twice: second call returns alreadyCommitted with the preserved rowCount and stages no new rows', async () => {
-    // temporarymeasurements.FileID is varchar(36); keep the fixture name short
+    // Keep the fixture name within temporarymeasurements.FileID's canonical width
     // or INSERT IGNORE silently truncates it and count-by-FileID finds nothing.
     const seeded = await seedValidStagedSession({ fileName: `arc-direct-${Date.now()}.xlsx` });
     const batchID = `arcgis_direct_idem_${Date.now()}`;
@@ -590,6 +591,41 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     expect(sessionRow.state).toBe('committed');
     expect(sessionRow.committed_batch_id).toBe(batchID);
     expect(Number(sessionRow.committed_row_count)).toBe(seeded.stagedRowCount);
+  });
+
+  // arcgis_import_sessions.file_id is varchar(255), wider than the varchar(50)
+  // FileID chain the commit stages into. A session captured before the length
+  // contract existed must fail with a readable error at the write boundary
+  // rather than ER_DATA_TOO_LONG part-way through the commit transaction.
+  it('commitArcgisImport refuses a stored session whose file name exceeds the FileID contract, staging nothing', async () => {
+    const overLengthName = `${'a'.repeat(47)}.xlsx`;
+    expect(overLengthName.length).toBeGreaterThan(MAX_MEASUREMENT_FILE_ID_LENGTH);
+
+    const seeded = await seedValidStagedSession({ fileName: overLengthName });
+    const batchID = `arcgis_too_long_${Date.now()}`;
+    const connectionManager = ConnectionManager.getInstance();
+
+    await expect(
+      commitArcgisImport(connectionManager, {
+        schema: seeded.schema,
+        plotID: seeded.plotID,
+        censusID: seeded.censusID,
+        importSessionId: seeded.importSessionId,
+        fileName: seeded.fileName,
+        batchID,
+        uploadMode: UploadMode.REVISIONS,
+        userId: AUTH_USER_EMAIL,
+        uploadSessionID: 'worker-session-too-long'
+      })
+    ).rejects.toThrow(/50 characters or fewer/);
+
+    // The refusal must leave no partially staged rows behind.
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(0);
+
+    // ...and the transaction rollback must leave the session uploadable so the
+    // user can run a fresh preflight after renaming the file.
+    const sessionRow = await getImportSession(seeded.importSessionId);
+    expect(sessionRow.state).toBe('preflight');
   });
 
   it('rejects a committed ArcGIS import session when replayed with a different BatchID', async () => {

@@ -36,6 +36,7 @@ import {
   uploadSessionHasReplacedCensus,
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
+import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
 
 const CHANGELOG_TABLE_NAME = 'file_upload';
 const MEASUREMENTS_FORM_TYPE = 'measurements';
@@ -148,6 +149,11 @@ function buildIngestionFailurePayload(droppedRows: DroppedMeasurementRow[], plot
 }
 
 export async function stageMeasurementChunk(connectionManager: ConnectionManager, params: StageMeasurementChunkParams): Promise<StageMeasurementChunkResult> {
+  const fileIDError = measurementFileIDValidationError(params.fileName);
+  if (fileIDError) {
+    throw new Error(fileIDError);
+  }
+
   const {
     schema,
     fileName,

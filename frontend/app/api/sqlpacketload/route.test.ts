@@ -320,6 +320,15 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
   });
 
+  it('rejects measurement filenames longer than 50 characters before querying or staging', async () => {
+    const res = (await POST(makeMeasurementRequest({ fileName: `${'a'.repeat(47)}.csv` })))!;
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: 'MEASUREMENT_FILE_NAME_TOO_LONG' });
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+  });
+
   it('rejects measurement uploads when the upload session does not own the scope', async () => {
     requireUploadSessionOwnershipMock.mockRejectedValueOnce(new MockUploadSessionOwnershipError('Upload session expired before measurement chunk upload', 409));
 
