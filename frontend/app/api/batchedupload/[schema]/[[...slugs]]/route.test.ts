@@ -125,6 +125,23 @@ describe('batchedupload POST route', () => {
     expect(validatedSchemaMock).toHaveBeenCalledWith('forestgeo_testing');
   });
 
+  it('carries plotX/plotY through untouched to recordFailedMeasurementRows (route only maps plotID/censusID/batchID/fileID)', async () => {
+    const payload = [
+      { treeID: 10, stemGUID: 20, reason: 'coordinate drift', plotX: -0.271, plotY: 267.5 },
+      { treeID: 11, stemGUID: 21, reason: 'missing plot coordinates' }
+    ];
+    const req = makeRequest(payload);
+    const res = await POST(req, makeParams('forestgeo_testing', ['42', '7']));
+
+    expect(res.status).toBe(200);
+
+    const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
+    const [, , rowsArg] = insertMock.mock.calls[0];
+    expect(rowsArg[0]).toMatchObject({ plotX: -0.271, plotY: 267.5 });
+    expect((rowsArg[1] as any).plotX).toBeUndefined();
+    expect((rowsArg[1] as any).plotY).toBeUndefined();
+  });
+
   it('500 and logs on DB error', async () => {
     const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
     insertMock.mockRejectedValueOnce(new Error('boom'));

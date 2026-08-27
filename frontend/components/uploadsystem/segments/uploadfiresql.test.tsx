@@ -287,4 +287,73 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
     expect(requestBody.rawRows).toBeDefined();
     expect(requestBody.fileRowSet).toBeUndefined();
   });
+
+  // A row the server rejects (data.failingRows) is pushed straight to /api/batchedupload so the
+  // failed measurement can be recovered later. Its plot coordinates must survive that hop, or a
+  // failed row's RawPlotX/RawPlotY end up NULL even when the source file carried px/py.
+  it('carries plotX/plotY from a server-rejected row into the /api/batchedupload payload', async () => {
+    const csvContent = ['tag,spcode,quadrat,lx,ly,date', '1,ABAL,Q0001,1.5,2.5,2020-01-01'].join('\n');
+    const raw = new File([csvContent], 'measurements.csv', { type: 'text/csv' });
+    const file = new FileWithStream(raw, false);
+
+    fetchMock.mockImplementation((url: RequestInfo | URL) => {
+      if (String(url).includes('/api/sqlpacketload')) {
+        return Promise.resolve(
+          jsonResponse({
+            transactionCompleted: true,
+            batchID: 'BATCH-TEST',
+            failingRows: [
+              {
+                tag: '2',
+                spcode: 'ABAL',
+                quadrat: 'Q0001',
+                lx: '1.5',
+                ly: '2.5',
+                px: '-0.271',
+                py: '267.5',
+                date: '2020-01-01',
+                failureReason: 'Duplicate row'
+              }
+            ]
+          })
+        );
+      }
+      return Promise.resolve(jsonResponse({ message: 'Inserted ingestion error rows', rowCount: 1 }));
+    });
+
+    const props: UploadFireProps = {
+      schema: 'forestgeo_testing',
+      uploadForm: FormType.measurements,
+      uploadMode: UploadMode.CLEAN_REUPLOAD,
+      sourceFormat: SourceFormat.csv,
+      personnelRecording: '',
+      acceptedFiles: [file],
+      parsedData: {},
+      uploadCompleteMessage: '',
+      selectedDelimiters: { 'measurements.csv': ',' },
+      quadratOverlapAcknowledgment: null,
+      onQuadratOverlapAcknowledgmentRequired: vi.fn(),
+      setUploadCompleteMessage,
+      setIsDataUnsaved,
+      setUploadError,
+      setErrorComponent,
+      setReviewState,
+      setAllRowToCMID
+    };
+
+    render(<UploadFireSQL {...props} />);
+
+    await waitFor(() => {
+      const batchedUploadCalls = fetchMock.mock.calls.filter(call => String(call[0]).includes('/api/batchedupload'));
+      expect(batchedUploadCalls.length).toBeGreaterThan(0);
+    });
+
+    const batchedUploadCall = fetchMock.mock.calls.find(call => String(call[0]).includes('/api/batchedupload'));
+    expect(batchedUploadCall).toBeDefined();
+    const requestBody = JSON.parse(String((batchedUploadCall?.[1] as RequestInit).body));
+
+    expect(requestBody).toHaveLength(1);
+    expect(requestBody[0].plotX).toBe('-0.271');
+    expect(requestBody[0].plotY).toBe('267.5');
+  });
 });

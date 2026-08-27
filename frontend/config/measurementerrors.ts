@@ -14,6 +14,8 @@ export interface IngestionFailureRowInput {
   quadrat?: string | null;
   x?: number | null;
   y?: number | null;
+  plotX?: number | null;
+  plotY?: number | null;
   dbh?: number | null;
   hom?: number | null;
   date?: string | Date | null;
@@ -290,8 +292,8 @@ async function insertPreparedIngestionFailureRowsSequential(
     schema,
     `INSERT INTO ??.coremeasurements
       (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description,
-       UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawCodes, RawComments, SourceRowIndex, IsActive)
-     VALUES (?, NULL, FALSE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+       UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY, RawCodes, RawComments, SourceRowIndex, IsActive)
+     VALUES (?, NULL, FALSE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
      ON DUPLICATE KEY UPDATE
        CoreMeasurementID = LAST_INSERT_ID(CoreMeasurementID),
        MeasurementDate = VALUES(MeasurementDate),
@@ -306,6 +308,8 @@ async function insertPreparedIngestionFailureRowsSequential(
        RawQuadrat = VALUES(RawQuadrat),
        RawX = VALUES(RawX),
        RawY = VALUES(RawY),
+       RawPlotX = VALUES(RawPlotX),
+       RawPlotY = VALUES(RawPlotY),
        RawCodes = VALUES(RawCodes),
        RawComments = VALUES(RawComments),
        IsValidated = FALSE`
@@ -329,6 +333,8 @@ async function insertPreparedIngestionFailureRowsSequential(
         row.quadrat ?? null,
         row.x ?? null,
         row.y ?? null,
+        row.plotX ?? null,
+        row.plotY ?? null,
         row.codes ?? null,
         row.comments ?? null,
         sourceRowIndex
@@ -364,8 +370,8 @@ async function insertPreparedIngestionFailureRowsBulk(
       schema,
       `INSERT INTO ??.coremeasurements
         (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description,
-         UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawCodes, RawComments, SourceRowIndex, IsActive)
-       VALUES ${buildRepeatedRowPattern(chunk.length, '(?, NULL, FALSE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)')}
+         UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY, RawCodes, RawComments, SourceRowIndex, IsActive)
+       VALUES ${buildRepeatedRowPattern(chunk.length, '(?, NULL, FALSE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)')}
        ON DUPLICATE KEY UPDATE
          MeasurementDate = VALUES(MeasurementDate),
          MeasuredDBH = VALUES(MeasuredDBH),
@@ -379,6 +385,8 @@ async function insertPreparedIngestionFailureRowsBulk(
          RawQuadrat = VALUES(RawQuadrat),
          RawX = VALUES(RawX),
          RawY = VALUES(RawY),
+         RawPlotX = VALUES(RawPlotX),
+         RawPlotY = VALUES(RawPlotY),
          RawCodes = VALUES(RawCodes),
          RawComments = VALUES(RawComments),
          SourceRowIndex = VALUES(SourceRowIndex),
@@ -399,6 +407,8 @@ async function insertPreparedIngestionFailureRowsBulk(
       row.quadrat ?? null,
       row.x ?? null,
       row.y ?? null,
+      row.plotX ?? null,
+      row.plotY ?? null,
       row.codes ?? null,
       row.comments ?? null,
       sourceRowIndex

@@ -436,6 +436,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         quadrat: row.quadrat || null,
         x: row.lx || null,
         y: row.ly || null,
+        plotX: row.px || null,
+        plotY: row.py || null,
         dbh: row.dbh || null,
         hom: row.hom || null,
         date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,

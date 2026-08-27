@@ -136,6 +136,8 @@ function buildIngestionFailurePayload(droppedRows: DroppedMeasurementRow[], plot
     quadrat: row.quadrat,
     x: toNullableNumber(row.lx),
     y: toNullableNumber(row.ly),
+    plotX: toNullableNumber(row.px),
+    plotY: toNullableNumber(row.py),
     dbh: toNullableNumber(row.dbh),
     hom: toNullableNumber(row.hom),
     date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,

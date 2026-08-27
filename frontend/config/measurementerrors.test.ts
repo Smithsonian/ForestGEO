@@ -71,6 +71,89 @@ describe('measurementerrors helpers', () => {
     expect(logInsertCalls[0][1]).toEqual([77, 1001, 77, 1002]);
   });
 
+  it('writes RawPlotX/RawPlotY on the bulk insert path and refreshes them on ON DUPLICATE KEY UPDATE', async () => {
+    const executeQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ insertId: 2001 })
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce([{ CoreMeasurementID: 88, SourceRowIndex: 1 }])
+      .mockResolvedValueOnce(undefined);
+
+    const connectionManager = { executeQuery } as any;
+
+    await insertIngestionFailureRows(
+      connectionManager,
+      'forestgeo_testing',
+      [
+        {
+          plotID: 1,
+          censusID: 2,
+          tag: 'T-3',
+          stemTag: '1',
+          spCode: 'ULMALA',
+          quadrat: 'A01',
+          x: 5,
+          y: 5,
+          plotX: -0.271,
+          plotY: 267.5,
+          failureReason: 'Row dropped by INSERT IGNORE',
+          fileID: 'coords.csv',
+          batchID: 'batch-1',
+          sourceRowIndex: 1
+        }
+      ],
+      'tx-1'
+    );
+
+    const bulkMeasurementInsertCall = executeQuery.mock.calls.find(([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements'));
+    expect(bulkMeasurementInsertCall, 'bulk coremeasurements insert was never issued').toBeDefined();
+    const [sql, params] = bulkMeasurementInsertCall!;
+
+    expect(sql).toContain('RawPlotX');
+    expect(sql).toContain('RawPlotY');
+    expect(sql).toContain('RawPlotX = VALUES(RawPlotX)');
+    expect(sql).toContain('RawPlotY = VALUES(RawPlotY)');
+    expect(params).toContain(-0.271);
+    expect(params).toContain(267.5);
+  });
+
+  it('writes RawPlotX/RawPlotY on the sequential insert path (no batchID → falls back to sequential)', async () => {
+    const executeQuery = vi.fn().mockResolvedValueOnce({ insertId: 3001 }).mockResolvedValueOnce(undefined);
+
+    const connectionManager = { executeQuery } as any;
+
+    await insertIngestionFailureRows(
+      connectionManager,
+      'forestgeo_testing',
+      [
+        {
+          plotID: 1,
+          censusID: 2,
+          tag: 'T-4',
+          stemTag: '1',
+          spCode: 'ULMALA',
+          quadrat: 'A01',
+          plotX: -0.271,
+          plotY: 267.5,
+          failureReason: 'Missing required field: SpeciesCode',
+          fileID: 'coords.csv',
+          batchID: null,
+          sourceRowIndex: null
+        }
+      ],
+      'tx-1'
+    );
+
+    const sequentialInsertCall = executeQuery.mock.calls.find(([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements'));
+    expect(sequentialInsertCall, 'sequential coremeasurements insert was never issued').toBeDefined();
+    const [sql, params] = sequentialInsertCall!;
+
+    expect(sql).toContain('RawPlotX');
+    expect(sql).toContain('RawPlotY');
+    expect(params).toContain(-0.271);
+    expect(params).toContain(267.5);
+  });
+
   it('falls back to sequential inserts when batch metadata is missing', async () => {
     const executeQuery = vi.fn().mockResolvedValueOnce({ insertId: 1001 }).mockResolvedValueOnce({ insertId: 88 }).mockResolvedValueOnce(undefined);
 
