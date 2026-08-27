@@ -170,14 +170,17 @@ describe('validateMeasurementRow', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('rejects a row whose __parsed_extra leading cell is an out-of-range number (parity with legacy validateRow)', () => {
+  it('does NOT range-reject a __parsed_extra array even when its leading cell looks like an out-of-range number', () => {
     // papaparse stores leftover cells as an array under __parsed_extra. The legacy inline validateRow
-    // did NOT exclude __parsed_extra from the decimal-range loop: Number.parseFloat(String(['-5','junk']))
-    // is -5 -> out of range -> the whole row was rejected. The shared validator must match that exactly.
+    // did NOT exclude __parsed_extra from its catch-all decimal-range loop: Number.parseFloat(String(['-5','junk']))
+    // is -5 -> out of range -> the whole row was rejected. That was the bug this task fixes: range/sign
+    // checks now apply ONLY to NUMERIC_MEASUREMENT_FIELDS, and __parsed_extra is never an ingested field,
+    // so it can no longer trigger a range-based rejection here. It still surfaces via hasExtraColumns.
     const row = { tag: 'T1', stemtag: 'S1', spcode: 'abc', quadrat: 'q1', __parsed_extra: ['-5', 'junk'] } as unknown as FileRow;
     const verdict = validateMeasurementRow(row, [{ label: 'tag' }, { label: 'spcode' }, { label: 'quadrat' }], ',', FormType.measurements);
-    expect(verdict.valid).toBe(false);
-    expect(verdict.failureReason).toContain('__parsed_extra');
+    expect(verdict.valid).toBe(true);
+    expect(verdict.failureReason ?? '').not.toContain('out of range');
+    expect(verdict.hasExtraColumns).toBe(true);
   });
 
   it('does NOT range-reject a non-numeric __parsed_extra array (parseFloat of a non-numeric leading cell is NaN)', () => {
@@ -518,5 +521,83 @@ describe('resolveMeasurementChunk', () => {
     });
 
     expect(result.validRows).toHaveLength(1);
+  });
+});
+
+describe('coordinate sign handling', () => {
+  const HEADERS = ['quadrat', 'tag', 'stemtag', 'spcode', 'dbh', 'hom', 'DTN', 'codes', 'notes', 'date', 'px', 'py', 'lx', 'ly'];
+
+  function chunk(overrides: Record<string, string>) {
+    const base: Record<string, string> = {
+      quadrat: 'A01',
+      tag: '1',
+      stemtag: '1',
+      spcode: 'ULMALA',
+      dbh: '20',
+      hom: '1.3',
+      DTN: '10',
+      codes: '',
+      notes: '',
+      date: '2026-01-20',
+      px: '5',
+      py: '5',
+      lx: '5',
+      ly: '5'
+    };
+    return resolveMeasurementChunk([{ ...base, ...overrides }], HEADERS.length, {
+      formType: FormType.measurements,
+      uploadMode: 'other',
+      delimiter: ',',
+      requiredHeaders: [{ label: 'tag' }, { label: 'spcode' }, { label: 'quadrat' }, { label: 'lx' }, { label: 'ly' }, { label: 'date' }],
+      csvHeaders: HEADERS
+    });
+  }
+
+  it.each([
+    ['lx', '-0.5'],
+    ['ly', '-6.35'],
+    ['px', '-0.271'],
+    ['py', '-2.5']
+  ])('accepts negative %s', (field, value) => {
+    const r = chunk({ [field]: value });
+    expect(r.invalidRows, `negative ${field} must not reject: ${JSON.stringify(r.invalidRows[0]?.failureReason)}`).toHaveLength(0);
+    expect(r.validRows).toHaveLength(1);
+  });
+
+  it.each([
+    ['dbh', '-1'],
+    ['hom', '-0.2']
+  ])('still rejects negative %s', (field, value) => {
+    const r = chunk({ [field]: value });
+    expect(r.invalidRows).toHaveLength(1);
+    expect(r.invalidRows[0].failureReason).toContain(field);
+  });
+
+  it('ignores a negative passthrough column', () => {
+    const r = chunk({ DTN: '-20' });
+    expect(r.invalidRows, 'DTN is not an ingested field and must not reject the row').toHaveLength(0);
+  });
+
+  it.each(['lx', 'px', 'dbh'])('still rejects non-numeric %s', field => {
+    const r = chunk({ [field]: '12.5abc' });
+    expect(r.invalidRows).toHaveLength(1);
+    expect(r.invalidRows[0].failureReason).toContain('Non-numeric');
+  });
+
+  it.each(['lx', 'px', 'dbh'])('still rejects %s above MAX_DECIMAL', field => {
+    const r = chunk({ [field]: '1000000.5' });
+    expect(r.invalidRows).toHaveLength(1);
+    expect(r.invalidRows[0].failureReason).toContain('out of range');
+  });
+
+  it.each(['lx', 'ly', 'px', 'py'])('rejects signed %s below -MAX_DECIMAL', field => {
+    const r = chunk({ [field]: '-1000000.5' });
+    expect(r.invalidRows).toHaveLength(1);
+    expect(r.invalidRows[0].failureReason).toContain('out of range');
+  });
+
+  it('rounds px/py to six decimals', () => {
+    expect(transformMeasurementValue('1.23456789', 'px', FormType.measurements)).toBe(1.234568);
+    expect(transformMeasurementValue('-1.23456789', 'py', FormType.measurements)).toBe(-1.234568);
   });
 });
