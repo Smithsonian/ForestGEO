@@ -1,5 +1,5 @@
 import path from 'path';
-import mysql, { type PoolOptions } from 'mysql2/promise';
+import mysql, { type PoolOptions, type RowDataPacket } from 'mysql2/promise';
 import type { ProvisioningStep, StepContext } from '../types';
 import { executeSqlFile } from '../sql-runner';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
@@ -176,14 +176,14 @@ async function hasRequiredSchemaObjects(ctx: StepContext): Promise<boolean> {
 
 async function hasRequiredPlotCoordinateColumns(ctx: StepContext): Promise<boolean> {
   if (!ctx.sitePool) return false;
-  const [rows]: any = await ctx.sitePool.query(
+  const [rows] = await ctx.sitePool.query<RowDataPacket[]>(
     `SELECT LOWER(TABLE_NAME) AS table_name, LOWER(COLUMN_NAME) AS column_name
        FROM information_schema.COLUMNS
       WHERE TABLE_SCHEMA = ?`,
     [ctx.schemaName]
   );
   const existing = new Set(
-    rows.map((row: any) => `${String(row.table_name ?? row.TABLE_NAME).toLowerCase()}.${String(row.column_name ?? row.COLUMN_NAME).toLowerCase()}`)
+    rows.map(row => `${String(row.table_name ?? row.TABLE_NAME).toLowerCase()}.${String(row.column_name ?? row.COLUMN_NAME).toLowerCase()}`)
   );
   return REQUIRED_PLOT_COORDINATE_COLUMNS.every(([table, column]) => existing.has(`${table.toLowerCase()}.${column.toLowerCase()}`));
 }
