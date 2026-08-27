@@ -40,6 +40,8 @@
     "apply-catalog-migrations": "npx tsx scripts/apply-catalog-migrations.ts",
     "check:schema-contract": "npx tsx scripts/check-schema-contract.ts",
     "deploy:validations": "npx tsx scripts/deploy-validations-to-all-schemas.ts",
+    "deploy:procedures": "npx tsx scripts/deploy-validations-to-all-schemas.ts --procedures-only",
+    "activate:validation19": "npx tsx scripts/deploy-validations-to-all-schemas.ts --activate-validation-19",
     "deploy:taxonomy-views": "npx tsx scripts/deploy-taxonomy-views-to-all-schemas.ts",
     "docs": "npm run dev --prefix docs",
     "docs:build": "npm run build --prefix docs",
