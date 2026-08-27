@@ -628,13 +628,10 @@ export async function revalidateEditedFailedRow(
     errors.push({ errorCode: 'NEGATIVE_HOM', errorMessage: INGESTION_ERROR_MESSAGES['NEGATIVE_HOM'] });
   }
 
-  // Negative coordinate checks (mirrors SP: LocalX < 0, LocalY < 0)
-  if (fields.X != null && Number(fields.X) < 0) {
-    errors.push({ errorCode: 'INVALID_COORDINATE', errorMessage: `Invalid LocalX: ${fields.X} (must be >= 0 or NULL)` });
-  }
-  if (fields.Y != null && Number(fields.Y) < 0) {
-    errors.push({ errorCode: 'INVALID_COORDINATE', errorMessage: `Invalid LocalY: ${fields.Y} (must be >= 0 or NULL)` });
-  }
+  // Coordinate sign is deliberately NOT checked here. Negative LocalX/LocalY are valid at ingest
+  // (a stem mapped just outside its quadrat) and are surfaced post-ingest by validation 8,
+  // ValidateFindStemsOutsidePlots. Retaining the check here would make a legacy failed row
+  // impossible to reingest under the current contract.
 
   // Missing measurement data (mirrors SP: DBH=0 AND HOM=0 AND no codes)
   const dbhEmpty = fields.DBH == null || Number(fields.DBH) === 0;

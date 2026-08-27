@@ -1961,8 +1961,6 @@ BEGIN
                    CONCAT('Invalid HOM: ', tm.HOM, ' (must be >= 0 or NULL)'), NULL),
                IF(COALESCE(tm.SourceFormat, 'csv') = 'arcgis_xlsx' AND tm.LocalX IS NULL, 'Missing required field: LocalX', NULL),
                IF(COALESCE(tm.SourceFormat, 'csv') = 'arcgis_xlsx' AND tm.LocalY IS NULL, 'Missing required field: LocalY', NULL),
-               IF(tm.LocalX < 0, CONCAT('Invalid LocalX: ', tm.LocalX), NULL),
-               IF(tm.LocalY < 0, CONCAT('Invalid LocalY: ', tm.LocalY), NULL),
                IF(tm.DBH = 0 AND tm.HOM = 0 AND (tm.Codes IS NULL OR TRIM(tm.Codes) = ''),
                    'Missing measurement data: DBH and HOM both 0 with no codes', NULL)
            ), 255) AS FailureReason
@@ -1984,7 +1982,6 @@ BEGIN
         UNION ALL SELECT 'Missing required field: LocalX', 'MISSING_FIELD_LOCALX'
         UNION ALL SELECT 'Missing required field: LocalY', 'MISSING_FIELD_LOCALY'
         UNION ALL SELECT 'Missing measurement data', 'MISSING_MEASUREMENT_DATA'
-        UNION ALL SELECT 'Invalid Local', 'INVALID_COORDINATE'
         UNION ALL SELECT 'exceeds maximum length', 'FIELD_TOO_LONG'
         UNION ALL SELECT 'Invalid DBH', 'NEGATIVE_DBH'
         UNION ALL SELECT 'Invalid HOM', 'NEGATIVE_HOM'
