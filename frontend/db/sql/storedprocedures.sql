@@ -1645,7 +1645,7 @@ BEGIN
             INSERT IGNORE INTO coremeasurements
                 (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
                  Description, UploadFileID, UploadBatchID,
-                 RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+                 RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY,
                  RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)
             SELECT
                 (SELECT CensusID FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID LIMIT 1),
@@ -1654,14 +1654,16 @@ BEGIN
                 LEFT(CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150)), 255),
                 vFileID, vBatchID,
                 NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
-                LocalX, LocalY, NULLIF(Codes, ''), PublishedStemID, NULLIF(Comments, ''),
+                LocalX, LocalY, PlotX, PlotY, NULLIF(Codes, ''), PublishedStemID, NULLIF(Comments, ''),
                 id, 1
             FROM temporarymeasurements
             WHERE FileID = vFileID AND BatchID = vBatchID
             ON DUPLICATE KEY UPDATE
                 IsValidated = FALSE,
                 Description = VALUES(Description),
-                RawPublishedStemID = VALUES(RawPublishedStemID);
+                RawPublishedStemID = VALUES(RawPublishedStemID),
+                RawPlotX = VALUES(RawPlotX),
+                RawPlotY = VALUES(RawPlotY);
 
             -- Link to error log
             INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
@@ -3171,7 +3173,7 @@ BEGIN
 
     INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
                                   Description, UserDefinedFields, UploadFileID, UploadBatchID,
-                                  RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+                                  RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY,
                                   RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)
     SELECT cic.CensusID, cic.StemGUID, NULL,
            cic.MeasurementDate,
@@ -3189,7 +3191,7 @@ BEGIN
            vFileID,
            vBatchID,
            cic.TreeTag, cic.StemTag, cic.SpeciesCode, cic.QuadratName,
-           cic.LocalX, cic.LocalY, cic.Codes, cic.PublishedStemID, cic.Comments,
+           cic.LocalX, cic.LocalY, cic.PlotX, cic.PlotY, cic.Codes, cic.PublishedStemID, cic.Comments,
            cic.id,
            1
     FROM core_insert_candidates cic
@@ -3260,14 +3262,14 @@ BEGIN
     INSERT IGNORE INTO coremeasurements
         (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
          Description, UploadFileID, UploadBatchID,
-         RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+         RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY,
          RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)
     SELECT vCurrentCensusID, NULL, FALSE,
            NULLIF(tm.MeasurementDate, '1900-01-01'), NULLIF(tm.DBH, 0), NULLIF(tm.HOM, 0),
            grouped_failures.FailureReason,
            vFileID, vBatchID,
            NULLIF(tm.TreeTag, ''), NULLIF(tm.StemTag, ''), NULLIF(tm.SpeciesCode, ''), NULLIF(tm.QuadratName, ''),
-           tm.LocalX, tm.LocalY, NULLIF(tm.Codes, ''), tm.PublishedStemID, NULLIF(tm.Comments, ''),
+           tm.LocalX, tm.LocalY, tm.PlotX, tm.PlotY, NULLIF(tm.Codes, ''), tm.PublishedStemID, NULLIF(tm.Comments, ''),
            tm.id, 1
     FROM (
         SELECT SourceRowIndex,
@@ -3286,7 +3288,9 @@ BEGIN
     ON DUPLICATE KEY UPDATE
         IsValidated = FALSE,
         Description = VALUES(Description),
-        RawPublishedStemID = VALUES(RawPublishedStemID);
+        RawPublishedStemID = VALUES(RawPublishedStemID),
+        RawPlotX = VALUES(RawPlotX),
+        RawPlotY = VALUES(RawPlotY);
 
     INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
     SELECT DISTINCT cm.CoreMeasurementID, me.ErrorID, FALSE

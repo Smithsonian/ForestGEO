@@ -18,13 +18,9 @@
  *   5. Re-running the same (now-completed) batch produces identical stem
  *      values — the procedure's uploadmetrics idempotency skip is a no-op on
  *      already-materialized coordinates.
- *
- * NOTE ON SCOPE: Task 8 (not this task) adds RawPlotX/RawPlotY to the
- * coremeasurements INSERTs inside bulkingestionprocess. Until that lands,
- * coremeasurements.RawPlotX/RawPlotY stay NULL for every row this procedure
- * writes, even though the column already exists on the table (see
- * db/sql/tablestructures.sql). This suite therefore asserts only the
- * stems-side behavior; it does not assert coremeasurements.RawPlotX/RawPlotY.
+ *   6. Every coremeasurements row bulkingestionprocess writes — successful,
+ *      hard-failed, or SQL-exception-handled — retains RawPlotX/RawPlotY from
+ *      the source temporarymeasurements row (Task 8).
  *
  * Prerequisites: docker compose up -d mysql
  *
@@ -188,6 +184,7 @@ describe('plot-coordinate-ingest — integration', () => {
   function buildRow(opts: {
     tag: string;
     stemtag: string;
+    spcode?: string;
     lx: string;
     ly: string;
     px?: string;
@@ -202,7 +199,7 @@ describe('plot-coordinate-ingest — integration', () => {
     const row: Record<string, string> = {
       tag: opts.tag,
       stemtag: opts.stemtag,
-      spcode: SPECIES_CODE,
+      spcode: opts.spcode ?? SPECIES_CODE,
       quadrat: QUADRAT_NAME,
       lx: opts.lx,
       ly: opts.ly,
@@ -400,6 +397,22 @@ describe('plot-coordinate-ingest — integration', () => {
     expect(firstRun.plotX, 'PlotX must come from id=900010 (lowest id supplying PlotX), not id=900030').toBe(111);
     expect(firstRun.plotY, 'PlotY must come from id=900020 (lowest id supplying PlotY), not id=900030').toBe(222);
 
+    // AC6 (Task 8): the successful coremeasurements row for the surviving
+    // (id=900010-anchored) measurement must also retain RawPlotX/RawPlotY.
+    // Stage 2 dedup (initial_dup_filter) collapses the 3 exact-duplicate
+    // rows into ONE group row before core_insert_candidates ever sees them,
+    // already applying the same "lowest id supplying each axis" pick used
+    // for the stem — so the surviving coremeasurements row's raw values
+    // equal the group-level pick (111 / 222), not a single input row's.
+    const [successRows] = await connection.query<RowDataPacket[]>(
+      `SELECT CAST(RawPlotX AS CHAR) AS RawPlotXText, CAST(RawPlotY AS CHAR) AS RawPlotYText FROM coremeasurements
+       WHERE UploadFileID = ? AND UploadBatchID = ? AND SourceRowIndex = ?`,
+      [FILE_NAME, BATCH_ID, 900010]
+    );
+    expect(successRows, 'the surviving successful measurement row must exist in coremeasurements').toHaveLength(1);
+    expect(Number(successRows[0].RawPlotXText), 'successful row must retain the deduped RawPlotX').toBe(firstRun.plotX);
+    expect(Number(successRows[0].RawPlotYText), 'successful row must retain the deduped RawPlotY').toBe(firstRun.plotY);
+
     // The two non-surviving duplicate rows (900020, 900030) must still be
     // visible as failed/unresolved measurements, not silently dropped.
     const [failedRows] = await connection.query<RowDataPacket[]>(
@@ -508,19 +521,20 @@ describe('plot-coordinate-ingest — integration', () => {
     expect(afterSecondBatch.plotY, 'stored PlotY must survive the disagreeing later batch').toBe(42);
 
     // The incoming (disagreeing) measurement itself must still have been
-    // ingested normally — the fill-only guard must not block the batch.
-    //
-    // NOTE: this deliberately does NOT assert coremeasurements.RawPlotX/
-    // RawPlotY. Task 8 (not this task) wires bulkingestionprocess's
-    // coremeasurements INSERTs to populate those columns; until it lands
-    // they stay NULL even though the column already exists on the table.
+    // ingested normally — the fill-only guard must not block the batch. And
+    // per Task 8, the row's own RawPlotX/RawPlotY must reflect exactly what
+    // it supplied (777), even though the stem-level PlotX/PlotY it did NOT
+    // win against (42) stays untouched above — these are independent facts.
     const [cmRows] = await connection.query<RowDataPacket[]>(
-      `SELECT StemGUID, RawStemTag FROM coremeasurements WHERE CensusID = ? AND UploadFileID = ? AND UploadBatchID = ?`,
+      `SELECT StemGUID, RawStemTag, CAST(RawPlotX AS CHAR) AS RawPlotXText, CAST(RawPlotY AS CHAR) AS RawPlotYText
+       FROM coremeasurements WHERE CensusID = ? AND UploadFileID = ? AND UploadBatchID = ?`,
       [censusID, FILE_B, BATCH_B]
     );
     expect(cmRows, 'the disagreeing measurement itself must still ingest').toHaveLength(1);
     expect(cmRows[0].StemGUID, 'the ingested measurement must resolve to the existing stem').not.toBeNull();
     expect(cmRows[0].RawStemTag).toBe(STEM_TAG);
+    expect(Number(cmRows[0].RawPlotXText), 'RawPlotX must record the raw incoming value, not the preserved stem value').toBe(777);
+    expect(Number(cmRows[0].RawPlotYText), 'RawPlotY must record the raw incoming value, not the preserved stem value').toBe(777);
   }, 60000);
 
   // -------------------------------------------------------------------------
@@ -544,5 +558,39 @@ describe('plot-coordinate-ingest — integration', () => {
     console.log(`[no-coords] stem=${JSON.stringify(stem)}`);
     expect(stem.plotX).toBeNull();
     expect(stem.plotY).toBeNull();
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // Task 8, AC2: a hard-failed row (invalid species code — never resolves to
+  // a stem) still retains RawPlotX/RawPlotY on its coremeasurements row.
+  // -------------------------------------------------------------------------
+
+  it('retains raw plot coordinates on a hard-failed row (invalid species code)', async () => {
+    const FILE_NAME = 'plot-coord-hard-fail.csv';
+    const BATCH_ID = 'plot-coord-hard-fail-batch';
+    const TREE_TAG = 'TREE-PXFAIL1';
+    const STEM_TAG = 'PXFAIL1';
+
+    await stageRows(
+      [buildRow({ tag: TREE_TAG, stemtag: STEM_TAG, spcode: 'NOSUCH', lx: '1', ly: '1', px: '-0.271', py: '267.5', dbh: '10', date: '2024-01-05' })],
+      FILE_NAME,
+      BATCH_ID,
+      UploadMode.CLEAN_REUPLOAD
+    );
+
+    // An invalid species code never resolves to a stem — it is expected to
+    // hard-fail (StemGUID stays NULL) via the hard_failure_rows materialization.
+    await runIngest(FILE_NAME, BATCH_ID, true);
+
+    const [cmRows] = await connection.query<RowDataPacket[]>(
+      `SELECT StemGUID, CAST(RawPlotX AS CHAR) AS RawPlotXText, CAST(RawPlotY AS CHAR) AS RawPlotYText
+       FROM coremeasurements WHERE CensusID = ? AND UploadFileID = ? AND UploadBatchID = ? AND RawTreeTag = ?`,
+      [censusID, FILE_NAME, BATCH_ID, TREE_TAG]
+    );
+    console.log(`[hard-fail] cmRows=${JSON.stringify(cmRows)}`);
+    expect(cmRows, 'the invalid-species row must still materialize as a hard failure').toHaveLength(1);
+    expect(cmRows[0].StemGUID, 'invalid species code should still hard-fail').toBeNull();
+    expect(Number(cmRows[0].RawPlotXText)).toBe(-0.271);
+    expect(Number(cmRows[0].RawPlotYText)).toBe(267.5);
   }, 60000);
 });
