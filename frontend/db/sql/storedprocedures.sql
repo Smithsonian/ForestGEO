@@ -1680,7 +1680,7 @@ BEGIN
                 classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
                 requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
                 prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
-                current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
+                current_tree_lookup, stem_resolution_rows, stem_insert_candidates, stem_plotcoord_pick,
                 unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
                 published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
                 core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
@@ -1909,7 +1909,7 @@ BEGIN
         classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
         requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
         prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
-        current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
+        current_tree_lookup, stem_resolution_rows, stem_insert_candidates, stem_plotcoord_pick,
         unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
         published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
         core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
@@ -2024,7 +2024,19 @@ BEGIN
            NULLIF(GROUP_CONCAT(DISTINCT CASE WHEN Codes IS NOT NULL AND TRIM(Codes) != '' THEN TRIM(Codes) END
                    ORDER BY Codes SEPARATOR ';'), '') AS Codes,
            NULLIF(GROUP_CONCAT(DISTINCT CASE WHEN Comments IS NOT NULL AND TRIM(Comments) != '' THEN TRIM(Comments) END
-                   ORDER BY Comments SEPARATOR ' | '), '') AS Comments
+                   ORDER BY Comments SEPARATOR ' | '), '') AS Comments,
+           -- PlotX/PlotY are deliberately NOT part of the dedup key (GROUP BY) below: they
+           -- carry no measurement identity, and adding them would split otherwise-identical
+           -- duplicate rows into separate "duplicates" whenever they disagreed only on plot
+           -- metadata. Instead, pick the lowest-id non-NULL value independently per axis;
+           -- GROUP_CONCAT skips NULL inputs, so SUBSTRING_INDEX(..., 1) is "the id-lowest row
+           -- (within this duplicate group) that actually supplied that axis".
+           CAST(NULLIF(SUBSTRING_INDEX(
+             GROUP_CONCAT(CASE WHEN PlotX IS NOT NULL THEN CAST(PlotX AS CHAR) END ORDER BY id SEPARATOR ','),
+             ',', 1), '') AS DECIMAL(12,6)) AS PlotX,
+           CAST(NULLIF(SUBSTRING_INDEX(
+             GROUP_CONCAT(CASE WHEN PlotY IS NOT NULL THEN CAST(PlotY AS CHAR) END ORDER BY id SEPARATOR ','),
+             ',', 1), '') AS DECIMAL(12,6)) AS PlotY
     FROM temporarymeasurements
     WHERE FileID = vFileID AND BatchID = vBatchID AND CensusID = vCurrentCensusID
       -- validation_failures is the only pre-dedup failure source; hard_failure_rows
@@ -2201,7 +2213,7 @@ BEGIN
     CREATE TEMPORARY TABLE filter_validity AS
     SELECT i.id, i.FileID, i.BatchID, i.PlotID, i.CensusID, i.TreeTag,
            IFNULL(i.StemTag, '') AS StemTag, i.SpeciesCode, i.QuadratName,
-           i.LocalX, i.LocalY,
+           i.LocalX, i.LocalY, i.PlotX, i.PlotY,
            IFNULL(i.DBH, 0) AS DBH, IFNULL(i.HOM, 0) AS HOM,
            i.MeasurementDate, i.Codes, i.Comments, i.PublishedStemID,
            CASE
@@ -2631,8 +2643,7 @@ BEGIN
            cf.StemTag,
            cf.SpeciesCode,
            cf.QuadratName,
-           cf.LocalX,
-           cf.LocalY,
+           cf.LocalX, cf.LocalY, cf.PlotX, cf.PlotY,
            cf.DBH,
            cf.HOM,
            cf.MeasurementDate,
@@ -2699,22 +2710,62 @@ BEGIN
                WHEN TRIM(COALESCE(srr.StemTag, '')) = '' THEN NULL
                ELSE TRIM(srr.StemTag)
            END AS StemTag,
-           srr.LocalX,
-           srr.LocalY
+           -- PlotX/PlotY are carried here for column-projection parity with the other
+           -- LocalX/LocalY-bearing intermediate tables, but are NOT the source used by
+           -- the new-stem INSERT below: this DISTINCT projection can (like LocalX/LocalY
+           -- today) yield multiple candidate rows per TreeID/StemTag/CensusID when
+           -- several contributing measurements disagree, and INSERT IGNORE resolves that
+           -- via engine row order, not id order. The INSERT instead sources each
+           -- plot-coordinate axis independently through its own lowest-id pick against
+           -- stem_resolution_rows (see below), which is deterministic.
+           srr.LocalX, srr.LocalY, srr.PlotX, srr.PlotY
     FROM stem_resolution_rows srr;
 
     CREATE INDEX idx_stem_insert_candidates_key
         ON stem_insert_candidates (TreeID, CensusID, StemTag);
 
+    -- Deterministic plot-coordinate pick: the value from the lowest stem_resolution_rows.id
+    -- that supplies each axis, chosen independently per axis (a row can supply PlotX and not
+    -- PlotY, or vice versa). This is scoped to THIS batch's contributing rows, same as the
+    -- StemCrossID/PublishedStemID inheritance above. Shared by both the new-stem INSERT and
+    -- the existing-stem catch-up UPDATE below so the two paths agree on the same values.
+    --
+    -- Resolved to a VALUE here (not an id joined back against stem_resolution_rows) because
+    -- MySQL rejects referencing the same TEMPORARY TABLE twice in one statement ("Can't reopen
+    -- table") — the natural "MIN(id) per axis, then LEFT JOIN stem_resolution_rows AS sx / AS sy
+    -- to fetch each axis's value" shape needs two such references and does not run. GROUP_CONCAT
+    -- skips NULL inputs, so SUBSTRING_INDEX(..., 1) is "the id-lowest contributing row that
+    -- actually supplied that axis" — the same technique used for initial_dup_filter above.
+    CREATE TEMPORARY TABLE stem_plotcoord_pick AS
+    SELECT TreeID, StemTag, CensusID,
+           CAST(NULLIF(SUBSTRING_INDEX(
+             GROUP_CONCAT(CASE WHEN PlotX IS NOT NULL THEN CAST(PlotX AS CHAR) END ORDER BY id SEPARATOR ','),
+             ',', 1), '') AS DECIMAL(12,6)) AS PlotX,
+           CAST(NULLIF(SUBSTRING_INDEX(
+             GROUP_CONCAT(CASE WHEN PlotY IS NOT NULL THEN CAST(PlotY AS CHAR) END ORDER BY id SEPARATOR ','),
+             ',', 1), '') AS DECIMAL(12,6)) AS PlotY
+    FROM stem_resolution_rows
+    GROUP BY TreeID, StemTag, CensusID;
+
+    CREATE INDEX idx_stem_plotcoord_pick_key
+        ON stem_plotcoord_pick (TreeID, CensusID, StemTag);
+
     -- Inline StemCrossID/PublishedStemID inheritance: set the previous census's values at INSERT time for stems with an unambiguous previous-census match.
-    INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)
+    -- PlotX/PlotY are sourced independently from stem_plotcoord_pick rather than from
+    -- stem_insert_candidates' own (non-deterministic under INSERT IGNORE) LocalX/LocalY-style
+    -- columns — see the comment on stem_insert_candidates above.
+    INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, PlotX, PlotY, Moved, StemDescription, IsActive)
     SELECT sic.TreeID, sic.QuadratID, sic.CensusID, sic.StemCrossID, sic.PublishedStemID,
-           sic.StemTag, sic.LocalX, sic.LocalY, 0, NULL, 1
+           sic.StemTag, sic.LocalX, sic.LocalY, pick.PlotX, pick.PlotY, 0, NULL, 1
     FROM stem_insert_candidates sic
     LEFT JOIN stems s_existing
         ON s_existing.TreeID = sic.TreeID
         AND s_existing.CensusID = sic.CensusID
         AND s_existing.StemTag <=> sic.StemTag
+    LEFT JOIN stem_plotcoord_pick pick
+        ON pick.TreeID = sic.TreeID
+        AND pick.StemTag <=> sic.StemTag
+        AND pick.CensusID = sic.CensusID
     WHERE s_existing.StemGUID IS NULL;
 
     -- Catch-up fill for stems that already existed in the current census (skipped by INSERT IGNORE above).
@@ -2727,6 +2778,16 @@ BEGIN
     SET s.PublishedStemID = sic.PublishedStemID
     WHERE s.PublishedStemID IS NULL
       AND sic.PublishedStemID IS NOT NULL;
+
+    -- Fill-only, per axis, lowest contributing staging id. Never overwrites a stored value:
+    -- the incoming number remains visible on coremeasurements.RawPlotX/RawPlotY, and validation 19
+    -- operates on those row-level values, so a disagreement stays detectable.
+    UPDATE stems s
+    INNER JOIN stem_plotcoord_pick pick
+        ON pick.TreeID = s.TreeID AND pick.StemTag <=> s.StemTag AND pick.CensusID = s.CensusID
+    SET s.PlotX = COALESCE(s.PlotX, pick.PlotX),
+        s.PlotY = COALESCE(s.PlotY, pick.PlotY)
+    WHERE s.PlotX IS NULL OR s.PlotY IS NULL;
 
     CREATE TEMPORARY TABLE current_stem_lookup AS
     SELECT DISTINCT srr.id,
@@ -2781,8 +2842,7 @@ BEGIN
            srr.StemTag,
            srr.SpeciesCode,
            srr.QuadratName,
-           srr.LocalX,
-           srr.LocalY,
+           srr.LocalX, srr.LocalY, srr.PlotX, srr.PlotY,
            srr.DBH,
            srr.HOM,
            srr.MeasurementDate,
@@ -3359,7 +3419,7 @@ BEGIN
         classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
         requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
         prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
-        current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
+        current_tree_lookup, stem_resolution_rows, stem_insert_candidates, stem_plotcoord_pick,
         unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
         published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
         core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
@@ -3420,7 +3480,7 @@ BEGIN
             classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
             requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
             prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
-            current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
+            current_tree_lookup, stem_resolution_rows, stem_insert_candidates, stem_plotcoord_pick,
             unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
             published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
             core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
