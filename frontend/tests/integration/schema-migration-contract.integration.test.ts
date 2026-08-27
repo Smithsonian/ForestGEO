@@ -26,10 +26,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import fs from 'fs';
 import path from 'path';
-import type { Connection, RowDataPacket } from 'mysql2/promise';
+import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import { setupTestDatabase, teardownTestDatabase, runBulkIngestion, type TestData } from '../setup/local-db-setup';
 import { formatContractFailures, type SchemaQueryRow } from '@/lib/db/schema-contract';
+import { splitSqlFile } from '@/lib/provisioning/sql-runner';
 import {
   loadMigrationSources,
   selectPendingMigrations,
@@ -58,6 +60,24 @@ const PUBLISHED_STEMID_CONFLICT_CODE = 'PUBLISHED_STEMID_CONFLICT';
 // metadata-only RENAME that preserves cached rows, not a drop-and-recreate.
 const VFT_SENTINEL_CORE_MEASUREMENT_ID = 999001;
 const VFT_SENTINEL_STEM_VALUE = 424242;
+
+const PLOT_COORDINATE_MIGRATION_ID = '2026-08-27-01-add-plot-coordinates';
+const PLOT_COORDINATE_TYPE = 'decimal(12,6)';
+// The ten nullable plot-coordinate columns the migration adds, one home per
+// table on the ingest path — never one axis standing in for its pair.
+const PLOT_COORDINATE_COLUMNS: ReadonlyArray<{ table: string; column: string }> = [
+  { table: 'temporarymeasurements', column: 'PlotX' },
+  { table: 'temporarymeasurements', column: 'PlotY' },
+  { table: 'stems', column: 'PlotX' },
+  { table: 'stems', column: 'PlotY' },
+  { table: 'coremeasurements', column: 'RawPlotX' },
+  { table: 'coremeasurements', column: 'RawPlotY' },
+  { table: 'measurementssummary', column: 'StemPlotX' },
+  { table: 'measurementssummary', column: 'StemPlotY' },
+  { table: 'viewfulltable', column: 'StemPlotX' },
+  { table: 'viewfulltable', column: 'StemPlotY' }
+];
+const CANONICAL_DDL_PATH = path.join(process.cwd(), 'db', 'sql', 'tablestructures.sql');
 
 describe('Stale-schema migrate + verify pipeline', () => {
   let connection: Connection;
@@ -88,6 +108,17 @@ describe('Stale-schema migrate + verify pipeline', () => {
     // lacks the storage columns, their lookup index, and the conflict error code.
     await connection.query('ALTER TABLE stems DROP COLUMN PublishedStemID');
     await connection.query('ALTER TABLE coremeasurements DROP COLUMN RawPublishedStemID');
+    // A site provisioned before the plot-coordinate work lacks all ten columns
+    // outright. Dropping them here (rather than only in the isolated drift
+    // fixtures below) forces the ADD branch of migration 2026-08-27-01 to run
+    // for every table, not just temporarymeasurements.PlotY via the partial-pair
+    // fixture — a typo'd ALTER on stems/coremeasurements/measurementssummary/
+    // viewfulltable would otherwise never execute in any test.
+    await connection.query('ALTER TABLE temporarymeasurements DROP COLUMN PlotX, DROP COLUMN PlotY');
+    await connection.query('ALTER TABLE stems DROP COLUMN PlotX, DROP COLUMN PlotY');
+    await connection.query('ALTER TABLE coremeasurements DROP COLUMN RawPlotX, DROP COLUMN RawPlotY');
+    await connection.query('ALTER TABLE measurementssummary DROP COLUMN StemPlotX, DROP COLUMN StemPlotY');
+    await connection.query('ALTER TABLE viewfulltable DROP COLUMN StemPlotX, DROP COLUMN StemPlotY');
     // Reproduce a partially-applied prior-snapshot migration: PriorCensusID is
     // present, while the two value columns are missing. The original migration
     // only checked PriorCensusID, so the follow-up must repair both independently.
@@ -203,6 +234,25 @@ describe('Stale-schema migrate + verify pipeline', () => {
     );
     expect(repairedSnapshotColumns.map(row => String(row.COLUMN_NAME)).sort()).toEqual(['PriorCensusID', 'PriorDBH', 'PriorHOM']);
 
+    // All ten plot-coordinate columns exist post-migration, each independently
+    // decimal(12,6) NULL — this schema was freshly provisioned (never regressed
+    // on these columns), so this proves the "already exact -> no-op" branch of
+    // the migration leaves a fresh contract-matching schema untouched.
+    const [plotCoordinateColumns] = await connection.query<RowDataPacket[]>(
+      `SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ?
+         AND (TABLE_NAME, COLUMN_NAME) IN (${PLOT_COORDINATE_COLUMNS.map(() => '(?, ?)').join(', ')})`,
+      [schema, ...PLOT_COORDINATE_COLUMNS.flatMap(({ table, column }) => [table, column])]
+    );
+    expect(plotCoordinateColumns.length).toBe(PLOT_COORDINATE_COLUMNS.length);
+    for (const { table, column } of PLOT_COORDINATE_COLUMNS) {
+      const row = plotCoordinateColumns.find(r => String(r.TABLE_NAME) === table && String(r.COLUMN_NAME) === column);
+      expect(row, `${table}.${column} missing after migration`).toBeDefined();
+      expect(row?.COLUMN_TYPE, `${table}.${column} type`).toBe(PLOT_COORDINATE_TYPE);
+      expect(row?.IS_NULLABLE, `${table}.${column} nullability`).toBe('YES');
+    }
+
     // The error catalog is outside the structural contract, so audit.ok cannot
     // speak for it — but bulkingestionprocess writes this code, so a repair that
     // restored the columns without the catalog row would log conflicts to nothing.
@@ -302,4 +352,119 @@ describe('Stale-schema migrate + verify pipeline', () => {
     // The STORED unique signature still recomputes on insert.
     expect(String(roundTrip[0].unique_sig)).toContain(insertedCode);
   });
+});
+
+/**
+ * Plot-coordinate migration column-level guard proof (integration, real MySQL).
+ *
+ * Each of the ten plot-coordinate columns is probed independently by
+ * migration 2026-08-27-01, never treating one axis as a proxy for its pair.
+ * These fixtures isolate that per-column behavior against two throwaway
+ * schemas loaded straight from the canonical DDL (which already bakes the
+ * columns in), each deliberately regressed to one specific drift shape:
+ *   - a partial pair (X present, Y dropped) must be repaired to add only Y;
+ *   - an existing same-named column of the wrong type must stop the
+ *     migration with a named contract error and be left completely
+ *     untouched, never silently coerced.
+ */
+describe('Plot-coordinate migration column-level guards', () => {
+  let connection: Connection;
+  let sources: MigrationSource[];
+
+  beforeAll(async () => {
+    connection = await mysql.createConnection({
+      host: process.env.TEST_DB_HOST ?? 'localhost',
+      user: process.env.TEST_DB_USER ?? 'root',
+      password: process.env.TEST_DB_PASSWORD ?? 'testpassword',
+      port: Number(process.env.TEST_DB_PORT ?? 3306),
+      multipleStatements: true
+    });
+    sources = loadMigrationSources();
+  }, 60_000);
+
+  afterAll(async () => {
+    if (!connection) return;
+    await connection.end();
+  });
+
+  /** Loads the canonical DDL into a fresh throwaway schema, then applies `regress`. */
+  async function provisionDriftSchema(schemaName: string, regress: (exec: SqlExecutor) => Promise<void>): Promise<SqlExecutor> {
+    await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    await connection.query(`CREATE DATABASE \`${schemaName}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
+    await connection.query(`USE \`${schemaName}\``);
+
+    const statements = splitSqlFile(fs.readFileSync(CANONICAL_DDL_PATH, 'utf-8'));
+    const failures: string[] = [];
+    for (const statement of statements) {
+      try {
+        await connection.query(statement.sql);
+      } catch (error) {
+        failures.push(`line ${statement.lineNumber}: ${(error as Error).message}`);
+      }
+    }
+    expect(failures, `${schemaName} canonical DDL failed to load cleanly:\n${failures.join('\n')}`).toEqual([]);
+
+    const exec: SqlExecutor = async (sql, params) => {
+      const [rows] = await connection.query(sql, params ?? []);
+      return Array.isArray(rows) ? (rows as SchemaQueryRow[]) : [];
+    };
+    await regress(exec);
+    return exec;
+  }
+
+  it('a partial pair (PlotX present, PlotY dropped) is repaired by adding only the missing axis', async () => {
+    const schemaName = 'plotcoord_partial_pair';
+    const exec = await provisionDriftSchema(schemaName, async e => {
+      await e('ALTER TABLE temporarymeasurements DROP COLUMN PlotY');
+    });
+
+    try {
+      const result = await applyPendingMigrations(exec, schemaName, sources);
+      expect(result.failed, result.failed ? `${result.failed.id}: ${result.failed.error}` : undefined).toBeNull();
+      expect(result.appliedNow).toContain(PLOT_COORDINATE_MIGRATION_ID);
+
+      const [columns] = await connection.query<RowDataPacket[]>(
+        `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'temporarymeasurements' AND COLUMN_NAME IN ('PlotX', 'PlotY')`,
+        [schemaName]
+      );
+      const byColumn = Object.fromEntries(columns.map(row => [String(row.COLUMN_NAME), row]));
+      // PlotX was never touched (already matched the contract); PlotY was added.
+      expect(byColumn.PlotX?.COLUMN_TYPE).toBe(PLOT_COORDINATE_TYPE);
+      expect(byColumn.PlotX?.IS_NULLABLE).toBe('YES');
+      expect(byColumn.PlotY?.COLUMN_TYPE).toBe(PLOT_COORDINATE_TYPE);
+      expect(byColumn.PlotY?.IS_NULLABLE).toBe('YES');
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    }
+  }, 60_000);
+
+  it('an existing same-named column with an incompatible type stops the migration with a named contract error and is left untouched', async () => {
+    const schemaName = 'plotcoord_wrong_type';
+    const exec = await provisionDriftSchema(schemaName, async e => {
+      await e(`ALTER TABLE temporarymeasurements MODIFY COLUMN PlotX varchar(50) NULL`);
+    });
+
+    try {
+      const result = await applyPendingMigrations(exec, schemaName, sources);
+      expect(result.failed).not.toBeNull();
+      expect(result.failed?.id).toBe(PLOT_COORDINATE_MIGRATION_ID);
+      expect(result.failed?.error).toContain('Plot-coordinate schema contract conflict');
+      expect(result.failed?.error).toContain('temporarymeasurements.PlotX');
+
+      const [columns] = await connection.query<RowDataPacket[]>(
+        `SELECT COLUMN_TYPE, IS_NULLABLE
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'temporarymeasurements' AND COLUMN_NAME = 'PlotX'`,
+        [schemaName]
+      );
+      // The offending column was never coerced — the migration failed loudly
+      // instead of silently accepting or "fixing" a shape it does not own.
+      expect(columns[0]?.COLUMN_TYPE).toBe('varchar(50)');
+      expect(columns[0]?.IS_NULLABLE).toBe('YES');
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    }
+  }, 60_000);
 });

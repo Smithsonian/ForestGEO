@@ -83,5 +83,9 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-08-26-01-widen-temporarymeasurements-fileid',
     file: 'schema-contract-repair/2026-08-26-01-widen-temporarymeasurements-fileid.sql'
+  },
+  {
+    id: '2026-08-27-01-add-plot-coordinates',
+    file: 'schema-contract-repair/2026-08-27-01-add-plot-coordinates.sql'
   }
 ] as const;
