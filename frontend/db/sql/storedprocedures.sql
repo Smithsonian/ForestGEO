@@ -2732,15 +2732,7 @@ BEGIN
                WHEN TRIM(COALESCE(srr.StemTag, '')) = '' THEN NULL
                ELSE TRIM(srr.StemTag)
            END AS StemTag,
-           -- PlotX/PlotY are carried here for column-projection parity with the other
-           -- LocalX/LocalY-bearing intermediate tables, but are NOT the source used by
-           -- the new-stem INSERT below: this DISTINCT projection can (like LocalX/LocalY
-           -- today) yield multiple candidate rows per TreeID/StemTag/CensusID when
-           -- several contributing measurements disagree, and INSERT IGNORE resolves that
-           -- via engine row order, not id order. The INSERT instead sources each
-           -- plot-coordinate axis independently through its own lowest-id pick against
-           -- stem_resolution_rows (see below), which is deterministic.
-           srr.LocalX, srr.LocalY, srr.PlotX, srr.PlotY
+           srr.LocalX, srr.LocalY
     FROM stem_resolution_rows srr;
 
     CREATE INDEX idx_stem_insert_candidates_key
@@ -2773,9 +2765,8 @@ BEGIN
         ON stem_plotcoord_pick (TreeID, CensusID, StemTag);
 
     -- Inline StemCrossID/PublishedStemID inheritance: set the previous census's values at INSERT time for stems with an unambiguous previous-census match.
-    -- PlotX/PlotY are sourced independently from stem_plotcoord_pick rather than from
-    -- stem_insert_candidates' own (non-deterministic under INSERT IGNORE) LocalX/LocalY-style
-    -- columns — see the comment on stem_insert_candidates above.
+    -- PlotX/PlotY are sourced independently from stem_plotcoord_pick rather than
+    -- from the DISTINCT stem candidate projection.
     INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, PlotX, PlotY, Moved, StemDescription, IsActive)
     SELECT sic.TreeID, sic.QuadratID, sic.CensusID, sic.StemCrossID, sic.PublishedStemID,
            sic.StemTag, sic.LocalX, sic.LocalY, pick.PlotX, pick.PlotY, 0, NULL, 1
