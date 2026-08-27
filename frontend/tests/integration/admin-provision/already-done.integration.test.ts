@@ -21,13 +21,13 @@ import { initTablesStep, deployProceduresStep, seedValidationsStep } from '@/lib
 import type { StepContext, ProvisioningInput } from '@/lib/provisioning/types';
 
 const TEST_SCHEMA = TEST_SCHEMA_PREFIX + 'meta';
-const CURRENT_SCHEMA_VERSION = '2026-08-04';
-const CURRENT_PROCEDURES_VERSION = '2026-08-04-procs';
+const CURRENT_SCHEMA_VERSION = '2026-08-27';
+const CURRENT_PROCEDURES_VERSION = '2026-08-27-procs';
 const STALE_SCHEMA_VERSION = '2020-01-01';
 const META_TABLE = '_provisioning_meta';
 // Mirrors lib/provisioning/steps/sql-steps.ts:EXPECTED_VALIDATION_COUNT.
 // Reflects the actual number of validation INSERTs in corequeries.sql.
-const EXPECTED_VALIDATION_COUNT = 16;
+const EXPECTED_VALIDATION_COUNT = 17;
 
 const REQUIRED_TABLES_FOR_ALREADY_DONE = ['plots', 'census', 'quadrats', 'coremeasurements', 'measurement_errors', 'uploadmetrics', 'validation_runs'] as const;
 const REQUIRED_VIEW_FOR_ALREADY_DONE = 'uploaddatalossreport';
@@ -167,7 +167,7 @@ describe('schema-version stamping (alreadyDone)', () => {
     it('returns true when meta is stamped AND all REQUIRED_PROCEDURES exist', async () => {
       await createMetaTable();
       await insertMetaRow(CURRENT_PROCEDURES_VERSION, { ProceduresDeployedAt: true });
-      // Create all 10 required procedures (case-insensitive names).
+      // Create all 11 required procedures (case-insensitive names).
       const procedures = [
         'bulkingestionprocess',
         'bulkingestioncollapser',
@@ -177,6 +177,7 @@ describe('schema-version stamping (alreadyDone)', () => {
         'RefreshViewFullTable',
         'RunSharedDBHChangeValidations',
         'RunSharedCrossCensusLocationValidations',
+        'RunPlotCoordinateConsistencyValidation',
         'reinsertdefaultvalidations',
         'reinsertdefaultpostvalidations'
       ];
@@ -198,6 +199,7 @@ describe('schema-version stamping (alreadyDone)', () => {
         'RefreshViewFullTable',
         'RunSharedDBHChangeValidations',
         'RunSharedCrossCensusLocationValidations',
+        'RunPlotCoordinateConsistencyValidation',
         'reinsertdefaultvalidations',
         'reinsertdefaultpostvalidations'
       ];

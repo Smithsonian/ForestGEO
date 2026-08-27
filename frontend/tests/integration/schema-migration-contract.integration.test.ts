@@ -148,6 +148,15 @@ describe('Stale-schema migrate + verify pipeline', () => {
     // additive migration must leave both definitions untouched.
     await connection.query(`ALTER TABLE species MODIFY COLUMN SpeciesName varchar(64) CHARACTER SET ${LEGACY_CHARSET} COLLATE ${LEGACY_COLLATION} NULL`);
     await connection.query(`ALTER TABLE uploadintegrityalerts MODIFY COLUMN message text CHARACTER SET ${LEGACY_CHARSET} COLLATE ${LEGACY_COLLATION} NOT NULL`);
+    // Task 12 baked validation 19 (ValidatePlotCoordinateConsistency) — both its
+    // enabled sitespecificvalidations row and its measurement_errors catalog
+    // row — into corequeries.sql/tablestructures.sql, so setupTestDatabase()
+    // above already seeded both. Remove them here to reproduce the pre-Task-12
+    // stale shape that migration 2026-08-27-02 exists to repair (seeded
+    // disabled, because at migration time on a real stale site the helper
+    // procedure it CALLs is not guaranteed to exist yet).
+    await connection.query('DELETE FROM sitespecificvalidations WHERE ValidationID = 19');
+    await connection.query(`DELETE FROM measurement_errors WHERE ErrorSource = 'validation' AND ErrorCode = '19'`);
   }, 90000);
 
   afterAll(async () => {
@@ -585,12 +594,17 @@ describe('Validation 19 identity-conflict preflight', () => {
       const [rows] = await connection.query<RowDataPacket[]>(`SELECT ProcedureName FROM sitespecificvalidations WHERE ValidationID = 19`);
       expect(rows[0].ProcedureName, 'the conflicting row must be left untouched').toBe('CustomSiteRule');
 
-      // The preflight must abort before either INSERT — no orphaned error-catalog row.
+      // The measurement_errors ('validation', '19') row ships in the canonical
+      // DDL itself (tablestructures.sql), so provisionSchema() above already
+      // seeded it before the migration ever ran — its presence here proves
+      // only that the canonical seed exists, not that the migration inserted
+      // it. What the preflight abort must guarantee is that it stays at
+      // exactly one row: no duplicate insert past the identity-conflict check.
       const [errorRows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS count FROM measurement_errors WHERE ErrorSource = ? AND ErrorCode = ?`, [
         VALIDATION_19_ERROR_SOURCE,
         VALIDATION_19_ERROR_CODE
       ]);
-      expect(Number(errorRows[0].count)).toBe(0);
+      expect(Number(errorRows[0].count)).toBe(1);
     } finally {
       await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
     }

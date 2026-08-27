@@ -177,14 +177,13 @@ describe('plot-coordinate-validation — integration', () => {
     censusID = testData.census[0].censusID;
     sharedState.connection = connection;
 
-    // local-db-setup's loadValidationDefinitions() seeds sitespecificvalidations
-    // and measurement_errors from corequeries.sql, which only goes up to
-    // ValidationID 18. Validation 19 (ValidatePlotCoordinateConsistency) is
-    // seeded in production by db/migrations/schema-contract-repair/
-    // 2026-08-27-02-seed-validation-19.sql, which the local test schema never
-    // applies. RunPlotCoordinateConsistencyValidation only reads
-    // measurement_errors (not sitespecificvalidations), so that row alone is
-    // sufficient for these tests.
+    // tablestructures.sql and corequeries.sql now seed the measurement_errors
+    // and sitespecificvalidations rows for validation 19
+    // (ValidatePlotCoordinateConsistency) on every fresh schema, so this insert
+    // is normally a no-op. It stays as a defensive INSERT IGNORE so this suite
+    // doesn't depend on that seed order: RunPlotCoordinateConsistencyValidation
+    // only reads measurement_errors (not sitespecificvalidations), so this row
+    // alone is sufficient for these tests even if the seed above ever regresses.
     await connection.query(
       `INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage)
        VALUES ('validation', '19', 'Validation ValidatePlotCoordinateConsistency')`

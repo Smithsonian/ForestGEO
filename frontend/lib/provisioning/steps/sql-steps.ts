@@ -16,8 +16,8 @@ const QUERIES_FILE = () => path.join(process.cwd(), 'db/sql/corequeries.sql');
  * for the same change the two constants must still differ or the stamps
  * collapse into one row.
  */
-const SCHEMA_VERSION = '2026-08-04';
-const PROCEDURES_SCHEMA_VERSION = '2026-08-04-procs';
+const SCHEMA_VERSION = '2026-08-27';
+const PROCEDURES_SCHEMA_VERSION = '2026-08-27-procs';
 const META_TABLE = '_provisioning_meta';
 
 const VALIDATIONS_TABLE = 'sitespecificvalidations';
@@ -37,6 +37,7 @@ export const REQUIRED_PROCEDURES = [
   'RefreshViewFullTable',
   'RunSharedDBHChangeValidations',
   'RunSharedCrossCensusLocationValidations',
+  'RunPlotCoordinateConsistencyValidation',
   'reinsertdefaultvalidations',
   'reinsertdefaultpostvalidations'
 ] as const;
@@ -44,12 +45,12 @@ export const REQUIRED_PROCEDURES = [
 /**
  * Expected minimum count of seeded validation rules in `sitespecificvalidations`.
  * Derived from `INSERT INTO sitespecificvalidations` statements in corequeries.sql
- * (currently 16: IDs 1-9, 11-15, 17-18). The 00-infrastructure test fixture adds
- * 2 more (IDs 20-21) via local-db-setup.ts, totaling 18 — those are test-only
+ * (currently 17: IDs 1-9, 11-15, 17-19). The 00-infrastructure test fixture adds
+ * 2 more (IDs 20-21) via local-db-setup.ts, totaling 19 — those are test-only
  * extras and NOT part of provisioning. If corequeries.sql gains/loses validation
  * INSERTs, bump this constant and SCHEMA_VERSION together.
  */
-const EXPECTED_VALIDATION_COUNT = 16;
+const EXPECTED_VALIDATION_COUNT = 17;
 
 interface ProvisioningMetaRow {
   SchemaVersion: string;

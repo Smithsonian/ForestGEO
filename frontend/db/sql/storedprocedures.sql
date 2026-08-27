@@ -1462,6 +1462,12 @@ and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
             'CALL RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 0, 1);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
+    VALUES (19, 'ValidatePlotCoordinateConsistency',
+            'Plot coordinate disagrees with the quadrat''s own median offset',
+            'stemPlotX;stemPlotY;stemLocalX;stemLocalY;quadratName;treeTag;stemTag',
+            'CALL RunPlotCoordinateConsistencyValidation(@p_CensusID, @p_PlotID);', '', true);
+    INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
+                                         ChangelogDefinition, IsEnabled)
     VALUES (12, 'ValidateScreenStemsWithMeasurementsButDeadAttributes',
             'Invalid DBH;Invalid HOM;DEAD-state attribute(s)',
             'measuredDBH;measuredHOM;attributes', 'insert into measurement_error_log (MeasurementID, ErrorID)

@@ -922,6 +922,7 @@ values ('ingestion', 'MISSING_FIELD_TREETAG', 'Missing required field: TreeTag')
        ('ingestion', 'DUPLICATE_TAG_CONFLICT_EXISTING', 'Conflicting TreeTag/StemTag matches existing census measurement'),
        ('ingestion', 'SQL_EXCEPTION', 'Ingestion SQL exception'),
        ('validation', '14', 'Invalid attribute code'),
+       ('validation', '19', 'Validation ValidatePlotCoordinateConsistency'),
        ('validation', '20', 'Species mismatch from previous census'),
        ('validation', '21', 'Same-batch species conflict');
 
