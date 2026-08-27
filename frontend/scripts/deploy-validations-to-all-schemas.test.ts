@@ -48,7 +48,10 @@ describe('parseMode', () => {
 
 describe('main CLI dispatch', () => {
   it('dispatches procedures-only mode without reading corequeries.sql', async () => {
-    const deps = makeCliDeps();
+    const deps = makeCliDeps({
+      discoverSchemas: vi.fn().mockResolvedValue(['forestgeo_test']),
+      checkMigrationStatus: vi.fn().mockResolvedValue({ migrated: false, missingTables: ['measurement_errors'] })
+    });
     await main(['--procedures-only'], deps);
     expect(deps.readSqlFile).toHaveBeenCalledWith(expect.stringContaining('storedprocedures.sql'));
     expect(deps.readSqlFile).not.toHaveBeenCalledWith(expect.stringContaining('corequeries.sql'));
@@ -119,6 +122,22 @@ describe('withSchemaConnection', () => {
     );
     expect(result).toBe('ok');
     expect(conn.end).toHaveBeenCalledOnce();
+  });
+
+  it('preserves the deployment error when closing the failed connection also errors', async () => {
+    const conn = makeConnection({ end: vi.fn().mockRejectedValue(new Error('close failed')) as any });
+    const deploymentError = new Error('routine DDL failed');
+
+    await expect(
+      withSchemaConnection(
+        'forestgeo_test',
+        async () => {
+          throw deploymentError;
+        },
+        async () => conn
+      )
+    ).rejects.toBe(deploymentError);
+    expect((deploymentError as Error & { cleanupError?: unknown }).cleanupError).toMatchObject({ message: 'close failed' });
   });
 
   it('validates the schema name before ever connecting', async () => {

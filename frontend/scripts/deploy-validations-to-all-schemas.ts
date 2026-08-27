@@ -47,6 +47,16 @@ export const AZURE_PORT = 3306;
 
 const REQUIRED_MIGRATION_TABLES = ['measurement_error_log', 'measurement_errors'] as const;
 
+export const VALIDATION_19_CONTRACT = {
+  validationID: 19,
+  procedureName: 'ValidatePlotCoordinateConsistency',
+  description: "Plot coordinate disagrees with the quadrat's own median offset",
+  criteria: 'stemPlotX;stemPlotY;stemLocalX;stemLocalY;quadratName;treeTag;stemTag',
+  definition: 'CALL RunPlotCoordinateConsistencyValidation(@p_CensusID, @p_PlotID);',
+  changelogDefinition: '',
+  errorMessage: 'Validation ValidatePlotCoordinateConsistency'
+} as const;
+
 export interface SchemaResult {
   schema: string;
   status: 'deployed' | 'skipped' | 'failed';
@@ -187,18 +197,29 @@ export async function activateValidation19(conn: mysql.Connection, schema: strin
   await conn.query(useSchemaSql(schema));
   await assertRequiredProcedures(conn, schema);
 
-  const [errs]: any = await conn.query(`SELECT ErrorID FROM measurement_errors WHERE ErrorSource = 'validation' AND ErrorCode = '19'`);
-  if (errs.length === 0) {
-    throw new Error(`${schema}: measurement_errors row for validation 19 is missing; run the migration before activating`);
+  const [errs]: any = await conn.query(`SELECT ErrorID, ErrorMessage FROM measurement_errors WHERE ErrorSource = 'validation' AND ErrorCode = '19'`);
+  if (errs.length !== 1 || errs[0].ErrorMessage !== VALIDATION_19_CONTRACT.errorMessage) {
+    throw new Error(
+      `${schema}: measurement_errors row for validation 19 is missing or does not match the repository contract; run the migration before activating`
+    );
   }
 
   const [validations]: any = await conn.query(
-    `SELECT ValidationID, ProcedureName, IsEnabled
+    `SELECT ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled
        FROM sitespecificvalidations
       WHERE ValidationID = 19 OR ProcedureName = 'ValidatePlotCoordinateConsistency'`
   );
-  if (validations.length !== 1 || Number(validations[0].ValidationID) !== 19 || validations[0].ProcedureName !== 'ValidatePlotCoordinateConsistency') {
-    throw new Error(`${schema}: validation 19 identity is missing or conflicting; expected exactly (19, ValidatePlotCoordinateConsistency)`);
+  const validation = validations[0];
+  const contractMatches =
+    validations.length === 1 &&
+    Number(validation?.ValidationID) === VALIDATION_19_CONTRACT.validationID &&
+    validation?.ProcedureName === VALIDATION_19_CONTRACT.procedureName &&
+    validation?.Description === VALIDATION_19_CONTRACT.description &&
+    validation?.Criteria === VALIDATION_19_CONTRACT.criteria &&
+    validation?.Definition === VALIDATION_19_CONTRACT.definition &&
+    validation?.ChangelogDefinition === VALIDATION_19_CONTRACT.changelogDefinition;
+  if (!contractMatches) {
+    throw new Error(`${schema}: validation 19 identity is missing/conflicting, or its fields do not match the repository contract`);
   }
 
   await conn.query(
@@ -243,10 +264,23 @@ export async function withSchemaConnection<T>(
 ): Promise<T> {
   validateSchemaOrThrow(schema);
   const conn = await connect(schema);
+  let operationError: unknown;
   try {
     return await fn(conn);
+  } catch (error) {
+    operationError = error;
+    throw error;
   } finally {
-    await conn.end();
+    try {
+      await conn.end();
+    } catch (closeError) {
+      if (operationError === undefined) throw closeError;
+      // Preserve the actionable SQL failure. The close failure remains attached
+      // for structured logging/debugging without replacing the primary error.
+      if (operationError instanceof Error) {
+        (operationError as Error & { cleanupError?: unknown }).cleanupError = closeError;
+      }
+    }
   }
 }
 
@@ -339,6 +373,65 @@ function reportSummary(deps: DeployCliDeps, title: string, results: SchemaResult
   }
 }
 
+interface SchemaSweepOptions<TPrepared> {
+  summaryTitle: string;
+  operationMessage: string;
+  requireMigrated: boolean;
+  listSchemas?: boolean;
+  prepare?: () => Promise<TPrepared> | TPrepared;
+  processSchema: (schema: string, password: string, prepared: TPrepared) => Promise<string>;
+}
+
+/** Shared discovery/iteration/reporting lifecycle for every deployment mode. */
+async function runForAllSchemas<TPrepared = undefined>(deps: DeployCliDeps, password: string, options: SchemaSweepOptions<TPrepared>): Promise<void> {
+  const discoveryConnection = await deps.createConnection(discoveryConnectionOptions(password));
+  try {
+    deps.log('[Step 1] Finding all ForestGEO schemas...');
+    const schemas = await deps.discoverSchemas(discoveryConnection);
+    if (schemas.length === 0) {
+      deps.log('No forestgeo_* schemas found!');
+      return;
+    }
+
+    deps.log(`Found ${schemas.length} ForestGEO schemas${options.listSchemas ? ':' : '.'}`);
+    if (options.listSchemas) schemas.forEach(schema => deps.log(`  - ${schema}`));
+    deps.log('');
+
+    const prepared = options.prepare ? await options.prepare() : (undefined as TPrepared);
+    deps.log(options.operationMessage);
+    const results: SchemaResult[] = [];
+
+    for (const schema of schemas) {
+      deps.log(`Processing: ${schema}`);
+      try {
+        if (options.requireMigrated) {
+          const { migrated, missingTables } = await deps.checkMigrationStatus(discoveryConnection, schema);
+          if (!migrated) {
+            const detail = `Missing tables: ${missingTables.join(', ')}. Run run-migrations.sh against this schema first.`;
+            deps.log(`  SKIPPED (not migrated) - ${detail}`);
+            results.push({ schema, status: 'skipped', detail });
+            deps.log('');
+            continue;
+          }
+        }
+
+        const detail = await options.processSchema(schema, password, prepared);
+        deps.log(`  OK - ${detail}`);
+        results.push({ schema, status: 'deployed', detail });
+      } catch (error: any) {
+        const detail = error instanceof Error ? error.message : String(error);
+        deps.log(`  FAILED: ${detail}`);
+        results.push({ schema, status: 'failed', detail });
+      }
+      deps.log('');
+    }
+
+    reportSummary(deps, options.summaryTitle, results, schemas.length);
+  } finally {
+    await discoveryConnection.end();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // legacy-full-reset — unchanged behavior: corequeries.sql (which TRUNCATEs
 // sitespecificvalidations) + storedprocedures.sql applied to every migrated
@@ -350,78 +443,36 @@ function reportSummary(deps: DeployCliDeps, title: string, results: SchemaResult
 async function runLegacyFullReset(deps: DeployCliDeps): Promise<void> {
   deps.log('Starting validation and stored procedure deployment to all ForestGEO schemas...\n');
   const password = requireAzurePassword();
-
-  const discoveryConnection = await deps.createConnection(discoveryConnectionOptions(password));
-
-  try {
-    deps.log('[Step 1] Finding all ForestGEO schemas...');
-    const schemas = await deps.discoverSchemas(discoveryConnection);
-
-    if (schemas.length === 0) {
-      deps.log('No forestgeo_* schemas found!');
-      return;
-    }
-
-    deps.log(`Found ${schemas.length} ForestGEO schemas:`);
-    schemas.forEach(schema => deps.log(`  - ${schema}`));
-    deps.log('');
-
-    deps.log('[Step 2] Reading SQL source files...');
-    const scriptingDir = sqlSourceDir();
-    const corequeriesSQL = deps.readSqlFile(path.join(scriptingDir, 'corequeries.sql'));
-    deps.log(`  corequeries.sql: ${corequeriesSQL.length} chars`);
-    const storedprocsRaw = deps.readSqlFile(path.join(scriptingDir, 'storedprocedures.sql'));
-    const storedprocStatements = parseStoredProceduresSQL(storedprocsRaw);
-    deps.log(`  storedprocedures.sql: ${storedprocsRaw.length} chars, ${storedprocStatements.length} statements`);
-    deps.log('');
-
-    deps.log('[Step 3] Checking migration status and deploying...\n');
-
-    const results: SchemaResult[] = [];
-
-    for (const schema of schemas) {
-      deps.log(`Processing: ${schema}`);
-
-      try {
-        const { migrated, missingTables } = await deps.checkMigrationStatus(discoveryConnection, schema);
-
-        if (!migrated) {
-          const detail = `Missing tables: ${missingTables.join(', ')}. Run run-migrations.sh against this schema first.`;
-          deps.log(`  SKIPPED (not migrated) - ${detail}`);
-          results.push({ schema, status: 'skipped', detail });
-          deps.log('');
-          continue;
-        }
-
-        const schemaConnection = await deps.createConnection(schemaConnectionOptions(password, schema, true));
-        try {
-          await deployStoredProcedures(schemaConnection, storedprocStatements);
+  await runForAllSchemas(deps, password, {
+    summaryTitle: 'Deployment',
+    operationMessage: '[Step 3] Checking migration status and deploying...\n',
+    requireMigrated: true,
+    listSchemas: true,
+    prepare: () => {
+      deps.log('[Step 2] Reading SQL source files...');
+      const scriptingDir = sqlSourceDir();
+      const corequeriesSQL = deps.readSqlFile(path.join(scriptingDir, 'corequeries.sql'));
+      deps.log(`  corequeries.sql: ${corequeriesSQL.length} chars`);
+      const storedprocsRaw = deps.readSqlFile(path.join(scriptingDir, 'storedprocedures.sql'));
+      const storedprocStatements = parseStoredProceduresSQL(storedprocsRaw);
+      deps.log(`  storedprocedures.sql: ${storedprocsRaw.length} chars, ${storedprocStatements.length} statements\n`);
+      return { corequeriesSQL, storedprocStatements };
+    },
+    processSchema: async (schema, currentPassword, prepared) =>
+      withSchemaConnection(
+        schema,
+        async schemaConnection => {
+          await deployStoredProcedures(schemaConnection, prepared.storedprocStatements);
           deps.log('  Stored procedures deployed');
-
-          await schemaConnection.query(corequeriesSQL);
-
+          await schemaConnection.query(prepared.corequeriesSQL);
           const [validations] = await schemaConnection.query<mysql.RowDataPacket[]>(
             'SELECT ValidationID, ProcedureName, IsEnabled FROM sitespecificvalidations ORDER BY ValidationID'
           );
-          const enabledCount = countEnabledValidations(validations);
-          const detail = `${validations.length} validations (${enabledCount} enabled), stored procedures updated`;
-          deps.log(`  OK - ${detail}`);
-          results.push({ schema, status: 'deployed', detail });
-        } finally {
-          await schemaConnection.end();
-        }
-      } catch (error: any) {
-        deps.log(`  FAILED: ${error.message}`);
-        results.push({ schema, status: 'failed', detail: error.message });
-      }
-
-      deps.log('');
-    }
-
-    reportSummary(deps, 'Deployment', results, schemas.length);
-  } finally {
-    await discoveryConnection.end();
-  }
+          return `${validations.length} validations (${countEnabledValidations(validations)} enabled), stored procedures updated`;
+        },
+        s => deps.createConnection(schemaConnectionOptions(currentPassword, s, true))
+      )
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -434,58 +485,26 @@ async function runLegacyFullReset(deps: DeployCliDeps): Promise<void> {
 async function runProceduresOnlyForAllSchemas(deps: DeployCliDeps): Promise<void> {
   deps.log('Starting procedures-only deployment to all ForestGEO schemas...\n');
   const password = requireAzurePassword();
-
-  deps.log('[Step 1] Reading storedprocedures.sql (corequeries.sql is never read in this mode)...');
-  const storedprocsRaw = deps.readSqlFile(path.join(sqlSourceDir(), 'storedprocedures.sql'));
-  const statements = parseStoredProceduresSQL(storedprocsRaw);
-  deps.log(`  storedprocedures.sql: ${storedprocsRaw.length} chars, ${statements.length} statements\n`);
-
-  const discoveryConnection = await deps.createConnection(discoveryConnectionOptions(password));
-  try {
-    deps.log('[Step 2] Finding all ForestGEO schemas...');
-    const schemas = await deps.discoverSchemas(discoveryConnection);
-
-    if (schemas.length === 0) {
-      deps.log('No forestgeo_* schemas found!');
-      return;
+  await runForAllSchemas(deps, password, {
+    summaryTitle: 'Procedures-only deployment',
+    operationMessage: '[Step 3] Deploying stored procedures to each migrated schema...\n',
+    requireMigrated: true,
+    prepare: () => {
+      deps.log('[Step 2] Reading storedprocedures.sql (corequeries.sql is never read in this mode)...');
+      const raw = deps.readSqlFile(path.join(sqlSourceDir(), 'storedprocedures.sql'));
+      const statements = parseStoredProceduresSQL(raw);
+      deps.log(`  storedprocedures.sql: ${raw.length} chars, ${statements.length} statements\n`);
+      return statements;
+    },
+    processSchema: async (schema, currentPassword, statements) => {
+      await withSchemaConnection(
+        schema,
+        conn => deployProceduresOnly(conn, schema, statements),
+        s => deps.createConnection(schemaConnectionOptions(currentPassword, s, false))
+      );
+      return `stored procedures deployed and REQUIRED_PROCEDURES verified (${REQUIRED_PROCEDURES.length} procedures)`;
     }
-    deps.log(`Found ${schemas.length} ForestGEO schemas.\n`);
-
-    deps.log('[Step 3] Deploying stored procedures to each migrated schema...\n');
-    const results: SchemaResult[] = [];
-
-    for (const schema of schemas) {
-      deps.log(`Processing: ${schema}`);
-      try {
-        const { migrated, missingTables } = await deps.checkMigrationStatus(discoveryConnection, schema);
-        if (!migrated) {
-          const detail = `Missing tables: ${missingTables.join(', ')}. Run run-migrations.sh against this schema first.`;
-          deps.log(`  SKIPPED (not migrated) - ${detail}`);
-          results.push({ schema, status: 'skipped', detail });
-          deps.log('');
-          continue;
-        }
-
-        await withSchemaConnection(
-          schema,
-          conn => deployProceduresOnly(conn, schema, statements),
-          s => deps.createConnection(schemaConnectionOptions(password, s, false))
-        );
-
-        const detail = `stored procedures deployed and REQUIRED_PROCEDURES verified (${REQUIRED_PROCEDURES.length} procedures)`;
-        deps.log(`  OK - ${detail}`);
-        results.push({ schema, status: 'deployed', detail });
-      } catch (error: any) {
-        deps.log(`  FAILED: ${error.message}`);
-        results.push({ schema, status: 'failed', detail: error.message });
-      }
-      deps.log('');
-    }
-
-    reportSummary(deps, 'Procedures-only deployment', results, schemas.length);
-  } finally {
-    await discoveryConnection.end();
-  }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -497,44 +516,19 @@ async function runProceduresOnlyForAllSchemas(deps: DeployCliDeps): Promise<void
 async function runActivateValidation19ForAllSchemas(deps: DeployCliDeps): Promise<void> {
   deps.log('Activating validation 19 (ValidatePlotCoordinateConsistency) on eligible ForestGEO schemas...\n');
   const password = requireAzurePassword();
-
-  const discoveryConnection = await deps.createConnection(discoveryConnectionOptions(password));
-  try {
-    deps.log('[Step 1] Finding all ForestGEO schemas...');
-    const schemas = await deps.discoverSchemas(discoveryConnection);
-
-    if (schemas.length === 0) {
-      deps.log('No forestgeo_* schemas found!');
-      return;
+  await runForAllSchemas(deps, password, {
+    summaryTitle: 'Validation 19 activation',
+    operationMessage: '[Step 2] Activating validation 19 on each eligible schema...\n',
+    requireMigrated: false,
+    processSchema: async (schema, currentPassword) => {
+      await withSchemaConnection(
+        schema,
+        conn => activateValidation19(conn, schema),
+        s => deps.createConnection(schemaConnectionOptions(currentPassword, s, false))
+      );
+      return 'validation 19 (ValidatePlotCoordinateConsistency) enabled';
     }
-    deps.log(`Found ${schemas.length} ForestGEO schemas.\n`);
-
-    deps.log('[Step 2] Activating validation 19 on each eligible schema...\n');
-    const results: SchemaResult[] = [];
-
-    for (const schema of schemas) {
-      deps.log(`Processing: ${schema}`);
-      try {
-        await withSchemaConnection(
-          schema,
-          conn => activateValidation19(conn, schema),
-          s => deps.createConnection(schemaConnectionOptions(password, s, false))
-        );
-
-        const detail = 'validation 19 (ValidatePlotCoordinateConsistency) enabled';
-        deps.log(`  OK - ${detail}`);
-        results.push({ schema, status: 'deployed', detail });
-      } catch (error: any) {
-        deps.log(`  FAILED: ${error.message}`);
-        results.push({ schema, status: 'failed', detail: error.message });
-      }
-      deps.log('');
-    }
-
-    reportSummary(deps, 'Validation 19 activation', results, schemas.length);
-  } finally {
-    await discoveryConnection.end();
-  }
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -29,7 +29,7 @@ import fs from 'fs';
 import path from 'path';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { setupTestDatabase, teardownTestDatabase, type TestDatabaseConfig } from '../setup/local-db-setup';
-import { activateValidation19, deployProceduresOnly, parseStoredProceduresSQL } from '../../scripts/deploy-validations-to-all-schemas';
+import { activateValidation19, deployProceduresOnly, parseStoredProceduresSQL, VALIDATION_19_CONTRACT } from '../../scripts/deploy-validations-to-all-schemas';
 
 // ---------------------------------------------------------------------------
 // Safety guard — setupTestDatabase DROPs/CREATEs its schema; never run remote.
@@ -78,7 +78,28 @@ describe('deploy-validations-to-all-schemas — integration', () => {
     // comment on the INSERT. Every test in this file starts from a known,
     // disabled baseline so the "activation actually flips it" assertions are
     // meaningful.
-    await connection.query(`UPDATE sitespecificvalidations SET IsEnabled = FALSE WHERE ValidationID = 19`);
+    await connection.query(
+      `INSERT INTO sitespecificvalidations
+         (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
+       VALUES (19, ?, ?, ?, ?, ?, FALSE)
+       ON DUPLICATE KEY UPDATE
+         ProcedureName = VALUES(ProcedureName),
+         Description = VALUES(Description),
+         Criteria = VALUES(Criteria),
+         Definition = VALUES(Definition),
+         ChangelogDefinition = VALUES(ChangelogDefinition),
+         IsEnabled = FALSE`,
+      [
+        VALIDATION_19_CONTRACT.procedureName,
+        VALIDATION_19_CONTRACT.description,
+        VALIDATION_19_CONTRACT.criteria,
+        VALIDATION_19_CONTRACT.definition,
+        VALIDATION_19_CONTRACT.changelogDefinition
+      ]
+    );
+    await connection.query(`UPDATE measurement_errors SET ErrorMessage = ? WHERE ErrorSource = 'validation' AND ErrorCode = '19'`, [
+      VALIDATION_19_CONTRACT.errorMessage
+    ]);
     await connection.query(`DELETE FROM sitespecificvalidations WHERE ValidationID = ${CUSTOM_VALIDATION_ID}`);
   });
 
@@ -193,6 +214,14 @@ describe('deploy-validations-to-all-schemas — integration', () => {
       await expect(activateValidation19(connection, schema)).rejects.toThrow(/identity/i);
 
       expect(await isEnabled(19), 'a conflicting identity must never be flipped on').toBe(false);
+    }, 60000);
+
+    it('refuses activation when the identity matches but the executable definition is malformed', async () => {
+      await connection.query(`UPDATE sitespecificvalidations SET Definition = 'SELECT 1;' WHERE ValidationID = 19`);
+
+      await expect(activateValidation19(connection, schema)).rejects.toThrow(/repository contract/i);
+
+      expect(await isEnabled(19), 'a malformed rule must never be enabled').toBe(false);
     }, 60000);
 
     it('refuses activation when the measurement_errors row for validation 19 is missing', async () => {
