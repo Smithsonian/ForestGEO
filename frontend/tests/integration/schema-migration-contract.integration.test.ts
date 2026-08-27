@@ -514,6 +514,13 @@ describe('Plot-coordinate migration column-level guards', () => {
       // instead of silently accepting or "fixing" a shape it does not own.
       expect(columns[0]?.COLUMN_TYPE).toBe('varchar(50)');
       expect(columns[0]?.IS_NULLABLE).toBe('YES');
+
+      const [helpers] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS count FROM information_schema.ROUTINES
+          WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = 'mig_2026_08_27_01_raise_contract_conflict'`,
+        [schemaName]
+      );
+      expect(Number(helpers[0].count), 'failed migration must clean up its helper procedure').toBe(0);
     } finally {
       await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
     }
@@ -605,6 +612,13 @@ describe('Validation 19 identity-conflict preflight', () => {
         VALIDATION_19_ERROR_CODE
       ]);
       expect(Number(errorRows[0].count)).toBe(1);
+
+      const [helpers] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS count FROM information_schema.ROUTINES
+          WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = 'mig_2026_08_27_02_raise_validation_conflict'`,
+        [schemaName]
+      );
+      expect(Number(helpers[0].count), 'failed migration must clean up its helper procedure').toBe(0);
     } finally {
       await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
     }
@@ -671,6 +685,36 @@ describe('Validation 19 identity-conflict preflight', () => {
         [VALIDATION_19_ERROR_SOURCE, VALIDATION_19_ERROR_CODE]
       );
       expect(Number(errorRowsAfterRerun[0].count)).toBe(1);
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    }
+  }, 60_000);
+
+  it('repairs repository-owned fields on an exact but partially seeded validation identity', async () => {
+    const schemaName = 'validation19_partial_exact';
+    const exec = await provisionSchema(schemaName, async e => {
+      await e(`DELETE FROM sitespecificvalidations WHERE ValidationID = 19`);
+      await e(
+        `INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
+         VALUES (19, 'ValidatePlotCoordinateConsistency', 'partial', 'x', 'SELECT 1;', 'wrong', FALSE)`
+      );
+    });
+
+    try {
+      const result = await applyPendingMigrations(exec, schemaName, sources);
+      expect(result.failed, result.failed ? `${result.failed.id}: ${result.failed.error}` : undefined).toBeNull();
+
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT Description, Criteria, Definition, ChangelogDefinition, IsEnabled
+           FROM sitespecificvalidations WHERE ValidationID = 19`
+      );
+      expect(rows[0]).toMatchObject({
+        Description: "Plot coordinate disagrees with the quadrat's own median offset",
+        Criteria: 'stemPlotX;stemPlotY;stemLocalX;stemLocalY;quadratName;treeTag;stemTag',
+        Definition: 'CALL RunPlotCoordinateConsistencyValidation(@p_CensusID, @p_PlotID);',
+        ChangelogDefinition: ''
+      });
+      expect(isEnabledFlag(rows[0].IsEnabled)).toBe(false);
     } finally {
       await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
     }
