@@ -36,7 +36,10 @@ describe('splitSqlFile', () => {
     const statements = splitSqlFile(readFileSync(PROCS_FILE, 'utf-8'));
     const procedures = statements.filter(statement => /CREATE\s+PROCEDURE\b/i.test(statement.sql));
 
-    expect(procedures).toHaveLength(10);
+    // 11 as of RunPlotCoordinateConsistencyValidation (7ca65f58) — bump this count
+    // deliberately whenever storedprocedures.sql gains or loses a CREATE PROCEDURE,
+    // never to silence a failure without checking the new/removed procedure's DEFINER.
+    expect(procedures).toHaveLength(11);
     for (const procedure of procedures) {
       expect(procedure.sql).toMatch(/SQL SECURITY DEFINER/i);
       expect(procedure.sql).not.toMatch(/DEFINER\s*=/i);

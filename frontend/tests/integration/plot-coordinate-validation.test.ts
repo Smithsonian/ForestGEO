@@ -146,6 +146,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
 import { ingestBatch, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
 import { refreshMeasurementsSummaryForScope, refreshViewFullTableForScope } from '@/lib/measurementviewrefresh';
+import { checkFinishedCensus, partitionPreconditionFailures } from '@/lib/ctfs-export';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -776,6 +777,150 @@ describe('plot-coordinate-validation — integration', () => {
       await connection.query('CREATE TEMPORARY TABLE plot_coord_medians (probe INT)');
       await connection.query('DROP TEMPORARY TABLE plot_coord_offsets');
       await connection.query('DROP TEMPORARY TABLE plot_coord_medians');
+    });
+  });
+
+  // ===========================================================================
+  // Task 14: census-publish precondition gate (lib/ctfs-export checkFinishedCensus)
+  // ===========================================================================
+  //
+  // The app's only "publish a census" action is the CTFS export route
+  // (app/api/export/ctfs-sql/[schema]/[plotID]/[censusID], driven by
+  // components/dashboard/publishcensusbutton.tsx). There is no separately
+  // named "assertCensusPublishable" helper — its precondition gate IS
+  // checkFinishedCensus from lib/ctfs-export/precondition.ts.
+  //
+  // checkFinishedCensus classifies an unresolved measurement_error_log row as
+  // a WARNING kind (Task 10C: "unresolved-error" is data-quality, not
+  // destination-integrity), so on its own it does not 400 the route — the row
+  // is simply excluded and reported. What actually blocks a real publish is
+  // that exclusion (a row must have IsValidated=TRUE to export — see
+  // exportableMeasurementBaseWhere) taking the census below
+  // MIN_EXPORTABLE_FRACTION. These tests use a single-measurement census scope
+  // so that one unresolved validation-19 link drives the exportable count to
+  // zero and trips the blocking zero-exportable-rows check — the same
+  // mechanism a real, larger census hits once too much of it is unresolved.
+  describe('census-publish precondition gate (checkFinishedCensus + validation 19)', () => {
+    /**
+     * checkFinishedCensus's exportable-row count (check 8) joins the full
+     * species -> genus -> family chain. local-db-setup's inline species seed
+     * (seedSampleData) never populates species.GenusID, so every species row
+     * it creates fails that INNER JOIN and the export count is always zero —
+     * unrelated to anything this test seeds. Attach a real genus/family here,
+     * scoped to this describe block only, so the baseline census is
+     * genuinely exportable and the later block/resolve transitions are
+     * attributable to the validation-19 state we control.
+     */
+    async function ensureSpeciesHasTaxonomyChain(): Promise<number> {
+      const [speciesRows] = await connection.query<RowDataPacket[]>(`SELECT SpeciesID, GenusID FROM species WHERE SpeciesCode = ?`, [SPECIES_CODE]);
+      expect(speciesRows, `fixture species ${SPECIES_CODE} must exist`).toHaveLength(1);
+      const speciesID = speciesRows[0].SpeciesID;
+      if (speciesRows[0].GenusID != null) return speciesID;
+
+      await connection.query(`INSERT INTO family (Family) VALUES ('Sapindaceae') ON DUPLICATE KEY UPDATE Family = VALUES(Family)`);
+      const [familyRows] = await connection.query<RowDataPacket[]>(`SELECT FamilyID FROM family WHERE Family = 'Sapindaceae'`);
+      const familyID = familyRows[0].FamilyID;
+
+      await connection.query(`INSERT INTO genus (Genus, FamilyID) VALUES ('Acer', ?) ON DUPLICATE KEY UPDATE FamilyID = VALUES(FamilyID)`, [familyID]);
+      const [genusRows] = await connection.query<RowDataPacket[]>(`SELECT GenusID FROM genus WHERE Genus = 'Acer'`);
+      const genusID = genusRows[0].GenusID;
+
+      await connection.query(`UPDATE species SET GenusID = ? WHERE SpeciesID = ?`, [genusID, speciesID]);
+      return speciesID;
+    }
+
+    async function insertPublishableMeasurement(tag: string): Promise<{ coreMeasurementID: number }> {
+      const [quadratRows] = await connection.query<RowDataPacket[]>(`SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?`, [
+        QUADRAT_NAME,
+        plotID
+      ]);
+      expect(quadratRows, `fixture quadrat ${QUADRAT_NAME} must exist`).toHaveLength(1);
+      const quadratID = quadratRows[0].QuadratID;
+
+      const speciesID = await ensureSpeciesHasTaxonomyChain();
+
+      await connection.query(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`, [`TREE-${tag}`, speciesID, censusID]);
+      const [treeRows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() AS TreeID');
+      const treeID = treeRows[0].TreeID;
+
+      await connection.query(
+        `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, PlotX, PlotY, IsActive)
+         VALUES (?, ?, ?, ?, 1, 1, 1, 1, 1)`,
+        [treeID, quadratID, censusID, tag]
+      );
+      const [stemRows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() AS StemGUID');
+      const stemGUID = stemRows[0].StemGUID;
+
+      await connection.query(
+        `INSERT INTO coremeasurements
+           (CensusID, StemGUID, IsValidated, MeasuredDBH, MeasuredHOM, MeasurementDate, RawPlotX, RawPlotY, RawTreeTag, RawStemTag, IsActive)
+         VALUES (?, ?, TRUE, 10, 1.3, '2024-01-05', 1, 1, ?, ?, 1)`,
+        [censusID, stemGUID, `TREE-${tag}`, tag]
+      );
+      const [cmRows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() AS CoreMeasurementID');
+      return { coreMeasurementID: cmRows[0].CoreMeasurementID };
+    }
+
+    async function validation19ErrorID(): Promise<number> {
+      const [rows] = await connection.query<RowDataPacket[]>(`SELECT ErrorID FROM measurement_errors WHERE ErrorSource = 'validation' AND ErrorCode = '19'`);
+      expect(rows, 'validation 19 must be seeded in measurement_errors').toHaveLength(1);
+      return rows[0].ErrorID;
+    }
+
+    async function seedUnresolvedValidation19Link(coreMeasurementID: number): Promise<void> {
+      const errorID = await validation19ErrorID();
+      // Mirrors what the real orchestrator produces while validation 19 is
+      // unresolved: an open measurement_error_log row AND IsValidated=FALSE.
+      // components/processors/processorhelperfunctions.tsx#updateValidatedRows
+      // only ever flips a row to TRUE once no unresolved validation error
+      // remains for it, so this pairing is the real, reachable shape — not a
+      // synthetic one invented just for this test.
+      await connection.query(`INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, FALSE)`, [coreMeasurementID, errorID]);
+      await connection.query(`UPDATE coremeasurements SET IsValidated = FALSE WHERE CoreMeasurementID = ?`, [coreMeasurementID]);
+    }
+
+    async function resolveValidation19Link(coreMeasurementID: number): Promise<void> {
+      const errorID = await validation19ErrorID();
+      await connection.query(`UPDATE measurement_error_log SET IsResolved = TRUE, ResolvedAt = NOW() WHERE MeasurementID = ? AND ErrorID = ?`, [
+        coreMeasurementID,
+        errorID
+      ]);
+      await connection.query(`UPDATE coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = ?`, [coreMeasurementID]);
+    }
+
+    it('blocks publish while a validation-19 error is unresolved, and clears once resolved', async () => {
+      const { coreMeasurementID } = await insertPublishableMeasurement('PUB01');
+
+      // Baseline: the fully-validated, error-free row alone is publishable.
+      // This proves the later ok=false comes from the seeded error, not some
+      // other pre-existing condition in this scope — the assertion below
+      // must actually discriminate, not just always report a blocker.
+      const before = await checkFinishedCensus(connection, { schema, plotId: plotID, censusId: censusID });
+      expect(before.ok, 'a single validated, error-free row must be publishable').toBe(true);
+
+      await seedUnresolvedValidation19Link(coreMeasurementID);
+
+      const duringBlock = await checkFinishedCensus(connection, { schema, plotId: plotID, censusId: censusID });
+      expect(duringBlock.ok, 'an unresolved validation-19 error must fail the precondition check').toBe(false);
+      if (!duringBlock.ok) {
+        expect(
+          duringBlock.reasons.map(r => r.kind),
+          'validation 19 must surface through the unresolved-error check'
+        ).toContain('unresolved-error');
+        // This is the census's ONLY measurement, so excluding it (IsValidated
+        // must be TRUE to export) drops the exportable count to zero — the
+        // same outcome the CTFS export route 400s a real publish on.
+        const { blocking } = partitionPreconditionFailures(duringBlock.reasons);
+        expect(
+          blocking.map(r => r.kind),
+          'a sole unvalidated row must block the real publish, not just warn'
+        ).toContain('zero-exportable-rows');
+      }
+
+      await resolveValidation19Link(coreMeasurementID);
+
+      const afterResolve = await checkFinishedCensus(connection, { schema, plotId: plotID, censusId: censusID });
+      expect(afterResolve.ok, 'resolving the validation-19 link must clear the publish blocker').toBe(true);
     });
   });
 });
