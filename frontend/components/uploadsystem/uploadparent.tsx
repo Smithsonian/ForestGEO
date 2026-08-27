@@ -5,7 +5,7 @@ import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType
 import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
-import { Box, CircularProgress, Stack, Typography } from '@mui/joy';
+import { Box, Button, CircularProgress, Stack, Typography } from '@mui/joy';
 import ContextValidationGuard from '@/components/shared/ContextValidationGuard';
 import UploadParseFiles from '@/components/uploadsystem/segments/uploadparsefiles';
 import UploadAsyncJob from '@/components/uploadsystem/segments/uploadasyncjob';
@@ -36,6 +36,11 @@ import type { ArcgisImportReference } from '@/lib/arcgis/types';
 import type { QuadratOverlapAcknowledgment } from '@/lib/provisioning/types';
 import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
 import { useAsyncUploadFeature } from '@/app/hooks/useasyncuploadfeature';
+
+// Revision matching can hang indefinitely on a stalled connection; this bounds how long
+// the UI waits before treating the request as failed rather than leaving the user on the
+// loading state forever.
+const REVISION_MATCH_TIMEOUT_MS = 120_000;
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -170,6 +175,11 @@ function UploadParentInner(props: UploadParentProps) {
 
   // Track if we've already initialized reingestion to prevent re-triggering
   const reingestionInitializedRef = useRef(false);
+
+  // The in-flight /api/revisionupload request's controller, so the cancel button and
+  // unmount cleanup can abort it explicitly rather than leaving it to resolve into a
+  // component that no longer wants the result.
+  const revisionMatchAbortControllerRef = useRef<AbortController | null>(null);
 
   // Context and session
   const _currentPlot = usePlotContext();
@@ -374,11 +384,19 @@ function UploadParentInner(props: UploadParentProps) {
     }
   }
 
+  function cancelRevisionMatch() {
+    revisionMatchAbortControllerRef.current?.abort();
+  }
+
   async function handleRevisionMatch() {
     const files = Object.entries(parsedData).map(([fileName, fileRows]) => ({
       fileName,
       rows: Object.values(fileRows)
     }));
+
+    const controller = new AbortController();
+    revisionMatchAbortControllerRef.current = controller;
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(REVISION_MATCH_TIMEOUT_MS)]);
 
     try {
       const response = await fetch('/api/revisionupload', {
@@ -389,7 +407,8 @@ function UploadParentInner(props: UploadParentProps) {
           plotID: currentPlotID,
           censusID: currentCensusID,
           schema: currentSite?.schemaName
-        })
+        }),
+        signal
       });
 
       if (!response.ok) {
@@ -400,6 +419,19 @@ function UploadParentInner(props: UploadParentProps) {
       const result: RevisionUploadResponse = await response.json();
       setRevisionMatchResult(result);
     } catch (err: unknown) {
+      // A manual abort (cancel button or unmount) means the user has already navigated
+      // away -- surfacing an error here would fight that. AbortSignal.timeout's own
+      // abort carries a distinct DOMException name, so it still reports as a failure.
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
+
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        errorHandling.setError(new Error(`Revision matching timed out after ${REVISION_MATCH_TIMEOUT_MS / 1000}s`));
+        uploadState.setReviewState(ReviewStates.ERRORS);
+        return;
+      }
+
       const errorObj = err instanceof Error ? err : new Error(String(err));
       errorHandling.setError(errorObj);
       uploadState.setReviewState(ReviewStates.ERRORS);
@@ -420,6 +452,14 @@ function UploadParentInner(props: UploadParentProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parsedData, revisionMatchResult, uploadState.state.reviewState]);
+
+  // Abort any in-flight revision-match request on unmount so it doesn't resolve into a
+  // component that no longer exists.
+  useEffect(() => {
+    return () => {
+      revisionMatchAbortControllerRef.current?.abort();
+    };
+  }, []);
 
   // Check if we should start with reingestion processing (only once on mount)
   useEffect(() => {
@@ -557,6 +597,16 @@ function UploadParentInner(props: UploadParentProps) {
             <Stack spacing={2} alignItems="center" sx={{ p: 3 }}>
               <CircularProgress />
               <Typography level="body-md">Matching revision rows&hellip;</Typography>
+              <Button
+                variant="outlined"
+                color="neutral"
+                onClick={() => {
+                  cancelRevisionMatch();
+                  void handleReturnToStart();
+                }}
+              >
+                Cancel and return to start
+              </Button>
             </Stack>
           );
         }
