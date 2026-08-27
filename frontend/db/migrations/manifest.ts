@@ -87,5 +87,9 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-08-27-01-add-plot-coordinates',
     file: 'schema-contract-repair/2026-08-27-01-add-plot-coordinates.sql'
+  },
+  {
+    id: '2026-08-27-02-seed-validation-19',
+    file: 'schema-contract-repair/2026-08-27-02-seed-validation-19.sql'
   }
 ] as const;
