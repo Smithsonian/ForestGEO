@@ -26,6 +26,8 @@ const CSV_ALIASES: Record<string, string[]> = {
   quadrat: ['quadrat', 'quad', 'quadratname'],
   lx: ['lx', 'localx', 'x', 'xcoord'],
   ly: ['ly', 'localy', 'y', 'ycoord'],
+  px: ['px', 'plotx'],
+  py: ['py', 'ploty'],
   dbh: ['dbh', 'diameter'],
   hom: ['hom', 'height', 'heightofmeasurement'],
   date: ['date', 'measurementdate', 'dateof'],
