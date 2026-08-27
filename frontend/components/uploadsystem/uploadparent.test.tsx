@@ -586,13 +586,48 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     return { applyRequestBodies, resolveMatch: () => releaseMatch?.() };
   }
 
+  /**
+   * Mocks /api/revisionupload as a request that never resolves on its own -- it only
+   * settles by rejecting with the same AbortError DOMException real fetch() produces
+   * when the request's signal aborts (verified against Node's real fetch: a manual
+   * AbortController.abort() surfaces as `DOMException` named 'AbortError'). This lets
+   * the cancel-button and unmount tests observe the abort without a real timeout.
+   */
+  function mockNeverSettlingRevisionMatchFetch() {
+    const signals: AbortSignal[] = [];
+
+    const impl = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url !== '/api/revisionupload') {
+        throw new Error(`Unexpected fetch call to ${url} in never-settling revision match test`);
+      }
+
+      const signal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        if (!signal) return;
+        signals.push(signal);
+        const rejectWithAbortError = () => reject(new DOMException('This operation was aborted', 'AbortError'));
+        if (signal.aborted) {
+          rejectWithAbortError();
+          return;
+        }
+        signal.addEventListener('abort', rejectWithAbortError);
+      });
+    });
+
+    global.fetch = impl as unknown as typeof global.fetch;
+    return { signals };
+  }
+
   async function driveToRevisionMatch(user: ReturnType<typeof userEvent.setup>) {
-    render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} overrideUploadMode={UploadMode.REVISIONS} />);
+    const renderResult = render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} overrideUploadMode={UploadMode.REVISIONS} />);
 
     await user.click(screen.getByText('Add File'));
     await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
 
     await user.click(screen.getByText('Continue Upload'));
+
+    return renderResult;
   }
 
   it('opens on the New Rows tab for a new-only revision upload, and requires explicit confirmation before applying', async () => {
@@ -705,5 +740,41 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     expect(screen.queryByText('No rows with changes were found.')).not.toBeInTheDocument();
 
     expect(screen.getByTestId('revision-match-apply')).toBeDisabled();
+  });
+
+  it('cancels the in-flight revision match request and returns to start without showing an error', async () => {
+    const user = userEvent.setup();
+    const { signals } = mockNeverSettlingRevisionMatchFetch();
+
+    await driveToRevisionMatch(user);
+
+    await waitFor(() => expect(screen.getByText(/matching revision rows/i)).toBeInTheDocument());
+    const cancelButton = screen.getByText('Cancel and return to start');
+    expect(cancelButton).toBeInTheDocument();
+
+    await user.click(cancelButton);
+
+    // Returns to the start screen (UploadStart, mocked above) rather than staying on
+    // the loading state or falling through to the error screen.
+    await waitFor(() => expect(screen.getByTestId('upload-start')).toBeInTheDocument());
+    expect(screen.queryByTestId('upload-error')).not.toBeInTheDocument();
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(true);
+  });
+
+  it('aborts the in-flight revision match request on unmount', async () => {
+    const user = userEvent.setup();
+    const { signals } = mockNeverSettlingRevisionMatchFetch();
+
+    const { unmount } = await driveToRevisionMatch(user);
+
+    await waitFor(() => expect(screen.getByText(/matching revision rows/i)).toBeInTheDocument());
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(false);
+
+    unmount();
+
+    expect(signals[0]?.aborted).toBe(true);
   });
 });

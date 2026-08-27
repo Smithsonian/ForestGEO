@@ -13,6 +13,7 @@ import {
   createTestPool,
   seedCatalogTables,
   clearProvisioningState,
+  suppressBackgroundDispatch,
   makeRequest,
   GLOBAL_SESSION,
   DB_ADMIN_SESSION,
@@ -71,20 +72,16 @@ function buildValidInput(schemaName: string) {
 }
 
 describe('POST /api/admin/provision (integration)', () => {
-  let setImmediateSpy: ReturnType<typeof vi.spyOn>;
+  let setImmediateSpy: ReturnType<typeof suppressBackgroundDispatch>;
 
   beforeAll(async () => {
     testPool = createTestPool();
     await seedCatalogTables(testPool);
-    // Prevent the orchestrator's background runProvisioning kickoff from
-    // actually executing — we only need to verify the synchronous catalog
-    // insertions that startRun performs inline before `dispatchRun` schedules
-    // the real work through setImmediate.
-    setImmediateSpy = vi.spyOn(globalThis, 'setImmediate').mockImplementation(((_cb: any) => 0) as any);
   });
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    setImmediateSpy = suppressBackgroundDispatch();
     await clearProvisioningState(testPool, TEST_SCHEMA);
   });
 
@@ -147,6 +144,11 @@ describe('POST /api/admin/provision (integration)', () => {
 
   it('inserts the run row, all step rows, and returns 202 with runId for a global admin', async () => {
     mocks.auth.mockResolvedValue(GLOBAL_SESSION);
+    // The step assertions below only hold while background dispatch is suppressed;
+    // otherwise runProvisioning races them and advances the steps past 'pending'.
+    // Asserted on the stub rather than on the resulting DB state because the
+    // background work lands a tick later, which makes any DB-based check a race.
+    expect(vi.isMockFunction(globalThis.setImmediate), 'setImmediate stub was not active: restoreMocks tore down a beforeAll spy').toBe(true);
 
     const res = await POST(makeRequest(POST_URL, { method: 'POST', body: buildValidInput(TEST_SCHEMA) }));
 
