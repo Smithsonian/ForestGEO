@@ -87,9 +87,13 @@ vi.mock('@/config/uploadsessiontracker', () => ({
   }
 }));
 
-vi.mock('@/config/measurementerrors', () => ({
-  insertIngestionFailureRows: vi.fn().mockResolvedValue([])
-}));
+vi.mock('@/config/measurementerrors', async importOriginal => {
+  const actual = (await importOriginal()) as object;
+  return {
+    ...actual,
+    insertIngestionFailureRows: vi.fn().mockResolvedValue([])
+  };
+});
 
 vi.mock('@/components/processors/processorhelperfunctions', () => ({
   insertOrUpdate: vi.fn().mockResolvedValue(undefined)
@@ -109,7 +113,7 @@ vi.mock('mysql2/promise', async importOriginal => {
 });
 
 /** Number of columns in the temporarymeasurements INSERT (FileID through PublishedStemID) */
-const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 18;
+const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 20;
 
 const TEST_SESSION_ID = 'session-1';
 const TEST_PLOT_ID = 22;
