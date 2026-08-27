@@ -960,6 +960,26 @@ export default function ErrorsExplorer() {
         valueFormatter: (value: number | null | undefined) => Number(value ?? 0).toFixed(2)
       },
       {
+        field: 'stemPlotX',
+        headerName: 'Plot X',
+        width: 105,
+        type: 'number',
+        editable: false,
+        align: 'right',
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => (value == null ? '' : Number(value).toFixed(2))
+      },
+      {
+        field: 'stemPlotY',
+        headerName: 'Plot Y',
+        width: 105,
+        type: 'number',
+        editable: false,
+        align: 'right',
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => (value == null ? '' : Number(value).toFixed(2))
+      },
+      {
         field: 'measuredDBH',
         headerName: 'DBH',
         width: 95,
