@@ -22,7 +22,7 @@ const { insertIngestionFailureRowsMock } = vi.hoisted(() => ({
 vi.mock('@/config/measurementerrors', () => ({
   insertIngestionFailureRows: insertIngestionFailureRowsMock,
   toFiniteNumber: (value: unknown): number | null => {
-    if (value === null || value === undefined || value === '') return null;
+    if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return null;
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
   }
@@ -259,5 +259,14 @@ describe('recordFailedMeasurementRows', () => {
     expect(mapped[0].plotY).toBe(267.5);
     expect(mapped[1].plotX, 'absent plot coordinate must map to null, not undefined/0').toBeNull();
     expect(mapped[1].plotY).toBeNull();
+  });
+
+  it('normalizes runtime numeric strings, preserves zero, and nulls malformed rejected values', async () => {
+    const rows = [{ tag: 'T060', failureReasons: 'bad plot x', plotX: 'abc', plotY: 0, x: '1.25', y: '   ', dbh: 'Infinity' } as any];
+
+    await recordFailedMeasurementRows(makeConnectionManager(), 'forestgeo_test', rows, 'f.csv', 'b-004', 1, 2);
+
+    const [mapped] = insertIngestionFailureRowsMock.mock.calls[0][2];
+    expect(mapped).toMatchObject({ x: 1.25, y: null, plotX: null, plotY: 0, dbh: null });
   });
 });

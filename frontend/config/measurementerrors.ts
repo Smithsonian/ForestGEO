@@ -566,7 +566,7 @@ const FIELD_LENGTH_LIMITS = {
 } as const;
 
 export function toFiniteNumber(value: unknown): number | null {
-  if (value === null || value === undefined || value === '') return null;
+  if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }

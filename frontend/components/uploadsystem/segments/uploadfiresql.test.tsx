@@ -309,7 +309,7 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
                 quadrat: 'Q0001',
                 lx: '1.5',
                 ly: '2.5',
-                px: '-0.271',
+                px: 0,
                 py: '267.5',
                 date: '2020-01-01',
                 failureReason: 'Duplicate row'
@@ -353,7 +353,7 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
     const requestBody = JSON.parse(String((batchedUploadCall?.[1] as RequestInit).body));
 
     expect(requestBody).toHaveLength(1);
-    expect(requestBody[0].plotX).toBe('-0.271');
+    expect(requestBody[0].plotX).toBe(0);
     expect(requestBody[0].plotY).toBe('267.5');
   });
 });

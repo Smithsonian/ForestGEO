@@ -86,6 +86,28 @@ describe('batchedupload POST route', () => {
     expect(body.message).toMatch(/No data provided for batch upload/i);
   });
 
+  it('400 when the body is not an array of row objects', async () => {
+    const nonArray = await POST(makeRequest({ plotX: 1 }), makeParams('forestgeo_testing', ['1', '2']));
+    expect(nonArray.status).toBe(400);
+
+    const scalarRow = await POST(makeRequest([42]), makeParams('forestgeo_testing', ['1', '2']));
+    expect(scalarRow.status).toBe(400);
+    expect(recordFailedMeasurementRows).not.toHaveBeenCalled();
+  });
+
+  it('400 when the body is malformed JSON', async () => {
+    const req = new Request('http://localhost/api', {
+      method: 'POST',
+      body: '{not-json',
+      headers: { 'content-type': 'application/json' }
+    }) as any;
+    req.nextUrl = new URL('http://localhost/api');
+
+    const res = await POST(req, makeParams('forestgeo_testing', ['1', '2']));
+    expect(res.status).toBe(400);
+    expect(recordFailedMeasurementRows).not.toHaveBeenCalled();
+  });
+
   it('happy path: validateContextualValues succeeds → proceeds, branded schema is forwarded', async () => {
     const payload = [
       { id: 999, failedMeasurementID: 123, treeID: 10, stemGUID: 20, reason: 'bad diameter' },
