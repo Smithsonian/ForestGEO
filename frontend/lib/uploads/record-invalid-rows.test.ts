@@ -19,13 +19,9 @@ const { insertIngestionFailureRowsMock } = vi.hoisted(() => ({
   insertIngestionFailureRowsMock: vi.fn()
 }));
 
-vi.mock('@/config/measurementerrors', () => ({
-  insertIngestionFailureRows: insertIngestionFailureRowsMock,
-  toFiniteNumber: (value: unknown): number | null => {
-    if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
+vi.mock('@/config/measurementerrors', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/config/measurementerrors')>()),
+  insertIngestionFailureRows: insertIngestionFailureRowsMock
 }));
 
 vi.mock('@/lib/db/connectionmanager', () => ({
@@ -93,6 +89,13 @@ describe('recordInvalidRows', () => {
     expect(rows[0].y).toBeNull();
     expect(rows[0].dbh).toBeNull();
     expect(rows[0].hom).toBeNull();
+  });
+
+  it('non-scalar, non-decimal, and out-of-range runtime values map to null', async () => {
+    await recordInvalidRows(makeConnectionManager(), BASE_CTX, [{ tag: 'T002b', lx: true, ly: [], px: '0x10', py: 1000000, dbh: {}, hom: '-1000000' } as any]);
+
+    const [row] = insertIngestionFailureRowsMock.mock.calls[0][2];
+    expect(row).toMatchObject({ x: null, y: null, plotX: null, plotY: null, dbh: null, hom: null });
   });
 
   it('valid numeric strings produce finite numbers', async () => {

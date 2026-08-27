@@ -703,7 +703,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     renderHeader: () => formatHeader('X', 'Plot'),
     flex: 0.7,
     valueFormatter: (value: number | null | undefined) => {
-      return Number(value ?? 0).toFixed(2);
+      return value == null ? '' : Number(value).toFixed(2);
     },
     maxWidth: 100,
     editable: false,
@@ -718,7 +718,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     type: 'number',
     maxWidth: 100,
     valueFormatter: (value: number | null | undefined) => {
-      return Number(value ?? 0).toFixed(2);
+      return value == null ? '' : Number(value).toFixed(2);
     },
     editable: false,
     filterOperators: customNumericOperators

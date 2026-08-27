@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ViewFullTableGridColumns, VIEW_FULL_TABLE_COLUMN_WIDTHS } from './datagridcolumns';
+import { MeasurementsSummaryViewGridColumns, ViewFullTableGridColumns, VIEW_FULL_TABLE_COLUMN_WIDTHS } from './datagridcolumns';
 
 // The archive "All Historical Data" grid formerly gave every one of its columns a
 // uniform `flex: 0.3` with no minWidth, which starved headers down to one or two visible
@@ -62,5 +62,18 @@ describe('ViewFullTableGridColumns width presets', () => {
     // code bucket (includes the hidden-by-default ID columns).
     expect(byField.get('speciesCode')).toMatchObject(VIEW_FULL_TABLE_COLUMN_WIDTHS.code);
     expect(byField.get('coreMeasurementID')).toMatchObject(VIEW_FULL_TABLE_COLUMN_WIDTHS.code);
+  });
+});
+
+describe('MeasurementsSummaryViewGridColumns plot coordinates', () => {
+  it.each(['stemPlotX', 'stemPlotY'])('renders missing %s as blank while preserving a real zero', field => {
+    const column = MeasurementsSummaryViewGridColumns.find(candidate => candidate.field === field);
+    expect(column?.valueFormatter).toBeTypeOf('function');
+    const format = column!.valueFormatter as (value: number | null | undefined) => string;
+
+    expect(format(null)).toBe('');
+    expect(format(undefined)).toBe('');
+    expect(format(0)).toBe('0.00');
+    expect(format(12.345)).toBe('12.35');
   });
 });

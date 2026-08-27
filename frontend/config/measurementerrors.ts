@@ -565,10 +565,27 @@ const FIELD_LENGTH_LIMITS = {
   Codes: 255
 } as const;
 
+// Raw failed-row measurements are persisted in DECIMAL(12,6) columns. Keep
+// runtime values inside that representable range so malformed API payloads
+// cannot turn a rejected-row audit insert into a second database failure.
+const MAX_STORED_DECIMAL = 999999.999999;
+const BASE_10_NUMBER_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
 export function toFiniteNumber(value: unknown): number | null {
-  if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  if (value === null || value === undefined) return null;
+
+  let parsed: number;
+  if (typeof value === 'number') {
+    parsed = value;
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '' || !BASE_10_NUMBER_PATTERN.test(trimmed)) return null;
+    parsed = Number(trimmed);
+  } else {
+    return null;
+  }
+
+  return Number.isFinite(parsed) && Math.abs(parsed) <= MAX_STORED_DECIMAL ? parsed : null;
 }
 
 /**

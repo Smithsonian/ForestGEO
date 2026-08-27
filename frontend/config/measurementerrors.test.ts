@@ -6,7 +6,8 @@ import {
   getIngestionErrorMessage,
   inferAllIngestionErrorCodes,
   insertIngestionFailureRows,
-  revalidateEditedFailedRow
+  revalidateEditedFailedRow,
+  toFiniteNumber
 } from './measurementerrors';
 
 vi.mock('@/ailogger', () => ({
@@ -18,6 +19,19 @@ vi.mock('@/ailogger', () => ({
 }));
 
 describe('measurementerrors helpers', () => {
+  it('accepts only finite base-10 scalar values that fit the failed-row DECIMAL columns', () => {
+    expect(toFiniteNumber(' -12.5e2 ')).toBe(-1250);
+    expect(toFiniteNumber(0)).toBe(0);
+    expect(toFiniteNumber('999999.999999')).toBe(999999.999999);
+
+    expect(toFiniteNumber(true)).toBeNull();
+    expect(toFiniteNumber([])).toBeNull();
+    expect(toFiniteNumber('0x10')).toBeNull();
+    expect(toFiniteNumber('Infinity')).toBeNull();
+    expect(toFiniteNumber(1000000)).toBeNull();
+    expect(toFiniteNumber('-1000000')).toBeNull();
+  });
+
   it('includes stored coremeasurement descriptions in failed-measurements queries', () => {
     const sql = buildFailedMeasurementsSelectQuery('forestgeo_testing');
 
