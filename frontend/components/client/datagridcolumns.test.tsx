@@ -4,10 +4,10 @@ import { ViewFullTableGridColumns, VIEW_FULL_TABLE_COLUMN_WIDTHS } from './datag
 // The archive "All Historical Data" grid formerly gave every one of its columns a
 // uniform `flex: 0.3` with no minWidth, which starved headers down to one or two visible
 // characters (M…, Pl…). These tests lock in that every column now carries a per-type width
-// preset with a legibility floor (minWidth). 54 = the original 53 + plotGlobalCoordinatesEPSG
-// (added alongside viewfulltable.PlotGlobalCoordinatesEPSG, 2026-08-04).
+// preset with a legibility floor (minWidth). 56 = the prior 54 (53 + plotGlobalCoordinatesEPSG,
+// added 2026-08-04) + stemPlotX/stemPlotY (site-supplied plot coordinates, 2026-08-27).
 const FORMER_UNIFORM_FLEX = 0.3;
-const EXPECTED_COLUMN_COUNT = 54;
+const EXPECTED_COLUMN_COUNT = 56;
 const SMALLEST_PRESET_MIN_WIDTH = VIEW_FULL_TABLE_COLUMN_WIDTHS.code.minWidth;
 
 const presetList = Object.values(VIEW_FULL_TABLE_COLUMN_WIDTHS);
