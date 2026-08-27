@@ -16,13 +16,30 @@ const QUERIES_FILE = () => path.join(process.cwd(), 'db/sql/corequeries.sql');
  * for the same change the two constants must still differ or the stamps
  * collapse into one row.
  */
-const SCHEMA_VERSION = '2026-08-27';
+// Additive changes for already-provisioned schemas are owned by the migration
+// manifest, not by replaying tablestructures.sql/corequeries.sql. Keep the
+// table/validation stamp stable for this release: bumping it would rerun
+// CREATE TABLE IF NOT EXISTS against old tables (which cannot add columns) and
+// could replay the destructive validation seed while still stamping success.
+const SCHEMA_VERSION = '2026-08-04';
 const PROCEDURES_SCHEMA_VERSION = '2026-08-27-procs';
 const META_TABLE = '_provisioning_meta';
 
 const VALIDATIONS_TABLE = 'sitespecificvalidations';
 const REQUIRED_TABLES = ['plots', 'census', 'quadrats', 'coremeasurements', 'measurement_errors', 'uploadmetrics', 'validation_runs'] as const;
 export const REQUIRED_VIEWS = ['uploaddatalossreport'] as const;
+const REQUIRED_PLOT_COORDINATE_COLUMNS = [
+  ['temporarymeasurements', 'PlotX'],
+  ['temporarymeasurements', 'PlotY'],
+  ['stems', 'PlotX'],
+  ['stems', 'PlotY'],
+  ['coremeasurements', 'RawPlotX'],
+  ['coremeasurements', 'RawPlotY'],
+  ['measurementssummary', 'StemPlotX'],
+  ['measurementssummary', 'StemPlotY'],
+  ['viewfulltable', 'StemPlotX'],
+  ['viewfulltable', 'StemPlotY']
+] as const;
 
 /**
  * Canonical list of stored procedures defined in storedprocedures.sql.
@@ -43,14 +60,13 @@ export const REQUIRED_PROCEDURES = [
 ] as const;
 
 /**
- * Expected minimum count of seeded validation rules in `sitespecificvalidations`.
- * Derived from `INSERT INTO sitespecificvalidations` statements in corequeries.sql
- * (currently 17: IDs 1-9, 11-15, 17-19). The 00-infrastructure test fixture adds
- * 2 more (IDs 20-21) via local-db-setup.ts, totaling 19 — those are test-only
- * extras and NOT part of provisioning. If corequeries.sql gains/loses validation
- * INSERTs, bump this constant and SCHEMA_VERSION together.
+ * Minimum validation count belonging to the last replay-safe provisioning
+ * stamp. Later additive rules (including validation 19) are migration-owned and
+ * must not force corequeries.sql to replay against existing site-authored rows.
+ * Fresh schemas receive all current rules from corequeries.sql and therefore
+ * naturally exceed this floor.
  */
-const EXPECTED_VALIDATION_COUNT = 17;
+const EXPECTED_VALIDATION_COUNT = 16;
 
 interface ProvisioningMetaRow {
   SchemaVersion: string;
@@ -158,6 +174,20 @@ async function hasRequiredSchemaObjects(ctx: StepContext): Promise<boolean> {
   return REQUIRED_TABLES.every(name => existing.has(name)) && REQUIRED_VIEWS.every(name => existing.has(name));
 }
 
+async function hasRequiredPlotCoordinateColumns(ctx: StepContext): Promise<boolean> {
+  if (!ctx.sitePool) return false;
+  const [rows]: any = await ctx.sitePool.query(
+    `SELECT LOWER(TABLE_NAME) AS table_name, LOWER(COLUMN_NAME) AS column_name
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = ?`,
+    [ctx.schemaName]
+  );
+  const existing = new Set(
+    rows.map((row: any) => `${String(row.table_name ?? row.TABLE_NAME).toLowerCase()}.${String(row.column_name ?? row.COLUMN_NAME).toLowerCase()}`)
+  );
+  return REQUIRED_PLOT_COORDINATE_COLUMNS.every(([table, column]) => existing.has(`${table.toLowerCase()}.${column.toLowerCase()}`));
+}
+
 async function resetSiteSchema(ctx: StepContext): Promise<void> {
   validateSchemaOrThrow(ctx.schemaName);
   if (ctx.sitePool) {
@@ -206,6 +236,11 @@ export const initTablesStep: ProvisioningStep = {
     const existing = await getExistingSiteObjects(ctx);
     if (existing.size > 0 && !(await hasRequiredSchemaObjects(ctx))) {
       await resetSiteSchema(ctx);
+    } else if (existing.size > 0 && !(await hasRequiredPlotCoordinateColumns(ctx))) {
+      throw new Error(
+        `Existing schema ${ctx.schemaName} is missing migration-owned plot-coordinate columns. ` +
+          'Run apply-schema-migrations before resuming provisioning; tablestructures.sql cannot alter existing tables safely.'
+      );
     }
     await executeSqlFile(ctx.sitePool, TABLES_FILE(), ctx.schemaName);
     await ensureMetaTable(ctx);
@@ -224,6 +259,11 @@ export const deployProceduresStep: ProvisioningStep = {
   },
   async run(ctx: StepContext): Promise<void> {
     if (!ctx.sitePool) throw new Error('sitePool not initialized');
+    if (!(await hasRequiredPlotCoordinateColumns(ctx))) {
+      throw new Error(
+        `Schema ${ctx.schemaName} is missing migration-owned plot-coordinate columns. ` + 'Run apply-schema-migrations before deploying stored procedures.'
+      );
+    }
     await executeSqlFile(ctx.sitePool, PROCS_FILE(), ctx.schemaName);
     await ensureMetaTable(ctx);
     await writeMetaTimestamp(ctx, 'ProceduresDeployedAt', PROCEDURES_SCHEMA_VERSION);

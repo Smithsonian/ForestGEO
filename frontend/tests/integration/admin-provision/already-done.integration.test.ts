@@ -21,13 +21,13 @@ import { initTablesStep, deployProceduresStep, seedValidationsStep } from '@/lib
 import type { StepContext, ProvisioningInput } from '@/lib/provisioning/types';
 
 const TEST_SCHEMA = TEST_SCHEMA_PREFIX + 'meta';
-const CURRENT_SCHEMA_VERSION = '2026-08-27';
+const CURRENT_SCHEMA_VERSION = '2026-08-04';
 const CURRENT_PROCEDURES_VERSION = '2026-08-27-procs';
 const STALE_SCHEMA_VERSION = '2020-01-01';
 const META_TABLE = '_provisioning_meta';
-// Mirrors lib/provisioning/steps/sql-steps.ts:EXPECTED_VALIDATION_COUNT.
-// Reflects the actual number of validation INSERTs in corequeries.sql.
-const EXPECTED_VALIDATION_COUNT = 17;
+// Mirrors the replay-safe provisioning floor. Newer additive validation rows
+// are delivered by the schema migration manifest.
+const EXPECTED_VALIDATION_COUNT = 16;
 
 const REQUIRED_TABLES_FOR_ALREADY_DONE = ['plots', 'census', 'quadrats', 'coremeasurements', 'measurement_errors', 'uploadmetrics', 'validation_runs'] as const;
 const REQUIRED_VIEW_FOR_ALREADY_DONE = 'uploaddatalossreport';
