@@ -9,6 +9,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import mysql, { type Pool } from 'mysql2/promise';
+import { vi } from 'vitest';
 
 export const TEST_SCHEMA_PREFIX = 'forestgeo_routetest_';
 
@@ -30,6 +31,22 @@ export interface SeedStep {
   startedAtSecondsAgo?: number;
   finishedAt?: Date | null;
   errorMessage?: string | null;
+}
+
+/**
+ * Suppresses the orchestrator's background `dispatchRun` kickoff by stubbing
+ * `setImmediate` to a no-op, so the caller observes only the synchronous catalog
+ * writes that startRun/retryRun perform inline.
+ *
+ * MUST be called from beforeEach, never beforeAll. vitest.integration.config.mts
+ * sets `restoreMocks`, which tears a beforeAll spy down after the FIRST test.
+ * With the seam dead from test 2 onward, dispatchRun ran real provisioning —
+ * CREATE DATABASE and schema DDL — and started a 10-second heartbeat interval
+ * that outlived the file and deadlocked the next test's catalog cleanup
+ * (ER_LOCK_DEADLOCK on DELETE FROM catalog.provisioning_runs).
+ */
+export function suppressBackgroundDispatch() {
+  return vi.spyOn(globalThis, 'setImmediate').mockImplementation((() => 0) as never);
 }
 
 export function createTestPool(): Pool {
