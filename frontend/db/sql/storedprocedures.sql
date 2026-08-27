@@ -3558,4 +3558,131 @@ END $$
 
 DELIMITER ;
 
+DROP PROCEDURE IF EXISTS RunPlotCoordinateConsistencyValidation;
+DELIMITER $$
+
+CREATE PROCEDURE RunPlotCoordinateConsistencyValidation(IN p_CensusID INT, IN p_PlotID INT)
+SQL SECURITY DEFINER
+BEGIN
+    -- Flags a measurement whose supplied plot coordinate disagrees with its OWN quadrat's median
+    -- offset. Comparing against the quadrat rather than against StartX+LocalX directly is what makes
+    -- this usable: a plot whose stored origins are the nominal grid has a constant non-zero offset
+    -- in every quadrat, which is normal, not an error. The median resists isolated outliers so one
+    -- mis-assigned stem cannot move the baseline it is measured against.
+    DECLARE v_scale DECIMAL(20,10);
+    DECLARE v_units VARCHAR(8);
+    DECLARE v_error_id INT;
+    -- PLOT_COORDINATE_OUTLIER_METRES from the spec. Not site-configurable in v1: a delegated
+    -- CALL cannot reach a constant inside the helper it calls.
+    DECLARE v_outlier_metres DECIMAL(10,4) DEFAULT 1.0;
+
+    -- The validation runner returns connections to a pool. Temporary tables survive transaction
+    -- rollback and connection release, so every exceptional exit must clean them before RESIGNAL.
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        DROP TEMPORARY TABLE IF EXISTS plot_coord_offsets;
+        DROP TEMPORARY TABLE IF EXISTS plot_coord_medians;
+        RESIGNAL;
+    END;
+
+    IF p_PlotID IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+          SET MESSAGE_TEXT = 'RunPlotCoordinateConsistencyValidation: PlotID is required to resolve dimension units';
+    END IF;
+
+    SELECT DefaultDimensionUnits INTO v_units FROM plots WHERE PlotID = p_PlotID;
+    SET v_scale = CASE v_units
+        WHEN 'km' THEN 1000 WHEN 'hm' THEN 100 WHEN 'dam' THEN 10 WHEN 'm' THEN 1
+        WHEN 'dm' THEN 0.1  WHEN 'cm' THEN 0.01 WHEN 'mm' THEN 0.001 ELSE NULL END;
+
+    IF v_scale IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+          SET MESSAGE_TEXT = 'RunPlotCoordinateConsistencyValidation: plot has unknown or NULL dimension unit; refusing to guess';
+    END IF;
+
+    SELECT ErrorID INTO v_error_id FROM measurement_errors
+     WHERE ErrorSource = 'validation' AND ErrorCode = '19' LIMIT 1;
+
+    IF v_error_id IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+          SET MESSAGE_TEXT = 'RunPlotCoordinateConsistencyValidation: measurement_errors row for validation 19 is missing';
+    END IF;
+
+    DROP TEMPORARY TABLE IF EXISTS plot_coord_offsets;
+    CREATE TEMPORARY TABLE plot_coord_offsets AS
+    SELECT cm.CoreMeasurementID,
+           cm.CensusID,
+           s.QuadratID,
+           (cm.RawPlotX - (q.StartX + s.LocalX)) * v_scale AS off_x,
+           (cm.RawPlotY - (q.StartY + s.LocalY)) * v_scale AS off_y
+    FROM coremeasurements cm
+    JOIN census c    ON c.CensusID = cm.CensusID AND c.IsActive IS TRUE
+    JOIN stems s     ON s.StemGUID = cm.StemGUID AND s.CensusID = cm.CensusID AND s.IsActive IS TRUE
+    JOIN quadrats q  ON q.QuadratID = s.QuadratID AND q.IsActive IS TRUE
+    WHERE cm.IsActive IS TRUE
+      -- Validation 19 judges what this upload row supplied. The stem fallback belongs only
+      -- to read/display models; using it here would turn omitted axes into false contributors.
+      AND cm.RawPlotX IS NOT NULL
+      AND cm.RawPlotY IS NOT NULL
+      AND s.LocalX IS NOT NULL AND s.LocalY IS NOT NULL
+      AND q.StartX IS NOT NULL AND q.StartY IS NOT NULL
+      AND (p_CensusID IS NULL OR cm.CensusID = p_CensusID)
+      AND (p_PlotID   IS NULL OR c.PlotID   = p_PlotID);
+
+    CREATE INDEX idx_pco_census_quadrat ON plot_coord_offsets (CensusID, QuadratID);
+
+    -- Component-wise median via deterministic ROW_NUMBER/COUNT windows. Averaging the two middle
+    -- values on an even count keeps the result stable; a mode over rounded continuous values could
+    -- tie arbitrarily and produce different answers on identical data.
+    DROP TEMPORARY TABLE IF EXISTS plot_coord_medians;
+    CREATE TEMPORARY TABLE plot_coord_medians AS
+    SELECT CensusID,
+           QuadratID,
+           AVG(CASE WHEN rx IN (FLOOR((n + 1) / 2), CEIL((n + 1) / 2)) THEN off_x END) AS med_x,
+           AVG(CASE WHEN ry IN (FLOOR((n + 1) / 2), CEIL((n + 1) / 2)) THEN off_y END) AS med_y
+    FROM (
+        SELECT CensusID, QuadratID, off_x, off_y,
+               ROW_NUMBER() OVER (PARTITION BY CensusID, QuadratID ORDER BY off_x, CoreMeasurementID) AS rx,
+               ROW_NUMBER() OVER (PARTITION BY CensusID, QuadratID ORDER BY off_y, CoreMeasurementID) AS ry,
+               COUNT(*)     OVER (PARTITION BY CensusID, QuadratID)                                     AS n
+        FROM plot_coord_offsets
+    ) ranked
+    WHERE n >= 3
+    GROUP BY CensusID, QuadratID;
+
+    CREATE INDEX idx_pcm_census_quadrat ON plot_coord_medians (CensusID, QuadratID);
+
+    INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
+    SELECT o.CoreMeasurementID, v_error_id, FALSE
+    FROM plot_coord_offsets o
+    JOIN plot_coord_medians m ON m.CensusID = o.CensusID AND m.QuadratID = o.QuadratID
+    WHERE SQRT(POW(o.off_x - m.med_x, 2) + POW(o.off_y - m.med_y, 2)) > v_outlier_metres
+    ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;
+
+    -- Clear only stale validation-19 links in this execution scope. Do this after the
+    -- outlier upsert so an INSERT failure leaves old errors unresolved (fail-safe).
+    UPDATE measurement_error_log l
+    JOIN coremeasurements cm ON cm.CoreMeasurementID = l.MeasurementID
+    JOIN census c ON c.CensusID = cm.CensusID
+       SET l.IsResolved = TRUE,
+           l.ResolvedAt = CURRENT_TIMESTAMP
+     WHERE l.ErrorID = v_error_id
+       AND cm.IsActive IS TRUE
+       AND (p_CensusID IS NULL OR cm.CensusID = p_CensusID)
+       AND c.PlotID = p_PlotID
+       AND NOT EXISTS (
+           SELECT 1
+           FROM plot_coord_offsets o
+           JOIN plot_coord_medians m
+             ON m.CensusID = o.CensusID AND m.QuadratID = o.QuadratID
+           WHERE o.CoreMeasurementID = cm.CoreMeasurementID
+             AND SQRT(POW(o.off_x - m.med_x, 2) + POW(o.off_y - m.med_y, 2)) > v_outlier_metres
+       );
+
+    DROP TEMPORARY TABLE IF EXISTS plot_coord_offsets;
+    DROP TEMPORARY TABLE IF EXISTS plot_coord_medians;
+END $$
+
+DELIMITER ;
+
 -- uploaddatalossreport view is defined in tablestructures.sql (canonical location for views)
