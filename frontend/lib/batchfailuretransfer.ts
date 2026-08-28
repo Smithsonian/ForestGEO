@@ -62,7 +62,7 @@ export async function moveTemporaryBatchToFailedMeasurements(
         schema,
         `INSERT INTO ??.coremeasurements
           (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description,
-           UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawCodes, RawComments, SourceRowIndex, IsActive)
+           UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY, RawCodes, RawComments, SourceRowIndex, IsActive)
          SELECT tm.CensusID,
                 NULL,
                 FALSE,
@@ -78,6 +78,8 @@ export async function moveTemporaryBatchToFailedMeasurements(
                 tm.QuadratName,
                 tm.LocalX,
                 tm.LocalY,
+                tm.PlotX,
+                tm.PlotY,
                 tm.Codes,
                 tm.Comments,
                 tm.id,

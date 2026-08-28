@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildTemporaryMeasurementInsertRecord,
   CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   cleanupPreviousFileUploads,
   findDroppedMeasurementCandidates,
@@ -7,6 +8,7 @@ import {
   MYSQL_UNSIGNED_INT_MAX,
   parseUnsignedIntField
 } from './temporary-measurements';
+import { SourceFormat } from '@/config/macros/formdetails';
 import type ConnectionManager from '@/lib/db/connectionmanager';
 import type { FileRow } from '@/config/macros/formdetails';
 
@@ -80,6 +82,46 @@ describe('findDroppedMeasurementCandidates placeholder alignment', () => {
     const slotPositions = slotOrder.map(slot => String(sql).indexOf(slot));
     slotPositions.forEach((position, index) => expect(position, `missing value slot ${slotOrder[index]}`).toBeGreaterThan(-1));
     expect(slotPositions, 'value slots appear in a different order than the params array').toEqual([...slotPositions].sort((a, b) => a - b));
+  });
+});
+
+describe('buildTemporaryMeasurementInsertRecord plot coordinates', () => {
+  it('stages plot coordinates, and NULL when the file omits them', () => {
+    const withCoords = buildTemporaryMeasurementInsertRecord(
+      {
+        tag: '1',
+        stemtag: '1',
+        spcode: 'ULMALA',
+        quadrat: 'A01',
+        lx: '5',
+        ly: '5',
+        px: '-0.271',
+        py: '267.5',
+        dbh: '20',
+        hom: '1.3',
+        date: '2026-01-20'
+      } as any,
+      'coords.csv',
+      'batch-1',
+      'session-1',
+      SourceFormat.csv,
+      1,
+      2
+    );
+    expect(withCoords.PlotX).toBe(-0.271);
+    expect(withCoords.PlotY).toBe(267.5);
+
+    const without = buildTemporaryMeasurementInsertRecord(
+      { tag: '1', stemtag: '1', spcode: 'ULMALA', quadrat: 'A01', lx: '5', ly: '5', dbh: '20', hom: '1.3', date: '2026-01-20' } as any,
+      'coords.csv',
+      'batch-1',
+      'session-1',
+      SourceFormat.csv,
+      1,
+      2
+    );
+    expect(without.PlotX, 'absent plot coordinate must stage NULL, never 0').toBeNull();
+    expect(without.PlotY).toBeNull();
   });
 });
 

@@ -111,10 +111,10 @@ describe('upload procedure regressions', () => {
     const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
     expect(canonicalSql).toContain(
-      'INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
+      'INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, PlotX, PlotY, Moved, StemDescription, IsActive)'
     );
     expect(canonicalSql).not.toContain(
-      'INSERT INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
+      'INSERT INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, PlotX, PlotY, Moved, StemDescription, IsActive)'
     );
   });
 
@@ -124,7 +124,7 @@ describe('upload procedure regressions', () => {
     expect(canonicalSql).toContain('CREATE TEMPORARY TABLE source_row_insert_conflicts AS');
     expect(canonicalSql).toContain("'Measurement insert skipped: source row resolved to multiple candidate measurements'");
     expect(canonicalSql).toContain(
-      'INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields, UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)'
+      'INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields, UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY, RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)'
     );
     expect(canonicalSql).toContain('FROM core_insert_candidates cic ORDER BY cic.id;');
     expect(canonicalSql).toContain('core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements');

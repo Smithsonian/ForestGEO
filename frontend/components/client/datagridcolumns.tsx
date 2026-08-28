@@ -698,6 +698,32 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     preProcessEditCellProps: params => preprocessor(params)
   },
   {
+    field: 'stemPlotX',
+    headerName: 'Plot X',
+    renderHeader: () => formatHeader('X', 'Plot'),
+    flex: 0.7,
+    valueFormatter: (value: number | null | undefined) => {
+      return Number(value ?? 0).toFixed(2);
+    },
+    maxWidth: 100,
+    editable: false,
+    type: 'number',
+    filterOperators: customNumericOperators
+  },
+  {
+    field: 'stemPlotY',
+    headerName: 'Plot Y',
+    renderHeader: () => formatHeader('Y', 'Plot'),
+    flex: 0.7,
+    type: 'number',
+    maxWidth: 100,
+    valueFormatter: (value: number | null | undefined) => {
+      return Number(value ?? 0).toFixed(2);
+    },
+    editable: false,
+    filterOperators: customNumericOperators
+  },
+  {
     field: 'measuredDBH',
     headerName: 'DBH',
     flex: 0.5,
@@ -1146,6 +1172,20 @@ export const ViewFullTableGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'stemLocalY',
     headerName: 'StemLocalY',
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'stemPlotX',
+    headerName: 'StemPlotX',
+    ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'stemPlotY',
+    headerName: 'StemPlotY',
     ...VIEW_FULL_TABLE_COLUMN_WIDTHS.measurement,
     editable: false,
     filterable: false

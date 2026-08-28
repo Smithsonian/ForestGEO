@@ -84,7 +84,15 @@ vi.mock('@/config/uploadsessiontracker', () => ({
   UploadSessionState: { INITIALIZED: 'initialized', UPLOADING: 'uploading' }
 }));
 
-vi.mock('@/config/measurementerrors', () => ({ insertIngestionFailureRows: vi.fn().mockResolvedValue([]) }));
+// insertIngestionFailureRows is mocked (it performs DB writes this suite
+// doesn't want to model). toFiniteNumber is kept real via importOriginal:
+// it's a pure parsing helper the staging path (lib/ingestion/temporary-measurements,
+// lib/uploads/record-invalid-rows) now calls directly, and a plain object mock here
+// would drop it and crash the measurement branch with an unrelated-looking 500.
+vi.mock('@/config/measurementerrors', async importOriginal => {
+  const actual = (await importOriginal()) as object;
+  return { ...actual, insertIngestionFailureRows: vi.fn().mockResolvedValue([]) };
+});
 
 vi.mock('@/components/processors/processorhelperfunctions', () => ({ insertOrUpdate: vi.fn().mockResolvedValue(undefined) }));
 

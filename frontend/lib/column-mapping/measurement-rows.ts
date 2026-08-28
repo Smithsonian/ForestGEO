@@ -37,7 +37,11 @@ const MAX_DECIMAL = 999999.999999;
 const PARSED_EXTRA_KEY = '__parsed_extra';
 // Measurement fields that must hold a number; a non-numeric value here rejects the row rather than
 // being coerced (transform) or nulled — dbh/hom are optional, so nulling would silently accept bad input.
-const NUMERIC_MEASUREMENT_FIELDS = ['dbh', 'hom', 'lx', 'ly'] as const;
+const NUMERIC_MEASUREMENT_FIELDS = ['dbh', 'hom', 'lx', 'ly', 'px', 'py'] as const;
+// Sign is a storage-safety question only for magnitudes. Coordinates are legitimately signed:
+// a stem mapped just outside its quadrat, or west of the plot origin, has a negative offset.
+// Coordinate sign is a data-quality question, handled post-ingest by validation 8.
+const NON_NEGATIVE_MEASUREMENT_FIELDS = new Set<string>(['dbh', 'hom']);
 
 /** A value that is present (non-nullish) but does not strictly parse as a finite number. */
 function isPresentNonNumeric(value: unknown): boolean {
@@ -69,7 +73,7 @@ export function transformMeasurementValue(value: string, field: string, formType
   // Strict numeric parsing: Number() rejects partially-numeric strings like '12.5abc' that
   // Number.parseFloat would silently truncate to 12.5. A non-numeric value is returned unchanged
   // (as a string) so validateMeasurementRow can reject the row instead of ingesting a coerced value.
-  if (formType === FormType.measurements && (field === 'lx' || field === 'ly')) {
+  if (formType === FormType.measurements && (field === 'lx' || field === 'ly' || field === 'px' || field === 'py')) {
     const n = Number(trimmed);
     if (!Number.isNaN(n)) return Math.round(n * 1000000) / 1000000;
   }
@@ -140,12 +144,23 @@ export function validateMeasurementRow(row: FileRow, requiredHeaders: { label: s
     }
   }
 
-  for (const [key, value] of Object.entries(row)) {
-    if (value !== null && value !== undefined && !['tag', 'stemtag'].includes(key)) {
-      const num = Number.parseFloat(String(value));
-      if (!Number.isNaN(num) && (num < 0 || num > MAX_DECIMAL)) {
-        errors.push(`Decimal value for ${key} is out of range: ${value}`);
-      }
+  // Range and sign checks apply ONLY to ingested numeric fields. The previous implementation
+  // looped every key in the row, so a passthrough column the app never stores (a plot coordinate,
+  // an elevation, a note with a leading minus) could reject an otherwise-valid measurement.
+  for (const field of NUMERIC_MEASUREMENT_FIELDS) {
+    const raw = row[field];
+    if (raw === null || raw === undefined) continue;
+    const text = String(raw).trim();
+    if (text === '' || NULLISH.has(text)) continue;
+    const num = Number(text);
+    if (!Number.isFinite(num)) continue; // already reported by the non-numeric check above
+    // Coordinates are signed, but decimal(12,6) has symmetric storage bounds.
+    // Reject both sides here rather than relying on INSERT IGNORE or MySQL coercion.
+    if (Math.abs(num) > MAX_DECIMAL) {
+      errors.push(`Decimal value for ${field} is out of range: ${text}`);
+    }
+    if (num < 0 && NON_NEGATIVE_MEASUREMENT_FIELDS.has(field)) {
+      errors.push(`Decimal value for ${field} is out of range: ${text}`);
     }
   }
 

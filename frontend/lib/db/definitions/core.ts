@@ -30,6 +30,8 @@ export interface FailedMeasurementsRDS {
   quadrat?: string;
   x?: number;
   y?: number;
+  plotX?: number;
+  plotY?: number;
   dbh?: number;
   hom?: number;
   date?: Date | null;

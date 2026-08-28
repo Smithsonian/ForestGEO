@@ -368,6 +368,16 @@ ON DUPLICATE KEY UPDATE
     Definition = VALUES(Definition),
     IsEnabled = VALUES(IsEnabled);
 
+-- IsEnabled = TRUE is deliberate here (unlike the migration, which seeds this
+-- disabled): a fresh schema installs procedures and validations together, so
+-- RunPlotCoordinateConsistencyValidation always exists by the time this runs.
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
+                                     ChangelogDefinition, IsEnabled)
+VALUES (19, 'ValidatePlotCoordinateConsistency',
+        'Plot coordinate disagrees with the quadrat''s own median offset',
+        'stemPlotX;stemPlotY;stemLocalX;stemLocalY;quadratName;treeTag;stemTag',
+        'CALL RunPlotCoordinateConsistencyValidation(@p_CensusID, @p_PlotID);', '', TRUE);
+
 truncate postvalidationqueries; -- clear the table if re-running this script on accident
 insert into postvalidationqueries
     (QueryName, QueryDefinition, Description, IsEnabled)

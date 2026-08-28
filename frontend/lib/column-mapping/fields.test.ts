@@ -13,7 +13,7 @@ describe('normalizeHeader', () => {
 describe('canonicalFieldsFor(csv)', () => {
   const fields = canonicalFieldsFor(SourceFormat.csv);
 
-  it('lists the 12 CSV import fields', () => {
+  it('lists the 14 CSV import fields', () => {
     // Order matches TableHeadersByFormType[measurements] (registry is source of truth; export-only fields excluded).
     expect(fields.map(f => f.canonicalField)).toEqual([
       'tag',
@@ -22,6 +22,8 @@ describe('canonicalFieldsFor(csv)', () => {
       'quadrat',
       'lx',
       'ly',
+      'px',
+      'py',
       'dbh',
       'hom',
       'date',
@@ -148,5 +150,32 @@ describe('makeLegacyCsvHeaderKey (form-aware legacy transform)', () => {
     expect(key('idlevel')).toBe('idlevel');
     expect(key('authority')).toBe('authority');
     expect(key(' Sub-Species ')).toBe('subspecies');
+  });
+});
+
+describe('plot coordinate fields', () => {
+  it('registers px and py as optional canonical CSV fields', () => {
+    const fields = canonicalFieldsFor(SourceFormat.csv);
+    const px = fields.find(f => f.canonicalField === 'px');
+    const py = fields.find(f => f.canonicalField === 'py');
+    expect(px, 'px must be a canonical CSV field').toBeDefined();
+    expect(py, 'py must be a canonical CSV field').toBeDefined();
+    expect(px!.required, 'px must be optional').toBe(false);
+    expect(py!.required, 'py must be optional').toBe(false);
+  });
+
+  it('aliases plotx/ploty to px/py', () => {
+    const aliases = aliasesFor(SourceFormat.csv);
+    expect(aliases.px).toEqual(['px', 'plotx']);
+    expect(aliases.py).toEqual(['py', 'ploty']);
+    expect(legacyCsvHeaderKey('PlotX')).toBe('px');
+    expect(legacyCsvHeaderKey('ploty')).toBe('py');
+  });
+
+  it('does not steal x/y/xcoord/ycoord from lx/ly', () => {
+    expect(legacyCsvHeaderKey('x')).toBe('lx');
+    expect(legacyCsvHeaderKey('y')).toBe('ly');
+    expect(legacyCsvHeaderKey('xcoord')).toBe('lx');
+    expect(legacyCsvHeaderKey('ycoord')).toBe('ly');
   });
 });

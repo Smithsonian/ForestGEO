@@ -65,4 +65,28 @@ describe('measurement view refresh', () => {
     const targetedInsert = targetedCM.executeQuery.mock.calls[1][0] as string;
     expect(normalizeRefreshFilter(targetedInsert)).toBe(normalizeRefreshFilter(scopeInsert));
   });
+
+  it('projects StemPlotX/StemPlotY into measurementssummary preferring the row-level snapshot', async () => {
+    const cm = makeConnectionManager();
+
+    await refreshMeasurementsSummaryForScope(cm, 'forestgeo_testing', 17, 42, 'tx-1');
+
+    const insertSql = cm.executeQuery.mock.calls[1][0] as string;
+    expect(insertSql).toContain('StemPlotX,');
+    expect(insertSql).toContain('StemPlotY,');
+    expect(insertSql).toContain('COALESCE(cm.RawPlotX, st.PlotX)                      AS StemPlotX');
+    expect(insertSql).toContain('COALESCE(cm.RawPlotY, st.PlotY)                      AS StemPlotY');
+  });
+
+  it('projects StemPlotX/StemPlotY into viewfulltable preferring the row-level snapshot', async () => {
+    const cm = makeConnectionManager();
+
+    await refreshViewFullTableForScope(cm, 'forestgeo_testing', 17, 42, 'tx-1');
+
+    const insertSql = cm.executeQuery.mock.calls[1][0] as string;
+    expect(insertSql).toContain('StemPlotX,');
+    expect(insertSql).toContain('StemPlotY,');
+    expect(insertSql).toContain('COALESCE(cm.RawPlotX, s.PlotX)                      AS StemPlotX');
+    expect(insertSql).toContain('COALESCE(cm.RawPlotY, s.PlotY)                      AS StemPlotY');
+  });
 });

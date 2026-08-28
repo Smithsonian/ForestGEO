@@ -643,4 +643,65 @@ describe('ingestBatch — integration', () => {
       executeQuerySpy.mockRestore();
     }
   }, 60000);
+
+  // -------------------------------------------------------------------------
+  // 8. Negative local coordinates ingest normally (Task 6)
+  //
+  // A stem mapped just outside its quadrat (negative LocalX/LocalY) is no
+  // longer a hard-fail INVALID_COORDINATE ingestion error — it materializes
+  // like any other row, and out-of-bounds placement is caught post-ingest by
+  // validation 8 (ValidateFindStemsOutsidePlots).
+  // -------------------------------------------------------------------------
+
+  it('ingests a negative local coordinate instead of hard-failing it', async () => {
+    const fileName = 'ingest-batch-negative-coord.csv';
+    const transactionID = await connectionManager.beginTransaction();
+    const params: StageMeasurementChunkParams = {
+      schema,
+      fileName,
+      batchID: BATCH_ID,
+      plotID,
+      censusID,
+      uploadMode: UploadMode.CLEAN_REUPLOAD,
+      sourceFormat: SourceFormat.csv,
+      rawRows: [
+        { tag: '9001', stemtag: '9001', spcode: 'ACERRU', quadrat: 'Q01', lx: '-0.5', ly: '4.2', dbh: '12.3', hom: '1.3', date: MEASUREMENT_DATE, codes: 'A' }
+      ],
+      csvHeaders: CSV_HEADERS,
+      delimiter: CSV_DELIMITER,
+      uploadSessionID: UPLOAD_SESSION_ID,
+      transactionID,
+      changedBy: CHANGED_BY
+    };
+    const stageResult = await stageMeasurementChunk(connectionManager, params);
+    await connectionManager.commitTransaction(transactionID);
+    console.log(`[negative-coord] insertedCount=${stageResult.insertedCount} invalidRows=${stageResult.invalidRows.length}`);
+    expect(stageResult.insertedCount).toBe(1);
+    expect(stageResult.invalidRows).toHaveLength(0);
+
+    const result = await ingestBatch(connectionManager, { schema, fileID: fileName, batchID: BATCH_ID });
+    console.log(`[negative-coord] subBatchResults=${JSON.stringify(result.subBatchResults)}`);
+    expect(result.subBatchResults[0].batchFailedButHandled).toBe(false);
+
+    const [cmRows] = await connection.query<RowDataPacket[]>(
+      `SELECT CoreMeasurementID, StemGUID, CAST(RawX AS CHAR) AS RawXText
+         FROM coremeasurements
+        WHERE UploadFileID = ? AND UploadBatchID = ? AND RawTreeTag = '9001'`,
+      [fileName, BATCH_ID]
+    );
+    expect(cmRows, 'the row must materialize, not be parked as a hard failure').toHaveLength(1);
+    expect(cmRows[0].StemGUID, 'StemGUID NULL means the row failed ingestion').not.toBeNull();
+    expect(Number(cmRows[0].RawXText)).toBe(-0.5);
+
+    const [errorRows] = await connection.query<RowDataPacket[]>(
+      `SELECT e.ErrorCode
+         FROM measurement_error_log l
+         JOIN measurement_errors e ON e.ErrorID = l.ErrorID
+        WHERE l.MeasurementID = ?`,
+      [cmRows[0].CoreMeasurementID]
+    );
+    const errorCodes = errorRows.map(row => row.ErrorCode);
+    console.log(`[negative-coord] errorCodes=${JSON.stringify(errorCodes)}`);
+    expect(errorCodes).not.toContain('INVALID_COORDINATE');
+  }, 60000);
 });

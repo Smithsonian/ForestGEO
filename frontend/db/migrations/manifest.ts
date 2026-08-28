@@ -29,6 +29,8 @@ export interface MigrationManifestEntry {
   id: string;
   /** Path to the migration SQL, relative to db/migrations/. */
   file: string;
+  /** Best-effort cleanup run when the migration body fails. Never masks the original error. */
+  failureCleanup?: readonly string[];
 }
 
 export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
@@ -83,5 +85,15 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-08-26-01-widen-temporarymeasurements-fileid',
     file: 'schema-contract-repair/2026-08-26-01-widen-temporarymeasurements-fileid.sql'
+  },
+  {
+    id: '2026-08-27-01-add-plot-coordinates',
+    file: 'schema-contract-repair/2026-08-27-01-add-plot-coordinates.sql',
+    failureCleanup: ['DROP PROCEDURE IF EXISTS mig_2026_08_27_01_raise_contract_conflict']
+  },
+  {
+    id: '2026-08-27-02-seed-validation-19',
+    file: 'schema-contract-repair/2026-08-27-02-seed-validation-19.sql',
+    failureCleanup: ['DROP PROCEDURE IF EXISTS mig_2026_08_27_02_raise_validation_conflict']
   }
 ] as const;

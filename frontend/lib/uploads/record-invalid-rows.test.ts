@@ -22,7 +22,7 @@ const { insertIngestionFailureRowsMock } = vi.hoisted(() => ({
 vi.mock('@/config/measurementerrors', () => ({
   insertIngestionFailureRows: insertIngestionFailureRowsMock,
   toFiniteNumber: (value: unknown): number | null => {
-    if (value === null || value === undefined || value === '') return null;
+    if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return null;
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
   }
@@ -117,6 +117,16 @@ describe('recordInvalidRows', () => {
     expect(rows[0].quadrat).toBeNull();
     expect(rows[0].codes).toBeNull();
     expect(rows[0].comments).toBeNull();
+  });
+
+  it('maps px/py to plotX/plotY, NULL when absent', async () => {
+    await recordInvalidRows(makeConnectionManager(), BASE_CTX, [{ tag: 'T009a', px: '-0.271', py: '267.5' }, { tag: 'T009b' }]);
+
+    const rows = insertIngestionFailureRowsMock.mock.calls[0][2];
+    expect(rows[0].plotX).toBeCloseTo(-0.271);
+    expect(rows[0].plotY).toBeCloseTo(267.5);
+    expect(rows[1].plotX, 'absent plot coordinate must map to null, not 0').toBeNull();
+    expect(rows[1].plotY).toBeNull();
   });
 
   it('missing failureReason defaults to "Unknown parse error"', async () => {
@@ -234,5 +244,29 @@ describe('recordFailedMeasurementRows', () => {
     expect(mapped[0].censusID).toBe(99);
     expect(mapped[1].plotID).toBe(55);
     expect(mapped[1].censusID).toBe(99);
+  });
+
+  it('carries row.plotX/row.plotY through, NULL when absent', async () => {
+    const rows = [
+      { tag: 'T050', failureReasons: 'coordinate drift', plotX: -0.271, plotY: 267.5 } as any,
+      { tag: 'T051', failureReasons: 'missing plot coordinates' } as any
+    ];
+
+    await recordFailedMeasurementRows(makeConnectionManager(), 'forestgeo_test', rows, 'f.csv', 'b-003', 1, 2);
+
+    const mapped = insertIngestionFailureRowsMock.mock.calls[0][2];
+    expect(mapped[0].plotX).toBe(-0.271);
+    expect(mapped[0].plotY).toBe(267.5);
+    expect(mapped[1].plotX, 'absent plot coordinate must map to null, not undefined/0').toBeNull();
+    expect(mapped[1].plotY).toBeNull();
+  });
+
+  it('normalizes runtime numeric strings, preserves zero, and nulls malformed rejected values', async () => {
+    const rows = [{ tag: 'T060', failureReasons: 'bad plot x', plotX: 'abc', plotY: 0, x: '1.25', y: '   ', dbh: 'Infinity' } as any];
+
+    await recordFailedMeasurementRows(makeConnectionManager(), 'forestgeo_test', rows, 'f.csv', 'b-004', 1, 2);
+
+    const [mapped] = insertIngestionFailureRowsMock.mock.calls[0][2];
+    expect(mapped).toMatchObject({ x: 1.25, y: null, plotX: null, plotY: 0, dbh: null });
   });
 });

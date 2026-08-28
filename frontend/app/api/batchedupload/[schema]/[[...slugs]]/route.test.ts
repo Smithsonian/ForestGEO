@@ -86,6 +86,28 @@ describe('batchedupload POST route', () => {
     expect(body.message).toMatch(/No data provided for batch upload/i);
   });
 
+  it('400 when the body is not an array of row objects', async () => {
+    const nonArray = await POST(makeRequest({ plotX: 1 }), makeParams('forestgeo_testing', ['1', '2']));
+    expect(nonArray.status).toBe(400);
+
+    const scalarRow = await POST(makeRequest([42]), makeParams('forestgeo_testing', ['1', '2']));
+    expect(scalarRow.status).toBe(400);
+    expect(recordFailedMeasurementRows).not.toHaveBeenCalled();
+  });
+
+  it('400 when the body is malformed JSON', async () => {
+    const req = new Request('http://localhost/api', {
+      method: 'POST',
+      body: '{not-json',
+      headers: { 'content-type': 'application/json' }
+    }) as any;
+    req.nextUrl = new URL('http://localhost/api');
+
+    const res = await POST(req, makeParams('forestgeo_testing', ['1', '2']));
+    expect(res.status).toBe(400);
+    expect(recordFailedMeasurementRows).not.toHaveBeenCalled();
+  });
+
   it('happy path: validateContextualValues succeeds → proceeds, branded schema is forwarded', async () => {
     const payload = [
       { id: 999, failedMeasurementID: 123, treeID: 10, stemGUID: 20, reason: 'bad diameter' },
@@ -123,6 +145,23 @@ describe('batchedupload POST route', () => {
     expect(typeof (rowsArg[0] as any).fileID).toBe('string');
 
     expect(validatedSchemaMock).toHaveBeenCalledWith('forestgeo_testing');
+  });
+
+  it('carries plotX/plotY through untouched to recordFailedMeasurementRows (route only maps plotID/censusID/batchID/fileID)', async () => {
+    const payload = [
+      { treeID: 10, stemGUID: 20, reason: 'coordinate drift', plotX: -0.271, plotY: 267.5 },
+      { treeID: 11, stemGUID: 21, reason: 'missing plot coordinates' }
+    ];
+    const req = makeRequest(payload);
+    const res = await POST(req, makeParams('forestgeo_testing', ['42', '7']));
+
+    expect(res.status).toBe(200);
+
+    const insertMock = recordFailedMeasurementRows as ReturnType<typeof vi.fn>;
+    const [, , rowsArg] = insertMock.mock.calls[0];
+    expect(rowsArg[0]).toMatchObject({ plotX: -0.271, plotY: 267.5 });
+    expect((rowsArg[1] as any).plotX).toBeUndefined();
+    expect((rowsArg[1] as any).plotY).toBeUndefined();
   });
 
   it('500 and logs on DB error', async () => {

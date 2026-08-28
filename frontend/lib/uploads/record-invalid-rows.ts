@@ -77,6 +77,8 @@ export async function recordInvalidRows(
     quadrat: row.quadrat || null,
     x: toFiniteNumber(row.lx),
     y: toFiniteNumber(row.ly),
+    plotX: toFiniteNumber(row.px),
+    plotY: toFiniteNumber(row.py),
     dbh: toFiniteNumber(row.dbh),
     hom: toFiniteNumber(row.hom),
     date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
@@ -120,10 +122,15 @@ export async function recordFailedMeasurementRows(
     stemTag: row.stemTag ?? null,
     spCode: row.spCode ?? null,
     quadrat: row.quadrat ?? null,
-    x: row.x ?? null,
-    y: row.y ?? null,
-    dbh: row.dbh ?? null,
-    hom: row.hom ?? null,
+    // This function is the HTTP route's persistence boundary. Do not trust the
+    // compile-time DTO: rejected CSV values can still be strings at runtime.
+    // Normalize exactly as the worker path does, including preserving zero.
+    x: toFiniteNumber(row.x),
+    y: toFiniteNumber(row.y),
+    plotX: toFiniteNumber(row.plotX),
+    plotY: toFiniteNumber(row.plotY),
+    dbh: toFiniteNumber(row.dbh),
+    hom: toFiniteNumber(row.hom),
     date: row.date ?? null,
     codes: row.codes ?? null,
     comments: row.description ?? null,

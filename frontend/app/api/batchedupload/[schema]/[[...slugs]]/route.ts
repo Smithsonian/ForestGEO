@@ -16,12 +16,22 @@ export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest, props: { params: Promise<{ schema: string; slugs?: string[] }> }) {
   const params = await props.params;
-  let errorRows: FailedMeasurementsRDS[] = await request.json();
-  const { schema: schemaParam, slugs } = params;
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return NextResponse.json({ message: 'Batch upload body must be valid JSON.' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
 
-  if (!errorRows || errorRows.length === 0) {
+  if (!Array.isArray(payload) || payload.length === 0) {
     return new NextResponse(JSON.stringify({ message: 'No data provided for batch upload!' }), { status: HTTPResponses.INVALID_REQUEST });
   }
+  if (payload.some(row => row === null || typeof row !== 'object' || Array.isArray(row))) {
+    return NextResponse.json({ message: 'Batch upload rows must be JSON objects.' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  let errorRows = payload as FailedMeasurementsRDS[];
+  const { schema: schemaParam, slugs } = params;
 
   // Validate contextual values with fallback to URL params
   const validation = await validateContextualValues(request, {

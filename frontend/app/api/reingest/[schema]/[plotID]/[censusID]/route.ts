@@ -26,6 +26,8 @@ interface ReingestionSourceRow {
   RawQuadrat: string | null;
   RawX: number | null;
   RawY: number | null;
+  RawPlotX: number | null;
+  RawPlotY: number | null;
   MeasuredDBH: number | null;
   MeasuredHOM: number | null;
   MeasurementDate: string | null;
@@ -126,6 +128,8 @@ async function getFailedMeasurementRows(
        cm.RawQuadrat,
        cm.RawX,
        cm.RawY,
+       cm.RawPlotX,
+       cm.RawPlotY,
        cm.MeasuredDBH,
        cm.MeasuredHOM,
        cm.MeasurementDate,
@@ -186,6 +190,8 @@ async function moveFailedToTemporary(
     row.RawQuadrat,
     row.RawX,
     row.RawY,
+    row.RawPlotX,
+    row.RawPlotY,
     row.MeasuredDBH,
     row.MeasuredHOM,
     row.MeasurementDate,
@@ -197,7 +203,7 @@ async function moveFailedToTemporary(
   const insertTempSQL = safeFormatQuery(
     schema,
     `INSERT INTO ??.temporarymeasurements
-      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments, PublishedStemID)
+      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, PlotX, PlotY, DBH, HOM, MeasurementDate, Codes, Comments, PublishedStemID)
      VALUES ?`
   );
   const insertResult: any = await connectionManager.executeQuery(insertTempSQL, [values], transactionID);
@@ -277,6 +283,8 @@ async function createReingestionSnapshotTables(connectionManager: any, schema: s
       RawQuadrat VARCHAR(255) NULL,
       RawX DECIMAL(12, 6) NULL,
       RawY DECIMAL(12, 6) NULL,
+      RawPlotX DECIMAL(12, 6) NULL,
+      RawPlotY DECIMAL(12, 6) NULL,
       RawCodes VARCHAR(255) NULL,
       RawPublishedStemID INT UNSIGNED NULL,
       RawComments VARCHAR(255) NULL,
@@ -291,7 +299,7 @@ async function createReingestionSnapshotTables(connectionManager: any, schema: s
     `INSERT INTO reingestion_results
       (OriginalID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
        Description, UserDefinedFields, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
-       RawCodes, RawPublishedStemID, RawComments, IsActive)
+       RawPlotX, RawPlotY, RawCodes, RawPublishedStemID, RawComments, IsActive)
      SELECT
        rm.OriginalID,
        cm_new.CensusID,
@@ -308,6 +316,8 @@ async function createReingestionSnapshotTables(connectionManager: any, schema: s
        cm_new.RawQuadrat,
        cm_new.RawX,
        cm_new.RawY,
+       cm_new.RawPlotX,
+       cm_new.RawPlotY,
        cm_new.RawCodes,
        cm_new.RawPublishedStemID,
        cm_new.RawComments,
@@ -415,6 +425,8 @@ async function reconcileReingestionRows(
            orig.RawQuadrat = rr.RawQuadrat,
            orig.RawX = rr.RawX,
            orig.RawY = rr.RawY,
+           orig.RawPlotX = rr.RawPlotX,
+           orig.RawPlotY = rr.RawPlotY,
            orig.RawCodes = rr.RawCodes,
            orig.RawPublishedStemID = rr.RawPublishedStemID,
            orig.RawComments = rr.RawComments,

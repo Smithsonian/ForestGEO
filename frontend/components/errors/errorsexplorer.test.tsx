@@ -142,6 +142,8 @@ const GRID_ROW: Record<string, unknown> = {
   quadratName: '0101',
   stemLocalX: 1.23,
   stemLocalY: 4.56,
+  stemPlotX: 101.23,
+  stemPlotY: 204.56,
   measurementDate: '2026-01-01',
   measuredDBH: 10,
   measuredHOM: 1.3,
@@ -807,6 +809,15 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     await mountExplorer();
     await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
     expect(JSON.parse(screen.getByTestId('column-editability').textContent ?? '{}').speciesCode).toBe(true);
+  });
+
+  it('shows the plot-coordinate fields used by validation 19 as read-only columns', async () => {
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"stemPlotX":101.23'));
+
+    const columns = requireGridProps().columns;
+    expect(columns.find(column => column.field === 'stemPlotX')).toMatchObject({ headerName: 'Plot X', editable: false });
+    expect(columns.find(column => column.field === 'stemPlotY')).toMatchObject({ headerName: 'Plot Y', editable: false });
   });
 
   it('skips the preview flow entirely when the diff is empty', async () => {

@@ -57,6 +57,8 @@ export interface MeasurementsSummaryRDS {
   stemTag?: string;
   stemLocalX?: number;
   stemLocalY?: number;
+  stemPlotX?: number;
+  stemPlotY?: number;
   measurementDate?: any;
   measuredDBH?: number;
   measuredHOM?: number;
@@ -172,6 +174,8 @@ export interface ViewFullTableRDS {
   stemTag?: string;
   stemLocalX?: number;
   stemLocalY?: number;
+  stemPlotX?: number;
+  stemPlotY?: number;
   speciesID?: number;
   speciesCode?: string;
   speciesName?: string;

@@ -49,7 +49,7 @@ async function handler(_request: NextRequest, context: RouteContext) {
     shiftQuery = safeFormatQuery(
       schema,
       `INSERT INTO ??.temporarymeasurements
-        (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments, PublishedStemID)
+        (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, PlotX, PlotY, DBH, HOM, MeasurementDate, Codes, Comments, PublishedStemID)
        SELECT
          ? AS FileID,
          ? AS BatchID,
@@ -61,6 +61,8 @@ async function handler(_request: NextRequest, context: RouteContext) {
          cm.RawQuadrat,
          cm.RawX,
          cm.RawY,
+         cm.RawPlotX,
+         cm.RawPlotY,
          cm.MeasuredDBH,
          cm.MeasuredHOM,
          cm.MeasurementDate,
@@ -119,6 +121,8 @@ async function handler(_request: NextRequest, context: RouteContext) {
          RawQuadrat,
          RawX,
          RawY,
+         RawPlotX,
+         RawPlotY,
          RawCodes,
          RawPublishedStemID,
          RawComments,
@@ -156,6 +160,8 @@ async function handler(_request: NextRequest, context: RouteContext) {
            orig.RawQuadrat = ?,
            orig.RawX = ?,
            orig.RawY = ?,
+           orig.RawPlotX = ?,
+           orig.RawPlotY = ?,
            orig.RawCodes = ?,
            orig.RawPublishedStemID = ?,
            orig.RawComments = ?,
@@ -237,6 +243,8 @@ async function handler(_request: NextRequest, context: RouteContext) {
         snapshot.RawQuadrat,
         snapshot.RawX,
         snapshot.RawY,
+        snapshot.RawPlotX,
+        snapshot.RawPlotY,
         snapshot.RawCodes,
         snapshot.RawPublishedStemID,
         snapshot.RawComments,

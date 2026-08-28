@@ -29,6 +29,8 @@ function buildMeasurementsSummaryInsertSelect(whereClause: string): string {
                                                 StemTag,
                                                 StemLocalX,
                                                 StemLocalY,
+                                                StemPlotX,
+                                                StemPlotY,
                                                 QuadratName,
                                                 MeasurementDate,
                                                 MeasuredDBH,
@@ -53,6 +55,11 @@ function buildMeasurementsSummaryInsertSelect(whereClause: string): string {
             COALESCE(st.StemTag, cm.RawStemTag)                  AS StemTag,
             COALESCE(st.LocalX, cm.RawX)                         AS StemLocalX,
             COALESCE(st.LocalY, cm.RawY)                         AS StemLocalY,
+            -- Reverse of the local-coordinate precedence above: for plot coordinates
+            -- the row-level upload snapshot wins, so a row that disagreed with an
+            -- already-populated stem still displays the value that triggered validation 19.
+            COALESCE(cm.RawPlotX, st.PlotX)                      AS StemPlotX,
+            COALESCE(cm.RawPlotY, st.PlotY)                      AS StemPlotY,
             COALESCE(q.QuadratName, cm.RawQuadrat)               AS QuadratName,
             cm.MeasurementDate                                   AS MeasurementDate,
             cm.MeasuredDBH                                       AS MeasuredDBH,
@@ -139,6 +146,8 @@ function buildViewFullTableInsertSelect(whereClause: string): string {
                                           StemTag,
                                           StemLocalX,
                                           StemLocalY,
+                                          StemPlotX,
+                                          StemPlotY,
                                           SpeciesID,
                                           SpeciesCode,
                                           SpeciesName,
@@ -196,6 +205,11 @@ function buildViewFullTableInsertSelect(whereClause: string): string {
             COALESCE(s.StemTag, cm.RawStemTag)                  AS StemTag,
             COALESCE(s.LocalX, cm.RawX)                         AS StemLocalX,
             COALESCE(s.LocalY, cm.RawY)                         AS StemLocalY,
+            -- Reverse of the local-coordinate precedence above: for plot coordinates
+            -- the row-level upload snapshot wins, so a row that disagreed with an
+            -- already-populated stem still displays the value that triggered validation 19.
+            COALESCE(cm.RawPlotX, s.PlotX)                      AS StemPlotX,
+            COALESCE(cm.RawPlotY, s.PlotY)                      AS StemPlotY,
             sp.SpeciesID                                        AS SpeciesID,
             COALESCE(sp.SpeciesCode, cm.RawSpCode)              AS SpeciesCode,
             sp.SpeciesName                                      AS SpeciesName,

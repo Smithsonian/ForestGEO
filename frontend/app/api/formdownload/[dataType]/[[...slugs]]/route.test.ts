@@ -245,6 +245,8 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
           QuadratName: 'Q1',
           StartX: 1.1,
           StartY: 2.2,
+          PlotX: 3.3,
+          PlotY: 4.4,
           MeasurementDate: '2025-01-01',
           MeasuredDBH: 13.5,
           MeasuredHOM: 130,
@@ -274,6 +276,8 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
         quadrat: 'Q1',
         lx: 1.1,
         ly: 2.2,
+        px: 3.3,
+        py: 4.4,
         dbh: 13.5,
         hom: 130,
         date: '2025-01-01',
@@ -292,6 +296,70 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     expect(sql).toMatch(/LEFT JOIN forestgeo_testing\.sitespecificvalidations vp/i);
     expect(sql).toMatch(/COALESCE\(/);
     expect(sql).toMatch(/\(SEARCH_STUB OR FILTER_STUB\)/);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('measurements: PlotX/PlotY export prefers the raw snapshot over the stem row, falling back to the stem row when the raw snapshot is NULL', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi
+      .spyOn(cm, 'executeQuery')
+      .mockResolvedValueOnce([{ COLUMN_NAME: 'MeasuredDBH' }])
+      .mockResolvedValueOnce([
+        // Row 1: raw and stem coordinates disagree. cm.RawPlotX/RawPlotY is the
+        // as-uploaded snapshot; st.PlotX/PlotY is the shared stems row. MySQL's
+        // COALESCE(cm.RawPlotX, st.PlotX) returns the first non-null argument, so
+        // with both present the raw snapshot (100.111) wins over the stem value
+        // (999.999) that the SQL never even selects once resolved.
+        {
+          StemGUID: 21,
+          TreeID: 2,
+          StemTag: 'S-2',
+          TreeTag: 'T-2',
+          SpeciesCode: 'ABCD',
+          QuadratName: 'Q1',
+          StartX: 1.1,
+          StartY: 2.2,
+          PlotX: 100.111,
+          PlotY: 200.222,
+          MeasurementDate: '2025-01-01',
+          MeasuredDBH: 13.5,
+          MeasuredHOM: 130,
+          Codes: null,
+          Errors: null
+        },
+        // Row 2: raw snapshot is NULL for this row, so COALESCE falls back to the
+        // stem row's PlotX/PlotY.
+        {
+          StemGUID: 22,
+          TreeID: 3,
+          StemTag: 'S-3',
+          TreeTag: 'T-3',
+          SpeciesCode: 'ABCD',
+          QuadratName: 'Q1',
+          StartX: 1.3,
+          StartY: 2.4,
+          PlotX: 55.5,
+          PlotY: 66.6,
+          MeasurementDate: '2025-01-02',
+          MeasuredDBH: 14.0,
+          MeasuredHOM: 131,
+          Codes: null,
+          Errors: null
+        }
+      ]);
+    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+
+    const fmParam = { quickFilterValues: [], items: [], visible: ['valid', 'errors'], tss: [] };
+    const res = await GET(makeRequest(), makeProps('measurements', ['forestgeo_testing', '7', '80', fm(fmParam)]));
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    const body = await res.json();
+    expect(body[0]).toMatchObject({ stemID: 21, px: 100.111, py: 200.222 });
+    expect(body[1]).toMatchObject({ stemID: 22, px: 55.5, py: 66.6 });
+
+    const sql = exec.mock.calls[1][0] as string;
+    expect(sql).toMatch(/COALESCE\(cm\.RawPlotX, st\.PlotX\)\s+AS PlotX/);
+    expect(sql).toMatch(/COALESCE\(cm\.RawPlotY, st\.PlotY\)\s+AS PlotY/);
     expect(close).toHaveBeenCalledTimes(1);
   });
 

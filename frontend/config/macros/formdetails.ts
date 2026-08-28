@@ -105,6 +105,18 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     },
     { label: 'lx', explanation: 'The X-coordinate of the stem', category: 'required' },
     { label: 'ly', explanation: 'The Y-coordinate of the stem', category: 'required' },
+    {
+      label: 'px',
+      explanation:
+        'The X-coordinate of the stem within the plot, in the plot dimension units. Optional; supply alongside lx when your file carries plot coordinates.',
+      category: 'optional'
+    },
+    {
+      label: 'py',
+      explanation:
+        'The Y-coordinate of the stem within the plot, in the plot dimension units. Optional; supply alongside ly when your file carries plot coordinates.',
+      category: 'optional'
+    },
     { label: 'dbh', explanation: 'The diameter at breast height (DBH) of the tree', category: 'optional' }, // optional -- dead stems should not be measured
     { label: 'hom', explanation: 'The height (from ground) where the measurement was taken', category: 'optional' }, // optional -- dead stems should not be measured
     { label: 'date', explanation: 'The date of the measurement', category: 'required' },
