@@ -1462,10 +1462,13 @@ and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
             'CALL RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 0, 1);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
+    -- Seeded disabled, like the migration and corequeries.sql. Validation 19 is
+    -- turned on per site through `npm run activate:validation19`, which verifies
+    -- the helper procedure and error row first.
     VALUES (19, 'ValidatePlotCoordinateConsistency',
             'Plot coordinate disagrees with the quadrat''s own median offset',
             'stemPlotX;stemPlotY;stemLocalX;stemLocalY;quadratName;treeTag;stemTag',
-            'CALL RunPlotCoordinateConsistencyValidation(@p_CensusID, @p_PlotID);', '', true);
+            'CALL RunPlotCoordinateConsistencyValidation(@p_CensusID, @p_PlotID);', '', false);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
     VALUES (12, 'ValidateScreenStemsWithMeasurementsButDeadAttributes',
