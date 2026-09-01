@@ -38,6 +38,7 @@ describe('applyCoordinateRules', () => {
     expect(effects[0].affectedTable).toBe('stems');
     expect(effects[0].affectedRowCount).toBe(SHARED_COUNT);
     expect(effects[0].references?.stemGUIDs).toEqual([STEM_GUID]);
+    expect(effects[0].detail).toContain('every measurement referencing that stem reflects the new value');
   });
 
   it('emits R4 when only StemPlotX changed', async () => {
@@ -52,6 +53,9 @@ describe('applyCoordinateRules', () => {
     expect(effects[0].affectedTable).toBe('stems');
     expect(effects[0].affectedRowCount).toBe(SHARED_COUNT);
     expect(effects[0].references?.stemGUIDs).toEqual([STEM_GUID]);
+    expect(effects[0].title).toContain('Shared stem plot coordinate');
+    expect(effects[0].detail).toContain('raw upload values keep displaying those snapshots');
+    expect(effects[0].detail).not.toContain('every measurement referencing that stem reflects the new value');
   });
 
   it('emits R4 when only StemPlotY changed', async () => {

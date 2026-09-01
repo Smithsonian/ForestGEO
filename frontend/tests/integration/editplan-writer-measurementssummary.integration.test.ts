@@ -436,6 +436,32 @@ describe('writeMeasurementsSummary (integration)', () => {
       expect(cmRow.IsValidated).toBeNull();
     });
 
+    it('preserves the canonical Y axis when only X changes and the row raw Y disagrees', async () => {
+      const stemGUID = fixture.stemGUIDs[STEM_TAG_S1];
+      const CANONICAL_X = 10.25;
+      const CANONICAL_Y = 20.5;
+      const RAW_X = 110.25;
+      const RAW_Y = 220.5;
+      const NEW_X = -15.125001;
+      await connection.query('UPDATE stems SET PlotX = ?, PlotY = ? WHERE StemGUID = ?', [CANONICAL_X, CANONICAL_Y, stemGUID]);
+      await connection.query('UPDATE coremeasurements SET RawPlotX = ?, RawPlotY = ? WHERE CoreMeasurementID = ?', [RAW_X, RAW_Y, fixture.coreMeasurementID]);
+
+      const plan = buildPlan([{ field: 'StemPlotX', from: RAW_X, to: NEW_X }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { StemPlotX: NEW_X });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const stemRow = await loadStem(connection, stemGUID);
+      expect(Number(stemRow?.PlotX)).toBeCloseTo(NEW_X, 6);
+      expect(Number(stemRow?.PlotY), 'an X-only edit must not copy the row-level RawPlotY over the canonical stem Y').toBeCloseTo(CANONICAL_Y, 6);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(Number(cmRow.RawPlotX)).toBeCloseTo(NEW_X, 6);
+      expect(Number(cmRow.RawPlotY), 'the untouched raw snapshot axis must also remain unchanged').toBeCloseTo(RAW_Y, 6);
+    });
+
     it('does NOT fabricate RawPlotX/RawPlotY when an unrelated raw-sync edit runs', async () => {
       // Give the stem canonical plot coordinates while the measurement row's
       // raw columns stay NULL — the shape of a row whose upload file never

@@ -572,14 +572,11 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
   //     COALESCE(cm.RawPlotX, s.PlotX) read model shows the edited value.
   if (changedFields.has('StemPlotX') || changedFields.has('StemPlotY')) {
     changesFound = true;
-    const plotXValue = changedFields.has('StemPlotX') ? toOptionalNumber(newValues.StemPlotX) : toOptionalNumber(merged.StemPlotX);
-    const plotYValue = changedFields.has('StemPlotY') ? toOptionalNumber(newValues.StemPlotY) : toOptionalNumber(merged.StemPlotY);
+    const stemPlotChanges: Record<string, number | null> = {};
+    if (changedFields.has('StemPlotX')) stemPlotChanges.PlotX = toOptionalNumber(newValues.StemPlotX);
+    if (changedFields.has('StemPlotY')) stemPlotChanges.PlotY = toOptionalNumber(newValues.StemPlotY);
     if (merged.StemGUID !== null && merged.StemGUID !== undefined) {
-      await cm.executeQuery(
-        format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, { PlotX: plotXValue, PlotY: plotYValue }, 'StemGUID', merged.StemGUID]),
-        [],
-        txID
-      );
+      await cm.executeQuery(format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, stemPlotChanges, 'StemGUID', merged.StemGUID]), [], txID);
     }
   }
 
