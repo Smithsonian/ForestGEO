@@ -1,5 +1,11 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { ensureMeasurementErrorDefinition, getIngestionErrorMessage, inferIngestionErrorCode, INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
+import {
+  ensureMeasurementErrorDefinition,
+  errorCodeForSystemFailure,
+  getIngestionErrorMessage,
+  INGESTION_ERROR_SOURCE,
+  type SystemFailureKind
+} from '@/config/measurementerrors';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 /**
@@ -13,6 +19,7 @@ export async function moveTemporarySubBatchesToFailedMeasurements(
   fileID: string,
   subBatchPrefix: string,
   failureReason: string,
+  failureKind: SystemFailureKind,
   transactionID?: string
 ): Promise<number> {
   const findSubBatchesSQL = safeFormatQuery(schema, 'SELECT DISTINCT BatchID FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID LIKE ?');
@@ -21,7 +28,7 @@ export async function moveTemporarySubBatchesToFailedMeasurements(
 
   let totalMoved = 0;
   for (const row of subBatchRows) {
-    const moved = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, row.BatchID, failureReason, transactionID);
+    const moved = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, row.BatchID, failureReason, failureKind, transactionID);
     totalMoved += moved;
   }
   return totalMoved;
@@ -33,6 +40,7 @@ export async function moveTemporaryBatchToFailedMeasurements(
   fileID: string,
   batchID: string,
   failureReason: string,
+  failureKind: SystemFailureKind,
   transactionID?: string
 ): Promise<number> {
   const managesOwnTransaction = !transactionID;
@@ -48,7 +56,7 @@ export async function moveTemporaryBatchToFailedMeasurements(
     const sourceRowCount = Number(countRows?.[0]?.rowCount ?? 0);
 
     if (sourceRowCount > 0) {
-      const errorCode = inferIngestionErrorCode(failureReason);
+      const errorCode = errorCodeForSystemFailure(failureKind);
       const errorID = await ensureMeasurementErrorDefinition(
         connectionManager,
         schema,

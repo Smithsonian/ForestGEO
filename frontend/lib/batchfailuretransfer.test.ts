@@ -30,7 +30,7 @@ describe('moveTemporaryBatchToFailedMeasurements', () => {
     } as any;
     ensureMeasurementErrorDefinition.mockResolvedValue(22);
 
-    const movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, 'forestgeo_testing', 'file.csv', 'batch-1', 'failed');
+    const movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, 'forestgeo_testing', 'file.csv', 'batch-1', 'failed', 'sql_exception');
 
     expect(movedRows).toBe(1);
     expect(ensureMeasurementErrorDefinition).toHaveBeenCalledTimes(1);
@@ -47,9 +47,9 @@ describe('moveTemporaryBatchToFailedMeasurements', () => {
       rollbackTransaction: vi.fn().mockResolvedValue(undefined)
     } as any;
 
-    await expect(moveTemporaryBatchToFailedMeasurements(connectionManager, 'forestgeo_testing', 'file.csv', 'batch-2', 'failed')).rejects.toThrow(
-      'select failed'
-    );
+    await expect(
+      moveTemporaryBatchToFailedMeasurements(connectionManager, 'forestgeo_testing', 'file.csv', 'batch-2', 'failed', 'sql_exception')
+    ).rejects.toThrow('select failed');
 
     expect(connectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-2');
     expect(connectionManager.commitTransaction).not.toHaveBeenCalled();
@@ -69,7 +69,15 @@ describe('moveTemporaryBatchToFailedMeasurements', () => {
     } as any;
     ensureMeasurementErrorDefinition.mockResolvedValue(22);
 
-    const movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, 'forestgeo_testing', 'file.csv', 'batch-3', 'failed', 'outer-tx');
+    const movedRows = await moveTemporaryBatchToFailedMeasurements(
+      connectionManager,
+      'forestgeo_testing',
+      'file.csv',
+      'batch-3',
+      'failed',
+      'sql_exception',
+      'outer-tx'
+    );
 
     expect(movedRows).toBe(1);
     expect(connectionManager.beginTransaction).not.toHaveBeenCalled();
@@ -104,7 +112,8 @@ describe('moveTemporaryBatchToFailedMeasurements', () => {
       'forestgeo_harvard',
       'harvard2014b.TXT',
       'batch-interrupted',
-      INTERRUPTION_REASON
+      INTERRUPTION_REASON,
+      'interrupted_upload'
     );
 
     expect(movedRows).toBe(3);
@@ -116,6 +125,73 @@ describe('moveTemporaryBatchToFailedMeasurements', () => {
     expect(errorCode).toBe('INTERRUPTED_UPLOAD');
     expect(errorCode).not.toBe('SQL_EXCEPTION');
     expect(String(errorMessage).toLowerCase()).toContain('interrupted');
+  });
+
+  /**
+   * Every system-failure caller now declares its kind explicitly at the call
+   * site, so the code recorded must follow the declared kind — never a guess
+   * derived from the reason wording. This reason string contains no SQL
+   * keyword at all; prose inference would default it to SQL_EXCEPTION anyway
+   * here, but the point is that the classifier never even looks.
+   */
+  it('selects the error code from the explicit failure kind, not the message wording', async () => {
+    const connectionManager = {
+      beginTransaction: vi.fn().mockResolvedValue('tx-kind-sql'),
+      executeQuery: vi
+        .fn()
+        .mockResolvedValueOnce([{ rowCount: 3 }])
+        .mockResolvedValueOnce({ affectedRows: 3 })
+        .mockResolvedValueOnce({ affectedRows: 3 })
+        .mockResolvedValueOnce({ affectedRows: 3 }),
+      commitTransaction: vi.fn().mockResolvedValue(undefined),
+      rollbackTransaction: vi.fn().mockResolvedValue(undefined)
+    } as any;
+    ensureMeasurementErrorDefinition.mockResolvedValue(41);
+
+    await moveTemporaryBatchToFailedMeasurements(
+      connectionManager,
+      'forestgeo_testing',
+      'f.csv',
+      'batch-kind-sql',
+      'Sub-batch moved after all 5 attempts failed', // contains no SQL keyword
+      'sql_exception'
+    );
+
+    const [, , , errorCode] = ensureMeasurementErrorDefinition.mock.calls[0];
+    expect(errorCode).toBe('SQL_EXCEPTION');
+  });
+
+  /**
+   * The inverse proof: a reason that matches none of the interruption
+   * fragments in `INTERRUPTION_REASON_FRAGMENTS` — prose inference would
+   * default it to SQL_EXCEPTION — must still land as INTERRUPTED_UPLOAD when
+   * the caller declares that kind.
+   */
+  it('maps interrupted_upload to INTERRUPTED_UPLOAD even when the wording matches no interruption fragment', async () => {
+    const connectionManager = {
+      beginTransaction: vi.fn().mockResolvedValue('tx-kind-interrupted'),
+      executeQuery: vi
+        .fn()
+        .mockResolvedValueOnce([{ rowCount: 1 }])
+        .mockResolvedValueOnce({ affectedRows: 1 })
+        .mockResolvedValueOnce({ affectedRows: 1 })
+        .mockResolvedValueOnce({ affectedRows: 1 }),
+      commitTransaction: vi.fn().mockResolvedValue(undefined),
+      rollbackTransaction: vi.fn().mockResolvedValue(undefined)
+    } as any;
+    ensureMeasurementErrorDefinition.mockResolvedValue(42);
+
+    await moveTemporaryBatchToFailedMeasurements(
+      connectionManager,
+      'forestgeo_testing',
+      'f.csv',
+      'batch-kind-interrupted',
+      'Something completely unrelated happened during cleanup',
+      'interrupted_upload'
+    );
+
+    const [, , , errorCode] = ensureMeasurementErrorDefinition.mock.calls[0];
+    expect(errorCode).toBe('INTERRUPTED_UPLOAD');
   });
 
   /**
@@ -145,7 +221,7 @@ describe('moveTemporaryBatchToFailedMeasurements', () => {
     } as any;
     ensureMeasurementErrorDefinition.mockResolvedValue(22);
 
-    await moveTemporaryBatchToFailedMeasurements(connectionManager, 'forestgeo_testing', 'file.csv', 'batch-plot', 'failed');
+    await moveTemporaryBatchToFailedMeasurements(connectionManager, 'forestgeo_testing', 'file.csv', 'batch-plot', 'failed', 'sql_exception');
 
     const insertCall = connectionManager.executeQuery.mock.calls.find(
       (call: any[]) => String(call[0]).includes('INSERT INTO') && String(call[0]).includes('coremeasurements')

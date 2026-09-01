@@ -62,11 +62,11 @@ async function handler(request: NextRequest, context: RouteContext) {
 
     // After sub-batching, remaining rows may have sub-batch IDs (e.g. batchID__sub001).
     // Try exact match first, then fall back to moving all sub-batches for this file.
-    let movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, batchID, failureReason);
+    let movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, batchID, failureReason, 'sql_exception');
 
     if (movedRows === 0) {
       const subBatchPrefix = `${batchID}__sub`;
-      movedRows = await moveTemporarySubBatchesToFailedMeasurements(connectionManager, schema, fileID, subBatchPrefix, failureReason);
+      movedRows = await moveTemporarySubBatchesToFailedMeasurements(connectionManager, schema, fileID, subBatchPrefix, failureReason, 'sql_exception');
       if (movedRows > 0) {
         ailogger.warn(
           `Moved ${movedRows} sub-batched temporary rows to unresolved coremeasurements for ${fileID} (prefix: ${subBatchPrefix}). Reason: ${failureReason}`

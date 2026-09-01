@@ -36,6 +36,26 @@ export interface IngestionFailureRowInput {
   fileID?: string | null;
   batchID?: string | null;
   sourceRowIndex?: number | null;
+  failureKind?: IngestionFailureKind;
+}
+
+/**
+ * `parser_reject` covers per-row validation rejects, where the specific defect
+ * (missing field, invalid reference, ...) is still unknown until the reason
+ * text is classified. `sql_exception` and `interrupted_upload` are system
+ * failures — the caller already knows which one happened and must say so
+ * explicitly rather than have it guessed from prose.
+ */
+export type IngestionFailureKind = 'parser_reject' | 'sql_exception' | 'interrupted_upload';
+export type SystemFailureKind = Exclude<IngestionFailureKind, 'parser_reject'>;
+
+const SYSTEM_FAILURE_ERROR_CODES: Record<SystemFailureKind, string> = {
+  sql_exception: 'SQL_EXCEPTION',
+  interrupted_upload: 'INTERRUPTED_UPLOAD'
+};
+
+export function errorCodeForSystemFailure(kind: SystemFailureKind): string {
+  return SYSTEM_FAILURE_ERROR_CODES[kind];
 }
 
 const INGESTION_ERROR_MESSAGES: Record<string, string> = {
@@ -130,6 +150,24 @@ export function getIngestionErrorMessage(code: string, fallback?: string | null)
 interface MeasurementErrorInput {
   errorCode: string;
   errorMessage: string;
+}
+
+/**
+ * The single choke point for turning a failure into an error code. A
+ * `parser_reject` still needs the reason text classified (the specific
+ * per-row defect isn't known up front); every other kind is a system failure
+ * the caller has already identified, so it maps straight to its code and
+ * never runs prose inference over the reason text.
+ */
+export function classifyIngestionFailure(kind: IngestionFailureKind, failureReason?: string | null): MeasurementErrorInput[] {
+  if (kind !== 'parser_reject') {
+    const errorCode = errorCodeForSystemFailure(kind);
+    return [{ errorCode, errorMessage: getIngestionErrorMessage(errorCode, failureReason) }];
+  }
+  return inferAllIngestionErrorCodes(failureReason).map(code => ({
+    errorCode: code,
+    errorMessage: getIngestionErrorMessage(code, failureReason)
+  }));
 }
 
 const INGESTION_FAILURE_BULK_INSERT_SIZE = 250;
@@ -259,10 +297,7 @@ function prepareIngestionFailureRows(rows: IngestionFailureRowInput[]): Prepared
     normalizedDate: normalizeDate(row.date),
     description: normalizeFailureDescription(row.failureReason),
     sourceRowIndex: row.sourceRowIndex ?? index + 1,
-    errors: inferAllIngestionErrorCodes(row.failureReason).map(code => ({
-      errorCode: code,
-      errorMessage: getIngestionErrorMessage(code, row.failureReason)
-    }))
+    errors: classifyIngestionFailure(row.failureKind ?? 'parser_reject', row.failureReason)
   }));
 }
 

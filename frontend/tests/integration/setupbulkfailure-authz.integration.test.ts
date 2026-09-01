@@ -128,6 +128,16 @@ describe('GET /api/setupbulkfailure/[fileID]/[batchID] authz', () => {
     expect(res.status).toBe(HTTP_OK);
     // Retained token check ran, and the failure transfer executed for a member.
     expect(requireUploadSessionOwnershipMock).toHaveBeenCalledTimes(1);
-    expect(transferSpies.moveTemporaryBatchToFailedMeasurements).toHaveBeenCalledTimes(1);
+    // The route always declares this call site's kind explicitly — a required
+    // param proves *a* kind was passed, but the exact-args check below proves
+    // it's the *correct* one ('sql_exception' for this system-failure path).
+    expect(transferSpies.moveTemporaryBatchToFailedMeasurements).toHaveBeenCalledWith(
+      expect.anything(),
+      MEMBER_SCHEMA,
+      TEST_FILE_ID,
+      TEST_BATCH_ID,
+      'Batch moved after max attempts',
+      'sql_exception'
+    );
   });
 });

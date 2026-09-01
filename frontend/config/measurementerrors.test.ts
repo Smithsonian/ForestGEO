@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildFailedMeasurementsSelectQuery,
+  classifyIngestionFailure,
   ensureMeasurementErrorDefinition,
   FALLBACK_FAILURE_REASON,
   getIngestionErrorMessage,
@@ -402,6 +403,21 @@ describe('measurementerrors helpers', () => {
     const params = insertCall![1] as unknown[];
     expect(params[4]).toBe('Unrecognized failure text for sequential path'); // Description = reason
     expect(params[16]).toBe('broken stem'); // RawComments = comments
+  });
+
+  it('classifies explicit system-failure kinds directly, bypassing reason inference', () => {
+    expect(classifyIngestionFailure('sql_exception', 'wording with no keywords')).toEqual([
+      { errorCode: 'SQL_EXCEPTION', errorMessage: getIngestionErrorMessage('SQL_EXCEPTION') }
+    ]);
+    expect(classifyIngestionFailure('interrupted_upload', 'GatewayTimeout')).toEqual([
+      { errorCode: 'INTERRUPTED_UPLOAD', errorMessage: getIngestionErrorMessage('INTERRUPTED_UPLOAD') }
+    ]);
+  });
+
+  it('still classifies parser_reject via reason-text inference (unchanged behavior)', () => {
+    expect(classifyIngestionFailure('parser_reject', 'Missing required field: TreeTag')).toEqual([
+      { errorCode: 'MISSING_FIELD_TREETAG', errorMessage: getIngestionErrorMessage('MISSING_FIELD_TREETAG') }
+    ]);
   });
 });
 
