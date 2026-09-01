@@ -158,6 +158,22 @@ export class InvalidFieldValueError extends Error {
   }
 }
 
+// Every numeric edit-plan field currently persists to a DECIMAL(12,6)
+// column. Keep parsing and representable-range validation at the API boundary
+// so MySQL never has to coerce an out-of-range value in a permissive staging
+// or deployment environment.
+export const MAX_STORED_DECIMAL = 999999.999999;
+export const BASE_10_NUMBER_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+export function parseFiniteBase10Number(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed === '' || !BASE_10_NUMBER_PATTERN.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 const TAXONOMIC_IDENTITY_FIELDS = new Set(['SpeciesCode', 'SpCode', 'spcode']);
 const SPECIES_EDIT_ROLES = new Set<UserAuthRoles>(['global', 'db admin']);
 
@@ -167,10 +183,13 @@ export function isFieldEditableByRole(fieldName: string, role: UserAuthRoles | n
   return role !== null && role !== undefined && SPECIES_EDIT_ROLES.has(role);
 }
 
-function normalizeNumericValue(field: string, value: unknown): number {
-  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
-  if (!Number.isFinite(parsed)) {
+export function normalizeNumericValue(field: string, value: unknown): number {
+  const parsed = parseFiniteBase10Number(value);
+  if (parsed === null) {
     throw new InvalidFieldValueError(field, value, `Field "${field}" must be a finite number`);
+  }
+  if (Math.abs(parsed) > MAX_STORED_DECIMAL) {
+    throw new InvalidFieldValueError(field, value, `Field "${field}" must be between -${MAX_STORED_DECIMAL} and ${MAX_STORED_DECIMAL}`);
   }
   return parsed;
 }

@@ -2,6 +2,7 @@ import type ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { FileRow } from '@/config/macros/formdetails';
 import { canonicalizeRowForHash, RowMode } from '@/config/editplan/canonicalrow';
+import { parseFiniteBase10Number } from '@/config/editplan/fieldpolicy';
 
 export const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments', 'spcode', 'quadrat', 'lx', 'ly', 'px', 'py', 'tag', 'stemtag'] as const;
 
@@ -36,20 +37,21 @@ export type FieldCompareKind = 'numeric' | 'string-ci' | 'numeric-or-string-ci' 
 export interface FieldDescriptor {
   dbProperty: keyof ExistingMeasurementRow;
   compareKind: FieldCompareKind;
+  canonicalProperty?: string;
 }
 
 export const FIELD_DESCRIPTORS: Record<UpdatableField, FieldDescriptor> = {
-  dbh: { dbProperty: 'MeasuredDBH', compareKind: 'numeric' },
-  hom: { dbProperty: 'MeasuredHOM', compareKind: 'numeric' },
+  dbh: { dbProperty: 'MeasuredDBH', compareKind: 'numeric', canonicalProperty: 'MeasuredDBH' },
+  hom: { dbProperty: 'MeasuredHOM', compareKind: 'numeric', canonicalProperty: 'MeasuredHOM' },
   date: { dbProperty: 'MeasurementDate', compareKind: 'date' },
   codes: { dbProperty: 'RawCodes', compareKind: 'string-exact' },
   comments: { dbProperty: 'Description', compareKind: 'string-exact' },
   spcode: { dbProperty: 'SpeciesCode', compareKind: 'string-ci' },
   quadrat: { dbProperty: 'QuadratName', compareKind: 'numeric-or-string-ci' },
-  lx: { dbProperty: 'LocalX', compareKind: 'numeric' },
-  ly: { dbProperty: 'LocalY', compareKind: 'numeric' },
-  px: { dbProperty: 'StemPlotX', compareKind: 'numeric' },
-  py: { dbProperty: 'StemPlotY', compareKind: 'numeric' },
+  lx: { dbProperty: 'LocalX', compareKind: 'numeric', canonicalProperty: 'StemLocalX' },
+  ly: { dbProperty: 'LocalY', compareKind: 'numeric', canonicalProperty: 'StemLocalY' },
+  px: { dbProperty: 'StemPlotX', compareKind: 'numeric', canonicalProperty: 'StemPlotX' },
+  py: { dbProperty: 'StemPlotY', compareKind: 'numeric', canonicalProperty: 'StemPlotY' },
   tag: { dbProperty: 'TreeTag', compareKind: 'numeric-or-string-ci' },
   stemtag: { dbProperty: 'StemTag', compareKind: 'numeric-or-string-ci' }
 };
@@ -112,10 +114,10 @@ export function normalizeDateToString(value: Date | string | null): string | nul
   return String(value).slice(0, 10);
 }
 
-function areEquivalentNumericValues(csvValue: string, dbValue: unknown): boolean {
-  const parsedCsvValue = Number.parseFloat(csvValue);
-  const parsedDbValue = typeof dbValue === 'number' ? dbValue : Number.parseFloat(String(dbValue ?? ''));
-  return Number.isFinite(parsedCsvValue) && Number.isFinite(parsedDbValue) && parsedCsvValue === parsedDbValue;
+function areEquivalentNumericValues(csvValue: unknown, dbValue: unknown): boolean {
+  const parsedCsvValue = parseFiniteBase10Number(csvValue);
+  const parsedDbValue = parseFiniteBase10Number(dbValue);
+  return parsedCsvValue !== null && parsedDbValue !== null && parsedCsvValue === parsedDbValue;
 }
 
 /**
@@ -144,7 +146,7 @@ export function fieldValuesAreEquivalent(compareKind: FieldCompareKind, csvValue
 
   switch (compareKind) {
     case 'numeric':
-      return areEquivalentNumericValues(csvNormalized, dbValue);
+      return areEquivalentNumericValues(csvValue, dbValue);
     case 'date':
       return csvNormalized === dbNormalized;
     case 'string-exact':
@@ -185,8 +187,12 @@ export function computeDiff(csvRow: FileRow, dbRow: ExistingMeasurementRow): Rec
 
     const descriptor = FIELD_DESCRIPTORS[field];
     const dbValue = readDbValueForDisplay(field, dbRow);
+    const comparisonCsvValue =
+      descriptor.compareKind === 'numeric' && descriptor.canonicalProperty
+        ? canonicalizeRowForHash({ [field]: csvValue }, 'revision-update')[descriptor.canonicalProperty]
+        : csvValue;
 
-    if (fieldValuesAreEquivalent(descriptor.compareKind, csvValue, dbValue)) continue;
+    if (fieldValuesAreEquivalent(descriptor.compareKind, comparisonCsvValue, dbValue)) continue;
 
     changes[field] = { from: dbValue, to: csvValue };
   }

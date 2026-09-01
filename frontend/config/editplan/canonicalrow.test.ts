@@ -127,7 +127,14 @@ describe('canonicalizeRowForHash', () => {
 
     it('rejects malformed numeric strings instead of converting them to null', () => {
       expect(() => canonicalizeRowForHash({ dbh: '12abc' }, 'revision-update')).toThrow(InvalidFieldValueError);
+      expect(() => canonicalizeRowForHash({ px: '0x10' }, 'revision-update')).toThrow(InvalidFieldValueError);
       expect(() => canonicalizeRowForHash({ hom: Number.NaN }, 'revision-update')).toThrow(InvalidFieldValueError);
+    });
+
+    it('rejects plot coordinates outside DECIMAL(12,6) while accepting the boundary', () => {
+      expect(canonicalizeRowForHash({ px: '999999.999999' }, 'revision-update')).toMatchObject({ StemPlotX: 999999.999999 });
+      expect(() => canonicalizeRowForHash({ px: '1000000' }, 'revision-update')).toThrow(InvalidFieldValueError);
+      expect(() => canonicalizeRowForHash({ py: '-1000000' }, 'revision-insert')).toThrow(InvalidFieldValueError);
     });
 
     it('accepts numeric values directly without string conversion', () => {

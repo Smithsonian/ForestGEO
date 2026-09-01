@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeDiff, ExistingMeasurementRow } from './matchdiff';
 import type { FileRow } from '@/config/macros/formdetails';
+import { InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 
 function makeDbRow(overrides: Partial<ExistingMeasurementRow> = {}): ExistingMeasurementRow {
   return {
@@ -67,5 +68,26 @@ describe('computeDiff plot coordinates', () => {
     const csvRow = { px: '100.500000' } as unknown as FileRow;
 
     expect(computeDiff(csvRow, dbRow).px).toBeUndefined();
+  });
+
+  it('compares the six-decimal canonical value so excess precision does not create a phantom change', () => {
+    const dbRow = makeDbRow({ StemPlotX: 100.123456 });
+    const csvRow = { px: '100.1234564' } as unknown as FileRow;
+
+    expect(computeDiff(csvRow, dbRow).px).toBeUndefined();
+  });
+
+  it('rejects malformed numeric prefixes even when parseFloat would match the stored value', () => {
+    const dbRow = makeDbRow({ StemPlotX: 100 });
+    const csvRow = { px: '100abc' } as unknown as FileRow;
+
+    expect(() => computeDiff(csvRow, dbRow)).toThrow(InvalidFieldValueError);
+  });
+
+  it('rejects plot coordinates outside DECIMAL(12,6)', () => {
+    const dbRow = makeDbRow({ StemPlotX: 100 });
+    const csvRow = { px: '1000000' } as unknown as FileRow;
+
+    expect(() => computeDiff(csvRow, dbRow)).toThrow(InvalidFieldValueError);
   });
 });

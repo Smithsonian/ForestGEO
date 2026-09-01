@@ -1,4 +1,4 @@
-import { InvalidFieldValueError, PER_COLUMN_DECIMAL_PRECISION, isDateField } from './fieldpolicy';
+import { InvalidFieldValueError, PER_COLUMN_DECIMAL_PRECISION, isDateField, normalizeNumericValue } from './fieldpolicy';
 
 export type RowMode = 'revision-update' | 'revision-insert';
 
@@ -90,18 +90,9 @@ function normalizeDate(value: unknown): string | null {
 }
 
 function normalizeDecimal(field: string, value: unknown, precision: number): number | null {
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) {
-      throw new InvalidFieldValueError(field, value, `Field "${field}" must be a finite number`);
-    }
-    return Number(value.toFixed(precision));
-  }
-  const trimmed = normalizeString(value);
-  if (trimmed === null) return null;
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed)) {
-    throw new InvalidFieldValueError(field, value, `Field "${field}" must be a finite number`);
-  }
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' && normalizeString(value) === null) return null;
+  const parsed = normalizeNumericValue(field, value);
   return Number(parsed.toFixed(precision));
 }
 
