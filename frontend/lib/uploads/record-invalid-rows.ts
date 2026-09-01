@@ -54,8 +54,9 @@ export interface InvalidRowContext {
  *
  * Mirrors the mapping that the old async worker (insertInvalidMeasurementRows,
  * git e01cdb33) used before it was removed: lx→x, ly→y; date formatted as
- * YYYY-MM-DD via moment when present; failureReason defaulting to
- * "Unknown parse error" when absent.
+ * YYYY-MM-DD via moment when present; failureReason is passed through as-is
+ * (null when absent) — insertIngestionFailureRows (the persistence choke
+ * point) owns the fallback policy, not this caller.
  *
  * Returns the count of rows recorded (0 when rows is empty).
  */
@@ -84,7 +85,7 @@ export async function recordInvalidRows(
     date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
     codes: row.codes || null,
     comments: row.comments || null,
-    failureReason: row.failureReason ? String(row.failureReason) : 'Unknown parse error',
+    failureReason: row.failureReason ? String(row.failureReason) : null,
     fileID: ctx.fileName,
     batchID: ctx.batchID,
     sourceRowIndex: idx + 1 + offset
@@ -133,8 +134,8 @@ export async function recordFailedMeasurementRows(
     hom: toFiniteNumber(row.hom),
     date: row.date ?? null,
     codes: row.codes ?? null,
-    comments: row.description ?? null,
-    failureReason: row.failureReasons ?? 'Unknown error',
+    comments: row.comments ?? null,
+    failureReason: row.failureReasons ?? null,
     fileID: row.fileID ?? fileID,
     batchID: row.batchID ?? batchID,
     sourceRowIndex: idx + 1

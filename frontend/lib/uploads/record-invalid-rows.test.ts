@@ -4,7 +4,7 @@
 // No real DB — insertIngestionFailureRows is mocked. The tests verify:
 //   - empty string → null for numeric fields ('' must not become 0 or NaN)
 //   - empty string → null for string fields (old-worker 'value || null' semantics)
-//   - missing / empty failureReason → 'Unknown parse error'
+//   - missing / empty failureReason passes through as null (choke point owns the fallback)
 //   - date formatting → 'YYYY-MM-DD'
 //   - sourceRowIndexOffset arithmetic (chunked callers must pass running offset)
 //   - recordFailedMeasurementRows passes per-row fileID/batchID overrides through
@@ -132,18 +132,18 @@ describe('recordInvalidRows', () => {
     expect(rows[1].plotY).toBeNull();
   });
 
-  it('missing failureReason defaults to "Unknown parse error"', async () => {
+  it('missing failureReason passes through as null', async () => {
     await recordInvalidRows(makeConnectionManager(), BASE_CTX, [{ tag: 'T004' }]);
 
     const rows = insertIngestionFailureRowsMock.mock.calls[0][2];
-    expect(rows[0].failureReason).toBe('Unknown parse error');
+    expect(rows[0].failureReason).toBeNull();
   });
 
-  it('empty-string failureReason defaults to "Unknown parse error"', async () => {
+  it('empty-string failureReason passes through as null', async () => {
     await recordInvalidRows(makeConnectionManager(), BASE_CTX, [{ tag: 'T005', failureReason: '' }]);
 
     const rows = insertIngestionFailureRowsMock.mock.calls[0][2];
-    expect(rows[0].failureReason).toBe('Unknown parse error');
+    expect(rows[0].failureReason).toBeNull();
   });
 
   it('present failureReason is preserved as-is', async () => {
@@ -271,5 +271,31 @@ describe('recordFailedMeasurementRows', () => {
 
     const [mapped] = insertIngestionFailureRowsMock.mock.calls[0][2];
     expect(mapped).toMatchObject({ x: 1.25, y: null, plotX: null, plotY: 0, dbh: null });
+  });
+
+  it('maps HTTP rejected-row comments from the wire field `comments`, not `description`', async () => {
+    insertIngestionFailureRowsMock.mockResolvedValue([1]);
+    await recordFailedMeasurementRows(
+      makeConnectionManager(),
+      'forestgeo_testing',
+      [{ comments: 'field note', failureReasons: 'reason text' } as any],
+      'f.csv',
+      'b1',
+      1,
+      2
+    );
+    const input = insertIngestionFailureRowsMock.mock.calls[0][2][0];
+    expect(input.comments).toBe('field note');
+    expect(input.failureReason).toBe('reason text');
+  });
+
+  it('missing comments and failureReasons pass through as null', async () => {
+    const rows = [{ tag: 'T070' } as any];
+
+    await recordFailedMeasurementRows(makeConnectionManager(), 'forestgeo_test', rows, 'f.csv', 'b-005', 1, 2);
+
+    const [mapped] = insertIngestionFailureRowsMock.mock.calls[0][2];
+    expect(mapped.comments).toBeNull();
+    expect(mapped.failureReason).toBeNull();
   });
 });
