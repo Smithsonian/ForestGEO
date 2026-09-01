@@ -243,6 +243,8 @@ export const INGESTION_ERROR_FIELD_MAP: Record<string, string[]> = {
   // No field is at fault — the upload was cut off before the row was judged.
   INTERRUPTED_UPLOAD: [],
   SQL_EXCEPTION: [],
+  // No field is at fault — the reject predates reason recording or its reason is unrecognized.
+  UNCLASSIFIED_REJECT: [],
   SAME_BATCH_SPECIES_CONFLICT: ['treeTag', 'speciesCode']
 };
 

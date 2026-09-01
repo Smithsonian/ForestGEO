@@ -419,6 +419,17 @@ describe('measurementerrors helpers', () => {
       { errorCode: 'MISSING_FIELD_TREETAG', errorMessage: getIngestionErrorMessage('MISSING_FIELD_TREETAG') }
     ]);
   });
+
+  it.each<(string | null)[]>([
+    [null],
+    [''],
+    ['   '],
+    ['Unknown parse error'],
+    ['some reason mentioning sql and deadlock'],
+    ['GatewayTimeout while flushing batch']
+  ])('parser inference returns UNCLASSIFIED_REJECT for unrecognized reason %j', reason => {
+    expect(inferAllIngestionErrorCodes(reason)).toEqual(['UNCLASSIFIED_REJECT']);
+  });
 });
 
 /**
@@ -426,7 +437,9 @@ describe('measurementerrors helpers', () => {
  * parked as SQL_EXCEPTION because the Azure front-end timeout and the abandoned
  * upload session produced reasons that matched no classifier pattern. An
  * interruption is not a data defect — the row was never judged at all — so it
- * must carry its own code.
+ * must carry its own code, sourced from the caller's explicit failure kind
+ * rather than sniffed out of the reason text (prose inference was removed —
+ * `inferAllIngestionErrorCodes` never returns INTERRUPTED_UPLOAD on its own).
  */
 describe('inferAllIngestionErrorCodes — upload interruptions', () => {
   const INTERRUPTION_REASONS = [
@@ -438,8 +451,10 @@ describe('inferAllIngestionErrorCodes — upload interruptions', () => {
     'Batch cancelled before completion'
   ];
 
-  it.each(INTERRUPTION_REASONS)('maps %j to INTERRUPTED_UPLOAD, not SQL_EXCEPTION', reason => {
-    expect(inferAllIngestionErrorCodes(reason)).toEqual(['INTERRUPTED_UPLOAD']);
+  it.each(INTERRUPTION_REASONS)('maps %j to INTERRUPTED_UPLOAD via the explicit kind, not SQL_EXCEPTION', reason => {
+    expect(classifyIngestionFailure('interrupted_upload', reason)).toEqual([
+      { errorCode: 'INTERRUPTED_UPLOAD', errorMessage: getIngestionErrorMessage('INTERRUPTED_UPLOAD') }
+    ]);
   });
 
   it('gives INTERRUPTED_UPLOAD a message that distinguishes it from a rejected row', () => {
@@ -458,8 +473,12 @@ describe('inferAllIngestionErrorCodes — upload interruptions', () => {
     expect(inferAllIngestionErrorCodes('Duplicate measurement row detected')).toEqual(['DUPLICATE_ENTRY']);
   });
 
-  it('still defaults genuinely unmapped reasons to SQL_EXCEPTION', () => {
-    expect(inferAllIngestionErrorCodes('some brand new failure nobody has classified')).toEqual(['SQL_EXCEPTION']);
+  it.each(INTERRUPTION_REASONS)('no longer infers INTERRUPTED_UPLOAD from reason prose — %j defaults to UNCLASSIFIED_REJECT', reason => {
+    expect(inferAllIngestionErrorCodes(reason)).toEqual(['UNCLASSIFIED_REJECT']);
+  });
+
+  it('still defaults genuinely unmapped reasons to UNCLASSIFIED_REJECT, never SQL_EXCEPTION', () => {
+    expect(inferAllIngestionErrorCodes('some brand new failure nobody has classified')).toEqual(['UNCLASSIFIED_REJECT']);
   });
 
   /**

@@ -80,29 +80,9 @@ const INGESTION_ERROR_MESSAGES: Record<string, string> = {
   FIELD_TOO_LONG: 'One or more fields exceed column length limits',
   MISSING_MEASUREMENT_DATA: 'Missing measurement data',
   INTERRUPTED_UPLOAD: 'Upload was interrupted before this row was processed (server timeout or cancelled session) — the row itself was not rejected',
+  UNCLASSIFIED_REJECT: 'Row was rejected before ingestion; the recorded reason does not match a known error category',
   SQL_EXCEPTION: 'Ingestion SQL exception'
 };
-
-/**
- * Reason fragments that mean "the upload was cut off", not "this row is bad".
- * Rows carrying these were never judged by the ingestion procedure, so grouping
- * them under SQL_EXCEPTION misreports clean data as defective — the failure mode
- * behind the 2026-07-27 Harvard Forest incident, where an Azure front-end
- * timeout parked 106,227 rows as if each one had a data error.
- */
-const INTERRUPTION_REASON_FRAGMENTS = [
-  'gatewaytimeout',
-  'gateway timeout',
-  'server error 504',
-  'cleaned up after abandonment',
-  'client disconnected',
-  'batch cancelled before completion'
-];
-
-export function inferIngestionErrorCode(reason?: string | null): string {
-  const codes = inferAllIngestionErrorCodes(reason);
-  return codes[0];
-}
 
 export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
   const text = (reason || '').toLowerCase();
@@ -131,13 +111,9 @@ export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
   if (text.includes('exceeds maximum length') || text.includes('field too long')) codes.push('FIELD_TOO_LONG');
   if (text.includes('missing measurement data')) codes.push('MISSING_MEASUREMENT_DATA');
 
-  if (codes.length === 0 && INTERRUPTION_REASON_FRAGMENTS.some(fragment => text.includes(fragment))) {
-    codes.push('INTERRUPTED_UPLOAD');
-  }
-
   if (codes.length === 0) {
-    ailogger.warn(`inferAllIngestionErrorCodes: unmapped error pattern defaulting to SQL_EXCEPTION: "${reason}"`);
-    codes.push('SQL_EXCEPTION');
+    ailogger.warn(`inferAllIngestionErrorCodes: unrecognized parser-reject reason: "${reason}"`);
+    codes.push('UNCLASSIFIED_REJECT');
   }
 
   return Array.from(new Set(codes));
@@ -153,11 +129,14 @@ interface MeasurementErrorInput {
 }
 
 /**
- * The single choke point for turning a failure into an error code. A
- * `parser_reject` still needs the reason text classified (the specific
- * per-row defect isn't known up front); every other kind is a system failure
- * the caller has already identified, so it maps straight to its code and
- * never runs prose inference over the reason text.
+ * Turns a failure into an error code. A `parser_reject` still needs the
+ * reason text classified (the specific per-row defect isn't known up
+ * front); every other kind is a system failure the caller has already
+ * identified, so it maps straight to its code and never runs prose
+ * inference over the reason text. Not the only caller of these
+ * primitives — `lib/batchfailuretransfer.ts` composes code+message from
+ * `errorCodeForSystemFailure`/`getIngestionErrorMessage` directly for the
+ * same system-failure kinds.
  */
 export function classifyIngestionFailure(kind: IngestionFailureKind, failureReason?: string | null): MeasurementErrorInput[] {
   if (kind !== 'parser_reject') {

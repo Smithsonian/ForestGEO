@@ -162,10 +162,12 @@ describe('moveTemporaryBatchToFailedMeasurements', () => {
   });
 
   /**
-   * The inverse proof: a reason that matches none of the interruption
-   * fragments in `INTERRUPTION_REASON_FRAGMENTS` — prose inference would
-   * default it to SQL_EXCEPTION — must still land as INTERRUPTED_UPLOAD when
-   * the caller declares that kind.
+   * The inverse proof: interruption wording no longer influences
+   * classification at all — reason-text inference for INTERRUPTED_UPLOAD was
+   * removed, so a reason carrying none of the old interruption wordings
+   * (indeed, one that matches no classifier pattern at all) must still land
+   * as INTERRUPTED_UPLOAD, because the explicit kind the caller declares is
+   * the only thing that decides.
    */
   it('maps interrupted_upload to INTERRUPTED_UPLOAD even when the wording matches no interruption fragment', async () => {
     const connectionManager = {
