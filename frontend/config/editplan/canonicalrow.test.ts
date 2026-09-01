@@ -19,6 +19,12 @@ describe('canonicalizeRowForHash', () => {
       expect(out.StemLocalX).toBe(3.14);
       expect(out.StemLocalY).toBe(2.72);
     });
+
+    it('maps px/py to plot coordinates at DECIMAL(12,6) precision, preserving sign', () => {
+      const out = canonicalizeRowForHash({ px: '-2.5312449', py: '487.125' }, 'revision-update');
+      expect(out.StemPlotX).toBe(-2.531245); // precision-6 rounds the 7th decimal
+      expect(out.StemPlotY).toBe(487.125);
+    });
   });
 
   describe('revision-insert mode', () => {

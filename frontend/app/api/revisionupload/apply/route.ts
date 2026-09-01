@@ -577,6 +577,8 @@ async function insertNewRowsThroughPipeline(
       canonical.QuadratName ?? null,
       canonical.StemLocalX ?? null,
       canonical.StemLocalY ?? null,
+      canonical.StemPlotX ?? null,
+      canonical.StemPlotY ?? null,
       canonical.MeasuredDBH ?? null,
       canonical.MeasuredHOM ?? null,
       canonical.MeasurementDate ?? null,
@@ -588,7 +590,7 @@ async function insertNewRowsThroughPipeline(
   const insertTempSQL = safeFormatQuery(
     schema,
     `INSERT IGNORE INTO ??.temporarymeasurements
-      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, PlotX, PlotY, DBH, HOM, MeasurementDate, Codes, Comments)
      VALUES ?`
   );
   await connectionManager.executeQuery(insertTempSQL, [rowValues], transactionID);

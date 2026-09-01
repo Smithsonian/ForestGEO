@@ -706,9 +706,10 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
       return value == null ? '' : Number(value).toFixed(2);
     },
     maxWidth: 100,
-    editable: false,
+    editable: true,
     type: 'number',
-    filterOperators: customNumericOperators
+    filterOperators: customNumericOperators,
+    preProcessEditCellProps: params => preprocessor(params)
   },
   {
     field: 'stemPlotY',
@@ -720,8 +721,9 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     valueFormatter: (value: number | null | undefined) => {
       return value == null ? '' : Number(value).toFixed(2);
     },
-    editable: false,
-    filterOperators: customNumericOperators
+    editable: true,
+    filterOperators: customNumericOperators,
+    preProcessEditCellProps: params => preprocessor(params)
   },
   {
     field: 'measuredDBH',

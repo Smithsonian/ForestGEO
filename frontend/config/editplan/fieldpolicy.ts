@@ -10,6 +10,8 @@ export const EDITABLE_FIELDS_BY_SURFACE: Record<EditSurface, ReadonlySet<string>
     'QuadratName',
     'StemLocalX',
     'StemLocalY',
+    'StemPlotX',
+    'StemPlotY',
     'MeasurementDate',
     'MeasuredDBH',
     'MeasuredHOM',
@@ -18,7 +20,7 @@ export const EDITABLE_FIELDS_BY_SURFACE: Record<EditSurface, ReadonlySet<string>
   ]),
   failedmeasurements: new Set(['Tag', 'StemTag', 'SpCode', 'Quadrat', 'X', 'Y', 'DBH', 'HOM', 'Date', 'Codes', 'Comments']),
   'revision-row-local': new Set(['dbh', 'hom', 'date', 'codes', 'comments']),
-  'revision-identity': new Set(['spcode', 'tag', 'stemtag', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes', 'comments'])
+  'revision-identity': new Set(['spcode', 'tag', 'stemtag', 'quadrat', 'lx', 'ly', 'px', 'py', 'dbh', 'hom', 'date', 'codes', 'comments'])
 };
 
 export const FIELD_ALIASES_BY_SURFACE: Record<EditSurface, Record<string, string>> = {
@@ -29,6 +31,8 @@ export const FIELD_ALIASES_BY_SURFACE: Record<EditSurface, Record<string, string
     quadratName: 'QuadratName',
     stemLocalX: 'StemLocalX',
     stemLocalY: 'StemLocalY',
+    stemPlotX: 'StemPlotX',
+    stemPlotY: 'StemPlotY',
     measurementDate: 'MeasurementDate',
     measuredDBH: 'MeasuredDBH',
     measuredHOM: 'MeasuredHOM',
@@ -105,6 +109,8 @@ export const CLEAR_POLICY: Record<string, ClearSemantics> = {
   MeasuredHOM: 'no-op-on-blank',
   StemLocalX: 'no-op-on-blank',
   StemLocalY: 'no-op-on-blank',
+  StemPlotX: 'no-op-on-blank',
+  StemPlotY: 'no-op-on-blank',
   MeasurementDate: 'invalid-clear',
   Description: 'clear-on-blank',
   Attributes: 'clear-on-blank'
@@ -115,6 +121,10 @@ export const PER_COLUMN_DECIMAL_PRECISION: Record<string, number> = {
   MeasuredHOM: 2,
   StemLocalX: 2,
   StemLocalY: 2,
+  // Plot coordinates persist in DECIMAL(12,6) columns; keep the full stored
+  // scale so diff/hash normalization never flags an unchanged 6-decimal value.
+  StemPlotX: 6,
+  StemPlotY: 6,
   DBH: 2,
   HOM: 2,
   X: 2,

@@ -409,6 +409,48 @@ describe('POST /api/revisionupload/apply', () => {
     );
   });
 
+  it('stages new rows with plot coordinates into temporarymeasurements PlotX/PlotY', async () => {
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          newRows: [
+            {
+              csvIndex: 0,
+              csvRow: {
+                tag: 'T9',
+                stemtag: 'S9',
+                spcode: 'AAA',
+                quadrat: 'Q1',
+                lx: '3.5',
+                ly: '4.25',
+                px: '-2.531244',
+                py: '487.125',
+                dbh: '10',
+                date: '2026-04-01'
+              }
+            }
+          ],
+          confirmNewRows: true
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ insertedCount: 1 });
+
+    const insertCall = mocks.executeQuery.mock.calls.find(([sql]) => typeof sql === 'string' && sql.includes('INSERT IGNORE INTO ??.temporarymeasurements'));
+    expect(insertCall).toBeDefined();
+    const [insertSQL, insertParams] = insertCall!;
+    expect(insertSQL).toContain('LocalX, LocalY, PlotX, PlotY, DBH, HOM');
+    const rowValues = (insertParams as unknown[][])[0][0] as unknown[];
+    // Column order: FileID, BatchID, PlotID, CensusID, TreeTag, StemTag,
+    // SpeciesCode, QuadratName, LocalX, LocalY, PlotX, PlotY, DBH, HOM, ...
+    expect(rowValues[8]).toBe(3.5);
+    expect(rowValues[9]).toBe(4.25);
+    expect(rowValues[10]).toBe(-2.531244);
+    expect(rowValues[11]).toBe(487.125);
+  });
+
   it('rejects malformed numeric values in new rows before inserting temporary measurements', async () => {
     const response = await POST(
       buildRequest(

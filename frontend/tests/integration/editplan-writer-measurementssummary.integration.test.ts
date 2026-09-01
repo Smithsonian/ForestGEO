@@ -396,6 +396,76 @@ describe('writeMeasurementsSummary (integration)', () => {
     });
   });
 
+  describe('StemPlotX / StemPlotY change', () => {
+    it('propagates plot coordinates to the stems row and stamps RawPlotX/RawPlotY on the measurement', async () => {
+      // Negative on one axis on purpose: signed plot coordinates are valid
+      // data (a stem west of the plot origin) and must survive the writer.
+      const NEW_PLOT_X = -2.531244;
+      const NEW_PLOT_Y = 487.125;
+      const stemGUIDBefore = fixture.stemGUIDs[STEM_TAG_S1];
+
+      const plan = buildPlan(
+        [
+          { field: 'StemPlotX', from: null, to: NEW_PLOT_X },
+          { field: 'StemPlotY', from: null, to: NEW_PLOT_Y }
+        ],
+        fixture.coreMeasurementID
+      );
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, {
+        StemPlotX: NEW_PLOT_X,
+        StemPlotY: NEW_PLOT_Y
+      });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const stemRow = await loadStem(connection, stemGUIDBefore);
+      expect(Number(stemRow?.PlotX)).toBeCloseTo(NEW_PLOT_X, 6);
+      expect(Number(stemRow?.PlotY)).toBeCloseTo(NEW_PLOT_Y, 6);
+      // Local coordinates are a separate axis pair and must not move.
+      expect(Number(stemRow?.LocalX)).toBeCloseTo(INITIAL_STEM_X, 2);
+      expect(Number(stemRow?.LocalY)).toBeCloseTo(INITIAL_STEM_Y, 2);
+
+      // The row-level snapshot must reflect the edit so the
+      // COALESCE(RawPlotX, PlotX) read model shows the corrected value and
+      // validation 19 (raw axes only) sees it.
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(Number(cmRow.RawPlotX)).toBeCloseTo(NEW_PLOT_X, 6);
+      expect(Number(cmRow.RawPlotY)).toBeCloseTo(NEW_PLOT_Y, 6);
+      expect(cmRow.IsValidated).toBeNull();
+    });
+
+    it('does NOT fabricate RawPlotX/RawPlotY when an unrelated raw-sync edit runs', async () => {
+      // Give the stem canonical plot coordinates while the measurement row's
+      // raw columns stay NULL — the shape of a row whose upload file never
+      // supplied px/py on a stem that got coordinates from another row.
+      const stemGUID = fixture.stemGUIDs[STEM_TAG_S1];
+      await connection.query('UPDATE stems SET PlotX = ?, PlotY = ? WHERE StemGUID = ?', [100.5, 200.25, stemGUID]);
+
+      // StemLocalX is a raw-sync trigger field, so this edit rewrites the Raw*
+      // columns. RawPlotX/RawPlotY must stay NULL: stamping the stem's
+      // canonical value would fabricate an "as uploaded" plot coordinate and
+      // enroll this row in raw-axes-only validation 19.
+      const NEW_X = 9.25;
+      const plan = buildPlan([{ field: 'StemLocalX', from: INITIAL_STEM_X, to: NEW_X }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { StemLocalX: NEW_X });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.RawX).not.toBeNull();
+      expect(cmRow.RawPlotX).toBeNull();
+      expect(cmRow.RawPlotY).toBeNull();
+
+      const stemRow = await loadStem(connection, stemGUID);
+      expect(Number(stemRow?.PlotX)).toBeCloseTo(100.5, 2);
+      expect(Number(stemRow?.PlotY)).toBeCloseTo(200.25, 2);
+    });
+  });
+
   describe('StemTag change', () => {
     it('creates a new stem on the same tree/quadrat and rewires the measurement', async () => {
       const newStemTag = 'WS9';

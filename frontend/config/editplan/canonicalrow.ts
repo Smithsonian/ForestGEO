@@ -9,6 +9,8 @@ type CanonicalField =
   | 'QuadratName'
   | 'StemLocalX'
   | 'StemLocalY'
+  | 'StemPlotX'
+  | 'StemPlotY'
   | 'MeasuredDBH'
   | 'MeasuredHOM'
   | 'MeasurementDate'
@@ -26,7 +28,9 @@ const UPDATE_FIELDS: readonly CanonicalField[] = [
   'SpeciesCode',
   'QuadratName',
   'StemLocalX',
-  'StemLocalY'
+  'StemLocalY',
+  'StemPlotX',
+  'StemPlotY'
 ];
 
 const INSERT_FIELDS: readonly CanonicalField[] = [...UPDATE_FIELDS];
@@ -42,6 +46,8 @@ const CSV_ALIAS_TO_CANONICAL: Record<string, CanonicalField> = {
   quadrat: 'QuadratName',
   lx: 'StemLocalX',
   ly: 'StemLocalY',
+  px: 'StemPlotX',
+  py: 'StemPlotY',
   dbh: 'MeasuredDBH',
   hom: 'MeasuredHOM',
   date: 'MeasurementDate',

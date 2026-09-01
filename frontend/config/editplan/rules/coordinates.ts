@@ -3,7 +3,8 @@ import { RuleContext } from './context';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 export async function applyCoordinateRules(ctx: RuleContext): Promise<Effect[]> {
-  if (!ctx.changedFields.has('StemLocalX') && !ctx.changedFields.has('StemLocalY')) return [];
+  const coordinateFields = ['StemLocalX', 'StemLocalY', 'StemPlotX', 'StemPlotY'];
+  if (!coordinateFields.some(field => ctx.changedFields.has(field))) return [];
   const stemGUID = Number(ctx.oldRow.StemGUID);
   if (!stemGUID) return [];
   const rows = await ctx.cm.executeQuery(

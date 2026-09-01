@@ -27,7 +27,7 @@ interface UploadRevisionMatchProps {
 
 const NEW_ROW_DISPLAY_FIELDS = ['tag', 'stemtag', 'spcode', 'quadrat', 'dbh', 'date'] as const;
 
-const IDENTITY_FIELDS: ReadonlySet<string> = new Set(['spcode', 'tag', 'stemtag', 'quadrat', 'lx', 'ly']);
+const IDENTITY_FIELDS: ReadonlySet<string> = new Set(['spcode', 'tag', 'stemtag', 'quadrat', 'lx', 'ly', 'px', 'py']);
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return '—';
@@ -171,7 +171,7 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
           <Stack spacing={0.5}>
             <Typography level="body-sm" fontWeight="lg">
               {rowsWithIdentityChanges.length} {rowsWithIdentityChanges.length === 1 ? 'row edits' : 'rows edit'} identity columns (<code>spcode</code>,{' '}
-              <code>tag</code>, <code>stemtag</code>, <code>quadrat</code>, <code>lx</code>, <code>ly</code>).
+              <code>tag</code>, <code>stemtag</code>, <code>quadrat</code>, <code>lx</code>, <code>ly</code>, <code>px</code>, <code>py</code>).
             </Typography>
             <Typography level="body-sm">
               These edits will be applied to the matched rows and may propagate to other measurements that share the same tree, stem, or quadrat. Review the

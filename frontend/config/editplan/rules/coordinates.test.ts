@@ -40,6 +40,31 @@ describe('applyCoordinateRules', () => {
     expect(effects[0].references?.stemGUIDs).toEqual([STEM_GUID]);
   });
 
+  it('emits R4 when only StemPlotX changed', async () => {
+    const ctx = makeCtx({
+      newRow: { StemPlotX: -3.25 },
+      changedFields: new Set(['StemPlotX'])
+    });
+    const effects = await applyCoordinateRules(ctx);
+    expect(effects).toHaveLength(1);
+    expect(effects[0].id).toBe('R4');
+    expect(effects[0].severity).toBe('warn');
+    expect(effects[0].affectedTable).toBe('stems');
+    expect(effects[0].affectedRowCount).toBe(SHARED_COUNT);
+    expect(effects[0].references?.stemGUIDs).toEqual([STEM_GUID]);
+  });
+
+  it('emits R4 when only StemPlotY changed', async () => {
+    const ctx = makeCtx({
+      newRow: { StemPlotY: 512.4 },
+      changedFields: new Set(['StemPlotY'])
+    });
+    const effects = await applyCoordinateRules(ctx);
+    expect(effects).toHaveLength(1);
+    expect(effects[0].id).toBe('R4');
+    expect(effects[0].affectedRowCount).toBe(SHARED_COUNT);
+  });
+
   it('emits R4 when only StemLocalY changed', async () => {
     const ctx = makeCtx({
       newRow: { StemLocalY: 99.0 },

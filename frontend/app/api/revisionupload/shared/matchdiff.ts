@@ -3,7 +3,7 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { FileRow } from '@/config/macros/formdetails';
 import { canonicalizeRowForHash, RowMode } from '@/config/editplan/canonicalrow';
 
-export const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments', 'spcode', 'quadrat', 'lx', 'ly', 'tag', 'stemtag'] as const;
+export const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments', 'spcode', 'quadrat', 'lx', 'ly', 'px', 'py', 'tag', 'stemtag'] as const;
 
 export type UpdatableField = (typeof UPDATABLE_FIELDS)[number];
 export type MatchStrategy = 'stemid' | 'tag_stemtag';
@@ -48,6 +48,8 @@ export const FIELD_DESCRIPTORS: Record<UpdatableField, FieldDescriptor> = {
   quadrat: { dbProperty: 'QuadratName', compareKind: 'numeric-or-string-ci' },
   lx: { dbProperty: 'LocalX', compareKind: 'numeric' },
   ly: { dbProperty: 'LocalY', compareKind: 'numeric' },
+  px: { dbProperty: 'StemPlotX', compareKind: 'numeric' },
+  py: { dbProperty: 'StemPlotY', compareKind: 'numeric' },
   tag: { dbProperty: 'TreeTag', compareKind: 'numeric-or-string-ci' },
   stemtag: { dbProperty: 'StemTag', compareKind: 'numeric-or-string-ci' }
 };
@@ -73,6 +75,8 @@ export interface ExistingMeasurementRow {
   QuadratName: string | null;
   LocalX: number | string | null;
   LocalY: number | string | null;
+  StemPlotX: number | string | null;
+  StemPlotY: number | string | null;
 }
 
 export const LOOKUP_CHUNK_SIZE = 1000;
@@ -82,7 +86,8 @@ const MEASUREMENT_SELECT = `cm.CoreMeasurementID, cm.StemGUID, cm.IsActive, cm.M
               cm.MeasurementDate, cm.RawCodes, cm.Description, cm.RawTreeTag, cm.RawStemTag,
               st.IsActive AS StemIsActive, t.IsActive AS TreeIsActive, q.IsActive AS QuadratIsActive,
               q.PlotID, t.TreeTag, st.StemTag,
-              sp.SpeciesCode, q.QuadratName, st.LocalX, st.LocalY`;
+              sp.SpeciesCode, q.QuadratName, st.LocalX, st.LocalY,
+              COALESCE(cm.RawPlotX, st.PlotX) AS StemPlotX, COALESCE(cm.RawPlotY, st.PlotY) AS StemPlotY`;
 
 const MEASUREMENT_JOINS = `??.coremeasurements cm
        LEFT JOIN ??.stems st ON st.StemGUID = cm.StemGUID
