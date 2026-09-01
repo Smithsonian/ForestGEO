@@ -430,6 +430,42 @@ describe('measurementerrors helpers', () => {
   ])('parser inference returns UNCLASSIFIED_REJECT for unrecognized reason %j', reason => {
     expect(inferAllIngestionErrorCodes(reason)).toEqual(['UNCLASSIFIED_REJECT']);
   });
+
+  // These reasons are the ACTUAL strings validateMeasurementRow/resolveMeasurementChunk
+  // emit (lib/column-mapping/measurement-rows.ts) — plural "Missing required fields:"
+  // joined with ', ' over lowercase canonical labels, "Decimal value for X is out of
+  // range: <value>" for lx/ly/px/py/dbh/hom, and multi-error rows joined with '|'.
+  it('maps the plural missing-required-fields reason to per-field codes', () => {
+    expect(inferAllIngestionErrorCodes('Missing required fields: tag, stemtag, date')).toEqual([
+      'MISSING_FIELD_TREETAG',
+      'MISSING_FIELD_STEMTAG',
+      'MISSING_FIELD_DATE'
+    ]);
+    expect(inferAllIngestionErrorCodes('Missing required fields: lx, ly')).toEqual(['MISSING_FIELD_LOCALX', 'MISSING_FIELD_LOCALY']);
+  });
+
+  it('maps out-of-range coordinate rejects to INVALID_COORDINATE', () => {
+    expect(inferAllIngestionErrorCodes('Decimal value for lx is out of range: -0.3')).toEqual(['INVALID_COORDINATE']);
+    expect(inferAllIngestionErrorCodes('Decimal value for px is out of range: 12345678')).toEqual(['INVALID_COORDINATE']);
+  });
+
+  it('maps out-of-range negative dbh/hom to their sign codes', () => {
+    expect(inferAllIngestionErrorCodes('Decimal value for dbh is out of range: -5')).toEqual(['NEGATIVE_DBH']);
+    expect(inferAllIngestionErrorCodes('Decimal value for hom is out of range: -1.3')).toEqual(['NEGATIVE_HOM']);
+  });
+
+  it('collects every code from a |-joined multi-error reason', () => {
+    expect(inferAllIngestionErrorCodes('Missing required fields: tag|Decimal value for ly is out of range: -1.2')).toEqual([
+      'MISSING_FIELD_TREETAG',
+      'INVALID_COORDINATE'
+    ]);
+  });
+
+  it('silently drops an unrecognized label from the missing-fields list rather than inventing a code for it', () => {
+    // 'px' has no MISSING_FIELD_* code (it only participates in the decimal-range check),
+    // so it must not surface a bogus code or block the sibling 'tag' label from mapping.
+    expect(inferAllIngestionErrorCodes('Missing required fields: tag, px')).toEqual(['MISSING_FIELD_TREETAG']);
+  });
 });
 
 /**

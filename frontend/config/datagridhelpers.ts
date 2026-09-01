@@ -336,6 +336,11 @@ export const failureErrorMapping: Record<string, string[]> = {
   'Quadrat mismatch across censuses': ['quadrat'],
   'Coordinate drift': ['x', 'y'],
   'Coordinate drift exceeds allowed threshold': ['x', 'y'],
+  'Coordinate value is outside the accepted or storable range': ['x', 'y'],
+  // Legacy key: matches catalog text on schemas whose INVALID_COORDINATE row hasn't
+  // yet been lazily refreshed by ensureMeasurementErrorDefinition's ON DUPLICATE KEY
+  // UPDATE. Keep until every live schema has ingested at least one coordinate reject
+  // under the corrected wording.
   'Coordinate value is negative': ['x', 'y'],
   'DBH must be non-negative': ['dbh'],
   'HOM must be non-negative': ['hom'],

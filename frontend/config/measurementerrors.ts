@@ -76,13 +76,26 @@ const INGESTION_ERROR_MESSAGES: Record<string, string> = {
   NEGATIVE_DBH: 'DBH must be non-negative',
   NEGATIVE_HOM: 'HOM must be non-negative',
   MISSING_FIELD_COORDINATES: 'Missing required coordinate fields (lx, ly)',
-  INVALID_COORDINATE: 'Coordinate value is negative',
+  INVALID_COORDINATE: 'Coordinate value is outside the accepted or storable range',
   FIELD_TOO_LONG: 'One or more fields exceed column length limits',
   MISSING_MEASUREMENT_DATA: 'Missing measurement data',
   INTERRUPTED_UPLOAD: 'Upload was interrupted before this row was processed (server timeout or cancelled session) — the row itself was not rejected',
   UNCLASSIFIED_REJECT: 'Row was rejected before ingestion; the recorded reason does not match a known error category',
   SQL_EXCEPTION: 'Ingestion SQL exception'
 };
+
+// Parser reject reasons use the lowercase canonical field labels from
+// lib/column-mapping (validateMeasurementRow joins them: "Missing required fields: tag, date").
+const MISSING_FIELD_CODES_BY_LABEL: Record<string, string> = {
+  tag: 'MISSING_FIELD_TREETAG',
+  stemtag: 'MISSING_FIELD_STEMTAG',
+  spcode: 'MISSING_FIELD_SPECIESCODE',
+  quadrat: 'MISSING_FIELD_QUADRATNAME',
+  date: 'MISSING_FIELD_DATE',
+  lx: 'MISSING_FIELD_LOCALX',
+  ly: 'MISSING_FIELD_LOCALY'
+};
+const MISSING_FIELDS_LIST_PATTERN = /missing required fields?:\s*([^|]+)/g;
 
 export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
   const text = (reason || '').toLowerCase();
@@ -104,12 +117,26 @@ export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
   if (text.includes('duplicate')) codes.push('DUPLICATE_ENTRY');
   if (text.includes('invalid dbh') || text.includes('negative dbh')) codes.push('NEGATIVE_DBH');
   if (text.includes('invalid hom') || text.includes('negative hom')) codes.push('NEGATIVE_HOM');
-  if (text.includes('missing required fields: lx') || text.includes('missing required fields: ly')) codes.push('MISSING_FIELD_COORDINATES');
   if (text.includes('missing required field: localx')) codes.push('MISSING_FIELD_LOCALX');
   if (text.includes('missing required field: localy')) codes.push('MISSING_FIELD_LOCALY');
   if (text.includes('invalid localx') || text.includes('invalid localy') || text.includes('invalid local')) codes.push('INVALID_COORDINATE');
   if (text.includes('exceeds maximum length') || text.includes('field too long')) codes.push('FIELD_TOO_LONG');
   if (text.includes('missing measurement data')) codes.push('MISSING_MEASUREMENT_DATA');
+
+  // Parser-emitted reject shapes (lib/column-mapping/measurement-rows.ts):
+  // "Missing required fields: tag, stemtag, date" (plural, lowercase canonical labels)
+  // and "Decimal value for <field> is out of range: <value>" for lx/ly/px/py/dbh/hom.
+  // A positive (too-large) dbh/hom overflow has no distinguishing sign in that text, so
+  // it deliberately falls through to UNCLASSIFIED_REJECT rather than guessing NEGATIVE_*.
+  for (const match of text.matchAll(MISSING_FIELDS_LIST_PATTERN)) {
+    for (const label of match[1].split(',').map(part => part.trim())) {
+      const code = MISSING_FIELD_CODES_BY_LABEL[label];
+      if (code) codes.push(code);
+    }
+  }
+  if (/decimal value for (lx|ly|px|py) is out of range/.test(text)) codes.push('INVALID_COORDINATE');
+  if (/decimal value for dbh is out of range: -/.test(text)) codes.push('NEGATIVE_DBH');
+  if (/decimal value for hom is out of range: -/.test(text)) codes.push('NEGATIVE_HOM');
 
   if (codes.length === 0) {
     ailogger.warn(`inferAllIngestionErrorCodes: unrecognized parser-reject reason: "${reason}"`);

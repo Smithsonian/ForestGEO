@@ -347,7 +347,7 @@ async function seedMeasurementErrors(conn: mysql.Connection): Promise<void> {
     ['ingestion', 'DUPLICATE_ENTRY', 'Duplicate measurement row detected'],
     ['ingestion', 'NEGATIVE_DBH', 'DBH must be non-negative'],
     ['ingestion', 'NEGATIVE_HOM', 'HOM must be non-negative'],
-    ['ingestion', 'INVALID_COORDINATE', 'Coordinate value is negative'],
+    ['ingestion', 'INVALID_COORDINATE', 'Coordinate value is outside the accepted or storable range'],
     ['ingestion', 'FIELD_TOO_LONG', 'One or more fields exceed column length limits'],
     ['ingestion', 'MISSING_MEASUREMENT_DATA', 'Missing measurement data'],
     ['ingestion', 'QUADRAT_MISMATCH', 'Quadrat mismatch across censuses'],

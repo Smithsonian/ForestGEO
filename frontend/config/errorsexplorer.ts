@@ -237,7 +237,10 @@ export const INGESTION_ERROR_FIELD_MAP: Record<string, string[]> = {
   NEGATIVE_DBH: ['measuredDBH'],
   NEGATIVE_HOM: ['measuredHOM'],
   MISSING_FIELD_COORDINATES: ['stemLocalX', 'stemLocalY'],
-  INVALID_COORDINATE: ['stemLocalX', 'stemLocalY'],
+  // A storage-range reject can come from lx/ly OR px/py (Decimal value for lx|ly|px|py is out of
+  // range) — the reason text doesn't say which pair, so route to both local and plot fields rather
+  // than falsely pinning it on lx/ly alone.
+  INVALID_COORDINATE: ['stemLocalX', 'stemLocalY', 'stemPlotX', 'stemPlotY'],
   FIELD_TOO_LONG: [],
   MISSING_MEASUREMENT_DATA: ['measuredDBH', 'measuredHOM'],
   // No field is at fault — the upload was cut off before the row was judged.
