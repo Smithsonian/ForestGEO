@@ -6,6 +6,16 @@ import { MAX_STORED_DECIMAL, parseFiniteBase10Number } from '@/config/editplan/f
 export const INGESTION_ERROR_SOURCE = 'ingestion' as const;
 export const VALIDATION_ERROR_SOURCE = 'validation' as const;
 
+export const FALLBACK_FAILURE_REASON = 'Unknown parse error';
+// coremeasurements.Description is varchar(255); an over-length bind under strict
+// sql_mode would fail the whole audit insert, so truncate rather than throw.
+const FAILURE_DESCRIPTION_MAX_LENGTH = 255;
+
+function normalizeFailureDescription(failureReason?: string | null): string {
+  const trimmed = failureReason == null ? '' : String(failureReason).trim();
+  return (trimmed || FALLBACK_FAILURE_REASON).slice(0, FAILURE_DESCRIPTION_MAX_LENGTH);
+}
+
 export interface IngestionFailureRowInput {
   plotID: number;
   censusID: number;
@@ -128,6 +138,7 @@ interface PreparedIngestionFailureRow {
   resultIndex: number;
   row: IngestionFailureRowInput;
   normalizedDate: string | null;
+  description: string;
   sourceRowIndex: number;
   errors: MeasurementErrorInput[];
 }
@@ -246,6 +257,7 @@ function prepareIngestionFailureRows(rows: IngestionFailureRowInput[]): Prepared
     resultIndex: index,
     row,
     normalizedDate: normalizeDate(row.date),
+    description: normalizeFailureDescription(row.failureReason),
     sourceRowIndex: row.sourceRowIndex ?? index + 1,
     errors: inferAllIngestionErrorCodes(row.failureReason).map(code => ({
       errorCode: code,
@@ -317,7 +329,7 @@ async function insertPreparedIngestionFailureRowsSequential(
   );
 
   for (const preparedRow of rows) {
-    const { row, normalizedDate, sourceRowIndex, errors } = preparedRow;
+    const { row, normalizedDate, description, sourceRowIndex, errors } = preparedRow;
     const insertResult: any = await connectionManager.executeQuery(
       insertSQL,
       [
@@ -325,7 +337,7 @@ async function insertPreparedIngestionFailureRowsSequential(
         normalizedDate,
         row.dbh ?? null,
         row.hom ?? null,
-        row.comments ?? null,
+        description,
         row.fileID ?? null,
         row.batchID ?? null,
         row.tag ?? null,
@@ -394,12 +406,12 @@ async function insertPreparedIngestionFailureRowsBulk(
          IsValidated = FALSE`
     );
 
-    const insertParams = chunk.flatMap(({ row, normalizedDate, sourceRowIndex }) => [
+    const insertParams = chunk.flatMap(({ row, normalizedDate, description, sourceRowIndex }) => [
       row.censusID,
       normalizedDate,
       row.dbh ?? null,
       row.hom ?? null,
-      row.comments ?? null,
+      description,
       row.fileID ?? null,
       row.batchID ?? null,
       row.tag ?? null,

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildFailedMeasurementsSelectQuery,
   ensureMeasurementErrorDefinition,
+  FALLBACK_FAILURE_REASON,
   getIngestionErrorMessage,
   inferAllIngestionErrorCodes,
   insertIngestionFailureRows,
@@ -306,6 +307,101 @@ describe('measurementerrors helpers', () => {
     });
     expect(String(executeQuery.mock.calls[1]?.[0])).toContain('IsActive = 1');
     expect(String(executeQuery.mock.calls[2]?.[0])).toContain('LOWER(SpeciesCode) = LOWER(?)');
+  });
+
+  it('persists the failure reason into Description and keeps comments in RawComments only', async () => {
+    const executeQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ insertId: 1001 }) // ensureMeasurementErrorDefinition upsert
+      .mockResolvedValueOnce({ affectedRows: 1 }) // bulk INSERT
+      .mockResolvedValueOnce([{ CoreMeasurementID: 90, SourceRowIndex: 1 }]) // SELECT-back
+      .mockResolvedValueOnce(undefined); // error-log INSERT
+    const connectionManager = { executeQuery } as any;
+
+    await insertIngestionFailureRows(connectionManager, 'forestgeo_testing', [
+      {
+        plotID: 1,
+        censusID: 2,
+        tag: 'T-9',
+        stemTag: '1',
+        spCode: 'ULMALA',
+        quadrat: 'A01',
+        comments: 'leaning stem',
+        failureReason: 'Non-numeric value for dbh: n/a',
+        fileID: 'upload.csv',
+        batchID: 'batch-9',
+        sourceRowIndex: 1
+      }
+    ]);
+
+    const insertCall = executeQuery.mock.calls.find(([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements'));
+    const params = insertCall![1] as unknown[];
+    expect(params[4]).toBe('Non-numeric value for dbh: n/a'); // Description = reason
+    expect(params[16]).toBe('leaning stem'); // RawComments = comments
+  });
+
+  it('falls back to FALLBACK_FAILURE_REASON when the reason is blank', async () => {
+    const executeQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ insertId: 1001 })
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce([{ CoreMeasurementID: 91, SourceRowIndex: 1 }])
+      .mockResolvedValueOnce(undefined);
+    const connectionManager = { executeQuery } as any;
+
+    await insertIngestionFailureRows(connectionManager, 'forestgeo_testing', [
+      { plotID: 1, censusID: 2, failureReason: '   ', fileID: 'upload.csv', batchID: 'batch-9', sourceRowIndex: 1 }
+    ]);
+
+    const insertCall = executeQuery.mock.calls.find(([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements'));
+    expect((insertCall![1] as unknown[])[4]).toBe(FALLBACK_FAILURE_REASON);
+  });
+
+  it('truncates over-length reasons to the Description column width', async () => {
+    const executeQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ insertId: 1001 })
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce([{ CoreMeasurementID: 92, SourceRowIndex: 1 }])
+      .mockResolvedValueOnce(undefined);
+    const connectionManager = { executeQuery } as any;
+
+    await insertIngestionFailureRows(connectionManager, 'forestgeo_testing', [
+      { plotID: 1, censusID: 2, failureReason: 'x'.repeat(300), fileID: 'upload.csv', batchID: 'batch-9', sourceRowIndex: 1 }
+    ]);
+
+    const insertCall = executeQuery.mock.calls.find(([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements'));
+    expect((insertCall![1] as unknown[])[4]).toBe('x'.repeat(255));
+  });
+
+  it('persists the failure reason into Description on the sequential insert path (no batchID)', async () => {
+    const executeQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ insertId: 1001 }) // ensureMeasurementErrorDefinition upsert
+      .mockResolvedValueOnce({ insertId: 93 }) // row INSERT
+      .mockResolvedValueOnce(undefined); // error-log INSERT
+    const connectionManager = { executeQuery } as any;
+
+    await insertIngestionFailureRows(connectionManager, 'forestgeo_testing', [
+      {
+        plotID: 1,
+        censusID: 2,
+        tag: 'T-10',
+        stemTag: '1',
+        spCode: 'ULMALA',
+        quadrat: 'A01',
+        comments: 'broken stem',
+        failureReason: 'Unrecognized failure text for sequential path',
+        fileID: 'upload.csv',
+        batchID: null,
+        sourceRowIndex: null
+      }
+    ]);
+
+    const insertCall = executeQuery.mock.calls.find(([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements'));
+    const params = insertCall![1] as unknown[];
+    expect(params[4]).toBe('Unrecognized failure text for sequential path'); // Description = reason
+    expect(params[16]).toBe('broken stem'); // RawComments = comments
   });
 });
 
