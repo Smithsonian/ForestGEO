@@ -28,7 +28,12 @@ jobs:
           --health-retries=10
 
     steps:
+      # The schedule fires on the default branch (main), but the nightly's job is to
+      # regression-test the integration branch where work lands first. Pin every
+      # checkout to forestgeo-app-development so the suite exercises dev, not main.
       - uses: actions/checkout@v4
+        with:
+          ref: forestgeo-app-development
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -128,6 +133,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: forestgeo-app-development
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -221,6 +228,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: forestgeo-app-development
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -276,6 +285,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: forestgeo-app-development
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -338,6 +349,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: forestgeo-app-development
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

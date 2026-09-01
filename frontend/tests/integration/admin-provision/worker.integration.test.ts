@@ -15,7 +15,7 @@
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import type { Pool } from 'mysql2/promise';
-import { createTestPool, seedCatalogTables, clearProvisioningState, seedRun, TEST_SCHEMA_PREFIX } from './_shared';
+import { createTestPool, seedCatalogTables, clearProvisioningState, seedRun, suppressBackgroundDispatch, TEST_SCHEMA_PREFIX } from './_shared';
 
 vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
@@ -27,18 +27,16 @@ const STALE_HEARTBEAT_AGE_SECONDS = 600;
 
 describe('provisioning worker (integration)', () => {
   let testPool: Pool;
-  let setImmediateSpy: ReturnType<typeof vi.spyOn>;
+  let setImmediateSpy: ReturnType<typeof suppressBackgroundDispatch>;
 
   beforeAll(async () => {
     testPool = createTestPool();
     await seedCatalogTables(testPool);
-    // Suppress the actual provisioning kickoff that `dispatchRun` triggers
-    // through setImmediate. We only need to verify selection logic.
-    setImmediateSpy = vi.spyOn(globalThis, 'setImmediate').mockImplementation(((_cb: any) => 0) as any);
   });
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    setImmediateSpy = suppressBackgroundDispatch();
     _resetForTests();
     await clearProvisioningState(testPool, TEST_SCHEMA);
   });
