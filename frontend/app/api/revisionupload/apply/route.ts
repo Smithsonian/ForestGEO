@@ -47,6 +47,13 @@ class RevisionApplyPlanHashMismatchError extends Error {
   }
 }
 
+class RevisionStagingIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RevisionStagingIntegrityError';
+  }
+}
+
 interface ApplyMatchedRow {
   csvIndex?: number;
   coreMeasurementID: number;
@@ -139,6 +146,24 @@ function getAffectedRowCount(result: unknown): number {
 
   const affectedRows = (result as { affectedRows?: unknown }).affectedRows;
   return typeof affectedRows === 'number' && Number.isFinite(affectedRows) ? affectedRows : 0;
+}
+
+function getWarningCount(result: unknown): number {
+  if (!result || typeof result !== 'object' || !('warningStatus' in result)) return 0;
+  const warningStatus = (result as { warningStatus?: unknown }).warningStatus;
+  return typeof warningStatus === 'number' && Number.isFinite(warningStatus) ? warningStatus : 0;
+}
+
+function describeSqlWarnings(warnings: unknown): string {
+  if (!Array.isArray(warnings) || warnings.length === 0) return 'warning details unavailable';
+  return warnings
+    .slice(0, 5)
+    .map(warning => {
+      if (!warning || typeof warning !== 'object') return String(warning);
+      const row = warning as { Code?: unknown; Message?: unknown; Level?: unknown };
+      return [row.Level, row.Code, row.Message].filter(value => value !== undefined && value !== null && value !== '').join(' ');
+    })
+    .join('; ');
 }
 
 interface MatchedRowWithDiff {
@@ -589,16 +614,40 @@ async function insertNewRowsThroughPipeline(
 
   const insertTempSQL = safeFormatQuery(
     schema,
-    `INSERT IGNORE INTO ??.temporarymeasurements
+    `INSERT INTO ??.temporarymeasurements
       (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, PlotX, PlotY, DBH, HOM, MeasurementDate, Codes, Comments)
      VALUES ?`
   );
-  await connectionManager.executeQuery(insertTempSQL, [rowValues], transactionID);
+  const insertResult = await connectionManager.executeQuery(insertTempSQL, [rowValues], transactionID);
+  const stagedCount = getAffectedRowCount(insertResult);
+  const warningCount = getWarningCount(insertResult);
+
+  if (warningCount > 0) {
+    const warnings = await connectionManager.executeQuery('SHOW WARNINGS', [], transactionID);
+    const warningDetail = describeSqlWarnings(warnings);
+    ailogger.error('[revisionupload/apply] temporarymeasurement staging produced SQL warnings', undefined, {
+      schema,
+      batchID,
+      warningCount,
+      warningDetail
+    });
+    throw new RevisionStagingIntegrityError(`Revision staging produced ${warningCount} SQL warning(s): ${warningDetail}`);
+  }
+
+  if (stagedCount !== newRows.length) {
+    ailogger.error('[revisionupload/apply] temporarymeasurement staging row-count mismatch', undefined, {
+      schema,
+      batchID,
+      expectedRows: newRows.length,
+      stagedRows: stagedCount
+    });
+    throw new RevisionStagingIntegrityError(`Revision staging inserted ${stagedCount} of ${newRows.length} expected row(s)`);
+  }
 
   const bulkIngestSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
   await connectionManager.executeQuery(bulkIngestSQL, [REVISION_UPLOAD_FILE_ID, batchID], transactionID);
 
-  return newRows.length;
+  return stagedCount;
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -987,6 +1036,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (errorObj instanceof InvalidFieldValueError) {
       return NextResponse.json({ error: 'invalid field value', field: errorObj.field }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
+    if (errorObj instanceof RevisionStagingIntegrityError) {
+      return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
     }
     const status = errorObj instanceof RevisionApplyConflictError ? HTTPResponses.CONFLICT : HTTPResponses.INTERNAL_SERVER_ERROR;
     return NextResponse.json({ error: errorObj.message }, { status });
