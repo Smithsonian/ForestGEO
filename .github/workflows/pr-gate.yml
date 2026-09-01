@@ -10,6 +10,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The two ratchets live in ONE job, on purpose.
+  #
+  # They used to run as steps inside `unit` here AND inside `e2e-tests` in
+  # e2e-tests.yml. A single count over baseline therefore turned into two red
+  # workflows for one cause (see PR #456: any 490 vs baseline 489 failed both).
+  # Worse, they ran BEFORE the test steps, so a one-line drift aborted the job
+  # and discarded the entire unit/e2e signal — maximum noise, minimum
+  # information.
+  #
+  # As their own job the drift reports once, under a name that says what it is,
+  # and the test jobs still run and report independently.
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Dependency-cycle gate
+        run: node scripts/check-cycles.mjs
+        working-directory: frontend
+
+      - name: Any-escape count gate
+        run: node scripts/check-any-count.mjs
+        working-directory: frontend
+
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -30,21 +65,16 @@ jobs:
         run: npm run build:check
         working-directory: frontend
 
-      - name: Dependency-cycle gate
-        run: node scripts/check-cycles.mjs
-        working-directory: frontend
-
-      - name: Any-escape count gate
-        run: node scripts/check-any-count.mjs
-        working-directory: frontend
-
       - name: Unit tests
         run: npm run test:unit
         working-directory: frontend
 
   integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # ~10 minutes on a healthy runner. Raised from 35 after run 33019550004 was
+    # killed mid-suite at the cap on a degraded runner — 3.5x headroom was not
+    # enough to survive one bad host.
+    timeout-minutes: 50
 
     services:
       mysql:
