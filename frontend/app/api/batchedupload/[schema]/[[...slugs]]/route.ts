@@ -4,6 +4,7 @@ import { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
 import connectionmanager from '@/lib/db/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
+import { toError } from '@/lib/errorhelpers';
 import { recordFailedMeasurementRows } from '@/lib/uploads/record-invalid-rows';
 import { generateShortBatchID } from '@/config/utils';
 import { validatedSchema, type SchemaName } from '@/lib/db/sqlsecurity';
@@ -130,7 +131,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
       await connectionManager.closeConnection();
     } catch (closeError) {
       if (operationError === undefined) throw closeError;
-      ailogger.error('Failed to close batch upload connection after the primary error:', closeError);
+      ailogger.error('Failed to close batch upload connection after the primary error:', toError(closeError));
     }
   }
 }

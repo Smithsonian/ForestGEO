@@ -6,6 +6,7 @@ import { HTTPResponses } from '@/config/macros';
 import { FileRow } from '@/config/macros/formdetails';
 import { generateShortBatchID } from '@/config/utils';
 import ailogger from '@/ailogger';
+import { toError } from '@/lib/errorhelpers';
 import { ACTIVE_UPLOAD_SESSION_STATES, ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS, STALE_VALIDATION_RUN_THRESHOLD_MINUTES } from '@/config/measurementscopepolicy';
@@ -1053,7 +1054,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await connectionManager.closeConnection();
     } catch (closeError) {
       if (operationError === undefined) throw closeError;
-      ailogger.error(`${logPrefix} failed to close connection after the primary error:`, closeError);
+      ailogger.error(`${logPrefix} failed to close connection after the primary error:`, toError(closeError));
     }
   }
 }

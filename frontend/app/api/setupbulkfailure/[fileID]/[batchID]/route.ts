@@ -3,6 +3,7 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
+import { toError } from '@/lib/errorhelpers';
 import { moveTemporaryBatchToFailedMeasurements, moveTemporarySubBatchesToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
@@ -86,7 +87,7 @@ async function handler(request: NextRequest, context: RouteContext) {
       await connectionManager.closeConnection();
     } catch (closeError) {
       if (operationError === undefined) throw closeError;
-      ailogger.error(`Failed to close failure-transfer connection for ${fileID}-${batchID}:`, closeError);
+      ailogger.error(`Failed to close failure-transfer connection for ${fileID}-${batchID}:`, toError(closeError));
     }
   }
   return new NextResponse(JSON.stringify({ temp: true }), { status: HTTPResponses.OK });
