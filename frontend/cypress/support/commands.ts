@@ -106,57 +106,6 @@ Cypress.Commands.add('loginAsFieldCrew', () => {
 Cypress.Commands.add('setupCommonMocks', () => {
   cy.log('🔧 Setting up common API mocks');
 
-  // Mock plots data
-  cy.intercept('POST', '/api/fetchall/plots**', {
-    statusCode: 200,
-    body: {
-      output: [
-        {
-          plotID: 1,
-          plotName: 'Test Plot',
-          locationName: 'Test Location',
-          countryName: 'Test Country',
-          dimensionX: 1000,
-          dimensionY: 500,
-          area: 50,
-          plotShape: 'square',
-          plotDescription: 'Test plot for E2E tests',
-          numQuadrats: 100,
-          coordUnit: 'm'
-        }
-      ],
-      totalCount: 1
-    }
-  }).as('fetchPlots');
-
-  // Mock census data
-  cy.intercept('POST', '/api/fetchall/census**', {
-    statusCode: 200,
-    body: {
-      output: [
-        {
-          censusID: 1,
-          plotID: 1,
-          plotCensusNumber: 1,
-          startDate: '2024-01-01',
-          endDate: '2024-12-31',
-          description: 'Test census'
-        }
-      ],
-      totalCount: 1
-    }
-  }).as('fetchCensus');
-
-  // Mock sites data
-  cy.intercept('POST', '/api/fetchall/sites**', {
-    statusCode: 200,
-    body: {
-      output: [mockSite],
-      totalCount: 1
-    }
-  }).as('fetchSites');
-
-  // Mock administrative sites data
   cy.intercept('GET', '/api/administrative/fetch/sites**', {
     statusCode: 200,
     body: [mockSite]
