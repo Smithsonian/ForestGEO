@@ -8,6 +8,7 @@ import { moveTemporaryBatchToFailedMeasurements, moveTemporarySubBatchesToFailed
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { BatchFamilyScopeError, discoverBatchFamily } from '@/lib/uploads/batch-family';
+import { inferSystemFailureKind } from '@/config/measurementerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -54,12 +55,17 @@ async function handler(request: NextRequest, context: RouteContext) {
       });
     }
 
+    // The client reports whatever killed its setupbulkprocedure request as free
+    // text. A transport failure (front-end 504, aborted fetch) means these rows
+    // were never judged, so they must not be recorded as ingestion SQL errors.
+    const failureKind = inferSystemFailureKind(failureReason);
+
     // After sub-batching, remaining rows may have sub-batch IDs (e.g. batchID__sub001).
     // Try exact match first, then fall back to moving all sub-batches for this file.
-    let movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, batchID, failureReason, 'sql_exception');
+    let movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, batchID, failureReason, failureKind);
 
     if (movedRows === 0) {
-      movedRows = await moveTemporarySubBatchesToFailedMeasurements(connectionManager, schema, fileID, batchID, failureReason, 'sql_exception');
+      movedRows = await moveTemporarySubBatchesToFailedMeasurements(connectionManager, schema, fileID, batchID, failureReason, failureKind);
       if (movedRows > 0) {
         ailogger.warn(`Moved ${movedRows} sub-batched temporary rows to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`);
       }

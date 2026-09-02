@@ -187,12 +187,18 @@ export function computeDiff(csvRow: FileRow, dbRow: ExistingMeasurementRow): Rec
 
     const descriptor = FIELD_DESCRIPTORS[field];
     const dbValue = readDbValueForDisplay(field, dbRow);
-    const comparisonCsvValue =
-      descriptor.compareKind === 'numeric' && descriptor.canonicalProperty
-        ? canonicalizeRowForHash({ [field]: csvValue }, 'revision-update')[descriptor.canonicalProperty]
-        : csvValue;
+    // Canonicalize BOTH sides at the field's declared precision. Rounding only
+    // the CSV value and comparing it against the raw DECIMAL(12,6) column made
+    // a stored 12.345 differ from a CSV 12.345, surfacing a change whose `from`
+    // and `to` render identically and whose apply silently truncated the row.
+    // Comparing canonical-to-canonical asks the question that actually matters:
+    // would applying this cell change what we store?
+    const canonicalize = (value: unknown) => canonicalizeRowForHash({ [field]: value }, 'revision-update')[descriptor.canonicalProperty as string];
+    const isCanonicalNumeric = descriptor.compareKind === 'numeric' && descriptor.canonicalProperty !== undefined;
+    const comparisonCsvValue = isCanonicalNumeric ? canonicalize(csvValue) : csvValue;
+    const comparisonDbValue = isCanonicalNumeric ? canonicalize(dbValue) : dbValue;
 
-    if (fieldValuesAreEquivalent(descriptor.compareKind, comparisonCsvValue, dbValue)) continue;
+    if (fieldValuesAreEquivalent(descriptor.compareKind, comparisonCsvValue, comparisonDbValue)) continue;
 
     changes[field] = { from: dbValue, to: csvValue };
   }

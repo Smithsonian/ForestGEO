@@ -380,13 +380,30 @@ async function classifyFileRows(
         .map(row => row.CoreMeasurementID)
         .sort((left, right) => left - right);
 
+      // computeDiff canonicalizes numeric cells, so one malformed or
+      // out-of-range value throws. Demote that row to invalid with its CSV
+      // index instead of letting it 422 the whole file, which left the
+      // researcher with a field name and no way to find the offending row.
+      let changes: Record<string, { from: unknown; to: unknown }>;
+      try {
+        changes = computeDiff(candidate.csvRow, survivor);
+      } catch (diffError: unknown) {
+        if (!(diffError instanceof InvalidFieldValueError)) throw diffError;
+        invalidRows.push({
+          csvRow: candidate.csvRow,
+          csvIndex: candidate.csvIndex,
+          reason: diffError.message
+        });
+        continue;
+      }
+
       matchedRows.push({
         csvIndex: candidate.csvIndex,
         csvRow: candidate.csvRow,
         coreMeasurementID: survivor.CoreMeasurementID,
         duplicateMeasurementIDsToDelete,
         existingValues: buildExistingValues(survivor),
-        changes: computeDiff(candidate.csvRow, survivor)
+        changes
       });
       continue;
     }

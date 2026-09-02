@@ -7,6 +7,7 @@ import {
   FALLBACK_FAILURE_REASON,
   getIngestionErrorMessage,
   inferAllIngestionErrorCodes,
+  inferSystemFailureKind,
   insertIngestionFailureRows,
   revalidateEditedFailedRow,
   toFiniteNumber
@@ -557,5 +558,107 @@ describe('inferAllIngestionErrorCodes — upload interruptions', () => {
     expect(params[1]).toBe('INTERRUPTED_UPLOAD');
     expect(String(params[2]).toLowerCase()).toContain('interrupted');
     expect(transactionID).toBe('tx-9');
+  });
+});
+
+describe('inferSystemFailureKind — the setupbulkfailure reason boundary', () => {
+  // setupbulkfailure is the only transfer whose failure kind is not known by
+  // its caller: the browser sends whatever killed its setupbulkprocedure
+  // request as free text. Hardcoding 'sql_exception' there is what parked
+  // 106,227 clean Harvard Forest rows as if each carried a data error.
+  const CLIENT_INTERRUPTION_REASONS = [
+    'Server error 504: 504.0 GatewayTimeout',
+    'Upload session upload_ms3jw74a_97uvta1zlug cleaned up after abandonment',
+    'Client disconnected',
+    'Batch cancelled before completion',
+    // Composed by uploadfiresql's own fetchWithTimeout / abort paths.
+    'Request timeout after 480000ms',
+    'Request aborted for /api/setupbulkprocedure/file-1/batch-1',
+    // The browser's native fetch failures.
+    'TypeError: Failed to fetch',
+    'NetworkError when attempting to fetch resource.',
+    'Load failed'
+  ];
+
+  it.each(CLIENT_INTERRUPTION_REASONS)('classifies %j as interrupted_upload', reason => {
+    expect(inferSystemFailureKind(reason)).toBe('interrupted_upload');
+  });
+
+  const GENUINE_SERVER_FAILURE_REASONS = [
+    'Server error 500: Duplicate entry for key uq_coremeasurements',
+    'Client error (400): schema outside the authenticated user scope',
+    'Batch moved after max attempts',
+    'ER_LOCK_WAIT_TIMEOUT: Lock wait timeout exceeded'
+  ];
+
+  it.each(GENUINE_SERVER_FAILURE_REASONS)('leaves %j as sql_exception', reason => {
+    expect(inferSystemFailureKind(reason)).toBe('sql_exception');
+  });
+
+  it('defaults an absent or non-string reason to sql_exception rather than silently excusing the batch', () => {
+    expect(inferSystemFailureKind(undefined)).toBe('sql_exception');
+    expect(inferSystemFailureKind(null)).toBe('sql_exception');
+    expect(inferSystemFailureKind({ nested: 'gateway timeout' })).toBe('sql_exception');
+  });
+
+  it('produces the INTERRUPTED_UPLOAD code end-to-end for a front-end timeout', () => {
+    const reason = 'Server error 504: 504.0 GatewayTimeout';
+
+    expect(classifyIngestionFailure(inferSystemFailureKind(reason), reason)).toEqual([
+      { errorCode: 'INTERRUPTED_UPLOAD', errorMessage: getIngestionErrorMessage('INTERRUPTED_UPLOAD') }
+    ]);
+  });
+});
+
+describe('inferAllIngestionErrorCodes — parser reject shapes', () => {
+  // Every message validateMeasurementRow can emit must land on a code with a
+  // field map, otherwise the errors explorer shows the researcher a rejected
+  // row and no cell to fix.
+  it('classifies a non-numeric DBH, the single most common real reject', () => {
+    expect(inferAllIngestionErrorCodes('Non-numeric value for dbh: N/A')).toEqual(['NON_NUMERIC_DBH']);
+  });
+
+  it('classifies a non-numeric HOM', () => {
+    expect(inferAllIngestionErrorCodes('Non-numeric value for hom: unknown')).toEqual(['NON_NUMERIC_HOM']);
+  });
+
+  it.each(['lx', 'ly', 'px', 'py'])('classifies a non-numeric %s coordinate', field => {
+    expect(inferAllIngestionErrorCodes(`Non-numeric value for ${field}: ~12`)).toEqual(['NON_NUMERIC_COORDINATE']);
+  });
+
+  it('classifies an unparseable date', () => {
+    expect(inferAllIngestionErrorCodes('Unparseable date value: 31/02/2026')).toEqual(['INVALID_DATE']);
+  });
+
+  it('classifies a delimiter-contaminated tag pair as a mis-parsed row', () => {
+    const reason = 'Tag values contain delimiter character ",": tag="T1,S1", stemtag="". This suggests parsing error.';
+
+    expect(inferAllIngestionErrorCodes(reason)).toContain('MALFORMED_ROW');
+  });
+
+  it('classifies concatenated over-long tags as a mis-parsed row', () => {
+    const reason =
+      'Unusually long tag values detected: tag="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...", stemtag="BBB...". This may indicate concatenated fields due to parsing error.';
+
+    expect(inferAllIngestionErrorCodes(reason)).toContain('MALFORMED_ROW');
+  });
+
+  it('reports every defect on a row that trips more than one parser check', () => {
+    const reason = 'Missing required fields: quadrat | Non-numeric value for dbh: N/A | Unparseable date value: yesterday';
+
+    expect(inferAllIngestionErrorCodes(reason).sort()).toEqual(['INVALID_DATE', 'MISSING_FIELD_QUADRATNAME', 'NON_NUMERIC_DBH']);
+  });
+
+  it('never re-emits the retired MISSING_FIELD_COORDINATES code for an lx/ly reject', () => {
+    const codes = inferAllIngestionErrorCodes('Missing required fields: lx, ly');
+
+    expect(codes).toEqual(['MISSING_FIELD_LOCALX', 'MISSING_FIELD_LOCALY']);
+    expect(codes).not.toContain('MISSING_FIELD_COORDINATES');
+  });
+
+  it('still resolves the retired code for rows persisted under it before the per-field split', () => {
+    // Removing it from the catalog would leave historical rows with the generic
+    // 'Ingestion error' fallback in the explorer.
+    expect(getIngestionErrorMessage('MISSING_FIELD_COORDINATES')).toBe('Missing required coordinate fields (lx, ly)');
   });
 });

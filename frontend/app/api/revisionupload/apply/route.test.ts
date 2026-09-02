@@ -508,6 +508,14 @@ describe('POST /api/revisionupload/apply', () => {
       error: "Revision staging produced 1 SQL warning(s): Warning 1265 Data truncated for column 'PlotX'"
     });
     expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('CALL ??.bulkingestionprocess'), expect.anything(), expect.anything());
+
+    // SHOW WARNINGS must go through the text protocol. runQuery routes to
+    // connection.execute() whenever a params array is supplied, and MySQL
+    // rejects SHOW WARNINGS there with ER_UNSUPPORTED_PS (1295) — which would
+    // throw an opaque 500 over the very diagnostic this branch exists to read.
+    const showWarningsCall = mocks.executeQuery.mock.calls.find(([query]: [string]) => query === 'SHOW WARNINGS');
+    expect(showWarningsCall).toBeDefined();
+    expect(showWarningsCall![1]).toBeUndefined();
     expect(mocks.loggerError).toHaveBeenCalledWith(
       '[revisionupload/apply] temporarymeasurement staging produced SQL warnings',
       undefined,

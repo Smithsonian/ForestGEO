@@ -58,6 +58,41 @@ export function errorCodeForSystemFailure(kind: SystemFailureKind): string {
   return SYSTEM_FAILURE_ERROR_CODES[kind];
 }
 
+/**
+ * Reason fragments that mean "the upload was cut off", not "this row is bad".
+ * Rows carrying these were never judged by the ingestion procedure, so grouping
+ * them under SQL_EXCEPTION misreports clean data as defective — the failure mode
+ * behind the 2026-07-27 Harvard Forest incident, where an Azure front-end
+ * timeout parked 106,227 rows as if each one had a data error.
+ *
+ * Every other caller knows its own failure kind and passes it explicitly.
+ * setupbulkfailure is the one boundary that cannot: its reason is a free-text
+ * string composed by the browser from whatever killed the request, so the kind
+ * has to be recovered from that text here.
+ */
+const INTERRUPTION_REASON_FRAGMENTS = [
+  'gatewaytimeout',
+  'gateway timeout',
+  'server error 504',
+  'cleaned up after abandonment',
+  'client disconnected',
+  'batch cancelled before completion',
+  // Shapes the upload client itself composes when the request never reached a
+  // verdict: fetchWithTimeout's timeout message, an aborted batch, and the
+  // browser's own network-failure text (Chrome/Firefox vs Safari).
+  'request timeout after',
+  'request aborted for',
+  'failed to fetch',
+  'networkerror',
+  'network error',
+  'load failed'
+];
+
+export function inferSystemFailureKind(reason?: unknown): SystemFailureKind {
+  const text = normalizeFailureDescription(reason).toLowerCase();
+  return INTERRUPTION_REASON_FRAGMENTS.some(fragment => text.includes(fragment)) ? 'interrupted_upload' : 'sql_exception';
+}
+
 const INGESTION_ERROR_MESSAGES: Record<string, string> = {
   MISSING_FIELD_TREETAG: 'Missing required field: TreeTag',
   MISSING_FIELD_STEMTAG: 'Missing required field: StemTag',
@@ -75,11 +110,19 @@ const INGESTION_ERROR_MESSAGES: Record<string, string> = {
   DUPLICATE_ENTRY: 'Duplicate measurement row detected',
   NEGATIVE_DBH: 'DBH must be non-negative',
   NEGATIVE_HOM: 'HOM must be non-negative',
+  // Retired: lx/ly rejects now classify per field as MISSING_FIELD_LOCALX /
+  // MISSING_FIELD_LOCALY. Retained so rows persisted under the old grouped code
+  // still resolve to a message and to affected fields in the errors explorer.
   MISSING_FIELD_COORDINATES: 'Missing required coordinate fields (lx, ly)',
   INVALID_COORDINATE: 'Coordinate value is outside the accepted or storable range',
   FIELD_TOO_LONG: 'One or more fields exceed column length limits',
   MISSING_MEASUREMENT_DATA: 'Missing measurement data',
   INTERRUPTED_UPLOAD: 'Upload was interrupted before this row was processed (server timeout or cancelled session) — the row itself was not rejected',
+  NON_NUMERIC_DBH: 'DBH value is not numeric',
+  NON_NUMERIC_HOM: 'HOM value is not numeric',
+  NON_NUMERIC_COORDINATE: 'Coordinate value is not numeric',
+  INVALID_DATE: 'Measurement date could not be parsed',
+  MALFORMED_ROW: 'Row appears mis-parsed: tag fields contain the delimiter or are unusually long',
   UNCLASSIFIED_REJECT: 'Row was rejected before ingestion; the recorded reason does not match a known error category',
   SQL_EXCEPTION: 'Ingestion SQL exception'
 };
@@ -141,6 +184,18 @@ export function inferAllIngestionErrorCodes(reason?: unknown): string[] {
   if (/decimal value for (lx|ly|px|py) is out of range/.test(text)) codes.push('INVALID_COORDINATE');
   if (/decimal value for dbh is out of range: -/.test(text)) codes.push('NEGATIVE_DBH');
   if (/decimal value for hom is out of range: -/.test(text)) codes.push('NEGATIVE_HOM');
+
+  // The remaining shapes validateMeasurementRow emits. "dbh=N/A" and an
+  // unparseable date are the two most frequent real rejects, so leaving them on
+  // UNCLASSIFIED_REJECT (whose field map is empty) told a researcher a row was
+  // rejected without pointing at the cell to fix.
+  if (/non-numeric value for dbh/.test(text)) codes.push('NON_NUMERIC_DBH');
+  if (/non-numeric value for hom/.test(text)) codes.push('NON_NUMERIC_HOM');
+  // Like INVALID_COORDINATE, one code covers the local/plot pairs: the explorer
+  // highlights all four coordinate cells rather than mis-pinning the wrong pair.
+  if (/non-numeric value for (lx|ly|px|py)/.test(text)) codes.push('NON_NUMERIC_COORDINATE');
+  if (text.includes('unparseable date value')) codes.push('INVALID_DATE');
+  if (text.includes('contain delimiter character') || text.includes('unusually long tag values')) codes.push('MALFORMED_ROW');
 
   if (codes.length === 0) {
     ailogger.warn(`inferAllIngestionErrorCodes: unrecognized parser-reject reason: "${normalizedReason}"`);

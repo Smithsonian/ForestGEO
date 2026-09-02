@@ -624,7 +624,10 @@ async function insertNewRowsThroughPipeline(
   const warningCount = getWarningCount(insertResult);
 
   if (warningCount > 0) {
-    const warnings = await connectionManager.executeQuery('SHOW WARNINGS', [], transactionID);
+    // SHOW WARNINGS is rejected by the prepared-statement protocol (ER_UNSUPPORTED_PS 1295).
+    // Passing no params keeps runQuery on connection.query(), so the diagnostic this branch
+    // exists to surface is actually readable instead of throwing over the real failure.
+    const warnings = await connectionManager.executeQuery('SHOW WARNINGS', undefined, transactionID);
     const warningDetail = describeSqlWarnings(warnings);
     ailogger.error('[revisionupload/apply] temporarymeasurement staging produced SQL warnings', undefined, {
       schema,

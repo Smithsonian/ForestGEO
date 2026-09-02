@@ -90,4 +90,25 @@ describe('computeDiff plot coordinates', () => {
 
     expect(() => computeDiff(csvRow, dbRow)).toThrow(InvalidFieldValueError);
   });
+
+  it('does not invent a change when the stored value carries more precision than the field is compared at', () => {
+    // MeasuredDBH/LocalX live in DECIMAL(12,6) but canonicalize to 2 places.
+    // Rounding only the CSV side made these look different, so the review UI
+    // showed a change whose `from` and `to` render identically — and applying
+    // it silently rewrote 12.345 to 12.35.
+    const dbRow = makeDbRow({ MeasuredDBH: 12.345, LocalX: 3.456 });
+    const csvRow = { dbh: '12.345', lx: '3.456' } as unknown as FileRow;
+
+    const changes = computeDiff(csvRow, dbRow);
+
+    expect(changes.dbh).toBeUndefined();
+    expect(changes.lx).toBeUndefined();
+  });
+
+  it('still flags a real dbh change at the compared precision', () => {
+    const dbRow = makeDbRow({ MeasuredDBH: 12.345 });
+    const csvRow = { dbh: '13.5' } as unknown as FileRow;
+
+    expect(computeDiff(csvRow, dbRow).dbh).toEqual({ from: '12.345', to: '13.5' });
+  });
 });

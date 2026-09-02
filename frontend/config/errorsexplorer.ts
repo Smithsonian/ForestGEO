@@ -236,7 +236,14 @@ export const INGESTION_ERROR_FIELD_MAP: Record<string, string[]> = {
   DUPLICATE_TAG_CONFLICT_EXISTING: ['treeTag', 'stemTag'],
   NEGATIVE_DBH: ['measuredDBH'],
   NEGATIVE_HOM: ['measuredHOM'],
+  // Retired code — see config/measurementerrors.ts. Kept so rows persisted
+  // under the old grouped lx/ly code still highlight their coordinate cells.
   MISSING_FIELD_COORDINATES: ['stemLocalX', 'stemLocalY'],
+  NON_NUMERIC_DBH: ['measuredDBH'],
+  NON_NUMERIC_HOM: ['measuredHOM'],
+  NON_NUMERIC_COORDINATE: ['stemLocalX', 'stemLocalY', 'stemPlotX', 'stemPlotY'],
+  INVALID_DATE: ['measurementDate'],
+  MALFORMED_ROW: ['treeTag', 'stemTag'],
   // A storage-range reject can come from lx/ly OR px/py (Decimal value for lx|ly|px|py is out of
   // range) — the reason text doesn't say which pair, so route to both local and plot fields rather
   // than falsely pinning it on lx/ly alone.
