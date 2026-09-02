@@ -15,7 +15,7 @@
 
 import moment from 'moment/moment';
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { insertIngestionFailureRows, toFiniteNumber } from '@/config/measurementerrors';
+import { insertIngestionFailureRows, normalizeFailureDescription, toFiniteNumber } from '@/config/measurementerrors';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { FileRow } from '@/config/macros/formdetails';
 import { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
@@ -135,9 +135,13 @@ export async function recordFailedMeasurementRows(
     date: row.date ?? null,
     codes: row.codes ?? null,
     comments: row.comments ?? null,
-    failureReason: row.failureReasons ?? null,
-    fileID: row.fileID ?? fileID,
-    batchID: row.batchID ?? batchID,
+    failureReason:
+      row.failureReasons == null ? null : typeof row.failureReasons === 'string' ? row.failureReasons : normalizeFailureDescription(row.failureReasons),
+    // File and batch identity are server-owned. A client can include these
+    // fields in a DTO-shaped JSON row, but must not redirect persistence to a
+    // different upload family.
+    fileID,
+    batchID,
     sourceRowIndex: idx + 1
   }));
 

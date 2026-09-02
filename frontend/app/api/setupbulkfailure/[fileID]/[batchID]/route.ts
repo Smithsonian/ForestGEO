@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { safeFormatQuery, validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
+import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { moveTemporaryBatchToFailedMeasurements, moveTemporarySubBatchesToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
+import { BatchFamilyScopeError, discoverBatchFamily } from '@/lib/uploads/batch-family';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -38,23 +39,15 @@ async function handler(request: NextRequest, context: RouteContext) {
   }
 
   const connectionManager = ConnectionManager.getInstance();
+  let operationError: unknown;
   try {
-    const scopeSQL = safeFormatQuery(
-      schema,
-      `SELECT PlotID, CensusID
-       FROM ??.temporarymeasurements
-       WHERE FileID = ?
-         AND (BatchID = ? OR BatchID LIKE ?)
-       GROUP BY PlotID, CensusID
-       LIMIT 1`
-    );
-    const scopeRows = await connectionManager.executeQuery(scopeSQL, [fileID, batchID, `${batchID}__sub%`]);
-    if (Array.isArray(scopeRows) && scopeRows.length > 0) {
+    const family = await discoverBatchFamily((sql, params) => connectionManager.executeQuery(sql, params), schema, fileID, batchID);
+    if (family) {
       await requireUploadSessionOwnership({
         schema,
         sessionId,
-        plotId: Number(scopeRows[0].PlotID),
-        censusId: Number(scopeRows[0].CensusID),
+        plotId: family.plotID,
+        censusId: family.censusID,
         allowedStates: [UploadSessionState.PROCESSING, UploadSessionState.COLLAPSING],
         contextLabel: `batch failure handling for ${fileID}-${batchID}`
       });
@@ -65,19 +58,20 @@ async function handler(request: NextRequest, context: RouteContext) {
     let movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, batchID, failureReason, 'sql_exception');
 
     if (movedRows === 0) {
-      const subBatchPrefix = `${batchID}__sub`;
-      movedRows = await moveTemporarySubBatchesToFailedMeasurements(connectionManager, schema, fileID, subBatchPrefix, failureReason, 'sql_exception');
+      movedRows = await moveTemporarySubBatchesToFailedMeasurements(connectionManager, schema, fileID, batchID, failureReason, 'sql_exception');
       if (movedRows > 0) {
-        ailogger.warn(
-          `Moved ${movedRows} sub-batched temporary rows to unresolved coremeasurements for ${fileID} (prefix: ${subBatchPrefix}). Reason: ${failureReason}`
-        );
+        ailogger.warn(`Moved ${movedRows} sub-batched temporary rows to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`);
       }
     } else {
       ailogger.warn(`Moved ${movedRows} temporary rows to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`);
     }
   } catch (error: any) {
+    operationError = error;
     if (error instanceof UploadSessionOwnershipError) {
       return new NextResponse(JSON.stringify({ error: error.message }), { status: error.status });
+    }
+    if (error instanceof BatchFamilyScopeError) {
+      return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.CONFLICT });
     }
     ailogger.error(`failure transfer for ${fileID}-${batchID}:`, error);
     return new NextResponse(
@@ -88,7 +82,12 @@ async function handler(request: NextRequest, context: RouteContext) {
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
   } finally {
-    await connectionManager.closeConnection();
+    try {
+      await connectionManager.closeConnection();
+    } catch (closeError) {
+      if (operationError === undefined) throw closeError;
+      ailogger.error(`Failed to close failure-transfer connection for ${fileID}-${batchID}:`, closeError);
+    }
   }
   return new NextResponse(JSON.stringify({ temp: true }), { status: HTTPResponses.OK });
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { moveTemporaryBatchToFailedMeasurements } from './batchfailuretransfer';
+import { moveTemporaryBatchToFailedMeasurements, moveTemporarySubBatchesToFailedMeasurements } from './batchfailuretransfer';
 
 const ensureMeasurementErrorDefinition = vi.hoisted(() => vi.fn());
 
@@ -53,6 +53,33 @@ describe('moveTemporaryBatchToFailedMeasurements', () => {
 
     expect(connectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-2');
     expect(connectionManager.commitTransaction).not.toHaveBeenCalled();
+  });
+
+  it('preserves the transfer error when rollback itself fails', async () => {
+    const connectionManager = {
+      beginTransaction: vi.fn().mockResolvedValue('tx-rollback-fails'),
+      executeQuery: vi.fn().mockRejectedValue(new Error('transfer failed')),
+      rollbackTransaction: vi.fn().mockRejectedValue(new Error('rollback failed'))
+    } as any;
+
+    await expect(
+      moveTemporaryBatchToFailedMeasurements(connectionManager, 'forestgeo_testing', 'file.csv', 'batch-rollback', 'failed', 'sql_exception')
+    ).rejects.toMatchObject({ message: 'transfer failed', rollbackError: expect.any(Error) });
+  });
+
+  it('escapes the original batch ID when finding sub-batches', async () => {
+    const connectionManager = {
+      executeQuery: vi
+        .fn()
+        .mockResolvedValueOnce([{ BatchID: 'batch_%__sub001' }])
+        .mockResolvedValueOnce([{ rowCount: 0 }])
+    } as any;
+
+    await moveTemporarySubBatchesToFailedMeasurements(connectionManager, 'forestgeo_testing', 'file.csv', 'batch_%', 'failed', 'sql_exception', 'outer-tx');
+
+    const [sql, params] = connectionManager.executeQuery.mock.calls[0];
+    expect(sql).toContain("ESCAPE '\\\\'");
+    expect(params).toEqual(['file.csv', 'batch\\_\\%\\_\\_sub%']);
   });
 
   it('reuses an existing transaction when one is provided', async () => {

@@ -306,10 +306,10 @@ async function discoverForestGeoSchemas(conn: mysql.Connection): Promise<string[
   const [rows] = await conn.query<mysql.RowDataPacket[]>(
     `SELECT SCHEMA_NAME as schema_name
        FROM INFORMATION_SCHEMA.SCHEMATA
-      WHERE SCHEMA_NAME LIKE 'forestgeo_%'
+      WHERE SCHEMA_NAME LIKE 'forestgeo\\_%' ESCAPE '\\\\'
       ORDER BY SCHEMA_NAME`
   );
-  return rows.map((r: any) => String(r.schema_name));
+  return rows.map((r: any) => String(r.schema_name)).filter(schema => /^forestgeo_[a-z0-9_]+$/.test(schema));
 }
 
 export const realDeps: DeployCliDeps = {

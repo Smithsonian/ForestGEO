@@ -147,6 +147,18 @@ describe('batchedupload POST route', () => {
     expect(validatedSchemaMock).toHaveBeenCalledWith('forestgeo_testing');
   });
 
+  it('does not accept malformed or unsafe numeric URL parameters in the fallback path', async () => {
+    validateContextualValuesMock.mockResolvedValueOnce({
+      success: false,
+      response: new Response(JSON.stringify({ message: 'context validation failed' }), { status: 400 })
+    });
+    const req = makeRequest([{ treeID: 1, reason: 'bad' }]);
+    const res = await POST(req, makeParams('forestgeo_testing', ['1junk', '-2']));
+
+    expect(res.status).toBe(400);
+    expect(recordFailedMeasurementRows).not.toHaveBeenCalled();
+  });
+
   it('carries plotX/plotY through untouched to recordFailedMeasurementRows (route only maps plotID/censusID/batchID/fileID)', async () => {
     const payload = [
       { treeID: 10, stemGUID: 20, reason: 'coordinate drift', plotX: -0.271, plotY: 267.5 },

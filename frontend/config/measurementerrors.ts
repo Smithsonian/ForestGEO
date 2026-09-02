@@ -11,7 +11,7 @@ export const FALLBACK_FAILURE_REASON = 'Unknown parse error';
 // sql_mode would fail the whole audit insert, so truncate rather than throw.
 const FAILURE_DESCRIPTION_MAX_LENGTH = 255;
 
-function normalizeFailureDescription(failureReason?: string | null): string {
+export function normalizeFailureDescription(failureReason?: unknown): string {
   const trimmed = failureReason == null ? '' : String(failureReason).trim();
   return (trimmed || FALLBACK_FAILURE_REASON).slice(0, FAILURE_DESCRIPTION_MAX_LENGTH);
 }
@@ -97,8 +97,12 @@ const MISSING_FIELD_CODES_BY_LABEL: Record<string, string> = {
 };
 const MISSING_FIELDS_LIST_PATTERN = /missing required fields?:\s*([^|]+)/g;
 
-export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
-  const text = (reason || '').toLowerCase();
+export function inferAllIngestionErrorCodes(reason?: unknown): string[] {
+  // This is called from an HTTP persistence boundary: TypeScript's string
+  // type does not constrain values decoded from JSON. Normalize once so
+  // classification and logging cannot throw or emit unbounded input.
+  const normalizedReason = normalizeFailureDescription(reason);
+  const text = normalizedReason.toLowerCase();
   const codes: string[] = [];
 
   if (text.includes('missing required field: treetag') || text.includes('missing treetag')) codes.push('MISSING_FIELD_TREETAG');
@@ -139,15 +143,17 @@ export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
   if (/decimal value for hom is out of range: -/.test(text)) codes.push('NEGATIVE_HOM');
 
   if (codes.length === 0) {
-    ailogger.warn(`inferAllIngestionErrorCodes: unrecognized parser-reject reason: "${reason}"`);
+    ailogger.warn(`inferAllIngestionErrorCodes: unrecognized parser-reject reason: "${normalizedReason}"`);
     codes.push('UNCLASSIFIED_REJECT');
   }
 
   return Array.from(new Set(codes));
 }
 
-export function getIngestionErrorMessage(code: string, fallback?: string | null): string {
-  return INGESTION_ERROR_MESSAGES[code] || fallback || 'Ingestion error';
+export function getIngestionErrorMessage(code: string, fallback?: unknown): string {
+  if (INGESTION_ERROR_MESSAGES[code]) return INGESTION_ERROR_MESSAGES[code];
+  if (typeof fallback === 'string' && fallback.trim()) return normalizeFailureDescription(fallback);
+  return 'Ingestion error';
 }
 
 interface MeasurementErrorInput {
@@ -165,7 +171,7 @@ interface MeasurementErrorInput {
  * `errorCodeForSystemFailure`/`getIngestionErrorMessage` directly for the
  * same system-failure kinds.
  */
-export function classifyIngestionFailure(kind: IngestionFailureKind, failureReason?: string | null): MeasurementErrorInput[] {
+export function classifyIngestionFailure(kind: IngestionFailureKind, failureReason?: unknown): MeasurementErrorInput[] {
   if (kind !== 'parser_reject') {
     const errorCode = errorCodeForSystemFailure(kind);
     return [{ errorCode, errorMessage: getIngestionErrorMessage(errorCode, failureReason) }];
@@ -410,6 +416,7 @@ async function insertPreparedIngestionFailureRowsSequential(
 async function insertPreparedIngestionFailureRowsBulk(
   connectionManager: ConnectionManager,
   schema: string,
+  fileID: string | null,
   batchID: string,
   rows: PreparedIngestionFailureRow[],
   transactionID: string | undefined,
@@ -475,12 +482,13 @@ async function insertPreparedIngestionFailureRowsBulk(
       schema,
       `SELECT CoreMeasurementID, SourceRowIndex
        FROM ??.coremeasurements
-       WHERE UploadBatchID = ?
+       WHERE UploadFileID <=> ?
+         AND UploadBatchID <=> ?
          AND SourceRowIndex IN (${rowIndexes.map(() => '?').join(', ')})`
     );
     const measurementRows: Array<{ CoreMeasurementID: number; SourceRowIndex: number }> = await connectionManager.executeQuery(
       selectSQL,
-      [batchID, ...rowIndexes],
+      [fileID, batchID, ...rowIndexes],
       transactionID
     );
     const measurementIDBySourceRow = new Map(measurementRows.map(row => [row.SourceRowIndex, row.CoreMeasurementID]));
@@ -550,7 +558,7 @@ export async function insertIngestionFailureRows(
   const preparedRows = prepareIngestionFailureRows(rows);
   const errorIDCache = await resolveIngestionErrorIDCache(connectionManager, schema, preparedRows, transactionID);
 
-  const bulkEligibleRows = new Map<string, PreparedIngestionFailureRow[]>();
+  const bulkEligibleRows = new Map<string, { fileID: string | null; batchID: string; rows: PreparedIngestionFailureRow[] }>();
   const sequentialRows: PreparedIngestionFailureRow[] = [];
 
   for (const preparedRow of preparedRows) {
@@ -560,17 +568,19 @@ export async function insertIngestionFailureRows(
       continue;
     }
 
-    const group = bulkEligibleRows.get(batchID) ?? [];
-    group.push(preparedRow);
-    bulkEligibleRows.set(batchID, group);
+    const fileID = preparedRow.row.fileID ?? null;
+    const groupKey = `${fileID ?? '<NULL>'}\u0000${batchID}`;
+    const group = bulkEligibleRows.get(groupKey) ?? { fileID, batchID, rows: [] };
+    group.rows.push(preparedRow);
+    bulkEligibleRows.set(groupKey, group);
   }
 
   const insertedIDs: number[] = [];
   const insertedIDByRow = new Map<number, number>();
 
-  for (const [batchID, batchRows] of bulkEligibleRows.entries()) {
+  for (const { fileID, batchID, rows: batchRows } of bulkEligibleRows.values()) {
     for (const [rowIndex, measurementID] of (
-      await insertPreparedIngestionFailureRowsBulk(connectionManager, schema, batchID, batchRows, transactionID, errorIDCache)
+      await insertPreparedIngestionFailureRowsBulk(connectionManager, schema, fileID, batchID, batchRows, transactionID, errorIDCache)
     ).entries()) {
       insertedIDByRow.set(rowIndex, measurementID);
     }

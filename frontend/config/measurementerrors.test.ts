@@ -85,6 +85,16 @@ describe('measurementerrors helpers', () => {
 
     expect(logInsertCalls).toHaveLength(1);
     expect(logInsertCalls[0][1]).toEqual([77, 1001, 77, 1002]);
+
+    const lookupCall = lookupCalls[0];
+    expect(lookupCall[0]).toContain('UploadFileID <=> ?');
+    expect(lookupCall[1]).toEqual(['upload.csv', 'batch-1', 1]);
+  });
+
+  it('bounds and coerces runtime reject reasons before classification', () => {
+    expect(() => inferAllIngestionErrorCodes({ reason: 'not a string' })).not.toThrow();
+    expect(inferAllIngestionErrorCodes({ reason: 'not a string' })).toEqual(['UNCLASSIFIED_REJECT']);
+    expect(inferAllIngestionErrorCodes('x'.repeat(500))).toEqual(['UNCLASSIFIED_REJECT']);
   });
 
   it('writes RawPlotX/RawPlotY on the bulk insert path and refreshes them on ON DUPLICATE KEY UPDATE', async () => {

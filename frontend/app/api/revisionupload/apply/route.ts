@@ -669,7 +669,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let body: ApplyRequest;
   try {
-    body = await request.json();
+    const parsedBody: unknown = await request.json();
+    if (parsedBody === null || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+    body = parsedBody as ApplyRequest;
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -757,6 +761,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const connectionManager = ConnectionManager.getInstance();
+  let operationError: unknown;
 
   try {
     await assertCanEditMeasurementScope(connectionManager, session!, {
@@ -1006,6 +1011,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json(response, { status: HTTPResponses.OK });
   } catch (error: unknown) {
     const errorObj = error instanceof Error ? error : new Error(String(error));
+    operationError = errorObj;
     ailogger.error(`${logPrefix} request failed after ${Date.now() - requestStartedAt}ms:`, errorObj);
     if (errorObj instanceof SessionExpiredError) {
       return NextResponse.json({ error: 'session expired' }, { status: HTTPResponses.UNAUTHORIZED });
@@ -1043,6 +1049,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const status = errorObj instanceof RevisionApplyConflictError ? HTTPResponses.CONFLICT : HTTPResponses.INTERNAL_SERVER_ERROR;
     return NextResponse.json({ error: errorObj.message }, { status });
   } finally {
-    await connectionManager.closeConnection();
+    try {
+      await connectionManager.closeConnection();
+    } catch (closeError) {
+      if (operationError === undefined) throw closeError;
+      ailogger.error(`${logPrefix} failed to close connection after the primary error:`, closeError);
+    }
   }
 }

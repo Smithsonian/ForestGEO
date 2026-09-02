@@ -220,7 +220,7 @@ describe('recordFailedMeasurementRows', () => {
     expect(insertIngestionFailureRowsMock).not.toHaveBeenCalled();
   });
 
-  it('per-row fileID/batchID overrides take precedence over caller-level defaults', async () => {
+  it('ignores per-row fileID/batchID overrides and uses caller-level identity', async () => {
     const rows = [
       { tag: 'T030', failureReasons: 'bad data', fileID: 'override-file.csv', batchID: 'override-batch' } as any,
       { tag: 'T031', failureReasons: 'wrong coords' } as any
@@ -229,10 +229,10 @@ describe('recordFailedMeasurementRows', () => {
     await recordFailedMeasurementRows(makeConnectionManager(), 'forestgeo_test', rows, 'default-file.csv', 'default-batch', 10, 20);
 
     const mapped = insertIngestionFailureRowsMock.mock.calls[0][2];
-    // Row 0 has per-row overrides — must win.
-    expect(mapped[0].fileID).toBe('override-file.csv');
-    expect(mapped[0].batchID).toBe('override-batch');
-    // Row 1 falls back to caller-level defaults.
+    // Row 0 cannot redirect the persistence boundary.
+    expect(mapped[0].fileID).toBe('default-file.csv');
+    expect(mapped[0].batchID).toBe('default-batch');
+    // Row 1 uses the same caller-level defaults.
     expect(mapped[1].fileID).toBe('default-file.csv');
     expect(mapped[1].batchID).toBe('default-batch');
   });
