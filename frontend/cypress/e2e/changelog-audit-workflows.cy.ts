@@ -12,35 +12,9 @@
  * Coverage: Changelog/audit trail workflows (0% → 90%)
  */
 
+import { mockIsolatedGridApi } from '../support/grid-api-helpers';
+
 describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
-  const mockSession = {
-    user: {
-      name: 'Test User',
-      email: 'testuser@test.com',
-      userStatus: 'field crew'
-    },
-    expires: '2025-12-31'
-  };
-
-  const mockSite = {
-    siteID: 1,
-    siteName: 'Test Site',
-    schemaName: 'test_schema',
-    usesSubquadrats: false
-  };
-
-  const mockPlot = {
-    plotID: 1,
-    plotName: 'Test Plot',
-    numQuadrats: 100
-  };
-
-  const mockCensus = {
-    censusID: 1,
-    plotCensusNumber: 1,
-    dateRanges: [{ censusID: 1, startDate: '2024-01-01', endDate: '2024-12-31' }]
-  };
-
   const mockChangelogEntries = [
     {
       id: 1,
@@ -125,35 +99,11 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
   ];
 
   beforeEach(() => {
-    cy.log('🔐 Setting up authentication and context');
-
-    // Mock authentication
-    cy.intercept('GET', '/api/auth/session', {
-      statusCode: 200,
-      body: mockSession
-    }).as('session');
-
-    // Mock context - sites
-    cy.intercept('GET', '/api/fetchall/sites?schema=*', {
-      statusCode: 200,
-      body: [mockSite]
-    }).as('fetchSites');
-
-    // Mock context - plots
-    cy.intercept('GET', '/api/fetchall/plots?schema=test_schema', {
-      statusCode: 200,
-      body: [mockPlot]
-    }).as('fetchPlots');
-
-    // Mock context - census
-    cy.intercept('GET', '/api/fetchall/census?schema=test_schema', {
-      statusCode: 200,
-      body: [mockCensus]
-    }).as('fetchCensus');
-
-    // Visit dashboard to initialize context
-    cy.visit('/dashboard');
-    cy.wait(['@session', '@fetchSites', '@fetchPlots', '@fetchCensus']);
+    cy.viewport(1600, 1000);
+    cy.setupForestGEOUser('standardUser');
+    cy.mockCoreDataValidity();
+    cy.visitAuthenticatedPage('/dashboard');
+    cy.selectSitePlotAndCensus('Luquillo', 'Luquillo Main Plot', 5);
   });
 
   describe('Recent Changes Display', () => {
@@ -161,17 +111,14 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('📍 Setting up changelog mocks');
 
       // Mock changelog data fetch
-      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/test_schema*', {
-        statusCode: 200,
-        body: mockChangelogEntries
-      }).as('fetchChangelog');
+      mockIsolatedGridApi({ gridType: 'unifiedchangelog', rows: mockChangelogEntries });
     });
 
     it('should display recent changes page', () => {
       cy.log('🔍 Testing recent changes page display');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('📊 Verifying page title and grid display');
       cy.contains(/recent changes/i).should('be.visible');
@@ -188,7 +135,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing changelog column display');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying all required columns are present');
       cy.contains('Table Name').should('be.visible');
@@ -204,7 +151,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing timestamp formatting');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying timestamp is formatted correctly');
       // Should show formatted date like "Saturday, November 2nd 2024, 02:30:00 pm"
@@ -216,7 +163,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing multiple entry display');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying all 4 mock entries are displayed');
       cy.get('[role="row"]').should('have.length.at.least', 4);
@@ -225,17 +172,14 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
 
   describe('Change Detail Viewing', () => {
     beforeEach(() => {
-      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/test_schema*', {
-        statusCode: 200,
-        body: mockChangelogEntries
-      }).as('fetchChangelog');
+      mockIsolatedGridApi({ gridType: 'unifiedchangelog', rows: mockChangelogEntries });
     });
 
     it('should display old row state for UPDATE operations', () => {
       cy.log('🔍 Testing old state display for updates');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying old state shows previous values');
       // Look for the old DBH value
@@ -247,7 +191,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing new state display for updates');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying new state shows updated values');
       // Look for the new DBH value
@@ -258,7 +202,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing INSERT operation display');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying INSERT shows NULL for old state');
       // INSERT operations should have NULL/empty old state
@@ -269,7 +213,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing DELETE operation display');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying DELETE shows NULL for new state');
       // DELETE operations should have NULL/empty new state
@@ -280,7 +224,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing field-level change detail');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying individual field names and values are shown');
       cy.contains('coreMeasurementID').should('be.visible');
@@ -291,20 +235,17 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
 
   describe('Change Filtering and Search', () => {
     beforeEach(() => {
-      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/test_schema*', {
-        statusCode: 200,
-        body: mockChangelogEntries
-      }).as('fetchChangelog');
+      mockIsolatedGridApi({ gridType: 'unifiedchangelog', rows: mockChangelogEntries });
     });
 
     it('should filter changes by table name', () => {
       cy.log('🔍 Testing table name filtering');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       // Mock filtered results
-      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/test_schema*tableName=coremeasurements*', {
+      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/luquillo*tableName=coremeasurements*', {
         statusCode: 200,
         body: mockChangelogEntries.filter(e => e.tableName === 'coremeasurements')
       }).as('fetchFilteredChangelog');
@@ -322,7 +263,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing operation type filtering');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('🔍 Filtering by UPDATE operations');
       cy.get('[role="grid"]').within(() => {
@@ -334,7 +275,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing user filtering');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying changes by different users are shown');
       cy.contains('testuser@test.com').should('be.visible');
@@ -345,7 +286,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing record ID search');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('🔍 Searching for specific record ID');
       // Use quick filter if available
@@ -358,17 +299,14 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
 
   describe('User Activity Tracking', () => {
     beforeEach(() => {
-      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/test_schema*', {
-        statusCode: 200,
-        body: mockChangelogEntries
-      }).as('fetchChangelog');
+      mockIsolatedGridApi({ gridType: 'unifiedchangelog', rows: mockChangelogEntries });
     });
 
     it('should display who made each change', () => {
       cy.log('🔍 Testing user identification in changes');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying "Changed By" column shows user emails');
       cy.contains('testuser@test.com').should('be.visible');
@@ -379,7 +317,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing multi-user change tracking');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying changes from both users are present');
       const testUserChanges = mockChangelogEntries.filter(e => e.changedBy === 'testuser@test.com');
@@ -397,7 +335,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing chronological ordering');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying entries are sorted by timestamp');
       // Most recent should be first (Nov 2 @ 16:00)
@@ -408,17 +346,14 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
 
   describe('Table-Specific Change Tracking', () => {
     beforeEach(() => {
-      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/test_schema*', {
-        statusCode: 200,
-        body: mockChangelogEntries
-      }).as('fetchChangelog');
+      mockIsolatedGridApi({ gridType: 'unifiedchangelog', rows: mockChangelogEntries });
     });
 
     it('should track changes to coremeasurements table', () => {
       cy.log('🔍 Testing coremeasurements change tracking');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying coremeasurements changes are tracked');
       cy.contains('coremeasurements').should('be.visible');
@@ -429,7 +364,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing attributes change tracking');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying attributes changes are tracked');
       cy.contains('attributes').should('be.visible');
@@ -440,7 +375,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing species change tracking');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying species changes are tracked');
       cy.contains('species').should('be.visible');
@@ -451,7 +386,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing all operation types are tracked');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying INSERT, UPDATE, DELETE are all tracked');
       cy.contains('INSERT').should('be.visible');
@@ -462,17 +397,14 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
 
   describe('Changelog Grid Behavior', () => {
     beforeEach(() => {
-      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/test_schema*', {
-        statusCode: 200,
-        body: mockChangelogEntries
-      }).as('fetchChangelog');
+      mockIsolatedGridApi({ gridType: 'unifiedchangelog', rows: mockChangelogEntries });
     });
 
     it('should be read-only (locked)', () => {
       cy.log('🔍 Testing changelog grid is read-only');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying no edit buttons are present');
       cy.get('[aria-label="Edit"]').should('not.exist');
@@ -484,7 +416,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing timestamp sorting');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('🔄 Clicking timestamp column header to sort');
       cy.contains('Timestamp').click();
@@ -498,7 +430,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing table name sorting');
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('🔄 Clicking table name column header to sort');
       cy.contains('Table Name').click();
@@ -511,13 +443,10 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing empty changelog display');
 
       // Mock empty changelog
-      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/test_schema*', {
-        statusCode: 200,
-        body: []
-      }).as('fetchEmptyChangelog');
+      mockIsolatedGridApi({ gridType: 'unifiedchangelog', rows: [] });
 
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchEmptyChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('✅ Verifying grid shows empty state');
       cy.get('[role="grid"]').should('be.visible');
@@ -530,20 +459,17 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing complete change tracking integration');
 
       // Mock initial changelog (empty)
-      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/test_schema*', {
-        statusCode: 200,
-        body: []
-      }).as('fetchInitialChangelog');
+      mockIsolatedGridApi({ gridType: 'unifiedchangelog', rows: [] });
 
       cy.log('📍 Step 1: View empty changelog');
       cy.visit('/measurementshub/recentchanges');
-      cy.wait('@fetchInitialChangelog');
+      cy.wait('@fetchIsolatedGridRows');
 
       cy.log('📍 Step 2: Navigate to data editing');
       cy.visit('/measurementshub/viewfulltable');
 
       // Mock measurements data
-      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', {
+      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/luquillo*', {
         statusCode: 200,
         body: {
           output: [
@@ -589,7 +515,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
         });
 
       // Mock update
-      cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/test_schema', {
+      cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/luquillo', {
         statusCode: 200,
         body: {
           message: 'Row updated successfully',
@@ -603,7 +529,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
 
       cy.log('📍 Step 4: Return to changelog to verify change was recorded');
       // Mock updated changelog
-      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/test_schema*', {
+      cy.intercept('GET', '**/api/fixeddata/unifiedchangelog/luquillo/**', {
         statusCode: 200,
         body: [
           {
@@ -637,7 +563,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing API error handling');
 
       // Mock API error
-      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/test_schema*', {
+      cy.intercept('GET', '**/api/fixeddata/unifiedchangelog/luquillo/**', {
         statusCode: 500,
         body: { error: 'Internal server error' }
       }).as('fetchChangelogError');
@@ -654,7 +580,7 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.log('🔍 Testing malformed JSON handling');
 
       // Mock changelog with invalid JSON
-      cy.intercept('GET', '/api/fixeddatafilter/unifiedchangelog/test_schema*', {
+      cy.intercept('GET', '**/api/fixeddata/unifiedchangelog/luquillo/**', {
         statusCode: 200,
         body: [
           {
