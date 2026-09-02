@@ -54,6 +54,7 @@ describe('deploy-validations-to-all-schemas — integration', () => {
   let connection: Connection;
   let config: TestDatabaseConfig;
   let schema: string;
+  let seededValidation19Enabled: boolean | null;
   let procedureStatements: string[];
 
   beforeAll(async () => {
@@ -65,7 +66,16 @@ describe('deploy-validations-to-all-schemas — integration', () => {
     const storedprocsRaw = fs.readFileSync(path.join(process.cwd(), 'db/sql', 'storedprocedures.sql'), 'utf8');
     procedureStatements = parseStoredProceduresSQL(storedprocsRaw);
 
-    console.log(`[setup] schema=${schema} procedureStatements=${procedureStatements.length}`);
+    // Read the seeded state BEFORE beforeEach normalises it. setupTestDatabase has
+    // just run loadSchema -> corequeries.sql -> storedprocedures.sql, so this is
+    // exactly what a freshly provisioned schema ships with.
+    const [seeded] = await connection.query<RowDataPacket[]>(`SELECT IsEnabled FROM sitespecificvalidations WHERE ValidationID = 19`);
+    seededValidation19Enabled =
+      seeded.length === 0
+        ? null
+        : seeded[0].IsEnabled === 1 || seeded[0].IsEnabled === true || (Buffer.isBuffer(seeded[0].IsEnabled) && seeded[0].IsEnabled[0] === 1);
+
+    console.log(`[setup] schema=${schema} procedureStatements=${procedureStatements.length} seededValidation19Enabled=${seededValidation19Enabled}`);
   }, 120000);
 
   afterAll(async () => {
@@ -73,12 +83,10 @@ describe('deploy-validations-to-all-schemas — integration', () => {
   });
 
   beforeEach(async () => {
-    // setupTestDatabase's fresh schema (loadSchema -> corequeries.sql ->
-    // storedprocedures.sql) already seeds validation 19 as ENABLED, unlike
-    // the migration path which seeds it disabled — see corequeries.sql's
-    // comment on the INSERT. Every test in this file starts from a known,
-    // disabled baseline so the "activation actually flips it" assertions are
-    // meaningful.
+    // Normalise validation 19 to a known disabled baseline so the "activation
+    // actually flips it" assertions below are meaningful. The fresh schema now
+    // seeds it disabled too (see the seeded-default test), but this keeps each
+    // test independent of what the previous one left behind.
     await connection.query(
       `INSERT INTO sitespecificvalidations
          (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
@@ -176,6 +184,19 @@ describe('deploy-validations-to-all-schemas — integration', () => {
   // -------------------------------------------------------------------------
   // activateValidation19
   // -------------------------------------------------------------------------
+
+  describe('seeded default', () => {
+    it('ships validation 19 DISABLED on a freshly provisioned schema', () => {
+      // Regression guard. corequeries.sql is applied by
+      // deploy-validations-to-all-schemas in its default legacy-full-reset mode,
+      // which truncates and reseeds sitespecificvalidations on every schema. When
+      // this seed said TRUE it enabled validation 19 across all 12 production
+      // schemas on 2026-08-28, overriding the migration's disabled seed. Enabling
+      // is meant to go through activateValidation19's gated path only.
+      expect(seededValidation19Enabled, 'validation 19 row must exist on a fresh schema').not.toBeNull();
+      expect(seededValidation19Enabled, 'a fresh schema must NOT ship validation 19 enabled').toBe(false);
+    });
+  });
 
   describe('activateValidation19', () => {
     it('enables validation 19 and verifies the row is enabled after UPDATE', async () => {

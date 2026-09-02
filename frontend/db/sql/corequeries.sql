@@ -368,15 +368,25 @@ ON DUPLICATE KEY UPDATE
     Definition = VALUES(Definition),
     IsEnabled = VALUES(IsEnabled);
 
--- IsEnabled = TRUE is deliberate here (unlike the migration, which seeds this
--- disabled): a fresh schema installs procedures and validations together, so
--- RunPlotCoordinateConsistencyValidation always exists by the time this runs.
+-- IsEnabled = FALSE, matching the migration that seeds this row. The earlier
+-- reasoning here ("a fresh schema installs procedures and validations together")
+-- is true for provisioning but not for the deploy path: this file is applied by
+-- deploy-validations-to-all-schemas in its default legacy-full-reset mode, which
+-- truncates and reseeds sitespecificvalidations on EVERY schema. Seeding TRUE
+-- therefore silently enabled validation 19 across all 12 production schemas on
+-- 2026-08-28, overriding the migration's deliberate disabled seed minutes after
+-- it ran.
+--
+-- Validation 19 is enabled per site, on purpose, via
+--   npm run activate:validation19
+-- which gates on the helper procedure and the measurement_errors row both being
+-- present. That gate is the only intended way to turn this on.
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)
 VALUES (19, 'ValidatePlotCoordinateConsistency',
         'Plot coordinate disagrees with the quadrat''s own median offset',
         'stemPlotX;stemPlotY;stemLocalX;stemLocalY;quadratName;treeTag;stemTag',
-        'CALL RunPlotCoordinateConsistencyValidation(@p_CensusID, @p_PlotID);', '', TRUE);
+        'CALL RunPlotCoordinateConsistencyValidation(@p_CensusID, @p_PlotID);', '', FALSE);
 
 truncate postvalidationqueries; -- clear the table if re-running this script on accident
 insert into postvalidationqueries
