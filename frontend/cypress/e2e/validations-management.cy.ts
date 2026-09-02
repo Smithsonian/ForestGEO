@@ -20,8 +20,8 @@ describe('Validations Management Interface', () => {
   // Test data
   const testSite = {
     siteID: 1,
-    siteName: 'Test Site',
-    schemaName: 'testschema'
+    siteName: 'Luquillo',
+    schemaName: 'luquillo'
   };
 
   const existingValidation = {
@@ -53,31 +53,9 @@ WHERE cm.IsValidated IS NULL
   ];
 
   beforeEach(() => {
-    // Login as admin (required for validation management)
-    cy.visit('/login');
-
-    // Mock successful authentication for admin user
-    cy.window().then(win => {
-      win.sessionStorage.setItem('next-auth.session-token', 'mock-admin-token');
-    });
-
-    // Intercept session check
-    cy.intercept('GET', '/api/auth/session', {
-      statusCode: 200,
-      body: {
-        user: {
-          name: 'Admin User',
-          email: 'admin@forestgeo.si.edu',
-          userStatus: 'db admin' // Admin role required for validations
-        },
-        expires: '2025-12-31'
-      }
-    }).as('session');
-
-    // Mock site context (required for validation page)
-    cy.window().then(win => {
-      win.localStorage.setItem('currentSite', JSON.stringify(testSite));
-    });
+    cy.viewport(1600, 1000);
+    cy.setupForestGEOUser('adminUser');
+    cy.mockCoreDataValidity();
 
     // Mock schema structure API
     cy.intercept('GET', `/api/structure/${testSite.schemaName}`, {
@@ -93,8 +71,8 @@ WHERE cm.IsValidated IS NULL
       body: [existingValidation]
     }).as('fetchValidations');
 
-    cy.visit('/dashboard');
-    cy.wait('@session');
+    cy.visitAuthenticatedPage('/dashboard');
+    cy.selectSitePlotAndCensus('Luquillo', 'Luquillo Main Plot', 5);
     cy.log('✅ Admin user authenticated');
   });
 
@@ -190,14 +168,9 @@ WHERE cm.IsValidated IS NULL
     it('should show warning when no site is selected', () => {
       cy.log('⚠️ Testing no site selected state');
 
-      // Clear site context
-      cy.window().then(win => {
-        win.localStorage.removeItem('currentSite');
-      });
-
+      cy.setupForestGEOUser('adminUser');
       cy.visit('/measurementshub/validations');
 
-      // Verify warning message
       cy.contains('Please select a site to view and manage validations').should('be.visible');
 
       cy.log('✅ No site warning works correctly');
