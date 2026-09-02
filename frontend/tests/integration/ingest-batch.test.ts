@@ -282,6 +282,20 @@ describe('ingestBatch — integration', () => {
     return rows;
   }
 
+  /** Distinct ingestion error codes currently attached to this file's unresolved rows. */
+  async function fetchIngestionErrorCodes(fileName: string = FILE_NAME): Promise<string[]> {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT DISTINCT me.ErrorCode
+       FROM measurement_error_log mel
+       JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+       JOIN coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
+       WHERE cm.UploadFileID = ? AND me.ErrorSource = 'ingestion'
+       ORDER BY me.ErrorCode`,
+      [fileName]
+    );
+    return rows.map(row => String(row.ErrorCode));
+  }
+
   async function countTemporaryRows(): Promise<number> {
     const [rows] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM temporarymeasurements WHERE FileID = ? AND BatchID = ?', [
       FILE_NAME,
@@ -576,6 +590,13 @@ describe('ingestBatch — integration', () => {
     );
     console.log(`[abort-mid] unresolved coremeasurements rows=${unresolvedRows[0].count}`);
     expect(Number(unresolvedRows[0].count)).toBe(EXPECTED_ROW_COUNT);
+
+    // A mid-retry abort is an interruption, not a data defect — the row was
+    // never judged by the procedure. It must carry INTERRUPTED_UPLOAD, not
+    // SQL_EXCEPTION, regardless of how the failure text happens to read.
+    const errorCodes = await fetchIngestionErrorCodes();
+    console.log(`[abort-mid] ingestion error codes=${JSON.stringify(errorCodes)}`);
+    expect(errorCodes).toEqual(['INTERRUPTED_UPLOAD']);
   }, 60000);
 
   // -------------------------------------------------------------------------
@@ -639,6 +660,79 @@ describe('ingestBatch — integration', () => {
       );
       console.log(`[kill-interrupt] unresolved coremeasurements rows=${unresolvedRows[0].count}`);
       expect(Number(unresolvedRows[0].count)).toBe(EXPECTED_ROW_COUNT);
+
+      // A KILLed procedure call is a system failure, not a per-row data
+      // defect — it must carry SQL_EXCEPTION.
+      const errorCodes = await fetchIngestionErrorCodes();
+      console.log(`[kill-interrupt] ingestion error codes=${JSON.stringify(errorCodes)}`);
+      expect(errorCodes).toEqual(['SQL_EXCEPTION']);
+    } finally {
+      executeQuerySpy.mockRestore();
+    }
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // 7b. Ordinary unrecoverable error (outer-catch "else" branch): the sub-batch
+  // is abandoned after a single KILLed attempt (fast path to the giving-up
+  // code), and the FIRST attempt to move its rows to unresolved coremeasurements
+  // itself throws with a message that contains NO SQL keyword — proving the
+  // code is still SQL_EXCEPTION because the caller declared that kind
+  // explicitly, not because prose inference happened to match. ingestBatch's
+  // outer catch then retries the move (this time for real) and completes
+  // normally.
+  // -------------------------------------------------------------------------
+
+  it('classifies the outer-catch unrecoverable-error branch as SQL_EXCEPTION even when the thrown message has no SQL keyword', async () => {
+    await stageFixtureRows();
+    expect(await countTemporaryRows()).toBe(EXPECTED_ROW_COUNT);
+
+    const interruptError = Object.assign(new Error(MYSQL_QUERY_INTERRUPTED_MESSAGE), {
+      code: MYSQL_CODE_QUERY_INTERRUPTED,
+      errno: MYSQL_ERRNO_QUERY_INTERRUPTED,
+      sqlState: MYSQL_SQLSTATE_QUERY_INTERRUPTED
+    });
+    const NO_SQL_KEYWORD_MESSAGE = 'Unexpected condition while finalizing sub-batch cleanup';
+    let coreMeasurementsInsertAttempts = 0;
+    const realExecuteQuery = connectionManager.executeQuery.bind(connectionManager);
+    const executeQuerySpy = vi
+      .spyOn(connectionManager, 'executeQuery')
+      .mockImplementation(async (query: string, params?: unknown[], transactionId?: string) => {
+        if (query.includes('bulkingestionprocess')) {
+          throw interruptError;
+        }
+        // Unique to moveTemporaryBatchToFailedMeasurements's INSERT ... SELECT
+        // (RawTreeTag <- tm.TreeTag) — reject only its FIRST occurrence so the
+        // giving-up code inside processSubBatch fails and propagates to
+        // ingestBatch's outer catch, which then retries for real.
+        if (query.includes('INSERT INTO') && query.includes('coremeasurements') && query.includes('tm.TreeTag')) {
+          coreMeasurementsInsertAttempts++;
+          if (coreMeasurementsInsertAttempts === 1) {
+            throw new Error(NO_SQL_KEYWORD_MESSAGE);
+          }
+        }
+        return realExecuteQuery(query, params, transactionId);
+      });
+
+    try {
+      const result = await runIngestBatch();
+
+      console.log(`[unrecoverable] coreMeasurementsInsertAttempts=${coreMeasurementsInsertAttempts}`);
+      expect(coreMeasurementsInsertAttempts, 'the injected failure must have been hit once before the real retry').toBeGreaterThanOrEqual(2);
+
+      expect(result.subBatchResults).toHaveLength(1);
+      expect(result.subBatchResults[0].batchFailedButHandled).toBe(true);
+      expect(result.subBatchResults[0].rowCount).toBe(EXPECTED_ROW_COUNT);
+
+      expect(await countTemporaryRows()).toBe(0);
+      const [unresolvedRows] = await connection.query<RowDataPacket[]>(
+        'SELECT COUNT(*) AS count FROM coremeasurements WHERE UploadFileID = ? AND StemGUID IS NULL',
+        [FILE_NAME]
+      );
+      expect(Number(unresolvedRows[0].count)).toBe(EXPECTED_ROW_COUNT);
+
+      const errorCodes = await fetchIngestionErrorCodes();
+      console.log(`[unrecoverable] ingestion error codes=${JSON.stringify(errorCodes)}`);
+      expect(errorCodes).toEqual(['SQL_EXCEPTION']);
     } finally {
       executeQuerySpy.mockRestore();
     }

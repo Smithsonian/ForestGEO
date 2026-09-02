@@ -1,9 +1,16 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { ensureMeasurementErrorDefinition, getIngestionErrorMessage, inferIngestionErrorCode, INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
+import {
+  ensureMeasurementErrorDefinition,
+  errorCodeForSystemFailure,
+  getIngestionErrorMessage,
+  INGESTION_ERROR_SOURCE,
+  type SystemFailureKind
+} from '@/config/measurementerrors';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 
 /**
- * Moves all remaining sub-batches (BatchID LIKE 'prefix%') for a given file
+ * Moves all remaining sub-batches for a given file
  * to unresolved coremeasurements. Used when the client calls setupbulkfailure
  * with the original batchID but rows have been split into sub-batch IDs.
  */
@@ -11,20 +18,62 @@ export async function moveTemporarySubBatchesToFailedMeasurements(
   connectionManager: ConnectionManager,
   schema: string,
   fileID: string,
-  subBatchPrefix: string,
+  originalBatchID: string,
   failureReason: string,
+  failureKind: SystemFailureKind,
   transactionID?: string
 ): Promise<number> {
-  const findSubBatchesSQL = safeFormatQuery(schema, 'SELECT DISTINCT BatchID FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID LIKE ?');
-  // Reuse the caller's transaction when provided so multi-batch cleanup can stay atomic.
-  const subBatchRows: any[] = await connectionManager.executeQuery(findSubBatchesSQL, [fileID, `${subBatchPrefix}%`], transactionID);
+  const managesOwnTransaction = !transactionID;
+  let activeTransactionID = transactionID ?? null;
 
-  let totalMoved = 0;
-  for (const row of subBatchRows) {
-    const moved = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, row.BatchID, failureReason, transactionID);
-    totalMoved += moved;
+  try {
+    if (managesOwnTransaction) {
+      activeTransactionID = await connectionManager.beginTransaction();
+    }
+
+    const findSubBatchesSQL = safeFormatQuery(
+      schema,
+      `SELECT DISTINCT BatchID
+       FROM ??.temporarymeasurements
+      WHERE FileID = ?
+        AND BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}`
+    );
+    // Reuse the caller's transaction when provided so multi-batch cleanup can stay atomic.
+    const subBatchRows: any[] = await connectionManager.executeQuery(
+      findSubBatchesSQL,
+      [fileID, buildSubBatchPattern(originalBatchID)],
+      activeTransactionID ?? undefined
+    );
+
+    let totalMoved = 0;
+    for (const row of subBatchRows) {
+      const moved = await moveTemporaryBatchToFailedMeasurements(
+        connectionManager,
+        schema,
+        fileID,
+        row.BatchID,
+        failureReason,
+        failureKind,
+        activeTransactionID ?? undefined
+      );
+      totalMoved += moved;
+    }
+    if (managesOwnTransaction && activeTransactionID) {
+      await connectionManager.commitTransaction(activeTransactionID);
+    }
+    return totalMoved;
+  } catch (error) {
+    if (managesOwnTransaction && activeTransactionID) {
+      try {
+        await connectionManager.rollbackTransaction(activeTransactionID);
+      } catch (rollbackError) {
+        if (error instanceof Error) {
+          (error as Error & { rollbackError?: unknown }).rollbackError = rollbackError;
+        }
+      }
+    }
+    throw error;
   }
-  return totalMoved;
 }
 
 export async function moveTemporaryBatchToFailedMeasurements(
@@ -33,6 +82,7 @@ export async function moveTemporaryBatchToFailedMeasurements(
   fileID: string,
   batchID: string,
   failureReason: string,
+  failureKind: SystemFailureKind,
   transactionID?: string
 ): Promise<number> {
   const managesOwnTransaction = !transactionID;
@@ -48,7 +98,7 @@ export async function moveTemporaryBatchToFailedMeasurements(
     const sourceRowCount = Number(countRows?.[0]?.rowCount ?? 0);
 
     if (sourceRowCount > 0) {
-      const errorCode = inferIngestionErrorCode(failureReason);
+      const errorCode = errorCodeForSystemFailure(failureKind);
       const errorID = await ensureMeasurementErrorDefinition(
         connectionManager,
         schema,
@@ -94,6 +144,10 @@ export async function moveTemporaryBatchToFailedMeasurements(
         `INSERT IGNORE INTO ??.measurement_error_log (MeasurementID, ErrorID, IsResolved, CreatedAt, ResolvedAt)
          SELECT cm.CoreMeasurementID, ?, FALSE, NOW(), NULL
          FROM ??.coremeasurements cm
+         JOIN ??.temporarymeasurements tm
+           ON tm.id = cm.SourceRowIndex
+          AND tm.FileID = cm.UploadFileID
+          AND tm.BatchID = cm.UploadBatchID
          WHERE cm.UploadFileID = ?
            AND cm.UploadBatchID = ?
            AND cm.StemGUID IS NULL`
@@ -110,7 +164,15 @@ export async function moveTemporaryBatchToFailedMeasurements(
     return sourceRowCount;
   } catch (error) {
     if (managesOwnTransaction && activeTransactionID) {
-      await connectionManager.rollbackTransaction(activeTransactionID);
+      try {
+        await connectionManager.rollbackTransaction(activeTransactionID);
+      } catch (rollbackError) {
+        // Keep the actionable transfer error as the thrown error. The rollback
+        // failure is secondary, but attach it for structured diagnostics.
+        if (error instanceof Error) {
+          (error as Error & { rollbackError?: unknown }).rollbackError = rollbackError;
+        }
+      }
     }
     throw error;
   }

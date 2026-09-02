@@ -26,6 +26,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'fs';
+import mysql from 'mysql2/promise';
 import path from 'path';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { setupTestDatabase, teardownTestDatabase, type TestDatabaseConfig } from '../setup/local-db-setup';
@@ -123,6 +124,15 @@ describe('deploy-validations-to-all-schemas — integration', () => {
   // -------------------------------------------------------------------------
 
   describe('deployProceduresOnly', () => {
+    it('executes the parsed source through the production multipleStatements=false setting', async () => {
+      const productionLikeConnection = await mysql.createConnection({ ...config, multipleStatements: false });
+      try {
+        await deployProceduresOnly(productionLikeConnection, schema, procedureStatements);
+      } finally {
+        await productionLikeConnection.end();
+      }
+    }, 60000);
+
     it('preserves every custom validation row and every pre-existing IsEnabled value', async () => {
       await connection.query(
         `INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)

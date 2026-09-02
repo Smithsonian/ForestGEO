@@ -6,6 +6,7 @@ import { HTTPResponses } from '@/config/macros';
 import { FileRow } from '@/config/macros/formdetails';
 import { generateShortBatchID } from '@/config/utils';
 import ailogger from '@/ailogger';
+import { toError } from '@/lib/errorhelpers';
 import { ACTIVE_UPLOAD_SESSION_STATES, ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS, STALE_VALIDATION_RUN_THRESHOLD_MINUTES } from '@/config/measurementscopepolicy';
@@ -44,6 +45,13 @@ class RevisionApplyPlanHashMismatchError extends Error {
   constructor(public freshPlan: unknown) {
     super('plan hash mismatch');
     this.name = 'RevisionApplyPlanHashMismatchError';
+  }
+}
+
+class RevisionStagingIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RevisionStagingIntegrityError';
   }
 }
 
@@ -139,6 +147,24 @@ function getAffectedRowCount(result: unknown): number {
 
   const affectedRows = (result as { affectedRows?: unknown }).affectedRows;
   return typeof affectedRows === 'number' && Number.isFinite(affectedRows) ? affectedRows : 0;
+}
+
+function getWarningCount(result: unknown): number {
+  if (!result || typeof result !== 'object' || !('warningStatus' in result)) return 0;
+  const warningStatus = (result as { warningStatus?: unknown }).warningStatus;
+  return typeof warningStatus === 'number' && Number.isFinite(warningStatus) ? warningStatus : 0;
+}
+
+function describeSqlWarnings(warnings: unknown): string {
+  if (!Array.isArray(warnings) || warnings.length === 0) return 'warning details unavailable';
+  return warnings
+    .slice(0, 5)
+    .map(warning => {
+      if (!warning || typeof warning !== 'object') return String(warning);
+      const row = warning as { Code?: unknown; Message?: unknown; Level?: unknown };
+      return [row.Level, row.Code, row.Message].filter(value => value !== undefined && value !== null && value !== '').join(' ');
+    })
+    .join('; ');
 }
 
 interface MatchedRowWithDiff {
@@ -577,6 +603,8 @@ async function insertNewRowsThroughPipeline(
       canonical.QuadratName ?? null,
       canonical.StemLocalX ?? null,
       canonical.StemLocalY ?? null,
+      canonical.StemPlotX ?? null,
+      canonical.StemPlotY ?? null,
       canonical.MeasuredDBH ?? null,
       canonical.MeasuredHOM ?? null,
       canonical.MeasurementDate ?? null,
@@ -587,16 +615,43 @@ async function insertNewRowsThroughPipeline(
 
   const insertTempSQL = safeFormatQuery(
     schema,
-    `INSERT IGNORE INTO ??.temporarymeasurements
-      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+    `INSERT INTO ??.temporarymeasurements
+      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, PlotX, PlotY, DBH, HOM, MeasurementDate, Codes, Comments)
      VALUES ?`
   );
-  await connectionManager.executeQuery(insertTempSQL, [rowValues], transactionID);
+  const insertResult = await connectionManager.executeQuery(insertTempSQL, [rowValues], transactionID);
+  const stagedCount = getAffectedRowCount(insertResult);
+  const warningCount = getWarningCount(insertResult);
+
+  if (warningCount > 0) {
+    // SHOW WARNINGS is rejected by the prepared-statement protocol (ER_UNSUPPORTED_PS 1295).
+    // Passing no params keeps runQuery on connection.query(), so the diagnostic this branch
+    // exists to surface is actually readable instead of throwing over the real failure.
+    const warnings = await connectionManager.executeQuery('SHOW WARNINGS', undefined, transactionID);
+    const warningDetail = describeSqlWarnings(warnings);
+    ailogger.error('[revisionupload/apply] temporarymeasurement staging produced SQL warnings', undefined, {
+      schema,
+      batchID,
+      warningCount,
+      warningDetail
+    });
+    throw new RevisionStagingIntegrityError(`Revision staging produced ${warningCount} SQL warning(s): ${warningDetail}`);
+  }
+
+  if (stagedCount !== newRows.length) {
+    ailogger.error('[revisionupload/apply] temporarymeasurement staging row-count mismatch', undefined, {
+      schema,
+      batchID,
+      expectedRows: newRows.length,
+      stagedRows: stagedCount
+    });
+    throw new RevisionStagingIntegrityError(`Revision staging inserted ${stagedCount} of ${newRows.length} expected row(s)`);
+  }
 
   const bulkIngestSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
   await connectionManager.executeQuery(bulkIngestSQL, [REVISION_UPLOAD_FILE_ID, batchID], transactionID);
 
-  return newRows.length;
+  return stagedCount;
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -618,7 +673,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let body: ApplyRequest;
   try {
-    body = await request.json();
+    const parsedBody: unknown = await request.json();
+    if (parsedBody === null || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+    body = parsedBody as ApplyRequest;
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -706,6 +765,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const connectionManager = ConnectionManager.getInstance();
+  let operationError: unknown;
 
   try {
     await assertCanEditMeasurementScope(connectionManager, session!, {
@@ -955,6 +1015,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json(response, { status: HTTPResponses.OK });
   } catch (error: unknown) {
     const errorObj = error instanceof Error ? error : new Error(String(error));
+    operationError = errorObj;
     ailogger.error(`${logPrefix} request failed after ${Date.now() - requestStartedAt}ms:`, errorObj);
     if (errorObj instanceof SessionExpiredError) {
       return NextResponse.json({ error: 'session expired' }, { status: HTTPResponses.UNAUTHORIZED });
@@ -986,9 +1047,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (errorObj instanceof InvalidFieldValueError) {
       return NextResponse.json({ error: 'invalid field value', field: errorObj.field }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
     }
+    if (errorObj instanceof RevisionStagingIntegrityError) {
+      return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
     const status = errorObj instanceof RevisionApplyConflictError ? HTTPResponses.CONFLICT : HTTPResponses.INTERNAL_SERVER_ERROR;
     return NextResponse.json({ error: errorObj.message }, { status });
   } finally {
-    await connectionManager.closeConnection();
+    try {
+      await connectionManager.closeConnection();
+    } catch (closeError) {
+      if (operationError === undefined) throw closeError;
+      ailogger.error(`${logPrefix} failed to close connection after the primary error:`, toError(closeError));
+    }
   }
 }

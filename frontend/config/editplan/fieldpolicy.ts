@@ -10,6 +10,8 @@ export const EDITABLE_FIELDS_BY_SURFACE: Record<EditSurface, ReadonlySet<string>
     'QuadratName',
     'StemLocalX',
     'StemLocalY',
+    'StemPlotX',
+    'StemPlotY',
     'MeasurementDate',
     'MeasuredDBH',
     'MeasuredHOM',
@@ -18,7 +20,7 @@ export const EDITABLE_FIELDS_BY_SURFACE: Record<EditSurface, ReadonlySet<string>
   ]),
   failedmeasurements: new Set(['Tag', 'StemTag', 'SpCode', 'Quadrat', 'X', 'Y', 'DBH', 'HOM', 'Date', 'Codes', 'Comments']),
   'revision-row-local': new Set(['dbh', 'hom', 'date', 'codes', 'comments']),
-  'revision-identity': new Set(['spcode', 'tag', 'stemtag', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes', 'comments'])
+  'revision-identity': new Set(['spcode', 'tag', 'stemtag', 'quadrat', 'lx', 'ly', 'px', 'py', 'dbh', 'hom', 'date', 'codes', 'comments'])
 };
 
 export const FIELD_ALIASES_BY_SURFACE: Record<EditSurface, Record<string, string>> = {
@@ -29,6 +31,8 @@ export const FIELD_ALIASES_BY_SURFACE: Record<EditSurface, Record<string, string
     quadratName: 'QuadratName',
     stemLocalX: 'StemLocalX',
     stemLocalY: 'StemLocalY',
+    stemPlotX: 'StemPlotX',
+    stemPlotY: 'StemPlotY',
     measurementDate: 'MeasurementDate',
     measuredDBH: 'MeasuredDBH',
     measuredHOM: 'MeasuredHOM',
@@ -105,6 +109,8 @@ export const CLEAR_POLICY: Record<string, ClearSemantics> = {
   MeasuredHOM: 'no-op-on-blank',
   StemLocalX: 'no-op-on-blank',
   StemLocalY: 'no-op-on-blank',
+  StemPlotX: 'no-op-on-blank',
+  StemPlotY: 'no-op-on-blank',
   MeasurementDate: 'invalid-clear',
   Description: 'clear-on-blank',
   Attributes: 'clear-on-blank'
@@ -115,6 +121,10 @@ export const PER_COLUMN_DECIMAL_PRECISION: Record<string, number> = {
   MeasuredHOM: 2,
   StemLocalX: 2,
   StemLocalY: 2,
+  // Plot coordinates persist in DECIMAL(12,6) columns; keep the full stored
+  // scale so diff/hash normalization never flags an unchanged 6-decimal value.
+  StemPlotX: 6,
+  StemPlotY: 6,
   DBH: 2,
   HOM: 2,
   X: 2,
@@ -148,6 +158,22 @@ export class InvalidFieldValueError extends Error {
   }
 }
 
+// Every numeric edit-plan field currently persists to a DECIMAL(12,6)
+// column. Keep parsing and representable-range validation at the API boundary
+// so MySQL never has to coerce an out-of-range value in a permissive staging
+// or deployment environment.
+export const MAX_STORED_DECIMAL = 999999.999999;
+export const BASE_10_NUMBER_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+export function parseFiniteBase10Number(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed === '' || !BASE_10_NUMBER_PATTERN.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 const TAXONOMIC_IDENTITY_FIELDS = new Set(['SpeciesCode', 'SpCode', 'spcode']);
 const SPECIES_EDIT_ROLES = new Set<UserAuthRoles>(['global', 'db admin']);
 
@@ -157,10 +183,13 @@ export function isFieldEditableByRole(fieldName: string, role: UserAuthRoles | n
   return role !== null && role !== undefined && SPECIES_EDIT_ROLES.has(role);
 }
 
-function normalizeNumericValue(field: string, value: unknown): number {
-  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
-  if (!Number.isFinite(parsed)) {
+export function normalizeNumericValue(field: string, value: unknown): number {
+  const parsed = parseFiniteBase10Number(value);
+  if (parsed === null) {
     throw new InvalidFieldValueError(field, value, `Field "${field}" must be a finite number`);
+  }
+  if (Math.abs(parsed) > MAX_STORED_DECIMAL) {
+    throw new InvalidFieldValueError(field, value, `Field "${field}" must be between -${MAX_STORED_DECIMAL} and ${MAX_STORED_DECIMAL}`);
   }
   return parsed;
 }

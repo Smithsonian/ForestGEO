@@ -1,9 +1,20 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
+import { MAX_STORED_DECIMAL, parseFiniteBase10Number } from '@/config/editplan/fieldpolicy';
 
 export const INGESTION_ERROR_SOURCE = 'ingestion' as const;
 export const VALIDATION_ERROR_SOURCE = 'validation' as const;
+
+export const FALLBACK_FAILURE_REASON = 'Unknown parse error';
+// coremeasurements.Description is varchar(255); an over-length bind under strict
+// sql_mode would fail the whole audit insert, so truncate rather than throw.
+const FAILURE_DESCRIPTION_MAX_LENGTH = 255;
+
+export function normalizeFailureDescription(failureReason?: unknown): string {
+  const trimmed = failureReason == null ? '' : String(failureReason).trim();
+  return (trimmed || FALLBACK_FAILURE_REASON).slice(0, FAILURE_DESCRIPTION_MAX_LENGTH);
+}
 
 export interface IngestionFailureRowInput {
   plotID: number;
@@ -25,6 +36,61 @@ export interface IngestionFailureRowInput {
   fileID?: string | null;
   batchID?: string | null;
   sourceRowIndex?: number | null;
+  failureKind?: IngestionFailureKind;
+}
+
+/**
+ * `parser_reject` covers per-row validation rejects, where the specific defect
+ * (missing field, invalid reference, ...) is still unknown until the reason
+ * text is classified. `sql_exception` and `interrupted_upload` are system
+ * failures — the caller already knows which one happened and must say so
+ * explicitly rather than have it guessed from prose.
+ */
+export type IngestionFailureKind = 'parser_reject' | 'sql_exception' | 'interrupted_upload';
+export type SystemFailureKind = Exclude<IngestionFailureKind, 'parser_reject'>;
+
+const SYSTEM_FAILURE_ERROR_CODES: Record<SystemFailureKind, string> = {
+  sql_exception: 'SQL_EXCEPTION',
+  interrupted_upload: 'INTERRUPTED_UPLOAD'
+};
+
+export function errorCodeForSystemFailure(kind: SystemFailureKind): string {
+  return SYSTEM_FAILURE_ERROR_CODES[kind];
+}
+
+/**
+ * Reason fragments that mean "the upload was cut off", not "this row is bad".
+ * Rows carrying these were never judged by the ingestion procedure, so grouping
+ * them under SQL_EXCEPTION misreports clean data as defective — the failure mode
+ * behind the 2026-07-27 Harvard Forest incident, where an Azure front-end
+ * timeout parked 106,227 rows as if each one had a data error.
+ *
+ * Every other caller knows its own failure kind and passes it explicitly.
+ * setupbulkfailure is the one boundary that cannot: its reason is a free-text
+ * string composed by the browser from whatever killed the request, so the kind
+ * has to be recovered from that text here.
+ */
+const INTERRUPTION_REASON_FRAGMENTS = [
+  'gatewaytimeout',
+  'gateway timeout',
+  'server error 504',
+  'cleaned up after abandonment',
+  'client disconnected',
+  'batch cancelled before completion',
+  // Shapes the upload client itself composes when the request never reached a
+  // verdict: fetchWithTimeout's timeout message, an aborted batch, and the
+  // browser's own network-failure text (Chrome/Firefox vs Safari).
+  'request timeout after',
+  'request aborted for',
+  'failed to fetch',
+  'networkerror',
+  'network error',
+  'load failed'
+];
+
+export function inferSystemFailureKind(reason?: unknown): SystemFailureKind {
+  const text = normalizeFailureDescription(reason).toLowerCase();
+  return INTERRUPTION_REASON_FRAGMENTS.some(fragment => text.includes(fragment)) ? 'interrupted_upload' : 'sql_exception';
 }
 
 const INGESTION_ERROR_MESSAGES: Record<string, string> = {
@@ -44,37 +110,42 @@ const INGESTION_ERROR_MESSAGES: Record<string, string> = {
   DUPLICATE_ENTRY: 'Duplicate measurement row detected',
   NEGATIVE_DBH: 'DBH must be non-negative',
   NEGATIVE_HOM: 'HOM must be non-negative',
+  // Retired: lx/ly rejects now classify per field as MISSING_FIELD_LOCALX /
+  // MISSING_FIELD_LOCALY. Retained so rows persisted under the old grouped code
+  // still resolve to a message and to affected fields in the errors explorer.
   MISSING_FIELD_COORDINATES: 'Missing required coordinate fields (lx, ly)',
-  INVALID_COORDINATE: 'Coordinate value is negative',
+  INVALID_COORDINATE: 'Coordinate value is outside the accepted or storable range',
   FIELD_TOO_LONG: 'One or more fields exceed column length limits',
   MISSING_MEASUREMENT_DATA: 'Missing measurement data',
   INTERRUPTED_UPLOAD: 'Upload was interrupted before this row was processed (server timeout or cancelled session) — the row itself was not rejected',
+  NON_NUMERIC_DBH: 'DBH value is not numeric',
+  NON_NUMERIC_HOM: 'HOM value is not numeric',
+  NON_NUMERIC_COORDINATE: 'Coordinate value is not numeric',
+  INVALID_DATE: 'Measurement date could not be parsed',
+  MALFORMED_ROW: 'Row appears mis-parsed: tag fields contain the delimiter or are unusually long',
+  UNCLASSIFIED_REJECT: 'Row was rejected before ingestion; the recorded reason does not match a known error category',
   SQL_EXCEPTION: 'Ingestion SQL exception'
 };
 
-/**
- * Reason fragments that mean "the upload was cut off", not "this row is bad".
- * Rows carrying these were never judged by the ingestion procedure, so grouping
- * them under SQL_EXCEPTION misreports clean data as defective — the failure mode
- * behind the 2026-07-27 Harvard Forest incident, where an Azure front-end
- * timeout parked 106,227 rows as if each one had a data error.
- */
-const INTERRUPTION_REASON_FRAGMENTS = [
-  'gatewaytimeout',
-  'gateway timeout',
-  'server error 504',
-  'cleaned up after abandonment',
-  'client disconnected',
-  'batch cancelled before completion'
-];
+// Parser reject reasons use the lowercase canonical field labels from
+// lib/column-mapping (validateMeasurementRow joins them: "Missing required fields: tag, date").
+const MISSING_FIELD_CODES_BY_LABEL: Record<string, string> = {
+  tag: 'MISSING_FIELD_TREETAG',
+  stemtag: 'MISSING_FIELD_STEMTAG',
+  spcode: 'MISSING_FIELD_SPECIESCODE',
+  quadrat: 'MISSING_FIELD_QUADRATNAME',
+  date: 'MISSING_FIELD_DATE',
+  lx: 'MISSING_FIELD_LOCALX',
+  ly: 'MISSING_FIELD_LOCALY'
+};
+const MISSING_FIELDS_LIST_PATTERN = /missing required fields?:\s*([^|]+)/g;
 
-export function inferIngestionErrorCode(reason?: string | null): string {
-  const codes = inferAllIngestionErrorCodes(reason);
-  return codes[0];
-}
-
-export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
-  const text = (reason || '').toLowerCase();
+export function inferAllIngestionErrorCodes(reason?: unknown): string[] {
+  // This is called from an HTTP persistence boundary: TypeScript's string
+  // type does not constrain values decoded from JSON. Normalize once so
+  // classification and logging cannot throw or emit unbounded input.
+  const normalizedReason = normalizeFailureDescription(reason);
+  const text = normalizedReason.toLowerCase();
   const codes: string[] = [];
 
   if (text.includes('missing required field: treetag') || text.includes('missing treetag')) codes.push('MISSING_FIELD_TREETAG');
@@ -93,32 +164,77 @@ export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
   if (text.includes('duplicate')) codes.push('DUPLICATE_ENTRY');
   if (text.includes('invalid dbh') || text.includes('negative dbh')) codes.push('NEGATIVE_DBH');
   if (text.includes('invalid hom') || text.includes('negative hom')) codes.push('NEGATIVE_HOM');
-  if (text.includes('missing required fields: lx') || text.includes('missing required fields: ly')) codes.push('MISSING_FIELD_COORDINATES');
   if (text.includes('missing required field: localx')) codes.push('MISSING_FIELD_LOCALX');
   if (text.includes('missing required field: localy')) codes.push('MISSING_FIELD_LOCALY');
   if (text.includes('invalid localx') || text.includes('invalid localy') || text.includes('invalid local')) codes.push('INVALID_COORDINATE');
   if (text.includes('exceeds maximum length') || text.includes('field too long')) codes.push('FIELD_TOO_LONG');
   if (text.includes('missing measurement data')) codes.push('MISSING_MEASUREMENT_DATA');
 
-  if (codes.length === 0 && INTERRUPTION_REASON_FRAGMENTS.some(fragment => text.includes(fragment))) {
-    codes.push('INTERRUPTED_UPLOAD');
+  // Parser-emitted reject shapes (lib/column-mapping/measurement-rows.ts):
+  // "Missing required fields: tag, stemtag, date" (plural, lowercase canonical labels)
+  // and "Decimal value for <field> is out of range: <value>" for lx/ly/px/py/dbh/hom.
+  // A positive (too-large) dbh/hom overflow has no distinguishing sign in that text, so
+  // it deliberately falls through to UNCLASSIFIED_REJECT rather than guessing NEGATIVE_*.
+  for (const match of text.matchAll(MISSING_FIELDS_LIST_PATTERN)) {
+    for (const label of match[1].split(',').map(part => part.trim())) {
+      const code = MISSING_FIELD_CODES_BY_LABEL[label];
+      if (code) codes.push(code);
+    }
   }
+  if (/decimal value for (lx|ly|px|py) is out of range/.test(text)) codes.push('INVALID_COORDINATE');
+  if (/decimal value for dbh is out of range: -/.test(text)) codes.push('NEGATIVE_DBH');
+  if (/decimal value for hom is out of range: -/.test(text)) codes.push('NEGATIVE_HOM');
+
+  // The remaining shapes validateMeasurementRow emits. "dbh=N/A" and an
+  // unparseable date are the two most frequent real rejects, so leaving them on
+  // UNCLASSIFIED_REJECT (whose field map is empty) told a researcher a row was
+  // rejected without pointing at the cell to fix.
+  if (/non-numeric value for dbh/.test(text)) codes.push('NON_NUMERIC_DBH');
+  if (/non-numeric value for hom/.test(text)) codes.push('NON_NUMERIC_HOM');
+  // Like INVALID_COORDINATE, one code covers the local/plot pairs: the explorer
+  // highlights all four coordinate cells rather than mis-pinning the wrong pair.
+  if (/non-numeric value for (lx|ly|px|py)/.test(text)) codes.push('NON_NUMERIC_COORDINATE');
+  if (text.includes('unparseable date value')) codes.push('INVALID_DATE');
+  if (text.includes('contain delimiter character') || text.includes('unusually long tag values')) codes.push('MALFORMED_ROW');
 
   if (codes.length === 0) {
-    ailogger.warn(`inferAllIngestionErrorCodes: unmapped error pattern defaulting to SQL_EXCEPTION: "${reason}"`);
-    codes.push('SQL_EXCEPTION');
+    ailogger.warn(`inferAllIngestionErrorCodes: unrecognized parser-reject reason: "${normalizedReason}"`);
+    codes.push('UNCLASSIFIED_REJECT');
   }
 
   return Array.from(new Set(codes));
 }
 
-export function getIngestionErrorMessage(code: string, fallback?: string | null): string {
-  return INGESTION_ERROR_MESSAGES[code] || fallback || 'Ingestion error';
+export function getIngestionErrorMessage(code: string, fallback?: unknown): string {
+  if (INGESTION_ERROR_MESSAGES[code]) return INGESTION_ERROR_MESSAGES[code];
+  if (typeof fallback === 'string' && fallback.trim()) return normalizeFailureDescription(fallback);
+  return 'Ingestion error';
 }
 
 interface MeasurementErrorInput {
   errorCode: string;
   errorMessage: string;
+}
+
+/**
+ * Turns a failure into an error code. A `parser_reject` still needs the
+ * reason text classified (the specific per-row defect isn't known up
+ * front); every other kind is a system failure the caller has already
+ * identified, so it maps straight to its code and never runs prose
+ * inference over the reason text. Not the only caller of these
+ * primitives — `lib/batchfailuretransfer.ts` composes code+message from
+ * `errorCodeForSystemFailure`/`getIngestionErrorMessage` directly for the
+ * same system-failure kinds.
+ */
+export function classifyIngestionFailure(kind: IngestionFailureKind, failureReason?: unknown): MeasurementErrorInput[] {
+  if (kind !== 'parser_reject') {
+    const errorCode = errorCodeForSystemFailure(kind);
+    return [{ errorCode, errorMessage: getIngestionErrorMessage(errorCode, failureReason) }];
+  }
+  return inferAllIngestionErrorCodes(failureReason).map(code => ({
+    errorCode: code,
+    errorMessage: getIngestionErrorMessage(code, failureReason)
+  }));
 }
 
 const INGESTION_FAILURE_BULK_INSERT_SIZE = 250;
@@ -127,6 +243,7 @@ interface PreparedIngestionFailureRow {
   resultIndex: number;
   row: IngestionFailureRowInput;
   normalizedDate: string | null;
+  description: string;
   sourceRowIndex: number;
   errors: MeasurementErrorInput[];
 }
@@ -245,11 +362,9 @@ function prepareIngestionFailureRows(rows: IngestionFailureRowInput[]): Prepared
     resultIndex: index,
     row,
     normalizedDate: normalizeDate(row.date),
+    description: normalizeFailureDescription(row.failureReason),
     sourceRowIndex: row.sourceRowIndex ?? index + 1,
-    errors: inferAllIngestionErrorCodes(row.failureReason).map(code => ({
-      errorCode: code,
-      errorMessage: getIngestionErrorMessage(code, row.failureReason)
-    }))
+    errors: classifyIngestionFailure(row.failureKind ?? 'parser_reject', row.failureReason)
   }));
 }
 
@@ -316,7 +431,7 @@ async function insertPreparedIngestionFailureRowsSequential(
   );
 
   for (const preparedRow of rows) {
-    const { row, normalizedDate, sourceRowIndex, errors } = preparedRow;
+    const { row, normalizedDate, description, sourceRowIndex, errors } = preparedRow;
     const insertResult: any = await connectionManager.executeQuery(
       insertSQL,
       [
@@ -324,7 +439,7 @@ async function insertPreparedIngestionFailureRowsSequential(
         normalizedDate,
         row.dbh ?? null,
         row.hom ?? null,
-        row.comments ?? null,
+        description,
         row.fileID ?? null,
         row.batchID ?? null,
         row.tag ?? null,
@@ -356,6 +471,7 @@ async function insertPreparedIngestionFailureRowsSequential(
 async function insertPreparedIngestionFailureRowsBulk(
   connectionManager: ConnectionManager,
   schema: string,
+  fileID: string | null,
   batchID: string,
   rows: PreparedIngestionFailureRow[],
   transactionID: string | undefined,
@@ -393,12 +509,12 @@ async function insertPreparedIngestionFailureRowsBulk(
          IsValidated = FALSE`
     );
 
-    const insertParams = chunk.flatMap(({ row, normalizedDate, sourceRowIndex }) => [
+    const insertParams = chunk.flatMap(({ row, normalizedDate, description, sourceRowIndex }) => [
       row.censusID,
       normalizedDate,
       row.dbh ?? null,
       row.hom ?? null,
-      row.comments ?? null,
+      description,
       row.fileID ?? null,
       row.batchID ?? null,
       row.tag ?? null,
@@ -421,12 +537,13 @@ async function insertPreparedIngestionFailureRowsBulk(
       schema,
       `SELECT CoreMeasurementID, SourceRowIndex
        FROM ??.coremeasurements
-       WHERE UploadBatchID = ?
+       WHERE UploadFileID <=> ?
+         AND UploadBatchID <=> ?
          AND SourceRowIndex IN (${rowIndexes.map(() => '?').join(', ')})`
     );
     const measurementRows: Array<{ CoreMeasurementID: number; SourceRowIndex: number }> = await connectionManager.executeQuery(
       selectSQL,
-      [batchID, ...rowIndexes],
+      [fileID, batchID, ...rowIndexes],
       transactionID
     );
     const measurementIDBySourceRow = new Map(measurementRows.map(row => [row.SourceRowIndex, row.CoreMeasurementID]));
@@ -496,7 +613,7 @@ export async function insertIngestionFailureRows(
   const preparedRows = prepareIngestionFailureRows(rows);
   const errorIDCache = await resolveIngestionErrorIDCache(connectionManager, schema, preparedRows, transactionID);
 
-  const bulkEligibleRows = new Map<string, PreparedIngestionFailureRow[]>();
+  const bulkEligibleRows = new Map<string, { fileID: string | null; batchID: string; rows: PreparedIngestionFailureRow[] }>();
   const sequentialRows: PreparedIngestionFailureRow[] = [];
 
   for (const preparedRow of preparedRows) {
@@ -506,17 +623,19 @@ export async function insertIngestionFailureRows(
       continue;
     }
 
-    const group = bulkEligibleRows.get(batchID) ?? [];
-    group.push(preparedRow);
-    bulkEligibleRows.set(batchID, group);
+    const fileID = preparedRow.row.fileID ?? null;
+    const groupKey = `${fileID ?? '<NULL>'}\u0000${batchID}`;
+    const group = bulkEligibleRows.get(groupKey) ?? { fileID, batchID, rows: [] };
+    group.rows.push(preparedRow);
+    bulkEligibleRows.set(groupKey, group);
   }
 
   const insertedIDs: number[] = [];
   const insertedIDByRow = new Map<number, number>();
 
-  for (const [batchID, batchRows] of bulkEligibleRows.entries()) {
+  for (const { fileID, batchID, rows: batchRows } of bulkEligibleRows.values()) {
     for (const [rowIndex, measurementID] of (
-      await insertPreparedIngestionFailureRowsBulk(connectionManager, schema, batchID, batchRows, transactionID, errorIDCache)
+      await insertPreparedIngestionFailureRowsBulk(connectionManager, schema, fileID, batchID, batchRows, transactionID, errorIDCache)
     ).entries()) {
       insertedIDByRow.set(rowIndex, measurementID);
     }
@@ -565,10 +684,13 @@ const FIELD_LENGTH_LIMITS = {
   Codes: 255
 } as const;
 
+// Raw failed-row measurements are persisted in DECIMAL(12,6) columns. Keep
+// runtime values inside that representable range so malformed API payloads
+// cannot turn a rejected-row audit insert into a second database failure.
+
 export function toFiniteNumber(value: unknown): number | null {
-  if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  const parsed = parseFiniteBase10Number(value);
+  return parsed !== null && Math.abs(parsed) <= MAX_STORED_DECIMAL ? parsed : null;
 }
 
 /**

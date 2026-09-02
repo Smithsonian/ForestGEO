@@ -20,9 +20,9 @@ BEGIN
 END;
 
 SET @id_conflict := (SELECT COUNT(*) FROM sitespecificvalidations
-                     WHERE ValidationID = 19 AND ProcedureName <> 'ValidatePlotCoordinateConsistency');
+                     WHERE ValidationID = 19 AND NOT (ProcedureName <=> 'ValidatePlotCoordinateConsistency'));
 SET @name_conflict := (SELECT COUNT(*) FROM sitespecificvalidations
-                       WHERE ProcedureName = 'ValidatePlotCoordinateConsistency' AND ValidationID <> 19);
+                       WHERE ProcedureName = 'ValidatePlotCoordinateConsistency' AND NOT (ValidationID <=> 19));
 SET @enabled_without_helper := (
   SELECT COUNT(*) FROM sitespecificvalidations
    WHERE ValidationID = 19

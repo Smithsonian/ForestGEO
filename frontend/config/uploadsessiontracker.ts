@@ -709,6 +709,7 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
           fileId,
           batchId,
           `Upload session ${session.sessionId} cleaned up after abandonment`,
+          'interrupted_upload',
           transactionID ?? undefined
         );
         temporaryDeleted += movedRows;
@@ -764,6 +765,7 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
               fileId,
               batchId,
               `Upload session ${session.sessionId} cleaned up after abandonment (pre-migration rows)`,
+              'interrupted_upload',
               transactionID ?? undefined
             );
             temporaryDeleted += movedRows;

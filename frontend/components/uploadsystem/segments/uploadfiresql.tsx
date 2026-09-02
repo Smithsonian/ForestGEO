@@ -446,7 +446,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
         codes: row.codes || null,
         comments: row.comments || null,
-        failureReasons: row.failureReason || 'Unknown error'
+        failureReasons: row.failureReason || undefined
       }));
 
       const response = await fetchWithTimeout(
@@ -1065,7 +1065,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                     } else {
                       parsingInvalidRows.push({
                         ...row,
-                        failureReason: verdict.failureReason ?? 'Unknown error',
+                        failureReason: verdict.failureReason ?? null,
                         ...(verdict.hasExtraColumns ? { excessData: row['__parsed_extra'] } : {})
                       });
                     }

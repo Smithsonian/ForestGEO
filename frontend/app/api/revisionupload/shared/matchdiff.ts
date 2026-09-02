@@ -2,8 +2,9 @@ import type ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { FileRow } from '@/config/macros/formdetails';
 import { canonicalizeRowForHash, RowMode } from '@/config/editplan/canonicalrow';
+import { parseFiniteBase10Number } from '@/config/editplan/fieldpolicy';
 
-export const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments', 'spcode', 'quadrat', 'lx', 'ly', 'tag', 'stemtag'] as const;
+export const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments', 'spcode', 'quadrat', 'lx', 'ly', 'px', 'py', 'tag', 'stemtag'] as const;
 
 export type UpdatableField = (typeof UPDATABLE_FIELDS)[number];
 export type MatchStrategy = 'stemid' | 'tag_stemtag';
@@ -36,18 +37,21 @@ export type FieldCompareKind = 'numeric' | 'string-ci' | 'numeric-or-string-ci' 
 export interface FieldDescriptor {
   dbProperty: keyof ExistingMeasurementRow;
   compareKind: FieldCompareKind;
+  canonicalProperty?: string;
 }
 
 export const FIELD_DESCRIPTORS: Record<UpdatableField, FieldDescriptor> = {
-  dbh: { dbProperty: 'MeasuredDBH', compareKind: 'numeric' },
-  hom: { dbProperty: 'MeasuredHOM', compareKind: 'numeric' },
+  dbh: { dbProperty: 'MeasuredDBH', compareKind: 'numeric', canonicalProperty: 'MeasuredDBH' },
+  hom: { dbProperty: 'MeasuredHOM', compareKind: 'numeric', canonicalProperty: 'MeasuredHOM' },
   date: { dbProperty: 'MeasurementDate', compareKind: 'date' },
   codes: { dbProperty: 'RawCodes', compareKind: 'string-exact' },
   comments: { dbProperty: 'Description', compareKind: 'string-exact' },
   spcode: { dbProperty: 'SpeciesCode', compareKind: 'string-ci' },
   quadrat: { dbProperty: 'QuadratName', compareKind: 'numeric-or-string-ci' },
-  lx: { dbProperty: 'LocalX', compareKind: 'numeric' },
-  ly: { dbProperty: 'LocalY', compareKind: 'numeric' },
+  lx: { dbProperty: 'LocalX', compareKind: 'numeric', canonicalProperty: 'StemLocalX' },
+  ly: { dbProperty: 'LocalY', compareKind: 'numeric', canonicalProperty: 'StemLocalY' },
+  px: { dbProperty: 'StemPlotX', compareKind: 'numeric', canonicalProperty: 'StemPlotX' },
+  py: { dbProperty: 'StemPlotY', compareKind: 'numeric', canonicalProperty: 'StemPlotY' },
   tag: { dbProperty: 'TreeTag', compareKind: 'numeric-or-string-ci' },
   stemtag: { dbProperty: 'StemTag', compareKind: 'numeric-or-string-ci' }
 };
@@ -73,6 +77,8 @@ export interface ExistingMeasurementRow {
   QuadratName: string | null;
   LocalX: number | string | null;
   LocalY: number | string | null;
+  StemPlotX: number | string | null;
+  StemPlotY: number | string | null;
 }
 
 export const LOOKUP_CHUNK_SIZE = 1000;
@@ -82,7 +88,8 @@ const MEASUREMENT_SELECT = `cm.CoreMeasurementID, cm.StemGUID, cm.IsActive, cm.M
               cm.MeasurementDate, cm.RawCodes, cm.Description, cm.RawTreeTag, cm.RawStemTag,
               st.IsActive AS StemIsActive, t.IsActive AS TreeIsActive, q.IsActive AS QuadratIsActive,
               q.PlotID, t.TreeTag, st.StemTag,
-              sp.SpeciesCode, q.QuadratName, st.LocalX, st.LocalY`;
+              sp.SpeciesCode, q.QuadratName, st.LocalX, st.LocalY,
+              COALESCE(cm.RawPlotX, st.PlotX) AS StemPlotX, COALESCE(cm.RawPlotY, st.PlotY) AS StemPlotY`;
 
 const MEASUREMENT_JOINS = `??.coremeasurements cm
        LEFT JOIN ??.stems st ON st.StemGUID = cm.StemGUID
@@ -107,10 +114,10 @@ export function normalizeDateToString(value: Date | string | null): string | nul
   return String(value).slice(0, 10);
 }
 
-function areEquivalentNumericValues(csvValue: string, dbValue: unknown): boolean {
-  const parsedCsvValue = Number.parseFloat(csvValue);
-  const parsedDbValue = typeof dbValue === 'number' ? dbValue : Number.parseFloat(String(dbValue ?? ''));
-  return Number.isFinite(parsedCsvValue) && Number.isFinite(parsedDbValue) && parsedCsvValue === parsedDbValue;
+function areEquivalentNumericValues(csvValue: unknown, dbValue: unknown): boolean {
+  const parsedCsvValue = parseFiniteBase10Number(csvValue);
+  const parsedDbValue = parseFiniteBase10Number(dbValue);
+  return parsedCsvValue !== null && parsedDbValue !== null && parsedCsvValue === parsedDbValue;
 }
 
 /**
@@ -139,7 +146,7 @@ export function fieldValuesAreEquivalent(compareKind: FieldCompareKind, csvValue
 
   switch (compareKind) {
     case 'numeric':
-      return areEquivalentNumericValues(csvNormalized, dbValue);
+      return areEquivalentNumericValues(csvValue, dbValue);
     case 'date':
       return csvNormalized === dbNormalized;
     case 'string-exact':
@@ -180,8 +187,18 @@ export function computeDiff(csvRow: FileRow, dbRow: ExistingMeasurementRow): Rec
 
     const descriptor = FIELD_DESCRIPTORS[field];
     const dbValue = readDbValueForDisplay(field, dbRow);
+    // Canonicalize BOTH sides at the field's declared precision. Rounding only
+    // the CSV value and comparing it against the raw DECIMAL(12,6) column made
+    // a stored 12.345 differ from a CSV 12.345, surfacing a change whose `from`
+    // and `to` render identically and whose apply silently truncated the row.
+    // Comparing canonical-to-canonical asks the question that actually matters:
+    // would applying this cell change what we store?
+    const canonicalize = (value: unknown) => canonicalizeRowForHash({ [field]: value }, 'revision-update')[descriptor.canonicalProperty as string];
+    const isCanonicalNumeric = descriptor.compareKind === 'numeric' && descriptor.canonicalProperty !== undefined;
+    const comparisonCsvValue = isCanonicalNumeric ? canonicalize(csvValue) : csvValue;
+    const comparisonDbValue = isCanonicalNumeric ? canonicalize(dbValue) : dbValue;
 
-    if (fieldValuesAreEquivalent(descriptor.compareKind, csvValue, dbValue)) continue;
+    if (fieldValuesAreEquivalent(descriptor.compareKind, comparisonCsvValue, comparisonDbValue)) continue;
 
     changes[field] = { from: dbValue, to: csvValue };
   }

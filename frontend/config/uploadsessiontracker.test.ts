@@ -83,10 +83,47 @@ describe('cleanupOrphanedData', () => {
       'file.csv',
       'batch-1',
       'Upload session session-1 cleaned up after abandonment (pre-migration rows)',
+      'interrupted_upload',
       'tx-cleanup'
     );
     expect(mocks.commitTransaction).toHaveBeenCalledWith('tx-cleanup');
     expect(mocks.rollbackTransaction).not.toHaveBeenCalled();
+  });
+
+  it('marks a session-owned batch move as interrupted_upload (not just the pre-migration fallback)', async () => {
+    mocks.executeQuery
+      .mockResolvedValueOnce([{ FileID: 'file.csv', BatchID: 'batch-2' }]) // session-owned batches (SessionID = ?)
+      .mockResolvedValueOnce([]) // no pre-migration (NULL SessionID) rows in this scope
+      .mockResolvedValueOnce({ affectedRows: 1 }); // mark session cleaned up
+    mocks.moveTemporaryBatchToFailedMeasurements.mockResolvedValue(2);
+
+    const result = await cleanupOrphanedData('forestgeo_testing', {
+      sessionId: 'session-2',
+      schema: 'forestgeo_testing',
+      plotId: 7,
+      censusId: 9,
+      userId: 'mason',
+      state: UploadSessionState.ABANDONED,
+      fileId: 'file.csv',
+      totalChunks: 1,
+      uploadedChunks: 1,
+      processedBatches: 0,
+      totalBatches: 1,
+      lastHeartbeat: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    expect(result).toEqual({ temporaryDeleted: 2, failedDeleted: 2 });
+    expect(mocks.moveTemporaryBatchToFailedMeasurements).toHaveBeenCalledWith(
+      expect.any(Object),
+      'forestgeo_testing',
+      'file.csv',
+      'batch-2',
+      'Upload session session-2 cleaned up after abandonment',
+      'interrupted_upload',
+      'tx-cleanup'
+    );
   });
 
   it('rolls back the outer transaction when a batch move fails', async () => {

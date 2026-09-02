@@ -55,8 +55,9 @@ describe('fieldpolicy', () => {
       expect(normalizeFieldValue('StemLocalX', '-5.5')).toBe(-5.5);
     });
 
-    it('rejects malformed numeric strings before the writer can coerce them to null', () => {
+    it('rejects malformed and non-base-10 numeric strings before the writer can coerce them', () => {
       expect(() => normalizeFieldValue('MeasuredDBH', 'abc')).toThrow(InvalidFieldValueError);
+      expect(() => normalizeFieldValue('StemPlotX', '0x10')).toThrow(InvalidFieldValueError);
       expect(() => normalizeFieldValue('StemLocalY', Number.NaN)).toThrow(InvalidFieldValueError);
     });
 
@@ -189,9 +190,10 @@ describe('fieldpolicy', () => {
       expect(normalizeFieldValue('MeasuredHOM', -0.1)).toBe(-0.1);
     });
 
-    it('passes through extreme finite coordinates unchanged — analyzer does not clamp StemLocalX/Y', () => {
-      expect(normalizeFieldValue('StemLocalX', GIANT_COORDINATE)).toBe(GIANT_COORDINATE);
-      expect(normalizeFieldValue('StemLocalY', -GIANT_COORDINATE)).toBe(-GIANT_COORDINATE);
+    it('rejects finite coordinates outside the DECIMAL(12,6) storage range', () => {
+      expect(() => normalizeFieldValue('StemLocalX', GIANT_COORDINATE)).toThrow(InvalidFieldValueError);
+      expect(() => normalizeFieldValue('StemLocalY', -GIANT_COORDINATE)).toThrow(InvalidFieldValueError);
+      expect(normalizeFieldValue('StemPlotX', '999999.999999')).toBe(999999.999999);
     });
 
     it('treats tab-only content as empty whitespace for invalid-clear fields', () => {

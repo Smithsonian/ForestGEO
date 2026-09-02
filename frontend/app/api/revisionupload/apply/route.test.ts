@@ -223,6 +223,8 @@ function buildDbRow(coreMeasurementID: number, overrides: Record<string, unknown
     QuadratName: 'Q',
     LocalX: 0,
     LocalY: 0,
+    StemPlotX: null,
+    StemPlotY: null,
     ...overrides
   };
 }
@@ -409,6 +411,52 @@ describe('POST /api/revisionupload/apply', () => {
     );
   });
 
+  it('stages new rows with plot coordinates into temporarymeasurements PlotX/PlotY', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('INSERT INTO ??.temporarymeasurements')) return { affectedRows: 1, warningStatus: 0 };
+      return [];
+    });
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          newRows: [
+            {
+              csvIndex: 0,
+              csvRow: {
+                tag: 'T9',
+                stemtag: 'S9',
+                spcode: 'AAA',
+                quadrat: 'Q1',
+                lx: '3.5',
+                ly: '4.25',
+                px: '-2.531244',
+                py: '487.125',
+                dbh: '10',
+                date: '2026-04-01'
+              }
+            }
+          ],
+          confirmNewRows: true
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ insertedCount: 1 });
+
+    const insertCall = mocks.executeQuery.mock.calls.find(([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO ??.temporarymeasurements'));
+    expect(insertCall).toBeDefined();
+    const [insertSQL, insertParams] = insertCall!;
+    expect(insertSQL).toContain('LocalX, LocalY, PlotX, PlotY, DBH, HOM');
+    const rowValues = (insertParams as unknown[][])[0][0] as unknown[];
+    // Column order: FileID, BatchID, PlotID, CensusID, TreeTag, StemTag,
+    // SpeciesCode, QuadratName, LocalX, LocalY, PlotX, PlotY, DBH, HOM, ...
+    expect(rowValues[8]).toBe(3.5);
+    expect(rowValues[9]).toBe(4.25);
+    expect(rowValues[10]).toBe(-2.531244);
+    expect(rowValues[11]).toBe(487.125);
+  });
+
   it('rejects malformed numeric values in new rows before inserting temporary measurements', async () => {
     const response = await POST(
       buildRequest(
@@ -421,11 +469,78 @@ describe('POST /api/revisionupload/apply', () => {
 
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({ error: 'invalid field value', field: 'MeasuredDBH' });
-    expect(mocks.executeQuery).not.toHaveBeenCalledWith(
-      expect.stringContaining('INSERT IGNORE INTO ??.temporarymeasurements'),
-      expect.anything(),
-      expect.anything()
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('INSERT INTO ??.temporarymeasurements'), expect.anything(), expect.anything());
+  });
+
+  it('rejects out-of-range plot coordinates before inserting temporary measurements', async () => {
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          newRows: [{ csvIndex: 0, csvRow: { tag: 'T1', px: '1000000' } }],
+          confirmNewRows: true
+        })
+      )
     );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: 'invalid field value', field: 'StemPlotX' });
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('INSERT INTO ??.temporarymeasurements'), expect.anything(), expect.anything());
+  });
+
+  it('rolls back revision staging when MySQL reports a warning and surfaces its details', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('INSERT INTO ??.temporarymeasurements')) return { affectedRows: 1, warningStatus: 1 };
+      if (query === 'SHOW WARNINGS') return [{ Level: 'Warning', Code: 1265, Message: "Data truncated for column 'PlotX'" }];
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          newRows: [{ csvIndex: 0, csvRow: { tag: 'T1', px: '12.5' } }],
+          confirmNewRows: true
+        })
+      )
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: "Revision staging produced 1 SQL warning(s): Warning 1265 Data truncated for column 'PlotX'"
+    });
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('CALL ??.bulkingestionprocess'), expect.anything(), expect.anything());
+
+    // SHOW WARNINGS must go through the text protocol. runQuery routes to
+    // connection.execute() whenever a params array is supplied, and MySQL
+    // rejects SHOW WARNINGS there with ER_UNSUPPORTED_PS (1295) — which would
+    // throw an opaque 500 over the very diagnostic this branch exists to read.
+    const showWarningsCall = mocks.executeQuery.mock.calls.find(([query]: [string]) => query === 'SHOW WARNINGS');
+    expect(showWarningsCall).toBeDefined();
+    expect(showWarningsCall![1]).toBeUndefined();
+    expect(mocks.loggerError).toHaveBeenCalledWith(
+      '[revisionupload/apply] temporarymeasurement staging produced SQL warnings',
+      undefined,
+      expect.objectContaining({ warningCount: 1 })
+    );
+  });
+
+  it('rejects a staging row-count mismatch instead of reporting the requested count as inserted', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('INSERT INTO ??.temporarymeasurements')) return { affectedRows: 0, warningStatus: 0 };
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          newRows: [{ csvIndex: 0, csvRow: { tag: 'T1', px: '12.5' } }],
+          confirmNewRows: true
+        })
+      )
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: 'Revision staging inserted 0 of 1 expected row(s)' });
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('CALL ??.bulkingestionprocess'), expect.anything(), expect.anything());
   });
 
   it('returns 409 with freshPlan when the bulk plan hash drifts between match and apply', async () => {

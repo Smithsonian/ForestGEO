@@ -2,11 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildFailedMeasurementsSelectQuery,
+  classifyIngestionFailure,
   ensureMeasurementErrorDefinition,
+  FALLBACK_FAILURE_REASON,
   getIngestionErrorMessage,
   inferAllIngestionErrorCodes,
+  inferSystemFailureKind,
   insertIngestionFailureRows,
-  revalidateEditedFailedRow
+  revalidateEditedFailedRow,
+  toFiniteNumber
 } from './measurementerrors';
 
 vi.mock('@/ailogger', () => ({
@@ -18,6 +22,19 @@ vi.mock('@/ailogger', () => ({
 }));
 
 describe('measurementerrors helpers', () => {
+  it('accepts only finite base-10 scalar values that fit the failed-row DECIMAL columns', () => {
+    expect(toFiniteNumber(' -12.5e2 ')).toBe(-1250);
+    expect(toFiniteNumber(0)).toBe(0);
+    expect(toFiniteNumber('999999.999999')).toBe(999999.999999);
+
+    expect(toFiniteNumber(true)).toBeNull();
+    expect(toFiniteNumber([])).toBeNull();
+    expect(toFiniteNumber('0x10')).toBeNull();
+    expect(toFiniteNumber('Infinity')).toBeNull();
+    expect(toFiniteNumber(1000000)).toBeNull();
+    expect(toFiniteNumber('-1000000')).toBeNull();
+  });
+
   it('includes stored coremeasurement descriptions in failed-measurements queries', () => {
     const sql = buildFailedMeasurementsSelectQuery('forestgeo_testing');
 
@@ -69,6 +86,16 @@ describe('measurementerrors helpers', () => {
 
     expect(logInsertCalls).toHaveLength(1);
     expect(logInsertCalls[0][1]).toEqual([77, 1001, 77, 1002]);
+
+    const lookupCall = lookupCalls[0];
+    expect(lookupCall[0]).toContain('UploadFileID <=> ?');
+    expect(lookupCall[1]).toEqual(['upload.csv', 'batch-1', 1]);
+  });
+
+  it('bounds and coerces runtime reject reasons before classification', () => {
+    expect(() => inferAllIngestionErrorCodes({ reason: 'not a string' })).not.toThrow();
+    expect(inferAllIngestionErrorCodes({ reason: 'not a string' })).toEqual(['UNCLASSIFIED_REJECT']);
+    expect(inferAllIngestionErrorCodes('x'.repeat(500))).toEqual(['UNCLASSIFIED_REJECT']);
   });
 
   it('writes RawPlotX/RawPlotY on the bulk insert path and refreshes them on ON DUPLICATE KEY UPDATE', async () => {
@@ -293,6 +320,163 @@ describe('measurementerrors helpers', () => {
     expect(String(executeQuery.mock.calls[1]?.[0])).toContain('IsActive = 1');
     expect(String(executeQuery.mock.calls[2]?.[0])).toContain('LOWER(SpeciesCode) = LOWER(?)');
   });
+
+  it('persists the failure reason into Description and keeps comments in RawComments only', async () => {
+    const executeQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ insertId: 1001 }) // ensureMeasurementErrorDefinition upsert
+      .mockResolvedValueOnce({ affectedRows: 1 }) // bulk INSERT
+      .mockResolvedValueOnce([{ CoreMeasurementID: 90, SourceRowIndex: 1 }]) // SELECT-back
+      .mockResolvedValueOnce(undefined); // error-log INSERT
+    const connectionManager = { executeQuery } as any;
+
+    await insertIngestionFailureRows(connectionManager, 'forestgeo_testing', [
+      {
+        plotID: 1,
+        censusID: 2,
+        tag: 'T-9',
+        stemTag: '1',
+        spCode: 'ULMALA',
+        quadrat: 'A01',
+        comments: 'leaning stem',
+        failureReason: 'Non-numeric value for dbh: n/a',
+        fileID: 'upload.csv',
+        batchID: 'batch-9',
+        sourceRowIndex: 1
+      }
+    ]);
+
+    const insertCall = executeQuery.mock.calls.find(([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements'));
+    const params = insertCall![1] as unknown[];
+    expect(params[4]).toBe('Non-numeric value for dbh: n/a'); // Description = reason
+    expect(params[16]).toBe('leaning stem'); // RawComments = comments
+  });
+
+  it('falls back to FALLBACK_FAILURE_REASON when the reason is blank', async () => {
+    const executeQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ insertId: 1001 })
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce([{ CoreMeasurementID: 91, SourceRowIndex: 1 }])
+      .mockResolvedValueOnce(undefined);
+    const connectionManager = { executeQuery } as any;
+
+    await insertIngestionFailureRows(connectionManager, 'forestgeo_testing', [
+      { plotID: 1, censusID: 2, failureReason: '   ', fileID: 'upload.csv', batchID: 'batch-9', sourceRowIndex: 1 }
+    ]);
+
+    const insertCall = executeQuery.mock.calls.find(([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements'));
+    expect((insertCall![1] as unknown[])[4]).toBe(FALLBACK_FAILURE_REASON);
+  });
+
+  it('truncates over-length reasons to the Description column width', async () => {
+    const executeQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ insertId: 1001 })
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce([{ CoreMeasurementID: 92, SourceRowIndex: 1 }])
+      .mockResolvedValueOnce(undefined);
+    const connectionManager = { executeQuery } as any;
+
+    await insertIngestionFailureRows(connectionManager, 'forestgeo_testing', [
+      { plotID: 1, censusID: 2, failureReason: 'x'.repeat(300), fileID: 'upload.csv', batchID: 'batch-9', sourceRowIndex: 1 }
+    ]);
+
+    const insertCall = executeQuery.mock.calls.find(([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements'));
+    expect((insertCall![1] as unknown[])[4]).toBe('x'.repeat(255));
+  });
+
+  it('persists the failure reason into Description on the sequential insert path (no batchID)', async () => {
+    const executeQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ insertId: 1001 }) // ensureMeasurementErrorDefinition upsert
+      .mockResolvedValueOnce({ insertId: 93 }) // row INSERT
+      .mockResolvedValueOnce(undefined); // error-log INSERT
+    const connectionManager = { executeQuery } as any;
+
+    await insertIngestionFailureRows(connectionManager, 'forestgeo_testing', [
+      {
+        plotID: 1,
+        censusID: 2,
+        tag: 'T-10',
+        stemTag: '1',
+        spCode: 'ULMALA',
+        quadrat: 'A01',
+        comments: 'broken stem',
+        failureReason: 'Unrecognized failure text for sequential path',
+        fileID: 'upload.csv',
+        batchID: null,
+        sourceRowIndex: null
+      }
+    ]);
+
+    const insertCall = executeQuery.mock.calls.find(([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements'));
+    const params = insertCall![1] as unknown[];
+    expect(params[4]).toBe('Unrecognized failure text for sequential path'); // Description = reason
+    expect(params[16]).toBe('broken stem'); // RawComments = comments
+  });
+
+  it('classifies explicit system-failure kinds directly, bypassing reason inference', () => {
+    expect(classifyIngestionFailure('sql_exception', 'wording with no keywords')).toEqual([
+      { errorCode: 'SQL_EXCEPTION', errorMessage: getIngestionErrorMessage('SQL_EXCEPTION') }
+    ]);
+    expect(classifyIngestionFailure('interrupted_upload', 'GatewayTimeout')).toEqual([
+      { errorCode: 'INTERRUPTED_UPLOAD', errorMessage: getIngestionErrorMessage('INTERRUPTED_UPLOAD') }
+    ]);
+  });
+
+  it('still classifies parser_reject via reason-text inference (unchanged behavior)', () => {
+    expect(classifyIngestionFailure('parser_reject', 'Missing required field: TreeTag')).toEqual([
+      { errorCode: 'MISSING_FIELD_TREETAG', errorMessage: getIngestionErrorMessage('MISSING_FIELD_TREETAG') }
+    ]);
+  });
+
+  it.each<(string | null)[]>([
+    [null],
+    [''],
+    ['   '],
+    ['Unknown parse error'],
+    ['some reason mentioning sql and deadlock'],
+    ['GatewayTimeout while flushing batch']
+  ])('parser inference returns UNCLASSIFIED_REJECT for unrecognized reason %j', reason => {
+    expect(inferAllIngestionErrorCodes(reason)).toEqual(['UNCLASSIFIED_REJECT']);
+  });
+
+  // These reasons are the ACTUAL strings validateMeasurementRow/resolveMeasurementChunk
+  // emit (lib/column-mapping/measurement-rows.ts) — plural "Missing required fields:"
+  // joined with ', ' over lowercase canonical labels, "Decimal value for X is out of
+  // range: <value>" for lx/ly/px/py/dbh/hom, and multi-error rows joined with '|'.
+  it('maps the plural missing-required-fields reason to per-field codes', () => {
+    expect(inferAllIngestionErrorCodes('Missing required fields: tag, stemtag, date')).toEqual([
+      'MISSING_FIELD_TREETAG',
+      'MISSING_FIELD_STEMTAG',
+      'MISSING_FIELD_DATE'
+    ]);
+    expect(inferAllIngestionErrorCodes('Missing required fields: lx, ly')).toEqual(['MISSING_FIELD_LOCALX', 'MISSING_FIELD_LOCALY']);
+  });
+
+  it('maps out-of-range coordinate rejects to INVALID_COORDINATE', () => {
+    expect(inferAllIngestionErrorCodes('Decimal value for lx is out of range: -0.3')).toEqual(['INVALID_COORDINATE']);
+    expect(inferAllIngestionErrorCodes('Decimal value for px is out of range: 12345678')).toEqual(['INVALID_COORDINATE']);
+  });
+
+  it('maps out-of-range negative dbh/hom to their sign codes', () => {
+    expect(inferAllIngestionErrorCodes('Decimal value for dbh is out of range: -5')).toEqual(['NEGATIVE_DBH']);
+    expect(inferAllIngestionErrorCodes('Decimal value for hom is out of range: -1.3')).toEqual(['NEGATIVE_HOM']);
+  });
+
+  it('collects every code from a |-joined multi-error reason', () => {
+    expect(inferAllIngestionErrorCodes('Missing required fields: tag|Decimal value for ly is out of range: -1.2')).toEqual([
+      'MISSING_FIELD_TREETAG',
+      'INVALID_COORDINATE'
+    ]);
+  });
+
+  it('silently drops an unrecognized label from the missing-fields list rather than inventing a code for it', () => {
+    // 'px' has no MISSING_FIELD_* code (it only participates in the decimal-range check),
+    // so it must not surface a bogus code or block the sibling 'tag' label from mapping.
+    expect(inferAllIngestionErrorCodes('Missing required fields: tag, px')).toEqual(['MISSING_FIELD_TREETAG']);
+  });
 });
 
 /**
@@ -300,7 +484,9 @@ describe('measurementerrors helpers', () => {
  * parked as SQL_EXCEPTION because the Azure front-end timeout and the abandoned
  * upload session produced reasons that matched no classifier pattern. An
  * interruption is not a data defect — the row was never judged at all — so it
- * must carry its own code.
+ * must carry its own code, sourced from the caller's explicit failure kind
+ * rather than sniffed out of the reason text (prose inference was removed —
+ * `inferAllIngestionErrorCodes` never returns INTERRUPTED_UPLOAD on its own).
  */
 describe('inferAllIngestionErrorCodes — upload interruptions', () => {
   const INTERRUPTION_REASONS = [
@@ -312,8 +498,10 @@ describe('inferAllIngestionErrorCodes — upload interruptions', () => {
     'Batch cancelled before completion'
   ];
 
-  it.each(INTERRUPTION_REASONS)('maps %j to INTERRUPTED_UPLOAD, not SQL_EXCEPTION', reason => {
-    expect(inferAllIngestionErrorCodes(reason)).toEqual(['INTERRUPTED_UPLOAD']);
+  it.each(INTERRUPTION_REASONS)('maps %j to INTERRUPTED_UPLOAD via the explicit kind, not SQL_EXCEPTION', reason => {
+    expect(classifyIngestionFailure('interrupted_upload', reason)).toEqual([
+      { errorCode: 'INTERRUPTED_UPLOAD', errorMessage: getIngestionErrorMessage('INTERRUPTED_UPLOAD') }
+    ]);
   });
 
   it('gives INTERRUPTED_UPLOAD a message that distinguishes it from a rejected row', () => {
@@ -332,8 +520,12 @@ describe('inferAllIngestionErrorCodes — upload interruptions', () => {
     expect(inferAllIngestionErrorCodes('Duplicate measurement row detected')).toEqual(['DUPLICATE_ENTRY']);
   });
 
-  it('still defaults genuinely unmapped reasons to SQL_EXCEPTION', () => {
-    expect(inferAllIngestionErrorCodes('some brand new failure nobody has classified')).toEqual(['SQL_EXCEPTION']);
+  it.each(INTERRUPTION_REASONS)('no longer infers INTERRUPTED_UPLOAD from reason prose — %j defaults to UNCLASSIFIED_REJECT', reason => {
+    expect(inferAllIngestionErrorCodes(reason)).toEqual(['UNCLASSIFIED_REJECT']);
+  });
+
+  it('still defaults genuinely unmapped reasons to UNCLASSIFIED_REJECT, never SQL_EXCEPTION', () => {
+    expect(inferAllIngestionErrorCodes('some brand new failure nobody has classified')).toEqual(['UNCLASSIFIED_REJECT']);
   });
 
   /**
@@ -366,5 +558,107 @@ describe('inferAllIngestionErrorCodes — upload interruptions', () => {
     expect(params[1]).toBe('INTERRUPTED_UPLOAD');
     expect(String(params[2]).toLowerCase()).toContain('interrupted');
     expect(transactionID).toBe('tx-9');
+  });
+});
+
+describe('inferSystemFailureKind — the setupbulkfailure reason boundary', () => {
+  // setupbulkfailure is the only transfer whose failure kind is not known by
+  // its caller: the browser sends whatever killed its setupbulkprocedure
+  // request as free text. Hardcoding 'sql_exception' there is what parked
+  // 106,227 clean Harvard Forest rows as if each carried a data error.
+  const CLIENT_INTERRUPTION_REASONS = [
+    'Server error 504: 504.0 GatewayTimeout',
+    'Upload session upload_ms3jw74a_97uvta1zlug cleaned up after abandonment',
+    'Client disconnected',
+    'Batch cancelled before completion',
+    // Composed by uploadfiresql's own fetchWithTimeout / abort paths.
+    'Request timeout after 480000ms',
+    'Request aborted for /api/setupbulkprocedure/file-1/batch-1',
+    // The browser's native fetch failures.
+    'TypeError: Failed to fetch',
+    'NetworkError when attempting to fetch resource.',
+    'Load failed'
+  ];
+
+  it.each(CLIENT_INTERRUPTION_REASONS)('classifies %j as interrupted_upload', reason => {
+    expect(inferSystemFailureKind(reason)).toBe('interrupted_upload');
+  });
+
+  const GENUINE_SERVER_FAILURE_REASONS = [
+    'Server error 500: Duplicate entry for key uq_coremeasurements',
+    'Client error (400): schema outside the authenticated user scope',
+    'Batch moved after max attempts',
+    'ER_LOCK_WAIT_TIMEOUT: Lock wait timeout exceeded'
+  ];
+
+  it.each(GENUINE_SERVER_FAILURE_REASONS)('leaves %j as sql_exception', reason => {
+    expect(inferSystemFailureKind(reason)).toBe('sql_exception');
+  });
+
+  it('defaults an absent or non-string reason to sql_exception rather than silently excusing the batch', () => {
+    expect(inferSystemFailureKind(undefined)).toBe('sql_exception');
+    expect(inferSystemFailureKind(null)).toBe('sql_exception');
+    expect(inferSystemFailureKind({ nested: 'gateway timeout' })).toBe('sql_exception');
+  });
+
+  it('produces the INTERRUPTED_UPLOAD code end-to-end for a front-end timeout', () => {
+    const reason = 'Server error 504: 504.0 GatewayTimeout';
+
+    expect(classifyIngestionFailure(inferSystemFailureKind(reason), reason)).toEqual([
+      { errorCode: 'INTERRUPTED_UPLOAD', errorMessage: getIngestionErrorMessage('INTERRUPTED_UPLOAD') }
+    ]);
+  });
+});
+
+describe('inferAllIngestionErrorCodes — parser reject shapes', () => {
+  // Every message validateMeasurementRow can emit must land on a code with a
+  // field map, otherwise the errors explorer shows the researcher a rejected
+  // row and no cell to fix.
+  it('classifies a non-numeric DBH, the single most common real reject', () => {
+    expect(inferAllIngestionErrorCodes('Non-numeric value for dbh: N/A')).toEqual(['NON_NUMERIC_DBH']);
+  });
+
+  it('classifies a non-numeric HOM', () => {
+    expect(inferAllIngestionErrorCodes('Non-numeric value for hom: unknown')).toEqual(['NON_NUMERIC_HOM']);
+  });
+
+  it.each(['lx', 'ly', 'px', 'py'])('classifies a non-numeric %s coordinate', field => {
+    expect(inferAllIngestionErrorCodes(`Non-numeric value for ${field}: ~12`)).toEqual(['NON_NUMERIC_COORDINATE']);
+  });
+
+  it('classifies an unparseable date', () => {
+    expect(inferAllIngestionErrorCodes('Unparseable date value: 31/02/2026')).toEqual(['INVALID_DATE']);
+  });
+
+  it('classifies a delimiter-contaminated tag pair as a mis-parsed row', () => {
+    const reason = 'Tag values contain delimiter character ",": tag="T1,S1", stemtag="". This suggests parsing error.';
+
+    expect(inferAllIngestionErrorCodes(reason)).toContain('MALFORMED_ROW');
+  });
+
+  it('classifies concatenated over-long tags as a mis-parsed row', () => {
+    const reason =
+      'Unusually long tag values detected: tag="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...", stemtag="BBB...". This may indicate concatenated fields due to parsing error.';
+
+    expect(inferAllIngestionErrorCodes(reason)).toContain('MALFORMED_ROW');
+  });
+
+  it('reports every defect on a row that trips more than one parser check', () => {
+    const reason = 'Missing required fields: quadrat | Non-numeric value for dbh: N/A | Unparseable date value: yesterday';
+
+    expect(inferAllIngestionErrorCodes(reason).sort()).toEqual(['INVALID_DATE', 'MISSING_FIELD_QUADRATNAME', 'NON_NUMERIC_DBH']);
+  });
+
+  it('never re-emits the retired MISSING_FIELD_COORDINATES code for an lx/ly reject', () => {
+    const codes = inferAllIngestionErrorCodes('Missing required fields: lx, ly');
+
+    expect(codes).toEqual(['MISSING_FIELD_LOCALX', 'MISSING_FIELD_LOCALY']);
+    expect(codes).not.toContain('MISSING_FIELD_COORDINATES');
+  });
+
+  it('still resolves the retired code for rows persisted under it before the per-field split', () => {
+    // Removing it from the catalog would leave historical rows with the generic
+    // 'Ingestion error' fallback in the explorer.
+    expect(getIngestionErrorMessage('MISSING_FIELD_COORDINATES')).toBe('Missing required coordinate fields (lx, ly)');
   });
 });
