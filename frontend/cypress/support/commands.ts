@@ -169,6 +169,25 @@ Cypress.Commands.add('gridRowShouldContain', (rowText: string, cellText?: string
   }
 });
 
+/**
+ * Enter edit mode for the admin-users row whose read-only email cell matches `email`.
+ * Yields the <tr> so callers scope input lookups to that row. The row element survives
+ * the re-render (React keys rows by userID), which matters because the email becomes an
+ * input value once editing starts and can no longer be found as text.
+ */
+Cypress.Commands.add('editAdminUserRow', (email: string) => {
+  return cy
+    .contains('tr', email)
+    .should('be.visible')
+    .then($row => {
+      cy.wrap($row)
+        .contains('button', /^Edit$/)
+        .click();
+      cy.wrap($row).find('input[name="firstName"]').should('exist');
+      return cy.wrap($row);
+    });
+});
+
 declare global {
   namespace Cypress {
     interface Chainable {
@@ -186,6 +205,10 @@ declare global {
        * scrolling the grid right first so column-virtualized cells render.
        */
       gridRowShouldContain(rowText: string, cellText?: string): Chainable<void>;
+      /**
+       * Click the row's Edit button on /admin/users and yield the <tr> for scoped input lookups.
+       */
+      editAdminUserRow(email: string): Chainable<JQuery<HTMLTableRowElement>>;
     }
   }
 }
