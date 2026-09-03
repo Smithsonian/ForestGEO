@@ -24,6 +24,7 @@ type CodeEditorProps = {
   showFormatButton?: boolean;
   showTestButton?: boolean;
   testButtonLabel?: string;
+  testButtonDisabled?: boolean;
   onTestQuery?: () => void;
 };
 
@@ -39,6 +40,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
   showFormatButton = false,
   showTestButton = false,
   testButtonLabel = 'Test Query',
+  testButtonDisabled = false,
   onTestQuery
 }) => {
   const [editorValue, setEditorValue] = useState(() => {
@@ -210,7 +212,14 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
             </Button>
           )}
           {showTestButton && onTestQuery && (
-            <Button size="sm" variant="solid" color="primary" startDecorator={<PlayArrow />} onClick={onTestQuery} disabled={isValidating}>
+            <Button
+              size="sm"
+              variant="solid"
+              color="primary"
+              startDecorator={<PlayArrow />}
+              onClick={onTestQuery}
+              disabled={isValidating || testButtonDisabled}
+            >
               {testButtonLabel}
             </Button>
           )}

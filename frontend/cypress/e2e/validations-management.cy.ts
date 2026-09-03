@@ -19,8 +19,9 @@
 // components/validationrow.tsx renders procedureName split on camelCase boundaries and joined with spaces
 const humanizeProcedureName = (name: string) => name.split(/(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/).join(' ');
 
-// components/validationrow.tsx puts aria-label on the Joy Switch root (.MuiSwitch-root), not the inner input
-const VALIDATION_TOGGLE_INPUT = '[aria-label$="validation"].MuiSwitch-root input[type="checkbox"]';
+// Joy Switch puts aria-label on its root and the checked state on the nested input.
+// Avoid coupling the suite to Joy's generated/root class names.
+const VALIDATION_TOGGLE_INPUT = '[aria-label$="validation"] input[type="checkbox"]';
 
 describe('Validations Management Interface', () => {
   // Test data
@@ -171,15 +172,16 @@ WHERE cm.IsValidated IS NULL
       cy.log('✅ Error state works correctly');
     });
 
-    it('should show warning when no site is selected', () => {
-      cy.log('⚠️ Testing no site selected state');
+    it('should return to the dashboard when no site is selected', () => {
+      cy.log('⚠️ Testing no site selected redirect');
 
       cy.setupForestGEOUser('adminUser');
       cy.visit('/measurementshub/validations');
 
-      cy.contains('Please select a site to view and manage validations').should('be.visible');
+      cy.location('pathname').should('equal', '/dashboard');
+      cy.get('[aria-label="Select a Site"]').should('be.visible');
 
-      cy.log('✅ No site warning works correctly');
+      cy.log('✅ Missing site selection returns to the dashboard');
     });
   });
 
@@ -218,10 +220,16 @@ WHERE cm.IsValidated IS NULL
 
       // Click Use Template button
       cy.contains('button', 'Use template').click();
+      cy.contains('button', 'Advanced SQL').click();
 
       // Verify template is loaded in editor
-      cy.contains('INSERT INTO measurement_error_log').should('be.visible');
-      cy.contains('@validationProcedureID').should('be.visible');
+      cy.get('.cm-content')
+        .invoke('text')
+        .then(text => {
+          const normalizedTemplate = text.replace(/\s+/g, ' ');
+          expect(normalizedTemplate).to.include('INSERT INTO measurement_error_log');
+          expect(normalizedTemplate).to.include('@validationProcedureID');
+        });
       cy.contains('Template loaded successfully').should('be.visible');
 
       cy.log('✅ Template loads correctly');
@@ -443,6 +451,7 @@ WHERE cm.IsValidated IS NULL;`
 
       // Clear the editor
       cy.get('.cm-content').type('{selectAll}{backspace}');
+      cy.wait(350);
 
       // Try to save
       cy.get('button[aria-label="Save validation changes"]').click();
@@ -488,6 +497,7 @@ WHERE cm.IsValidated IS NULL;`
 
       // Make a change
       cy.get('.cm-content').type('{selectAll}-- Test comment{enter}');
+      cy.wait(350);
 
       // Cancel
       cy.get('button[aria-label="Cancel validation changes"]').click();

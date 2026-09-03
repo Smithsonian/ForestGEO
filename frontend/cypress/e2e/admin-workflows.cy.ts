@@ -54,10 +54,17 @@ describe('Admin Workflows', () => {
       // inside IsolatedDataGridCommons ("Cannot read properties of undefined (reading
       // 'length')"), which the ErrorBoundary swallows into a "Something went wrong" card
       // instead of the grid.
-      cy.intercept('GET', '**/api/administrative/fetch/sites**', {
+      cy.intercept(
+        { method: 'GET', pathname: '/api/administrative/fetch/sites', query: { email: '*' } },
+        {
+          statusCode: 200,
+          body: { output: [{ id: 1, siteID: 1, siteName: 'Luquillo', schemaName: 'luquillo' }], totalCount: 1 }
+        }
+      ).as('fetchSites');
+      cy.intercept('GET', '/api/administrative/fetch/sites', {
         statusCode: 200,
-        body: { output: [{ id: 1, siteID: 1, siteName: 'Luquillo', schemaName: 'luquillo' }], totalCount: 1 }
-      }).as('fetchSites');
+        body: [{ id: 1, siteID: 1, siteName: 'Luquillo', schemaName: 'luquillo' }]
+      });
 
       // Navigate to admin sites page
       cy.visit('/admin/sites');
@@ -86,7 +93,7 @@ describe('Admin Workflows', () => {
       cy.log('➕ Creating new site:', testSite.siteName);
 
       // Mock successful site creation
-      cy.intercept('POST', '/api/fixeddata/sites', {
+      cy.intercept('POST', '**/api/administrative/fetch/sites**', {
         statusCode: 200,
         body: {
           message: 'Site created successfully',
@@ -94,22 +101,22 @@ describe('Admin Workflows', () => {
         }
       }).as('createSite');
 
-      // Click "Add Row" button
-      cy.contains('button', /add/i).click();
+      cy.contains('button', 'Add site').click();
       cy.log('  📝 Clicked Add button');
 
       // Fill in site details
-      cy.get('input[name="siteName"]').clear().type(testSite.siteName);
-      cy.get('input[name="schemaName"]').clear().type(testSite.schemaName);
-      cy.get('input[name="sqDimX"]').clear().type(testSite.sqDimX.toString());
-      cy.get('input[name="sqDimY"]').clear().type(testSite.sqDimY.toString());
-      cy.get('input[name="defaultUOMDBH"]').clear().type(testSite.defaultUOMDBH);
-      cy.get('input[name="defaultUOMHOM"]').clear().type(testSite.defaultUOMHOM);
+      cy.get('[data-field="siteName"] input').clear().type(testSite.siteName);
+      cy.get('[data-field="schemaName"] input').clear().type(testSite.schemaName);
+      cy.get('[data-field="sqDimX"] input').clear().type(testSite.sqDimX.toString());
+      cy.get('[data-field="sqDimY"] input').clear().type(testSite.sqDimY.toString());
+      cy.get('[data-field="defaultUOMDBH"] input').clear().type(testSite.defaultUOMDBH);
+      cy.get('[data-field="defaultUOMHOM"] input').clear().type(testSite.defaultUOMHOM);
 
       cy.log('  📝 Filled in site details');
 
       // Save the new site
       cy.get('button[aria-label="Save your changes"]').click();
+      cy.get('[role="dialog"]').contains('button', 'Save Changes').click();
       cy.wait('@createSite');
 
       cy.log('  💾 Saved new site');
@@ -124,10 +131,13 @@ describe('Admin Workflows', () => {
       cy.log('✏️ Editing existing site');
 
       // Mock sites list with existing site
-      cy.intercept('GET', '/api/administrative/fetch/sites**', {
-        statusCode: 200,
-        body: { output: [{ id: 999, ...testSite, siteID: 999 }], totalCount: 1 }
-      }).as('fetchSitesWithData');
+      cy.intercept(
+        { method: 'GET', pathname: '/api/administrative/fetch/sites', query: { email: '*' } },
+        {
+          statusCode: 200,
+          body: { output: [{ id: 999, ...testSite, siteID: 999 }], totalCount: 1 }
+        }
+      ).as('fetchSitesWithData');
 
       // Reload to get sites
       cy.reload();
@@ -163,6 +173,7 @@ describe('Admin Workflows', () => {
       // rather than cy.contains: once in edit mode the site name lives in an <input>
       // value, which cy.contains's text-node matching does not see.
       cy.get('[role="row"][data-id="999"]').find('button[aria-label="Save your changes"]').click();
+      cy.get('[role="dialog"]').contains('button', 'Save Changes').click();
       cy.wait('@editSite');
 
       cy.log('  💾 Saved changes');
@@ -177,10 +188,13 @@ describe('Admin Workflows', () => {
       cy.log('🗑️ Deleting site');
 
       // Mock sites list with site to delete
-      cy.intercept('GET', '/api/administrative/fetch/sites**', {
-        statusCode: 200,
-        body: { output: [{ id: 999, ...testSite, siteID: 999 }], totalCount: 1 }
-      }).as('fetchSitesWithData');
+      cy.intercept(
+        { method: 'GET', pathname: '/api/administrative/fetch/sites', query: { email: '*' } },
+        {
+          statusCode: 200,
+          body: { output: [{ id: 999, ...testSite, siteID: 999 }], totalCount: 1 }
+        }
+      ).as('fetchSitesWithData');
 
       cy.reload();
       cy.wait('@fetchSitesWithData');
@@ -214,11 +228,17 @@ describe('Admin Workflows', () => {
     it('should validate site creation with required fields', () => {
       cy.log('🔍 Testing site creation validation');
 
-      // Click "Add Row" button
-      cy.contains('button', /add/i).click();
+      cy.intercept('POST', '**/api/administrative/fetch/sites**', {
+        statusCode: 400,
+        body: { message: 'Required site fields are missing' }
+      }).as('rejectInvalidSite');
+
+      cy.contains('button', 'Add site').click();
 
       // Try to save without required fields
       cy.get('button[aria-label="Save your changes"]').click();
+      cy.get('[role="dialog"]').contains('button', 'Save Changes').click();
+      cy.wait('@rejectInvalidSite');
 
       // Should show validation error
       cy.contains(/required|invalid|error/i, { timeout: 5000 }).should('be.visible');
@@ -542,10 +562,9 @@ describe('Admin Workflows', () => {
       cy.reload();
       cy.wait('@fetchUserSiteRelationsWithData');
 
-      // Each user is a card (key={user.userID}, MUI Joy <Card>, class MuiCard-root) -
-      // only the sites actually assigned to that user render as chips on their card.
+      // Only the sites assigned to this user render as chips on their stable card test hook.
       cy.contains('John Doe')
-        .closest('.MuiCard-root')
+        .parents('[data-testid="user-site-card-1"]')
         .within(() => {
           cy.contains('Test Site 1').should('be.visible');
           cy.contains('Test Site 2').should('not.exist');
@@ -596,28 +615,17 @@ describe('Admin Workflows', () => {
     it('should restrict non-admin users from accessing admin pages', () => {
       cy.log('🚫 Testing non-admin access restrictions');
 
-      // Mock session as non-admin user
-      cy.intercept('GET', '/api/auth/session', {
-        statusCode: 200,
-        body: {
-          user: {
-            name: 'Standard User',
-            email: 'user@forestgeo.si.edu',
-            userStatus: 'field crew' // Non-admin role
-          },
-          expires: '2025-12-31'
-        }
-      }).as('nonAdminSession');
-
-      // Try to access admin sites page
-      cy.visit('/admin/sites');
-      cy.wait('@nonAdminSession');
-
-      // Should either:
-      // 1. Redirect to unauthorized page
-      // 2. Show access denied message
-      // 3. Redirect to dashboard
-      cy.url().should('not.include', '/admin/sites');
+      // The E2E harness intentionally bypasses page middleware, so exercise the
+      // server-side authorization boundary with a real non-admin session cookie.
+      cy.loginViaCredentials('e2e-field-crew@forestgeo.si.edu', 'field crew');
+      cy.request({
+        method: 'GET',
+        url: '/api/administrative/fetch/sites',
+        failOnStatusCode: false
+      }).then(response => {
+        expect(response.status).to.equal(403);
+        expect(response.body).to.deep.equal({ error: 'forbidden — admin role required' });
+      });
 
       cy.log('✅ Non-admin users are restricted from admin pages');
     });
@@ -626,43 +634,53 @@ describe('Admin Workflows', () => {
       cy.log('🔑 Verifying admin can perform all operations');
 
       // Register the real request the sites grid makes before visiting the page
-      cy.intercept('GET', '**/api/administrative/fetch/sites**', {
-        statusCode: 200,
-        body: { output: [{ id: 1, siteID: 1, siteName: 'Luquillo', schemaName: 'luquillo' }], totalCount: 1 }
-      }).as('fetchSites');
+      cy.intercept(
+        { method: 'GET', pathname: '/api/administrative/fetch/sites', query: { email: '*' } },
+        {
+          statusCode: 200,
+          body: { output: [{ id: 1, siteID: 1, siteName: 'Luquillo', schemaName: 'luquillo' }], totalCount: 1 }
+        }
+      ).as('fetchSites');
 
       // Admin should see all buttons/actions
       cy.visit('/admin/sites');
       cy.wait('@fetchSites');
 
       // Verify Add button is visible
-      cy.contains('button', /add/i).should('be.visible').and('not.be.disabled');
+      cy.contains('button', 'Add site').should('be.visible').and('not.be.disabled');
       cy.log('  ✅ Admin can add sites');
 
-      // Verify Edit and Delete buttons would be available (on rows)
-      // Note: These would appear when data is present
+      cy.get('[data-testid="EditIcon"]').should('be.visible');
+      cy.get('[data-testid="DeleteOutlinedIcon"]').should('be.visible');
 
       cy.log('✅ Admin has full access to all operations');
     });
   });
 
-  describe('Integration Tests: Complete Admin Workflow', () => {
-    it('should complete full admin workflow: create site, create user, assign user to site', () => {
-      cy.log('🔄 Running complete admin workflow');
+  describe('Cross-page Admin Workflow', () => {
+    it('should create a site and render the resulting user and assignment views', () => {
+      cy.log('🔄 Running cross-page admin workflow');
 
       // STEP 1: Create a new site
       cy.log('📍 STEP 1: Creating new site');
 
       // Set up intercepts BEFORE visiting - register the real request the sites grid makes
-      cy.intercept('GET', '**/api/administrative/fetch/sites**', {
+      cy.intercept(
+        { method: 'GET', pathname: '/api/administrative/fetch/sites', query: { email: '*' } },
+        {
+          statusCode: 200,
+          body: { output: [], totalCount: 0 }
+        }
+      ).as('fetchSites');
+      cy.intercept('GET', '/api/administrative/fetch/sites', {
         statusCode: 200,
-        body: { output: [], totalCount: 0 }
-      }).as('fetchSites');
+        body: [{ ...testSite, siteID: 999 }]
+      });
 
       cy.visit('/admin/sites');
       cy.wait('@fetchSites', { timeout: 10000 });
 
-      cy.intercept('POST', '/api/fixeddata/sites', {
+      cy.intercept('POST', '**/api/administrative/fetch/sites**', {
         statusCode: 200,
         body: {
           message: 'Site created successfully',
@@ -670,10 +688,11 @@ describe('Admin Workflows', () => {
         }
       }).as('createSite');
 
-      cy.contains('button', /add/i).click();
-      cy.get('input[name="siteName"]').type(testSite.siteName);
-      cy.get('input[name="schemaName"]').type(testSite.schemaName);
+      cy.contains('button', 'Add site').click();
+      cy.get('[data-field="siteName"] input').type(testSite.siteName);
+      cy.get('[data-field="schemaName"] input').type(testSite.schemaName);
       cy.get('button[aria-label="Save your changes"]').click();
+      cy.get('[role="dialog"]').contains('button', 'Save Changes').click();
       cy.wait('@createSite');
 
       cy.log('  ✅ Site created');
@@ -753,7 +772,7 @@ describe('Admin Workflows', () => {
 
       // Find the user's card and confirm the assigned site chip renders within it
       cy.contains(`${testUser.firstName} ${testUser.lastName}`)
-        .closest('.MuiCard-root')
+        .parents('[data-testid="user-site-card-888"]')
         .within(() => {
           cy.contains(testSite.siteName).should('be.visible');
         });

@@ -6,11 +6,31 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { useSession } from 'next-auth/react';
 import { useTheme } from '@mui/joy';
 import dynamic from 'next/dynamic';
-import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Box, Button, Alert, CircularProgress, Typography } from '@mui/material';
+import {
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Box,
+  Button,
+  Alert,
+  CircularProgress,
+  Snackbar,
+  Typography
+} from '@mui/material';
 import { Add } from '@mui/icons-material';
 import ailogger from '@/ailogger';
 
-const fetcher = (url: string) => fetch(url).then(res => res.json());
+const fetcher = async (url: string) => {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`.trim());
+  }
+  return response.json();
+};
 
 const ValidationRow = dynamic(() => import('@/components/validationrow'), { ssr: false });
 const NewValidationRow = dynamic(() => import('@/components/newvalidationrow'), { ssr: false });
@@ -48,6 +68,7 @@ export default function ValidationsPage() {
   const [expandedValidationID, setExpandedValidationID] = useState<number | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [creationSuccessOpen, setCreationSuccessOpen] = useState(false);
   const [newValidation, setNewValidation] = useState<ValidationProceduresRDS>({
     procedureName: '',
     description: '',
@@ -122,6 +143,7 @@ export default function ValidationsPage() {
           isEnabled: false
         });
         setIsCreatingNew(false);
+        setCreationSuccessOpen(true);
       } else {
         const errorText = await response.text();
         ailogger.error('Failed to create validation', undefined, { errorText, status: response.status, statusText: response.statusText });
@@ -179,7 +201,13 @@ export default function ValidationsPage() {
   return (
     <Box>
       <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Button variant="contained" startIcon={<Add />} onClick={() => setIsCreatingNew(true)} disabled={isCreatingNew || !currentSite}>
+        <Button
+          aria-label="Add New Validation"
+          variant="contained"
+          startIcon={<Add />}
+          onClick={() => setIsCreatingNew(true)}
+          disabled={isCreatingNew || !currentSite}
+        >
           Add New Validation
         </Button>
       </Box>
@@ -223,6 +251,11 @@ export default function ValidationsPage() {
           </TableBody>
         </Table>
       </TableContainer>
+      <Snackbar open={creationSuccessOpen} autoHideDuration={4000} onClose={() => setCreationSuccessOpen(false)}>
+        <Alert severity="success" variant="filled" onClose={() => setCreationSuccessOpen(false)}>
+          Validation created successfully
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }
