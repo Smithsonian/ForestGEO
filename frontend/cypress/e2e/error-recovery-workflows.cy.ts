@@ -50,7 +50,7 @@ describe('Error Recovery Workflows', () => {
     cy.wait('@fetchAdminUsers');
     cy.wait('@fetchAdminSites');
 
-    cy.get('input[aria-label="first name value"]').first().should('have.value', 'Alicia');
+    cy.contains('tr', 'user7@forestgeo.si.edu').should('contain.text', 'Alicia');
     cy.contains('button', 'Save Changes').should('be.disabled');
     cy.contains('button', 'Discard Changes').should('be.disabled');
   });
@@ -71,7 +71,7 @@ describe('Error Recovery Workflows', () => {
     cy.wait('@fetchAdminUsers');
     cy.wait('@fetchAdminSites');
 
-    cy.get('input[aria-label="first name value"]').first().clear().type('Modified');
+    cy.editAdminUserRow('user11@forestgeo.si.edu').find('input[aria-label="first name value"]').clear().type('Modified');
     cy.contains('button', 'Save Changes').should('not.be.disabled').click();
 
     cy.wait('@saveAdminUsers');
@@ -97,7 +97,7 @@ describe('Error Recovery Workflows', () => {
     cy.wait('@fetchAdminUsers');
     cy.wait('@fetchAdminSites');
 
-    cy.get('input[aria-label="first name value"]').first().clear().type('Modified');
+    cy.editAdminUserRow('user12@forestgeo.si.edu').find('input[aria-label="first name value"]').clear().type('Modified');
     cy.contains('button', 'Save Changes').click();
     cy.wait('@saveAdminUsers');
 
@@ -143,7 +143,7 @@ describe('Error Recovery Workflows', () => {
     cy.wait('@fetchAdminUsers');
     cy.wait('@fetchAdminSites');
 
-    cy.get('input[aria-label="first name value"]').first().clear().type('Retried');
+    cy.editAdminUserRow('user13@forestgeo.si.edu').find('input[aria-label="first name value"]').clear().type('Retried');
     cy.contains('button', 'Save Changes').click();
     cy.wait('@saveAdminUsers');
     cy.get('[role="alert"]').should('contain.text', 'Failed to save changes');
