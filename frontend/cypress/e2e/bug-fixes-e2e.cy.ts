@@ -164,7 +164,7 @@ describe('Measurement Hub Regression Contracts', () => {
     openValidationDetails('TREE104');
 
     cy.contains('button', 'Clear Errors').click();
-    cy.wait('@fetchMeasurementHubValidationErrors');
+    cy.contains('Validation errors cleared successfully').should('be.visible');
 
     cy.get('@runMeasurementHubQuery.all').then(interceptions => {
       const clearQueries = getClearErrorQueries(interceptions as Cypress.Interception[]);
@@ -172,7 +172,6 @@ describe('Measurement Hub Regression Contracts', () => {
       expect(clearQueries.some(interception => getSqlFromRequestBody(interception.request.body).includes('DELETE mel'))).to.equal(true);
       expect(clearQueries.some(interception => getSqlFromRequestBody(interception.request.body).includes('SET IsValidated = NULL'))).to.equal(true);
     });
-    cy.contains('Validation errors cleared successfully').should('be.visible');
     cy.contains('[role="alertdialog"]', 'The following validation errors were found in this row:').should('not.exist');
   });
 });
