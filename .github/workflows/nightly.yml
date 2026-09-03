@@ -72,6 +72,25 @@ jobs:
         run: npx cypress install
         working-directory: frontend
 
+      # Fail-closed guard: the default suite must run exactly the reviewed spec set,
+      # and no spec may carry a focus/skip modifier. Adding or removing a spec updates
+      # EXPECTED_DEFAULT_SPECS in the same PR.
+      - name: Assert default e2e suite is complete and unskipped
+        working-directory: frontend
+        run: |
+          EXPECTED_DEFAULT_SPECS=28
+          count=$(find cypress/e2e -type f \( -name '*.cy.js' -o -name '*.cy.ts' -o -name '*.cy.jsx' -o -name '*.cy.tsx' \) \
+            -not -path 'cypress/e2e/column-mapping-realdb/*' | wc -l | tr -d ' ')
+          if [ "$count" -ne "$EXPECTED_DEFAULT_SPECS" ]; then
+            echo "::error::Default e2e suite has $count specs; expected $EXPECTED_DEFAULT_SPECS. Update EXPECTED_DEFAULT_SPECS in nightly.yml with the spec change."
+            exit 1
+          fi
+          if grep -rnE '\b(it|describe|context)\.(skip|only)\(' cypress/e2e; then
+            echo "::error::Focused or skipped tests found under cypress/e2e (listed above). Remove them before the nightly can run."
+            exit 1
+          fi
+          echo "Default e2e suite: $count specs, no skip/only modifiers"
+
       - name: Run full Cypress suite
         run: npm run test:e2e:ci
         working-directory: frontend
