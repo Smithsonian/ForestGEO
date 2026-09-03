@@ -165,6 +165,7 @@ describe('Measurement Hub Regression Contracts', () => {
 
     cy.contains('button', 'Clear Errors').click();
     cy.contains('Validation errors cleared successfully').should('be.visible');
+    cy.wait('@fetchMeasurementHubValidationErrors');
 
     cy.get('@runMeasurementHubQuery.all').then(interceptions => {
       const clearQueries = getClearErrorQueries(interceptions as Cypress.Interception[]);

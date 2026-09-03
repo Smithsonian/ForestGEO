@@ -559,12 +559,6 @@ describe('Admin Workflows', () => {
     it('should allow admin to access all admin pages', () => {
       cy.log('🔑 Testing admin access to all pages');
 
-      // Set up intercepts for sites page
-      cy.intercept('POST', '/api/fixeddatafilter/sites**', {
-        statusCode: 200,
-        body: { output: [], totalCount: 0 }
-      }).as('fetchSites');
-
       // Admin should be able to access sites page
       cy.visit('/admin/sites');
       cy.url().should('include', '/admin/sites');
