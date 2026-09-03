@@ -16,6 +16,12 @@
 
 /// <reference types="cypress" />
 
+// components/validationrow.tsx renders procedureName split on camelCase boundaries and joined with spaces
+const humanizeProcedureName = (name: string) => name.split(/(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/).join(' ');
+
+// components/validationrow.tsx puts aria-label on the Joy Switch root (.MuiSwitch-root), not the inner input
+const VALIDATION_TOGGLE_INPUT = '[aria-label$="validation"].MuiSwitch-root input[type="checkbox"]';
+
 describe('Validations Management Interface', () => {
   // Test data
   const testSite = {
@@ -108,12 +114,12 @@ WHERE cm.IsValidated IS NULL
       cy.wait('@fetchValidations');
 
       // Verify validation appears in table
-      cy.contains(existingValidation.procedureName).should('be.visible');
+      cy.contains(humanizeProcedureName(existingValidation.procedureName)).should('be.visible');
       cy.contains('Test validation for E2E').should('be.visible');
       cy.contains('DBH > 0').should('be.visible');
 
       // Verify enable switch is present and checked
-      cy.get('input[type="checkbox"][aria-label*="validation"]').first().should('be.checked');
+      cy.get(VALIDATION_TOGGLE_INPUT).first().should('be.checked');
 
       cy.log('✅ Existing validation displayed correctly');
     });
@@ -196,7 +202,7 @@ WHERE cm.IsValidated IS NULL
       cy.get('textarea[placeholder*="Criteria"]').should('be.visible');
 
       // Verify template button is present
-      cy.contains('button', 'Use Template').should('be.visible');
+      cy.contains('button', 'Use template').should('be.visible');
 
       // Verify action buttons
       cy.get('button[aria-label="Save new validation"]').should('be.visible');
@@ -211,7 +217,7 @@ WHERE cm.IsValidated IS NULL
       cy.contains('button', 'Add New Validation').click();
 
       // Click Use Template button
-      cy.contains('button', 'Use Template').click();
+      cy.contains('button', 'Use template').click();
 
       // Verify template is loaded in editor
       cy.contains('INSERT INTO measurement_error_log').should('be.visible');
@@ -265,7 +271,7 @@ WHERE cm.IsValidated IS NULL;`
       cy.get('textarea[placeholder*="Criteria"]').type(newValidation.criteria);
 
       // Load template and modify it
-      cy.contains('button', 'Use Template').click();
+      cy.contains('button', 'Use template').click();
 
       // Click save
       cy.get('button[aria-label="Save new validation"]').click();
@@ -295,7 +301,7 @@ WHERE cm.IsValidated IS NULL;`
 
       // Fill in minimal required fields
       cy.get('input[placeholder="Procedure Name"]').type('Test');
-      cy.contains('button', 'Use Template').click();
+      cy.contains('button', 'Use template').click();
 
       // Try to save
       cy.get('button[aria-label="Save new validation"]').click();
@@ -668,7 +674,7 @@ WHERE cm.IsValidated IS NULL;`
       cy.log('🔄 Testing toggle confirmation');
 
       // Click the enable/disable switch
-      cy.get('input[type="checkbox"][aria-label*="validation"]').first().click();
+      cy.get(VALIDATION_TOGGLE_INPUT).first().click();
 
       // Verify confirmation dialog appears
       cy.get('[role="dialog"]').should('be.visible');
@@ -688,7 +694,7 @@ WHERE cm.IsValidated IS NULL;`
       const originalState = existingValidation.isEnabled;
 
       // Click switch
-      cy.get('input[type="checkbox"][aria-label*="validation"]').first().click();
+      cy.get(VALIDATION_TOGGLE_INPUT).first().click();
 
       // Click Cancel in dialog
       cy.contains('button', 'Cancel').click();
@@ -698,9 +704,9 @@ WHERE cm.IsValidated IS NULL;`
 
       // Verify switch state is unchanged
       if (originalState) {
-        cy.get('input[type="checkbox"][aria-label*="validation"]').first().should('be.checked');
+        cy.get(VALIDATION_TOGGLE_INPUT).first().should('be.checked');
       } else {
-        cy.get('input[type="checkbox"][aria-label*="validation"]').first().should('not.be.checked');
+        cy.get(VALIDATION_TOGGLE_INPUT).first().should('not.be.checked');
       }
 
       cy.log('✅ Toggle cancellation works correctly');
@@ -716,7 +722,7 @@ WHERE cm.IsValidated IS NULL;`
       }).as('updateValidation');
 
       // Click switch
-      cy.get('input[type="checkbox"][aria-label*="validation"]').first().click();
+      cy.get(VALIDATION_TOGGLE_INPUT).first().click();
 
       // Confirm
       cy.contains('button', 'Confirm').click();
@@ -749,7 +755,7 @@ WHERE cm.IsValidated IS NULL;`
       cy.wait('@fetchValidations');
 
       // Click switch (should be unchecked now)
-      cy.get('input[type="checkbox"][aria-label*="validation"]').first().click();
+      cy.get(VALIDATION_TOGGLE_INPUT).first().click();
 
       // Confirm
       cy.contains('button', 'Confirm').click();
@@ -771,7 +777,7 @@ WHERE cm.IsValidated IS NULL;`
       }).as('failedUpdate');
 
       // Click switch
-      cy.get('input[type="checkbox"][aria-label*="validation"]').first().click();
+      cy.get(VALIDATION_TOGGLE_INPUT).first().click();
 
       // Confirm
       cy.contains('button', 'Confirm').click();
