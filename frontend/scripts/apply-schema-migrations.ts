@@ -472,14 +472,20 @@ export function formatGateReason(audit: ContractAudit | null, migrationFailure: 
 /**
  * Applies the per-schema outcome rule across every discovered schema. A
  * quarantined schema never stops the loop; a blocked schema stops it (today's
- * "abort remaining schemas" behavior) and fails the run; zero passing schemas
- * fails the run regardless, so a bad migration cannot ship as N quarantines.
+ * "abort remaining schemas" behavior) and fails the run.
+ *
+ * `requireAtLeastOnePass` is the systemic-failure floor for the deploy sweep: if
+ * a bad migration breaks every schema at once, the run must fail rather than ship
+ * the app with every site quarantined. It is meaningless for a single-schema run,
+ * where "no schema passed" just restates the one outcome the caller asked for, so
+ * runCli enables it only for --all-sites.
  */
 export async function runApplyGateLoop(
   schemas: string[],
   processOne: (schema: string) => Promise<SchemaGateResult>,
   store: GateStore,
-  log: (line: string) => void
+  log: (line: string) => void,
+  requireAtLeastOnePass = true
 ): Promise<{ summary: GateRunSummary; exitCode: number }> {
   const summary: GateRunSummary = { passed: [], quarantined: [], blocked: [] };
   let exitCode = 0;
@@ -515,7 +521,7 @@ export async function runApplyGateLoop(
     log('');
   }
 
-  if (summary.passed.length === 0) {
+  if (requireAtLeastOnePass && summary.passed.length === 0) {
     exitCode = 1;
     log(`GATE FAILED: no schema passed; refusing to treat a systemic failure as ${summary.quarantined.length} quarantines.`);
   }
@@ -739,7 +745,15 @@ async function runCli(argv: string[]): Promise<number> {
   const sources = loadMigrationSources();
 
   const discovery = await createSchemaCliConnection(settings, { multipleStatements: false });
-  const catalog = await createSchemaCliConnection(settings, { database: CATALOG_DATABASE_NAME, multipleStatements: false });
+  // Guarded: a failure opening the catalog connection must not strand the
+  // discovery connection, which has no finally block covering it yet.
+  let catalog: Awaited<ReturnType<typeof createSchemaCliConnection>>;
+  try {
+    catalog = await createSchemaCliConnection(settings, { database: CATALOG_DATABASE_NAME, multipleStatements: false });
+  } catch (error) {
+    await discovery.end();
+    throw error;
+  }
   const gateExec = executorFor(catalog);
 
   try {
@@ -772,7 +786,8 @@ async function runCli(argv: string[]): Promise<number> {
         return { schema, passed: outcome.passed, reason: outcome.reason };
       },
       store,
-      line => console.log(line)
+      line => console.log(line),
+      args.allSites
     );
     writeGateResultFile(summary);
     reportGateRunToCi(summary);

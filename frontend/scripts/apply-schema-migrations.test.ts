@@ -390,6 +390,20 @@ describe('runApplyGateLoop', () => {
     expect(summary.blocked.map(entry => entry.schema)).toEqual(['forestgeo_Mixed']);
     expect(summary.quarantined).toEqual([]);
   });
+  it('skips the systemic-failure floor when the caller targets a single schema', async () => {
+    const logs: string[] = [];
+    const store = new FakeGateStore();
+    const { processOne } = processor({
+      forestgeo_only: { schema: 'forestgeo_only', passed: false, reason: 'DRIFT only' }
+    });
+
+    const { summary, exitCode } = await runApplyGateLoop(['forestgeo_only'], processOne, store, line => logs.push(line), false);
+    console.log(`[gate loop single-schema] exit=${exitCode} quarantined=${JSON.stringify(summary.quarantined.map(entry => entry.schema))}`);
+
+    expect(exitCode).toBe(0);
+    expect(summary.quarantined.map(entry => entry.schema)).toEqual(['forestgeo_only']);
+    expect(logs.some(line => /no schema passed/i.test(line))).toBe(false);
+  });
 });
 
 describe('gate reporting helpers', () => {

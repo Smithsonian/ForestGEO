@@ -156,7 +156,15 @@ async function runCli(argv: string[]): Promise<number> {
   const sources = loadMigrationSources();
 
   const discovery = await createSchemaCliConnection(settings, { multipleStatements: false });
-  const catalog = await createSchemaCliConnection(settings, { database: CATALOG_DATABASE_NAME, multipleStatements: false });
+  // Guarded: a failure opening the catalog connection must not strand the
+  // discovery connection, which has no finally block covering it yet.
+  let catalog: Awaited<ReturnType<typeof createSchemaCliConnection>>;
+  try {
+    catalog = await createSchemaCliConnection(settings, { database: CATALOG_DATABASE_NAME, multipleStatements: false });
+  } catch (error) {
+    await discovery.end();
+    throw error;
+  }
 
   const audits: ContractAudit[] = [];
   const quarantinedNames: string[] = [];
