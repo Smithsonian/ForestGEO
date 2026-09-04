@@ -144,3 +144,11 @@ export async function pruneGateRows(exec: SqlExecutor, discoveredSchemas: string
   }
   return pruned;
 }
+
+export const QUARANTINE_SKIP_PREFIX = 'Quarantined by the schema contract gate since';
+
+/** One-line skip reason for sweeps: gate name, time, first reason line. */
+export function quarantineSkipDetail(row: SchemaGateRow): string {
+  const firstReasonLine = (row.quarantineReason ?? '').split('\n').find(Boolean) ?? '(no reason recorded)';
+  return `${QUARANTINE_SKIP_PREFIX} ${row.quarantinedAt?.toISOString() ?? 'unknown'}: ${firstReasonLine}`;
+}
