@@ -16,12 +16,19 @@
 
 /// <reference types="cypress" />
 
+// components/validationrow.tsx renders procedureName split on camelCase boundaries and joined with spaces
+const humanizeProcedureName = (name: string) => name.split(/(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/).join(' ');
+
+// Joy Switch puts aria-label on its root and the checked state on the nested input.
+// Avoid coupling the suite to Joy's generated/root class names.
+const VALIDATION_TOGGLE_INPUT = '[aria-label$="validation"] input[type="checkbox"]';
+
 describe('Validations Management Interface', () => {
   // Test data
   const testSite = {
     siteID: 1,
-    siteName: 'Test Site',
-    schemaName: 'testschema'
+    siteName: 'Luquillo',
+    schemaName: 'luquillo'
   };
 
   const existingValidation = {
@@ -53,31 +60,9 @@ WHERE cm.IsValidated IS NULL
   ];
 
   beforeEach(() => {
-    // Login as admin (required for validation management)
-    cy.visit('/login');
-
-    // Mock successful authentication for admin user
-    cy.window().then(win => {
-      win.sessionStorage.setItem('next-auth.session-token', 'mock-admin-token');
-    });
-
-    // Intercept session check
-    cy.intercept('GET', '/api/auth/session', {
-      statusCode: 200,
-      body: {
-        user: {
-          name: 'Admin User',
-          email: 'admin@forestgeo.si.edu',
-          userStatus: 'db admin' // Admin role required for validations
-        },
-        expires: '2025-12-31'
-      }
-    }).as('session');
-
-    // Mock site context (required for validation page)
-    cy.window().then(win => {
-      win.localStorage.setItem('currentSite', JSON.stringify(testSite));
-    });
+    cy.viewport(1600, 1000);
+    cy.setupForestGEOUser('adminUser');
+    cy.mockCoreDataValidity();
 
     // Mock schema structure API
     cy.intercept('GET', `/api/structure/${testSite.schemaName}`, {
@@ -93,8 +78,8 @@ WHERE cm.IsValidated IS NULL
       body: [existingValidation]
     }).as('fetchValidations');
 
-    cy.visit('/dashboard');
-    cy.wait('@session');
+    cy.visitAuthenticatedPage('/dashboard');
+    cy.selectSitePlotAndCensus('Luquillo', 'Luquillo Main Plot', 5);
     cy.log('✅ Admin user authenticated');
   });
 
@@ -130,12 +115,12 @@ WHERE cm.IsValidated IS NULL
       cy.wait('@fetchValidations');
 
       // Verify validation appears in table
-      cy.contains(existingValidation.procedureName).should('be.visible');
+      cy.contains(humanizeProcedureName(existingValidation.procedureName)).should('be.visible');
       cy.contains('Test validation for E2E').should('be.visible');
       cy.contains('DBH > 0').should('be.visible');
 
       // Verify enable switch is present and checked
-      cy.get('input[type="checkbox"][aria-label*="validation"]').first().should('be.checked');
+      cy.get(VALIDATION_TOGGLE_INPUT).first().should('be.checked');
 
       cy.log('✅ Existing validation displayed correctly');
     });
@@ -187,20 +172,16 @@ WHERE cm.IsValidated IS NULL
       cy.log('✅ Error state works correctly');
     });
 
-    it('should show warning when no site is selected', () => {
-      cy.log('⚠️ Testing no site selected state');
+    it('should return to the dashboard when no site is selected', () => {
+      cy.log('⚠️ Testing no site selected redirect');
 
-      // Clear site context
-      cy.window().then(win => {
-        win.localStorage.removeItem('currentSite');
-      });
-
+      cy.setupForestGEOUser('adminUser');
       cy.visit('/measurementshub/validations');
 
-      // Verify warning message
-      cy.contains('Please select a site to view and manage validations').should('be.visible');
+      cy.location('pathname').should('equal', '/dashboard');
+      cy.get('[aria-label="Select a Site"]').should('be.visible');
 
-      cy.log('✅ No site warning works correctly');
+      cy.log('✅ Missing site selection returns to the dashboard');
     });
   });
 
@@ -223,7 +204,7 @@ WHERE cm.IsValidated IS NULL
       cy.get('textarea[placeholder*="Criteria"]').should('be.visible');
 
       // Verify template button is present
-      cy.contains('button', 'Use Template').should('be.visible');
+      cy.contains('button', 'Use template').should('be.visible');
 
       // Verify action buttons
       cy.get('button[aria-label="Save new validation"]').should('be.visible');
@@ -238,11 +219,17 @@ WHERE cm.IsValidated IS NULL
       cy.contains('button', 'Add New Validation').click();
 
       // Click Use Template button
-      cy.contains('button', 'Use Template').click();
+      cy.contains('button', 'Use template').click();
+      cy.contains('button', 'Advanced SQL').click();
 
       // Verify template is loaded in editor
-      cy.contains('INSERT INTO measurement_error_log').should('be.visible');
-      cy.contains('@validationProcedureID').should('be.visible');
+      cy.get('.cm-content')
+        .invoke('text')
+        .then(text => {
+          const normalizedTemplate = text.replace(/\s+/g, ' ');
+          expect(normalizedTemplate).to.include('INSERT INTO measurement_error_log');
+          expect(normalizedTemplate).to.include('@validationProcedureID');
+        });
       cy.contains('Template loaded successfully').should('be.visible');
 
       cy.log('✅ Template loads correctly');
@@ -292,7 +279,7 @@ WHERE cm.IsValidated IS NULL;`
       cy.get('textarea[placeholder*="Criteria"]').type(newValidation.criteria);
 
       // Load template and modify it
-      cy.contains('button', 'Use Template').click();
+      cy.contains('button', 'Use template').click();
 
       // Click save
       cy.get('button[aria-label="Save new validation"]').click();
@@ -322,7 +309,7 @@ WHERE cm.IsValidated IS NULL;`
 
       // Fill in minimal required fields
       cy.get('input[placeholder="Procedure Name"]').type('Test');
-      cy.contains('button', 'Use Template').click();
+      cy.contains('button', 'Use template').click();
 
       // Try to save
       cy.get('button[aria-label="Save new validation"]').click();
@@ -464,6 +451,7 @@ WHERE cm.IsValidated IS NULL;`
 
       // Clear the editor
       cy.get('.cm-content').type('{selectAll}{backspace}');
+      cy.wait(350);
 
       // Try to save
       cy.get('button[aria-label="Save validation changes"]').click();
@@ -509,6 +497,7 @@ WHERE cm.IsValidated IS NULL;`
 
       // Make a change
       cy.get('.cm-content').type('{selectAll}-- Test comment{enter}');
+      cy.wait(350);
 
       // Cancel
       cy.get('button[aria-label="Cancel validation changes"]').click();
@@ -695,7 +684,7 @@ WHERE cm.IsValidated IS NULL;`
       cy.log('🔄 Testing toggle confirmation');
 
       // Click the enable/disable switch
-      cy.get('input[type="checkbox"][aria-label*="validation"]').first().click();
+      cy.get(VALIDATION_TOGGLE_INPUT).first().click();
 
       // Verify confirmation dialog appears
       cy.get('[role="dialog"]').should('be.visible');
@@ -715,7 +704,7 @@ WHERE cm.IsValidated IS NULL;`
       const originalState = existingValidation.isEnabled;
 
       // Click switch
-      cy.get('input[type="checkbox"][aria-label*="validation"]').first().click();
+      cy.get(VALIDATION_TOGGLE_INPUT).first().click();
 
       // Click Cancel in dialog
       cy.contains('button', 'Cancel').click();
@@ -725,9 +714,9 @@ WHERE cm.IsValidated IS NULL;`
 
       // Verify switch state is unchanged
       if (originalState) {
-        cy.get('input[type="checkbox"][aria-label*="validation"]').first().should('be.checked');
+        cy.get(VALIDATION_TOGGLE_INPUT).first().should('be.checked');
       } else {
-        cy.get('input[type="checkbox"][aria-label*="validation"]').first().should('not.be.checked');
+        cy.get(VALIDATION_TOGGLE_INPUT).first().should('not.be.checked');
       }
 
       cy.log('✅ Toggle cancellation works correctly');
@@ -743,7 +732,7 @@ WHERE cm.IsValidated IS NULL;`
       }).as('updateValidation');
 
       // Click switch
-      cy.get('input[type="checkbox"][aria-label*="validation"]').first().click();
+      cy.get(VALIDATION_TOGGLE_INPUT).first().click();
 
       // Confirm
       cy.contains('button', 'Confirm').click();
@@ -776,7 +765,7 @@ WHERE cm.IsValidated IS NULL;`
       cy.wait('@fetchValidations');
 
       // Click switch (should be unchecked now)
-      cy.get('input[type="checkbox"][aria-label*="validation"]').first().click();
+      cy.get(VALIDATION_TOGGLE_INPUT).first().click();
 
       // Confirm
       cy.contains('button', 'Confirm').click();
@@ -798,7 +787,7 @@ WHERE cm.IsValidated IS NULL;`
       }).as('failedUpdate');
 
       // Click switch
-      cy.get('input[type="checkbox"][aria-label*="validation"]').first().click();
+      cy.get(VALIDATION_TOGGLE_INPUT).first().click();
 
       // Confirm
       cy.contains('button', 'Confirm').click();

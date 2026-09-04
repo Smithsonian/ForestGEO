@@ -5,9 +5,14 @@
  * deployProceduresOnly / activateValidation19 against a real schema is
  * covered by tests/integration/deploy-validations.test.ts.
  */
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { describe, expect, it, vi } from 'vitest';
 import type { Connection } from 'mysql2/promise';
-import { main, parseMode, withSchemaConnection, type DeployCliDeps } from './deploy-validations-to-all-schemas';
+import { main, parseMode, parseStoredProceduresSQL, withSchemaConnection, type DeployCliDeps } from './deploy-validations-to-all-schemas';
+
+const STORED_PROCEDURES_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'sql', 'storedprocedures.sql');
 
 function makeConnection(overrides: Partial<Connection> = {}): Connection {
   return {
@@ -43,6 +48,25 @@ describe('parseMode', () => {
 
   it.each([[['--procedures-only', '--activate-validation-19']], [['--unknown-mode']]])('rejects invalid CLI mode combinations synchronously: %j', args => {
     expect(() => parseMode(args)).toThrow(/mode|argument/i);
+  });
+});
+
+describe('parseStoredProceduresSQL', () => {
+  it('returns each leading DROP as a separate statement for multipleStatements=false connections', () => {
+    const statements = parseStoredProceduresSQL(fs.readFileSync(STORED_PROCEDURES_PATH, 'utf8'));
+    const firstCreate = statements.findIndex(statement => /^create\s+procedure/i.test(statement));
+    const leadingDrops = statements.slice(0, firstCreate);
+
+    expect(firstCreate).toBeGreaterThan(0);
+    expect(leadingDrops).toHaveLength(12);
+    for (const statement of leadingDrops) {
+      const executableSql = statement
+        .split('\n')
+        .filter(line => !line.trimStart().startsWith('--'))
+        .join('\n')
+        .trim();
+      expect(executableSql).toMatch(/^drop\s+procedure\s+if\s+exists\s+[^;]+$/i);
+    }
   });
 });
 
@@ -95,6 +119,33 @@ describe('main CLI dispatch', () => {
 
     expect(failingSchemaConn.end, 'a per-schema connection must close even when a later statement in the same schema fails').toHaveBeenCalledOnce();
     expect(discoveryConn.end).toHaveBeenCalledOnce();
+  });
+
+  it('reports a per-schema close failure alongside the primary deployment error', async () => {
+    const discoveryConn = makeConnection();
+    const failingSchemaConn = makeConnection({
+      query: vi.fn().mockRejectedValueOnce(new Error('routine DDL failed')),
+      end: vi.fn().mockRejectedValue(new Error('close failed')) as any
+    });
+    const deps = makeCliDeps({
+      readSqlFile: vi.fn().mockReturnValue('DROP PROCEDURE IF EXISTS example;'),
+      discoverSchemas: vi.fn().mockResolvedValue(['forestgeo_test']),
+      createConnection: vi.fn().mockResolvedValueOnce(discoveryConn).mockResolvedValueOnce(failingSchemaConn)
+    });
+
+    await expect(main(['--procedures-only'], deps)).rejects.toThrow(/failed for 1 schema/i);
+    expect(deps.log).toHaveBeenCalledWith('  FAILED: routine DDL failed (connection cleanup also failed: close failed)');
+  });
+
+  it('preserves a discovery failure when closing that connection also fails', async () => {
+    const discoveryConn = makeConnection({ end: vi.fn().mockRejectedValue(new Error('discovery close failed')) as any });
+    const deps = makeCliDeps({
+      createConnection: vi.fn().mockResolvedValue(discoveryConn),
+      discoverSchemas: vi.fn().mockRejectedValue(new Error('schema discovery failed'))
+    });
+
+    await expect(main(['--activate-validation-19'], deps)).rejects.toThrow('schema discovery failed');
+    expect(deps.log).toHaveBeenCalledWith('Discovery connection cleanup failed after schema discovery failed: discovery close failed');
   });
 });
 

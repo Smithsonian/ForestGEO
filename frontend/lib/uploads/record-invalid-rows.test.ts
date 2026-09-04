@@ -4,7 +4,7 @@
 // No real DB — insertIngestionFailureRows is mocked. The tests verify:
 //   - empty string → null for numeric fields ('' must not become 0 or NaN)
 //   - empty string → null for string fields (old-worker 'value || null' semantics)
-//   - missing / empty failureReason → 'Unknown parse error'
+//   - missing / empty failureReason passes through as null (choke point owns the fallback)
 //   - date formatting → 'YYYY-MM-DD'
 //   - sourceRowIndexOffset arithmetic (chunked callers must pass running offset)
 //   - recordFailedMeasurementRows passes per-row fileID/batchID overrides through
@@ -19,13 +19,9 @@ const { insertIngestionFailureRowsMock } = vi.hoisted(() => ({
   insertIngestionFailureRowsMock: vi.fn()
 }));
 
-vi.mock('@/config/measurementerrors', () => ({
-  insertIngestionFailureRows: insertIngestionFailureRowsMock,
-  toFiniteNumber: (value: unknown): number | null => {
-    if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
+vi.mock('@/config/measurementerrors', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/config/measurementerrors')>()),
+  insertIngestionFailureRows: insertIngestionFailureRowsMock
 }));
 
 vi.mock('@/lib/db/connectionmanager', () => ({
@@ -95,6 +91,13 @@ describe('recordInvalidRows', () => {
     expect(rows[0].hom).toBeNull();
   });
 
+  it('non-scalar, non-decimal, and out-of-range runtime values map to null', async () => {
+    await recordInvalidRows(makeConnectionManager(), BASE_CTX, [{ tag: 'T002b', lx: true, ly: [], px: '0x10', py: 1000000, dbh: {}, hom: '-1000000' } as any]);
+
+    const [row] = insertIngestionFailureRowsMock.mock.calls[0][2];
+    expect(row).toMatchObject({ x: null, y: null, plotX: null, plotY: null, dbh: null, hom: null });
+  });
+
   it('valid numeric strings produce finite numbers', async () => {
     await recordInvalidRows(makeConnectionManager(), BASE_CTX, [{ tag: 'T003', lx: '1.5', ly: '2.75', dbh: '12.345', hom: '1.3' }]);
 
@@ -129,18 +132,18 @@ describe('recordInvalidRows', () => {
     expect(rows[1].plotY).toBeNull();
   });
 
-  it('missing failureReason defaults to "Unknown parse error"', async () => {
+  it('missing failureReason passes through as null', async () => {
     await recordInvalidRows(makeConnectionManager(), BASE_CTX, [{ tag: 'T004' }]);
 
     const rows = insertIngestionFailureRowsMock.mock.calls[0][2];
-    expect(rows[0].failureReason).toBe('Unknown parse error');
+    expect(rows[0].failureReason).toBeNull();
   });
 
-  it('empty-string failureReason defaults to "Unknown parse error"', async () => {
+  it('empty-string failureReason passes through as null', async () => {
     await recordInvalidRows(makeConnectionManager(), BASE_CTX, [{ tag: 'T005', failureReason: '' }]);
 
     const rows = insertIngestionFailureRowsMock.mock.calls[0][2];
-    expect(rows[0].failureReason).toBe('Unknown parse error');
+    expect(rows[0].failureReason).toBeNull();
   });
 
   it('present failureReason is preserved as-is', async () => {
@@ -217,7 +220,7 @@ describe('recordFailedMeasurementRows', () => {
     expect(insertIngestionFailureRowsMock).not.toHaveBeenCalled();
   });
 
-  it('per-row fileID/batchID overrides take precedence over caller-level defaults', async () => {
+  it('ignores per-row fileID/batchID overrides and uses caller-level identity', async () => {
     const rows = [
       { tag: 'T030', failureReasons: 'bad data', fileID: 'override-file.csv', batchID: 'override-batch' } as any,
       { tag: 'T031', failureReasons: 'wrong coords' } as any
@@ -226,10 +229,10 @@ describe('recordFailedMeasurementRows', () => {
     await recordFailedMeasurementRows(makeConnectionManager(), 'forestgeo_test', rows, 'default-file.csv', 'default-batch', 10, 20);
 
     const mapped = insertIngestionFailureRowsMock.mock.calls[0][2];
-    // Row 0 has per-row overrides — must win.
-    expect(mapped[0].fileID).toBe('override-file.csv');
-    expect(mapped[0].batchID).toBe('override-batch');
-    // Row 1 falls back to caller-level defaults.
+    // Row 0 cannot redirect the persistence boundary.
+    expect(mapped[0].fileID).toBe('default-file.csv');
+    expect(mapped[0].batchID).toBe('default-batch');
+    // Row 1 uses the same caller-level defaults.
     expect(mapped[1].fileID).toBe('default-file.csv');
     expect(mapped[1].batchID).toBe('default-batch');
   });
@@ -268,5 +271,31 @@ describe('recordFailedMeasurementRows', () => {
 
     const [mapped] = insertIngestionFailureRowsMock.mock.calls[0][2];
     expect(mapped).toMatchObject({ x: 1.25, y: null, plotX: null, plotY: 0, dbh: null });
+  });
+
+  it('maps HTTP rejected-row comments from the wire field `comments`, not `description`', async () => {
+    insertIngestionFailureRowsMock.mockResolvedValue([1]);
+    await recordFailedMeasurementRows(
+      makeConnectionManager(),
+      'forestgeo_testing',
+      [{ comments: 'field note', failureReasons: 'reason text' } as any],
+      'f.csv',
+      'b1',
+      1,
+      2
+    );
+    const input = insertIngestionFailureRowsMock.mock.calls[0][2][0];
+    expect(input.comments).toBe('field note');
+    expect(input.failureReason).toBe('reason text');
+  });
+
+  it('missing comments and failureReasons pass through as null', async () => {
+    const rows = [{ tag: 'T070' } as any];
+
+    await recordFailedMeasurementRows(makeConnectionManager(), 'forestgeo_test', rows, 'f.csv', 'b-005', 1, 2);
+
+    const [mapped] = insertIngestionFailureRowsMock.mock.calls[0][2];
+    expect(mapped.comments).toBeNull();
+    expect(mapped.failureReason).toBeNull();
   });
 });

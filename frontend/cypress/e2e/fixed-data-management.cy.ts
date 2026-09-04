@@ -36,7 +36,8 @@ describe('Fixed Data Management', () => {
     cy.contains('[role="row"]', 'ATTR003').should('contain', 'inactive');
     cy.get('input[placeholder="Search All Fields..."]').should('be.visible');
     cy.get('[aria-label="Export as CSV"]').should('exist');
-    cy.get('[aria-label="More actions"]').should('be.visible');
+    cy.contains('button', /^Add record$/).should('be.visible');
+    cy.contains('button', /^Upload$/).should('be.visible');
   });
 
   it('enters and cancels Stem Code row edit mode through the current action buttons', () => {
@@ -91,7 +92,9 @@ describe('Fixed Data Management', () => {
 
     cy.contains('[role="row"]', 'RUBI04').should('contain', 'berteriana');
 
-    cy.get('[aria-label="Manual Entry Form"]').click({ force: true });
+    cy.contains('button', /^Add record$/)
+      .should('be.visible')
+      .click();
     cy.contains('[role="alertdialog"]', 'Manual Input Form - Species').should('be.visible');
     cy.get('[aria-label="close"]').click({ force: true });
     cy.contains('[role="alertdialog"]', 'Manual Input Form - Species').should('not.exist');
@@ -125,7 +128,7 @@ describe('Fixed Data Management', () => {
 
     cy.contains('.MuiDataGrid-row', 'Q0102').find('button').eq(1).click({ force: true });
     cy.contains('[role="dialog"]', 'Confirm Deletion').should('be.visible');
-    cy.contains('[role="dialog"]', 'Are you sure you want to delete this row?').should('be.visible');
+    cy.contains('[role="dialog"]', 'Delete “Q0102”? This action cannot be undone.').should('be.visible');
     cy.contains('button', 'Confirm').click({ force: true });
     cy.wait('@deleteIsolatedGridRow');
 

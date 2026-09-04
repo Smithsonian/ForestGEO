@@ -6,7 +6,7 @@ function openUploadedFiles() {
   cy.visitAuthenticatedPage('/dashboard');
   cy.selectSitePlotAndCensus('Luquillo', 'Luquillo Main Plot', 5);
   cy.openCensusHubLink('Uploaded Files');
-  cy.contains('Uploaded CSV Files').should('be.visible');
+  cy.contains('Stored source files').should('be.visible');
 }
 
 describe('Upload File Management', () => {
@@ -34,7 +34,7 @@ describe('Upload File Management', () => {
       expect(url.searchParams.get('census')).to.equal('5');
     });
 
-    cy.contains('Accessing Container: luquillo-plot1-census5').should('be.visible');
+    cy.contains('Files uploaded to Luquillo Main Plot, census 5').should('be.visible');
     cy.contains('File Count').should('be.visible');
     cy.contains('File Name').should('be.visible');
     cy.contains('measurements-2024-06-15.csv').should('be.visible');
@@ -125,6 +125,6 @@ describe('Upload File Management', () => {
     openUploadedFiles();
     cy.wait('@fetchUploadedFiles');
 
-    cy.contains('No data available').should('be.visible');
+    cy.contains('No source files are currently available in storage').should('be.visible');
   });
 });

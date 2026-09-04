@@ -310,6 +310,61 @@ describe('POST /api/revisionupload', () => {
     });
   });
 
+  it('demotes only the row with an out-of-range cell, instead of 422ing the whole file with no row locator', async () => {
+    // computeDiff canonicalizes numeric cells, so one bad value used to throw
+    // out of the match loop and reject every row in the upload with a bare
+    // field name — unusable on a 10,000-row revision file.
+    const MATCHED_ROWS = [
+      { CoreMeasurementID: 777, RawTreeTag: 'TREE-7', TreeTag: 'TREE-7', StemTag: '2', RawStemTag: '2' },
+      { CoreMeasurementID: 778, RawTreeTag: 'TREE-8', TreeTag: 'TREE-8', StemTag: '2', RawStemTag: '2' }
+    ];
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes("LOWER(TRIM(COALESCE(t.TreeTag, cm.RawTreeTag, '')))")) {
+        return MATCHED_ROWS.map(row => ({
+          ...row,
+          StemGUID: row.CoreMeasurementID,
+          IsActive: 1,
+          MeasuredDBH: 12.4,
+          MeasuredHOM: 1.1,
+          MeasurementDate: '2025-05-01',
+          RawCodes: null,
+          Description: null,
+          StemIsActive: 1,
+          TreeIsActive: 1,
+          QuadratIsActive: 1,
+          PlotID: 1,
+          SpeciesCode: 'AAAAAA',
+          QuadratName: '101',
+          LocalX: 1.5,
+          LocalY: 2.5
+        }));
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        rows: [
+          { tag: 'TREE-7', stemtag: '2', dbh: '12.8' },
+          { tag: 'TREE-8', stemtag: '2', dbh: '9999999' }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(body.matchedRows).toHaveLength(1);
+    expect(body.matchedRows[0].csvIndex).toBe(0);
+    expect(body.invalidRows).toHaveLength(1);
+    expect(body.invalidRows[0].csvIndex).toBe(1);
+    expect(body.invalidRows[0].reason).toMatch(/MeasuredDBH/);
+  });
+
   it('flags duplicate stemid rows within a single file as invalid instead of silently collapsing them', async () => {
     mocks.executeQuery.mockResolvedValue([]);
 

@@ -67,8 +67,10 @@ export interface SchemaResult {
  * Parse storedprocedures.sql into executable statements.
  *
  * The file uses MySQL client DELIMITER directives which mysql2 cannot handle
- * directly. We strip the DELIMITER lines, split on the custom delimiter ($$),
- * and return individual CREATE/DROP statements.
+ * directly. We strip the DELIMITER lines and return every statement
+ * individually, including the ordinary semicolon-delimited statements before
+ * and between stored procedure blocks. This keeps the output executable on
+ * the production connections, which deliberately disable multipleStatements.
  */
 export function parseStoredProceduresSQL(raw: string): string[] {
   const statements: string[] = [];
@@ -91,9 +93,11 @@ export function parseStoredProceduresSQL(raw: string): string[] {
 
     buffer += line + '\n';
 
-    // Check if the buffer ends with the current delimiter
+    // Check if the buffer ends with the current delimiter. This applies to the
+    // ordinary semicolon delimiter too; otherwise all leading DROP statements
+    // are bundled into one query that production mysql2 connections reject.
     const trimmedBuffer = buffer.trimEnd();
-    if (currentDelimiter !== ';' && trimmedBuffer.endsWith(currentDelimiter)) {
+    if (trimmedBuffer.endsWith(currentDelimiter)) {
       const stmt = trimmedBuffer.slice(0, -currentDelimiter.length).trim();
       if (stmt.length > 0) {
         statements.push(stmt);
@@ -102,16 +106,10 @@ export function parseStoredProceduresSQL(raw: string): string[] {
     }
   }
 
-  // Flush remaining buffer (handles trailing statements after final DELIMITER ;)
+  // Flush an unterminated trailing statement, if present.
   const remaining = buffer.trim();
-  if (remaining.length > 0) {
-    // Split on semicolons for any remaining simple statements
-    for (const part of remaining.split(';')) {
-      const stmt = part.trim();
-      if (stmt.length > 0 && !stmt.startsWith('--')) {
-        statements.push(stmt);
-      }
-    }
+  if (remaining.length > 0 && !remaining.startsWith('--')) {
+    statements.push(remaining);
   }
 
   return statements;
@@ -278,7 +276,7 @@ export async function withSchemaConnection<T>(
       // Preserve the actionable SQL failure. The close failure remains attached
       // for structured logging/debugging without replacing the primary error.
       if (operationError instanceof Error) {
-        (operationError as Error & { cleanupError?: unknown }).cleanupError = closeError;
+        (operationError as ErrorWithCleanup).cleanupError = closeError;
       }
     }
   }
@@ -308,10 +306,10 @@ async function discoverForestGeoSchemas(conn: mysql.Connection): Promise<string[
   const [rows] = await conn.query<mysql.RowDataPacket[]>(
     `SELECT SCHEMA_NAME as schema_name
        FROM INFORMATION_SCHEMA.SCHEMATA
-      WHERE SCHEMA_NAME LIKE 'forestgeo_%'
+      WHERE SCHEMA_NAME LIKE 'forestgeo\\_%' ESCAPE '\\\\'
       ORDER BY SCHEMA_NAME`
   );
-  return rows.map((r: any) => String(r.schema_name));
+  return rows.map((r: any) => String(r.schema_name)).filter(schema => /^forestgeo_[a-z0-9_]+$/.test(schema));
 }
 
 export const realDeps: DeployCliDeps = {
@@ -382,9 +380,22 @@ interface SchemaSweepOptions<TPrepared> {
   processSchema: (schema: string, password: string, prepared: TPrepared) => Promise<string>;
 }
 
+type ErrorWithCleanup = Error & { cleanupError?: unknown };
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function describeErrorWithCleanup(error: unknown): string {
+  const primary = describeError(error);
+  const cleanupError = error instanceof Error ? (error as ErrorWithCleanup).cleanupError : undefined;
+  return cleanupError === undefined ? primary : `${primary} (connection cleanup also failed: ${describeError(cleanupError)})`;
+}
+
 /** Shared discovery/iteration/reporting lifecycle for every deployment mode. */
 async function runForAllSchemas<TPrepared = undefined>(deps: DeployCliDeps, password: string, options: SchemaSweepOptions<TPrepared>): Promise<void> {
   const discoveryConnection = await deps.createConnection(discoveryConnectionOptions(password));
+  let operationError: unknown;
   try {
     deps.log('[Step 1] Finding all ForestGEO schemas...');
     const schemas = await deps.discoverSchemas(discoveryConnection);
@@ -418,8 +429,8 @@ async function runForAllSchemas<TPrepared = undefined>(deps: DeployCliDeps, pass
         const detail = await options.processSchema(schema, password, prepared);
         deps.log(`  OK - ${detail}`);
         results.push({ schema, status: 'deployed', detail });
-      } catch (error: any) {
-        const detail = error instanceof Error ? error.message : String(error);
+      } catch (error: unknown) {
+        const detail = describeErrorWithCleanup(error);
         deps.log(`  FAILED: ${detail}`);
         results.push({ schema, status: 'failed', detail });
       }
@@ -427,8 +438,19 @@ async function runForAllSchemas<TPrepared = undefined>(deps: DeployCliDeps, pass
     }
 
     reportSummary(deps, options.summaryTitle, results, schemas.length);
+  } catch (error: unknown) {
+    operationError = error;
+    throw error;
   } finally {
-    await discoveryConnection.end();
+    try {
+      await discoveryConnection.end();
+    } catch (closeError: unknown) {
+      if (operationError === undefined) throw closeError;
+      if (operationError instanceof Error) {
+        (operationError as ErrorWithCleanup).cleanupError = closeError;
+      }
+      deps.log(`Discovery connection cleanup failed after ${describeError(operationError)}: ${describeError(closeError)}`);
+    }
   }
 }
 

@@ -1356,7 +1356,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       field: 'actions',
       type: 'actions',
       headerName: 'Actions',
-      flex: 1,
+      width: 112,
+      minWidth: 112,
       cellClassName: 'actions',
       getActions: ({ id }) => {
         if (!rowModesModel[id]?.mode) return [];

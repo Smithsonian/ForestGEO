@@ -75,7 +75,9 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
     e.stopPropagation();
     originalScriptContent.current = scriptContent ?? '';
     setIsEditing(true);
-    handleExpandClick(validation.validationID!); // Ensure expansion happens
+    if (expandedValidationID !== validation.validationID) {
+      handleExpandClick(validation.validationID!);
+    }
   };
 
   const handleCancelChanges = (e: React.MouseEvent) => {
@@ -148,9 +150,7 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
 
       if (response.ok) {
         const result = await response.json();
-        if (result.isValid && result.errors.length === 0) {
-          setSnackbar({ open: true, message: 'Query is valid!', color: 'success' });
-        } else if (result.errors.length > 0) {
+        if (result.errors.length > 0) {
           setSnackbar({
             open: true,
             message: `Validation errors: ${result.errors.join(', ')}`,
@@ -162,6 +162,8 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
             message: `Warnings: ${result.warnings.join(', ')}`,
             color: 'warning'
           });
+        } else if (result.isValid) {
+          setSnackbar({ open: true, message: 'Query is valid!', color: 'success' });
         }
       } else {
         setSnackbar({ open: true, message: 'Failed to validate query', color: 'danger' });
@@ -287,6 +289,7 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
                   showFormatButton={isEditing}
                   showTestButton={isEditing}
                   testButtonLabel={isTesting ? 'Testing...' : 'Test Query'}
+                  testButtonDisabled={isTesting}
                   onTestQuery={handleTestQuery}
                   aria-label="Validation script editor"
                 />
@@ -354,7 +357,14 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
       />
 
       {/* Snackbar for user feedback */}
-      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })} color={snackbar.color} variant="soft">
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        color={snackbar.color}
+        variant="soft"
+        role={snackbar.color === 'danger' ? 'alert' : 'status'}
+      >
         {snackbar.message}
       </Snackbar>
     </>

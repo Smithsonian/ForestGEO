@@ -199,6 +199,7 @@ describe('Admin: site provisioning wizard', () => {
       });
     }).as('retryRun');
 
+    cy.viewport(1600, 1000);
     cy.clock(Date.now(), ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout']);
     cy.visit(`/admin/provision/${RUN_ID}`);
     cy.wait('@pollStatus');
@@ -231,6 +232,7 @@ describe('Admin: site provisioning wizard', () => {
       });
     }).as('teardownRun');
 
+    cy.viewport(1600, 1000);
     cy.clock(Date.now(), ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout']);
     cy.visit(`/admin/provision/${RUN_ID}`);
     cy.wait('@pollStatus');

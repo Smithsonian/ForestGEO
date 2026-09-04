@@ -4,6 +4,19 @@ const { defineConfig } = require('cypress');
 const { getSharedWebpackConfig, getLogTask } = require('./cypress/support/shared-config.cjs');
 
 module.exports = defineConfig({
+  // Retry failed specs in CI only. Several suites here are legitimately
+  // timing-sensitive — they drive a real Next dev server and a real MySQL — and
+  // a degraded shared runner turns that into red PRs unrelated to the change
+  // under review (e.g. PR #456's "Timed out after waiting 15000ms for your
+  // remote page to load", green on rerun).
+  //
+  // openMode stays 0 so local runs never hide a flake from the person writing
+  // the test. A genuine failure still fails all attempts, so this absorbs
+  // infrastructure noise without masking real breakage.
+  retries: {
+    runMode: 2,
+    openMode: 0
+  },
   e2e: {
     experimentalRunAllSpecs: true,
     experimentalInteractiveRunEvents: false,

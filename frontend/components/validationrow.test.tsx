@@ -212,6 +212,16 @@ describe('ValidationRow - Functional Tests', () => {
       expect(mockHandleExpandClick).toHaveBeenCalledWith(1);
     });
 
+    it('MUST keep an already expanded validation open when Edit is clicked', async () => {
+      const user = userEvent.setup();
+      render(<ValidationRow {...defaultProps} expandedValidationID={1} />);
+
+      await user.click(screen.getByRole('button', { name: /edit validation/i }));
+
+      expect(mockHandleExpandClick).not.toHaveBeenCalled();
+      expect(screen.getByTestId('code-editor')).toBeInTheDocument();
+    });
+
     it('MUST save changes when Save button clicked', async () => {
       const user = userEvent.setup();
       mockOnSaveChanges.mockResolvedValue(undefined);

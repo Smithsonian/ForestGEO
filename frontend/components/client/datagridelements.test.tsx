@@ -55,6 +55,25 @@ describe('EditToolbar', () => {
     vi.clearAllMocks();
   });
 
+  it('exposes the site creation action and invokes the grid add handler', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{ items: [], quickFilterValues: [], visible: [], tss: [] }}
+        gridColumns={[{ field: 'siteName', headerName: 'Site Name' }]}
+        gridType="sites"
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add site' }));
+
+    expect(handleAddNewRow).toHaveBeenCalledOnce();
+  });
+
   it('uses the invalid button only as an invalid-row filter toggle', async () => {
     const user = userEvent.setup();
     const toggleErrors = vi.fn();

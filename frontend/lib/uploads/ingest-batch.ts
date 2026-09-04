@@ -29,6 +29,7 @@ import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
+import type { SystemFailureKind } from '@/config/measurementerrors';
 import { buildSubBatchID, buildSubBatchPattern, discoverBatchFamily, highestSubBatchOrdinal, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { isKilledConnectionError, isKilledStatementError, QueryTimeoutError } from '@/lib/db/primitives';
 
@@ -585,7 +586,14 @@ async function processSubBatch(
     : `all ${MAX_ATTEMPTS_PER_SUBBATCH} attempts failed`;
 
   ailogger.error(`Sub-batch ${subBatchID} giving up: ${attemptSummary}`);
-  const movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, subBatchID, `Sub-batch moved after ${attemptSummary}`);
+  const movedRows = await moveTemporaryBatchToFailedMeasurements(
+    connectionManager,
+    schema,
+    fileID,
+    subBatchID,
+    `Sub-batch moved after ${attemptSummary}`,
+    'sql_exception'
+  );
   ailogger.warn(`Moved ${movedRows} rows from sub-batch ${subBatchID} to unresolved coremeasurements (${attemptSummary})`);
 
   return {
@@ -727,6 +735,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       }
 
       const failureReason = isMidBatchAbort ? 'Batch cancelled before completion' : `Sub-batch abandoned after unrecoverable error: ${subError.message}`;
+      const failureKind: SystemFailureKind = isMidBatchAbort ? 'interrupted_upload' : 'sql_exception';
 
       // Move all remaining sub-batches in a single transaction so cleanup
       // is atomic — either every remaining sub-batch is moved to failures
@@ -741,6 +750,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
             fileID,
             subBatchIDs[j],
             failureReason,
+            failureKind,
             cleanupTransactionID
           );
           results.push({
