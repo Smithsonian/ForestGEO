@@ -100,9 +100,7 @@ WHERE cm.IsValidated IS NULL
 
       if (response.ok) {
         const result = await response.json();
-        if (result.isValid && result.errors.length === 0) {
-          setSnackbar({ open: true, message: 'Query is valid!', color: 'success' });
-        } else if (result.errors.length > 0) {
+        if (result.errors.length > 0) {
           setSnackbar({
             open: true,
             message: `Validation errors: ${result.errors.slice(0, 2).join(', ')}${result.errors.length > 2 ? '...' : ''}`,
@@ -114,6 +112,8 @@ WHERE cm.IsValidated IS NULL
             message: `Warnings: ${result.warnings.slice(0, 2).join(', ')}${result.warnings.length > 2 ? '...' : ''}`,
             color: 'warning'
           });
+        } else if (result.isValid) {
+          setSnackbar({ open: true, message: 'Query is valid!', color: 'success' });
         }
       } else {
         setSnackbar({ open: true, message: 'Failed to validate query', color: 'danger' });
@@ -218,6 +218,7 @@ WHERE cm.IsValidated IS NULL
                   showFormatButton={true}
                   showTestButton={true}
                   testButtonLabel={isTesting ? 'Testing...' : 'Test Query'}
+                  testButtonDisabled={isTesting}
                   onTestQuery={handleTestQuery}
                   aria-label="New validation script editor"
                 />
@@ -244,7 +245,14 @@ WHERE cm.IsValidated IS NULL
       </TableRow>
 
       {/* Snackbar for user feedback */}
-      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })} color={snackbar.color} variant="soft">
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        color={snackbar.color}
+        variant="soft"
+        role={snackbar.color === 'danger' ? 'alert' : 'status'}
+      >
         {snackbar.message}
       </Snackbar>
     </>

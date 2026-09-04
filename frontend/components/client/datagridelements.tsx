@@ -54,7 +54,7 @@ import { DatagridType, FormType, getTableHeaders } from '@/config/macros/formdet
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { Plot, Site } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
-import { CallSplit, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore, Warning } from '@mui/icons-material';
+import { Add, CallSplit, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore, Warning } from '@mui/icons-material';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import RenderGridFormExplanations from '@/components/client/rendergridformexplanations';
 
@@ -459,6 +459,15 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               <Divider orientation={'horizontal'} sx={{ width: '100%' }} />
               {/* Right section - action buttons */}
               <Stack direction="row" spacing={1} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', width: '100%' }}>
+                {gridType === 'sites' && (
+                  <ToolbarButton
+                    render={
+                      <Button onClick={handleAddNewRow} variant="soft" color="primary" size="sm" startDecorator={<Add />} aria-label="Add site">
+                        Add site
+                      </Button>
+                    }
+                  />
+                )}
                 {/* Keep the frequent manual-entry action visible and explicitly labelled. */}
                 {dynamicButtons
                   .filter((button: any) => button.label === 'Manual Entry Form')

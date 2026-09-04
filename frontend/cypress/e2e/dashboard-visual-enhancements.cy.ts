@@ -159,8 +159,11 @@ describe('Dashboard Visual Enhancements E2E', () => {
   });
 
   it('keeps the current dashboard sections accessible on mobile viewports', () => {
-    cy.viewport(375, 667);
+    // Selection runs at desktop width: the shared helpers cannot operate inside the
+    // mobile Drawer (see a11y-responsive.cy.ts). The viewport switches afterwards so
+    // the assertions still exercise the mobile rendering.
     openDashboardWithActiveCensus();
+    cy.viewport(375, 667);
 
     cy.get('[aria-label="Menu"]').should('be.visible');
     cy.get('[data-testid="selected-site-name"]').should('contain', 'Luquillo');

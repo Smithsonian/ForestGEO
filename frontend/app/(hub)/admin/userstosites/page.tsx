@@ -542,6 +542,7 @@ export default function UsersToSitesPage() {
           return (
             <Card
               key={user.userID}
+              data-testid={`user-site-card-${user.userID}`}
               variant="outlined"
               sx={{
                 transition: 'box-shadow 0.2s ease',

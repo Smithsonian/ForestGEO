@@ -27,10 +27,20 @@ describe('Error Recovery Workflows', () => {
   });
 
   it('recovers after a transient load failure when the page is retried', () => {
+    // The admin users page effect runs twice per mount under React StrictMode (see
+    // next.config.js reactStrictMode), so a single page load issues two requests to
+    // fetch/users: the first (StrictMode's discarded invocation) and the second (the
+    // one whose state actually renders). Serve the 500 for both of the initial
+    // mount's requests so the failure is guaranteed to be the one that renders,
+    // then 200 for every request after that (the mock clamps to the last entry).
     mockAdminUsersApi({
       users: [buildAdminUser({ userID: 7, firstName: 'Alicia', lastName: 'Rivera' })],
       sites: [buildAdminSite()],
       userResponses: [
+        {
+          statusCode: 500,
+          body: []
+        },
         {
           statusCode: 500,
           body: []
@@ -50,7 +60,7 @@ describe('Error Recovery Workflows', () => {
     cy.wait('@fetchAdminUsers');
     cy.wait('@fetchAdminSites');
 
-    cy.get('input[aria-label="first name value"]').first().should('have.value', 'Alicia');
+    cy.contains('tr', 'user7@forestgeo.si.edu').should('contain.text', 'Alicia');
     cy.contains('button', 'Save Changes').should('be.disabled');
     cy.contains('button', 'Discard Changes').should('be.disabled');
   });
@@ -71,7 +81,7 @@ describe('Error Recovery Workflows', () => {
     cy.wait('@fetchAdminUsers');
     cy.wait('@fetchAdminSites');
 
-    cy.get('input[aria-label="first name value"]').first().clear().type('Modified');
+    cy.editAdminUserRow('user11@forestgeo.si.edu').find('input[aria-label="first name value"]').clear().type('Modified');
     cy.contains('button', 'Save Changes').should('not.be.disabled').click();
 
     cy.wait('@saveAdminUsers');
@@ -97,7 +107,7 @@ describe('Error Recovery Workflows', () => {
     cy.wait('@fetchAdminUsers');
     cy.wait('@fetchAdminSites');
 
-    cy.get('input[aria-label="first name value"]').first().clear().type('Modified');
+    cy.editAdminUserRow('user12@forestgeo.si.edu').find('input[aria-label="first name value"]').clear().type('Modified');
     cy.contains('button', 'Save Changes').click();
     cy.wait('@saveAdminUsers');
 
@@ -143,7 +153,7 @@ describe('Error Recovery Workflows', () => {
     cy.wait('@fetchAdminUsers');
     cy.wait('@fetchAdminSites');
 
-    cy.get('input[aria-label="first name value"]').first().clear().type('Retried');
+    cy.editAdminUserRow('user13@forestgeo.si.edu').find('input[aria-label="first name value"]').clear().type('Retried');
     cy.contains('button', 'Save Changes').click();
     cy.wait('@saveAdminUsers');
     cy.get('[role="alert"]').should('contain.text', 'Failed to save changes');

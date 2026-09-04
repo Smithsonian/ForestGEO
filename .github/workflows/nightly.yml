@@ -40,6 +40,14 @@ jobs:
         with:
           node-version: "24.x"
 
+      # Fail closed on substitutions as well as additions/removals, and recognize
+      # every focused/skipped Mocha form used by Cypress.
+      - name: Assert default e2e suite is complete and unskipped
+        working-directory: frontend
+        run: |
+          node --test scripts/assert-default-e2e-suite.test.mjs
+          node scripts/assert-default-e2e-suite.mjs
+
       - name: Create .env for E2E testing
         run: |
           cat > frontend/.env <<'ENVEOF'
