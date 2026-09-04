@@ -228,9 +228,14 @@ jobs:
           npx tsx scripts/apply-catalog-migrations.ts --azure --apply
         continue-on-error: false
 
+      # A schema that has NEVER passed this gate and fails it is quarantined (the
+      # app refuses it with 503 SCHEMA_QUARANTINED) and the deploy continues; a
+      # schema that passed before and now fails still blocks the deploy. The
+      # result file feeds the "Report quarantined schemas" step below. See #429.
       - name: Apply schema migrations to all schemas
         env:
           AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+          SCHEMA_GATE_RESULT_PATH: ${{ runner.temp }}/schema-gate-result.json
         run: |
           cd frontend/
           npx tsx scripts/apply-schema-migrations.ts --all-sites --apply
@@ -243,6 +248,57 @@ jobs:
           cd frontend/
           npx tsx scripts/check-schema-contract.ts --all-sites
         continue-on-error: false
+
+      # Quarantine is not a failure, so nothing else would tell a human. Opens one
+      # issue per distinct set of quarantined schemas and comments on it while it
+      # stays open. Never blocks the deploy it reports on.
+      - name: Report quarantined schemas
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          SCHEMA_GATE_RESULT_PATH: ${{ runner.temp }}/schema-gate-result.json
+        with:
+          script: |
+            const fs = require('fs');
+            const LABEL = 'schema-quarantine';
+            const resultPath = process.env.SCHEMA_GATE_RESULT_PATH;
+            if (!fs.existsSync(resultPath)) {
+              core.info('No schema gate result file; the apply step did not complete.');
+              return;
+            }
+            const result = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
+            if (!Array.isArray(result.quarantined) || result.quarantined.length === 0) {
+              core.info('No schemas quarantined.');
+              return;
+            }
+            const names = result.quarantined.map(entry => entry.schema).sort();
+            const title = `Schema quarantined: ${names.join(', ')}`;
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            const rows = result.quarantined.map(entry => `| \`${entry.schema}\` | ${entry.since} | ${entry.reason.split('\n')[0]} |`).join('\n');
+            const body = [
+              `## Schema contract gate quarantine`,
+              ``,
+              `**Run:** ${runUrl}`,
+              `**Branch:** ${context.ref}`,
+              ``,
+              `| Schema | Quarantined since | Reason (first line) |`,
+              `|---|---|---|`,
+              rows,
+              ``,
+              `The deploy continued for every other schema. Site-scoped API requests for these schemas return 503 \`SCHEMA_QUARANTINED\` until a later deploy passes the gate for them.`,
+              ``,
+              `Repair: see "Quarantined schemas" in \`frontend/docs/deployment-to-development.md\`. Never edit \`catalog.schema_contract_gate\` by hand.`
+            ].join('\n');
+            const { data: open } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', labels: LABEL, per_page: 100 });
+            const existing = open.find(issue => issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: existing.number, body });
+              core.warning(`${title} — commented on #${existing.number}`);
+              return;
+            }
+            const { data: created } = await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body, labels: [LABEL, 'automated'] });
+            core.warning(`${title} — opened #${created.number}`);
 
       - name: Deploy validation queries and stored procedures to all schemas
         env:
@@ -356,8 +412,9 @@ jobs:
               ### Recommended Actions
               1. Check the [workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
               2. If migration failed, inspect each schema's \`schema_migrations\` ledger before retrying
-              3. If deployment failed, check Azure Portal for app service status and logs
-              4. Verify the app is running by logging in and testing functionality
+              3. A schema listed as BLOCKED in the gate summary passed the gate before and regressed on this deploy; quarantined schemas do not fail the deploy and are tracked under the \`schema-quarantine\` label
+              4. If deployment failed, check Azure Portal for app service status and logs
+              5. Verify the app is running by logging in and testing functionality
 
               > **Note**: The health endpoint requires authentication (Azure Easy Auth) and cannot be checked externally.
 
