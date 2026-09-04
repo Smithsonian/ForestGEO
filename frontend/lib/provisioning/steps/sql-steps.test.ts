@@ -83,10 +83,25 @@ describe('SQL-file steps', () => {
     );
     expect(rows).toHaveLength(2);
     const schemaRow = rows.find((row: any) => row.SchemaVersion === '2026-08-04');
-    const proceduresRow = rows.find((row: any) => row.SchemaVersion === '2026-08-04-procs');
+    const proceduresRow = rows.find((row: any) => row.SchemaVersion === '2026-08-27-procs');
     expect(schemaRow.TablesDeployedAt).not.toBeNull();
     expect(schemaRow.ValidationsDeployedAt).not.toBeNull();
     expect(proceduresRow.ProceduresDeployedAt).not.toBeNull();
+  });
+
+  it('keeps additive migration work out of the non-idempotent table provisioning stamp', async () => {
+    // Simulate a schema provisioned before plot-coordinate columns existed. Its
+    // table stamp remains current because the manifest migration, not a replay
+    // of CREATE TABLE IF NOT EXISTS, owns this transition.
+    await ctx.sitePool!.query(`ALTER TABLE temporarymeasurements DROP COLUMN PlotX, DROP COLUMN PlotY`);
+    expect(await initTablesStep.alreadyDone(ctx)).toBe(true);
+
+    await ctx.sitePool!.query(`DELETE FROM _provisioning_meta WHERE SchemaVersion = '2026-08-04'`);
+    await expect(initTablesStep.run(ctx)).rejects.toThrow(/apply-schema-migrations|plot-coordinate columns/i);
+    await expect(deployProceduresStep.run(ctx)).rejects.toThrow(/apply-schema-migrations|plot-coordinate columns/i);
+
+    const [rows]: any = await ctx.sitePool!.query(`SELECT COUNT(*) AS c FROM _provisioning_meta WHERE SchemaVersion = '2026-08-27'`);
+    expect(Number(rows[0]?.c ?? rows[0]?.C)).toBe(0);
   });
 
   it('init_tables alreadyDone: false when meta exists with stale version but objects are present', async () => {

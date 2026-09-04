@@ -82,8 +82,9 @@ vi.mock('@/lib/db/connectionmanager', () => ({
   }
 }));
 
-function buildRequest(schema: string): NextRequest {
-  return new NextRequest(`http://localhost/api/setupbulkfailure/${TEST_FILE_ID}/${TEST_BATCH_ID}?schema=${schema}`, {
+function buildRequest(schema: string, reason?: string): NextRequest {
+  const reasonParam = reason === undefined ? '' : `&reason=${encodeURIComponent(reason)}`;
+  return new NextRequest(`http://localhost/api/setupbulkfailure/${TEST_FILE_ID}/${TEST_BATCH_ID}?schema=${schema}${reasonParam}`, {
     method: 'GET',
     headers: { 'x-upload-session-id': TEST_SESSION_ID }
   });
@@ -128,6 +129,98 @@ describe('GET /api/setupbulkfailure/[fileID]/[batchID] authz', () => {
     expect(res.status).toBe(HTTP_OK);
     // Retained token check ran, and the failure transfer executed for a member.
     expect(requireUploadSessionOwnershipMock).toHaveBeenCalledTimes(1);
-    expect(transferSpies.moveTemporaryBatchToFailedMeasurements).toHaveBeenCalledTimes(1);
+    // The route always declares this call site's kind explicitly — a required
+    // param proves *a* kind was passed, but the exact-args check below proves
+    // it's the *correct* one ('sql_exception' for this system-failure path).
+    expect(transferSpies.moveTemporaryBatchToFailedMeasurements).toHaveBeenCalledWith(
+      expect.anything(),
+      MEMBER_SCHEMA,
+      TEST_FILE_ID,
+      TEST_BATCH_ID,
+      'Batch moved after max attempts',
+      'sql_exception'
+    );
+  });
+});
+
+/**
+ * This route is the one failure-transfer boundary whose kind is not known by
+ * its caller: the browser sends whatever killed its setupbulkprocedure request
+ * as free text. Hardcoding 'sql_exception' here is what recorded 106,227 clean
+ * Harvard Forest rows as if each carried an ingestion SQL error after an Azure
+ * front-end timeout.
+ */
+describe('GET /api/setupbulkfailure/[fileID]/[batchID] failure-kind classification', () => {
+  const INTERRUPTION_REASON = 'Server error 504: 504.0 GatewayTimeout';
+  const GENUINE_SQL_REASON = 'Server error 500: Duplicate entry for key uq_coremeasurements';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
+    dbSpies.executeQuery.mockResolvedValue([{ PlotID: 22, CensusID: 6 }]);
+    transferSpies.moveTemporaryBatchToFailedMeasurements.mockResolvedValue(3);
+  });
+
+  it('records a front-end timeout as interrupted_upload, not as a per-row ingestion error', async () => {
+    const { auth } = await import('@/auth');
+    vi.mocked(auth).mockResolvedValueOnce({
+      user: { email: MEMBER_EMAIL, userStatus: 'field crew', sites: [{ schemaName: MEMBER_SCHEMA }] }
+    } as any);
+
+    const { GET } = await import('@/app/api/setupbulkfailure/[fileID]/[batchID]/route');
+    const res = await GET(buildRequest(MEMBER_SCHEMA, INTERRUPTION_REASON), makeContext());
+
+    expect(res.status).toBe(HTTP_OK);
+    expect(transferSpies.moveTemporaryBatchToFailedMeasurements).toHaveBeenCalledWith(
+      expect.anything(),
+      MEMBER_SCHEMA,
+      TEST_FILE_ID,
+      TEST_BATCH_ID,
+      INTERRUPTION_REASON,
+      'interrupted_upload'
+    );
+  });
+
+  it('keeps a genuine server-side failure as sql_exception', async () => {
+    const { auth } = await import('@/auth');
+    vi.mocked(auth).mockResolvedValueOnce({
+      user: { email: MEMBER_EMAIL, userStatus: 'field crew', sites: [{ schemaName: MEMBER_SCHEMA }] }
+    } as any);
+
+    const { GET } = await import('@/app/api/setupbulkfailure/[fileID]/[batchID]/route');
+    const res = await GET(buildRequest(MEMBER_SCHEMA, GENUINE_SQL_REASON), makeContext());
+
+    expect(res.status).toBe(HTTP_OK);
+    expect(transferSpies.moveTemporaryBatchToFailedMeasurements).toHaveBeenCalledWith(
+      expect.anything(),
+      MEMBER_SCHEMA,
+      TEST_FILE_ID,
+      TEST_BATCH_ID,
+      GENUINE_SQL_REASON,
+      'sql_exception'
+    );
+  });
+
+  it('carries the same kind into the sub-batch fallback transfer', async () => {
+    const { auth } = await import('@/auth');
+    vi.mocked(auth).mockResolvedValueOnce({
+      user: { email: MEMBER_EMAIL, userStatus: 'field crew', sites: [{ schemaName: MEMBER_SCHEMA }] }
+    } as any);
+    // No exact-match rows: the route falls back to moving every sub-batch.
+    transferSpies.moveTemporaryBatchToFailedMeasurements.mockResolvedValueOnce(0);
+    transferSpies.moveTemporarySubBatchesToFailedMeasurements.mockResolvedValueOnce(5);
+
+    const { GET } = await import('@/app/api/setupbulkfailure/[fileID]/[batchID]/route');
+    const res = await GET(buildRequest(MEMBER_SCHEMA, INTERRUPTION_REASON), makeContext());
+
+    expect(res.status).toBe(HTTP_OK);
+    expect(transferSpies.moveTemporarySubBatchesToFailedMeasurements).toHaveBeenCalledWith(
+      expect.anything(),
+      MEMBER_SCHEMA,
+      TEST_FILE_ID,
+      TEST_BATCH_ID,
+      INTERRUPTION_REASON,
+      'interrupted_upload'
+    );
   });
 });

@@ -7,6 +7,8 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 // Sentinel values placed only on the first mock row so we can assert they survive the staging INSERT.
 const FIRST_ROW_RAW_CODES = 'AL';
 const FIRST_ROW_RAW_PUBLISHED_STEM_ID = 5001;
+const FIRST_ROW_RAW_PLOT_X = -0.271;
+const FIRST_ROW_RAW_PLOT_Y = 267.5;
 
 // Reads the column position out of the staging INSERT's own column list, so payload assertions
 // track the real layout instead of hard-coded offsets that break silently on column reordering.
@@ -97,6 +99,8 @@ function mockUnresolvedRows(count: number) {
     RawQuadrat: 'Q01',
     RawX: 1.23,
     RawY: 4.56,
+    RawPlotX: idx === 0 ? FIRST_ROW_RAW_PLOT_X : null,
+    RawPlotY: idx === 0 ? FIRST_ROW_RAW_PLOT_Y : null,
     MeasuredDBH: 12.3,
     MeasuredHOM: 1.3,
     MeasurementDate: '2024-01-01',
@@ -371,6 +375,91 @@ describe('reingest API routes', () => {
 
       expect(valuesParam[0][codesIndex]).toBe(FIRST_ROW_RAW_CODES); // Codes value preserved in insert payload
       expect(valuesParam[0][publishedStemIdIndex]).toBe(FIRST_ROW_RAW_PUBLISHED_STEM_ID); // RawPublishedStemID preserved
+    });
+
+    it('preserves RawPlotX/RawPlotY values (mapped to PlotX/PlotY) when staging failed rows to temporarymeasurements', async () => {
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce(mockUnresolvedRows(1))
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ affectedRows: 1, insertId: 1 });
+
+      const req = makeRequest('POST');
+      const res = await POST(req, makeParams());
+      expect(res.status).toBe(200);
+
+      const insertCall = mockConnectionManager.executeQuery.mock.calls.find(
+        (call: any[]) => String(call[0]).includes('INSERT INTO') && String(call[0]).includes('temporarymeasurements')
+      );
+
+      expect(insertCall).toBeDefined();
+      expect(insertCall[0]).toContain('PlotX');
+      expect(insertCall[0]).toContain('PlotY');
+      const valuesParam = insertCall[1]?.[0];
+      expect(Array.isArray(valuesParam)).toBe(true);
+
+      const plotXIndex = stagingInsertColumnIndex(String(insertCall[0]), 'PlotX');
+      const plotYIndex = stagingInsertColumnIndex(String(insertCall[0]), 'PlotY');
+      expect(plotXIndex).toBeGreaterThanOrEqual(0);
+      expect(plotYIndex).toBeGreaterThanOrEqual(0);
+
+      // The source row supplies RawPlotX/RawPlotY (coremeasurements naming);
+      // the staging INSERT must map those onto temporarymeasurements'
+      // PlotX/PlotY at exactly the column position the INSERT declares.
+      expect(valuesParam[0][plotXIndex]).toBe(FIRST_ROW_RAW_PLOT_X);
+      expect(valuesParam[0][plotYIndex]).toBe(FIRST_ROW_RAW_PLOT_Y);
+    });
+
+    it('threads RawPlotX/RawPlotY through the reingestion_results snapshot and back onto the original CoreMeasurementID', async () => {
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce(mockUnresolvedRows(1)) // move: unresolved source rows
+        .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
+        .mockResolvedValueOnce({ affectedRows: 1, insertId: 601 }) // move: insert temp rows
+        .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed successfully: 1 records', batch_failed: false, records_failed: 0 }]]) // call bulkingestionprocess
+        .mockResolvedValueOnce(undefined) // reconcile: drop temp map table
+        .mockResolvedValueOnce(undefined) // reconcile: create temp map table
+        .mockResolvedValueOnce(undefined) // reconcile: insert map chunk
+        .mockResolvedValueOnce(undefined) // reconcile: resolve existing ingestion errors
+        .mockResolvedValueOnce(undefined) // reconcile: transfer error logs from transient rows
+        .mockResolvedValueOnce(undefined) // reconcile: drop temp reingestion_results
+        .mockResolvedValueOnce(undefined) // reconcile: drop temp reingestion_attributes
+        .mockResolvedValueOnce(undefined) // reconcile: create temp reingestion_results
+        .mockResolvedValueOnce(undefined) // reconcile: snapshot transient rows
+        .mockResolvedValueOnce(undefined) // reconcile: create temp reingestion_attributes
+        .mockResolvedValueOnce(undefined) // reconcile: snapshot transient attributes
+        .mockResolvedValueOnce(undefined) // reconcile: delete transient rows
+        .mockResolvedValueOnce(undefined) // reconcile: sync original rows
+        .mockResolvedValueOnce(undefined) // reconcile: clear original attributes
+        .mockResolvedValueOnce(undefined) // reconcile: restore attributes
+        .mockResolvedValueOnce([{ count: 1 }]) // reconcile: successful reingestions
+        .mockResolvedValueOnce([{ count: 0 }]) // reconcile: remaining failures
+        .mockResolvedValueOnce(undefined) // reconcile: final drop temp reingestion_attributes
+        .mockResolvedValueOnce(undefined) // reconcile: final drop temp reingestion_results
+        .mockResolvedValueOnce(undefined); // reconcile: final drop temp map table
+
+      const req = makeRequest('GET');
+      const res = await GET(req, makeParams());
+      expect(res.status).toBe(200);
+
+      const calls = mockConnectionManager.executeQuery.mock.calls;
+
+      const createResultsTableCall = calls.find((call: any[]) => String(call[0]).includes('CREATE TEMPORARY TABLE reingestion_results'));
+      expect(createResultsTableCall).toBeDefined();
+      expect(String(createResultsTableCall[0])).toContain('RawPlotX');
+      expect(String(createResultsTableCall[0])).toContain('RawPlotY');
+
+      const snapshotResultsCall = calls.find((call: any[]) => String(call[0]).includes('INSERT INTO reingestion_results'));
+      expect(snapshotResultsCall).toBeDefined();
+      expect(String(snapshotResultsCall[0])).toContain('cm_new.RawPlotX');
+      expect(String(snapshotResultsCall[0])).toContain('cm_new.RawPlotY');
+
+      // The original CoreMeasurementID receives the reingested raw coordinates
+      // via this UPDATE...JOIN — proves the sync writes onto `orig`, keyed by
+      // OriginalID (== the original CoreMeasurementID), from the snapshot.
+      const syncCall = calls.find((call: any[]) => String(call[0]).includes('SET orig.CensusID'));
+      expect(syncCall).toBeDefined();
+      expect(String(syncCall[0])).toContain('orig.RawPlotX = rr.RawPlotX');
+      expect(String(syncCall[0])).toContain('orig.RawPlotY = rr.RawPlotY');
+      expect(String(syncCall[0])).toContain('rr.OriginalID = orig.CoreMeasurementID');
     });
   });
 });

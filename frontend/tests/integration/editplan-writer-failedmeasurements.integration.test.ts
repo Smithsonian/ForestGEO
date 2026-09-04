@@ -196,7 +196,7 @@ async function loadCoreMeasurement(connection: Connection, coreMeasurementID: nu
 
 async function loadErrorLogRows(connection: Connection, coreMeasurementID: number): Promise<RowDataPacket[]> {
   const [rows] = await connection.query<RowDataPacket[]>(
-    `SELECT mel.MeasurementID, mel.ErrorID, mel.IsResolved, me.ErrorSource, me.ErrorCode
+    `SELECT mel.MeasurementID, mel.ErrorID, mel.IsResolved, me.ErrorSource, me.ErrorCode, me.ErrorMessage
      FROM measurement_error_log mel
      JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
      WHERE mel.MeasurementID = ?
@@ -360,6 +360,69 @@ describe('writeFailedMeasurements (integration)', () => {
       const afterStoredDateAsIso =
         afterStoredDate instanceof Date ? afterStoredDate.toISOString().split('T')[0] : String(afterStoredDate).split('T')[0].split(' ')[0];
       expect(afterStoredDateAsIso).toBe(NEW_DATE_YMD);
+    });
+  });
+
+  describe('Description is the reject reason, not a copy of the comments', () => {
+    // The legacy PATCH wrote Comments into both RawComments and Description.
+    // Any edit of an unresolved row therefore overwrote the recorded reject
+    // reason with the user's comment text. Revalidation masks this whenever it
+    // still finds errors (it restates Description afterwards), so the case that
+    // actually loses data is the corrected row: revalidation returns nothing,
+    // and the first write is the final value.
+    const NEW_COMMENT = 'researcher note added during triage';
+
+    it('clears Description rather than stamping the comment on it once the row revalidates clean', async () => {
+      const validSpeciesCode = testData.species[0].SpeciesCode;
+      const validQuadratName = testData.quadrats[0].QuadratName;
+      const newValues = {
+        SpCode: validSpeciesCode,
+        Quadrat: validQuadratName,
+        Comments: NEW_COMMENT
+      };
+      const plan = buildPlan(
+        [
+          { field: 'SpCode', from: INITIAL_RAW_SPCODE, to: validSpeciesCode },
+          { field: 'Quadrat', from: INITIAL_RAW_QUADRAT, to: validQuadratName },
+          { field: 'Comments', from: INITIAL_RAW_COMMENTS, to: NEW_COMMENT }
+        ],
+        fixture.coreMeasurementID
+      );
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, newValues);
+
+      const txID = await cm.beginTransaction();
+      await writeFailedMeasurements(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      // Precondition for this test to mean anything: the row must revalidate
+      // clean, so nothing restates Description after the first write.
+      const unresolvedAfter = (await loadErrorLogRows(connection, fixture.coreMeasurementID)).filter(row => Number(row.IsResolved) === 0);
+      expect(unresolvedAfter).toHaveLength(0);
+
+      const afterCm = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(afterCm.RawComments).toBe(NEW_COMMENT);
+      expect(afterCm.Description).toBeNull();
+    });
+
+    it('restates Description from the revalidation errors, never from the comment, while the row is still defective', async () => {
+      const plan = buildPlan([{ field: 'Comments', from: INITIAL_RAW_COMMENTS, to: NEW_COMMENT }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { Comments: NEW_COMMENT });
+
+      const txID = await cm.beginTransaction();
+      await writeFailedMeasurements(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const unresolvedMessages = (await loadErrorLogRows(connection, fixture.coreMeasurementID))
+        .filter(row => Number(row.IsResolved) === 0)
+        .map(row => String(row.ErrorMessage));
+      expect(unresolvedMessages.length).toBeGreaterThan(0);
+
+      const afterCm = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(afterCm.RawComments).toBe(NEW_COMMENT);
+      expect(afterCm.Description).not.toBe(NEW_COMMENT);
+      for (const message of unresolvedMessages) {
+        expect(String(afterCm.Description)).toContain(message);
+      }
     });
   });
 

@@ -87,9 +87,13 @@ vi.mock('@/config/uploadsessiontracker', () => ({
   }
 }));
 
-vi.mock('@/config/measurementerrors', () => ({
-  insertIngestionFailureRows: vi.fn().mockResolvedValue([])
-}));
+vi.mock('@/config/measurementerrors', async importOriginal => {
+  const actual = (await importOriginal()) as object;
+  return {
+    ...actual,
+    insertIngestionFailureRows: vi.fn().mockResolvedValue([])
+  };
+});
 
 vi.mock('@/components/processors/processorhelperfunctions', () => ({
   insertOrUpdate: vi.fn().mockResolvedValue(undefined)
@@ -109,7 +113,7 @@ vi.mock('mysql2/promise', async importOriginal => {
 });
 
 /** Number of columns in the temporarymeasurements INSERT (FileID through PublishedStemID) */
-const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 18;
+const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 20;
 
 const TEST_SESSION_ID = 'session-1';
 const TEST_PLOT_ID = 22;
@@ -318,6 +322,15 @@ describe('sqlpacketload measurement scope validation', () => {
     );
     expect(insertCall).toBeDefined();
     expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
+  });
+
+  it('rejects measurement filenames longer than 50 characters before querying or staging', async () => {
+    const res = (await POST(makeMeasurementRequest({ fileName: `${'a'.repeat(47)}.csv` })))!;
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: 'MEASUREMENT_FILE_NAME_TOO_LONG' });
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
   });
 
   it('rejects measurement uploads when the upload session does not own the scope', async () => {

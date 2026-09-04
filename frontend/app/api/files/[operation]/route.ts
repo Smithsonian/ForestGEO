@@ -8,7 +8,12 @@ import { auth } from '@/auth';
 import { getSessionUserId } from '@/lib/auth-helpers';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
-import { attemptScopedBlobName, isValidUploadAttemptID, sanitizeUploadFileName as sanitizeFileName } from '@/lib/uploads/file-names';
+import {
+  attemptScopedBlobName,
+  isValidUploadAttemptID,
+  measurementFileIDValidationError,
+  sanitizeUploadFileName as sanitizeFileName
+} from '@/lib/uploads/file-names';
 import path from 'path';
 import type { Session } from 'next-auth';
 import { FormType, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
@@ -266,6 +271,13 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
   const sanitizedFileName = sanitizeFileName(fileName);
   if (sanitizedFileName !== fileName) {
     ailogger.warn(`File name sanitized: ${fileName} -> ${sanitizedFileName}`);
+  }
+
+  if (formType === FormType.measurements) {
+    const fileIDError = measurementFileIDValidationError(sanitizedFileName);
+    if (fileIDError) {
+      return NextResponse.json({ error: fileIDError, code: 'MEASUREMENT_FILE_NAME_TOO_LONG' }, { status: HTTPResponses.INVALID_REQUEST });
+    }
   }
 
   if (attemptID !== undefined && !isValidUploadAttemptID(attemptID)) {

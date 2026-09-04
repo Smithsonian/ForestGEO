@@ -35,6 +35,37 @@ const SECURITY_CSP_REPORT_ONLY = [
   "form-action 'self'"
 ].join('; ');
 
+// Cypress component testing builds this webpack config through Next's own
+// getNextJsBaseWebpackConfig, but @cypress/webpack-dev-server's findPagesDir()
+// falls back to the PROJECT ROOT when a project has no pages/ or src/pages/
+// (this app is app-router only). next-swc-loader then computes
+// `isPageFile = filename.startsWith(pagesDir)`, so every file under the repo --
+// all of node_modules included -- is compiled as a Next page and rejected for
+// using `export * from '...'`, which MUI's esm barrels do.
+//
+// Next itself never sets pagesDir to the project root: find-pages-dir returns a
+// real subdirectory or undefined. So `pagesDir === dir` identifies the
+// Cypress-only value unambiguously, and this is a no-op during dev and build.
+function neutralizeCypressPagesDir(config, dir) {
+  if (!dir) return;
+
+  const visit = rules => {
+    for (const rule of rules || []) {
+      if (!rule || typeof rule === 'string') continue;
+      for (const use of [].concat(rule.use || [])) {
+        const isSwcLoader = use && typeof use === 'object' && String(use.loader || '').includes('next-swc-loader');
+        if (isSwcLoader && use.options && use.options.pagesDir === dir) {
+          use.options.pagesDir = undefined;
+        }
+      }
+      if (rule.oneOf) visit(rule.oneOf);
+      if (rule.rules) visit(rule.rules);
+    }
+  };
+
+  visit(config.module && config.module.rules);
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = withBundleAnalyzer({
   experimental: {
@@ -61,16 +92,18 @@ const nextConfig = withBundleAnalyzer({
     // Use timestamp for cache busting only when needed
     return process.env.BUILD_ID || `build-${Date.now()}`;
   },
-  webpack: (config, { isServer, dev }) => {
+  webpack: (config, { isServer, dev, dir }) => {
     if (!isServer) {
       config.resolve.fallback = { fs: false };
     }
     config.resolve.mainFields = ['main', 'module', 'browser'];
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      '@mui/material/esm': '@mui/material',
-      '@mui/utils/esm': '@mui/utils'
-    };
+    // The `@mui/material/esm` -> `@mui/material` aliases that used to sit here were a
+    // previous attempt at the `export *` build failure and were provably inert:
+    // aliases match the REQUEST specifier, but source imports `@mui/material/utils`
+    // and the `esm/` segment is introduced downstream by the package exports map,
+    // which the alias never sees. MUI also sets `exports["./esm"] = null`, blocking
+    // the aliased specifier outright. The real fix is neutralizeCypressPagesDir below.
+    neutralizeCypressPagesDir(config, dir);
     config.module.rules.push({
       test: /\.cy.(js|ts|tsx|jsx)$/,
       exclude: /node_modules/

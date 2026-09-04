@@ -189,13 +189,13 @@ const VALID_ROW_COUNT = 5;
 const REJECT_ROW_COUNT = 1;
 
 const FIXTURE_CSV = [
-  'treetag,stemtag,SpeciesCode,quadrat,lx,ly,dbh,hom,date,codes',
-  `E1001,1,ACERRU,Q01,1.4567,2.5,10.4567,1.3,${MEASUREMENT_DATE},A`,
-  `E1002,1,QUERCO,Q01,3.25,4.75,20.4,1.3,${MEASUREMENT_DATE},A`,
-  `E1003,1,PINUST,Q02,5.5,6.5,30.125,1.35,${MEASUREMENT_DATE},A`,
-  `E1004,1,FAGUGR,Q02,7.5,8.5,15.2,1.3,${MEASUREMENT_DATE},A`,
-  `E1005,1,BETUAL,Q03,9.5,0.5,25.8,1.3,${MEASUREMENT_DATE},A`,
-  `E1006,1,ACERRU,,2.5,3.5,11.1,1.3,${MEASUREMENT_DATE},A`
+  'treetag,stemtag,SpeciesCode,quadrat,lx,ly,px,py,dbh,hom,date,codes',
+  `E1001,1,ACERRU,Q01,1.4567,2.5,0,-0.271,10.4567,1.3,${MEASUREMENT_DATE},A`,
+  `E1002,1,QUERCO,Q01,3.25,4.75,3.25,,20.4,1.3,${MEASUREMENT_DATE},A`,
+  `E1003,1,PINUST,Q02,5.5,6.5,,267.5,30.125,1.35,${MEASUREMENT_DATE},A`,
+  `E1004,1,FAGUGR,Q02,7.5,8.5,-10,0,15.2,1.3,${MEASUREMENT_DATE},A`,
+  `E1005,1,BETUAL,Q03,9.5,0.5,123.123456,456.654321,25.8,1.3,${MEASUREMENT_DATE},A`,
+  `E1006,1,ACERRU,,2.5,3.5,abc,0,11.1,1.3,${MEASUREMENT_DATE},A`
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -212,6 +212,10 @@ interface ResolvedRowSnapshot {
   quadratName: string;
   localX: number | null;
   localY: number | null;
+  stemPlotX: number | null;
+  stemPlotY: number | null;
+  rawPlotX: number | null;
+  rawPlotY: number | null;
   dbh: number | null;
   hom: number | null;
   measurementDate: string | null;
@@ -225,6 +229,8 @@ interface RejectRowSnapshot {
   rawQuadrat: string | null;
   rawX: number | null;
   rawY: number | null;
+  rawPlotX: number | null;
+  rawPlotY: number | null;
   dbh: number | null;
   hom: number | null;
   measurementDate: string | null;
@@ -355,7 +361,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
   async function fetchResolvedRows(censusID: number): Promise<ResolvedRowSnapshot[]> {
     const [rows] = await connection.query<RowDataPacket[]>(
       `SELECT t.TreeTag, s.StemTag, sp.SpeciesCode, q.QuadratName,
-              s.LocalX, s.LocalY,
+              s.LocalX, s.LocalY, s.PlotX, s.PlotY, cm.RawPlotX, cm.RawPlotY,
               cm.MeasuredDBH, cm.MeasuredHOM,
               DATE_FORMAT(cm.MeasurementDate, '%Y-%m-%d') AS MeasurementDate,
               (SELECT GROUP_CONCAT(ca.Code ORDER BY ca.Code SEPARATOR ';')
@@ -377,6 +383,10 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
       quadratName: String(row.QuadratName),
       localX: toNumberOrNull(row.LocalX),
       localY: toNumberOrNull(row.LocalY),
+      stemPlotX: toNumberOrNull(row.PlotX),
+      stemPlotY: toNumberOrNull(row.PlotY),
+      rawPlotX: toNumberOrNull(row.RawPlotX),
+      rawPlotY: toNumberOrNull(row.RawPlotY),
       dbh: toNumberOrNull(row.MeasuredDBH),
       hom: toNumberOrNull(row.MeasuredHOM),
       measurementDate: toStringOrNull(row.MeasurementDate),
@@ -386,7 +396,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
 
   async function fetchRejectRows(censusID: number): Promise<RejectRowSnapshot[]> {
     const [rows] = await connection.query<RowDataPacket[]>(
-      `SELECT RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+      `SELECT RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY,
               MeasuredDBH, MeasuredHOM,
               DATE_FORMAT(MeasurementDate, '%Y-%m-%d') AS MeasurementDate,
               RawCodes, RawComments, SourceRowIndex
@@ -402,6 +412,8 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
       rawQuadrat: toStringOrNull(row.RawQuadrat),
       rawX: toNumberOrNull(row.RawX),
       rawY: toNumberOrNull(row.RawY),
+      rawPlotX: toNumberOrNull(row.RawPlotX),
+      rawPlotY: toNumberOrNull(row.RawPlotY),
       dbh: toNumberOrNull(row.MeasuredDBH),
       hom: toNumberOrNull(row.MeasuredHOM),
       measurementDate: toStringOrNull(row.MeasurementDate),
@@ -481,6 +493,8 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
         quadrat: row.quadrat || null,
         x: row.lx || null,
         y: row.ly || null,
+        plotX: row.px ?? null,
+        plotY: row.py ?? null,
         dbh: row.dbh || null,
         hom: row.hom || null,
         date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
@@ -580,6 +594,9 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
     expect(precisionRow).toBeDefined();
     expect(precisionRow!.dbh).toBe(10.46);
     expect(precisionRow!.localX).toBeCloseTo(1.4567, 4);
+    expect(precisionRow).toMatchObject({ stemPlotX: 0, rawPlotX: 0, stemPlotY: -0.271, rawPlotY: -0.271 });
+    expect(workerResolved.find(row => row.treeTag === 'E1002')).toMatchObject({ stemPlotX: 3.25, rawPlotX: 3.25, stemPlotY: null, rawPlotY: null });
+    expect(workerResolved.find(row => row.treeTag === 'E1003')).toMatchObject({ stemPlotX: null, rawPlotX: null, stemPlotY: 267.5, rawPlotY: 267.5 });
 
     // --- Parse rejects: the SAME resolution mechanism rejected the SAME row. ---
     expect(syncRun.invalidRows).toHaveLength(REJECT_ROW_COUNT);
@@ -597,6 +614,8 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
       rawTreeTag: 'E1006',
       rawSpCode: 'ACERRU',
       rawQuadrat: null,
+      rawPlotX: null,
+      rawPlotY: 0,
       rawCodes: 'A',
       sourceRowIndexMagnitude: 1
     });

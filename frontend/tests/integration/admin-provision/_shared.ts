@@ -9,6 +9,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import mysql, { type Pool } from 'mysql2/promise';
+import { vi } from 'vitest';
 
 export const TEST_SCHEMA_PREFIX = 'forestgeo_routetest_';
 
@@ -30,6 +31,22 @@ export interface SeedStep {
   startedAtSecondsAgo?: number;
   finishedAt?: Date | null;
   errorMessage?: string | null;
+}
+
+/**
+ * Suppresses the orchestrator's background `dispatchRun` kickoff by stubbing
+ * `setImmediate` to a no-op, so the caller observes only the synchronous catalog
+ * writes that startRun/retryRun perform inline.
+ *
+ * MUST be called from beforeEach, never beforeAll. vitest.integration.config.mts
+ * sets `restoreMocks`, which tears a beforeAll spy down after the FIRST test.
+ * With the seam dead from test 2 onward, dispatchRun ran real provisioning —
+ * CREATE DATABASE and schema DDL — and started a 10-second heartbeat interval
+ * that outlived the file and deadlocked the next test's catalog cleanup
+ * (ER_LOCK_DEADLOCK on DELETE FROM catalog.provisioning_runs).
+ */
+export function suppressBackgroundDispatch() {
+  return vi.spyOn(globalThis, 'setImmediate').mockImplementation((() => 0) as never);
 }
 
 export function createTestPool(): Pool {
@@ -71,21 +88,56 @@ export async function seedCatalogTables(pool: Pool): Promise<void> {
   await pool.query(`CREATE TABLE IF NOT EXISTS catalog.usersiterelations (UserID INT, SiteID INT)`);
 }
 
+/** Escapes the LIKE metacharacters in a schema name so `_` matches a literal underscore. */
+function likePrefix(schemaName: string): string {
+  return schemaName.replace(/([\\%_])/g, '\\$1') + '%';
+}
+
 /**
- * Cleans all rows in the provisioning catalog tables. If a `schemaName` is
- * provided, the matching site row is removed and the schema dropped — otherwise
- * any sites whose name starts with TEST_SCHEMA_PREFIX are removed.
+ * Cleans the provisioning catalog rows owned by one test file.
+ *
+ * `catalog` is shared by every integration file (only the per-site
+ * `forestgeo_test_*` schemas are isolated), so this used to delete whole tables.
+ * An unqualified `DELETE FROM catalog.provisioning_runs` locks every row and
+ * cascades into provisioning_steps, which deadlocks against the worker's
+ * heartbeat `UPDATE ... WHERE RunID = ?` — see the ER_LOCK_DEADLOCK in
+ * start.integration.test.ts. Scoping each delete to the caller's own schema
+ * keeps the lock footprint on rows this file actually owns.
+ *
+ * The match is a PREFIX: worker.integration.test.ts seeds derived schemas
+ * (`<TEST_SCHEMA>_c`, `_f`, `_a`, `_fresh`) that must be cleared alongside their
+ * parent. No two files' schemas prefix one another, so this cannot reach across
+ * files. Only the exact schema is dropped as a database.
+ *
+ * Omitting `schemaName` keeps the table-wide wipe, which list.integration.test.ts
+ * needs because it asserts the route returns an empty array when NO runs exist.
  */
 export async function clearProvisioningState(pool: Pool, schemaName?: string): Promise<void> {
+  if (schemaName) {
+    const owned = likePrefix(schemaName);
+    // Single-table DELETE with a subquery, NOT the multi-table `DELETE t FROM t JOIN u`
+    // form: createTestPool() intentionally selects no default database, and the
+    // multi-table form needs one even when every table is schema-qualified
+    // (ER_NO_DB_ERROR 1046).
+    await pool.query(
+      `DELETE FROM catalog.provisioning_steps
+        WHERE RunID IN (SELECT RunID FROM catalog.provisioning_runs WHERE SchemaName LIKE ?)`,
+      [owned]
+    );
+    await pool.query(`DELETE FROM catalog.provisioning_runs WHERE SchemaName LIKE ?`, [owned]);
+    await pool.query(
+      `DELETE FROM catalog.usersiterelations
+        WHERE SiteID IN (SELECT SiteID FROM catalog.sites WHERE SchemaName LIKE ?)`,
+      [owned]
+    );
+    await pool.query(`DELETE FROM catalog.sites WHERE SchemaName LIKE ?`, [owned]);
+    await pool.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    return;
+  }
   await pool.query(`DELETE FROM catalog.provisioning_steps`);
   await pool.query(`DELETE FROM catalog.provisioning_runs`);
   await pool.query(`DELETE FROM catalog.usersiterelations`);
-  if (schemaName) {
-    await pool.query(`DELETE FROM catalog.sites WHERE SchemaName = ?`, [schemaName]);
-    await pool.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
-  } else {
-    await pool.query(`DELETE FROM catalog.sites WHERE SchemaName LIKE ?`, [TEST_SCHEMA_PREFIX + '%']);
-  }
+  await pool.query(`DELETE FROM catalog.sites WHERE SchemaName LIKE ?`, [TEST_SCHEMA_PREFIX + '%']);
 }
 
 /**

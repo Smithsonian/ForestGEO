@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { ViewFullTableGridColumns, VIEW_FULL_TABLE_COLUMN_WIDTHS } from './datagridcolumns';
+import { MeasurementsSummaryViewGridColumns, ViewFullTableGridColumns, VIEW_FULL_TABLE_COLUMN_WIDTHS } from './datagridcolumns';
 
 // The archive "All Historical Data" grid formerly gave every one of its columns a
 // uniform `flex: 0.3` with no minWidth, which starved headers down to one or two visible
 // characters (M…, Pl…). These tests lock in that every column now carries a per-type width
-// preset with a legibility floor (minWidth). 54 = the original 53 + plotGlobalCoordinatesEPSG
-// (added alongside viewfulltable.PlotGlobalCoordinatesEPSG, 2026-08-04).
+// preset with a legibility floor (minWidth). 56 = the prior 54 (53 + plotGlobalCoordinatesEPSG,
+// added 2026-08-04) + stemPlotX/stemPlotY (site-supplied plot coordinates, 2026-08-27).
 const FORMER_UNIFORM_FLEX = 0.3;
-const EXPECTED_COLUMN_COUNT = 54;
+const EXPECTED_COLUMN_COUNT = 56;
 const SMALLEST_PRESET_MIN_WIDTH = VIEW_FULL_TABLE_COLUMN_WIDTHS.code.minWidth;
 
 const presetList = Object.values(VIEW_FULL_TABLE_COLUMN_WIDTHS);
@@ -62,5 +62,18 @@ describe('ViewFullTableGridColumns width presets', () => {
     // code bucket (includes the hidden-by-default ID columns).
     expect(byField.get('speciesCode')).toMatchObject(VIEW_FULL_TABLE_COLUMN_WIDTHS.code);
     expect(byField.get('coreMeasurementID')).toMatchObject(VIEW_FULL_TABLE_COLUMN_WIDTHS.code);
+  });
+});
+
+describe('MeasurementsSummaryViewGridColumns plot coordinates', () => {
+  it.each(['stemPlotX', 'stemPlotY'])('renders missing %s as blank while preserving a real zero', field => {
+    const column = MeasurementsSummaryViewGridColumns.find(candidate => candidate.field === field);
+    expect(column?.valueFormatter).toBeTypeOf('function');
+    const format = column!.valueFormatter as (value: number | null | undefined) => string;
+
+    expect(format(null)).toBe('');
+    expect(format(undefined)).toBe('');
+    expect(format(0)).toBe('0.00');
+    expect(format(12.345)).toBe('12.35');
   });
 });

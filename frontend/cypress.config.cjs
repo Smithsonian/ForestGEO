@@ -2,20 +2,21 @@
 const path = require('path');
 const { defineConfig } = require('cypress');
 const { getSharedWebpackConfig, getLogTask } = require('./cypress/support/shared-config.cjs');
-const mysql = require('mysql2/promise');
-
-// Database connection configuration
-const DB_CONFIG = {
-  host: 'forestgeo-mysqldataserver.mysql.database.azure.com',
-  user: 'azureroot',
-  password: process.env.AZURE_SQL_PASSWORD,
-  database: 'forestgeo_testing',
-  port: 3306,
-  ssl: { rejectUnauthorized: false },
-  multipleStatements: true
-};
 
 module.exports = defineConfig({
+  // Retry failed specs in CI only. Several suites here are legitimately
+  // timing-sensitive — they drive a real Next dev server and a real MySQL — and
+  // a degraded shared runner turns that into red PRs unrelated to the change
+  // under review (e.g. PR #456's "Timed out after waiting 15000ms for your
+  // remote page to load", green on rerun).
+  //
+  // openMode stays 0 so local runs never hide a flake from the person writing
+  // the test. A genuine failure still fails all attempts, so this absorbs
+  // infrastructure noise without masking real breakage.
+  retries: {
+    runMode: 2,
+    openMode: 0
+  },
   e2e: {
     experimentalRunAllSpecs: true,
     experimentalInteractiveRunEvents: false,
@@ -37,20 +38,7 @@ module.exports = defineConfig({
     setupNodeEvents(on, config) {
       // Add log task for ingestion report output
       on('task', {
-        log: getLogTask(),
-
-        // Database query task for E2E tests
-        async queryDB({ query }) {
-          const connection = await mysql.createConnection(DB_CONFIG);
-          try {
-            const [results] = await connection.execute(query);
-            await connection.end();
-            return results;
-          } catch (error) {
-            await connection.end();
-            throw error;
-          }
-        }
+        log: getLogTask()
       });
 
       // Set environment variable for Next.js dev server during E2E tests

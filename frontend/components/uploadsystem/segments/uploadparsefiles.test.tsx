@@ -237,6 +237,56 @@ describe('mapping rescue is wording-independent (code-based eligibility)', () =>
   });
 });
 
+// temporarymeasurements.FileID is varchar(50). Before this gate existed the upload ran to the
+// staging INSERT and died on ER_DATA_TOO_LONG, which the UI surfaced as a hang — so the block must
+// happen at selection time, and it must hold even when the file itself is otherwise perfectly valid.
+describe('measurement file name length gate', () => {
+  const overLengthName = `${'a'.repeat(47)}.csv`;
+
+  it('blocks an otherwise-valid file whose name exceeds the FileID contract', () => {
+    expect(overLengthName.length).toBeGreaterThan(50);
+    fileValidationEvents.clear();
+    fileValidationEvents.set(overLengthName, { isValid: true, issues: [], headers: CANONICAL_HEADERS });
+
+    act(() => {
+      renderUploadParseFiles([buildFile(overLengthName)], vi.fn());
+    });
+
+    // allFilesValid false swaps the CTA label, so assert the blocked state by its own wording.
+    expect(screen.getByRole('button', { name: /fix validation errors to continue/i })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /continue upload/i })).toBeNull();
+    expect(screen.getByText(/50 characters or fewer/i)).toBeDefined();
+  });
+
+  it('allows a name exactly at the limit, so the gate is not off by one', () => {
+    const atLimitName = `${'a'.repeat(46)}.csv`;
+    expect(atLimitName).toHaveLength(50);
+    fileValidationEvents.clear();
+    fileValidationEvents.set(atLimitName, { isValid: true, issues: [], headers: CANONICAL_HEADERS });
+
+    act(() => {
+      renderUploadParseFiles([buildFile(atLimitName)], vi.fn());
+    });
+
+    expect(screen.getByRole('button', { name: /continue upload/i })).not.toBeDisabled();
+    expect(screen.queryByText(/50 characters or fewer/i)).toBeNull();
+  });
+
+  it('blocks a short raw name whose sanitized storage identity exceeds the limit', () => {
+    const fileName = `${'🌳'.repeat(25)}.csv`;
+    expect(Array.from(fileName)).toHaveLength(29);
+    fileValidationEvents.clear();
+    fileValidationEvents.set(fileName, { isValid: true, issues: [], headers: CANONICAL_HEADERS });
+
+    act(() => {
+      renderUploadParseFiles([buildFile(fileName)], vi.fn());
+    });
+
+    expect(screen.getByRole('button', { name: /fix validation errors to continue/i })).toBeDisabled();
+    expect(screen.getByText(/stored file name would be 54 characters/i)).toBeDefined();
+  });
+});
+
 // When a confirmed mapping covers the header-coverage gap but a real STRUCTURAL issue still blocks
 // the file, the issue panel must not keep showing the resolved coverage message beside the blocker.
 describe('issue-list masking when a mapping resolves coverage gaps (M6)', () => {

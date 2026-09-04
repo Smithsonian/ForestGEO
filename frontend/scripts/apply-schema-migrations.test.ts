@@ -21,7 +21,7 @@ import {
 } from './apply-schema-migrations';
 
 function source(id: string, contents: string): MigrationSource {
-  return { id, file: `${id}.sql`, contents, checksum: sha256Hex(contents) };
+  return { id, file: `${id}.sql`, contents, checksum: sha256Hex(contents), failureCleanup: [] };
 }
 
 /**
@@ -187,6 +187,17 @@ describe('applyPendingMigrations', () => {
     expect(db.ledger.get(m1.id)?.Status).toBe(MIGRATION_STATUS.FAILED);
     expect(db.ledger.has(m2.id)).toBe(false);
     expect(db.lockHeld).toBe(false);
+  });
+
+  it('runs declared helper cleanup after a failed migration without masking the migration error', async () => {
+    const db = new FakeSchemaDb();
+    const failing = { ...m1, failureCleanup: ['DROP PROCEDURE IF EXISTS migration_helper'] };
+    db.failOnBodyIncluding = failing.contents;
+
+    const result = await applyPendingMigrations(db.exec, 'forestgeo_test', [failing]);
+
+    expect(result.failed).toEqual({ id: failing.id, error: 'simulated migration failure' });
+    expect(db.appliedBodies).toContain('DROP PROCEDURE IF EXISTS migration_helper');
   });
 
   it('refuses a concurrent migration runner before reading or writing the ledger', async () => {

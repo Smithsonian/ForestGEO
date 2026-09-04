@@ -92,7 +92,7 @@ vi.mock('@/ailogger', () => ({
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { countStagedRows, stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
-import { resetUploadSessionCensusReplacementColumnCacheForTests } from '@/lib/ingestion/temporary-measurements';
+import { resetUploadSessionCensusReplacementColumnCacheForTests, TEMPORARY_MEASUREMENT_INSERT_COLUMNS } from '@/lib/ingestion/temporary-measurements';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -393,6 +393,113 @@ describe('stageMeasurementChunk — integration', () => {
     expect(metadata.droppedCount).toBe(0);
     expect(metadata.batchCount).toBe(1);
     expect(metadata.formType).toBe('measurements');
+  });
+
+  // temporarymeasurements has no unique constraint (see the re-staging test below),
+  // so a real INSERT IGNORE collision cannot occur naturally here. To exercise the
+  // dropped-row detection path with a REAL drop, this test intercepts the bulk
+  // INSERT statement and strips one row's VALUES tuple before it reaches the
+  // server — exactly what a duplicate-key collision would do to the statement's
+  // effect. Every downstream step (the pre/post count diff, findDroppedMeasurementCandidates,
+  // and the failure-row insert) still runs against the real database.
+  it('records RawPlotX/RawPlotY when a row is silently dropped by INSERT IGNORE', async () => {
+    const KEPT_TREETAG = 'T9001';
+    const DROPPED_TREETAG = 'T9002';
+    const DROPPED_PLOT_X = '-0.271';
+    const DROPPED_PLOT_Y = '267.5';
+
+    const coordCsvHeaders = ['treetag', 'stemtag', 'speciescode', 'quadrat', 'lx', 'ly', 'px', 'py', 'dbh', 'hom', 'date', 'codes'];
+    const rawRows = [
+      {
+        treetag: KEPT_TREETAG,
+        stemtag: '1',
+        speciescode: 'ACERRU',
+        quadrat: 'Q01',
+        lx: '1.5',
+        ly: '2.5',
+        px: '10',
+        py: '20',
+        dbh: '10.55',
+        hom: '1.3',
+        date: VALID_DATE,
+        codes: 'A'
+      },
+      {
+        treetag: DROPPED_TREETAG,
+        stemtag: '1',
+        speciescode: 'ACERRU',
+        quadrat: 'Q01',
+        lx: '3.5',
+        ly: '4.5',
+        px: DROPPED_PLOT_X,
+        py: DROPPED_PLOT_Y,
+        dbh: '12.0',
+        hom: '1.3',
+        date: VALID_DATE,
+        codes: 'A'
+      }
+    ];
+
+    const columnCount = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.length;
+    const treeTagColumnIndex = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.indexOf('TreeTag');
+
+    const originalExecuteQuery = ConnectionManager.getInstance().executeQuery.bind(connectionManager);
+    const executeQuerySpy = vi
+      .spyOn(connectionManager, 'executeQuery')
+      .mockImplementation(async (query: string, params?: unknown[], transactionID?: string) => {
+        if (typeof query === 'string' && query.includes('INSERT IGNORE INTO') && query.includes('.temporarymeasurements') && Array.isArray(params)) {
+          const rowCount = params.length / columnCount;
+          let dropRowIndex = -1;
+          for (let i = 0; i < rowCount; i++) {
+            if (params[i * columnCount + treeTagColumnIndex] === DROPPED_TREETAG) {
+              dropRowIndex = i;
+              break;
+            }
+          }
+          if (dropRowIndex !== -1) {
+            const [beforeValues, afterValues] = query.split(' VALUES ');
+            const tuples = afterValues.match(/\([^()]*\)/g) ?? [];
+            tuples.splice(dropRowIndex, 1);
+            const newQuery = `${beforeValues} VALUES ${tuples.join(', ')}`;
+            const newParams = [...params.slice(0, dropRowIndex * columnCount), ...params.slice((dropRowIndex + 1) * columnCount)];
+            return originalExecuteQuery(newQuery, newParams, transactionID);
+          }
+        }
+        return originalExecuteQuery(query, params, transactionID);
+      });
+
+    try {
+      const transactionID = await connectionManager.beginTransaction();
+      const result = await stageMeasurementChunk(
+        connectionManager,
+        baseParams(transactionID, {
+          fileName: 'stage-measurements-drop-fixture.csv',
+          batchID: 'stage-drop-batch-0001',
+          rawRows,
+          csvHeaders: coordCsvHeaders
+        })
+      );
+      await connectionManager.commitTransaction(transactionID);
+
+      console.log(`[drop-fixture] insertedCount=${result.insertedCount} expectedCount=${result.expectedCount} droppedCount=${result.droppedCount}`);
+      expect(result.expectedCount).toBe(2);
+      expect(result.insertedCount).toBe(1);
+      expect(result.droppedCount, 'the spy must have forced exactly one row to be dropped').toBe(1);
+
+      const [failedRows] = await connection.query<RowDataPacket[]>(
+        `SELECT RawTreeTag, CAST(RawX AS CHAR) AS RawXText, CAST(RawY AS CHAR) AS RawYText,
+                CAST(RawPlotX AS CHAR) AS RawPlotXText, CAST(RawPlotY AS CHAR) AS RawPlotYText
+         FROM coremeasurements
+         WHERE StemGUID IS NULL AND RawTreeTag = ?`,
+        [DROPPED_TREETAG]
+      );
+      console.log(`[drop-fixture] failed coremeasurements row: ${JSON.stringify(failedRows)}`);
+      expect(failedRows, 'the dropped row must be recorded as an unresolved ingestion error').toHaveLength(1);
+      expect(Number(failedRows[0].RawPlotXText)).toBeCloseTo(Number(DROPPED_PLOT_X), 6);
+      expect(Number(failedRows[0].RawPlotYText)).toBeCloseTo(Number(DROPPED_PLOT_Y), 6);
+    } finally {
+      executeQuerySpy.mockRestore();
+    }
   });
 
   it('countStagedRows matches insertedCount for the staged scope and 0 elsewhere', async () => {

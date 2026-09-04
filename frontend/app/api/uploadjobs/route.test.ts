@@ -401,6 +401,17 @@ describe('POST /api/uploadjobs', () => {
     expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
   });
 
+  it('rejects measurement filenames longer than 50 characters before creating a job', async () => {
+    const fileName = `${'a'.repeat(47)}.csv`;
+    const file = { ...makeCreateBody().files[0], fileName, blobName: `${TEST_ATTEMPT_ID}/${fileName}` };
+    const response = await callPost(makeCreateRequest(makeCreateBody({ files: [file] })));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.errors).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'files.0.fileName' })]));
+    expect(mocks.createUploadBackgroundJob).not.toHaveBeenCalled();
+  });
+
   it('rejects more than 100 files', async () => {
     const file = makeCreateBody().files[0];
     const files = Array.from({ length: 101 }, (_, index) => ({ ...file, fileName: `file-${index}.csv`, blobName: `uploads/file-${index}.csv` }));

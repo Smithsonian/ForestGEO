@@ -288,6 +288,23 @@ describe('/api/files/[operation]', () => {
     );
   });
 
+  it('rejects measurement filenames longer than 50 characters before uploading the blob', async () => {
+    const fileName = `${'a'.repeat(47)}.csv`;
+    const formData = new FormData();
+    const file = new File(['TreeTag\n1'], fileName, { type: 'text/csv' });
+    formData.append(fileName, file);
+    const request = makeRequest(`http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&census=2&fileName=${fileName}&formType=measurements`, {
+      method: 'POST'
+    }) as any;
+    request.formData = vi.fn(async () => formData);
+
+    const response = await POST(request, props('upload'));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'MEASUREMENT_FILE_NAME_TOO_LONG' });
+    expect(mocks.uploadValidFileAsBufferWithMetadata).not.toHaveBeenCalled();
+  });
+
   it('returns 400 for malformed fileRowErrors metadata', async () => {
     const formData = new FormData();
     const file = new File(['TreeTag\n1'], 'measurements.csv', { type: 'text/csv' });

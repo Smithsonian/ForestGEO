@@ -2,23 +2,34 @@ import React from 'react';
 import UploadRevisionApply from '@/components/uploadsystem/segments/uploadrevisionapply';
 import UploadRevisionMatch from '@/components/uploadsystem/segments/uploadrevisionmatch';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import * as compatHooks from '@/app/contexts/compat-hooks';
-import * as backgroundValidationHooks from '@/app/hooks/usebackgroundvalidation';
+import { useAppStore } from '@/config/store/appstore';
+import { ValidationRunner } from '@/config/validation-runner';
+
+const TEST_PLOT = { plotID: 1, plotName: 'Test Plot' } as never;
+const TEST_CENSUS = { plotCensusNumber: 1, dateRanges: [{ censusID: 2 }] } as never;
 
 describe('Revision Upload Segments', () => {
   beforeEach(() => {
-    cy.stub(compatHooks, 'usePlotContext').returns({
-      plotID: 1,
-      plotName: 'Test Plot'
-    } as any);
-    cy.stub(compatHooks, 'useOrgCensusContext').returns({
-      plotCensusNumber: 1,
-      dateRanges: [{ censusID: 2 }]
-    } as any);
+    // cy.stub() on a webpack ES-module namespace silently no-ops -- it does not throw,
+    // so the stubs that used to sit here looked correct while the component read the
+    // real zustand store, got undefined plotID/censusID, and skipped startValidation.
+    // Seed the store through its own actions instead (prior art: sidebar.test.tsx:398).
+    // Use the actions, not raw setState: appstore.ts carries a persistence guard that
+    // trips when an empty selection overwrites a persisted one.
+    useAppStore.getState().clearSelections();
+    useAppStore.getState().setPlot(TEST_PLOT);
+    useAppStore.getState().setCensus(TEST_CENSUS);
   });
 
   afterEach(() => {
-    Cypress.sinon.restore();
+    useAppStore.getState().clearSelections();
+  });
+
+  it('seeds plot and census context into the store', () => {
+    // Guards the exact failure mode being fixed: a context mechanism that no-ops in
+    // silence. If this fails, every other assertion in this spec is untrustworthy.
+    expect(useAppStore.getState().currentPlot).to.deep.equal(TEST_PLOT);
+    expect(useAppStore.getState().currentCensus).to.deep.equal(TEST_CENSUS);
   });
 
   it('requires explicit confirmation before new rows can be applied', () => {
@@ -66,11 +77,12 @@ describe('Revision Upload Segments', () => {
   it('shows recovery actions on apply conflict and retries successfully', () => {
     const setReviewState = cy.stub().as('setReviewState');
     const setIsDataUnsaved = cy.stub().as('setIsDataUnsaved');
-    const startValidation = cy.stub().as('startValidation');
 
-    cy.stub(backgroundValidationHooks, 'useBackgroundValidation').returns({
-      startValidation
-    } as any);
+    // ValidationRunner is a plain object literal, so `start` is a writable property --
+    // unlike an ES-module namespace binding. The hook delegates to it at call time, so
+    // this observes the exact contract without launching the module-level singleton's
+    // multi-request workflow inside a component test.
+    cy.stub(ValidationRunner, 'start').as('startValidation');
 
     cy.clock();
 

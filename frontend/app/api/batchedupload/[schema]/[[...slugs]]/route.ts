@@ -4,6 +4,7 @@ import { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
 import connectionmanager from '@/lib/db/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
+import { toError } from '@/lib/errorhelpers';
 import { recordFailedMeasurementRows } from '@/lib/uploads/record-invalid-rows';
 import { generateShortBatchID } from '@/config/utils';
 import { validatedSchema, type SchemaName } from '@/lib/db/sqlsecurity';
@@ -16,12 +17,22 @@ export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest, props: { params: Promise<{ schema: string; slugs?: string[] }> }) {
   const params = await props.params;
-  let errorRows: FailedMeasurementsRDS[] = await request.json();
-  const { schema: schemaParam, slugs } = params;
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return NextResponse.json({ message: 'Batch upload body must be valid JSON.' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
 
-  if (!errorRows || errorRows.length === 0) {
+  if (!Array.isArray(payload) || payload.length === 0) {
     return new NextResponse(JSON.stringify({ message: 'No data provided for batch upload!' }), { status: HTTPResponses.INVALID_REQUEST });
   }
+  if (payload.some(row => row === null || typeof row !== 'object' || Array.isArray(row))) {
+    return NextResponse.json({ message: 'Batch upload rows must be JSON objects.' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  let errorRows = payload as FailedMeasurementsRDS[];
+  const { schema: schemaParam, slugs } = params;
 
   // Validate contextual values with fallback to URL params
   const validation = await validateContextualValues(request, {
@@ -41,10 +52,13 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
     // caller to act on any schema matching the pattern.
     if (schemaParam && slugs && slugs.length === 2) {
       const [plotIDParam, censusIDParam] = slugs;
-      plotID = parseInt(plotIDParam);
-      censusID = parseInt(censusIDParam);
+      if (!/^[1-9]\d*$/.test(plotIDParam) || !/^[1-9]\d*$/.test(censusIDParam)) {
+        return new NextResponse(JSON.stringify({ message: 'Invalid plotID or censusID in URL parameters!' }), { status: HTTPResponses.INVALID_REQUEST });
+      }
+      plotID = Number(plotIDParam);
+      censusID = Number(censusIDParam);
 
-      if (isNaN(plotID) || isNaN(censusID)) {
+      if (!Number.isSafeInteger(plotID) || !Number.isSafeInteger(censusID)) {
         return new NextResponse(JSON.stringify({ message: 'Invalid plotID or censusID in URL parameters!' }), { status: HTTPResponses.INVALID_REQUEST });
       }
 
@@ -80,14 +94,18 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
     ...row,
     plotID,
     censusID,
-    batchID: (row as any).batchID ?? batchID,
-    fileID: (row as any).fileID ?? fileID,
+    // These identifiers are generated/request-scoped values, never client
+    // overrides. Otherwise one rejected row could be persisted under another
+    // upload's file/batch and later be selected by the wrong retry.
+    batchID,
+    fileID,
     originalFailureReasons: row.originalFailureReasons ?? row.failureReasons ?? undefined,
     currentFailureReasons: row.currentFailureReasons ?? row.failureReasons ?? undefined
   }));
 
   const connectionManager = connectionmanager.getInstance();
   let transactionID = '';
+  let operationError: unknown;
 
   try {
     transactionID = await connectionManager.beginTransaction();
@@ -96,12 +114,24 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
 
     return new NextResponse(JSON.stringify({ message: 'Inserted ingestion error rows', rowCount: errorRows.length }), { status: HTTPResponses.OK });
   } catch (error: any) {
+    operationError = error;
     if (transactionID) {
-      await connectionManager.rollbackTransaction(transactionID);
+      try {
+        await connectionManager.rollbackTransaction(transactionID);
+      } catch (rollbackError) {
+        if (error instanceof Error) {
+          (error as Error & { rollbackError?: unknown }).rollbackError = rollbackError;
+        }
+      }
     }
     ailogger.error('Database Error:', error);
     return new NextResponse(JSON.stringify({ message: 'Database error', error: error.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
-    await connectionManager.closeConnection();
+    try {
+      await connectionManager.closeConnection();
+    } catch (closeError) {
+      if (operationError === undefined) throw closeError;
+      ailogger.error('Failed to close batch upload connection after the primary error:', toError(closeError));
+    }
   }
 }

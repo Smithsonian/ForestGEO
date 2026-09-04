@@ -92,7 +92,9 @@ vi.mock('@/ailogger', () => ({
 }));
 
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { recordInvalidRows, deleteUnresolvedRowsForBatchFamily, type InvalidRowContext } from '@/lib/uploads/record-invalid-rows';
+import { recordInvalidRows, recordFailedMeasurementRows, deleteUnresolvedRowsForBatchFamily, type InvalidRowContext } from '@/lib/uploads/record-invalid-rows';
+import { insertIngestionFailureRows, FALLBACK_FAILURE_REASON } from '@/config/measurementerrors';
+import type { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -199,7 +201,10 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
   // -------------------------------------------------------------------------
 
   it('records 2 parse-reject rows: full row + sparse row (tag+failureReason only)', async () => {
-    const ctx: InvalidRowContext = { schema, plotID, censusID, fileName: FILE_NAME, batchID: BATCH_ID };
+    // sourceRowIndexOffset: -3 pushes these two worker rejects into the real
+    // negative SourceRowIndex namespace (-2, -1) that the async worker uses to
+    // stay out of bulkingestionprocess's positive auto-increment range.
+    const ctx: InvalidRowContext = { schema, plotID, censusID, fileName: FILE_NAME, batchID: BATCH_ID, sourceRowIndexOffset: -3 };
 
     const fullRow = {
       tag: 'T0100',
@@ -216,9 +221,12 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
       failureReason: 'Missing required fields: quadrat'
     };
 
+    // failureReason: null (not the fallback literal) proves the CHOKE-POINT
+    // fallback in insertIngestionFailureRows applies FALLBACK_FAILURE_REASON,
+    // rather than the fixture merely passing a literal string through.
     const sparseRow = {
       tag: 'T0101',
-      failureReason: 'Unknown parse error'
+      failureReason: null
     };
 
     const transactionID = await connectionManager.beginTransaction();
@@ -260,8 +268,12 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
     expect(parseFloat(fullRecorded.RawYText)).toBeCloseTo(2.75);
     expect(parseFloat(fullRecorded.MeasuredDBHText)).toBeCloseTo(12.345);
     expect(parseFloat(fullRecorded.MeasuredHOMText)).toBeCloseTo(1.3);
-    // Description stores the comments field; failure reason goes into measurement_error_log.
-    expect(fullRecorded.Description).toBe('test comment');
+    // Description round-trips the verbatim failure reason; RawComments round-trips
+    // the verbatim comments. They are NOT copies of each other — this is the
+    // #454 fix under test (Description used to be silently NULL, or overwritten
+    // with the comments field, depending on the code path).
+    expect(fullRecorded.Description).toBe('Missing required fields: quadrat');
+    expect(fullRecorded.RawComments).toBe('test comment');
 
     // Verify the failure reason was written to measurement_error_log.
     const fullMeasurementID = await fetchCoreMeasurementID(FILE_NAME, BATCH_ID, 'T0100');
@@ -275,17 +287,121 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
     console.log(`[test1] sparse row: tag=${sparseRecorded.RawTreeTag} description=${sparseRecorded.Description} stemTag=${sparseRecorded.RawStemTag}`);
     expect(sparseRecorded.RawTreeTag).toBe('T0101');
     expect(sparseRecorded.RawStemTag).toBeNull();
-    // Sparse row has no comments — Description is null; failure reason is in measurement_error_log.
-    expect(sparseRecorded.Description).toBeNull();
+    // Sparse row's failureReason is null — the choke point (normalizeFailureDescription
+    // in config/measurementerrors.ts) must apply FALLBACK_FAILURE_REASON, never leave
+    // Description NULL. A NULL Description here is exactly what the #454 detector query
+    // (SourceRowIndex < 0 AND Description IS NULL) flags as an unrecorded reject.
+    expect(sparseRecorded.Description).toBe(FALLBACK_FAILURE_REASON);
     const sparseMeasurementID = await fetchCoreMeasurementID(FILE_NAME, BATCH_ID, 'T0101');
     expect(sparseMeasurementID).not.toBeNull();
     const sparseErrors = await fetchMeasurementErrors(sparseMeasurementID!);
     console.log(`[test1] sparse row error_log entries: ${JSON.stringify(sparseErrors)}`);
     expect(sparseErrors.length).toBeGreaterThan(0);
+    // An unrecognized (here: absent) reason must classify as UNCLASSIFIED_REJECT,
+    // never SQL_EXCEPTION — the choke point must not guess a system-failure code
+    // from prose it doesn't recognize.
+    const sparseErrorCodes = sparseErrors.map(row => row.ErrorCode);
+    console.log(`[test1] sparse row error codes: ${JSON.stringify(sparseErrorCodes)}`);
+    expect(sparseErrorCodes).toContain('UNCLASSIFIED_REJECT');
+    expect(sparseErrorCodes).not.toContain('SQL_EXCEPTION');
+
+    // #454 detector, scoped to this fixture's UploadFileID: fresh worker-path
+    // writes must never leave a negative-SourceRowIndex row with a NULL
+    // Description. Never run this unscoped — other tests' seed data is out of
+    // bounds for this assertion.
+    const [detectorRows] = await connection.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM \`${schema}\`.coremeasurements
+       WHERE UploadFileID = ? AND SourceRowIndex < 0 AND Description IS NULL`,
+      [FILE_NAME]
+    );
+    console.log(`[test1] #454 detector (scoped to fixture file) n=${detectorRows[0].n}`);
+    expect(Number(detectorRows[0].n)).toBe(0);
   });
 
   // -------------------------------------------------------------------------
-  // Test 2: deleteUnresolvedRowsForBatchFamily scoped delete behavior.
+  // Test 2: sequential-path insert — proves insertPreparedIngestionFailureRowsSequential
+  // against real SQL. The bulk-metadata cases above (batchID set) never reach this
+  // code path; only a falsy batchID does.
+  // -------------------------------------------------------------------------
+
+  it('insertIngestionFailureRows with batchID: null takes the sequential insert path and round-trips Description/RawComments', async () => {
+    const reason = 'Unparseable date value: 31/13/2020';
+    const comments = 'sequential path note';
+
+    const transactionID = await connectionManager.beginTransaction();
+    const insertedIDs = await insertIngestionFailureRows(
+      connectionManager,
+      schema,
+      [
+        {
+          plotID,
+          censusID,
+          tag: 'T0400',
+          comments,
+          failureReason: reason,
+          fileID: FILE_NAME,
+          batchID: null,
+          sourceRowIndex: 1
+        }
+      ],
+      transactionID
+    );
+    await connectionManager.commitTransaction(transactionID);
+
+    console.log(`[test2] insertIngestionFailureRows (sequential path) returned insertedIDs=${JSON.stringify(insertedIDs)}`);
+    expect(insertedIDs).toHaveLength(1);
+
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT Description, RawComments, UploadBatchID, StemGUID
+       FROM \`${schema}\`.coremeasurements
+       WHERE CoreMeasurementID = ?`,
+      [insertedIDs[0]]
+    );
+    console.log(`[test2] sequential-path row: ${JSON.stringify(rows[0])}`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].UploadBatchID).toBeNull();
+    expect(rows[0].StemGUID).toBeNull();
+    expect(rows[0].Description).toBe(reason);
+    expect(rows[0].RawComments).toBe(comments);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 3: HTTP-shape (recordFailedMeasurementRows) — proves the batchedupload
+  // route's persistence boundary round-trips the actual wire shape, including
+  // the plural `failureReasons` field name.
+  // -------------------------------------------------------------------------
+
+  it('recordFailedMeasurementRows persists the HTTP wire shape { comments, failureReasons } verbatim', async () => {
+    const reason = 'Missing required fields: date';
+    const comments = 'route note';
+    const httpBatchID = `${BATCH_ID}__http`;
+
+    const transactionID = await connectionManager.beginTransaction();
+    const count = await recordFailedMeasurementRows(
+      connectionManager,
+      schema,
+      [{ tag: 'T0500', comments, failureReasons: reason } as FailedMeasurementsRDS],
+      FILE_NAME,
+      httpBatchID,
+      plotID,
+      censusID,
+      transactionID
+    );
+    await connectionManager.commitTransaction(transactionID);
+
+    console.log(`[test3] recordFailedMeasurementRows returned count=${count}`);
+    expect(count).toBe(1);
+
+    const recorded = await fetchRecordedRows(httpBatchID);
+    console.log(`[test3] HTTP-shape row: ${JSON.stringify(recorded)}`);
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0].RawTreeTag).toBe('T0500');
+    expect(recorded[0].Description).toBe(reason);
+    expect(recorded[0].RawComments).toBe(comments);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 4: deleteUnresolvedRowsForBatchFamily scoped delete behavior.
   // -------------------------------------------------------------------------
 
   it('deleteUnresolvedRowsForBatchFamily: returns count, clears unresolved rows, does not delete resolved or different-batch rows', async () => {
@@ -303,7 +419,7 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
     );
     await connectionManager.commitTransaction(txInsert);
 
-    console.log('[test2] seeded 2 unresolved rows under BATCH_ID');
+    console.log('[test4] seeded 2 unresolved rows under BATCH_ID');
 
     // Also insert a "resolved" control row under BATCH_ID with non-NULL StemGUID.
     // We need a real StemGUID — insert a stem that satisfies the FK, then insert
@@ -317,7 +433,7 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
       [censusID]
     );
     const treeID: number = treeInsertResult.insertId;
-    console.log(`[test2] inserted control tree treeID=${treeID}`);
+    console.log(`[test4] inserted control tree treeID=${treeID}`);
 
     const [stemInsertResult]: any = await connection.query(
       `INSERT INTO \`${schema}\`.stems (TreeID, StemTag, LocalX, LocalY, CensusID, IsActive)
@@ -325,7 +441,7 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
       [treeID, censusID]
     );
     const stemGUID: number = stemInsertResult.insertId;
-    console.log(`[test2] inserted control stem stemGUID=${stemGUID}`);
+    console.log(`[test4] inserted control stem stemGUID=${stemGUID}`);
 
     // Insert a resolved coremeasurement (StemGUID IS NOT NULL) under the same
     // BATCH_ID — this row must survive the delete.
@@ -335,13 +451,13 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
        VALUES (?, ?, '2024-01-01', 5.0, 1.3, ?, ?, 1)`,
       [censusID, stemGUID, FILE_NAME, BATCH_ID]
     );
-    console.log('[test2] inserted 1 resolved control row (StemGUID IS NOT NULL)');
+    console.log('[test4] inserted 1 resolved control row (StemGUID IS NOT NULL)');
 
     // Also record 1 unresolved row under a DIFFERENT batch — must survive the delete.
     const txOther = await connectionManager.beginTransaction();
     await recordInvalidRows(connectionManager, { ...ctx, batchID: OTHER_BATCH_ID }, [{ tag: 'T0299', failureReason: 'Other batch reject' }], txOther);
     await connectionManager.commitTransaction(txOther);
-    console.log('[test2] seeded 1 unresolved row under OTHER_BATCH_ID');
+    console.log('[test4] seeded 1 unresolved row under OTHER_BATCH_ID');
 
     // And 1 unresolved row under a SUB-BATCH of BATCH_ID — this one MUST be
     // deleted. An interrupted split leaves rows under `__subNNN`; a delete that
@@ -351,24 +467,24 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
     const txSub = await connectionManager.beginTransaction();
     await recordInvalidRows(connectionManager, { ...ctx, batchID: SUB_BATCH_ID }, [{ tag: 'T0298', failureReason: 'Sub-batch reject' }], txSub);
     await connectionManager.commitTransaction(txSub);
-    console.log(`[test2] seeded 1 unresolved row under ${SUB_BATCH_ID}`);
+    console.log(`[test4] seeded 1 unresolved row under ${SUB_BATCH_ID}`);
 
     // Run the delete.
     const txDelete = await connectionManager.beginTransaction();
     const deletedCount = await deleteUnresolvedRowsForBatchFamily(connectionManager, schema, FILE_NAME, BATCH_ID, censusID, txDelete);
     await connectionManager.commitTransaction(txDelete);
 
-    console.log(`[test2] deleteUnresolvedRowsForBatchFamily returned deletedCount=${deletedCount}`);
+    console.log(`[test4] deleteUnresolvedRowsForBatchFamily returned deletedCount=${deletedCount}`);
     // 2 under the original ID + 1 under its sub-batch.
     expect(deletedCount).toBe(3);
 
     const remainingSubBatch = await fetchRecordedRows(SUB_BATCH_ID);
-    console.log(`[test2] remaining rows under ${SUB_BATCH_ID} after delete: ${remainingSubBatch.length}`);
+    console.log(`[test4] remaining rows under ${SUB_BATCH_ID} after delete: ${remainingSubBatch.length}`);
     expect(remainingSubBatch).toHaveLength(0);
 
     // Verify the unresolved BATCH_ID rows are gone.
     const remainingBatch = await fetchRecordedRows(BATCH_ID);
-    console.log(`[test2] remaining rows under BATCH_ID after delete: ${remainingBatch.length}`);
+    console.log(`[test4] remaining rows under BATCH_ID after delete: ${remainingBatch.length}`);
     expect(remainingBatch).toHaveLength(0);
 
     // Verify the resolved row (StemGUID IS NOT NULL) under BATCH_ID survived.
@@ -377,18 +493,18 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
        WHERE UploadFileID = ? AND UploadBatchID = ? AND StemGUID IS NOT NULL`,
       [FILE_NAME, BATCH_ID]
     );
-    console.log(`[test2] resolved rows under BATCH_ID after delete: ${resolvedRows.length}`);
+    console.log(`[test4] resolved rows under BATCH_ID after delete: ${resolvedRows.length}`);
     expect(resolvedRows).toHaveLength(1);
 
     // Verify the OTHER_BATCH_ID row survived.
     const remainingOther = await fetchRecordedRows(OTHER_BATCH_ID);
-    console.log(`[test2] remaining rows under OTHER_BATCH_ID after delete: ${remainingOther.length}`);
+    console.log(`[test4] remaining rows under OTHER_BATCH_ID after delete: ${remainingOther.length}`);
     expect(remainingOther).toHaveLength(1);
     expect(remainingOther[0].RawTreeTag).toBe('T0299');
   });
 
   // -------------------------------------------------------------------------
-  // Test 3: Retry simulation — re-record after delete produces clean state.
+  // Test 5: Retry simulation — re-record after delete produces clean state.
   // -------------------------------------------------------------------------
 
   it('retry simulation: record → delete → re-record yields exactly the new rows', async () => {
@@ -406,37 +522,38 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
       txFirst
     );
     await connectionManager.commitTransaction(txFirst);
-    console.log(`[test3] first attempt recorded count=${firstCount}`);
+    console.log(`[test5] first attempt recorded count=${firstCount}`);
     expect(firstCount).toBe(2);
 
     const afterFirst = await fetchRecordedRows(BATCH_ID);
-    console.log(`[test3] rows after first attempt: ${afterFirst.length}`);
+    console.log(`[test5] rows after first attempt: ${afterFirst.length}`);
     expect(afterFirst).toHaveLength(2);
 
     // Retry cleanup: delete the first-attempt rows.
     const txCleanup = await connectionManager.beginTransaction();
     const cleanedCount = await deleteUnresolvedRowsForBatchFamily(connectionManager, schema, FILE_NAME, BATCH_ID, censusID, txCleanup);
     await connectionManager.commitTransaction(txCleanup);
-    console.log(`[test3] cleanup deleted count=${cleanedCount}`);
+    console.log(`[test5] cleanup deleted count=${cleanedCount}`);
     expect(cleanedCount).toBe(2);
 
     const afterCleanup = await fetchRecordedRows(BATCH_ID);
-    console.log(`[test3] rows after cleanup: ${afterCleanup.length}`);
+    console.log(`[test5] rows after cleanup: ${afterCleanup.length}`);
     expect(afterCleanup).toHaveLength(0);
 
     // Second attempt (retry): record 1 row (simulating fewer failures on retry).
     const txRetry = await connectionManager.beginTransaction();
     const retryCount = await recordInvalidRows(connectionManager, ctx, [{ tag: 'T0302', failureReason: 'Retry attempt error C' }], txRetry);
     await connectionManager.commitTransaction(txRetry);
-    console.log(`[test3] retry recorded count=${retryCount}`);
+    console.log(`[test5] retry recorded count=${retryCount}`);
     expect(retryCount).toBe(1);
 
     const afterRetry = await fetchRecordedRows(BATCH_ID);
-    console.log(`[test3] rows after retry: ${afterRetry.length} — ${JSON.stringify(afterRetry)}`);
+    console.log(`[test5] rows after retry: ${afterRetry.length} — ${JSON.stringify(afterRetry)}`);
     expect(afterRetry).toHaveLength(1);
     expect(afterRetry[0].RawTreeTag).toBe('T0302');
-    // No comments on this row — Description is null; failure reason is in measurement_error_log.
-    expect(afterRetry[0].Description).toBeNull();
+    // Description round-trips the verbatim failure reason (no comments on this row).
+    expect(afterRetry[0].Description).toBe('Retry attempt error C');
+    expect(afterRetry[0].RawComments).toBeNull();
     expect(afterRetry[0].StemGUID).toBeNull();
     expect(afterRetry[0].UploadBatchID).toBe(BATCH_ID);
     expect(afterRetry[0].CensusID).toBe(censusID);
@@ -444,7 +561,7 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
     const retryMeasurementID = await fetchCoreMeasurementID(FILE_NAME, BATCH_ID, 'T0302');
     expect(retryMeasurementID).not.toBeNull();
     const retryErrors = await fetchMeasurementErrors(retryMeasurementID!);
-    console.log(`[test3] retry row error_log entries: ${JSON.stringify(retryErrors)}`);
+    console.log(`[test5] retry row error_log entries: ${JSON.stringify(retryErrors)}`);
     expect(retryErrors.length).toBeGreaterThan(0);
   });
 });

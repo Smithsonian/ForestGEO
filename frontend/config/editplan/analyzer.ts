@@ -285,6 +285,8 @@ async function loadCurrentRow(
          s.StemGUID,
          s.LocalX AS StemLocalX,
          s.LocalY AS StemLocalY,
+         COALESCE(cm.RawPlotX, s.PlotX) AS StemPlotX,
+         COALESCE(cm.RawPlotY, s.PlotY) AS StemPlotY,
          q.QuadratName
        FROM ??.coremeasurements cm
        JOIN ??.census c ON c.CensusID = cm.CensusID

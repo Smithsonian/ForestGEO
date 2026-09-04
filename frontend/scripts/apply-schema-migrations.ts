@@ -103,6 +103,7 @@ export interface MigrationSource {
   file: string;
   contents: string;
   checksum: string;
+  failureCleanup?: readonly string[];
 }
 
 export interface LedgerRow {
@@ -187,7 +188,7 @@ export function loadMigrationSources(
       throw new MigrationFileMissingError(`Manifest migration file not found: ${filePath} (id ${entry.id})`);
     }
     const contents = fs.readFileSync(filePath, 'utf-8');
-    return { id: entry.id, file: entry.file, contents, checksum: sha256Hex(contents) };
+    return { id: entry.id, file: entry.file, contents, checksum: sha256Hex(contents), failureCleanup: entry.failureCleanup ?? [] };
   });
 }
 
@@ -324,6 +325,12 @@ export async function applyPendingMigrations(exec: SqlExecutor, schema: string, 
         appliedNow.push(source.id);
       } catch (error) {
         const summary = errorMessage(error).slice(0, ERROR_SUMMARY_MAX_LENGTH);
+        // DDL is not transactional. Some reviewed migrations create short-lived
+        // helper routines to raise runtime contract errors; an early SIGNAL
+        // skips the SQL file's trailing DROP, so clean those helpers here.
+        for (const cleanupStatement of source.failureCleanup ?? []) {
+          await exec(cleanupStatement).catch(() => undefined);
+        }
         // Best-effort failure record; never mask the original migration error.
         await recordLedgerEntry(exec, source.id, source.checksum, MIGRATION_STATUS.FAILED, summary).catch(() => undefined);
         return { schema, pendingBefore, appliedNow, failed: { id: source.id, error: errorMessage(error) } };

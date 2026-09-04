@@ -106,8 +106,8 @@ describe('Performance Benchmarks', () => {
       cy.visit('/admin/users');
       cy.wait('@page1');
 
-      // Should show page 1 data - check lastName input field value
-      cy.get('input[name="lastName"]', { timeout: 10000 }).first().should('have.value', 'Page1');
+      // Should show page 1 data - check the row's rendered lastName text
+      cy.contains('tr', 'user0@forestgeo.si.edu', { timeout: 10000 }).should('contain.text', 'Page1');
 
       cy.log('✅ Pagination working efficiently');
     });
@@ -450,7 +450,7 @@ describe('Performance Benchmarks', () => {
 
       cy.visit('/admin/users');
 
-      cy.get('input[name="firstName"]', { timeout: 10000 }).first().clear().type('Modified');
+      cy.editAdminUserRow('test@forestgeo.si.edu').find('input[name="firstName"]').clear().type('Modified');
 
       const saveStart = Date.now();
 
@@ -488,7 +488,7 @@ describe('Performance Benchmarks', () => {
 
       cy.visit('/admin/users');
 
-      cy.get('input[name="firstName"]', { timeout: 10000 }).first().clear().type('Modified');
+      cy.editAdminUserRow('test@forestgeo.si.edu').find('input[name="firstName"]').clear().type('Modified');
       cy.contains('button', 'Save Changes').click();
 
       // Should show loading/saving indicator immediately
@@ -535,7 +535,7 @@ describe('Performance Benchmarks', () => {
       cy.visit('/admin/users');
 
       // Rapid changes should be debounced
-      cy.get('input[name="firstName"]', { timeout: 10000 }).first().clear().type('A');
+      cy.editAdminUserRow('test@forestgeo.si.edu').find('input[name="firstName"]').clear().type('A');
       cy.get('input[name="firstName"]').first().type('B');
       cy.get('input[name="firstName"]').first().type('C');
 

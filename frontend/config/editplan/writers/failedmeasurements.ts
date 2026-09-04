@@ -101,10 +101,14 @@ export async function writeFailedMeasurements(cm: ConnectionManager, input: Appl
   const resolvedCodes = pickCanonical(changedFields, newValues, beforeRow, 'Codes', 'RawCodes', toOptionalString);
   const resolvedComments = pickCanonical(changedFields, newValues, beforeRow, 'Comments', 'RawComments', toOptionalString);
 
-  // Description mirrors RawComments on write (legacy PATCH passed Comments twice:
-  // once for RawComments, once for Description). Revalidation may overwrite it
-  // below with concatenated error messages.
-  const initialDescription = resolvedComments;
+  // Description is the reject-reason column, never a second copy of the user's
+  // comments — the legacy PATCH passed Comments twice (once for RawComments,
+  // once for Description), which made any edit of an unresolved row overwrite
+  // the recorded reason with the comment text, or with NULL when there was none.
+  // Clear it here and let revalidation below restate why the row is still
+  // unresolved, matching refreshIngestionErrorsForMeasurement, which likewise
+  // resolves the row's existing error links before re-linking what still fails.
+  const clearedDescription = null;
 
   // UploadFileID / UploadBatchID are intentionally not in the failedmeasurements
   // allowlist (fieldpolicy.ts), so rejectDisallowedFields blocks any caller from
@@ -133,7 +137,7 @@ export async function writeFailedMeasurements(cm: ConnectionManager, input: Appl
       resolvedDate,
       resolvedCodes,
       resolvedComments,
-      initialDescription,
+      clearedDescription,
       coreMeasurementID
     ],
     txID

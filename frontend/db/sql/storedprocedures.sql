@@ -35,6 +35,8 @@ BEGIN
                                             StemTag,
                                             StemLocalX,
                                             StemLocalY,
+                                            StemPlotX,
+                                            StemPlotY,
                                             QuadratName,
                                             MeasurementDate,
                                             MeasuredDBH,
@@ -59,6 +61,11 @@ BEGIN
            COALESCE(st.StemTag, cm.RawStemTag)                  AS StemTag,
            COALESCE(st.LocalX, cm.RawX)                         AS StemLocalX,
            COALESCE(st.LocalY, cm.RawY)                         AS StemLocalY,
+           -- Reverse of the local-coordinate precedence above: for plot coordinates
+           -- the row-level upload snapshot wins, so a row that disagreed with an
+           -- already-populated stem still displays the value that triggered validation 19.
+           COALESCE(cm.RawPlotX, st.PlotX)                      AS StemPlotX,
+           COALESCE(cm.RawPlotY, st.PlotY)                      AS StemPlotY,
            COALESCE(q.QuadratName, cm.RawQuadrat)               AS QuadratName,
            cm.MeasurementDate                                   AS MeasurementDate,
            cm.MeasuredDBH                                       AS MeasuredDBH,
@@ -157,6 +164,8 @@ BEGIN
                                       StemTag,
                                       StemLocalX,
                                       StemLocalY,
+                                      StemPlotX,
+                                      StemPlotY,
                                       SpeciesID,
                                       SpeciesCode,
                                       SpeciesName,
@@ -214,6 +223,11 @@ BEGIN
            COALESCE(s.StemTag, cm.RawStemTag)                  AS StemTag,
            COALESCE(s.LocalX, cm.RawX)                         AS StemLocalX,
            COALESCE(s.LocalY, cm.RawY)                         AS StemLocalY,
+           -- Reverse of the local-coordinate precedence above: for plot coordinates
+           -- the row-level upload snapshot wins, so a row that disagreed with an
+           -- already-populated stem still displays the value that triggered validation 19.
+           COALESCE(cm.RawPlotX, s.PlotX)                      AS StemPlotX,
+           COALESCE(cm.RawPlotY, s.PlotY)                      AS StemPlotY,
            sp.SpeciesID                                        AS SpeciesID,
            COALESCE(sp.SpeciesCode, cm.RawSpCode)              AS SpeciesCode,
            sp.SpeciesName                                      AS SpeciesName,
@@ -1448,6 +1462,15 @@ and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
             'CALL RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 0, 1);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
+    -- Seeded disabled, like the migration and corequeries.sql. Validation 19 is
+    -- turned on per site through `npm run activate:validation19`, which verifies
+    -- the helper procedure and error row first.
+    VALUES (19, 'ValidatePlotCoordinateConsistency',
+            'Plot coordinate disagrees with the quadrat''s own median offset',
+            'stemPlotX;stemPlotY;stemLocalX;stemLocalY;quadratName;treeTag;stemTag',
+            'CALL RunPlotCoordinateConsistencyValidation(@p_CensusID, @p_PlotID);', '', false);
+    INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
+                                         ChangelogDefinition, IsEnabled)
     VALUES (12, 'ValidateScreenStemsWithMeasurementsButDeadAttributes',
             'Invalid DBH;Invalid HOM;DEAD-state attribute(s)',
             'measuredDBH;measuredHOM;attributes', 'insert into measurement_error_log (MeasurementID, ErrorID)
@@ -1553,7 +1576,7 @@ DELIMITER ;
 DROP PROCEDURE IF EXISTS bulkingestionprocess;
 DELIMITER $$
 
-CREATE PROCEDURE bulkingestionprocess(IN vFileID varchar(36), IN vBatchID varchar(36))
+CREATE PROCEDURE bulkingestionprocess(IN vFileID varchar(50), IN vBatchID varchar(36))
 SQL SECURITY DEFINER
 main_proc:
 BEGIN
@@ -1645,7 +1668,7 @@ BEGIN
             INSERT IGNORE INTO coremeasurements
                 (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
                  Description, UploadFileID, UploadBatchID,
-                 RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+                 RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY,
                  RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)
             SELECT
                 (SELECT CensusID FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID LIMIT 1),
@@ -1654,14 +1677,16 @@ BEGIN
                 LEFT(CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150)), 255),
                 vFileID, vBatchID,
                 NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
-                LocalX, LocalY, NULLIF(Codes, ''), PublishedStemID, NULLIF(Comments, ''),
+                LocalX, LocalY, PlotX, PlotY, NULLIF(Codes, ''), PublishedStemID, NULLIF(Comments, ''),
                 id, 1
             FROM temporarymeasurements
             WHERE FileID = vFileID AND BatchID = vBatchID
             ON DUPLICATE KEY UPDATE
                 IsValidated = FALSE,
                 Description = VALUES(Description),
-                RawPublishedStemID = VALUES(RawPublishedStemID);
+                RawPublishedStemID = VALUES(RawPublishedStemID),
+                RawPlotX = VALUES(RawPlotX),
+                RawPlotY = VALUES(RawPlotY);
 
             -- Link to error log
             INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
@@ -1680,7 +1705,7 @@ BEGIN
                 classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
                 requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
                 prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
-                current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
+                current_tree_lookup, stem_resolution_rows, stem_insert_candidates, stem_plotcoord_pick,
                 unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
                 published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
                 core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
@@ -1909,7 +1934,7 @@ BEGIN
         classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
         requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
         prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
-        current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
+        current_tree_lookup, stem_resolution_rows, stem_insert_candidates, stem_plotcoord_pick,
         unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
         published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
         core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
@@ -1961,8 +1986,6 @@ BEGIN
                    CONCAT('Invalid HOM: ', tm.HOM, ' (must be >= 0 or NULL)'), NULL),
                IF(COALESCE(tm.SourceFormat, 'csv') = 'arcgis_xlsx' AND tm.LocalX IS NULL, 'Missing required field: LocalX', NULL),
                IF(COALESCE(tm.SourceFormat, 'csv') = 'arcgis_xlsx' AND tm.LocalY IS NULL, 'Missing required field: LocalY', NULL),
-               IF(tm.LocalX < 0, CONCAT('Invalid LocalX: ', tm.LocalX), NULL),
-               IF(tm.LocalY < 0, CONCAT('Invalid LocalY: ', tm.LocalY), NULL),
                IF(tm.DBH = 0 AND tm.HOM = 0 AND (tm.Codes IS NULL OR TRIM(tm.Codes) = ''),
                    'Missing measurement data: DBH and HOM both 0 with no codes', NULL)
            ), 255) AS FailureReason
@@ -1984,7 +2007,6 @@ BEGIN
         UNION ALL SELECT 'Missing required field: LocalX', 'MISSING_FIELD_LOCALX'
         UNION ALL SELECT 'Missing required field: LocalY', 'MISSING_FIELD_LOCALY'
         UNION ALL SELECT 'Missing measurement data', 'MISSING_MEASUREMENT_DATA'
-        UNION ALL SELECT 'Invalid Local', 'INVALID_COORDINATE'
         UNION ALL SELECT 'exceeds maximum length', 'FIELD_TOO_LONG'
         UNION ALL SELECT 'Invalid DBH', 'NEGATIVE_DBH'
         UNION ALL SELECT 'Invalid HOM', 'NEGATIVE_HOM'
@@ -2027,7 +2049,19 @@ BEGIN
            NULLIF(GROUP_CONCAT(DISTINCT CASE WHEN Codes IS NOT NULL AND TRIM(Codes) != '' THEN TRIM(Codes) END
                    ORDER BY Codes SEPARATOR ';'), '') AS Codes,
            NULLIF(GROUP_CONCAT(DISTINCT CASE WHEN Comments IS NOT NULL AND TRIM(Comments) != '' THEN TRIM(Comments) END
-                   ORDER BY Comments SEPARATOR ' | '), '') AS Comments
+                   ORDER BY Comments SEPARATOR ' | '), '') AS Comments,
+           -- PlotX/PlotY are deliberately NOT part of the dedup key (GROUP BY) below: they
+           -- carry no measurement identity, and adding them would split otherwise-identical
+           -- duplicate rows into separate "duplicates" whenever they disagreed only on plot
+           -- metadata. Instead, pick the lowest-id non-NULL value independently per axis;
+           -- GROUP_CONCAT skips NULL inputs, so SUBSTRING_INDEX(..., 1) is "the id-lowest row
+           -- (within this duplicate group) that actually supplied that axis".
+           CAST(NULLIF(SUBSTRING_INDEX(
+             GROUP_CONCAT(CASE WHEN PlotX IS NOT NULL THEN CAST(PlotX AS CHAR) END ORDER BY id SEPARATOR ','),
+             ',', 1), '') AS DECIMAL(12,6)) AS PlotX,
+           CAST(NULLIF(SUBSTRING_INDEX(
+             GROUP_CONCAT(CASE WHEN PlotY IS NOT NULL THEN CAST(PlotY AS CHAR) END ORDER BY id SEPARATOR ','),
+             ',', 1), '') AS DECIMAL(12,6)) AS PlotY
     FROM temporarymeasurements
     WHERE FileID = vFileID AND BatchID = vBatchID AND CensusID = vCurrentCensusID
       -- validation_failures is the only pre-dedup failure source; hard_failure_rows
@@ -2204,7 +2238,7 @@ BEGIN
     CREATE TEMPORARY TABLE filter_validity AS
     SELECT i.id, i.FileID, i.BatchID, i.PlotID, i.CensusID, i.TreeTag,
            IFNULL(i.StemTag, '') AS StemTag, i.SpeciesCode, i.QuadratName,
-           i.LocalX, i.LocalY,
+           i.LocalX, i.LocalY, i.PlotX, i.PlotY,
            IFNULL(i.DBH, 0) AS DBH, IFNULL(i.HOM, 0) AS HOM,
            i.MeasurementDate, i.Codes, i.Comments, i.PublishedStemID,
            CASE
@@ -2634,8 +2668,7 @@ BEGIN
            cf.StemTag,
            cf.SpeciesCode,
            cf.QuadratName,
-           cf.LocalX,
-           cf.LocalY,
+           cf.LocalX, cf.LocalY, cf.PlotX, cf.PlotY,
            cf.DBH,
            cf.HOM,
            cf.MeasurementDate,
@@ -2702,22 +2735,53 @@ BEGIN
                WHEN TRIM(COALESCE(srr.StemTag, '')) = '' THEN NULL
                ELSE TRIM(srr.StemTag)
            END AS StemTag,
-           srr.LocalX,
-           srr.LocalY
+           srr.LocalX, srr.LocalY
     FROM stem_resolution_rows srr;
 
     CREATE INDEX idx_stem_insert_candidates_key
         ON stem_insert_candidates (TreeID, CensusID, StemTag);
 
+    -- Deterministic plot-coordinate pick: the value from the lowest stem_resolution_rows.id
+    -- that supplies each axis, chosen independently per axis (a row can supply PlotX and not
+    -- PlotY, or vice versa). This is scoped to THIS batch's contributing rows, same as the
+    -- StemCrossID/PublishedStemID inheritance above. Shared by both the new-stem INSERT and
+    -- the existing-stem catch-up UPDATE below so the two paths agree on the same values.
+    --
+    -- Resolved to a VALUE here (not an id joined back against stem_resolution_rows) because
+    -- MySQL rejects referencing the same TEMPORARY TABLE twice in one statement ("Can't reopen
+    -- table") — the natural "MIN(id) per axis, then LEFT JOIN stem_resolution_rows AS sx / AS sy
+    -- to fetch each axis's value" shape needs two such references and does not run. GROUP_CONCAT
+    -- skips NULL inputs, so SUBSTRING_INDEX(..., 1) is "the id-lowest contributing row that
+    -- actually supplied that axis" — the same technique used for initial_dup_filter above.
+    CREATE TEMPORARY TABLE stem_plotcoord_pick AS
+    SELECT TreeID, StemTag, CensusID,
+           CAST(NULLIF(SUBSTRING_INDEX(
+             GROUP_CONCAT(CASE WHEN PlotX IS NOT NULL THEN CAST(PlotX AS CHAR) END ORDER BY id SEPARATOR ','),
+             ',', 1), '') AS DECIMAL(12,6)) AS PlotX,
+           CAST(NULLIF(SUBSTRING_INDEX(
+             GROUP_CONCAT(CASE WHEN PlotY IS NOT NULL THEN CAST(PlotY AS CHAR) END ORDER BY id SEPARATOR ','),
+             ',', 1), '') AS DECIMAL(12,6)) AS PlotY
+    FROM stem_resolution_rows
+    GROUP BY TreeID, StemTag, CensusID;
+
+    CREATE INDEX idx_stem_plotcoord_pick_key
+        ON stem_plotcoord_pick (TreeID, CensusID, StemTag);
+
     -- Inline StemCrossID/PublishedStemID inheritance: set the previous census's values at INSERT time for stems with an unambiguous previous-census match.
-    INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)
+    -- PlotX/PlotY are sourced independently from stem_plotcoord_pick rather than
+    -- from the DISTINCT stem candidate projection.
+    INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, PlotX, PlotY, Moved, StemDescription, IsActive)
     SELECT sic.TreeID, sic.QuadratID, sic.CensusID, sic.StemCrossID, sic.PublishedStemID,
-           sic.StemTag, sic.LocalX, sic.LocalY, 0, NULL, 1
+           sic.StemTag, sic.LocalX, sic.LocalY, pick.PlotX, pick.PlotY, 0, NULL, 1
     FROM stem_insert_candidates sic
     LEFT JOIN stems s_existing
         ON s_existing.TreeID = sic.TreeID
         AND s_existing.CensusID = sic.CensusID
         AND s_existing.StemTag <=> sic.StemTag
+    LEFT JOIN stem_plotcoord_pick pick
+        ON pick.TreeID = sic.TreeID
+        AND pick.StemTag <=> sic.StemTag
+        AND pick.CensusID = sic.CensusID
     WHERE s_existing.StemGUID IS NULL;
 
     -- Catch-up fill for stems that already existed in the current census (skipped by INSERT IGNORE above).
@@ -2730,6 +2794,16 @@ BEGIN
     SET s.PublishedStemID = sic.PublishedStemID
     WHERE s.PublishedStemID IS NULL
       AND sic.PublishedStemID IS NOT NULL;
+
+    -- Fill-only, per axis, lowest contributing staging id. Never overwrites a stored value:
+    -- the incoming number remains visible on coremeasurements.RawPlotX/RawPlotY, and validation 19
+    -- operates on those row-level values, so a disagreement stays detectable.
+    UPDATE stems s
+    INNER JOIN stem_plotcoord_pick pick
+        ON pick.TreeID = s.TreeID AND pick.StemTag <=> s.StemTag AND pick.CensusID = s.CensusID
+    SET s.PlotX = COALESCE(s.PlotX, pick.PlotX),
+        s.PlotY = COALESCE(s.PlotY, pick.PlotY)
+    WHERE s.PlotX IS NULL OR s.PlotY IS NULL;
 
     CREATE TEMPORARY TABLE current_stem_lookup AS
     SELECT DISTINCT srr.id,
@@ -2784,8 +2858,7 @@ BEGIN
            srr.StemTag,
            srr.SpeciesCode,
            srr.QuadratName,
-           srr.LocalX,
-           srr.LocalY,
+           srr.LocalX, srr.LocalY, srr.PlotX, srr.PlotY,
            srr.DBH,
            srr.HOM,
            srr.MeasurementDate,
@@ -3114,7 +3187,7 @@ BEGIN
 
     INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
                                   Description, UserDefinedFields, UploadFileID, UploadBatchID,
-                                  RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+                                  RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY,
                                   RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)
     SELECT cic.CensusID, cic.StemGUID, NULL,
            cic.MeasurementDate,
@@ -3132,7 +3205,7 @@ BEGIN
            vFileID,
            vBatchID,
            cic.TreeTag, cic.StemTag, cic.SpeciesCode, cic.QuadratName,
-           cic.LocalX, cic.LocalY, cic.Codes, cic.PublishedStemID, cic.Comments,
+           cic.LocalX, cic.LocalY, cic.PlotX, cic.PlotY, cic.Codes, cic.PublishedStemID, cic.Comments,
            cic.id,
            1
     FROM core_insert_candidates cic
@@ -3203,14 +3276,14 @@ BEGIN
     INSERT IGNORE INTO coremeasurements
         (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
          Description, UploadFileID, UploadBatchID,
-         RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+         RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY,
          RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)
     SELECT vCurrentCensusID, NULL, FALSE,
            NULLIF(tm.MeasurementDate, '1900-01-01'), NULLIF(tm.DBH, 0), NULLIF(tm.HOM, 0),
            grouped_failures.FailureReason,
            vFileID, vBatchID,
            NULLIF(tm.TreeTag, ''), NULLIF(tm.StemTag, ''), NULLIF(tm.SpeciesCode, ''), NULLIF(tm.QuadratName, ''),
-           tm.LocalX, tm.LocalY, NULLIF(tm.Codes, ''), tm.PublishedStemID, NULLIF(tm.Comments, ''),
+           tm.LocalX, tm.LocalY, tm.PlotX, tm.PlotY, NULLIF(tm.Codes, ''), tm.PublishedStemID, NULLIF(tm.Comments, ''),
            tm.id, 1
     FROM (
         SELECT SourceRowIndex,
@@ -3229,7 +3302,9 @@ BEGIN
     ON DUPLICATE KEY UPDATE
         IsValidated = FALSE,
         Description = VALUES(Description),
-        RawPublishedStemID = VALUES(RawPublishedStemID);
+        RawPublishedStemID = VALUES(RawPublishedStemID),
+        RawPlotX = VALUES(RawPlotX),
+        RawPlotY = VALUES(RawPlotY);
 
     INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
     SELECT DISTINCT cm.CoreMeasurementID, me.ErrorID, FALSE
@@ -3362,7 +3437,7 @@ BEGIN
         classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
         requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
         prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
-        current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
+        current_tree_lookup, stem_resolution_rows, stem_insert_candidates, stem_plotcoord_pick,
         unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
         published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
         core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
@@ -3423,7 +3498,7 @@ BEGIN
             classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
             requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
             prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
-            current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
+            current_tree_lookup, stem_resolution_rows, stem_insert_candidates, stem_plotcoord_pick,
             unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
             published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
             core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
@@ -3479,6 +3554,133 @@ BEGIN
                vSoftValidationMs AS soft_validation_ms,
                TIMESTAMPDIFF(MICROSECOND, vProcStart, NOW(6)) DIV 1000 AS total_duration_ms;
     END IF;
+END $$
+
+DELIMITER ;
+
+DROP PROCEDURE IF EXISTS RunPlotCoordinateConsistencyValidation;
+DELIMITER $$
+
+CREATE PROCEDURE RunPlotCoordinateConsistencyValidation(IN p_CensusID INT, IN p_PlotID INT)
+SQL SECURITY DEFINER
+BEGIN
+    -- Flags a measurement whose supplied plot coordinate disagrees with its OWN quadrat's median
+    -- offset. Comparing against the quadrat rather than against StartX+LocalX directly is what makes
+    -- this usable: a plot whose stored origins are the nominal grid has a constant non-zero offset
+    -- in every quadrat, which is normal, not an error. The median resists isolated outliers so one
+    -- mis-assigned stem cannot move the baseline it is measured against.
+    DECLARE v_scale DECIMAL(20,10);
+    DECLARE v_units VARCHAR(8);
+    DECLARE v_error_id INT;
+    -- PLOT_COORDINATE_OUTLIER_METRES from the spec. Not site-configurable in v1: a delegated
+    -- CALL cannot reach a constant inside the helper it calls.
+    DECLARE v_outlier_metres DECIMAL(10,4) DEFAULT 1.0;
+
+    -- The validation runner returns connections to a pool. Temporary tables survive transaction
+    -- rollback and connection release, so every exceptional exit must clean them before RESIGNAL.
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        DROP TEMPORARY TABLE IF EXISTS plot_coord_offsets;
+        DROP TEMPORARY TABLE IF EXISTS plot_coord_medians;
+        RESIGNAL;
+    END;
+
+    IF p_PlotID IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+          SET MESSAGE_TEXT = 'RunPlotCoordinateConsistencyValidation: PlotID is required to resolve dimension units';
+    END IF;
+
+    SELECT DefaultDimensionUnits INTO v_units FROM plots WHERE PlotID = p_PlotID;
+    SET v_scale = CASE v_units
+        WHEN 'km' THEN 1000 WHEN 'hm' THEN 100 WHEN 'dam' THEN 10 WHEN 'm' THEN 1
+        WHEN 'dm' THEN 0.1  WHEN 'cm' THEN 0.01 WHEN 'mm' THEN 0.001 ELSE NULL END;
+
+    IF v_scale IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+          SET MESSAGE_TEXT = 'RunPlotCoordinateConsistencyValidation: plot has unknown or NULL dimension unit; refusing to guess';
+    END IF;
+
+    SELECT ErrorID INTO v_error_id FROM measurement_errors
+     WHERE ErrorSource = 'validation' AND ErrorCode = '19' LIMIT 1;
+
+    IF v_error_id IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+          SET MESSAGE_TEXT = 'RunPlotCoordinateConsistencyValidation: measurement_errors row for validation 19 is missing';
+    END IF;
+
+    DROP TEMPORARY TABLE IF EXISTS plot_coord_offsets;
+    CREATE TEMPORARY TABLE plot_coord_offsets AS
+    SELECT cm.CoreMeasurementID,
+           cm.CensusID,
+           s.QuadratID,
+           (cm.RawPlotX - (q.StartX + s.LocalX)) * v_scale AS off_x,
+           (cm.RawPlotY - (q.StartY + s.LocalY)) * v_scale AS off_y
+    FROM coremeasurements cm
+    JOIN census c    ON c.CensusID = cm.CensusID AND c.IsActive IS TRUE
+    JOIN stems s     ON s.StemGUID = cm.StemGUID AND s.CensusID = cm.CensusID AND s.IsActive IS TRUE
+    JOIN quadrats q  ON q.QuadratID = s.QuadratID AND q.IsActive IS TRUE
+    WHERE cm.IsActive IS TRUE
+      -- Validation 19 judges what this upload row supplied. The stem fallback belongs only
+      -- to read/display models; using it here would turn omitted axes into false contributors.
+      AND cm.RawPlotX IS NOT NULL
+      AND cm.RawPlotY IS NOT NULL
+      AND s.LocalX IS NOT NULL AND s.LocalY IS NOT NULL
+      AND q.StartX IS NOT NULL AND q.StartY IS NOT NULL
+      AND (p_CensusID IS NULL OR cm.CensusID = p_CensusID)
+      AND (p_PlotID   IS NULL OR c.PlotID   = p_PlotID);
+
+    CREATE INDEX idx_pco_census_quadrat ON plot_coord_offsets (CensusID, QuadratID);
+
+    -- Component-wise median via deterministic ROW_NUMBER/COUNT windows. Averaging the two middle
+    -- values on an even count keeps the result stable; a mode over rounded continuous values could
+    -- tie arbitrarily and produce different answers on identical data.
+    DROP TEMPORARY TABLE IF EXISTS plot_coord_medians;
+    CREATE TEMPORARY TABLE plot_coord_medians AS
+    SELECT CensusID,
+           QuadratID,
+           AVG(CASE WHEN rx IN (FLOOR((n + 1) / 2), CEIL((n + 1) / 2)) THEN off_x END) AS med_x,
+           AVG(CASE WHEN ry IN (FLOOR((n + 1) / 2), CEIL((n + 1) / 2)) THEN off_y END) AS med_y
+    FROM (
+        SELECT CensusID, QuadratID, off_x, off_y,
+               ROW_NUMBER() OVER (PARTITION BY CensusID, QuadratID ORDER BY off_x, CoreMeasurementID) AS rx,
+               ROW_NUMBER() OVER (PARTITION BY CensusID, QuadratID ORDER BY off_y, CoreMeasurementID) AS ry,
+               COUNT(*)     OVER (PARTITION BY CensusID, QuadratID)                                     AS n
+        FROM plot_coord_offsets
+    ) ranked
+    WHERE n >= 3
+    GROUP BY CensusID, QuadratID;
+
+    CREATE INDEX idx_pcm_census_quadrat ON plot_coord_medians (CensusID, QuadratID);
+
+    INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
+    SELECT o.CoreMeasurementID, v_error_id, FALSE
+    FROM plot_coord_offsets o
+    JOIN plot_coord_medians m ON m.CensusID = o.CensusID AND m.QuadratID = o.QuadratID
+    WHERE SQRT(POW(o.off_x - m.med_x, 2) + POW(o.off_y - m.med_y, 2)) > v_outlier_metres
+    ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;
+
+    -- Clear only stale validation-19 links in this execution scope. Do this after the
+    -- outlier upsert so an INSERT failure leaves old errors unresolved (fail-safe).
+    UPDATE measurement_error_log l
+    JOIN coremeasurements cm ON cm.CoreMeasurementID = l.MeasurementID
+    JOIN census c ON c.CensusID = cm.CensusID
+       SET l.IsResolved = TRUE,
+           l.ResolvedAt = CURRENT_TIMESTAMP
+     WHERE l.ErrorID = v_error_id
+       AND cm.IsActive IS TRUE
+       AND (p_CensusID IS NULL OR cm.CensusID = p_CensusID)
+       AND c.PlotID = p_PlotID
+       AND NOT EXISTS (
+           SELECT 1
+           FROM plot_coord_offsets o
+           JOIN plot_coord_medians m
+             ON m.CensusID = o.CensusID AND m.QuadratID = o.QuadratID
+           WHERE o.CoreMeasurementID = cm.CoreMeasurementID
+             AND SQRT(POW(o.off_x - m.med_x, 2) + POW(o.off_y - m.med_y, 2)) > v_outlier_metres
+       );
+
+    DROP TEMPORARY TABLE IF EXISTS plot_coord_offsets;
+    DROP TEMPORARY TABLE IF EXISTS plot_coord_medians;
 END $$
 
 DELIMITER ;

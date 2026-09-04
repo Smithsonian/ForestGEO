@@ -23,11 +23,13 @@
  * loop moves the remaining rows to unresolved coremeasurements.
  */
 
+import crypto from 'crypto';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
+import type { SystemFailureKind } from '@/config/measurementerrors';
 import { buildSubBatchID, buildSubBatchPattern, discoverBatchFamily, highestSubBatchOrdinal, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { isKilledConnectionError, isKilledStatementError, QueryTimeoutError } from '@/lib/db/primitives';
 
@@ -90,6 +92,21 @@ const MYSQL_ERRNO_DEADLOCK = 1213; // ER_LOCK_DEADLOCK
  * ECONNRESET and CR_SERVER_LOST/2013 (network-layer loss) stay retryable.
  */
 const PROTOCOL_CONNECTION_LOST_CODE = 'PROTOCOL_CONNECTION_LOST';
+
+/**
+ * MySQL GET_LOCK names may not exceed 64 characters. Hash the full logical
+ * scope so a long filename cannot make lock acquisition fail, and include the
+ * schema so equivalent file/plot/census values at different sites do not
+ * serialize one another in the server-global advisory-lock namespace.
+ */
+export function buildIngestionLockName(schema: string, fileID: string, plotID: number, censusID: number): string {
+  const digest = crypto
+    .createHash('sha256')
+    .update(JSON.stringify([schema, fileID, plotID, censusID]))
+    .digest('hex')
+    .slice(0, 40);
+  return `upload:file:${digest}`;
+}
 
 /**
  * Thrown when the caller's isAborted probe fires between sub-batches.
@@ -569,7 +586,14 @@ async function processSubBatch(
     : `all ${MAX_ATTEMPTS_PER_SUBBATCH} attempts failed`;
 
   ailogger.error(`Sub-batch ${subBatchID} giving up: ${attemptSummary}`);
-  const movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, subBatchID, `Sub-batch moved after ${attemptSummary}`);
+  const movedRows = await moveTemporaryBatchToFailedMeasurements(
+    connectionManager,
+    schema,
+    fileID,
+    subBatchID,
+    `Sub-batch moved after ${attemptSummary}`,
+    'sql_exception'
+  );
   ailogger.warn(`Moved ${movedRows} rows from sub-batch ${subBatchID} to unresolved coremeasurements (${attemptSummary})`);
 
   return {
@@ -614,7 +638,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       const totalRows = family.totalRows;
 
       // Acquire lock for setup phase
-      const lockKey = `upload:file:${fileID}:plot:${currentPlotID}:census:${currentCensusID}`;
+      const lockKey = buildIngestionLockName(schema, fileID, currentPlotID, currentCensusID);
       const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, tx.id, lockTimeoutMs);
       if (!lockAcquired) {
         throw new Error(`Failed to acquire application lock for file ${fileID}. Another upload may be in progress.`);
@@ -711,6 +735,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       }
 
       const failureReason = isMidBatchAbort ? 'Batch cancelled before completion' : `Sub-batch abandoned after unrecoverable error: ${subError.message}`;
+      const failureKind: SystemFailureKind = isMidBatchAbort ? 'interrupted_upload' : 'sql_exception';
 
       // Move all remaining sub-batches in a single transaction so cleanup
       // is atomic — either every remaining sub-batch is moved to failures
@@ -725,6 +750,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
             fileID,
             subBatchIDs[j],
             failureReason,
+            failureKind,
             cleanupTransactionID
           );
           results.push({

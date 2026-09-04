@@ -12,6 +12,7 @@ import {
   createTestPool,
   seedCatalogTables,
   clearProvisioningState,
+  suppressBackgroundDispatch,
   seedRun,
   seedSteps,
   makeRequest,
@@ -39,16 +40,16 @@ const TEST_SCHEMA = TEST_SCHEMA_PREFIX + 'retry';
 const URL_FOR = (runId: string) => `http://test/api/admin/provision/${runId}/retry`;
 
 describe('POST /api/admin/provision/[runId]/retry (integration)', () => {
-  let setImmediateSpy: ReturnType<typeof vi.spyOn>;
+  let setImmediateSpy: ReturnType<typeof suppressBackgroundDispatch>;
 
   beforeAll(async () => {
     testPool = createTestPool();
     await seedCatalogTables(testPool);
-    setImmediateSpy = vi.spyOn(globalThis, 'setImmediate').mockImplementation(((_cb: any) => 0) as any);
   });
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    setImmediateSpy = suppressBackgroundDispatch();
     await clearProvisioningState(testPool, TEST_SCHEMA);
   });
 

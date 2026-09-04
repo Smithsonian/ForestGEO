@@ -46,7 +46,7 @@ SET SESSION innodb_change_buffering = all;
 DROP PROCEDURE IF EXISTS bulkingestionprocess_monitored;
 
 DELIMITER $$
-CREATE PROCEDURE bulkingestionprocess_monitored(IN vFileID varchar(36), IN vBatchID varchar(36))
+CREATE PROCEDURE bulkingestionprocess_monitored(IN vFileID varchar(50), IN vBatchID varchar(36))
 BEGIN
     DECLARE start_time TIMESTAMP DEFAULT NOW(6);
     DECLARE end_time TIMESTAMP;

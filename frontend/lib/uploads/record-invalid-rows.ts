@@ -15,7 +15,7 @@
 
 import moment from 'moment/moment';
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { insertIngestionFailureRows, toFiniteNumber } from '@/config/measurementerrors';
+import { insertIngestionFailureRows, normalizeFailureDescription, toFiniteNumber } from '@/config/measurementerrors';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { FileRow } from '@/config/macros/formdetails';
 import { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
@@ -54,8 +54,9 @@ export interface InvalidRowContext {
  *
  * Mirrors the mapping that the old async worker (insertInvalidMeasurementRows,
  * git e01cdb33) used before it was removed: lx→x, ly→y; date formatted as
- * YYYY-MM-DD via moment when present; failureReason defaulting to
- * "Unknown parse error" when absent.
+ * YYYY-MM-DD via moment when present; failureReason is passed through as-is
+ * (null when absent) — insertIngestionFailureRows (the persistence choke
+ * point) owns the fallback policy, not this caller.
  *
  * Returns the count of rows recorded (0 when rows is empty).
  */
@@ -77,12 +78,14 @@ export async function recordInvalidRows(
     quadrat: row.quadrat || null,
     x: toFiniteNumber(row.lx),
     y: toFiniteNumber(row.ly),
+    plotX: toFiniteNumber(row.px),
+    plotY: toFiniteNumber(row.py),
     dbh: toFiniteNumber(row.dbh),
     hom: toFiniteNumber(row.hom),
     date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
     codes: row.codes || null,
     comments: row.comments || null,
-    failureReason: row.failureReason ? String(row.failureReason) : 'Unknown parse error',
+    failureReason: row.failureReason ? String(row.failureReason) : null,
     fileID: ctx.fileName,
     batchID: ctx.batchID,
     sourceRowIndex: idx + 1 + offset
@@ -120,16 +123,25 @@ export async function recordFailedMeasurementRows(
     stemTag: row.stemTag ?? null,
     spCode: row.spCode ?? null,
     quadrat: row.quadrat ?? null,
-    x: row.x ?? null,
-    y: row.y ?? null,
-    dbh: row.dbh ?? null,
-    hom: row.hom ?? null,
+    // This function is the HTTP route's persistence boundary. Do not trust the
+    // compile-time DTO: rejected CSV values can still be strings at runtime.
+    // Normalize exactly as the worker path does, including preserving zero.
+    x: toFiniteNumber(row.x),
+    y: toFiniteNumber(row.y),
+    plotX: toFiniteNumber(row.plotX),
+    plotY: toFiniteNumber(row.plotY),
+    dbh: toFiniteNumber(row.dbh),
+    hom: toFiniteNumber(row.hom),
     date: row.date ?? null,
     codes: row.codes ?? null,
-    comments: row.description ?? null,
-    failureReason: row.failureReasons ?? 'Unknown error',
-    fileID: row.fileID ?? fileID,
-    batchID: row.batchID ?? batchID,
+    comments: row.comments ?? null,
+    failureReason:
+      row.failureReasons == null ? null : typeof row.failureReasons === 'string' ? row.failureReasons : normalizeFailureDescription(row.failureReasons),
+    // File and batch identity are server-owned. A client can include these
+    // fields in a DTO-shaped JSON row, but must not redirect persistence to a
+    // different upload family.
+    fileID,
+    batchID,
     sourceRowIndex: idx + 1
   }));
 

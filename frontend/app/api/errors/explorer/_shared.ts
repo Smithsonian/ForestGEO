@@ -37,6 +37,8 @@ export interface RawErrorOccurrenceRow {
   QuadratName?: string | null;
   StemLocalX?: number | null;
   StemLocalY?: number | null;
+  StemPlotX?: number | null;
+  StemPlotY?: number | null;
   MeasurementDate?: string | Date | null;
   MeasuredDBH?: number | null;
   MeasuredHOM?: number | null;
@@ -179,6 +181,8 @@ function buildRawErrorsQuery(schema: string): string {
             ms.QuadratName,
             ms.StemLocalX,
             ms.StemLocalY,
+            ms.StemPlotX,
+            ms.StemPlotY,
             ms.MeasurementDate,
             ms.MeasuredDBH,
             ms.MeasuredHOM,
@@ -331,6 +335,8 @@ function groupErrorRows(rawRows: RawErrorOccurrenceRow[], contradictionMap: Map<
         quadratName: rawRow.QuadratName ?? undefined,
         stemLocalX: rawRow.StemLocalX ?? undefined,
         stemLocalY: rawRow.StemLocalY ?? undefined,
+        stemPlotX: rawRow.StemPlotX ?? undefined,
+        stemPlotY: rawRow.StemPlotY ?? undefined,
         measurementDate: normalizeDate(rawRow.MeasurementDate),
         measuredDBH: rawRow.MeasuredDBH ?? undefined,
         measuredHOM: rawRow.MeasuredHOM ?? undefined,

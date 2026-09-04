@@ -31,6 +31,7 @@ import {
   upsertAttributeRows,
   upsertSpeciesRows
 } from '@/lib/uploads/reference-data-writers';
+import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
 
 /**
  * Generate idempotency key for a batch of data
@@ -479,6 +480,18 @@ export async function POST(request: NextRequest) {
   let retryCount = 0;
   const sessionId = request.headers.get('x-upload-session-id');
   if (formType === 'measurements') {
+    if (typeof fileName !== 'string' || fileName.length === 0) {
+      return NextResponse.json(
+        { error: 'Measurement file name is required.', code: 'MEASUREMENT_FILE_NAME_REQUIRED' },
+        { status: HTTPResponses.INVALID_REQUEST }
+      );
+    }
+
+    const fileIDError = measurementFileIDValidationError(fileName);
+    if (fileIDError) {
+      return NextResponse.json({ error: fileIDError, code: 'MEASUREMENT_FILE_NAME_TOO_LONG' }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+
     const batchID = body.batchID || generateShortBatchID();
     let scopeValidation: Awaited<ReturnType<typeof validateMeasurementUploadScope>>;
     try {

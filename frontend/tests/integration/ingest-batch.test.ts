@@ -224,11 +224,11 @@ describe('ingestBatch — integration', () => {
   // Helpers
   // -------------------------------------------------------------------------
 
-  async function stageFixtureRows(): Promise<void> {
+  async function stageFixtureRows(fileName: string = FILE_NAME): Promise<void> {
     const transactionID = await connectionManager.beginTransaction();
     const params: StageMeasurementChunkParams = {
       schema,
-      fileName: FILE_NAME,
+      fileName,
       batchID: BATCH_ID,
       plotID,
       censusID,
@@ -248,8 +248,8 @@ describe('ingestBatch — integration', () => {
     expect(result.invalidRows).toHaveLength(0);
   }
 
-  async function runIngestBatch(): Promise<IngestBatchResult> {
-    const result = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID: BATCH_ID });
+  async function runIngestBatch(fileName: string = FILE_NAME): Promise<IngestBatchResult> {
+    const result = await ingestBatch(connectionManager, { schema, fileID: fileName, batchID: BATCH_ID });
     console.log(
       `[ingestBatch] processedSubBatches=${result.processedSubBatches} totalRows=${result.totalRows} recovered=${result.recovered} ` +
         `noDataFound=${result.noDataFound} totalDurationMs=${result.totalDurationMs}`
@@ -262,14 +262,14 @@ describe('ingestBatch — integration', () => {
     return result;
   }
 
-  async function fetchBatchMeasurements(): Promise<RowDataPacket[]> {
+  async function fetchBatchMeasurements(fileName: string = FILE_NAME): Promise<RowDataPacket[]> {
     const [rows] = await connection.query<RowDataPacket[]>(
       `SELECT CoreMeasurementID, StemGUID, CensusID, UploadFileID, UploadBatchID,
               CAST(MeasuredDBH AS CHAR) AS DBHText, CAST(MeasurementDate AS CHAR) AS MeasurementDateText
        FROM coremeasurements
        WHERE UploadFileID = ? AND UploadBatchID = ?
        ORDER BY CoreMeasurementID`,
-      [FILE_NAME, BATCH_ID]
+      [fileName, BATCH_ID]
     );
     return rows;
   }
@@ -280,6 +280,20 @@ describe('ingestBatch — integration', () => {
       [BATCH_ID]
     );
     return rows;
+  }
+
+  /** Distinct ingestion error codes currently attached to this file's unresolved rows. */
+  async function fetchIngestionErrorCodes(fileName: string = FILE_NAME): Promise<string[]> {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT DISTINCT me.ErrorCode
+       FROM measurement_error_log mel
+       JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+       JOIN coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
+       WHERE cm.UploadFileID = ? AND me.ErrorSource = 'ingestion'
+       ORDER BY me.ErrorCode`,
+      [fileName]
+    );
+    return rows.map(row => String(row.ErrorCode));
   }
 
   async function countTemporaryRows(): Promise<number> {
@@ -502,6 +516,18 @@ describe('ingestBatch — integration', () => {
     expect(Number(unresolvedRows[0].count)).toBe(0);
   }, 60000);
 
+  it('ingests a 50-character filename through the real hashed GET_LOCK and stored procedure path', async () => {
+    const fileName = `${'f'.repeat(46)}.csv`;
+    expect(fileName).toHaveLength(50);
+    await stageFixtureRows(fileName);
+
+    const result = await runIngestBatch(fileName);
+
+    expect(result.noDataFound).toBe(false);
+    expect(result.subBatchResults[0].batchFailedButHandled).toBe(false);
+    expect(await fetchBatchMeasurements(fileName)).toHaveLength(EXPECTED_ROW_COUNT);
+  }, 60000);
+
   // -------------------------------------------------------------------------
   // 6. Mid-retry abort: isAborted flips to true inside processSubBatch
   //
@@ -564,6 +590,13 @@ describe('ingestBatch — integration', () => {
     );
     console.log(`[abort-mid] unresolved coremeasurements rows=${unresolvedRows[0].count}`);
     expect(Number(unresolvedRows[0].count)).toBe(EXPECTED_ROW_COUNT);
+
+    // A mid-retry abort is an interruption, not a data defect — the row was
+    // never judged by the procedure. It must carry INTERRUPTED_UPLOAD, not
+    // SQL_EXCEPTION, regardless of how the failure text happens to read.
+    const errorCodes = await fetchIngestionErrorCodes();
+    console.log(`[abort-mid] ingestion error codes=${JSON.stringify(errorCodes)}`);
+    expect(errorCodes).toEqual(['INTERRUPTED_UPLOAD']);
   }, 60000);
 
   // -------------------------------------------------------------------------
@@ -627,8 +660,142 @@ describe('ingestBatch — integration', () => {
       );
       console.log(`[kill-interrupt] unresolved coremeasurements rows=${unresolvedRows[0].count}`);
       expect(Number(unresolvedRows[0].count)).toBe(EXPECTED_ROW_COUNT);
+
+      // A KILLed procedure call is a system failure, not a per-row data
+      // defect — it must carry SQL_EXCEPTION.
+      const errorCodes = await fetchIngestionErrorCodes();
+      console.log(`[kill-interrupt] ingestion error codes=${JSON.stringify(errorCodes)}`);
+      expect(errorCodes).toEqual(['SQL_EXCEPTION']);
     } finally {
       executeQuerySpy.mockRestore();
     }
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // 7b. Ordinary unrecoverable error (outer-catch "else" branch): the sub-batch
+  // is abandoned after a single KILLed attempt (fast path to the giving-up
+  // code), and the FIRST attempt to move its rows to unresolved coremeasurements
+  // itself throws with a message that contains NO SQL keyword — proving the
+  // code is still SQL_EXCEPTION because the caller declared that kind
+  // explicitly, not because prose inference happened to match. ingestBatch's
+  // outer catch then retries the move (this time for real) and completes
+  // normally.
+  // -------------------------------------------------------------------------
+
+  it('classifies the outer-catch unrecoverable-error branch as SQL_EXCEPTION even when the thrown message has no SQL keyword', async () => {
+    await stageFixtureRows();
+    expect(await countTemporaryRows()).toBe(EXPECTED_ROW_COUNT);
+
+    const interruptError = Object.assign(new Error(MYSQL_QUERY_INTERRUPTED_MESSAGE), {
+      code: MYSQL_CODE_QUERY_INTERRUPTED,
+      errno: MYSQL_ERRNO_QUERY_INTERRUPTED,
+      sqlState: MYSQL_SQLSTATE_QUERY_INTERRUPTED
+    });
+    const NO_SQL_KEYWORD_MESSAGE = 'Unexpected condition while finalizing sub-batch cleanup';
+    let coreMeasurementsInsertAttempts = 0;
+    const realExecuteQuery = connectionManager.executeQuery.bind(connectionManager);
+    const executeQuerySpy = vi
+      .spyOn(connectionManager, 'executeQuery')
+      .mockImplementation(async (query: string, params?: unknown[], transactionId?: string) => {
+        if (query.includes('bulkingestionprocess')) {
+          throw interruptError;
+        }
+        // Unique to moveTemporaryBatchToFailedMeasurements's INSERT ... SELECT
+        // (RawTreeTag <- tm.TreeTag) — reject only its FIRST occurrence so the
+        // giving-up code inside processSubBatch fails and propagates to
+        // ingestBatch's outer catch, which then retries for real.
+        if (query.includes('INSERT INTO') && query.includes('coremeasurements') && query.includes('tm.TreeTag')) {
+          coreMeasurementsInsertAttempts++;
+          if (coreMeasurementsInsertAttempts === 1) {
+            throw new Error(NO_SQL_KEYWORD_MESSAGE);
+          }
+        }
+        return realExecuteQuery(query, params, transactionId);
+      });
+
+    try {
+      const result = await runIngestBatch();
+
+      console.log(`[unrecoverable] coreMeasurementsInsertAttempts=${coreMeasurementsInsertAttempts}`);
+      expect(coreMeasurementsInsertAttempts, 'the injected failure must have been hit once before the real retry').toBeGreaterThanOrEqual(2);
+
+      expect(result.subBatchResults).toHaveLength(1);
+      expect(result.subBatchResults[0].batchFailedButHandled).toBe(true);
+      expect(result.subBatchResults[0].rowCount).toBe(EXPECTED_ROW_COUNT);
+
+      expect(await countTemporaryRows()).toBe(0);
+      const [unresolvedRows] = await connection.query<RowDataPacket[]>(
+        'SELECT COUNT(*) AS count FROM coremeasurements WHERE UploadFileID = ? AND StemGUID IS NULL',
+        [FILE_NAME]
+      );
+      expect(Number(unresolvedRows[0].count)).toBe(EXPECTED_ROW_COUNT);
+
+      const errorCodes = await fetchIngestionErrorCodes();
+      console.log(`[unrecoverable] ingestion error codes=${JSON.stringify(errorCodes)}`);
+      expect(errorCodes).toEqual(['SQL_EXCEPTION']);
+    } finally {
+      executeQuerySpy.mockRestore();
+    }
+  }, 60000);
+
+  // -------------------------------------------------------------------------
+  // 8. Negative local coordinates ingest normally (Task 6)
+  //
+  // A stem mapped just outside its quadrat (negative LocalX/LocalY) is no
+  // longer a hard-fail INVALID_COORDINATE ingestion error — it materializes
+  // like any other row, and out-of-bounds placement is caught post-ingest by
+  // validation 8 (ValidateFindStemsOutsidePlots).
+  // -------------------------------------------------------------------------
+
+  it('ingests a negative local coordinate instead of hard-failing it', async () => {
+    const fileName = 'ingest-batch-negative-coord.csv';
+    const transactionID = await connectionManager.beginTransaction();
+    const params: StageMeasurementChunkParams = {
+      schema,
+      fileName,
+      batchID: BATCH_ID,
+      plotID,
+      censusID,
+      uploadMode: UploadMode.CLEAN_REUPLOAD,
+      sourceFormat: SourceFormat.csv,
+      rawRows: [
+        { tag: '9001', stemtag: '9001', spcode: 'ACERRU', quadrat: 'Q01', lx: '-0.5', ly: '4.2', dbh: '12.3', hom: '1.3', date: MEASUREMENT_DATE, codes: 'A' }
+      ],
+      csvHeaders: CSV_HEADERS,
+      delimiter: CSV_DELIMITER,
+      uploadSessionID: UPLOAD_SESSION_ID,
+      transactionID,
+      changedBy: CHANGED_BY
+    };
+    const stageResult = await stageMeasurementChunk(connectionManager, params);
+    await connectionManager.commitTransaction(transactionID);
+    console.log(`[negative-coord] insertedCount=${stageResult.insertedCount} invalidRows=${stageResult.invalidRows.length}`);
+    expect(stageResult.insertedCount).toBe(1);
+    expect(stageResult.invalidRows).toHaveLength(0);
+
+    const result = await ingestBatch(connectionManager, { schema, fileID: fileName, batchID: BATCH_ID });
+    console.log(`[negative-coord] subBatchResults=${JSON.stringify(result.subBatchResults)}`);
+    expect(result.subBatchResults[0].batchFailedButHandled).toBe(false);
+
+    const [cmRows] = await connection.query<RowDataPacket[]>(
+      `SELECT CoreMeasurementID, StemGUID, CAST(RawX AS CHAR) AS RawXText
+         FROM coremeasurements
+        WHERE UploadFileID = ? AND UploadBatchID = ? AND RawTreeTag = '9001'`,
+      [fileName, BATCH_ID]
+    );
+    expect(cmRows, 'the row must materialize, not be parked as a hard failure').toHaveLength(1);
+    expect(cmRows[0].StemGUID, 'StemGUID NULL means the row failed ingestion').not.toBeNull();
+    expect(Number(cmRows[0].RawXText)).toBe(-0.5);
+
+    const [errorRows] = await connection.query<RowDataPacket[]>(
+      `SELECT e.ErrorCode
+         FROM measurement_error_log l
+         JOIN measurement_errors e ON e.ErrorID = l.ErrorID
+        WHERE l.MeasurementID = ?`,
+      [cmRows[0].CoreMeasurementID]
+    );
+    const errorCodes = errorRows.map(row => row.ErrorCode);
+    console.log(`[negative-coord] errorCodes=${JSON.stringify(errorCodes)}`);
+    expect(errorCodes).not.toContain('INVALID_COORDINATE');
   }, 60000);
 });

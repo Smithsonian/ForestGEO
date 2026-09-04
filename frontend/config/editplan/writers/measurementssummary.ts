@@ -36,6 +36,8 @@ const RAW_SYNC_TRIGGER_FIELDS: ReadonlySet<string> = new Set([
   'QuadratName',
   'StemLocalX',
   'StemLocalY',
+  'StemPlotX',
+  'StemPlotY',
   'MeasuredDBH',
   'MeasuredHOM',
   'MeasurementDate',
@@ -43,7 +45,16 @@ const RAW_SYNC_TRIGGER_FIELDS: ReadonlySet<string> = new Set([
   'Attributes'
 ]);
 
-const STEM_NEIGHBOR_REFRESH_FIELDS: ReadonlySet<string> = new Set(['SpeciesCode', 'TreeTag', 'StemTag', 'QuadratName', 'StemLocalX', 'StemLocalY']);
+const STEM_NEIGHBOR_REFRESH_FIELDS: ReadonlySet<string> = new Set([
+  'SpeciesCode',
+  'TreeTag',
+  'StemTag',
+  'QuadratName',
+  'StemLocalX',
+  'StemLocalY',
+  'StemPlotX',
+  'StemPlotY'
+]);
 
 export type MeasurementViewRefreshTargetDecision =
   | { mode: 'targeted'; coreMeasurementIDs: number[] }
@@ -167,6 +178,8 @@ interface LoadedCoreMeasurementRow {
   StemTag: string | null;
   StemLocalX: number | string | null;
   StemLocalY: number | string | null;
+  StemPlotX: number | string | null;
+  StemPlotY: number | string | null;
   QuadratName: string | null;
   QuadratID?: number | null;
 }
@@ -197,6 +210,8 @@ async function loadCurrentJoinedRow(
        s.StemTag,
        s.LocalX AS StemLocalX,
        s.LocalY AS StemLocalY,
+       COALESCE(cm.RawPlotX, s.PlotX) AS StemPlotX,
+       COALESCE(cm.RawPlotY, s.PlotY) AS StemPlotY,
        q.QuadratName
      FROM ??.coremeasurements cm
      JOIN ??.census c ON c.CensusID = cm.CensusID
@@ -552,6 +567,19 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
     }
   }
 
+  // --- StemPlotX / StemPlotY update: propagates to the shared stems row, and
+  //     the Raw* sync below stamps RawPlotX/RawPlotY on this measurement so the
+  //     COALESCE(cm.RawPlotX, s.PlotX) read model shows the edited value.
+  if (changedFields.has('StemPlotX') || changedFields.has('StemPlotY')) {
+    changesFound = true;
+    const stemPlotChanges: Record<string, number | null> = {};
+    if (changedFields.has('StemPlotX')) stemPlotChanges.PlotX = toOptionalNumber(newValues.StemPlotX);
+    if (changedFields.has('StemPlotY')) stemPlotChanges.PlotY = toOptionalNumber(newValues.StemPlotY);
+    if (merged.StemGUID !== null && merged.StemGUID !== undefined) {
+      await cm.executeQuery(format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, stemPlotChanges, 'StemGUID', merged.StemGUID]), [], txID);
+    }
+  }
+
   // --- Numeric measurement fields on coremeasurements
   if (changedFields.has('MeasuredDBH') || changedFields.has('MeasuredHOM') || changedFields.has('MeasurementDate')) {
     changesFound = true;
@@ -607,26 +635,29 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
   const shouldSyncRaw = Array.from(changedFields).some(f => RAW_SYNC_TRIGGER_FIELDS.has(f));
   if (shouldSyncRaw) {
     changesFound = true;
+    const rawSyncValues: Record<string, unknown> = {
+      RawTreeTag: merged.TreeTag ?? current.TreeTag ?? null,
+      RawStemTag: merged.StemTag ?? current.StemTag ?? null,
+      RawSpCode: merged.SpeciesCode ?? current.SpeciesCode ?? null,
+      RawQuadrat: merged.QuadratName ?? current.QuadratName ?? null,
+      RawX: toOptionalNumber(effective('StemLocalX')),
+      RawY: toOptionalNumber(effective('StemLocalY')),
+      RawCodes: effective('Attributes') ?? null,
+      RawComments: effective('Description') ?? null,
+      Description: effective('Description') ?? null,
+      MeasurementDate: normalizedMeasurementDate,
+      MeasuredDBH: toOptionalNumber(effective('MeasuredDBH')),
+      MeasuredHOM: toOptionalNumber(effective('MeasuredHOM'))
+    };
+    // RawPlotX/RawPlotY sync only on an actual plot-coordinate edit. The
+    // loaded StemPlotX is COALESCE(cm.RawPlotX, s.PlotX), so unconditional
+    // sync would stamp the stem's canonical value into a NULL raw column,
+    // fabricating an "as uploaded" plot coordinate for a row whose file never
+    // supplied one (and enrolling it in raw-axes-only validation 19).
+    if (changedFields.has('StemPlotX')) rawSyncValues.RawPlotX = toOptionalNumber(newValues.StemPlotX);
+    if (changedFields.has('StemPlotY')) rawSyncValues.RawPlotY = toOptionalNumber(newValues.StemPlotY);
     await cm.executeQuery(
-      format(`UPDATE ?? SET ? WHERE ?? = ?`, [
-        `${schema}.coremeasurements`,
-        {
-          RawTreeTag: merged.TreeTag ?? current.TreeTag ?? null,
-          RawStemTag: merged.StemTag ?? current.StemTag ?? null,
-          RawSpCode: merged.SpeciesCode ?? current.SpeciesCode ?? null,
-          RawQuadrat: merged.QuadratName ?? current.QuadratName ?? null,
-          RawX: toOptionalNumber(effective('StemLocalX')),
-          RawY: toOptionalNumber(effective('StemLocalY')),
-          RawCodes: effective('Attributes') ?? null,
-          RawComments: effective('Description') ?? null,
-          Description: effective('Description') ?? null,
-          MeasurementDate: normalizedMeasurementDate,
-          MeasuredDBH: toOptionalNumber(effective('MeasuredDBH')),
-          MeasuredHOM: toOptionalNumber(effective('MeasuredHOM'))
-        },
-        'CoreMeasurementID',
-        coreMeasurementID
-      ]),
+      format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.coremeasurements`, rawSyncValues, 'CoreMeasurementID', coreMeasurementID]),
       [],
       txID
     );

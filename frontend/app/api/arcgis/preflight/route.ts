@@ -15,6 +15,7 @@ import { canonicalFieldsFor } from '@/lib/column-mapping/fields';
 import { isColumnMappingShape, mappingMatchesSource, seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
 import { ArcgisMappingRequiredResponse, PREFLIGHT_STATUS_MAPPING_REQUIRED } from '@/lib/arcgis/types';
 import type { ArcgisSourceMetadata, ColumnMapping } from '@/lib/column-mapping/types';
+import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
 
 export const runtime = 'nodejs';
 
@@ -71,6 +72,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   if (!file.name.toLowerCase().endsWith('.xlsx')) {
     return NextResponse.json({ error: 'ArcGIS import requires a single .xlsx workbook' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+  const fileIDError = measurementFileIDValidationError(file.name);
+  if (fileIDError) {
+    return NextResponse.json({ error: fileIDError, code: 'MEASUREMENT_FILE_NAME_TOO_LONG' }, { status: HTTPResponses.INVALID_REQUEST });
   }
   if (file.size > MAX_ARCGIS_FILE_SIZE) {
     return NextResponse.json(

@@ -436,12 +436,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         quadrat: row.quadrat || null,
         x: row.lx || null,
         y: row.ly || null,
+        // Preserve numeric zero. The server boundary performs the authoritative
+        // finite-number normalization so malformed rejected values become NULL
+        // consistently with the background-worker path.
+        plotX: row.px ?? null,
+        plotY: row.py ?? null,
         dbh: row.dbh || null,
         hom: row.hom || null,
         date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
         codes: row.codes || null,
         comments: row.comments || null,
-        failureReasons: row.failureReason || 'Unknown error'
+        failureReasons: row.failureReason || undefined
       }));
 
       const response = await fetchWithTimeout(
@@ -1060,7 +1065,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                     } else {
                       parsingInvalidRows.push({
                         ...row,
-                        failureReason: verdict.failureReason ?? 'Unknown error',
+                        failureReason: verdict.failureReason ?? null,
                         ...(verdict.hasExtraColumns ? { excessData: row['__parsed_extra'] } : {})
                       });
                     }

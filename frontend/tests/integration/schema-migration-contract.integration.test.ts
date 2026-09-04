@@ -26,10 +26,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import fs from 'fs';
 import path from 'path';
-import type { Connection, RowDataPacket } from 'mysql2/promise';
+import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import { setupTestDatabase, teardownTestDatabase, runBulkIngestion, type TestData } from '../setup/local-db-setup';
 import { formatContractFailures, type SchemaQueryRow } from '@/lib/db/schema-contract';
+import { splitSqlFile } from '@/lib/provisioning/sql-runner';
 import {
   loadMigrationSources,
   selectPendingMigrations,
@@ -58,6 +60,36 @@ const PUBLISHED_STEMID_CONFLICT_CODE = 'PUBLISHED_STEMID_CONFLICT';
 // metadata-only RENAME that preserves cached rows, not a drop-and-recreate.
 const VFT_SENTINEL_CORE_MEASUREMENT_ID = 999001;
 const VFT_SENTINEL_STEM_VALUE = 424242;
+
+const PLOT_COORDINATE_MIGRATION_ID = '2026-08-27-01-add-plot-coordinates';
+const PLOT_COORDINATE_TYPE = 'decimal(12,6)';
+// The ten nullable plot-coordinate columns the migration adds, one home per
+// table on the ingest path — never one axis standing in for its pair.
+const PLOT_COORDINATE_COLUMNS: ReadonlyArray<{ table: string; column: string }> = [
+  { table: 'temporarymeasurements', column: 'PlotX' },
+  { table: 'temporarymeasurements', column: 'PlotY' },
+  { table: 'stems', column: 'PlotX' },
+  { table: 'stems', column: 'PlotY' },
+  { table: 'coremeasurements', column: 'RawPlotX' },
+  { table: 'coremeasurements', column: 'RawPlotY' },
+  { table: 'measurementssummary', column: 'StemPlotX' },
+  { table: 'measurementssummary', column: 'StemPlotY' },
+  { table: 'viewfulltable', column: 'StemPlotX' },
+  { table: 'viewfulltable', column: 'StemPlotY' }
+];
+const CANONICAL_DDL_PATH = path.join(process.cwd(), 'db', 'sql', 'tablestructures.sql');
+
+const VALIDATION_19_MIGRATION_ID = '2026-08-27-02-seed-validation-19';
+const VALIDATION_19_PROCEDURE_NAME = 'ValidatePlotCoordinateConsistency';
+const VALIDATION_19_ERROR_SOURCE = 'validation';
+const VALIDATION_19_ERROR_CODE = '19';
+const VALIDATION_IDENTITY_CONFLICT_PATTERN = /Validation identity conflict/;
+
+/** sitespecificvalidations.IsEnabled is a MySQL `bit` column: mysql2 returns it as a Buffer. */
+function isEnabledFlag(value: unknown): boolean {
+  if (Buffer.isBuffer(value)) return value[0] === 1;
+  return Boolean(value);
+}
 
 describe('Stale-schema migrate + verify pipeline', () => {
   let connection: Connection;
@@ -88,6 +120,17 @@ describe('Stale-schema migrate + verify pipeline', () => {
     // lacks the storage columns, their lookup index, and the conflict error code.
     await connection.query('ALTER TABLE stems DROP COLUMN PublishedStemID');
     await connection.query('ALTER TABLE coremeasurements DROP COLUMN RawPublishedStemID');
+    // A site provisioned before the plot-coordinate work lacks all ten columns
+    // outright. Dropping them here (rather than only in the isolated drift
+    // fixtures below) forces the ADD branch of migration 2026-08-27-01 to run
+    // for every table, not just temporarymeasurements.PlotY via the partial-pair
+    // fixture — a typo'd ALTER on stems/coremeasurements/measurementssummary/
+    // viewfulltable would otherwise never execute in any test.
+    await connection.query('ALTER TABLE temporarymeasurements DROP COLUMN PlotX, DROP COLUMN PlotY');
+    await connection.query('ALTER TABLE stems DROP COLUMN PlotX, DROP COLUMN PlotY');
+    await connection.query('ALTER TABLE coremeasurements DROP COLUMN RawPlotX, DROP COLUMN RawPlotY');
+    await connection.query('ALTER TABLE measurementssummary DROP COLUMN StemPlotX, DROP COLUMN StemPlotY');
+    await connection.query('ALTER TABLE viewfulltable DROP COLUMN StemPlotX, DROP COLUMN StemPlotY');
     // Reproduce a partially-applied prior-snapshot migration: PriorCensusID is
     // present, while the two value columns are missing. The original migration
     // only checked PriorCensusID, so the follow-up must repair both independently.
@@ -105,6 +148,15 @@ describe('Stale-schema migrate + verify pipeline', () => {
     // additive migration must leave both definitions untouched.
     await connection.query(`ALTER TABLE species MODIFY COLUMN SpeciesName varchar(64) CHARACTER SET ${LEGACY_CHARSET} COLLATE ${LEGACY_COLLATION} NULL`);
     await connection.query(`ALTER TABLE uploadintegrityalerts MODIFY COLUMN message text CHARACTER SET ${LEGACY_CHARSET} COLLATE ${LEGACY_COLLATION} NOT NULL`);
+    // Task 12 baked validation 19 (ValidatePlotCoordinateConsistency) — both its
+    // enabled sitespecificvalidations row and its measurement_errors catalog
+    // row — into corequeries.sql/tablestructures.sql, so setupTestDatabase()
+    // above already seeded both. Remove them here to reproduce the pre-Task-12
+    // stale shape that migration 2026-08-27-02 exists to repair (seeded
+    // disabled, because at migration time on a real stale site the helper
+    // procedure it CALLs is not guaranteed to exist yet).
+    await connection.query('DELETE FROM sitespecificvalidations WHERE ValidationID = 19');
+    await connection.query(`DELETE FROM measurement_errors WHERE ErrorSource = 'validation' AND ErrorCode = '19'`);
   }, 90000);
 
   afterAll(async () => {
@@ -176,6 +228,16 @@ describe('Stale-schema migrate + verify pipeline', () => {
     // second apply neither inserted nor re-recorded any migration.
     expect(Object.keys(after)).toEqual(Object.keys(before));
     expect(after).toEqual(before);
+
+    // Re-running the ledger-gated apply must not have duplicated the seeded
+    // validation-19 rows.
+    const [validationRows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS count FROM sitespecificvalidations WHERE ValidationID = 19`);
+    expect(Number(validationRows[0].count)).toBe(1);
+    const [errorRows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS count FROM measurement_errors WHERE ErrorSource = ? AND ErrorCode = ?`, [
+      VALIDATION_19_ERROR_SOURCE,
+      VALIDATION_19_ERROR_CODE
+    ]);
+    expect(Number(errorRows[0].count)).toBe(1);
   });
 
   it('(4) compatibility gate passes after repair while legacy collations remain visible', async () => {
@@ -203,6 +265,25 @@ describe('Stale-schema migrate + verify pipeline', () => {
     );
     expect(repairedSnapshotColumns.map(row => String(row.COLUMN_NAME)).sort()).toEqual(['PriorCensusID', 'PriorDBH', 'PriorHOM']);
 
+    // All ten plot-coordinate columns exist post-migration, each independently
+    // decimal(12,6) NULL — this schema was freshly provisioned (never regressed
+    // on these columns), so this proves the "already exact -> no-op" branch of
+    // the migration leaves a fresh contract-matching schema untouched.
+    const [plotCoordinateColumns] = await connection.query<RowDataPacket[]>(
+      `SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ?
+         AND (TABLE_NAME, COLUMN_NAME) IN (${PLOT_COORDINATE_COLUMNS.map(() => '(?, ?)').join(', ')})`,
+      [schema, ...PLOT_COORDINATE_COLUMNS.flatMap(({ table, column }) => [table, column])]
+    );
+    expect(plotCoordinateColumns.length).toBe(PLOT_COORDINATE_COLUMNS.length);
+    for (const { table, column } of PLOT_COORDINATE_COLUMNS) {
+      const row = plotCoordinateColumns.find(r => String(r.TABLE_NAME) === table && String(r.COLUMN_NAME) === column);
+      expect(row, `${table}.${column} missing after migration`).toBeDefined();
+      expect(row?.COLUMN_TYPE, `${table}.${column} type`).toBe(PLOT_COORDINATE_TYPE);
+      expect(row?.IS_NULLABLE, `${table}.${column} nullability`).toBe('YES');
+    }
+
     // The error catalog is outside the structural contract, so audit.ok cannot
     // speak for it — but bulkingestionprocess writes this code, so a repair that
     // restored the columns without the catalog row would log conflicts to nothing.
@@ -219,10 +300,31 @@ describe('Stale-schema migrate + verify pipeline', () => {
     ]);
     expect(sentinel.length).toBe(1);
     expect(Number(sentinel[0].StemGUID)).toBe(VFT_SENTINEL_STEM_VALUE);
+
+    // Validation 19 (ValidatePlotCoordinateConsistency) is seeded, disabled — the
+    // helper procedure it CALLs does not exist yet at migration time.
+    const [validation19] = await connection.query<RowDataPacket[]>(`SELECT ProcedureName, IsEnabled FROM sitespecificvalidations WHERE ValidationID = 19`);
+    expect(validation19.length).toBe(1);
+    expect(validation19[0].ProcedureName).toBe(VALIDATION_19_PROCEDURE_NAME);
+    expect(isEnabledFlag(validation19[0].IsEnabled)).toBe(false);
+
+    const [validation19Error] = await connection.query<RowDataPacket[]>(`SELECT ErrorID FROM measurement_errors WHERE ErrorSource = ? AND ErrorCode = ?`, [
+      VALIDATION_19_ERROR_SOURCE,
+      VALIDATION_19_ERROR_CODE
+    ]);
+    expect(validation19Error.length).toBe(1);
+
+    // An existing, unrelated validation's IsEnabled flag (loaded from the
+    // repository defaults before the migration ran) must be untouched.
+    const [validation1] = await connection.query<RowDataPacket[]>(`SELECT ProcedureName, IsEnabled FROM sitespecificvalidations WHERE ValidationID = 1`);
+    expect(validation1.length).toBe(1);
+    expect(validation1[0].ProcedureName).toBe('ValidateDBHGrowthExceedsMax');
+    expect(isEnabledFlag(validation1[0].IsEnabled)).toBe(true);
   });
 
   it('(5) a production keyed insert + one-row bulkingestionprocess succeed against the repaired schema', async () => {
-    const fileID = 'schema-repair-f1';
+    const fileID = `${'f'.repeat(46)}.csv`;
+    expect(fileID).toHaveLength(50);
     const batchID = 'schema-repair-b1';
     const plotID = testData.plots[0].plotID;
     const censusID = testData.census[0].censusID;
@@ -301,4 +403,320 @@ describe('Stale-schema migrate + verify pipeline', () => {
     // The STORED unique signature still recomputes on insert.
     expect(String(roundTrip[0].unique_sig)).toContain(insertedCode);
   });
+});
+
+/**
+ * Plot-coordinate migration column-level guard proof (integration, real MySQL).
+ *
+ * Each of the ten plot-coordinate columns is probed independently by
+ * migration 2026-08-27-01, never treating one axis as a proxy for its pair.
+ * These fixtures isolate that per-column behavior against two throwaway
+ * schemas loaded straight from the canonical DDL (which already bakes the
+ * columns in), each deliberately regressed to one specific drift shape:
+ *   - a partial pair (X present, Y dropped) must be repaired to add only Y;
+ *   - an existing same-named column of the wrong type must stop the
+ *     migration with a named contract error and be left completely
+ *     untouched, never silently coerced.
+ */
+describe('Plot-coordinate migration column-level guards', () => {
+  let connection: Connection;
+  let sources: MigrationSource[];
+
+  beforeAll(async () => {
+    connection = await mysql.createConnection({
+      host: process.env.TEST_DB_HOST ?? 'localhost',
+      user: process.env.TEST_DB_USER ?? 'root',
+      password: process.env.TEST_DB_PASSWORD ?? 'testpassword',
+      port: Number(process.env.TEST_DB_PORT ?? 3306),
+      multipleStatements: true
+    });
+    sources = loadMigrationSources();
+  }, 60_000);
+
+  afterAll(async () => {
+    if (!connection) return;
+    await connection.end();
+  });
+
+  /** Loads the canonical DDL into a fresh throwaway schema, then applies `regress`. */
+  async function provisionDriftSchema(schemaName: string, regress: (exec: SqlExecutor) => Promise<void>): Promise<SqlExecutor> {
+    await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    await connection.query(`CREATE DATABASE \`${schemaName}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
+    await connection.query(`USE \`${schemaName}\``);
+
+    const statements = splitSqlFile(fs.readFileSync(CANONICAL_DDL_PATH, 'utf-8'));
+    const failures: string[] = [];
+    for (const statement of statements) {
+      try {
+        await connection.query(statement.sql);
+      } catch (error) {
+        failures.push(`line ${statement.lineNumber}: ${(error as Error).message}`);
+      }
+    }
+    expect(failures, `${schemaName} canonical DDL failed to load cleanly:\n${failures.join('\n')}`).toEqual([]);
+
+    const exec: SqlExecutor = async (sql, params) => {
+      const [rows] = await connection.query(sql, params ?? []);
+      return Array.isArray(rows) ? (rows as SchemaQueryRow[]) : [];
+    };
+    await regress(exec);
+    return exec;
+  }
+
+  it('a partial pair (PlotX present, PlotY dropped) is repaired by adding only the missing axis', async () => {
+    const schemaName = 'plotcoord_partial_pair';
+    const exec = await provisionDriftSchema(schemaName, async e => {
+      await e('ALTER TABLE temporarymeasurements DROP COLUMN PlotY');
+    });
+
+    try {
+      const result = await applyPendingMigrations(exec, schemaName, sources);
+      expect(result.failed, result.failed ? `${result.failed.id}: ${result.failed.error}` : undefined).toBeNull();
+      expect(result.appliedNow).toContain(PLOT_COORDINATE_MIGRATION_ID);
+
+      const [columns] = await connection.query<RowDataPacket[]>(
+        `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'temporarymeasurements' AND COLUMN_NAME IN ('PlotX', 'PlotY')`,
+        [schemaName]
+      );
+      const byColumn = Object.fromEntries(columns.map(row => [String(row.COLUMN_NAME), row]));
+      // PlotX was never touched (already matched the contract); PlotY was added.
+      expect(byColumn.PlotX?.COLUMN_TYPE).toBe(PLOT_COORDINATE_TYPE);
+      expect(byColumn.PlotX?.IS_NULLABLE).toBe('YES');
+      expect(byColumn.PlotY?.COLUMN_TYPE).toBe(PLOT_COORDINATE_TYPE);
+      expect(byColumn.PlotY?.IS_NULLABLE).toBe('YES');
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    }
+  }, 60_000);
+
+  it('an existing same-named column with an incompatible type stops the migration with a named contract error and is left untouched', async () => {
+    const schemaName = 'plotcoord_wrong_type';
+    const exec = await provisionDriftSchema(schemaName, async e => {
+      await e(`ALTER TABLE temporarymeasurements MODIFY COLUMN PlotX varchar(50) NULL`);
+    });
+
+    try {
+      const result = await applyPendingMigrations(exec, schemaName, sources);
+      expect(result.failed).not.toBeNull();
+      expect(result.failed?.id).toBe(PLOT_COORDINATE_MIGRATION_ID);
+      expect(result.failed?.error).toContain('Plot-coordinate schema contract conflict');
+      expect(result.failed?.error).toContain('temporarymeasurements.PlotX');
+
+      const [columns] = await connection.query<RowDataPacket[]>(
+        `SELECT COLUMN_TYPE, IS_NULLABLE
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'temporarymeasurements' AND COLUMN_NAME = 'PlotX'`,
+        [schemaName]
+      );
+      // The offending column was never coerced — the migration failed loudly
+      // instead of silently accepting or "fixing" a shape it does not own.
+      expect(columns[0]?.COLUMN_TYPE).toBe('varchar(50)');
+      expect(columns[0]?.IS_NULLABLE).toBe('YES');
+
+      const [helpers] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS count FROM information_schema.ROUTINES
+          WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = 'mig_2026_08_27_01_raise_contract_conflict'`,
+        [schemaName]
+      );
+      expect(Number(helpers[0].count), 'failed migration must clean up its helper procedure').toBe(0);
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    }
+  }, 60_000);
+});
+
+/**
+ * Validation 19 identity-conflict preflight proof (integration, real MySQL).
+ *
+ * Migration 2026-08-27-02 must never seed ValidatePlotCoordinateConsistency over
+ * the top of a pre-existing, differently-identified rule: ValidationID is
+ * AUTO_INCREMENT for admin-authored rules, so the repository defaults ending at
+ * 18 do not prove 19 is free on every live site. A collision on either the ID or
+ * the ProcedureName must abort the whole migration with a named error and leave
+ * both the conflicting row and the error catalog completely untouched — never a
+ * silently swallowed INSERT IGNORE.
+ */
+describe('Validation 19 identity-conflict preflight', () => {
+  let connection: Connection;
+  let sources: MigrationSource[];
+
+  beforeAll(async () => {
+    connection = await mysql.createConnection({
+      host: process.env.TEST_DB_HOST ?? 'localhost',
+      user: process.env.TEST_DB_USER ?? 'root',
+      password: process.env.TEST_DB_PASSWORD ?? 'testpassword',
+      port: Number(process.env.TEST_DB_PORT ?? 3306),
+      multipleStatements: true
+    });
+    sources = loadMigrationSources();
+  }, 60_000);
+
+  afterAll(async () => {
+    if (!connection) return;
+    await connection.end();
+  });
+
+  /** Loads the canonical DDL into a fresh throwaway schema, then applies `regress`. */
+  async function provisionSchema(schemaName: string, seed?: (exec: SqlExecutor) => Promise<void>): Promise<SqlExecutor> {
+    await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    await connection.query(`CREATE DATABASE \`${schemaName}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
+    await connection.query(`USE \`${schemaName}\``);
+
+    const statements = splitSqlFile(fs.readFileSync(CANONICAL_DDL_PATH, 'utf-8'));
+    const failures: string[] = [];
+    for (const statement of statements) {
+      try {
+        await connection.query(statement.sql);
+      } catch (error) {
+        failures.push(`line ${statement.lineNumber}: ${(error as Error).message}`);
+      }
+    }
+    expect(failures, `${schemaName} canonical DDL failed to load cleanly:\n${failures.join('\n')}`).toEqual([]);
+
+    const exec: SqlExecutor = async (sql, params) => {
+      const [rows] = await connection.query(sql, params ?? []);
+      return Array.isArray(rows) ? (rows as SchemaQueryRow[]) : [];
+    };
+    if (seed) await seed(exec);
+    return exec;
+  }
+
+  it('refuses to seed validation 19 when the ID is held by a custom rule', async () => {
+    const schemaName = 'validation19_id_conflict';
+    const exec = await provisionSchema(schemaName, async e => {
+      await e(
+        `INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
+         VALUES (19, 'CustomSiteRule', 'site-authored', 'x', 'SELECT 1;', '', TRUE)`
+      );
+    });
+
+    try {
+      const result = await applyPendingMigrations(exec, schemaName, sources);
+      expect(result.failed).not.toBeNull();
+      expect(result.failed?.id).toBe(VALIDATION_19_MIGRATION_ID);
+      expect(result.failed?.error).toMatch(VALIDATION_IDENTITY_CONFLICT_PATTERN);
+
+      const [rows] = await connection.query<RowDataPacket[]>(`SELECT ProcedureName FROM sitespecificvalidations WHERE ValidationID = 19`);
+      expect(rows[0].ProcedureName, 'the conflicting row must be left untouched').toBe('CustomSiteRule');
+
+      // The measurement_errors ('validation', '19') row ships in the canonical
+      // DDL itself (tablestructures.sql), so provisionSchema() above already
+      // seeded it before the migration ever ran — its presence here proves
+      // only that the canonical seed exists, not that the migration inserted
+      // it. What the preflight abort must guarantee is that it stays at
+      // exactly one row: no duplicate insert past the identity-conflict check.
+      const [errorRows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS count FROM measurement_errors WHERE ErrorSource = ? AND ErrorCode = ?`, [
+        VALIDATION_19_ERROR_SOURCE,
+        VALIDATION_19_ERROR_CODE
+      ]);
+      expect(Number(errorRows[0].count)).toBe(1);
+
+      const [helpers] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS count FROM information_schema.ROUTINES
+          WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = 'mig_2026_08_27_02_raise_validation_conflict'`,
+        [schemaName]
+      );
+      expect(Number(helpers[0].count), 'failed migration must clean up its helper procedure').toBe(0);
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    }
+  }, 60_000);
+
+  it('refuses to seed validation 19 when ValidatePlotCoordinateConsistency already exists under a different ID', async () => {
+    const schemaName = 'validation19_name_conflict';
+    const exec = await provisionSchema(schemaName, async e => {
+      await e(
+        `INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
+         VALUES (5, 'ValidatePlotCoordinateConsistency', 'relocated by hand', 'x', 'SELECT 1;', '', TRUE)`
+      );
+    });
+
+    try {
+      const result = await applyPendingMigrations(exec, schemaName, sources);
+      expect(result.failed).not.toBeNull();
+      expect(result.failed?.id).toBe(VALIDATION_19_MIGRATION_ID);
+      expect(result.failed?.error).toMatch(VALIDATION_IDENTITY_CONFLICT_PATTERN);
+
+      const [rows] = await connection.query<RowDataPacket[]>(`SELECT ValidationID FROM sitespecificvalidations WHERE ProcedureName = ?`, [
+        VALIDATION_19_PROCEDURE_NAME
+      ]);
+      expect(rows.length, 'the conflicting row must be left untouched, and no row must have been added at ValidationID 19').toBe(1);
+      expect(rows[0].ValidationID).toBe(5);
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    }
+  }, 60_000);
+
+  it('seeds validation 19 disabled on a clean schema, and re-running the migration SQL directly is a no-op', async () => {
+    const schemaName = 'validation19_happy_path';
+    const exec = await provisionSchema(schemaName);
+    const migration = sources.find(source => source.id === VALIDATION_19_MIGRATION_ID);
+    if (!migration) throw new Error(`Migration source ${VALIDATION_19_MIGRATION_ID} not found in manifest sources`);
+
+    try {
+      const result = await applyPendingMigrations(exec, schemaName, sources);
+      expect(result.failed, result.failed ? `${result.failed.id}: ${result.failed.error}` : undefined).toBeNull();
+      expect(result.appliedNow).toContain(VALIDATION_19_MIGRATION_ID);
+
+      const [validationRows] = await connection.query<RowDataPacket[]>(`SELECT ProcedureName, IsEnabled FROM sitespecificvalidations WHERE ValidationID = 19`);
+      expect(validationRows.length).toBe(1);
+      expect(validationRows[0].ProcedureName).toBe(VALIDATION_19_PROCEDURE_NAME);
+      expect(isEnabledFlag(validationRows[0].IsEnabled)).toBe(false);
+
+      const [errorRows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS count FROM measurement_errors WHERE ErrorSource = ? AND ErrorCode = ?`, [
+        VALIDATION_19_ERROR_SOURCE,
+        VALIDATION_19_ERROR_CODE
+      ]);
+      expect(Number(errorRows[0].count)).toBe(1);
+
+      // Re-execute the migration's raw SQL a second time, bypassing the ledger
+      // entirely, to prove the migration's own information_schema/NOT EXISTS
+      // guards make it idempotent on a re-run — not merely skipped by the ledger.
+      await connection.query(migration.contents);
+
+      const [validationRowsAfterRerun] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS count FROM sitespecificvalidations WHERE ValidationID = 19`
+      );
+      expect(Number(validationRowsAfterRerun[0].count)).toBe(1);
+      const [errorRowsAfterRerun] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS count FROM measurement_errors WHERE ErrorSource = ? AND ErrorCode = ?`,
+        [VALIDATION_19_ERROR_SOURCE, VALIDATION_19_ERROR_CODE]
+      );
+      expect(Number(errorRowsAfterRerun[0].count)).toBe(1);
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    }
+  }, 60_000);
+
+  it('repairs repository-owned fields on an exact but partially seeded validation identity', async () => {
+    const schemaName = 'validation19_partial_exact';
+    const exec = await provisionSchema(schemaName, async e => {
+      await e(`DELETE FROM sitespecificvalidations WHERE ValidationID = 19`);
+      await e(
+        `INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
+         VALUES (19, 'ValidatePlotCoordinateConsistency', 'partial', 'x', 'SELECT 1;', 'wrong', FALSE)`
+      );
+    });
+
+    try {
+      const result = await applyPendingMigrations(exec, schemaName, sources);
+      expect(result.failed, result.failed ? `${result.failed.id}: ${result.failed.error}` : undefined).toBeNull();
+
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT Description, Criteria, Definition, ChangelogDefinition, IsEnabled
+           FROM sitespecificvalidations WHERE ValidationID = 19`
+      );
+      expect(rows[0]).toMatchObject({
+        Description: "Plot coordinate disagrees with the quadrat's own median offset",
+        Criteria: 'stemPlotX;stemPlotY;stemLocalX;stemLocalY;quadratName;treeTag;stemTag',
+        Definition: 'CALL RunPlotCoordinateConsistencyValidation(@p_CensusID, @p_PlotID);',
+        ChangelogDefinition: ''
+      });
+      expect(isEnabledFlag(rows[0].IsEnabled)).toBe(false);
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    }
+  }, 60_000);
 });

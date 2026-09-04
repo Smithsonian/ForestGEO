@@ -31,7 +31,9 @@ describe('Data Editing Workflows', () => {
 
     openMeasurementsSummary();
 
-    cy.get('[aria-label="Manual Entry Form"]').click({ force: true });
+    cy.contains('button', /^Manual entry$/)
+      .should('be.visible')
+      .click();
     cy.contains('[role="alertdialog"]', 'Manual Input Form - Measurements').should('be.visible');
     cy.get('[aria-label="close"]').click({ force: true });
     cy.contains('[role="alertdialog"]', 'Manual Input Form - Measurements').should('not.exist');
@@ -72,7 +74,9 @@ describe('Data Editing Workflows', () => {
 
     openAttributesGrid();
 
-    cy.get('[aria-label="Manual Entry Form"]').click({ force: true });
+    cy.contains('button', /^Add record$/)
+      .should('be.visible')
+      .click();
     cy.contains('[role="alertdialog"]', 'Manual Input Form - Attributes').should('be.visible');
     cy.get('[aria-label="close"]').click({ force: true });
     cy.contains('[role="alertdialog"]', 'Manual Input Form - Attributes').should('not.exist');

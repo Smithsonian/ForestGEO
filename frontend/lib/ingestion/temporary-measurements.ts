@@ -5,6 +5,7 @@ import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-fa
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { FileRow, SourceFormat } from '@/config/macros/formdetails';
+import { toFiniteNumber } from '@/config/measurementerrors';
 
 export const TEMP_MEASUREMENT_INSERT_BATCH_SIZE = 1000;
 
@@ -128,6 +129,8 @@ export const TEMPORARY_MEASUREMENT_INSERT_COLUMNS = [
   'QuadratName',
   'LocalX',
   'LocalY',
+  'PlotX',
+  'PlotY',
   'DBH',
   'HOM',
   'MeasurementDate',
@@ -151,7 +154,7 @@ export function buildTemporaryMeasurementInsertRecord(
   plotID: number,
   censusID: number
 ): TemporaryMeasurementInsertRecord {
-  const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments, publishedstemid } = row;
+  const { tag, stemtag, spcode, quadrat, lx, ly, px, py, dbh, hom, date, codes, comments, publishedstemid } = row;
   const formattedDate = normalizeMeasurementDate(date);
   const parsedLx = lx !== undefined && lx !== null && lx !== '' && !isNaN(Number(lx)) ? Number(lx) : null;
   const parsedLy = ly !== undefined && ly !== null && ly !== '' && !isNaN(Number(ly)) ? Number(ly) : null;
@@ -170,6 +173,8 @@ export function buildTemporaryMeasurementInsertRecord(
     QuadratName: quadrat ?? null,
     LocalX: parsedLx,
     LocalY: parsedLy,
+    PlotX: toFiniteNumber(px),
+    PlotY: toFiniteNumber(py),
     DBH: dbh ?? null,
     HOM: hom ?? null,
     MeasurementDate: formattedDate,

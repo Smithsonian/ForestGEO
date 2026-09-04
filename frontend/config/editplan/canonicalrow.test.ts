@@ -19,6 +19,12 @@ describe('canonicalizeRowForHash', () => {
       expect(out.StemLocalX).toBe(3.14);
       expect(out.StemLocalY).toBe(2.72);
     });
+
+    it('maps px/py to plot coordinates at DECIMAL(12,6) precision, preserving sign', () => {
+      const out = canonicalizeRowForHash({ px: '-2.5312449', py: '487.125' }, 'revision-update');
+      expect(out.StemPlotX).toBe(-2.531245); // precision-6 rounds the 7th decimal
+      expect(out.StemPlotY).toBe(487.125);
+    });
   });
 
   describe('revision-insert mode', () => {
@@ -121,7 +127,14 @@ describe('canonicalizeRowForHash', () => {
 
     it('rejects malformed numeric strings instead of converting them to null', () => {
       expect(() => canonicalizeRowForHash({ dbh: '12abc' }, 'revision-update')).toThrow(InvalidFieldValueError);
+      expect(() => canonicalizeRowForHash({ px: '0x10' }, 'revision-update')).toThrow(InvalidFieldValueError);
       expect(() => canonicalizeRowForHash({ hom: Number.NaN }, 'revision-update')).toThrow(InvalidFieldValueError);
+    });
+
+    it('rejects plot coordinates outside DECIMAL(12,6) while accepting the boundary', () => {
+      expect(canonicalizeRowForHash({ px: '999999.999999' }, 'revision-update')).toMatchObject({ StemPlotX: 999999.999999 });
+      expect(() => canonicalizeRowForHash({ px: '1000000' }, 'revision-update')).toThrow(InvalidFieldValueError);
+      expect(() => canonicalizeRowForHash({ py: '-1000000' }, 'revision-insert')).toThrow(InvalidFieldValueError);
     });
 
     it('accepts numeric values directly without string conversion', () => {

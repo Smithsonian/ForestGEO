@@ -67,13 +67,40 @@ describe('<LoginLogout />', () => {
       cy.get('button').first().should('contain', 'JQP');
     });
 
-    it('shows disabled settings button (settings menu functionality is disabled)', () => {
-      // The settings button is disabled in the component
-      cy.get('button').eq(1).should('be.disabled');
+    it('enables the settings button for a global user', () => {
+      cy.get('[aria-label="Settings menu"]').should('not.be.disabled');
     });
 
     it('shows logout button that can be clicked', () => {
       cy.get('button[aria-label="Logout button"]').should('be.visible').and('not.be.disabled');
+    });
+  });
+
+  context('when signed in without administrative rights', () => {
+    const standardSession = {
+      user: {
+        name: 'Sam Field',
+        email: 'sam.field@example.com',
+        userStatus: 'field crew'
+      },
+      expires: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    };
+
+    beforeEach(() => {
+      setMockSession({
+        data: standardSession,
+        status: 'authenticated'
+      });
+
+      mount(
+        <SessionProvider session={standardSession as unknown as any}>
+          <LoginLogout />
+        </SessionProvider>
+      );
+    });
+
+    it('disables the settings button for a non-administrative user', () => {
+      cy.get('[aria-label="Settings menu"]').should('be.disabled');
     });
   });
 });

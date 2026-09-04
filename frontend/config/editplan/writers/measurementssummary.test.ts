@@ -47,6 +47,24 @@ describe('resolveMeasurementViewRefreshTargets', () => {
     expect(result).toEqual({ mode: 'targeted', coreMeasurementIDs: [5, 42, 101] });
   });
 
+  it('expands to stem neighbors for plot-coordinate edits', async () => {
+    const cm = makeConnectionManager([{ CoreMeasurementID: 7 }]);
+
+    const result = await resolveMeasurementViewRefreshTargets(cm, 'forestgeo_testing', {
+      coreMeasurementID: 42,
+      plotID: 1,
+      censusID: 2,
+      changedFields: new Set(['StemPlotX', 'StemPlotY']),
+      beforeStemGUID: 11,
+      afterStemGUID: 11,
+      transactionID: 'tx-1'
+    });
+
+    expect(cm.executeQuery).toHaveBeenCalledTimes(1);
+    expect(cm.executeQuery.mock.calls[0][0]).toContain('WHERE cm.StemGUID IN (?)');
+    expect(result).toEqual({ mode: 'targeted', coreMeasurementIDs: [7, 42] });
+  });
+
   it('falls back to the scope refresh for unsupported changed fields', async () => {
     const cm = makeConnectionManager();
 
