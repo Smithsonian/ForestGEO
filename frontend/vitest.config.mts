@@ -46,7 +46,11 @@ export default defineConfig(({ mode }) => ({
       'tests/integration/**',
       'lib/provisioning/**',
       'lib/ctfs-export/precondition.test.ts',
-      'lib/ctfs-export/select-measurements.test.ts'
+      'lib/ctfs-export/select-measurements.test.ts',
+      // Guard scripts assert with node:test and are run by `node --test` in
+      // nightly.yml. Vitest collects the file but finds no vitest suite in it,
+      // which fails the whole run.
+      'scripts/**/*.test.mjs'
     ],
     // Strict timeout controls to prevent infinite loops
     testTimeout: 15000, // 15 seconds max per test
