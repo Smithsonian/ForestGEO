@@ -41,6 +41,19 @@ import {
   type SchemaDifference
 } from '@/lib/db/schema-contract';
 import { SCHEMA_MIGRATION_MANIFEST, type MigrationManifestEntry } from '../db/migrations/manifest';
+import { CATALOG_DATABASE_NAME } from '../db/migrations/catalog-manifest';
+import {
+  SchemaGateUnavailableError,
+  currentRunRef,
+  pruneGateRows,
+  readQuarantinedSchemas,
+  readSchemaGateRows,
+  recordGateBlock,
+  recordGatePass,
+  recordGateQuarantine,
+  type EnvVars,
+  type SchemaGateRow
+} from './lib/schema-gate';
 import {
   SITE_SCHEMA_LIKE,
   assertExpectedHost,
@@ -85,7 +98,7 @@ export const REQUIRED_INGESTION_PROCEDURES = ['bulkingestionprocess'] as const;
 export const EXEMPT_TEXT_COLLATION_COLUMNS = new Set<string>();
 
 /** ErrorSummary is TEXT; keep recorded failure summaries bounded. */
-const ERROR_SUMMARY_MAX_LENGTH = 2000;
+export const ERROR_SUMMARY_MAX_LENGTH = 2000;
 
 const CLI_FLAG = {
   CHECK: '--check',
@@ -400,6 +413,166 @@ export function contractGateFailed(audit: ContractAudit): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Quarantine (see #429): a schema that has never passed the gate must not take
+// every other schema's deploy down with it; a schema that HAS passed and now
+// fails is a regression this deploy introduced and still blocks.
+// ---------------------------------------------------------------------------
+
+export type GateOutcome = 'passed' | 'quarantined' | 'blocked';
+
+export const GATE_RESULT_PATH_ENV = 'SCHEMA_GATE_RESULT_PATH';
+const GITHUB_ACTIONS_ENV = 'GITHUB_ACTIONS';
+const GITHUB_STEP_SUMMARY_ENV = 'GITHUB_STEP_SUMMARY';
+const GATE_LOG_PREFIX = '  GATE   ';
+const ANNOTATION_TITLE = 'Schema quarantined';
+
+export interface SchemaGateResult {
+  schema: string;
+  passed: boolean;
+  /** Empty when passed; otherwise the audit/migration lines that failed. */
+  reason: string;
+}
+
+export interface GateRunSummary {
+  passed: string[];
+  quarantined: Array<{ schema: string; reason: string; since: string }>;
+  blocked: Array<{ schema: string; reason: string }>;
+}
+
+/** Injectable gate-table access so the loop is unit-testable without MySQL. */
+export interface GateStore {
+  rows: Map<string, SchemaGateRow>;
+  pass(schema: string): Promise<void>;
+  /** Returns the effective QuarantinedAt (the original one on a re-run). */
+  quarantine(schema: string, reason: string): Promise<Date>;
+  block(schema: string): Promise<void>;
+}
+
+export function decideGateOutcome(schemaPassed: boolean, priorRow: SchemaGateRow | null): GateOutcome {
+  if (schemaPassed) return 'passed';
+  return priorRow?.lastPassedAt == null ? 'quarantined' : 'blocked';
+}
+
+/** The lines printAudit would show, joined for storage; migration failure first when present. */
+export function formatGateReason(audit: ContractAudit | null, migrationFailure: { id: string; error: string } | null): string {
+  const lines: string[] = [];
+  if (migrationFailure) lines.push(`MIGRATION FAILED ${migrationFailure.id}: ${migrationFailure.error}`);
+  if (audit) {
+    for (const failure of audit.contractFailures) {
+      lines.push(
+        `DRIFT [${failure.table}] ${failure.category} "${failure.object}" ${failure.kind}: expected=${JSON.stringify(failure.expected)} actual=${JSON.stringify(failure.actual)}`
+      );
+    }
+    for (const proc of audit.missingProcedures) lines.push(`MISSING PROCEDURE ${proc}`);
+    for (const id of audit.pendingMigrationIds) lines.push(`PENDING MIGRATION ${id}`);
+  }
+  return lines.join('\n').slice(0, ERROR_SUMMARY_MAX_LENGTH);
+}
+
+/**
+ * Applies the per-schema outcome rule across every discovered schema. A
+ * quarantined schema never stops the loop; a blocked schema stops it (today's
+ * "abort remaining schemas" behavior) and fails the run; zero passing schemas
+ * fails the run regardless, so a bad migration cannot ship as N quarantines.
+ */
+export async function runApplyGateLoop(
+  schemas: string[],
+  processOne: (schema: string) => Promise<SchemaGateResult>,
+  store: GateStore,
+  log: (line: string) => void
+): Promise<{ summary: GateRunSummary; exitCode: number }> {
+  const summary: GateRunSummary = { passed: [], quarantined: [], blocked: [] };
+  let exitCode = 0;
+
+  for (const schema of schemas) {
+    log(`Schema: ${schema}`);
+    let result: SchemaGateResult;
+    try {
+      result = await processOne(schema);
+    } catch (error) {
+      result = { schema, passed: false, reason: errorMessage(error).slice(0, ERROR_SUMMARY_MAX_LENGTH) };
+      log(`  SCHEMA FAILED  ${schema}: ${result.reason}`);
+    }
+
+    const outcome = decideGateOutcome(result.passed, store.rows.get(schema.toLowerCase()) ?? null);
+    if (outcome === 'passed') {
+      await store.pass(schema);
+      summary.passed.push(schema);
+      log(`${GATE_LOG_PREFIX}passed`);
+    } else if (outcome === 'quarantined') {
+      const since = await store.quarantine(schema, result.reason);
+      summary.quarantined.push({ schema, reason: result.reason, since: since.toISOString() });
+      log(`${GATE_LOG_PREFIX}quarantined (never passed; first quarantined ${since.toISOString()})`);
+    } else {
+      await store.block(schema);
+      summary.blocked.push({ schema, reason: result.reason });
+      exitCode = 1;
+      log(`${GATE_LOG_PREFIX}BLOCKED (passed before; this deploy regressed it)`);
+      log(`  ABORTING remaining schemas after apply failure to limit partial rollout.`);
+      log('');
+      break;
+    }
+    log('');
+  }
+
+  if (summary.passed.length === 0) {
+    exitCode = 1;
+    log(`GATE FAILED: no schema passed; refusing to treat a systemic failure as ${summary.quarantined.length} quarantines.`);
+  }
+
+  const quarantinedNames = summary.quarantined.map(entry => entry.schema).join(', ');
+  log(
+    `Gate summary: ${summary.passed.length} passed, ${summary.quarantined.length} quarantined${quarantinedNames ? ` (${quarantinedNames})` : ''}, ${summary.blocked.length} blocked`
+  );
+  return { summary, exitCode };
+}
+
+export function formatGitHubAnnotations(summary: GateRunSummary): string[] {
+  return summary.quarantined.map(entry => `::warning title=${ANNOTATION_TITLE}::${entry.schema} — ${entry.reason.split('\n')[0]}`);
+}
+
+function formatStepSummaryMarkdown(summary: GateRunSummary): string {
+  const rows = [
+    ...summary.passed.map(schema => `| ${schema} | passed | | |`),
+    ...summary.quarantined.map(entry => `| ${entry.schema} | quarantined | ${entry.reason.split('\n')[0]} | ${entry.since} |`),
+    ...summary.blocked.map(entry => `| ${entry.schema} | BLOCKED | ${entry.reason.split('\n')[0]} | |`)
+  ];
+  return ['## Schema contract gate', '', '| Schema | Outcome | Reason | Quarantined since |', '|---|---|---|---|', ...rows, ''].join('\n');
+}
+
+/** Writes the JSON the workflow's "Report quarantined schemas" step reads. No-op unless the env var is set. */
+export function writeGateResultFile(summary: GateRunSummary, env: EnvVars = process.env): void {
+  const target = env[GATE_RESULT_PATH_ENV];
+  if (!target) return;
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, JSON.stringify(summary, null, 2), 'utf-8');
+}
+
+function reportGateRunToCi(summary: GateRunSummary, env: EnvVars = process.env): void {
+  if (env[GITHUB_ACTIONS_ENV] !== 'true') return;
+  for (const line of formatGitHubAnnotations(summary)) console.log(line);
+  const stepSummaryPath = env[GITHUB_STEP_SUMMARY_ENV];
+  if (stepSummaryPath) fs.appendFileSync(stepSummaryPath, formatStepSummaryMarkdown(summary), 'utf-8');
+}
+
+function gateStoreFor(exec: SqlExecutor, rows: Map<string, SchemaGateRow>, runRef: string): GateStore {
+  return {
+    rows,
+    async pass(schema) {
+      await recordGatePass(exec, schema, runRef);
+    },
+    async quarantine(schema, reason) {
+      await recordGateQuarantine(exec, schema, reason, runRef);
+      const after = await readSchemaGateRows(exec);
+      return after.get(schema.toLowerCase())?.quarantinedAt ?? new Date();
+    },
+    async block(schema) {
+      await recordGateBlock(exec, schema, runRef);
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -473,12 +646,18 @@ function printAudit(audit: ContractAudit): void {
   }
 }
 
+interface ProcessSchemaOutcome {
+  passed: boolean;
+  reason: string;
+  audit: ContractAudit | null;
+}
+
 async function processSchema(
   settings: ReturnType<typeof resolveConnectionSettings>,
   schema: string,
   mode: RunnerMode,
   sources: MigrationSource[]
-): Promise<boolean> {
+): Promise<ProcessSchemaOutcome> {
   let schemaConnection: Awaited<ReturnType<typeof createSchemaCliConnection>> | null = null;
   try {
     schemaConnection = await createSchemaCliConnection(settings, { database: schema, multipleStatements: true });
@@ -489,11 +668,12 @@ async function processSchema(
       console.log(`  applied: ${result.appliedNow.length === 0 ? '(none pending)' : result.appliedNow.join(', ')}`);
       if (result.failed) {
         console.error(`  MIGRATION FAILED  ${result.failed.id}: ${result.failed.error}`);
-        return false;
+        return { passed: false, reason: formatGateReason(null, result.failed), audit: null };
       }
       const audit = await auditSchemaContract(exec, schema, []);
       printAudit(audit);
-      return !contractGateFailed(audit);
+      const passed = !contractGateFailed(audit);
+      return { passed, reason: passed ? '' : formatGateReason(audit, null), audit };
     }
 
     const ledger = await readLedger(exec, schema);
@@ -505,10 +685,50 @@ async function processSchema(
       pending.map(p => p.id)
     );
     printAudit(audit);
-    return !contractGateFailed(audit);
+    const passed = !contractGateFailed(audit);
+    return { passed, reason: passed ? '' : formatGateReason(audit, null), audit };
   } finally {
     if (schemaConnection) await schemaConnection.end();
   }
+}
+
+function printQuarantined(schema: string, row: SchemaGateRow): void {
+  console.log(`Schema: ${schema}  [QUARANTINED since ${row.quarantinedAt?.toISOString() ?? 'unknown'}]`);
+  for (const line of (row.quarantineReason ?? '').split('\n').filter(Boolean)) console.log(`  ${line}`);
+  console.log();
+}
+
+async function runCheckLoop(
+  settings: ReturnType<typeof resolveConnectionSettings>,
+  schemas: string[],
+  sources: MigrationSource[],
+  quarantined: Map<string, SchemaGateRow>
+): Promise<number> {
+  let exitCode = 0;
+  let checked = 0;
+  for (const schema of schemas) {
+    const row = quarantined.get(schema.toLowerCase());
+    if (row) {
+      printQuarantined(schema, row);
+      continue;
+    }
+    console.log(`Schema: ${schema}`);
+    try {
+      const outcome = await processSchema(settings, schema, 'check', sources);
+      checked++;
+      if (!outcome.passed) exitCode = 1;
+    } catch (error) {
+      console.error(`  SCHEMA FAILED  ${schema}: ${errorMessage(error)}`);
+      exitCode = 1;
+    }
+    console.log();
+  }
+  if (checked === 0) {
+    console.error(`GATE FAILED: every discovered schema is quarantined; nothing was checked.`);
+    exitCode = 1;
+  }
+  console.log(`Check summary: ${checked} checked, ${quarantined.size} quarantined`);
+  return exitCode;
 }
 
 async function runCli(argv: string[]): Promise<number> {
@@ -519,8 +739,9 @@ async function runCli(argv: string[]): Promise<number> {
   const sources = loadMigrationSources();
 
   const discovery = await createSchemaCliConnection(settings, { multipleStatements: false });
+  const catalog = await createSchemaCliConnection(settings, { database: CATALOG_DATABASE_NAME, multipleStatements: false });
+  const gateExec = executorFor(catalog);
 
-  let exitCode = 0;
   try {
     const schemas = args.allSites ? await discoverSiteSchemas(discovery) : [args.schema as string];
     if (args.allSites) {
@@ -530,35 +751,39 @@ async function runCli(argv: string[]): Promise<number> {
     console.log(`Mode: ${args.mode.toUpperCase()} | Target: ${args.allSites ? 'all sites' : args.schema} | Host: ${settings.host}`);
     console.log(`Discovered ${schemas.length} schema(s). Manifest migrations: ${sources.map(s => s.id).join(', ')}\n`);
 
-    for (const schema of schemas) {
-      console.log(`Schema: ${schema}`);
-      try {
-        // A per-schema connection or processing failure fails the run (exitCode=1)
-        // but must not abort the remaining schemas — mirrors deploy-validations.
-        const passed = await processSchema(settings, schema, args.mode, sources);
-        if (!passed) {
-          exitCode = 1;
-          if (args.mode === 'apply') {
-            console.error(`  ABORTING remaining schemas after apply failure to limit partial rollout.`);
-            break;
-          }
-        }
-      } catch (error) {
-        console.error(`  SCHEMA FAILED  ${schema}: ${errorMessage(error)}`);
-        exitCode = 1;
-        if (args.mode === 'apply') {
-          console.error(`  ABORTING remaining schemas after apply failure to limit partial rollout.`);
-          break;
-        }
-      }
-      console.log();
+    if (args.mode === 'check') {
+      const quarantined = await readQuarantinedSchemas(gateExec);
+      return await runCheckLoop(settings, schemas, sources, quarantined);
     }
+
+    // Gate-table failures are infrastructure, not schema state: they abort the run
+    // here, before any schema is touched, and never produce a quarantine row.
+    const gateRows = await readSchemaGateRows(gateExec);
+    if (args.allSites) {
+      const pruned = await pruneGateRows(gateExec, schemas);
+      for (const name of pruned) console.log(`Pruned gate row for missing schema: ${name}`);
+    }
+
+    const store = gateStoreFor(gateExec, gateRows, currentRunRef());
+    const { summary, exitCode } = await runApplyGateLoop(
+      schemas,
+      async schema => {
+        const outcome = await processSchema(settings, schema, 'apply', sources);
+        return { schema, passed: outcome.passed, reason: outcome.reason };
+      },
+      store,
+      line => console.log(line)
+    );
+    writeGateResultFile(summary);
+    reportGateRunToCi(summary);
+    return exitCode;
   } finally {
+    await catalog.end();
     await discovery.end();
   }
-
-  return exitCode;
 }
+
+export { runCli };
 
 const invokedDirectly = (() => {
   if (!process.argv[1]) return false;
@@ -578,7 +803,8 @@ if (invokedDirectly) {
       process.exitCode = code;
     })
     .catch((error: unknown) => {
-      console.error(`\nFatal: ${errorMessage(error)}`);
+      const prefix = error instanceof SchemaGateUnavailableError ? 'Gate unavailable' : 'Fatal';
+      console.error(`\n${prefix}: ${errorMessage(error)}`);
       process.exitCode = 1;
     });
 }

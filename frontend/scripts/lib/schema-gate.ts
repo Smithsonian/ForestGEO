@@ -25,6 +25,13 @@ export interface SchemaGateRow {
   lastRunRef: string | null;
 }
 
+/**
+ * Environment lookup shape for the run-ref and reporting helpers. Deliberately
+ * not the global process-env type: next/types/global.d.ts augments it with a
+ * REQUIRED NODE_ENV, so a caller could not pass a small literal env.
+ */
+export type EnvVars = Readonly<Record<string, string | undefined>>;
+
 export class SchemaGateUnavailableError extends Error {
   constructor(message: string) {
     super(message);
@@ -61,7 +68,7 @@ function toGateRow(row: Record<string, unknown>): SchemaGateRow {
 }
 
 /** Actions run URL when running in CI, otherwise a hostname-tagged local marker. */
-export function currentRunRef(env: NodeJS.ProcessEnv = process.env): string {
+export function currentRunRef(env: EnvVars = process.env): string {
   const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = env;
   if (GITHUB_SERVER_URL && GITHUB_REPOSITORY && GITHUB_RUN_ID) {
     return `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`;

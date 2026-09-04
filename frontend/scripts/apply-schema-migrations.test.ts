@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import crypto from 'crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import type { SchemaQueryRow } from '@/lib/db/schema-contract';
 import {
   sha256Hex,
@@ -9,6 +12,13 @@ import {
   migrationLockName,
   contractGateFailed,
   parseRunnerArgs,
+  decideGateOutcome,
+  runApplyGateLoop,
+  formatGateReason,
+  formatGitHubAnnotations,
+  writeGateResultFile,
+  GATE_RESULT_PATH_ENV,
+  ERROR_SUMMARY_MAX_LENGTH,
   TamperedMigrationError,
   NoSiteSchemasError,
   MIGRATION_STATUS,
@@ -17,8 +27,12 @@ import {
   type ContractAudit,
   type MigrationSource,
   type LedgerRow,
-  type SqlExecutor
+  type SqlExecutor,
+  type GateStore,
+  type SchemaGateResult,
+  type GateRunSummary
 } from './apply-schema-migrations';
+import type { SchemaGateRow } from './lib/schema-gate';
 
 function source(id: string, contents: string): MigrationSource {
   return { id, file: `${id}.sql`, contents, checksum: sha256Hex(contents), failureCleanup: [] };
@@ -236,5 +250,199 @@ describe('parseRunnerArgs', () => {
 
   it('rejects a --schema with no value', () => {
     expect(() => parseRunnerArgs(['--apply', '--schema'])).toThrow(/requires a schema name/);
+  });
+});
+
+function gateRow(overrides: Partial<SchemaGateRow> = {}): SchemaGateRow {
+  return { schemaName: 'forestgeo_x', lastPassedAt: null, lastFailedAt: null, quarantinedAt: null, quarantineReason: null, lastRunRef: null, ...overrides };
+}
+
+/** Records every gate write so tests can assert exactly what the loop persisted. */
+class FakeGateStore implements GateStore {
+  rows = new Map<string, SchemaGateRow>();
+  passes: string[] = [];
+  quarantines: Array<{ schema: string; reason: string }> = [];
+  blocks: string[] = [];
+  readonly quarantinedSince = new Date('2026-09-02T18:04:11Z');
+
+  async pass(schema: string): Promise<void> {
+    this.passes.push(schema);
+  }
+  async quarantine(schema: string, reason: string): Promise<Date> {
+    this.quarantines.push({ schema, reason });
+    return this.quarantinedSince;
+  }
+  async block(schema: string): Promise<void> {
+    this.blocks.push(schema);
+  }
+}
+
+describe('decideGateOutcome', () => {
+  it('passes a passing schema regardless of history', () => {
+    expect(decideGateOutcome(true, null)).toBe('passed');
+    expect(decideGateOutcome(true, gateRow({ lastPassedAt: new Date() }))).toBe('passed');
+  });
+
+  it('quarantines a failing schema that has never passed', () => {
+    expect(decideGateOutcome(false, null)).toBe('quarantined');
+    expect(decideGateOutcome(false, gateRow({ lastPassedAt: null, quarantinedAt: new Date() }))).toBe('quarantined');
+  });
+
+  it('blocks a failing schema that passed before', () => {
+    expect(decideGateOutcome(false, gateRow({ lastPassedAt: new Date('2026-08-01T00:00:00Z') }))).toBe('blocked');
+  });
+});
+
+describe('runApplyGateLoop', () => {
+  function processor(results: Record<string, SchemaGateResult>) {
+    const calls: string[] = [];
+    const processOne = async (schema: string): Promise<SchemaGateResult> => {
+      calls.push(schema);
+      return results[schema];
+    };
+    return { processOne, calls };
+  }
+
+  it('continues past a never-passed failing schema and records the quarantine', async () => {
+    const logs: string[] = [];
+    const store = new FakeGateStore();
+    const { processOne, calls } = processor({
+      forestgeo_a: { schema: 'forestgeo_a', passed: true, reason: '' },
+      forestgeo_new: { schema: 'forestgeo_new', passed: false, reason: 'DRIFT [stems] column "PublishedStemID" missing' },
+      forestgeo_z: { schema: 'forestgeo_z', passed: true, reason: '' }
+    });
+
+    const { summary, exitCode } = await runApplyGateLoop(['forestgeo_a', 'forestgeo_new', 'forestgeo_z'], processOne, store, line => logs.push(line));
+    console.log(`[gate loop] exit=${exitCode} summary=${JSON.stringify(summary)}`);
+
+    expect(calls).toEqual(['forestgeo_a', 'forestgeo_new', 'forestgeo_z']);
+    expect(exitCode).toBe(0);
+    expect(summary.passed).toEqual(['forestgeo_a', 'forestgeo_z']);
+    expect(summary.quarantined).toEqual([
+      { schema: 'forestgeo_new', reason: 'DRIFT [stems] column "PublishedStemID" missing', since: store.quarantinedSince.toISOString() }
+    ]);
+    expect(summary.blocked).toEqual([]);
+    expect(store.passes).toEqual(['forestgeo_a', 'forestgeo_z']);
+    expect(store.quarantines).toEqual([{ schema: 'forestgeo_new', reason: 'DRIFT [stems] column "PublishedStemID" missing' }]);
+  });
+
+  it('stops at a previously-passed failing schema and exits 1', async () => {
+    const logs: string[] = [];
+    const store = new FakeGateStore();
+    store.rows.set('forestgeo_b', gateRow({ schemaName: 'forestgeo_b', lastPassedAt: new Date('2026-08-01T00:00:00Z') }));
+    const { processOne, calls } = processor({
+      forestgeo_a: { schema: 'forestgeo_a', passed: true, reason: '' },
+      forestgeo_b: { schema: 'forestgeo_b', passed: false, reason: 'MIGRATION FAILED 2026-09-x: boom' },
+      forestgeo_c: { schema: 'forestgeo_c', passed: true, reason: '' }
+    });
+
+    const { summary, exitCode } = await runApplyGateLoop(['forestgeo_a', 'forestgeo_b', 'forestgeo_c'], processOne, store, line => logs.push(line));
+    console.log(`[gate loop blocked] exit=${exitCode} calls=${JSON.stringify(calls)} summary=${JSON.stringify(summary)}`);
+
+    expect(calls).toEqual(['forestgeo_a', 'forestgeo_b']);
+    expect(exitCode).toBe(1);
+    expect(summary.blocked).toEqual([{ schema: 'forestgeo_b', reason: 'MIGRATION FAILED 2026-09-x: boom' }]);
+    expect(store.blocks).toEqual(['forestgeo_b']);
+    expect(store.quarantines).toEqual([]);
+  });
+
+  it('fails the run when no schema passed, even though each failure was quarantine-eligible', async () => {
+    const logs: string[] = [];
+    const store = new FakeGateStore();
+    const { processOne } = processor({
+      forestgeo_a: { schema: 'forestgeo_a', passed: false, reason: 'DRIFT a' },
+      forestgeo_b: { schema: 'forestgeo_b', passed: false, reason: 'DRIFT b' }
+    });
+
+    const { summary, exitCode } = await runApplyGateLoop(['forestgeo_a', 'forestgeo_b'], processOne, store, line => logs.push(line));
+    console.log(`[gate loop zero-pass] exit=${exitCode} logs=${JSON.stringify(logs)}`);
+
+    expect(exitCode).toBe(1);
+    expect(summary.quarantined.map(entry => entry.schema)).toEqual(['forestgeo_a', 'forestgeo_b']);
+    expect(logs.some(line => /no schema passed/i.test(line))).toBe(true);
+  });
+
+  it('treats a thrown per-schema error as a failure with the error message as reason', async () => {
+    const logs: string[] = [];
+    const store = new FakeGateStore();
+    const processOne = async (schema: string): Promise<SchemaGateResult> => {
+      if (schema === 'forestgeo_bad') throw new Error('ER_CANT_AGGREGATE_2COLLATIONS');
+      return { schema, passed: true, reason: '' };
+    };
+
+    const { summary } = await runApplyGateLoop(['forestgeo_bad', 'forestgeo_ok'], processOne, store, line => logs.push(line));
+
+    expect(summary.quarantined[0]).toMatchObject({ schema: 'forestgeo_bad', reason: 'ER_CANT_AGGREGATE_2COLLATIONS' });
+    expect(summary.passed).toEqual(['forestgeo_ok']);
+  });
+
+  it('matches prior gate rows case-insensitively so a mixed-case schema is not misread as never-passed', async () => {
+    const logs: string[] = [];
+    const store = new FakeGateStore();
+    store.rows.set('forestgeo_mixed', gateRow({ schemaName: 'forestgeo_Mixed', lastPassedAt: new Date('2026-08-01T00:00:00Z') }));
+    const { processOne } = processor({
+      forestgeo_Mixed: { schema: 'forestgeo_Mixed', passed: false, reason: 'DRIFT mixed' }
+    });
+
+    const { summary, exitCode } = await runApplyGateLoop(['forestgeo_Mixed'], processOne, store, line => logs.push(line));
+
+    expect(exitCode).toBe(1);
+    expect(summary.blocked.map(entry => entry.schema)).toEqual(['forestgeo_Mixed']);
+    expect(summary.quarantined).toEqual([]);
+  });
+});
+
+describe('gate reporting helpers', () => {
+  const summary: GateRunSummary = {
+    passed: ['forestgeo_a'],
+    quarantined: [{ schema: 'forestgeo_new', reason: 'DRIFT line 1\nDRIFT line 2', since: '2026-09-02T18:04:11.000Z' }],
+    blocked: []
+  };
+
+  it('truncates a reason at ERROR_SUMMARY_MAX_LENGTH', () => {
+    const audit: ContractAudit = {
+      schema: 's',
+      contractFailures: Array.from({ length: 200 }, (_, index) => ({
+        table: 'stems',
+        object: `col${index}`,
+        category: 'column' as const,
+        kind: 'missing' as const,
+        expected: 'int',
+        actual: null
+      })),
+      contractExtras: [],
+      collationViolations: [],
+      missingProcedures: [],
+      pendingMigrationIds: [],
+      ok: false
+    };
+
+    const reason = formatGateReason(audit, null);
+    console.log(`[gate reason] length=${reason.length} head=${reason.slice(0, 80)}`);
+
+    expect(reason.length).toBe(ERROR_SUMMARY_MAX_LENGTH);
+    expect(reason.startsWith('DRIFT')).toBe(true);
+  });
+
+  it('puts a migration failure ahead of any audit lines', () => {
+    const reason = formatGateReason(null, { id: '2026-09-02-01-x', error: 'Duplicate column name' });
+    expect(reason).toBe('MIGRATION FAILED 2026-09-02-01-x: Duplicate column name');
+  });
+
+  it('emits one warning annotation per quarantined schema with the first reason line', () => {
+    expect(formatGitHubAnnotations(summary)).toEqual(['::warning title=Schema quarantined::forestgeo_new — DRIFT line 1']);
+  });
+
+  it('writes the result file only when the env var is set', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-result-'));
+    const target = path.join(dir, 'result.json');
+
+    writeGateResultFile(summary, {});
+    expect(fs.existsSync(target)).toBe(false);
+
+    writeGateResultFile(summary, { [GATE_RESULT_PATH_ENV]: target });
+    expect(JSON.parse(fs.readFileSync(target, 'utf-8'))).toEqual(summary);
+
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
