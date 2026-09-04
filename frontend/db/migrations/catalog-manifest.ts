@@ -21,6 +21,10 @@ export const CATALOG_MIGRATION_MANIFEST: readonly CatalogMigrationManifestEntry[
   {
     id: '2026-07-27-01-background-job-tables',
     file: 'catalog/2026-07-27-01-background-job-tables.sql'
+  },
+  {
+    id: '2026-09-02-01-schema-contract-gate',
+    file: 'catalog/2026-09-02-01-schema-contract-gate.sql'
   }
 ] as const;
 

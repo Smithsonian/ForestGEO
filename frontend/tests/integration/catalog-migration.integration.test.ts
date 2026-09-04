@@ -23,7 +23,7 @@ import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 
 import {
   applyPendingCatalogMigrations,
-  CATALOG_BACKGROUND_JOB_TABLES,
+  CATALOG_OWNED_TABLES,
   CATALOG_LEDGER_TABLE,
   CATALOG_MIGRATION_LOCK_NAME,
   ensureCatalogDatabase,
@@ -51,7 +51,7 @@ const SETTINGS = {
   password: process.env.TEST_DB_PASSWORD || 'testpassword'
 };
 
-const CATALOG_MIGRATION_ID = CATALOG_MIGRATION_MANIFEST[0].id;
+const CATALOG_MIGRATION_IDS = CATALOG_MIGRATION_MANIFEST.map(entry => entry.id);
 
 describe('catalog migration gate — integration', () => {
   let connection: Connection;
@@ -73,7 +73,7 @@ describe('catalog migration gate — integration', () => {
 
   /** Full reset so each test starts from a known catalog state. */
   beforeEach(async () => {
-    for (const table of CATALOG_BACKGROUND_JOB_TABLES) {
+    for (const table of CATALOG_OWNED_TABLES) {
       await connection.query(`DROP TABLE IF EXISTS \`${CATALOG_DATABASE_NAME}\`.\`${table}\``);
     }
     await connection.query(`DROP TABLE IF EXISTS \`${CATALOG_DATABASE_NAME}\`.\`${CATALOG_LEDGER_TABLE}\``);
@@ -95,7 +95,7 @@ describe('catalog migration gate — integration', () => {
     console.log(`[apply] pendingBefore=${JSON.stringify(result.pendingBefore)} appliedNow=${JSON.stringify(result.appliedNow)}`);
 
     expect(result.failed).toBeNull();
-    expect(result.appliedNow).toEqual([CATALOG_MIGRATION_ID]);
+    expect(result.appliedNow).toEqual(CATALOG_MIGRATION_IDS);
 
     const after = await runCatalogPreflight(exec);
     console.log(`[apply] post states=${JSON.stringify(after.tables.map(entry => [entry.table, entry.state, entry.rowCount]))}`);
@@ -103,24 +103,24 @@ describe('catalog migration gate — integration', () => {
     expect(after.tables.every(entry => entry.rowCount === 0)).toBe(true);
 
     const created = await tableNames();
-    for (const table of CATALOG_BACKGROUND_JOB_TABLES) {
+    for (const table of CATALOG_OWNED_TABLES) {
       expect(created).toContain(table);
     }
 
     const ledger = await readCatalogLedger(exec);
-    expect(ledger).toHaveLength(1);
-    expect(ledger[0]).toMatchObject({ MigrationID: CATALOG_MIGRATION_ID, Status: 'applied' });
+    expect(ledger.map(row => row.MigrationID).sort()).toEqual([...CATALOG_MIGRATION_IDS].sort());
+    expect(ledger.every(row => row.Status === 'applied')).toBe(true);
   }, 60000);
 
   it('is idempotent: check → apply → check leaves no pending work and applies nothing twice', async () => {
     const sources = loadCatalogMigrationSources();
 
     // check (first): everything pending
-    expect(selectPendingCatalogMigrations(sources, await readCatalogLedger(exec)).map(source => source.id)).toEqual([CATALOG_MIGRATION_ID]);
+    expect(selectPendingCatalogMigrations(sources, await readCatalogLedger(exec)).map(source => source.id)).toEqual(CATALOG_MIGRATION_IDS);
 
     // apply
     const first = await applyPendingCatalogMigrations(exec, sources, await runCatalogPreflight(exec));
-    expect(first.appliedNow).toEqual([CATALOG_MIGRATION_ID]);
+    expect(first.appliedNow).toEqual(CATALOG_MIGRATION_IDS);
 
     // check (second): nothing pending
     expect(selectPendingCatalogMigrations(sources, await readCatalogLedger(exec))).toHaveLength(0);
@@ -129,7 +129,7 @@ describe('catalog migration gate — integration', () => {
     const second = await applyPendingCatalogMigrations(exec, sources, await runCatalogPreflight(exec));
     console.log(`[idempotency] second apply appliedNow=${JSON.stringify(second.appliedNow)}`);
     expect(second.appliedNow).toEqual([]);
-    expect(await readCatalogLedger(exec)).toHaveLength(1);
+    expect(await readCatalogLedger(exec)).toHaveLength(CATALOG_MIGRATION_IDS.length);
   }, 60000);
 
   it('holds one global catalog lock during apply and releases it afterwards', async () => {
@@ -221,10 +221,11 @@ describe('catalog migration gate — integration', () => {
 
     for (const row of siteLedgerRows) {
       const siteSchema = String(row.schemaName);
-      const [rows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS count FROM \`${siteSchema}\`.\`${SITE_LEDGER_TABLE}\` WHERE MigrationID = ?`, [
-        CATALOG_MIGRATION_ID
-      ]);
-      console.log(`[separation] ${siteSchema}.${SITE_LEDGER_TABLE} rows with catalog id = ${rows[0].count}`);
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS count FROM \`${siteSchema}\`.\`${SITE_LEDGER_TABLE}\` WHERE MigrationID IN (?)`,
+        [CATALOG_MIGRATION_IDS]
+      );
+      console.log(`[separation] ${siteSchema}.${SITE_LEDGER_TABLE} rows with any catalog id = ${rows[0].count}`);
       expect(Number(rows[0].count)).toBe(0);
     }
   }, 60000);
