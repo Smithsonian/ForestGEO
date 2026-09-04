@@ -6,6 +6,8 @@ vi.mock('@/auth', () => ({ auth: vi.fn() }));
 import { auth } from '@/auth';
 import { withRouteAuthz, fromQuery, fromPath, fromPathSegment, fromBody } from '@/lib/route-authz';
 import type { RouteKey } from '@/lib/route-policy';
+// Globally mocked in tests/mocks/db-mocks.ts; these cases drive it per test.
+import { findSchemaQuarantine } from '@/lib/schema-quarantine';
 
 const HTTP_OK = 200;
 const HTTP_BAD_REQUEST = 400;
@@ -15,6 +17,12 @@ const HTTP_INTERNAL_SERVER_ERROR = 500;
 
 const ADMIN_ROLE = 'global';
 const NON_ADMIN_ROLE = 'field crew';
+
+const SCHEMA_QUARANTINED_CODE = 'SCHEMA_QUARANTINED';
+const SCHEMA_GATE_UNAVAILABLE_CODE = 'SCHEMA_GATE_UNAVAILABLE';
+const QUARANTINED_SCHEMA = 'forestgeo_serc';
+const quarantineRecord = { schemaName: QUARANTINED_SCHEMA, quarantinedAt: new Date('2026-09-02T18:04:11Z'), reason: 'DRIFT', runRef: null };
+const quarantinedRequest = () => new NextRequest(`http://localhost/api/validations/validationlist?schema=${QUARANTINED_SCHEMA}`);
 
 const makeHandler = () => vi.fn(async () => new Response('ok', { status: HTTP_OK }));
 const emptyCtx = { params: Promise.resolve({}) };
@@ -162,5 +170,54 @@ describe('withRouteAuthz', () => {
     expect(handler).toHaveBeenCalledOnce();
     const payload = await res.json();
     expect(payload.echoedGridType).toBe('stems');
+  });
+  it('refuses a member session on a quarantined schema with 503 SCHEMA_QUARANTINED', async () => {
+    vi.mocked(auth).mockResolvedValueOnce({ user: { userStatus: NON_ADMIN_ROLE, sites: [{ schemaName: QUARANTINED_SCHEMA }] } } as any);
+    vi.mocked(findSchemaQuarantine).mockResolvedValueOnce(quarantineRecord);
+    const handler = makeHandler();
+    const wrapped = withRouteAuthz('validations/validationlist', handler, { schema: fromQuery('schema') });
+
+    const res = await wrapped(quarantinedRequest(), emptyCtx);
+    const body = await res.json();
+    console.log(`[quarantined route] status=${res.status} body=${JSON.stringify(body)}`);
+
+    expect(res.status).toBe(HTTP_SERVICE_UNAVAILABLE);
+    expect(body.code).toBe(SCHEMA_QUARANTINED_CODE);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('still returns 403 for a non-member on a quarantined schema (quarantine is checked after authz)', async () => {
+    vi.mocked(auth).mockResolvedValueOnce({ user: { userStatus: NON_ADMIN_ROLE, sites: [{ schemaName: 'forestgeo_panama' }] } } as any);
+    const wrapped = withRouteAuthz('validations/validationlist', makeHandler(), { schema: fromQuery('schema') });
+
+    const res = await wrapped(quarantinedRequest(), emptyCtx);
+
+    expect(res.status).toBe(HTTP_FORBIDDEN);
+    expect(findSchemaQuarantine).not.toHaveBeenCalled();
+  });
+
+  it('does not exempt admins from quarantine on a site-scoped route', async () => {
+    vi.mocked(auth).mockResolvedValueOnce({ user: { userStatus: ADMIN_ROLE, sites: [] } } as any);
+    vi.mocked(findSchemaQuarantine).mockResolvedValueOnce(quarantineRecord);
+    const handler = makeHandler();
+    const wrapped = withRouteAuthz('validations/validationlist', handler, { schema: fromQuery('schema') });
+
+    const res = await wrapped(quarantinedRequest(), emptyCtx);
+
+    expect(res.status).toBe(HTTP_SERVICE_UNAVAILABLE);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('fails closed with 503 SCHEMA_GATE_UNAVAILABLE when the lookup throws', async () => {
+    vi.mocked(auth).mockResolvedValueOnce({ user: { userStatus: NON_ADMIN_ROLE, sites: [{ schemaName: QUARANTINED_SCHEMA }] } } as any);
+    vi.mocked(findSchemaQuarantine).mockRejectedValueOnce(new Error('catalog unreachable'));
+    const handler = makeHandler();
+    const wrapped = withRouteAuthz('validations/validationlist', handler, { schema: fromQuery('schema') });
+
+    const res = await wrapped(quarantinedRequest(), emptyCtx);
+
+    expect(res.status).toBe(HTTP_SERVICE_UNAVAILABLE);
+    expect((await res.json()).code).toBe(SCHEMA_GATE_UNAVAILABLE_CODE);
+    expect(handler).not.toHaveBeenCalled();
   });
 });
