@@ -10,7 +10,10 @@
  * It ends in exactly one of:
  *   schema-contract OK: N schemas
  *   schema-contract FAILED: N schemas checked, M incompatible
- * N = 0 is ALWAYS a failure (a discovery failure must never read as a green run).
+ * each with a " (Q quarantined: ...)" suffix when the deploy gate has quarantined
+ * schemas (see #429) — those are printed with their stored reason and never
+ * audited here. N = 0 is ALWAYS a failure (a discovery failure, or an all-
+ * quarantined server, must never read as a green run).
  *
  * Flags:
  *   --schema <name>   audit ONE schema using LOCAL test credentials
@@ -33,6 +36,8 @@ import {
   type MigrationSource
 } from './apply-schema-migrations';
 import { assertExpectedHost, createSchemaCliConnection, discoverSiteSchemas, executorFor, resolveConnectionSettings } from './lib/schema-cli';
+import { CATALOG_DATABASE_NAME } from '../db/migrations/catalog-manifest';
+import { readQuarantinedSchemas, type SchemaGateRow } from './lib/schema-gate';
 
 const CLI_FLAG = {
   SCHEMA: '--schema',
@@ -76,20 +81,26 @@ export function parseAuditArgs(argv: string[]): AuditArgs {
 export interface AuditSummary {
   checked: number;
   incompatible: number;
+  quarantined: number;
   passed: boolean;
   message: string;
 }
 
 /**
  * Decides the overall pass/fail from per-schema audits. N = 0 is ALWAYS a
- * failure: a run that checked zero schemas must never report success.
+ * failure: a run that checked zero schemas must never report success, and a
+ * quarantined schema is not a checked schema.
  */
-export function summarizeAudits(audits: ContractAudit[]): AuditSummary {
+export function summarizeAudits(audits: ContractAudit[], quarantinedSchemas: readonly string[] = []): AuditSummary {
   const checked = audits.length;
   const incompatible = audits.filter(audit => !audit.ok).length;
+  const quarantined = quarantinedSchemas.length;
   const passed = checked > 0 && incompatible === 0;
-  const message = passed ? `schema-contract OK: ${checked} schemas` : `schema-contract FAILED: ${checked} schemas checked, ${incompatible} incompatible`;
-  return { checked, incompatible, passed, message };
+  const quarantineSuffix = quarantined === 0 ? '' : ` (${quarantined} quarantined: ${quarantinedSchemas.join(', ')})`;
+  const message = passed
+    ? `schema-contract OK: ${checked} schemas${quarantineSuffix}`
+    : `schema-contract FAILED: ${checked} schemas checked, ${incompatible} incompatible${quarantineSuffix}`;
+  return { checked, incompatible, quarantined, passed, message };
 }
 
 function printAuditDetail(audit: ContractAudit): void {
@@ -111,6 +122,11 @@ function printAuditDetail(audit: ContractAudit): void {
   for (const id of audit.pendingMigrationIds) {
     console.log(`  PENDING MIGRATION  ${id}`);
   }
+}
+
+function printQuarantinedDetail(schema: string, row: SchemaGateRow): void {
+  console.log(`Schema: ${schema}  [QUARANTINED since ${row.quarantinedAt?.toISOString() ?? 'unknown'}]`);
+  for (const line of (row.quarantineReason ?? '').split('\n').filter(Boolean)) console.log(`  ${line}`);
 }
 
 async function auditOneSchema(settings: ReturnType<typeof resolveConnectionSettings>, schema: string, sources: MigrationSource[]): Promise<ContractAudit> {
@@ -140,24 +156,34 @@ async function runCli(argv: string[]): Promise<number> {
   const sources = loadMigrationSources();
 
   const discovery = await createSchemaCliConnection(settings, { multipleStatements: false });
+  const catalog = await createSchemaCliConnection(settings, { database: CATALOG_DATABASE_NAME, multipleStatements: false });
 
   const audits: ContractAudit[] = [];
+  const quarantinedNames: string[] = [];
   try {
     const schemas = args.allSites ? await discoverSiteSchemas(discovery) : [args.schema as string];
     if (args.allSites) {
       assertSiteSchemasDiscovered(schemas);
     }
+    const quarantined = await readQuarantinedSchemas(executorFor(catalog));
 
     for (const schema of schemas) {
+      const row = quarantined.get(schema.toLowerCase());
+      if (row) {
+        printQuarantinedDetail(schema, row);
+        quarantinedNames.push(schema);
+        continue;
+      }
       const audit = await auditOneSchema(settings, schema, sources);
       audits.push(audit);
       printAuditDetail(audit);
     }
   } finally {
+    await catalog.end();
     await discovery.end();
   }
 
-  const summary = summarizeAudits(audits);
+  const summary = summarizeAudits(audits, quarantinedNames);
   console.log(`\n${summary.message}`);
   return summary.passed ? 0 : 1;
 }

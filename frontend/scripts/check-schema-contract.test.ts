@@ -39,6 +39,26 @@ describe('summarizeAudits', () => {
     expect(summary.checked).toBe(0);
     expect(summary.message).toBe('schema-contract FAILED: 0 schemas checked, 0 incompatible');
   });
+  it('reports quarantined schemas in the OK line without counting them as checked', () => {
+    const summary = summarizeAudits([audit('a', true), audit('b', true)], ['forestgeo_new']);
+    console.log(`[summary] ${JSON.stringify(summary)}`);
+    expect(summary.passed).toBe(true);
+    expect(summary.checked).toBe(2);
+    expect(summary.quarantined).toBe(1);
+    expect(summary.message).toBe('schema-contract OK: 2 schemas (1 quarantined: forestgeo_new)');
+  });
+
+  it('still fails when every schema is quarantined (zero checked)', () => {
+    const summary = summarizeAudits([], ['forestgeo_a', 'forestgeo_b']);
+    console.log(`[summary] ${JSON.stringify(summary)}`);
+    expect(summary.passed).toBe(false);
+    expect(summary.message).toBe('schema-contract FAILED: 0 schemas checked, 0 incompatible (2 quarantined: forestgeo_a, forestgeo_b)');
+  });
+
+  it('keeps the exact legacy message when nothing is quarantined', () => {
+    expect(summarizeAudits([audit('a', true)]).message).toBe('schema-contract OK: 1 schemas');
+    expect(summarizeAudits([audit('a', true)]).quarantined).toBe(0);
+  });
 });
 
 describe('parseAuditArgs', () => {
