@@ -16,8 +16,11 @@
 set -eu
 
 STORE="${FORESTGEO_LOCAL_STORE:-$HOME/dev/ForestGEO-local}"
-LINK_PATHS='docs/superpowers frontend/docs/superpowers'
-COPY_PATHS='frontend/CLAUDE.md'
+# Linked: one shared copy, so an edit is instantly true everywhere.
+LINK_PATHS='docs/superpowers frontend/docs/superpowers CLAUDE.md frontend/CLAUDE.md'
+# Copied: per-checkout files that tools rewrite in place, and secrets. One shared
+# inode would let an edit made for one branch silently change every other.
+COPY_PATHS='frontend/.env.local'
 
 check_only=0
 [ "${1:-}" = "--check" ] && check_only=1
@@ -37,7 +40,7 @@ for rel in $LINK_PATHS; do
   target="$STORE/$rel"
   link="$root/$rel"
 
-  if [ ! -d "$target" ]; then
+  if [ ! -e "$target" ]; then
     echo "  skip   $rel (nothing at $target)"
     continue
   fi
@@ -61,7 +64,7 @@ for rel in $LINK_PATHS; do
   fi
 
   if [ -e "$link" ]; then
-    echo "  SKIP   $rel — a real directory is already there; move its contents into $target, delete it, and re-run"
+    echo "  SKIP   $rel — a real file/directory is already there; move it into $target, delete it, and re-run"
     status=1
     continue
   fi
@@ -75,8 +78,6 @@ for rel in $LINK_PATHS; do
   fi
 done
 
-# Copied, not linked: per-checkout files that tools rewrite in place. One shared
-# inode would let an edit made for one branch silently change every other.
 for rel in $COPY_PATHS; do
   source_file="$STORE/$rel"
   dest="$root/$rel"
