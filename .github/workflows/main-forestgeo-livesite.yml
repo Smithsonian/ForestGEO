@@ -287,7 +287,7 @@ jobs:
               ``,
               `The deploy continued for every other schema. Site-scoped API requests for these schemas return 503 \`SCHEMA_QUARANTINED\` until a later deploy passes the gate for them.`,
               ``,
-              `Repair: see "Quarantined schemas" in \`frontend/docs/deployment-to-development.md\`. Never edit \`catalog.schema_contract_gate\` by hand.`
+              `Repair: see \`docs/schema-contract-gate-quarantine.md\`. Never edit \`catalog.schema_contract_gate\` by hand.`
             ].join('\n');
             const { data: open } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', labels: LABEL, per_page: 100 });
             const existing = open.find(issue => issue.title === title);
