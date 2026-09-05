@@ -24,6 +24,8 @@ vi.mock('@/ailogger', () => ({
 }));
 
 import { validateContextualValues } from '@/lib/contextvalidation';
+// Globally mocked in tests/mocks/db-mocks.ts; these cases drive it per test.
+import { findSchemaQuarantine } from '@/lib/schema-quarantine';
 
 const AUTHORIZED_SCHEMA = 'forestgeo_testing';
 const STATUS_UNAUTHENTICATED = 401;
@@ -138,6 +140,40 @@ describe('validateContextualValues — per-site schema authorization', () => {
     expect(result.success).toBe(true);
     expect(result.values?.schema).toBeUndefined();
     expect(authMock).not.toHaveBeenCalled();
+  });
+  it('refuses a quarantined schema with 503 SCHEMA_QUARANTINED after the access check', async () => {
+    authMock.mockResolvedValueOnce(sessionWithSites([AUTHORIZED_SCHEMA]));
+    vi.mocked(findSchemaQuarantine).mockResolvedValueOnce({
+      schemaName: AUTHORIZED_SCHEMA,
+      quarantinedAt: new Date('2026-09-02T18:04:11Z'),
+      reason: 'DRIFT',
+      runRef: null
+    });
+
+    const result = await validateContextualValues(makeRequest(AUTHORIZED_SCHEMA), { requireSchema: true });
+    const body = await result.response!.json();
+    console.log(`[ctx quarantined] status=${result.response!.status} body=${JSON.stringify(body)}`);
+
+    expect(result.success).toBe(false);
+    expect(result.response?.status).toBe(STATUS_SERVICE_UNAVAILABLE);
+    expect(body.code).toBe('SCHEMA_QUARANTINED');
+  });
+
+  it('never consults quarantine when requireSchemaAccess is false', async () => {
+    const result = await validateContextualValues(makeRequest(AUTHORIZED_SCHEMA), { requireSchema: true, requireSchemaAccess: false });
+
+    expect(result.success).toBe(true);
+    expect(findSchemaQuarantine).not.toHaveBeenCalled();
+  });
+
+  it('fails closed with 503 SCHEMA_GATE_UNAVAILABLE when the lookup throws', async () => {
+    authMock.mockResolvedValueOnce(sessionWithSites([AUTHORIZED_SCHEMA]));
+    vi.mocked(findSchemaQuarantine).mockRejectedValueOnce(new Error('catalog unreachable'));
+
+    const result = await validateContextualValues(makeRequest(AUTHORIZED_SCHEMA), { requireSchema: true });
+
+    expect(result.response?.status).toBe(STATUS_SERVICE_UNAVAILABLE);
+    expect((await result.response!.json()).code).toBe('SCHEMA_GATE_UNAVAILABLE');
   });
 });
 

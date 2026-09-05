@@ -5,6 +5,7 @@ import { requireAdmin, requireSession } from '@/lib/auth-helpers';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { ROUTE_POLICIES, type RouteKey } from '@/lib/route-policy';
 import { HTTPResponses } from '@/config/macros';
+import { findSchemaQuarantine, schemaGateUnavailableResponse, schemaQuarantinedResponse } from '@/lib/schema-quarantine';
 import ailogger from '@/ailogger';
 
 export interface RouteContext {
@@ -75,7 +76,9 @@ type Handler = (request: NextRequest, context: RouteContext) => Promise<Response
  *   - `admin`       → requires an admin session (403 otherwise).
  *   - `site-scoped` → resolves a schema via `options.schema` and enforces
  *                     per-site access (400 on missing/invalid schema, 403 on
- *                     out-of-scope, 503 when permissions are unavailable).
+ *                     out-of-scope, 503 when permissions are unavailable), then
+ *                     503 SCHEMA_QUARANTINED when the schema is quarantined by
+ *                     the deploy contract gate (see lib/schema-quarantine.ts).
  *
  * The schema is resolved by an EXPLICIT per-route resolver
  * ({@link fromQuery}/{@link fromPath}/{@link fromBody}), never inferred from
@@ -117,6 +120,17 @@ export function withRouteAuthz(routeKey: RouteKey, handler: Handler, options: Au
     }
     const denied = assertSchemaAccess(session, schema);
     if (denied) return denied;
+
+    // Quarantine is a schema-integrity state, not a permission: it is checked only
+    // after authz so an out-of-scope caller learns nothing, and admins are not exempt.
+    let quarantine;
+    try {
+      quarantine = await findSchemaQuarantine(schema);
+    } catch (error) {
+      ailogger.error(`[route-authz] schema quarantine lookup failed for '${schema}' on '${routeKey}'`, error instanceof Error ? error : undefined);
+      return schemaGateUnavailableResponse(error);
+    }
+    if (quarantine) return schemaQuarantinedResponse(quarantine);
 
     return handler(request, routeContext);
   };

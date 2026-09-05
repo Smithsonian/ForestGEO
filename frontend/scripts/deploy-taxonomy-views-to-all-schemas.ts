@@ -23,7 +23,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
-import { assertExpectedHost, createSchemaCliConnection, discoverSiteSchemas, resolveConnectionSettings } from './lib/schema-cli';
+import { assertExpectedHost, createSchemaCliConnection, discoverSiteSchemas, executorFor, resolveConnectionSettings } from './lib/schema-cli';
+import { quarantineSkipDetail, readQuarantinedSchemas } from './lib/schema-gate';
+
+export { quarantineSkipDetail };
 
 const TAXONOMY_VIEWS = ['alltaxonomiesview', 'stemtaxonomiesview'] as const;
 const REQUIRED_BASE_TABLES = ['species', 'genus', 'family', 'trees', 'stems'] as const;
@@ -111,6 +114,10 @@ export async function deployTaxonomyViewsToAllSchemas(): Promise<void> {
     }
 
     console.log(`Found ${schemas.length} ForestGEO schemas.\n`);
+
+    // Read once on the discovery connection: a quarantined schema is one the
+    // contract gate could not verify, so it must not receive new view DDL.
+    const quarantined = await readQuarantinedSchemas(executorFor(discoveryConnection));
     console.log('[Step 2] Applying views to each schema that has base taxonomy tables...\n');
 
     const results: SchemaResult[] = [];
@@ -119,6 +126,15 @@ export async function deployTaxonomyViewsToAllSchemas(): Promise<void> {
       console.log(`Processing: ${schema}`);
 
       try {
+        const quarantineRow = quarantined.get(schema.toLowerCase());
+        if (quarantineRow) {
+          const detail = quarantineSkipDetail(quarantineRow);
+          console.log(`  SKIPPED - ${detail}`);
+          results.push({ schema, status: 'skipped', detail });
+          console.log();
+          continue;
+        }
+
         const { ready, missing } = await hasRequiredBaseTables(discoveryConnection, schema);
         if (!ready) {
           const detail = `Missing base tables: ${missing.join(', ')}. Not a provisioned site schema — skipped.`;
@@ -156,7 +172,7 @@ export async function deployTaxonomyViewsToAllSchemas(): Promise<void> {
 
     console.log(`Total schemas:  ${schemas.length}`);
     console.log(`Deployed:       ${deployed.length}`);
-    console.log(`Skipped:        ${skipped.length} (no base taxonomy tables)`);
+    console.log(`Skipped:        ${skipped.length} (no base taxonomy tables, or quarantined)`);
     console.log(`Failed:         ${failed.length}`);
     console.log();
 

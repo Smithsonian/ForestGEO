@@ -73,10 +73,14 @@ export const CATALOG_LEDGER_TABLE = 'catalog_migrations';
  */
 export const CATALOG_MIGRATION_LOCK_NAME = 'fg:migrate:catalog';
 
-/** Tables this migration set owns, in foreign-key-safe DROP order (children first). */
-export const CATALOG_BACKGROUND_JOB_TABLES = ['background_job_events', 'background_job_files', 'background_jobs'] as const;
+/**
+ * Tables the catalog manifest owns, in foreign-key-safe DROP order (children
+ * first). schema_contract_gate has no foreign keys and is written by the site
+ * gate (see scripts/lib/schema-gate.ts), so it goes last.
+ */
+export const CATALOG_OWNED_TABLES = ['background_job_events', 'background_job_files', 'background_jobs', 'schema_contract_gate'] as const;
 
-export type CatalogTableName = (typeof CATALOG_BACKGROUND_JOB_TABLES)[number];
+export type CatalogTableName = (typeof CATALOG_OWNED_TABLES)[number];
 
 /**
  * Minimum shape each table must have to be considered CURRENT. Only
@@ -190,6 +194,15 @@ export const CATALOG_TABLE_CONTRACTS: Readonly<Record<CatalogTableName, CatalogT
     forbiddenColumns: [],
     enumValues: {},
     requiredIndexes: [{ name: 'idx_background_job_events_job_created', columns: ['JobID', 'CreatedAt'], unique: false }]
+  },
+  schema_contract_gate: {
+    requiredColumns: ['SchemaName', 'LastPassedAt', 'LastFailedAt', 'QuarantinedAt', 'QuarantineReason', 'LastRunRef', 'UpdatedAt'],
+    forbiddenColumns: [],
+    enumValues: {},
+    // The primary key on SchemaName is what makes one row per schema; it is
+    // created by the table definition itself, so there is no secondary index
+    // the gate's correctness depends on.
+    requiredIndexes: []
   }
 } as const;
 
@@ -367,7 +380,7 @@ export function classifyCatalogTable(table: CatalogTableName, columns: LiveColum
 export async function runCatalogPreflight(exec: SqlExecutor, database: string = CATALOG_DATABASE_NAME): Promise<CatalogPreflight> {
   const tables: CatalogTablePreflight[] = [];
 
-  for (const table of CATALOG_BACKGROUND_JOB_TABLES) {
+  for (const table of CATALOG_OWNED_TABLES) {
     const columnRows = await exec(
       `SELECT COLUMN_NAME AS name, COLUMN_TYPE AS columnType FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?`,
       [database, table]
@@ -569,7 +582,7 @@ export async function remediateEmptyUnreleasedCatalogTables(
 
   const dropped: CatalogTableName[] = [];
   // Children first so the foreign keys never block the parent drop.
-  for (const table of CATALOG_BACKGROUND_JOB_TABLES) {
+  for (const table of CATALOG_OWNED_TABLES) {
     await exec(`DROP TABLE IF EXISTS \`${database}\`.\`${table}\``);
     dropped.push(table);
   }
