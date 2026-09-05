@@ -1,1 +1,22 @@
+# Superpowers scratch (plans, specs, mockups) is deliberately local-only and is
+# ignored by the root .gitignore. Ignore rules do not cover `git add -f`, and they
+# never applied to files that were already tracked — which is how 15 of these
+# reached dev and main before they were untracked. This guard is the layer that
+# actually holds: it inspects what is STAGED, so a forced add is rejected too.
+#
+# There are no exceptions by design. A note worth keeping belongs in docs/notes/.
+# To override in a genuine emergency: git commit --no-verify (and expect a reviewer
+# to ask why).
+staged_superpowers=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '(^|/)\.?superpowers/' || true)
+if [ -n "$staged_superpowers" ]; then
+  echo "pre-commit: refusing to commit superpowers scratch files." >&2
+  echo "" >&2
+  echo "$staged_superpowers" | sed 's/^/  /' >&2
+  echo "" >&2
+  echo "These are local-only working documents. Unstage them with:" >&2
+  echo "  git restore --staged <path>" >&2
+  echo "If the content is worth keeping, move it to docs/notes/ and commit it there." >&2
+  exit 1
+fi
+
 cd frontend && npx lint-staged
