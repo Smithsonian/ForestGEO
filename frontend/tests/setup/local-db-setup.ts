@@ -418,14 +418,12 @@ export async function loadStoredProcedures(connection: mysql.Connection): Promis
       const trimmed = statement.trim();
       if (!trimmed || trimmed.length < 10) continue;
 
-      // Remove the definer clause (azureroot won't exist locally)
-      let cleaned = trimmed.replace(/definer\s*=\s*`?[^`\s]+`?@`?[^`\s]+`?\s*/gi, '');
-
-      // Check if it's a DROP statement (these should succeed)
-      const isDrop = cleaned.toLowerCase().startsWith('drop');
+      // Executed verbatim: storedprocedures.sql must not need per-environment
+      // rewriting (tests/ddl-environment-neutrality.test.ts guards that).
+      const isDrop = trimmed.toLowerCase().startsWith('drop');
 
       try {
-        await connection.query(cleaned);
+        await connection.query(trimmed);
         if (isDrop) {
           dropCount++;
         } else {
@@ -436,7 +434,7 @@ export async function loadStoredProcedures(connection: mysql.Connection): Promis
         const isExpectedError = err.message.includes('already exists') || err.message.includes('does not exist');
 
         if (!isExpectedError) {
-          const preview = cleaned.substring(0, 60).replace(/\n/g, ' ');
+          const preview = trimmed.substring(0, 60).replace(/\n/g, ' ');
           criticalErrors.push({ error: err.message.substring(0, 80), sql: preview });
         }
       }
