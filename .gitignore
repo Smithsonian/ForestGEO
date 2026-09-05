@@ -56,6 +56,7 @@ frontend/liquibase/
 *.sh
 !frontend/db/migrations/unified-measurements-migrations/run-branch-refresh.sh
 !scripts/verify-clone-runnable.sh
+!scripts/link-local-docs.sh
 *.properties
 .jscpd
 CLAUDE.md
@@ -76,8 +77,11 @@ frontend/db/migrations/unified-measurements-migrations/branch_refresh_00_ensure_
 # so any carve-out here would need the parent un-ignored, which is what let scratch
 # docs reach the repo before. A note worth keeping goes in docs/notes/ instead.
 # frontend/.husky/pre-commit rejects these paths even when staged with `git add -f`.
-superpowers/
-.superpowers/
+# No trailing slash: that form matches directories ONLY, and each checkout holds a
+# SYMLINK named `superpowers` pointing at the shared local store, which git treats
+# as a blob. With the slash the link itself showed up as untracked.
+superpowers
+.superpowers
 
 # personal weekly work notes — synced to Obsidian, not source-controlled
 weekly-notes/
