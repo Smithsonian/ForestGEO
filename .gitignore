@@ -71,14 +71,13 @@ frontend/db-migrations/unified-measurements-migrations/backups/
 frontend/backups/
 *deployment_log*.txt
 frontend/db/migrations/unified-measurements-migrations/branch_refresh_00_ensure_upload_tracking_tables.sql
-# superpowers scratch (plans, specs, mockups) — ignored everywhere
+# superpowers scratch (plans, specs, mockups) — ignored everywhere, no exceptions.
+# Deliberately no re-include rules: git cannot descend into an excluded directory,
+# so any carve-out here would need the parent un-ignored, which is what let scratch
+# docs reach the repo before. A note worth keeping goes in docs/notes/ instead.
+# frontend/.husky/pre-commit rejects these paths even when staged with `git add -f`.
 superpowers/
 .superpowers/
-!docs/superpowers/
-docs/superpowers/*
-!docs/superpowers/notes/
-docs/superpowers/notes/*
-!docs/superpowers/notes/2026-07-hydration-mismatch.md
 
 # personal weekly work notes — synced to Obsidian, not source-controlled
 weekly-notes/
