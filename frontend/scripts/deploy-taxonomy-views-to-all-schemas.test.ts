@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Connection } from 'mysql2/promise';
-import { deployTaxonomyViewsToSchema, extractViewStatements } from './deploy-taxonomy-views-to-all-schemas';
+import { deployTaxonomyViewsToSchema, extractViewStatements, quarantineSkipDetail } from './deploy-taxonomy-views-to-all-schemas';
 
 describe('taxonomy view deployment helpers', () => {
   it('extracts only the two allowlisted view statements', () => {
@@ -32,5 +32,20 @@ describe('taxonomy view deployment helpers', () => {
 
     expect(query.mock.calls.map(([sql]) => sql)).toEqual([...statements.values()]);
     expect(onApplied.mock.calls.map(([name]) => name)).toEqual([...statements.keys()]);
+  });
+});
+
+describe('quarantineSkipDetail', () => {
+  it('names the gate, the time, and the first reason line', () => {
+    const detail = quarantineSkipDetail({
+      schemaName: 'forestgeo_new',
+      lastPassedAt: null,
+      lastFailedAt: null,
+      quarantinedAt: new Date('2026-09-02T18:04:11Z'),
+      quarantineReason: 'DRIFT one\nDRIFT two',
+      lastRunRef: null
+    });
+    console.log(`[taxonomy skip detail] ${detail}`);
+    expect(detail).toBe('Quarantined by the schema contract gate since 2026-09-02T18:04:11.000Z: DRIFT one');
   });
 });

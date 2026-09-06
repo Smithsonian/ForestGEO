@@ -5,6 +5,7 @@ import ailogger from '@/ailogger';
 import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { auth } from '@/auth';
 import { hasSchemaAccess, isAdminSession } from '@/lib/authz';
+import { findSchemaQuarantine, schemaGateUnavailableResponse, schemaQuarantinedResponse } from '@/lib/schema-quarantine';
 
 export interface ContextValues {
   siteID?: number;
@@ -152,6 +153,21 @@ export async function validateContextualValues(
             { status: HTTPResponses.FORBIDDEN }
           )
         };
+      }
+
+      // Quarantine is a schema-integrity state, not a permission: checked after
+      // the access check so an out-of-scope caller learns nothing, and admins are
+      // not exempt. See lib/schema-quarantine.ts and #429.
+      let quarantine;
+      try {
+        quarantine = await findSchemaQuarantine(values.schema);
+      } catch (error) {
+        ailogger.error(`[contextvalidation] schema quarantine lookup failed for '${values.schema}'`, error instanceof Error ? error : undefined);
+        return { success: false, response: schemaGateUnavailableResponse(error) };
+      }
+      if (quarantine) {
+        ailogger.warn(`[contextvalidation] Schema quarantined: ${values.schema}`);
+        return { success: false, response: schemaQuarantinedResponse(quarantine) };
       }
     }
 
