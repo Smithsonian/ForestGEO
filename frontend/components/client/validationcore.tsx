@@ -6,12 +6,11 @@ import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ailogger from '@/ailogger';
 import { useAnimationCacheContext } from '@/app/contexts/animationcacheprovider';
 import { readValidationStream } from '@/components/processors/readvalidationstream';
+import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 type ValidationExecutionResult = { procedureName: string; success: boolean; error?: string };
 
-const DBH_GROWTH_PROCEDURE = 'ValidateDBHGrowthExceedsMax';
-const DBH_SHRINKAGE_PROCEDURE = 'ValidateDBHShrinkageExceedsMax';
 const QUADRAT_MISMATCH_PROCEDURE = 'ValidateQuadratMismatchAcrossCensuses';
 const COORDINATE_DRIFT_PROCEDURE = 'ValidateCoordinateDriftAcrossCensuses';
 

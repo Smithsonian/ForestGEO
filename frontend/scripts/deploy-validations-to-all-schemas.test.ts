@@ -59,7 +59,7 @@ describe('parseStoredProceduresSQL', () => {
     const leadingDrops = statements.slice(0, firstCreate);
 
     expect(firstCreate).toBeGreaterThan(0);
-    expect(leadingDrops).toHaveLength(12);
+    expect(leadingDrops).toHaveLength(13);
     for (const statement of leadingDrops) {
       const executableSql = statement
         .split('\n')

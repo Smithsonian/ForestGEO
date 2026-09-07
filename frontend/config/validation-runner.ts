@@ -12,9 +12,8 @@ import { readValidationStream } from '@/components/processors/readvalidationstre
 import { isNetworkValidationFetchFailure } from '@/components/client/validationcore';
 import ailogger from '@/ailogger';
 import { getValidationTaskTimeoutMs, resolveValidationRunPersistence } from '@/config/validation-runner-utils';
+import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
 
-const DBH_GROWTH_PROCEDURE = 'ValidateDBHGrowthExceedsMax';
-const DBH_SHRINKAGE_PROCEDURE = 'ValidateDBHShrinkageExceedsMax';
 const QUADRAT_MISMATCH_PROCEDURE = 'ValidateQuadratMismatchAcrossCensuses';
 const COORDINATE_DRIFT_PROCEDURE = 'ValidateCoordinateDriftAcrossCensuses';
 
