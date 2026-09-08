@@ -72,6 +72,7 @@ export function resolveConnectionSettings(allSites: boolean): ConnectionSettings
 export interface SchemaConnectionOptions {
   database?: string;
   multipleStatements?: boolean;
+  connectTimeout?: number;
 }
 
 /**
@@ -93,6 +94,7 @@ export async function createSchemaCliConnection(settings: ConnectionSettings, op
     port: settings.port,
     timezone: 'Z',
     multipleStatements: options.multipleStatements ?? false,
+    ...(options.connectTimeout !== undefined && { connectTimeout: options.connectTimeout }),
     ...(options.database !== undefined && { database: options.database }),
     ...(settings.host === AZURE_HOST && { ssl: { rejectUnauthorized: true } })
   });
