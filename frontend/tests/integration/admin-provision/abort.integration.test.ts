@@ -99,7 +99,8 @@ describe('POST /api/admin/provision/[runId]/abort (integration)', () => {
     mocks.auth.mockResolvedValue(GLOBAL_SESSION);
     const runId = await seedRun(testPool, TEST_SCHEMA, 'failed', { createSchema: true });
     const [siteRows]: any = await testPool.query(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ?`, [TEST_SCHEMA]);
-    await testPool.query(`INSERT INTO catalog.usersiterelations (UserID, SiteID) VALUES (1, ?)`, [siteRows[0].SiteID]);
+    const siteID = siteRows[0].SiteID;
+    await testPool.query(`INSERT INTO catalog.usersiterelations (UserID, SiteID) VALUES (1, ?)`, [siteID]);
 
     const res = await POST(makeRequest(URL_FOR(String(runId)), { method: 'POST' }), makeParams(runId));
 
@@ -114,7 +115,9 @@ describe('POST /api/admin/provision/[runId]/abort (integration)', () => {
     const [sites]: any = await testPool.query(`SELECT * FROM catalog.sites WHERE SchemaName = ?`, [TEST_SCHEMA]);
     expect(sites).toHaveLength(0);
 
-    const [relations]: any = await testPool.query(`SELECT * FROM catalog.usersiterelations`);
+    // Other suites may leave catalog relations for their own fixture sites;
+    // abort must remove the relation attached to the site it just removed.
+    const [relations]: any = await testPool.query(`SELECT * FROM catalog.usersiterelations WHERE SiteID = ?`, [siteID]);
     expect(relations).toHaveLength(0);
 
     const [schemas]: any = await testPool.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?`, [TEST_SCHEMA]);
