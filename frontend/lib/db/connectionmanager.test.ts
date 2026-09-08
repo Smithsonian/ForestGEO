@@ -102,29 +102,45 @@ describe('ConnectionManager.executeQuery timing', () => {
 });
 
 describe('ConnectionManager.withTransaction callback failures', () => {
-  it('rolls back and releases the connection when a non-async callback throws synchronously', async () => {
-    const connection = {
-      threadId: 998,
-      query: vi.fn().mockResolvedValue([[]]),
-      beginTransaction: vi.fn().mockResolvedValue(undefined),
-      rollback: vi.fn().mockResolvedValue(undefined),
-      release: vi.fn(),
-      ping: vi.fn()
-    };
-    getConnMock.mockResolvedValueOnce(connection);
+  type TransactionInternals = {
+    transactionConnections: Map<string, unknown>;
+    transactionMeta: Map<string, unknown>;
+    transactionSlotQueue: Array<() => void>;
+    startingTransactions: number;
+  };
 
-    const { default: ConnectionManager } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
-    const manager = ConnectionManager.getInstance();
-    const internals = manager as unknown as {
-      transactionConnections: Map<string, unknown>;
-      transactionMeta: Map<string, unknown>;
-      transactionSlotQueue: Array<() => void>;
-      startingTransactions: number;
-    };
+  function resetTransactions(internals: TransactionInternals) {
     internals.transactionConnections.clear();
     internals.transactionMeta.clear();
     internals.transactionSlotQueue.length = 0;
     internals.startingTransactions = 0;
+  }
+
+  function makeTransactionConnection(threadId: number) {
+    return {
+      threadId,
+      query: vi.fn().mockResolvedValue([[]]),
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      destroy: vi.fn(),
+      release: vi.fn(),
+      ping: vi.fn()
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rolls back and releases the connection when a non-async callback throws synchronously', async () => {
+    const connection = makeTransactionConnection(998);
+    getConnMock.mockResolvedValueOnce(connection);
+
+    const { default: ConnectionManager } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const manager = ConnectionManager.getInstance();
+    const internals = manager as unknown as TransactionInternals;
+    resetTransactions(internals);
 
     await expect(
       manager.withTransaction(() => {
@@ -135,6 +151,118 @@ describe('ConnectionManager.withTransaction callback failures', () => {
     expect(connection.rollback).toHaveBeenCalledOnce();
     expect(connection.release).toHaveBeenCalledOnce();
     expect(internals.transactionConnections.size).toBe(0);
+  });
+
+  it('destroys the connection and records an unknown outcome when COMMIT acknowledgement fails', async () => {
+    const commitFailure = new Error('commit acknowledgement lost');
+    const connection = makeTransactionConnection(1001);
+    connection.commit.mockRejectedValueOnce(commitFailure);
+    getConnMock.mockResolvedValueOnce(connection);
+
+    const { default: ConnectionManager, getTransactionFailureOutcome } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const manager = ConnectionManager.getInstance();
+    resetTransactions(manager as unknown as TransactionInternals);
+
+    const thrown = await manager
+      .withTransaction(async () => 'callback-result')
+      .then(
+        () => {
+          throw new Error('withTransaction resolved after COMMIT rejection');
+        },
+        (error: unknown) => error
+      );
+
+    expect(thrown).toBe(commitFailure);
+    expect(connection.destroy).toHaveBeenCalledOnce();
+    expect(connection.release).not.toHaveBeenCalled();
+    expect(getTransactionFailureOutcome(thrown)).toEqual({ databaseOutcome: 'unknown', connectionID: 1001 });
+  });
+
+  it('destroys the connection and records an unknown outcome when ROLLBACK acknowledgement fails', async () => {
+    const callbackFailure = new Error('callback failure');
+    const rollbackFailure = new Error('rollback acknowledgement lost');
+    const connection = makeTransactionConnection(1002);
+    connection.rollback.mockRejectedValueOnce(rollbackFailure);
+    getConnMock.mockResolvedValueOnce(connection);
+
+    const { default: ConnectionManager, getTransactionFailureOutcome } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const manager = ConnectionManager.getInstance();
+    resetTransactions(manager as unknown as TransactionInternals);
+
+    const thrown = await manager
+      .withTransaction(async () => {
+        throw callbackFailure;
+      })
+      .then(
+        () => {
+          throw new Error('withTransaction resolved after callback failure');
+        },
+        (error: unknown) => error
+      );
+
+    expect(thrown).toBe(callbackFailure);
+    expect(connection.destroy).toHaveBeenCalledOnce();
+    expect(connection.release).not.toHaveBeenCalled();
+    expect(getTransactionFailureOutcome(thrown)).toEqual({ databaseOutcome: 'unknown', connectionID: 1002 });
+  });
+
+  it('preserves the callback error and records a rolled-back outcome after acknowledged ROLLBACK', async () => {
+    const callbackFailure = new Error('callback failure');
+    const connection = makeTransactionConnection(1003);
+    getConnMock.mockResolvedValueOnce(connection);
+
+    const { default: ConnectionManager, getTransactionFailureOutcome } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const manager = ConnectionManager.getInstance();
+    resetTransactions(manager as unknown as TransactionInternals);
+
+    const thrown = await manager
+      .withTransaction(async () => {
+        throw callbackFailure;
+      })
+      .then(
+        () => {
+          throw new Error('withTransaction resolved after callback failure');
+        },
+        (error: unknown) => error
+      );
+
+    expect(thrown).toBe(callbackFailure);
+    expect(connection.rollback).toHaveBeenCalledOnce();
+    expect(connection.release).toHaveBeenCalledOnce();
+    expect(connection.destroy).not.toHaveBeenCalled();
+    expect(getTransactionFailureOutcome(thrown)).toEqual({ databaseOutcome: 'rolled-back', connectionID: 1003 });
+  });
+
+  it('never reports callback success when the transaction disappears before managed commit acknowledgement', async () => {
+    const connection = makeTransactionConnection(999);
+    getConnMock.mockResolvedValueOnce(connection);
+
+    const {
+      default: ConnectionManager,
+      TransactionConnectionLostError,
+      getTransactionFailureOutcome
+    } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const manager = ConnectionManager.getInstance();
+    const internals = manager as unknown as TransactionInternals;
+    resetTransactions(internals);
+
+    const thrown = await manager
+      .withTransaction(async tx => {
+        // Model a socket teardown after the callback's last successful query
+        // but before withTransaction can acknowledge COMMIT.
+        internals.transactionConnections.delete(tx.id);
+        return 'callback-result';
+      })
+      .then(
+        () => {
+          throw new Error('withTransaction resolved after its connection disappeared');
+        },
+        (error: unknown) => error
+      );
+
+    expect(thrown).toBeInstanceOf(TransactionConnectionLostError);
+    expect(connection.commit).not.toHaveBeenCalled();
+    expect(getTransactionFailureOutcome(thrown)).toEqual({ databaseOutcome: 'unknown', connectionID: 999 });
   });
 });
 
