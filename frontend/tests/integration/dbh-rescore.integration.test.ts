@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import { buildMeasurementScopeLockName } from '@/config/measurementscopelock';
+import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import {
   finalizeValidatedRowsInTransaction,
@@ -266,6 +267,53 @@ describe('rescoreDbhCensus transaction boundary', () => {
     ).toMatchObject({ outcome: 'artifact-failed', databaseOutcome: 'committed' });
   });
 
+  it('reconciles a real lost COMMIT acknowledgement as committed without claiming rollback', async () => {
+    const violates = await pair('ACKLOSS', 100, 900);
+    const clean = await pair('ACKCLEAN', 100, 105);
+    await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID IN (?,?)', [violates.present, clean.present]);
+    await refreshMeasurementViewsForScope(managerFor(connection) as any, schema, plotID, census2ID);
+
+    const pool = await getPoolMonitorInstance().getUsablePool();
+    const originalGetConnection = pool.getConnection.bind(pool);
+    let injected = false;
+    (pool as any).getConnection = async () => {
+      const txConnection = await originalGetConnection();
+      const actualCommit = txConnection.commit.bind(txConnection);
+      txConnection.commit = async () => {
+        await actualCommit();
+        if (!injected) {
+          injected = true;
+          (pool as any).getConnection = originalGetConnection;
+          throw new Error('simulated lost COMMIT acknowledgement');
+        }
+      };
+      return txConnection;
+    };
+    try {
+      const result = await rescoreDbhCensus(
+        { schema, plotID, censusID: census2ID },
+        { writeArtifact: async () => undefined, attemptID: () => 'lost-real-commit-ack' }
+      );
+      expect(injected).toBe(true);
+      expect(result).toMatchObject({ outcome: 'failed', databaseOutcome: 'committed', runID: expect.any(Number), provisionalRunID: expect.any(Number) });
+      expect(result.runID).toBe(result.provisionalRunID);
+      const [run] = await connection.query<RowDataPacket[]>('SELECT Status, ErrorMessages FROM validation_runs WHERE RunID=?', [result.runID]);
+      expect(run).toHaveLength(1);
+      expect(run[0].Status).toBe('completed');
+      expect(JSON.stringify(run[0].ErrorMessages)).toContain('dbh-rescore-attempt:lost-real-commit-ack');
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT CoreMeasurementID, IsValidated FROM coremeasurements WHERE CoreMeasurementID IN (?,?) ORDER BY CoreMeasurementID',
+        [violates.present, clean.present]
+      );
+      expect(rows.map(row => bool(row.IsValidated))).toEqual([false, true]);
+      const views = await snapshot();
+      expect(views.summary).toHaveLength(2);
+      expect(views.full).toHaveLength(2);
+    } finally {
+      (pool as any).getConnection = originalGetConnection;
+    }
+  }, 120000);
+
   it('rolls back exact durable state when the real execution connection dies after reset and DBH work', async () => {
     const seeded = await pair('KILL', 100, 900);
     await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID=?', [seeded.present]);
@@ -438,5 +486,25 @@ describe('rescoreDbhCensus transaction boundary', () => {
         })
       ).databaseOutcome
     ).toBe('rolled-back');
+  });
+
+  it('recognizes a completed marker from a fresh session while the original session remains alive', async () => {
+    const attempt = 'live-session-committed';
+    const [insert] = await connection.query<mysql.ResultSetHeader>(
+      "INSERT INTO validation_runs (PlotID,CensusID,TotalSteps,Status,ErrorMessages) VALUES (?, ?, 2, 'completed', JSON_ARRAY(?))",
+      [plotID, census2ID, `dbh-rescore-attempt:${attempt}`]
+    );
+    const [owner] = await connection.query<RowDataPacket[]>('SELECT CONNECTION_ID() AS id');
+    const fresh = await mysql.createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: 'testpassword', database: schema });
+    try {
+      expect(
+        await reconcileDbhRescoreAttempt({ schema, plotID, censusID: census2ID }, attempt, {
+          originalConnectionID: Number(owner[0].id),
+          queryFresh: async (sql, params) => (await fresh.query(sql, params ?? []))[0] as any
+        })
+      ).toMatchObject({ databaseOutcome: 'committed', runID: insert.insertId });
+    } finally {
+      await fresh.end();
+    }
   });
 });
