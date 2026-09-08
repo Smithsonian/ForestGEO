@@ -73,8 +73,7 @@ export interface DbhRescoreDependencies {
 export interface DbhRescoreReconciliationDependencies {
   /** Must use a newly acquired connection, never the interrupted tx session. */
   queryFresh: (sql: string, params?: unknown[]) => Promise<unknown>;
-  /** Caller has observed the original server session end. */
-  originalSessionEnded?: boolean;
+  /** Original MySQL thread ID captured inside the transaction before mutation. */
   originalConnectionID?: number;
 }
 
@@ -108,16 +107,19 @@ export async function reconcileDbhRescoreAttempt(
   const runID = Number(rows[0]?.RunID);
   if (Number.isInteger(runID) && runID > 0) return { databaseOutcome: 'committed', runID, errors: [] };
 
-  let ended = deps.originalSessionEnded === true;
-  if (deps.originalConnectionID !== undefined) {
-    const sessions = (await deps.queryFresh('SELECT COUNT(*) AS sessionCount FROM information_schema.PROCESSLIST WHERE ID = ?', [
-      deps.originalConnectionID
-    ])) as Array<{ sessionCount: number }>;
-    ended = Number(sessions[0]?.sessionCount) === 0;
+  if (deps.originalConnectionID === undefined) {
+    return { databaseOutcome: 'unknown', errors: ['Original DBH re-score connection ID is unavailable; absence does not prove rollback'] };
   }
+  const sessions = (await deps.queryFresh('SELECT COUNT(*) AS sessionCount FROM information_schema.PROCESSLIST WHERE ID = ?', [
+    deps.originalConnectionID
+  ])) as Array<{ sessionCount: number }>;
+  const transactions = (await deps.queryFresh('SELECT COUNT(*) AS transactionCount FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id = ?', [
+    deps.originalConnectionID
+  ])) as Array<{ transactionCount: number }>;
+  const ended = isObservedZeroCount(sessions[0]?.sessionCount) && isObservedZeroCount(transactions[0]?.transactionCount);
   return ended
     ? { databaseOutcome: 'rolled-back', errors: [] }
-    : { databaseOutcome: 'unknown', errors: ['Original DBH re-score session has not ended; absence does not prove rollback'] };
+    : { databaseOutcome: 'unknown', errors: ['Original DBH re-score session or transaction has not ended; absence does not prove rollback'] };
 }
 
 async function reconcileOnFreshConnection(scope: DbhRescoreScope, attemptID: string, originalConnectionID?: number) {
@@ -135,6 +137,11 @@ async function reconcileOnFreshConnection(scope: DbhRescoreScope, attemptID: str
 
 function asNumber(value: unknown): number {
   return Number(value);
+}
+
+/** Reconciliation is conservative: absent/null count data never proves zero. */
+function isObservedZeroCount(value: unknown): boolean {
+  return value !== null && value !== undefined && Number.isInteger(Number(value)) && Number(value) === 0;
 }
 
 function enabled(value: unknown): boolean {

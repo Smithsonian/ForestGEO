@@ -473,19 +473,34 @@ describe('rescoreDbhCensus transaction boundary', () => {
     expect(await rescoreDbhCensus({ schema, plotID, censusID: c3.censusID }, actual())).toMatchObject({ outcome: 'completed', databaseOutcome: 'committed' });
   });
 
-  it('only calls an ended absent attempt rolled back during reconciliation', async () => {
-    expect(
-      (await reconcileDbhRescoreAttempt({ schema, plotID, censusID: census2ID }, 'missing', { originalSessionEnded: false, queryFresh: async () => [] }))
-        .databaseOutcome
-    ).toBe('unknown');
-    expect(
-      (
-        await reconcileDbhRescoreAttempt({ schema, plotID, censusID: census2ID }, 'missing', {
-          originalSessionEnded: true,
-          queryFresh: async (sql, params) => (await connection.query(sql, params ?? []))[0] as any
-        })
-      ).databaseOutcome
-    ).toBe('rolled-back');
+  it('requires original session and InnoDB transaction termination before an absent attempt is rolled back', async () => {
+    const scope = { schema, plotID, censusID: census2ID };
+    expect((await reconcileDbhRescoreAttempt(scope, 'missing', { queryFresh: async () => [] })).databaseOutcome).toBe('unknown');
+    const transactionStillLive = await reconcileDbhRescoreAttempt(scope, 'missing', {
+      originalConnectionID: 777,
+      queryFresh: async sql => {
+        if (sql.includes('validation_runs')) return [];
+        if (sql.includes('PROCESSLIST')) return [{ sessionCount: 0 }];
+        return [{ transactionCount: 1 }];
+      }
+    });
+    expect(transactionStillLive.databaseOutcome).toBe('unknown');
+    const unavailableCount = await reconcileDbhRescoreAttempt(scope, 'missing', {
+      originalConnectionID: 777,
+      queryFresh: async sql => {
+        if (sql.includes('validation_runs')) return [];
+        return sql.includes('PROCESSLIST') ? [{ sessionCount: null }] : [{ transactionCount: 0 }];
+      }
+    });
+    expect(unavailableCount.databaseOutcome).toBe('unknown');
+    const bothGone = await reconcileDbhRescoreAttempt(scope, 'missing', {
+      originalConnectionID: 777,
+      queryFresh: async sql => {
+        if (sql.includes('validation_runs')) return [];
+        return sql.includes('PROCESSLIST') ? [{ sessionCount: 0 }] : [{ transactionCount: 0 }];
+      }
+    });
+    expect(bothGone.databaseOutcome).toBe('rolled-back');
   });
 
   it('recognizes a completed marker from a fresh session while the original session remains alive', async () => {
