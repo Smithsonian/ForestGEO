@@ -46,7 +46,7 @@
     "docs": "npm run dev --prefix docs",
     "docs:build": "npm run build --prefix docs",
     "docs:preview": "npm run preview --prefix docs",
-    "prepare": "cd .. && husky frontend/.husky"
+    "prepare": "cd .. && git config core.hooksPath .githooks || true"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,json,md,mdx,css,scss,yml,yaml}": "prettier --write"
@@ -157,7 +157,6 @@
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-prettier": "^5.5.1",
     "eslint-plugin-react": "^7.37.5",
-    "husky": "^9.1.7",
     "jest-axe": "^10.0.0",
     "jsdom": "^26.1.0",
     "lint-staged": "^16.4.0",

@@ -1,0 +1,32 @@
+#!/bin/sh
+# Runs from the root of whichever worktree is committing.
+#
+# Hooks live here, tracked, rather than in husky's generated frontend/.husky/_:
+# core.hooksPath is relative, so git resolves it against each worktree's own
+# root, and husky only generates its shim directory in the checkout where
+# `npm install` ran. That is why no hook fired in any of the 15 worktrees.
+
+# Superpowers scratch is deliberately local-only (see ~/dev/ForestGEO-local).
+# gitignore does not cover `git add -f`, and it never applied to files that were
+# already tracked, so this guard inspects what is STAGED instead. Deletions are
+# exempt so the paths can still be untracked.
+staged_superpowers=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '(^|/)\.?superpowers/' || true)
+if [ -n "$staged_superpowers" ]; then
+  echo "pre-commit: refusing to commit superpowers scratch files." >&2
+  echo "" >&2
+  echo "$staged_superpowers" | sed 's/^/  /' >&2
+  echo "" >&2
+  echo "These are local-only working documents. Unstage them with:" >&2
+  echo "  git restore --staged <path>" >&2
+  echo "If the content is worth keeping, move it to docs/notes/ and commit it there." >&2
+  exit 1
+fi
+
+# Not every worktree has had `npm install` run in it. Without this, `npx
+# lint-staged` would try to FETCH lint-staged from the registry mid-commit.
+if [ ! -x frontend/node_modules/.bin/lint-staged ]; then
+  echo "pre-commit: lint-staged not installed in this worktree; skipping formatting."
+  exit 0
+fi
+
+cd frontend && ./node_modules/.bin/lint-staged

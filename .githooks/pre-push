@@ -1,8 +1,12 @@
 #!/bin/sh
 
-# Git LFS check
-command -v git-lfs >/dev/null 2>&1 || { echo >&2 "\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the 'pre-push' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks').\n"; exit 2; }
-git lfs pre-push "$@"
+# The Git LFS dispatch that used to head this file has been removed. It aborted
+# the push with exit 2 whenever git-lfs was absent from PATH — on EVERY branch,
+# because the check ran before the branch test — and this repository uses no LFS
+# (no .gitattributes, no `git lfs ls-files` entries). It also consumed the stdin
+# that the loop below needs, so the test gate could never have run while LFS was
+# installed either. If LFS is adopted later, re-add it guarded by
+# `command -v git-lfs` and feed the loop from a saved copy of stdin.
 
 # Read stdin for branch information
 while read local_ref local_sha remote_ref remote_sha
