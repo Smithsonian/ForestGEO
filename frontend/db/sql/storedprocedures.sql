@@ -785,6 +785,9 @@ begin
 end $$
 
 -- Build comparison facts once for both DBH validators and the read-only diagnostic.
+-- Pair predicates do not depend on a present row's processing state: bulk callers
+-- pass NULL and materialize pending rows only, while diagnostics pass a measurement
+-- ID and can inspect the same facts for pending, failed, and validated rows.
 -- This deliberately contains no transaction control or implicit-commit DDL.  Callers own
 -- the session temporary table and must drop it after reading it.
 create procedure BuildDBHChangePairs(
@@ -865,6 +868,9 @@ BEGIN
       JOIN stems s_past ON s_past.TreeID = t_past.TreeID AND s_past.CensusID = c_past.CensusID AND s_past.StemTag = s_present.StemTag AND s_past.IsActive = 1
       JOIN coremeasurements cm_past ON cm_past.StemGUID = s_past.StemGUID AND cm_past.CensusID = c_past.CensusID AND cm_past.IsActive = 1 AND cm_past.IsValidated = 1
     WHERE cm_present.IsActive = 1
+      -- Normal validation only needs pending rows.  A diagnostic passes a concrete
+      -- measurement ID and intentionally retains every present validation state.
+      AND (p_CoreMeasurementID IS NOT NULL OR cm_present.IsValidated IS NULL)
       AND (p_CensusID IS NULL OR cm_present.CensusID = p_CensusID)
       AND (p_PlotID IS NULL OR c_present.PlotID = p_PlotID)
       AND (p_CoreMeasurementID IS NULL OR cm_present.CoreMeasurementID = p_CoreMeasurementID);
@@ -925,7 +931,11 @@ BEGIN
     INTO vRunGrowth, vRunShrinkage;
 
     IF vRunGrowth = 0 AND vRunShrinkage = 0 THEN
-        SELECT 0 AS SkippedNoInterval, 0 AS SkippedMissingDate, 0 AS SkippedZeroInterval, 0 AS SkippedNegativeInterval;
+        SELECT 0 AS SkippedNoInterval,
+               0 AS SkippedMissingDate,
+               0 AS SkippedZeroInterval,
+               0 AS SkippedNegativeInterval,
+               0 AS SkippedBelowDbhFloor;
         LEAVE shared_dbh;
     END IF;
 
@@ -1031,6 +1041,9 @@ BEGIN
            COALESCE(SUM(IntervalSkipReason = 'negative-interval'), 0) AS SkippedNegativeInterval
     FROM dbh_change_pairs
     WHERE PresentIsValidated IS NULL AND StatusExempt = 0 AND DbhsMeetFloor = 1 AND HomEligible = 1;
+    SELECT COALESCE(SUM(DbhsMeetFloor = 0), 0) AS SkippedBelowDbhFloor
+    FROM dbh_change_pairs
+    WHERE PresentIsValidated IS NULL AND StatusExempt = 0;
     DROP TEMPORARY TABLE IF EXISTS dbh_change_candidates;
     DROP TEMPORARY TABLE IF EXISTS dbh_change_pairs;
 END $$

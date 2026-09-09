@@ -93,7 +93,8 @@ describe('validation connection retries', () => {
           SkippedMissingDate: '3',
           SkippedZeroInterval: 2,
           SkippedNegativeInterval: 1
-        }
+        },
+        [{ SkippedBelowDbhFloor: '4' }]
       ],
       { affectedRows: 0 }
     ]);
@@ -102,7 +103,8 @@ describe('validation connection retries', () => {
       skippedNoInterval: 6,
       skippedMissingDate: 3,
       skippedZeroInterval: 2,
-      skippedNegativeInterval: 1
+      skippedNegativeInterval: 1,
+      skippedBelowDbhFloor: 4
     });
   });
 
@@ -111,7 +113,8 @@ describe('validation connection retries', () => {
       skippedNoInterval: 0,
       skippedMissingDate: 0,
       skippedZeroInterval: 0,
-      skippedNegativeInterval: 0
+      skippedNegativeInterval: 0,
+      skippedBelowDbhFloor: 0
     });
   });
 
@@ -124,7 +127,7 @@ describe('validation connection retries', () => {
         ];
       }
       if (sql.includes('CALL forestgeo_testing.RunSharedDBHChangeValidations')) {
-        return [[{ SkippedNoInterval: 1, SkippedMissingDate: 1, SkippedZeroInterval: 0, SkippedNegativeInterval: 0 }]];
+        return [[{ SkippedNoInterval: 1, SkippedMissingDate: 1, SkippedZeroInterval: 0, SkippedNegativeInterval: 0 }], [{ SkippedBelowDbhFloor: 2 }]];
       }
       return { affectedRows: 0 };
     });
@@ -139,7 +142,7 @@ describe('validation connection retries', () => {
     ).resolves.toEqual({
       ranGrowth: true,
       ranShrinkage: true,
-      skipCounts: { skippedNoInterval: 1, skippedMissingDate: 1, skippedZeroInterval: 0, skippedNegativeInterval: 0 }
+      skipCounts: { skippedNoInterval: 1, skippedMissingDate: 1, skippedZeroInterval: 0, skippedNegativeInterval: 0, skippedBelowDbhFloor: 2 }
     });
     expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
     expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();

@@ -109,6 +109,43 @@ describe('DBH change diagnostics integration', () => {
     expect(before[0][0].IsValidated).toBeNull();
   });
 
+  it('uses the requested schema for the routine temporary table when the connection default database differs', async () => {
+    const { presentID } = await seed('DIAG_DEFAULT_SCHEMA');
+    await connection.query('USE information_schema');
+    try {
+      await expect(explain(presentID)).resolves.toMatchObject({
+        outcome: 'pairs-found',
+        pairs: [{ presentCoreMeasurementID: presentID }]
+      });
+    } finally {
+      await connection.query(`USE \`${config.database}\``);
+    }
+  });
+
+  it('builds pending pairs in validation mode while explicit diagnostic calls explain pending, FALSE, and TRUE rows', async () => {
+    const pending = await seed('DIAG_PENDING');
+    const invalid = await seed('DIAG_FALSE');
+    const valid = await seed('DIAG_TRUE');
+    await connection.query('UPDATE coremeasurements SET IsValidated=NULL WHERE CoreMeasurementID=?', [pending.presentID]);
+    await connection.query('UPDATE coremeasurements SET IsValidated=FALSE WHERE CoreMeasurementID=?', [invalid.presentID]);
+    await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID=?', [valid.presentID]);
+
+    await connection.query('CALL BuildDBHChangePairs(?, ?, NULL)', [census2ID, plotID]);
+    try {
+      const [validationPairs] = await connection.query<RowDataPacket[]>(
+        'SELECT PresentCoreMeasurementID FROM dbh_change_pairs WHERE PresentCoreMeasurementID IN (?, ?, ?)',
+        [pending.presentID, invalid.presentID, valid.presentID]
+      );
+      expect(validationPairs.map(row => Number(row.PresentCoreMeasurementID))).toEqual([pending.presentID]);
+    } finally {
+      await connection.query('DROP TEMPORARY TABLE IF EXISTS dbh_change_pairs');
+    }
+
+    for (const id of [pending.presentID, invalid.presentID, valid.presentID]) {
+      await expect(explain(id)).resolves.toMatchObject({ outcome: 'pairs-found', pairs: [{ presentCoreMeasurementID: id }] });
+    }
+  });
+
   it('reports DBH floor on either side, centimetre conversion, null DBH, HOM and status eligibility directly from SQL facts', async () => {
     const cases = [
       { tag: 'DIAG_FLOOR_PRESENT', prior: 100, present: 9, expect: { dbhsMeetFloor: false } },
@@ -158,6 +195,50 @@ describe('DBH change diagnostics integration', () => {
     const cmResult = await explain(cm.presentID);
     expect(cmResult.outcome).toBe('pairs-found');
     if (cmResult.outcome === 'pairs-found') expect(cmResult.pairs[0]).toMatchObject({ unitToMm: 10, dbhsMeetFloor: false });
+  });
+
+  it('reports actionable DBH-floor skips separately from interval skips', async () => {
+    const pendingFloor = await seed('FLOOR_PENDING', 100, 9);
+    const processedFloor = await seed('FLOOR_DONE', 100, 9);
+    const statusFloor = await seed('FLOOR_STATUS', 100, 9);
+    const missingFloor = await seed('FLOOR_NODATE', 100, 9);
+    const missingDbh = await seed('FLOOR_NULLDBH', 100, 200);
+    const missingEligible = await seed('INTERVAL_NODATE', 100, 200);
+    await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID=?', [processedFloor.presentID]);
+    await connection.query("UPDATE cmattributes SET Code='D' WHERE CoreMeasurementID=?", [statusFloor.presentID]);
+    await connection.query('UPDATE coremeasurements SET MeasurementDate=NULL WHERE CoreMeasurementID IN (?, ?)', [
+      missingFloor.presentID,
+      missingEligible.presentID
+    ]);
+    await connection.query('UPDATE coremeasurements SET MeasuredDBH=NULL WHERE CoreMeasurementID=?', [missingDbh.presentID]);
+
+    const [millimetreSets] = await connection.query<any[]>('CALL RunSharedDBHChangeValidations(?, ?, 1, 1)', [census2ID, plotID]);
+    const millimetreFloor = millimetreSets.find((set: unknown) => Array.isArray(set) && set[0]?.SkippedBelowDbhFloor)?.[0];
+    const millimetreIntervals = millimetreSets.find((set: unknown) => Array.isArray(set) && set[0]?.SkippedNoInterval)?.[0];
+    // The failed-floor counter includes pending comparisons with a missing DBH
+    // as well as below-floor values, even without a date. Completed and
+    // status-exempt rows do not count. The existing interval counter stays
+    // gated by DBH eligibility, so the failed-floor missing-date row is not
+    // double-counted.
+    expect(millimetreFloor).toMatchObject({ SkippedBelowDbhFloor: '3' });
+    expect(millimetreIntervals).toMatchObject({ SkippedNoInterval: '1', SkippedMissingDate: '1' });
+
+    // Reinterpretation under centimetres would otherwise make the pending NULL
+    // DBH fixture carry into this independent conversion-boundary assertion.
+    await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID IN (?, ?, ?, ?, ?, ?)', [
+      pendingFloor.presentID,
+      processedFloor.presentID,
+      statusFloor.presentID,
+      missingFloor.presentID,
+      missingDbh.presentID,
+      missingEligible.presentID
+    ]);
+    await connection.query("UPDATE plots SET DefaultDBHUnits='cm' WHERE PlotID=?", [plotID]);
+    await seed('CM_BELOW', 0.9, 2);
+    await seed('CM_ABOVE', 1.1, 2);
+    const [centimetreSets] = await connection.query<any[]>('CALL RunSharedDBHChangeValidations(?, ?, 1, 1)', [census2ID, plotID]);
+    const centimetreFloor = centimetreSets.find((set: unknown) => Array.isArray(set) && set[0]?.SkippedBelowDbhFloor)?.[0];
+    expect(centimetreFloor).toMatchObject({ SkippedBelowDbhFloor: '1' });
   });
 
   it('returns every interval reason, excludes noneligible rows from skip counts, and distinguishes no prior comparison', async () => {

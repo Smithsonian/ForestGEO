@@ -17,4 +17,5 @@ export interface DbhChangeSkipCounts {
   SkippedMissingDate: number;
   SkippedZeroInterval: number;
   SkippedNegativeInterval: number;
+  SkippedBelowDbhFloor: number;
 }

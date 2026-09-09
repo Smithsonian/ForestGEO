@@ -96,8 +96,8 @@ function mapPair(row: Record<string, unknown>): DbhChangePairFact {
   };
 }
 
-async function dropPairs(tx: TxExecutor): Promise<void> {
-  await tx.query('DROP TEMPORARY TABLE IF EXISTS dbh_change_pairs');
+async function dropPairs(tx: TxExecutor, schema: string): Promise<void> {
+  await tx.query(safeFormatQuery(schema, 'DROP TEMPORARY TABLE IF EXISTS ??.dbh_change_pairs'));
 }
 
 /**
@@ -156,7 +156,7 @@ export async function explainDbhChangePairs(input: ExplainDbhChangePairsInput): 
       const buildSql = safeFormatQuery(input.schema, 'CALL ??.BuildDBHChangePairs(?, ?, ?)');
       await tx.query(buildSql, [input.censusID ?? null, input.plotID ?? null, input.coreMeasurementID]);
       const pairRows: Array<Record<string, unknown>> = await tx.query(
-        'SELECT * FROM dbh_change_pairs WHERE PresentCoreMeasurementID = ? ORDER BY PriorCoreMeasurementID DESC',
+        safeFormatQuery(input.schema, 'SELECT * FROM ??.dbh_change_pairs WHERE PresentCoreMeasurementID = ? ORDER BY PriorCoreMeasurementID DESC'),
         [input.coreMeasurementID]
       );
       const pairs = pairRows.map(mapPair);
@@ -166,7 +166,7 @@ export async function explainDbhChangePairs(input: ExplainDbhChangePairsInput): 
       throw error;
     } finally {
       try {
-        await dropPairs(tx);
+        await dropPairs(tx, input.schema);
       } catch (cleanupError) {
         if (primaryError) throw new AggregateError([primaryError, cleanupError], 'DBH diagnostics failed and temporary-table cleanup also failed');
         throw cleanupError;

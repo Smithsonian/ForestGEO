@@ -21,7 +21,7 @@ describe('explainDbhChangePairs', () => {
         return [{ CoreMeasurementID: 42, CensusID: 7, PlotID: 3, IsValidated: 0 }];
       }
       if (sql.includes('CALL `forestgeo_testing`.BuildDBHChangePairs')) return [];
-      if (sql.includes('FROM dbh_change_pairs')) {
+      if (sql.includes('FROM `forestgeo_testing`.dbh_change_pairs')) {
         return [
           {
             PresentCoreMeasurementID: 42,
@@ -57,7 +57,7 @@ describe('explainDbhChangePairs', () => {
       present: { coreMeasurementID: 42, isValidated: false, hasUnresolvedGrowthError: false, hasUnresolvedShrinkageError: false },
       pairs: [{ priorCoreMeasurementID: 19, growthViolates: true, shrinkageViolates: false }]
     });
-    expect(query.mock.calls.at(-1)?.[0]).toContain('DROP TEMPORARY TABLE IF EXISTS dbh_change_pairs');
+    expect(query.mock.calls.at(-1)?.[0]).toContain('DROP TEMPORARY TABLE IF EXISTS `forestgeo_testing`.dbh_change_pairs');
   });
 
   it('does not infer a reason from an empty pair table', async () => {
@@ -65,7 +65,11 @@ describe('explainDbhChangePairs', () => {
       if (sql.includes('FROM `forestgeo_testing`.coremeasurements')) {
         return [{ CoreMeasurementID: 42, CensusID: 7, PlotID: 3, IsValidated: null }];
       }
-      if (sql.includes('CALL `forestgeo_testing`.BuildDBHChangePairs') || sql.includes('FROM dbh_change_pairs') || sql.includes('DROP TEMPORARY TABLE'))
+      if (
+        sql.includes('CALL `forestgeo_testing`.BuildDBHChangePairs') ||
+        sql.includes('FROM `forestgeo_testing`.dbh_change_pairs') ||
+        sql.includes('DROP TEMPORARY TABLE')
+      )
         return [];
       throw new Error(`Unexpected query: ${sql}`);
     });
@@ -90,7 +94,7 @@ describe('explainDbhChangePairs', () => {
         return [{ CoreMeasurementID: 42, CensusID: 7, PlotID: 3, IsValidated: 1, HasUnresolvedGrowthError: 1, HasUnresolvedShrinkageError: 0 }];
       }
       if (sql.includes('CALL `forestgeo_testing`.BuildDBHChangePairs') || sql.includes('DROP TEMPORARY TABLE')) return [];
-      if (sql.includes('FROM dbh_change_pairs'))
+      if (sql.includes('FROM `forestgeo_testing`.dbh_change_pairs'))
         return [
           {
             PresentCoreMeasurementID: 42,

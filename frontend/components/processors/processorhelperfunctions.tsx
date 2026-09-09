@@ -477,6 +477,14 @@ export async function loadValidationDefinition(schema: string, validationProcedu
   return rows.length > 0 ? { procedureName: rows[0].ProcedureName, definition: rows[0].Definition } : null;
 }
 
+function reportDbhFloorSkips(schema: string, params: ValidationExecutionParams, skipCounts?: DBHValidationSkipCounts): void {
+  if (!skipCounts?.skippedBelowDbhFloor) return;
+  ailogger.warn(
+    `DBH checks skipped ${skipCounts.skippedBelowDbhFloor} comparison(s) because one or both diameters were missing or below 10 mm after unit conversion. If unexpected, check the plot's DBH units and recorded diameters.`,
+    { schema, censusID: params.p_CensusID ?? null, plotID: params.p_PlotID ?? null, ...skipCounts }
+  );
+}
+
 // Generalized runValidation function
 export async function runValidation(
   validationProcedureID: number,
@@ -508,8 +516,11 @@ export async function runValidation(
           ? formattedCursorQuery.replace(/;?\s*$/, ' ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;')
           : formattedCursorQuery;
 
-      await connectionManager.executeQuery(finalCursorQuery, [], transactionID);
+      const executionResult = await connectionManager.executeQuery(finalCursorQuery, [], transactionID);
       await connectionManager.commitTransaction(transactionID ?? '');
+      if (validationProcedureID === 1 || validationProcedureID === 2) {
+        reportDbhFloorSkips(schema, params, parseDbhValidationSkipCounts(executionResult));
+      }
       return true;
     } catch (e: any) {
       if (isRetryableValidationExecutionError(e)) {
@@ -574,6 +585,7 @@ export async function runCombinedDBHValidations(schema: string, params: Validati
       const result = await runSharedDBHChangeValidationsInTransaction({ schema, tx, params });
 
       await connectionManager.commitTransaction(transactionID);
+      reportDbhFloorSkips(schema, params, result.skipCounts);
       return { success: true, ...result };
     } catch (e: any) {
       if (isRetryableValidationExecutionError(e)) {

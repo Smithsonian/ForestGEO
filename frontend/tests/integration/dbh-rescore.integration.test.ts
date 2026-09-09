@@ -6,6 +6,7 @@ import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import {
   finalizeValidatedRowsInTransaction,
+  prepareDBHValidationRunInTransaction,
   prepareDBHValidationDefinitions,
   runSharedDBHChangeValidationsInTransaction
 } from '@/lib/validations/dbh-execution';
@@ -188,6 +189,60 @@ describe('rescoreDbhCensus transaction boundary', () => {
       [normal.present, inactive.present]
     );
     expect(rows.map(r => bool(r.IsValidated))).toEqual([false, false]);
+  });
+
+  it('preserves no-stem ingestion rows and their DBH occurrences in both normal and guarded scrub modes', async () => {
+    const invalidNullStem = await pair('SCRUB_FALSE', 100, 105);
+    const pendingNullStem = await pair('SCRUB_PENDING', 100, 105);
+    const validStem = await pair('SCRUB_STEM', 100, 105);
+    await connection.query('UPDATE coremeasurements SET StemGUID=NULL, IsValidated=FALSE WHERE CoreMeasurementID=?', [invalidNullStem.present]);
+    await connection.query('UPDATE coremeasurements SET StemGUID=NULL, IsValidated=NULL WHERE CoreMeasurementID=?', [pendingNullStem.present]);
+    await connection.query('UPDATE coremeasurements SET IsValidated=FALSE WHERE CoreMeasurementID=?', [validStem.present]);
+    const [growthErrors] = await connection.query<RowDataPacket[]>("SELECT ErrorID FROM measurement_errors WHERE ErrorSource='validation' AND ErrorCode='1'");
+    expect(growthErrors).toHaveLength(1);
+    await connection.query('INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, FALSE), (?, ?, FALSE), (?, ?, FALSE)', [
+      invalidNullStem.present,
+      growthErrors[0].ErrorID,
+      pendingNullStem.present,
+      growthErrors[0].ErrorID,
+      validStem.present,
+      growthErrors[0].ErrorID
+    ]);
+
+    const assertStates = async () => {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT cm.CoreMeasurementID, cm.IsValidated, mel.IsResolved FROM coremeasurements cm JOIN measurement_error_log mel ON mel.MeasurementID=cm.CoreMeasurementID WHERE cm.CoreMeasurementID IN (?, ?, ?) ORDER BY cm.CoreMeasurementID',
+        [invalidNullStem.present, pendingNullStem.present, validStem.present]
+      );
+      expect(rows.map(row => ({ isValidated: bool(row.IsValidated), isResolved: bool(row.IsResolved) }))).toEqual([
+        { isValidated: false, isResolved: false },
+        { isValidated: null, isResolved: false },
+        { isValidated: null, isResolved: true }
+      ]);
+    };
+
+    await managerFor(connection).withTransaction(tx =>
+      prepareDBHValidationRunInTransaction({ schema, tx, validationID: 1, params: { p_CensusID: census2ID, p_PlotID: plotID } })
+    );
+    await assertStates();
+
+    await connection.query('UPDATE coremeasurements SET IsValidated=FALSE WHERE CoreMeasurementID IN (?, ?)', [invalidNullStem.present, validStem.present]);
+    await connection.query('UPDATE coremeasurements SET IsValidated=NULL WHERE CoreMeasurementID=?', [pendingNullStem.present]);
+    await connection.query('UPDATE measurement_error_log SET IsResolved=FALSE, ResolvedAt=NULL WHERE MeasurementID IN (?, ?, ?)', [
+      invalidNullStem.present,
+      pendingNullStem.present,
+      validStem.present
+    ]);
+    await managerFor(connection).withTransaction(tx =>
+      prepareDBHValidationRunInTransaction({
+        schema,
+        tx,
+        validationID: 1,
+        params: { p_CensusID: census2ID, p_PlotID: plotID },
+        requireActiveStemGUID: true
+      })
+    );
+    await assertStates();
   });
 
   it.each(['before', 'prepared'] as const)('rolls back exact measurements, errors, and views when %s artifact fails', async event => {
