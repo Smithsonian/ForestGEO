@@ -300,12 +300,26 @@ jobs:
             const { data: created } = await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body, labels: [LABEL, 'automated'] });
             core.warning(`${title} — opened #${created.number}`);
 
-      - name: Deploy validation queries and stored procedures to all schemas
+      # The legacy no-flag command replays corequeries.sql, which truncates every
+      # site-specific validation. Keep procedure definitions current without
+      # changing validation configuration, then refresh only the two DBH rules.
+      - name: Deploy stored procedures to all schemas
         env:
           AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
         run: |
           cd frontend/
-          npx tsx scripts/deploy-validations-to-all-schemas.ts
+          npm run deploy:procedures
+        continue-on-error: false
+
+      - name: Refresh annual DBH validation rules
+        env:
+          AZURE_SQL_SERVER: forestgeo-mysqldataserver.mysql.database.azure.com
+          AZURE_SQL_USER: azureroot
+          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+          AZURE_SQL_PORT: '3306'
+        run: |
+          cd frontend/
+          npm run refresh:dbh-rules -- --all-sites --apply --i-understand-this-writes-to "$AZURE_SQL_SERVER"
         continue-on-error: false
 
       # Views are CREATE OR REPLACE artifacts, not migrations: they are redeployed
@@ -373,7 +387,7 @@ jobs:
         run: |
           echo "Attempting to restart the app (will not fix code-level issues)..."
 
-          az webapp restart --name forestgeo-development --resource-group ForestGEO-ResourceGroup || true
+          az webapp restart --name forestgeo-development --resource-group forestgeo-rg || true
 
           echo "Waiting 60 seconds for app to restart..."
           sleep 60
@@ -424,7 +438,7 @@ jobs:
               git push origin <good-commit-sha>:forestgeo-app-development --force-with-lease
 
               # Or restart the app (only helps with transient failures)
-              az webapp restart -g ForestGEO-ResourceGroup -n forestgeo-development
+              az webapp restart -g forestgeo-rg -n forestgeo-development
               \`\`\`
 
               /cc @${{ github.actor }}`,

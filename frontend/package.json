@@ -41,6 +41,7 @@
     "check:schema-contract": "npx tsx scripts/check-schema-contract.ts",
     "deploy:validations": "npx tsx scripts/deploy-validations-to-all-schemas.ts",
     "deploy:procedures": "npx tsx scripts/deploy-validations-to-all-schemas.ts --procedures-only",
+    "refresh:dbh-rules": "npx tsx scripts/refresh-dbh-rule-seeds.ts",
     "activate:validation19": "npx tsx scripts/deploy-validations-to-all-schemas.ts --activate-validation-19",
     "deploy:taxonomy-views": "npx tsx scripts/deploy-taxonomy-views-to-all-schemas.ts",
     "docs": "npm run dev --prefix docs",
