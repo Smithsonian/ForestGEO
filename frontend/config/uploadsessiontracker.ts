@@ -295,6 +295,7 @@ export async function ensureUploadSessionsTable(schema: string): Promise<void> {
       idempotency_key VARCHAR(255),
       mode VARCHAR(32),
       census_replacement_completed_at TIMESTAMP NULL DEFAULT NULL,
+      reference_replacement_completed_at TIMESTAMP NULL DEFAULT NULL,
       active_scope_key VARCHAR(255)
         GENERATED ALWAYS AS (
           CASE

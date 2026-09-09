@@ -7,6 +7,7 @@ import {
   resetTemporaryMeasurementsSourceFormatColumnCacheForTests,
   TEMP_MEASUREMENT_INSERT_BATCH_SIZE
 } from '@/lib/ingestion/temporary-measurements';
+import { resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { headerSignature } from '@/lib/column-mapping/mapping';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
@@ -236,6 +237,7 @@ describe('sqlpacketload measurement scope validation', () => {
     getCookieMock.mockResolvedValue(undefined);
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+    resetUploadSessionReplacementMarkerCacheForTests();
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
@@ -612,6 +614,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // a 'global' admin session clears it so these behavioral tests reach the handler body.
     authMock.mockResolvedValue({ user: { id: 'user-1', userStatus: 'global', sites: [] } });
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+    resetUploadSessionReplacementMarkerCacheForTests();
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-fixed');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
@@ -820,11 +823,28 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
   });
 
+  /**
+   * A reference-table CLEAN_REUPLOAD first decides whether THIS request owns the
+   * destructive reset (#472): it reads the upload_sessions marker column state,
+   * probes the session's marker, and claims it. Queue those three answers so the
+   * writer's own statements line up with the mocks that follow.
+   */
+  function queueUnclaimedReferenceReplacement() {
+    mockConnectionManager.executeQuery
+      // marker column state lookup (information_schema)
+      .mockResolvedValueOnce([{ tableCount: 1, columnCount: 1 }])
+      // marker probe: this session has not replaced yet
+      .mockResolvedValueOnce([{ reference_replacement_completed_at: null }])
+      // marker claim
+      .mockResolvedValueOnce({ affectedRows: 1 });
+  }
+
   it('refuses species clean re-upload when active species rows are already referenced', async () => {
     // The dependency lookup is the FIRST executeQuery call in the species CLEAN_REUPLOAD
     // path, returning every active SpeciesCode that is already referenced by trees or
     // species limits. Once a SpeciesID is in use, deleting the active species list would
     // still cascade-delete dependent data even if the upload includes the same code again.
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery.mockResolvedValueOnce([{ SpeciesCode: 'querc1' }, { SpeciesCode: 'fagr2' }]);
 
     const res = await POST(
@@ -853,12 +873,13 @@ describe('sqlpacketload fixed-data upload modes', () => {
       String(call[0]).includes('DELETE FROM `forestgeo_testing`.species')
     );
     expect(deleteCalls.length).toBe(0);
-    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('specieslimits');
+    expect(mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('specieslimits'))).toBe(true);
   });
 
   it('allows species clean re-upload on a fresh site with no dependent references', async () => {
     // No trees or species limits reference the current active species rows, so the
     // wipe-and-reload remains safe.
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
       // 1: dependency precheck returns nothing
       .mockResolvedValueOnce([])
@@ -878,7 +899,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     );
 
     expect(res?.status).toBe(200);
-    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('specieslimits');
+    expect(mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('specieslimits'))).toBe(true);
     // Positive anchor for the refusal test's zero-DELETE filter above: the wipe
     // must run here with exactly this SQL text, so a quoting change that would
     // make the negative filter vacuous fails loudly instead.
@@ -1601,7 +1622,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
     expect(res?.status).toBe(503);
     await expect(res?.json()).resolves.toMatchObject({
-      error: 'Duplicate active species rows already exist for SpeciesCode "swars1". Remove the duplicates before uploading revisions.'
+      error: 'Duplicate active species rows already exist for SpeciesCode "swars1". Remove the duplicates before re-uploading.'
     });
     expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
   });
@@ -1742,6 +1763,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     getCookieMock.mockResolvedValue(undefined);
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+    resetUploadSessionReplacementMarkerCacheForTests();
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);

@@ -16,7 +16,14 @@ import { UploadMode } from '@/config/uploadmodes';
 import { format } from 'mysql2/promise';
 import { handleUpsert } from '@/config/utils';
 import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
+import { RoleResult } from '@/lib/db/definitions/personnel';
 import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
+import {
+  ensureUploadSessionReplacementMarkerColumn,
+  markUploadSessionReplacementCompleted,
+  REFERENCE_REPLACEMENT_MARKER_COLUMN,
+  uploadSessionHasCompletedReplacement
+} from '@/lib/uploads/upload-session-replacement-marker';
 
 export interface FixedDataProcessingResult {
   insertedCount: number;
@@ -72,21 +79,65 @@ function formatBlockedCleanReuploadValues(values: string[], maxValues: number = 
   return truncateAndJoin(uniqueValues, ', ', maxValues);
 }
 
+/**
+ * Decides whether THIS request owns the destructive reset of a reference table.
+ *
+ * A CLEAN_REUPLOAD deletes the whole active table before writing the incoming
+ * rows. The route issues one request per file, so without this the second file
+ * of a multi-file upload deletes what the first file just committed — silently
+ * (#472). The answer is a durable per-session marker written in the caller's
+ * transaction, so the claim and the delete it guards commit or roll back together.
+ *
+ * A request with no upload session to key on keeps the pre-marker behaviour and
+ * replaces, rather than silently appending to rows the user asked to replace.
+ */
+async function claimReferenceTableReplacement(
+  connectionManager: ConnectionManager,
+  schema: string,
+  uploadMode: UploadMode,
+  uploadSessionID: string | null,
+  transactionID: string
+): Promise<boolean> {
+  if (uploadMode !== UploadMode.CLEAN_REUPLOAD) return false;
+  if (uploadSessionID === null) return true;
+
+  await ensureUploadSessionReplacementMarkerColumn(connectionManager, schema, REFERENCE_REPLACEMENT_MARKER_COLUMN);
+  const alreadyReplaced = await uploadSessionHasCompletedReplacement(
+    connectionManager,
+    schema,
+    uploadSessionID,
+    REFERENCE_REPLACEMENT_MARKER_COLUMN,
+    transactionID
+  );
+  if (alreadyReplaced) return false;
+
+  await markUploadSessionReplacementCompleted(connectionManager, schema, uploadSessionID, REFERENCE_REPLACEMENT_MARKER_COLUMN, transactionID);
+  return true;
+}
+
 export async function upsertAttributeRows(
   connectionManager: ConnectionManager,
   schema: string,
   rows: FileRow[],
   uploadMode: UploadMode,
+  uploadSessionID: string | null,
   transactionID: string
 ): Promise<FixedDataProcessingResult> {
   let insertedCount = 0;
   let updatedCount = 0;
   let skippedCount = 0;
 
-  if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+  const replacesExistingRows = await claimReferenceTableReplacement(connectionManager, schema, uploadMode, uploadSessionID, transactionID);
+  if (replacesExistingRows) {
     const deleteSQL = format(`DELETE FROM ??.attributes WHERE IsActive = 1`, [schema]);
     await connectionManager.executeQuery(deleteSQL, [], transactionID);
   }
+
+  // Rows can already be present when this request did not perform the reset: a
+  // revisions upload, a later file of a session that already replaced the table,
+  // or a retry of a request that committed after the client timed out. Matching
+  // first makes all three idempotent instead of colliding with the unique key.
+  const rowsMayAlreadyExist = !replacesExistingRows;
 
   for (const row of rows) {
     const code = normalizeRequiredString(row.code || row.codes);
@@ -98,7 +149,7 @@ export async function upsertAttributeRows(
     const description = normalizeOptionalString(row.description || row.comments);
     const status = normalizeOptionalString(row.status);
 
-    if (uploadMode === UploadMode.REVISIONS) {
+    if (rowsMayAlreadyExist) {
       const existingSQL = format(`SELECT Code FROM ??.attributes WHERE LOWER(Code) = LOWER(?) AND IsActive = 1 LIMIT 1`, [schema]);
       const existingRows = await connectionManager.executeQuery(existingSQL, [code], transactionID);
 
@@ -124,6 +175,7 @@ export async function upsertSpeciesRows(
   schema: string,
   rows: FileRow[],
   uploadMode: UploadMode,
+  uploadSessionID: string | null,
   transactionID: string
 ): Promise<FixedDataProcessingResult> {
   let insertedCount = 0;
@@ -135,7 +187,11 @@ export async function upsertSpeciesRows(
     throw new Error(`Species upload contains duplicate SpeciesCode values: ${duplicateSpeciesCodes.join(', ')}`);
   }
 
-  if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+  const replacesExistingRows = await claimReferenceTableReplacement(connectionManager, schema, uploadMode, uploadSessionID, transactionID);
+  // See upsertAttributeRows: anything that is not this session's reset must match before writing.
+  const rowsMayAlreadyExist = !replacesExistingRows;
+
+  if (replacesExistingRows) {
     // CLEAN_REUPLOAD deletes every active species row before re-inserting the file.
     // That DELETE is only safe when no live records depend on those SpeciesIDs yet.
     // trees and specieslimits both reference species via ON DELETE CASCADE, so
@@ -212,16 +268,17 @@ export async function upsertSpeciesRows(
       SubspeciesAuthority: normalizeOptionalString(row.subauthority)
     };
 
-    if (uploadMode === UploadMode.REVISIONS) {
+    if (rowsMayAlreadyExist) {
       const existingSQL = format(`SELECT SpeciesID FROM ??.species WHERE LOWER(SpeciesCode) = LOWER(?) AND IsActive = 1 ORDER BY SpeciesID`, [schema]);
       const existingRows = await connectionManager.executeQuery(existingSQL, [speciesCode], transactionID);
 
       if (existingRows.length > 1) {
-        throw new Error(`Duplicate active species rows already exist for SpeciesCode "${speciesCode}". Remove the duplicates before uploading revisions.`);
+        throw new Error(`Duplicate active species rows already exist for SpeciesCode "${speciesCode}". Remove the duplicates before re-uploading.`);
       }
 
       if (existingRows.length > 0) {
-        // REVISIONS source-of-truth semantics: every column that the species upload
+        // Source-of-truth semantics (revisions, and every file after the one that
+        // performed this session's reset): every column that the species upload
         // CSV format can carry is overwritten unconditionally. Fields the row omits
         // are normalized to NULL by normalizeOptionalString and so wipe whatever was
         // previously in the database. This is intentional -- the user explicitly
@@ -272,6 +329,109 @@ export async function upsertSpeciesRows(
       ],
       transactionID
     );
+    insertedCount += 1;
+  }
+
+  return { insertedCount, updatedCount, skippedCount };
+}
+
+/**
+ * Personnel is a reference table like species and attributes: a CLEAN_REUPLOAD
+ * clears the census's active roster before writing the incoming rows. It lived in
+ * the route handler until #472; DB write logic belongs beside its siblings, where
+ * the writer-level tests can reach it.
+ */
+export async function upsertPersonnelRows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  censusID: number | undefined,
+  rows: FileRow[],
+  uploadMode: UploadMode,
+  uploadSessionID: string | null,
+  transactionID: string
+): Promise<FixedDataProcessingResult> {
+  if (!censusID) {
+    throw new Error('CensusID is required for personnel uploads');
+  }
+
+  let insertedCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+
+  const replacesExistingRows = await claimReferenceTableReplacement(connectionManager, schema, uploadMode, uploadSessionID, transactionID);
+  // See upsertAttributeRows: anything that is not this session's reset must match before writing.
+  const rowsMayAlreadyExist = !replacesExistingRows;
+
+  if (replacesExistingRows) {
+    // Remove all census-active links for this census
+    const deleteCapSQL = format(`DELETE FROM ??.censusactivepersonnel WHERE CensusID = ?`, [schema]);
+    await connectionManager.executeQuery(deleteCapSQL, [censusID], transactionID);
+    // Remove personnel who are no longer linked to any census
+    const deleteOrphanedSQL = format(
+      `DELETE p FROM ??.personnel p
+       LEFT JOIN ??.censusactivepersonnel cap ON cap.PersonnelID = p.PersonnelID
+       WHERE cap.PersonnelID IS NULL AND p.IsActive = 1`,
+      [schema, schema]
+    );
+    await connectionManager.executeQuery(deleteOrphanedSQL, [], transactionID);
+  }
+
+  for (const row of rows) {
+    const firstName = normalizeRequiredString(row.firstname);
+    const lastName = normalizeRequiredString(row.lastname);
+    const roleName = normalizeRequiredString(row.role);
+    const roleDescription = normalizeOptionalString(row.roledescription);
+
+    if (!firstName || !lastName || !roleName) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const normalizedRole = roleName
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/\s+/g, ' ')
+      .toLowerCase()
+      .trim();
+
+    const roleID = (
+      await handleUpsert<RoleResult>(
+        connectionManager,
+        schema,
+        'roles',
+        {
+          RoleName: normalizedRole,
+          RoleDescription: roleDescription
+        },
+        'RoleID',
+        transactionID
+      )
+    ).id;
+
+    if (rowsMayAlreadyExist) {
+      const existingSQL = format(
+        `SELECT p.PersonnelID FROM ??.personnel p
+         WHERE LOWER(p.FirstName) = LOWER(?) AND LOWER(p.LastName) = LOWER(?) AND p.IsActive = 1
+         LIMIT 1`,
+        [schema]
+      );
+      const existingRows = await connectionManager.executeQuery(existingSQL, [firstName, lastName], transactionID);
+
+      if (existingRows.length > 0) {
+        const personnelID = Number(existingRows[0].PersonnelID);
+        const updateSQL = format(`UPDATE ??.personnel SET FirstName = ?, LastName = ?, RoleID = ?, DeletedAt = NULL WHERE PersonnelID = ?`, [schema]);
+        await connectionManager.executeQuery(updateSQL, [firstName, lastName, roleID, personnelID], transactionID);
+        const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
+        await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
+        updatedCount += 1;
+        continue;
+      }
+    }
+
+    const insertSQL = format(`INSERT INTO ??.personnel (FirstName, LastName, RoleID, IsActive, DeletedAt) VALUES (?, ?, ?, 1, NULL)`, [schema]);
+    const insertResult = await connectionManager.executeQuery(insertSQL, [firstName, lastName, roleID], transactionID);
+    const personnelID = Number(insertResult.insertId);
+    const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
+    await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
     insertedCount += 1;
   }
 

@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Plot } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
-import { generateShortBatchID, handleUpsert } from '@/config/utils';
+import { generateShortBatchID } from '@/config/utils';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
@@ -18,19 +18,12 @@ import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, type QuadratOverlapSummary } 
 import { QuadratGeometryValidationError, QuadratOverlapAcknowledgmentRequiredError, writeQuadratUpload } from '@/lib/ingestion/quadrat-write-boundary';
 import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE } from '@/lib/ingestion/quadrat-overlap-contract';
 import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
-import { RoleResult } from '@/lib/db/definitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { assertSchemaAccess } from '@/lib/authz';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import { MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
-import {
-  type FixedDataProcessingResult,
-  normalizeOptionalString,
-  normalizeRequiredString,
-  upsertAttributeRows,
-  upsertSpeciesRows
-} from '@/lib/uploads/reference-data-writers';
+import { type FixedDataProcessingResult, upsertAttributeRows, upsertPersonnelRows, upsertSpeciesRows } from '@/lib/uploads/reference-data-writers';
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
 
 /**
@@ -156,98 +149,6 @@ function isRetryableUploadError(error: unknown): boolean {
 
 function getUploadRetryDelayMs(attemptNumber: number): number {
   return Math.min(1000 * Math.pow(2, attemptNumber - 1), 10000);
-}
-
-async function upsertPersonnelRows(
-  connectionManager: ConnectionManager,
-  schema: string,
-  censusID: number | undefined,
-  rows: FileRow[],
-  uploadMode: UploadMode,
-  transactionID: string
-): Promise<FixedDataProcessingResult> {
-  if (!censusID) {
-    throw new Error('CensusID is required for personnel uploads');
-  }
-
-  let insertedCount = 0;
-  let updatedCount = 0;
-  let skippedCount = 0;
-
-  if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-    // Remove all census-active links for this census
-    const deleteCapSQL = format(`DELETE FROM ??.censusactivepersonnel WHERE CensusID = ?`, [schema]);
-    await connectionManager.executeQuery(deleteCapSQL, [censusID], transactionID);
-    // Remove personnel who are no longer linked to any census
-    const deleteOrphanedSQL = format(
-      `DELETE p FROM ??.personnel p
-       LEFT JOIN ??.censusactivepersonnel cap ON cap.PersonnelID = p.PersonnelID
-       WHERE cap.PersonnelID IS NULL AND p.IsActive = 1`,
-      [schema, schema]
-    );
-    await connectionManager.executeQuery(deleteOrphanedSQL, [], transactionID);
-  }
-
-  for (const row of rows) {
-    const firstName = normalizeRequiredString(row.firstname);
-    const lastName = normalizeRequiredString(row.lastname);
-    const roleName = normalizeRequiredString(row.role);
-    const roleDescription = normalizeOptionalString(row.roledescription);
-
-    if (!firstName || !lastName || !roleName) {
-      skippedCount += 1;
-      continue;
-    }
-
-    const normalizedRole = roleName
-      .replace(/([a-z])([A-Z])/g, '$1 $2')
-      .replace(/\s+/g, ' ')
-      .toLowerCase()
-      .trim();
-
-    const roleID = (
-      await handleUpsert<RoleResult>(
-        connectionManager,
-        schema,
-        'roles',
-        {
-          RoleName: normalizedRole,
-          RoleDescription: roleDescription
-        },
-        'RoleID',
-        transactionID
-      )
-    ).id;
-
-    if (uploadMode === UploadMode.REVISIONS) {
-      const existingSQL = format(
-        `SELECT p.PersonnelID FROM ??.personnel p
-         WHERE LOWER(p.FirstName) = LOWER(?) AND LOWER(p.LastName) = LOWER(?) AND p.IsActive = 1
-         LIMIT 1`,
-        [schema]
-      );
-      const existingRows = await connectionManager.executeQuery(existingSQL, [firstName, lastName], transactionID);
-
-      if (existingRows.length > 0) {
-        const personnelID = Number(existingRows[0].PersonnelID);
-        const updateSQL = format(`UPDATE ??.personnel SET FirstName = ?, LastName = ?, RoleID = ?, DeletedAt = NULL WHERE PersonnelID = ?`, [schema]);
-        await connectionManager.executeQuery(updateSQL, [firstName, lastName, roleID, personnelID], transactionID);
-        const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
-        await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
-        updatedCount += 1;
-        continue;
-      }
-    }
-
-    const insertSQL = format(`INSERT INTO ??.personnel (FirstName, LastName, RoleID, IsActive, DeletedAt) VALUES (?, ?, ?, 1, NULL)`, [schema]);
-    const insertResult = await connectionManager.executeQuery(insertSQL, [firstName, lastName, roleID], transactionID);
-    const personnelID = Number(insertResult.insertId);
-    const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
-    await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
-    insertedCount += 1;
-  }
-
-  return { insertedCount, updatedCount, skippedCount };
 }
 
 async function validateMeasurementUploadScope(
@@ -675,9 +576,9 @@ export async function POST(request: NextRequest) {
             transactionID
           );
         } else if (formType === 'attributes') {
-          fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
+          fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, sessionId, transactionID);
         } else if (formType === 'species') {
-          fixedDataProcessingResult = await upsertSpeciesRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
+          fixedDataProcessingResult = await upsertSpeciesRows(connectionManager, schema, uploadRows, uploadMode, sessionId, transactionID);
         } else if (formType === 'personnel') {
           fixedDataProcessingResult = await upsertPersonnelRows(
             connectionManager,
@@ -685,6 +586,7 @@ export async function POST(request: NextRequest) {
             census?.dateRanges?.[0]?.censusID,
             uploadRows,
             uploadMode,
+            sessionId,
             transactionID
           );
         } else {
@@ -750,9 +652,9 @@ export async function POST(request: NextRequest) {
             // Subsequent batch - update the existing entry with accumulated count
             // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
             const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
-            // Preserve the user's initial mode across chunked fixed-data uploads. Later
-            // quadrat chunks intentionally execute as revisions after the first clean-reset
-            // chunk, but the file-level changelog must continue to say clean_reupload.
+            // Fixed-data files are sent whole, so a second entry under the same file name is a
+            // retry of the request or a later upload of the same name — never a chunk. The
+            // file-level changelog keeps the mode the first request recorded.
             metadata.uploadMode = metadata.uploadMode || uploadMode;
             metadata.lastChunkMode = uploadMode;
             metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
