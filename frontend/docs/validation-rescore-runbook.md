@@ -97,7 +97,7 @@ Record unmeasured resources as unavailable. Historical counts (including 447 and
 
 The operator verifies every target schema before the first mutation: required tables, full definitions of both `BuildDBHChangePairs` and `RunSharedDBHChangeValidations`, both rule seeds and enabled states, and the executable revision. Verification compares parsed normalized bodies, allowing known SHOW CREATE/DEFINER formatting only; a marker substring is insufficient. The expected rollback manifest must describe the rollback bodies, not annualisation markers.
 
-Deploy the reviewed development revision and DBH procedure/seed changes while preserving unrelated enabled configuration. The shared database gets the procedure change without a main promotion. The old live app retains its DELETE retirement until normal promotion; do not promise permanent occurrence retention across old-app reruns. The corrected development and main workflows run `deploy:procedures` followed by `refresh:dbh-rules`. The second step reads the two DBH seeds from the canonical SQL and updates only their `Description` and `Definition`, preserving `IsEnabled`, `Criteria`, `ChangelogDefinition`, and all unrelated rows. It rejects missing, conflicting, or disabled DBH rules and verifies the full expected revision before each schema’s seed transaction commits. An explicitly selected quarantined schema is rejected; all-site deployment reports and excludes quarantined schemas consistently with the existing migration/procedure workflow. The later DBH sweep still requires every intended target to pass its own revision checks; deployment success with a quarantine is not network re-score completion. All selected schemas pass preflight before the first seed write. The legacy no-flag deploy command still exists for its old use cases; do not use it for this rollout because it truncates site-specific validations.
+Deploy the reviewed development revision and DBH procedure/seed changes while preserving unrelated enabled configuration. The shared database gets the procedure change without a main promotion. The old live app retains its DELETE retirement until normal promotion; do not promise permanent occurrence retention across old-app reruns. The corrected development and main workflows run `deploy:procedures` followed by `refresh:dbh-rules`. The second step reads the two DBH seeds from the canonical SQL and updates only their `Description` and `Definition`, preserving `IsEnabled`, `Criteria`, `ChangelogDefinition`, and all unrelated rows. It rejects missing or conflicting DBH identities, preserves enabled and disabled flags, and verifies the expected procedure/seed revision before each schema’s seed transaction commits. Enabling both DBH rules is a separate requirement of the re-score sweep, not of routine deployment. An explicitly selected quarantined schema is rejected; all-site deployment reports and excludes quarantined schemas and schemas missing the measurement-error migration tables, consistently with the existing procedure deployment. Explicitly selecting an unmigrated schema fails. Missing migration-status results also fail. The later DBH sweep still requires every intended target to pass its own revision checks; deployment success with a quarantine is not network re-score completion. All selected schemas pass preflight before the first seed write. The legacy no-flag deploy command still exists for its old use cases; do not use it for this rollout because it truncates site-specific validations.
 
 The seed refresh is repeatable after a partial deployment, but stored-procedure DDL is not transactional and a multi-schema release is not one atomic transaction. A failure must block app deployment. Keep writers isolated, inspect the failed scope, and rerun the reviewed procedure/seed deployment; never treat an app restart or a failed Actions job as a database rollback. The workflow does not re-score existing measurement rows.
 
@@ -110,6 +110,10 @@ npm run refresh:dbh-rules -- --all-sites --apply \
 ```
 
 The `development_temp` GitHub environment had no approval protection on 2026-09-09. A development merge can therefore immediately reach shared-database DDL. Establish the maintenance window **before merging**, and require the PR's `unit`, `integration`, `e2e-tests`, and `realdb-smoke` checks plus the `gates` and `component` jobs to be green. Do not use an administrator bypass for this release. After deployment, perform an authenticated smoke check of census selection, measurements, validation configuration, and DBH diagnostics under controlled access, then re-establish the recorded writer controls before the ordered sweep.
+
+Normal DBH execution materializes pending comparisons only. A diagnostic for a specific measurement still examines pending, failed, and validated rows using the same comparison predicates. Temporary-table diagnostic reads and cleanup explicitly name the target schema.
+
+`SkippedBelowDbhFloor` reports non-exempt, pending comparisons where either diameter is missing or below 10 mm after conversion (the two conditions both fail the floor eligibility check). The API parser exposes `skippedBelowDbhFloor`; re-score artifacts and run counts retain it, and normal single/combined validation logs an operator warning after commit when it is nonzero. This count is separate from invalid-date counts and does not prove the configured units are wrong. Review the plot's units and raw values when an exclusion count is unexpected; do not change units or waive the floor based on a count alone. The two operator CLIs verify remote TLS certificate chains and server identities.
 
 ## Measured isolated-copy budget
 
@@ -182,7 +186,7 @@ mysql_config_editor set --login-path=forestgeo-dbh-rollback \
   --user=azureroot --password
 ```
 
-From `frontend/` in the reviewed checkout, start **Bash** first. This is intentional: the block uses Bash arrays and `read -s -p`; do not paste it into an interactive zsh session line by line. It remains compatible with macOS’s Bash 3.2. The client invocation deliberately repeats host, user, port, and database even though the login path has defaults. TLS is required. Do **not** add `--force`: the MySQL client returns nonzero on SQL errors, and Bash stops on that failure.
+From `frontend/` in the reviewed checkout, start **Bash** first. This is intentional: the block uses Bash arrays and `read -s -p`; do not paste it into an interactive zsh session line by line. It remains compatible with macOS’s Bash 3.2. The client invocation deliberately repeats host, user, port, and database even though the login path has defaults. TLS verifies both the certificate chain and server hostname; use the approved CA trust configuration if the local client does not already trust the server certificate. Do **not** add `--force`: the MySQL client returns nonzero on SQL errors, and Bash stops on that failure.
 
 ```sh
 /bin/bash --noprofile --norc
@@ -210,7 +214,7 @@ test -r "$ROLLBACK_SEEDS"
 # failure status under `set -e`; they are not process substitutions.
 discovered=$("$MYSQL" --login-path=forestgeo-dbh-rollback \
   --host=forestgeo-mysqldataserver.mysql.database.azure.com \
-  --user=azureroot --port=3306 --ssl-mode=REQUIRED --batch --skip-column-names \
+  --user=azureroot --port=3306 --ssl-mode=VERIFY_IDENTITY --batch --skip-column-names \
   --execute "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE LEFT(SCHEMA_NAME, 10) = 'forestgeo_' ORDER BY SCHEMA_NAME")
 expected=$(printf '%s\n' "${ROLLBACK_SCHEMAS[@]}" | LC_ALL=C sort)
 [[ "$discovered" == "$expected" ]] || { printf 'Refusing unexpected schema scope: %s\n' "$discovered" >&2; exit 1; }
@@ -219,7 +223,7 @@ expected=$(printf '%s\n' "${ROLLBACK_SCHEMAS[@]}" | LC_ALL=C sort)
 # this explicit rollback scope.
 quarantined=$("$MYSQL" --login-path=forestgeo-dbh-rollback \
   --host=forestgeo-mysqldataserver.mysql.database.azure.com \
-  --user=azureroot --port=3306 --ssl-mode=REQUIRED --batch --skip-column-names \
+  --user=azureroot --port=3306 --ssl-mode=VERIFY_IDENTITY --batch --skip-column-names \
   --execute "SELECT SchemaName FROM catalog.schema_contract_gate WHERE QuarantinedAt IS NOT NULL AND SchemaName IN ('forestgeo_cooksbranch','forestgeo_harvard','forestgeo_ldw','forestgeo_mpala','forestgeo_ngel_nyaki','forestgeo_niobrara','forestgeo_panama','forestgeo_rabi','forestgeo_serc','forestgeo_testing','forestgeo_testing_mason','forestgeo_wytham')")
 [[ -z "$quarantined" ]] || { printf 'Refusing quarantined rollback target(s): %s\n' "$quarantined" >&2; exit 1; }
 
@@ -227,7 +231,7 @@ quarantined=$("$MYSQL" --login-path=forestgeo-dbh-rollback \
 for schema in "${ROLLBACK_SCHEMAS[@]}"; do
   "$MYSQL" --login-path=forestgeo-dbh-rollback \
     --host=forestgeo-mysqldataserver.mysql.database.azure.com \
-    --user=azureroot --port=3306 --ssl-mode=REQUIRED \
+    --user=azureroot --port=3306 --ssl-mode=VERIFY_IDENTITY \
     --database="$schema" < "$ROLLBACK_PROCEDURES"
 done
 
