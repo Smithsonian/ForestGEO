@@ -30,7 +30,12 @@ export interface DbhExpectedManifest {
 }
 
 /** DBH verification must use the process's application-pool target, not TEST_DB_* selector defaults. */
-export function getDbhRuntimeSettings(environment: NodeJS.ProcessEnv = process.env): { host: string; user: string; password: string; port: number } {
+export function getDbhRuntimeSettings(environment: Record<string, string | undefined> = process.env): {
+  host: string;
+  user: string;
+  password: string;
+  port: number;
+} {
   const host = environment.AZURE_SQL_SERVER;
   const user = environment.AZURE_SQL_USER;
   const password = environment.AZURE_SQL_PASSWORD;
