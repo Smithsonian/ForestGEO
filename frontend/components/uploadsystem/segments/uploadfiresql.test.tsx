@@ -218,6 +218,55 @@ describe('UploadFireSQL — the /api/sqlpacketload request body', () => {
       .map(call => JSON.parse(String((call[1] as RequestInit).body)).uploadMode);
     expect(requestModes).toEqual([UploadMode.CLEAN_REUPLOAD]);
   });
+
+  it.each([
+    { form: FormType.species, headers: 'spcode,species,authority', key: 'spcode', row: (code: string) => `${code},alba,${'authority '.repeat(10)}` },
+    { form: FormType.attributes, headers: 'code,description,status', key: 'code', row: (code: string) => `${code},${'description '.repeat(10)},alive` },
+    {
+      form: FormType.personnel,
+      headers: 'firstname,lastname,role,roledescription',
+      key: 'firstname',
+      row: (code: string) => `${code},Tester,Recorder,${'description '.repeat(10)}`
+    }
+  ])('preserves every row of a $form file larger than 256 KB in one clean-reupload request (#472)', async ({ form, headers, key, row }) => {
+    const codes = Array.from({ length: 3_000 }, (_, index) => `R${String(index).padStart(5, '0')}`);
+    const file = new FileWithStream(new File([[headers, ...codes.map(row)].join('\n')], `${form}.csv`, { type: 'text/csv' }), false);
+    expect(file.size).toBeGreaterThan(256 * 1024);
+
+    render(
+      <UploadFireSQL
+        schema="forestgeo_testing"
+        uploadForm={form}
+        uploadMode={UploadMode.CLEAN_REUPLOAD}
+        sourceFormat={SourceFormat.csv}
+        personnelRecording=""
+        acceptedFiles={[file]}
+        parsedData={{}}
+        uploadCompleteMessage=""
+        selectedDelimiters={{ [file.name]: ',' }}
+        setUploadCompleteMessage={setUploadCompleteMessage}
+        setIsDataUnsaved={setIsDataUnsaved}
+        setUploadError={setUploadError}
+        setErrorComponent={setErrorComponent}
+        setReviewState={setReviewState}
+        setAllRowToCMID={setAllRowToCMID}
+      />
+    );
+
+    // Wait until the entire SQL upload finishes: checking at the first request can
+    // pass while a later chunk is still queued to delete the rows it just inserted.
+    await waitFor(() => expect(setReviewState).toHaveBeenCalledWith(ReviewStates.UPLOAD_AZURE), { timeout: 10_000 });
+    expect(setUploadError).not.toHaveBeenCalled();
+
+    const requests = fetchMock.mock.calls
+      .filter(call => String(call[0]).includes('/api/sqlpacketload'))
+      .map(call => JSON.parse(String((call[1] as RequestInit).body)));
+    expect(requests).toHaveLength(1);
+    expect(requests[0].uploadMode).toBe(UploadMode.CLEAN_REUPLOAD);
+    const uploadedRows = Object.values(requests[0].fileRowSet) as Record<string, string>[];
+    expect(uploadedRows).toHaveLength(codes.length);
+    expect(new Set(uploadedRows.map(uploadedRow => uploadedRow[key]))).toEqual(new Set(codes));
+  });
 });
 
 // The rawPayload branch is only reachable on the measurements + column-mapping flow. Covered
@@ -248,8 +297,10 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
     vi.unstubAllGlobals();
   });
 
-  it('sends a measurements upload through the rawPayload branch', async () => {
-    const csvContent = ['tag,spcode,quadrat,lx,ly,date', '1,ABAL,Q0001,1.5,2.5,2020-01-01'].join('\n');
+  it.each([1, 10_000])('sends all %i measurement rows through the rawPayload branch, retaining chunking for large files', async rowCount => {
+    const csvContent = ['tag,spcode,quadrat,lx,ly,date', ...Array.from({ length: rowCount }, (_, index) => `${index + 1},ABAL,Q0001,1.5,2.5,2020-01-01`)].join(
+      '\n'
+    );
     const raw = new File([csvContent], 'measurements.csv', { type: 'text/csv' });
     const file = new FileWithStream(raw, false);
 
@@ -275,17 +326,24 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
 
     render(<UploadFireSQL {...props} />);
 
-    await waitFor(() => {
-      const sqlPacketLoadCalls = fetchMock.mock.calls.filter(call => String(call[0]).includes('/api/sqlpacketload'));
-      expect(sqlPacketLoadCalls.length).toBeGreaterThan(0);
-    });
+    const requestBodies = () =>
+      fetchMock.mock.calls.filter(call => String(call[0]).includes('/api/sqlpacketload')).map(call => JSON.parse(String((call[1] as RequestInit).body)));
+    // The 10,000-row case parses ~330KB in jsdom before the last chunk is requested; the default
+    // 1s waitFor budget is enough locally but not under CI load.
+    await waitFor(() => expect(requestBodies().flatMap(body => body.rawRows)).toHaveLength(rowCount), { timeout: 10_000 });
 
-    const sqlPacketLoadCall = fetchMock.mock.calls.find(call => String(call[0]).includes('/api/sqlpacketload'));
-    const requestBody = JSON.parse(String((sqlPacketLoadCall?.[1] as RequestInit).body));
-
-    // rawPayload branch: the request must carry rawRows, not a fileRowSet.
-    expect(requestBody.rawRows).toBeDefined();
-    expect(requestBody.fileRowSet).toBeUndefined();
+    const requests = requestBodies();
+    if (rowCount > 1) {
+      expect(file.size).toBeGreaterThan(256 * 1024);
+      expect(requests.length).toBeGreaterThan(1);
+    } else {
+      expect(requests).toHaveLength(1);
+    }
+    for (const requestBody of requests) {
+      // rawPayload branch: the request must carry rawRows, not a fileRowSet.
+      expect(requestBody.rawRows).toBeDefined();
+      expect(requestBody.fileRowSet).toBeUndefined();
+    }
   });
 
   // A row the server rejects (data.failingRows) is pushed straight to /api/batchedupload so the

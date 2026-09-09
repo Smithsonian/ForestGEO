@@ -14,6 +14,19 @@ export enum SourceFormat {
   arcgis_xlsx = 'arcgis_xlsx'
 }
 
+/**
+ * Measurement files are parsed and uploaded as size-bounded chunks; every other
+ * form is parsed and uploaded whole, in a single request. Reference-table
+ * uploads depend on that: their CLEAN_REUPLOAD deletes existing rows per
+ * request, so a second request would erase what the first one wrote (#472).
+ *
+ * One predicate, because the chunk-size decision and the progress estimate must
+ * never drift apart.
+ */
+export function uploadsWholeFileInOneRequest(uploadForm: FormType | string | undefined): boolean {
+  return uploadForm !== FormType.measurements;
+}
+
 export function normalizeSourceFormat(value: unknown): SourceFormat | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();

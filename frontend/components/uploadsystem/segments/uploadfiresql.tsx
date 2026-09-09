@@ -9,7 +9,8 @@ import {
   FormType,
   getTableHeaders,
   RequiredTableHeadersByFormType,
-  SourceFormat
+  SourceFormat,
+  uploadsWholeFileInOneRequest
 } from '@/config/macros/formdetails';
 import { Alert, Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
@@ -476,7 +477,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     [currentPlot?.plotID, currentCensus?.dateRanges, schema, fetchWithTimeout]
   );
 
-  const estimateChunkCount = useCallback((file: File): number => Math.max(1, Math.ceil(file.size / chunkSize)), [chunkSize]);
+  const estimateChunkCount = useCallback(
+    (file: File): number => (uploadsWholeFileInOneRequest(uploadForm) ? 1 : Math.max(1, Math.ceil(file.size / chunkSize))),
+    [chunkSize, uploadForm]
+  );
 
   // Unified ETA calculator for overall progress (0-100%)
   // Uses lower alpha for smoother estimates across all stages
@@ -976,10 +980,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           delimiter: delimiter,
           header: true,
           skipEmptyLines: true,
-          // Quadrat plots are bounded to 10,000 rows. Upload each quadrat file as one request so
-          // overlap validation and its acknowledgment are atomic at file scope rather than
-          // committing earlier chunks before a later chunk discovers a new overlap.
-          chunkSize: uploadForm === FormType.quadrats ? Math.max(file.size + 1, chunkSize) : chunkSize,
+          // Reference-table files must use one request: CLEAN_REUPLOAD deletes existing rows
+          // per request, so later chunks would erase earlier ones (#472). This also keeps
+          // quadrat overlap validation and acknowledgment atomic at file scope. A chunk size
+          // past the file size makes Papa emit exactly one chunk.
+          chunkSize: uploadsWholeFileInOneRequest(uploadForm) ? Math.max(file.size + 1, chunkSize) : chunkSize,
           transformHeader,
           transform,
           chunk(results: ParseResult<FileRow>, parser) {
