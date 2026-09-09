@@ -28,6 +28,8 @@ describe('prepared DBH legacy-rule rollback', () => {
   let speciesCode: string;
   let quadratName: string;
   let serial = 0;
+  const rollbackRoot = path.join(process.cwd(), 'db/rollback');
+  const rollbackSeeds = readFileSync(path.join(rollbackRoot, '2026-09-02-dbh-legacy-rules-corequeries.sql'), 'utf8');
 
   beforeAll(async () => {
     const setup = await setupTestDatabase();
@@ -41,16 +43,14 @@ describe('prepared DBH legacy-rule rollback', () => {
     plotID = testData.plots[0].plotID;
     speciesCode = testData.species[0].SpeciesCode || testData.species[0].Mnemonic;
     quadratName = testData.quadrats[0].QuadratName || testData.quadrats[0].Quadrat;
-    const rollbackRoot = path.join(process.cwd(), 'db/rollback');
     const procedures = readFileSync(path.join(rollbackRoot, '2026-09-02-dbh-legacy-rules-procedures.sql'), 'utf8');
-    const seeds = readFileSync(path.join(rollbackRoot, '2026-09-02-dbh-legacy-rules-corequeries.sql'), 'utf8');
     await connection.query('DROP PROCEDURE IF EXISTS RunSharedDBHChangeValidations');
     await connection.query('DROP PROCEDURE IF EXISTS BuildDBHChangePairs');
     for (const statement of parseStoredProceduresSQL(procedures)) {
       if (/^DROP\s+PROCEDURE/i.test(statement)) continue;
       if (/\bCREATE\s+PROCEDURE\s+(?:`?)(?:BuildDBHChangePairs|RunSharedDBHChangeValidations)/i.test(statement)) await connection.query(statement);
     }
-    await connection.query(seeds);
+    await connection.query(rollbackSeeds);
     await seedMeasurementErrors(connection);
   }, 90000);
 
@@ -58,6 +58,18 @@ describe('prepared DBH legacy-rule rollback', () => {
   beforeEach(async () => {
     await cleanupTestMeasurements(connection, testData);
     await connection.query("UPDATE plots SET DefaultDBHUnits = 'mm' WHERE PlotID = ?", [plotID]);
+    await connection.query('UPDATE sitespecificvalidations SET IsEnabled = TRUE WHERE ValidationID IN (1, 2)');
+  });
+
+  it('preserves disabled DBH flags when the rollback seed SQL is replayed', async () => {
+    await connection.query('UPDATE sitespecificvalidations SET IsEnabled = FALSE WHERE ValidationID IN (1, 2)');
+
+    await connection.query(rollbackSeeds);
+
+    const [rows] = await connection.query<RowDataPacket[]>(
+      'SELECT ValidationID, IsEnabled FROM sitespecificvalidations WHERE ValidationID IN (1, 2) ORDER BY ValidationID'
+    );
+    expect(rows.map(row => (Buffer.isBuffer(row.IsEnabled) ? row.IsEnabled[0] : Number(row.IsEnabled)))).toEqual([0, 0]);
   });
 
   async function seed(tag: string, prior: number, present: number, priorDate = '2015-01-01', presentDate = '2025-01-01', codes = 'A') {
@@ -107,13 +119,18 @@ describe('prepared DBH legacy-rule rollback', () => {
     for (const id of [floor.presentID, hom.presentID, missing.presentID, zero.presentID, reversed.presentID]) expect(await codesFor(id)).toContain('1');
   });
 
-  it('keeps the strict old shrinkage boundary and positive-prior requirement', async () => {
+  it('keeps the strict old shrinkage boundary and shared positive-prior requirement', async () => {
     const atBoundary = await seed('BOUNDARY', 100, 95);
     const beyondBoundary = await seed('BEYOND', 100, 94.999);
-    const zeroPrior = await seed('ZERO_PRIOR', 0, -1);
+    const zeroPriorShrinkage = await seed('ZERO_SHRINK', 0, -1);
+    // Both rows would exceed the absolute 65 mm legacy growth threshold if the
+    // positive-prior gate were left in the shrinkage branch only.
+    const zeroPriorGrowth = await seed('ZERO_GROWTH', 0, 100);
+    const negativePriorGrowth = await seed('NEG_GROWTH', -1, 100);
     expect(await codesFor(atBoundary.presentID)).not.toContain('2');
     expect(await codesFor(beyondBoundary.presentID)).toContain('2');
-    expect(await codesFor(zeroPrior.presentID)).not.toContain('2');
+    expect(await codesFor(zeroPriorShrinkage.presentID)).not.toContain('2');
+    for (const id of [zeroPriorGrowth.presentID, negativePriorGrowth.presentID]) expect(await codesFor(id)).not.toContain('1');
   });
 
   it('retains active, prior-validated, pending, and status-exempt selection rules', async () => {

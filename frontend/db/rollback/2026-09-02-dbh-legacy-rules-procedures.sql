@@ -10,8 +10,11 @@ DROP PROCEDURE IF EXISTS BuildDBHChangePairs;
 
 DELIMITER $$
 
--- Keep the current diagnostic table shape.  Floor, HOM, and interval columns are
+-- Keep the current diagnostic table shape. Floor, HOM, and interval columns are
 -- facts for the read-only diagnostic; legacy verdicts below do not use them.
+-- Pair predicates do not depend on present processing state: NULL bulk scope
+-- materializes pending rows only, while a measurement ID lets diagnostics inspect
+-- pending, failed, and validated rows.
 CREATE PROCEDURE BuildDBHChangePairs(
     IN p_CensusID INT,
     IN p_PlotID INT,
@@ -90,9 +93,15 @@ BEGIN
       JOIN stems s_past ON s_past.TreeID = t_past.TreeID AND s_past.CensusID = c_past.CensusID AND s_past.StemTag = s_present.StemTag AND s_past.IsActive = 1
       JOIN coremeasurements cm_past ON cm_past.StemGUID = s_past.StemGUID AND cm_past.CensusID = c_past.CensusID AND cm_past.IsActive = 1 AND cm_past.IsValidated = 1
     WHERE cm_present.IsActive = 1
+      -- Normal validation only needs pending rows.  Diagnostics supply a concrete
+      -- measurement ID and must be able to explain every present validation state.
+      AND (p_CoreMeasurementID IS NOT NULL OR cm_present.IsValidated IS NULL)
       AND (p_CensusID IS NULL OR cm_present.CensusID = p_CensusID)
       AND (p_PlotID IS NULL OR c_present.PlotID = p_PlotID)
-      AND (p_CoreMeasurementID IS NULL OR cm_present.CoreMeasurementID = p_CoreMeasurementID);
+      AND (p_CoreMeasurementID IS NULL OR cm_present.CoreMeasurementID = p_CoreMeasurementID)
+      -- This was a shared candidate gate in the legacy query, before the
+      -- growth/shrinkage branch, so it applies to both validations.
+      AND cm_past.MeasuredDBH > 0;
 
     UPDATE dbh_change_pairs
     SET IntervalDays = CASE WHEN PresentMeasurementDate IS NULL OR PriorMeasurementDate IS NULL THEN NULL ELSE DATEDIFF(PresentMeasurementDate, PriorMeasurementDate) END,
