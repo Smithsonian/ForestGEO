@@ -117,9 +117,15 @@ export async function reconcileDbhRescoreAttempt(
     deps.originalConnectionID
   ])) as Array<{ transactionCount: number }>;
   const ended = isObservedZeroCount(sessions[0]?.sessionCount) && isObservedZeroCount(transactions[0]?.transactionCount);
-  return ended
-    ? { databaseOutcome: 'rolled-back', errors: [] }
-    : { databaseOutcome: 'unknown', errors: ['Original DBH re-score session or transaction has not ended; absence does not prove rollback'] };
+  if (!ended) return { databaseOutcome: 'unknown', errors: ['Original DBH re-score session or transaction has not ended; absence does not prove rollback'] };
+
+  // The original session can commit between the first marker read and the
+  // disappearance checks above. Re-read after both have ended so that race
+  // is reported as committed rather than incorrectly as rolled back.
+  const finalRows = (await deps.queryFresh(sql, [scope.plotID, scope.censusID, attemptMarker(attemptID)])) as Array<{ RunID: number }>;
+  const finalRunID = Number(finalRows[0]?.RunID);
+  if (Number.isInteger(finalRunID) && finalRunID > 0) return { databaseOutcome: 'committed', runID: finalRunID, errors: [] };
+  return { databaseOutcome: 'rolled-back', errors: [] };
 }
 
 async function reconcileOnFreshConnection(scope: DbhRescoreScope, attemptID: string, originalConnectionID?: number) {
