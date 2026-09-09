@@ -143,13 +143,16 @@ describe('selectMeasurements', () => {
     expect(row.HOM, 'HOM is serialized as a string (lexical form preserved)').toBe('1.300000');
     expect(row.ExactDate, 'ExactDate is a YYYY-MM-DD string').toBe('2024-06-01');
     expect(row.Comments, 'Comments maps from coremeasurements.Description; seed value is NULL').toBeNull();
-    expect(row.LX, 'LX maps from stems.LocalX').toBeCloseTo(1.0, 5);
-    expect(row.LY, 'LY maps from stems.LocalY').toBeCloseTo(1.0, 5);
+    expect(row.LX, 'LX maps from stems.LocalX').toBeCloseTo(LOCAL_X, 5);
+    expect(row.LY, 'LY maps from stems.LocalY').toBeCloseTo(LOCAL_Y, 5);
 
-    // PX/PY = quadrats.StartX/StartY + stems.LocalX/LocalY. Seed origin is 0.0/0.0
-    // (Task 2 changes the seed origin to 40/60), so PX/PY equal LX/LY here.
-    expect(row.PX, 'PX = quadrats.StartX (0) + stems.LocalX (1.0)').toBeCloseTo(1.0, 5);
-    expect(row.PY, 'PY = quadrats.StartY (0) + stems.LocalY (1.0)').toBeCloseTo(1.0, 5);
+    // PX/PY = quadrats.StartX/StartY + stems.LocalX/LocalY. The seed's origin
+    // (40/60) and local offset (1.25/2.5) are the same values as the ORIGIN_*/
+    // LOCAL_* constants above, so this happy-path row exercises the identical
+    // non-zero derivation as the dedicated "PX/PY plot coordinates" suite below —
+    // a seed edit that changes either pair must update these constants too.
+    expect(row.PX, `PX = quadrats.StartX (${ORIGIN_X}) + stems.LocalX (${LOCAL_X})`).toBeCloseTo(EXPECTED_PX, 5);
+    expect(row.PY, `PY = quadrats.StartY (${ORIGIN_Y}) + stems.LocalY (${LOCAL_Y})`).toBeCloseTo(EXPECTED_PY, 5);
 
     // MVP invariant: PrimaryStem is always null
     expect(row.PrimaryStem, 'PrimaryStem is always null in MVP').toBeNull();
@@ -584,8 +587,10 @@ describe('selectMeasurements', () => {
         'ordering by CoreMeasurementID ASC is unchanged'
       ).toEqual([1, 2]);
       for (const row of measurementRows) {
-        expect(row.PX, `row ${row.CoreMeasurementID} PX = StartX(40) + LocalX(1.0) = 41`).toBeCloseTo(41.0, 5);
-        expect(row.PY, `row ${row.CoreMeasurementID} PY = StartY(60) + LocalY(1.0) = 61`).toBeCloseTo(61.0, 5);
+        // Local offsets are unchanged from the seed default (LOCAL_X/LOCAL_Y);
+        // only the quadrat origin was overridden above.
+        expect(row.PX, `row ${row.CoreMeasurementID} PX = StartX(${ORIGIN_X}) + LocalX(${LOCAL_X}) = ${EXPECTED_PX}`).toBeCloseTo(EXPECTED_PX, 5);
+        expect(row.PY, `row ${row.CoreMeasurementID} PY = StartY(${ORIGIN_Y}) + LocalY(${LOCAL_Y}) = ${EXPECTED_PY}`).toBeCloseTo(EXPECTED_PY, 5);
       }
       expect(attributeRows).toHaveLength(2);
       expect(attributeRows.find(a => a.CoreMeasurementID === 1)).toBeDefined();

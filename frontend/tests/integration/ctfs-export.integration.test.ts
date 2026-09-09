@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { createTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import { splitSqlFile } from '../../lib/provisioning/sql-runner';
 import { checkFinishedCensus, selectMeasurements, renderArtifact, renderRebuildViewFullTableArtifact } from '../../lib/ctfs-export';
+import { MISSING_PLOT_COORDINATE_SCOPE } from '../../lib/csv-to-sql-v2';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,6 +48,21 @@ const PERF_BASELINE_PATH = path.resolve(__dirname, '../fixtures/ctfs-export/perf
 const APP_PLOT_ID = 1;
 const APP_CENSUS_ID = 1;
 const DESTINATION_PLOT_ID = 1;
+
+// app-db-seed.sql's quadrat A1 origin (StartX/StartY) and stem local offset
+// (LocalX/LocalY) — see tests/fixtures/ctfs-export/app-db-seed.sql. The
+// destination Stem's PX/PY = StartX+LocalX / StartY+LocalY, each axis derived
+// independently; QX/QY carry the local offset straight through, unaffected by
+// the origin. mysql2 returns DECIMAL(16,5) columns as zero-padded strings, so
+// the expected values below are computed the same way MySQL formats them.
+const SEED_QUADRAT_START_X = 40;
+const SEED_QUADRAT_START_Y = 60;
+const SEED_STEM_LOCAL_X = 1.25;
+const SEED_STEM_LOCAL_Y = 2.5;
+const EXPECTED_STEM_QX = SEED_STEM_LOCAL_X.toFixed(5);
+const EXPECTED_STEM_QY = SEED_STEM_LOCAL_Y.toFixed(5);
+const EXPECTED_STEM_PX = (SEED_QUADRAT_START_X + SEED_STEM_LOCAL_X).toFixed(5);
+const EXPECTED_STEM_PY = (SEED_QUADRAT_START_Y + SEED_STEM_LOCAL_Y).toFixed(5);
 
 // ---------------------------------------------------------------------------
 // CTFS DDL + app schema helpers
@@ -322,7 +338,7 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
     expect(before.dbhAttributes, 'CTFS DBHAttributes must start empty').toBe(0);
 
     const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
-    await executeCtfsSql(ctfsConn, artifact.sql);
+    const resultSets = await executeCtfsSql(ctfsConn, artifact.sql);
 
     const after = await captureCtfsCounts(ctfsConn);
     expect(after.tree, 'One new Tree must be inserted').toBe(before.tree + 1);
@@ -337,6 +353,55 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
     // HOM is stored as DECIMAL in the CTFS schema; MySQL returns it with trailing
     // zeros (e.g. '1.300000'). Compare numerically, not as a string.
     expect(Number(dbhRows[0].HOM)).toBeCloseTo(1.3, 4);
+
+    // Verify the new Stem row carries the computed plot coordinates (#475).
+    // `before.stem` was asserted to be 0 above, so this single row is the new one.
+    const [stemRows] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT QX, QY, PX, PY FROM Stem');
+    expect(stemRows).toHaveLength(1);
+    expect(stemRows[0].QX, 'QX = stems.LocalX, unaffected by the quadrat origin').toBe(EXPECTED_STEM_QX);
+    expect(stemRows[0].QY, 'QY = stems.LocalY, unaffected by the quadrat origin').toBe(EXPECTED_STEM_QY);
+    expect(stemRows[0].PX, `PX = quadrats.StartX (${SEED_QUADRAT_START_X}) + stems.LocalX (${SEED_STEM_LOCAL_X})`).toBe(EXPECTED_STEM_PX);
+    expect(stemRows[0].PY, `PY = quadrats.StartY (${SEED_QUADRAT_START_Y}) + stems.LocalY (${SEED_STEM_LOCAL_Y})`).toBe(EXPECTED_STEM_PY);
+
+    // Stage 7's non-blocking diagnostic must report 0 — the seed's quadrat
+    // origin is fully populated, so no new stem is missing an axis.
+    const diagnostic = resultSets.find(rs => rs.length > 0 && rs[0].scope === MISSING_PLOT_COORDINATE_SCOPE);
+    expect(diagnostic, 'Stage 7 must always emit the missing-PX/PY diagnostic row, even when the count is 0').toBeDefined();
+    expect(Number(diagnostic![0].n), 'the seed stem has both axes populated, so the diagnostic count is 0').toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Missing quadrat origin (#475): PX NULL, PY populated, diagnostic n=1
+  // -------------------------------------------------------------------------
+
+  it('missing quadrat origin: destination Stem.PX is SQL NULL and Stage 7 diagnostic reports n=1', async () => {
+    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
+    for (const stmt of splitSqlFile(ctfsSeed)) {
+      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
+    }
+
+    // Null out quadrat A1's StartX in the app schema — a known, tolerated data
+    // gap that must not exclude the stem from export (#475).
+    await appConn.query(`UPDATE \`${appSchema}\`.quadrats SET StartX = NULL WHERE QuadratID = 1`);
+
+    const before = await captureCtfsCounts(ctfsConn);
+
+    const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
+    const resultSets = await executeCtfsSql(ctfsConn, artifact.sql);
+
+    const after = await captureCtfsCounts(ctfsConn);
+    expect(after.stem, 'the stem with a missing origin must still be inserted, not dropped').toBe(before.stem + 1);
+
+    const [stemRows] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT QX, QY, PX, PY FROM Stem');
+    expect(stemRows).toHaveLength(1);
+    expect(stemRows[0].QX, 'QX = stems.LocalX must still be carried through when only the origin axis is missing').toBe(EXPECTED_STEM_QX);
+    expect(stemRows[0].QY, 'QY = stems.LocalY must still be carried through when only the origin axis is missing').toBe(EXPECTED_STEM_QY);
+    expect(stemRows[0].PX, 'PX must be SQL NULL when quadrats.StartX is NULL — no substitution').toBeNull();
+    expect(stemRows[0].PY, `PY is unaffected by the missing StartX: StartY (${SEED_QUADRAT_START_Y}) + LocalY (${SEED_STEM_LOCAL_Y})`).toBe(EXPECTED_STEM_PY);
+
+    const diagnostic = resultSets.find(rs => rs.length > 0 && rs[0].scope === MISSING_PLOT_COORDINATE_SCOPE);
+    expect(diagnostic, 'Stage 7 must always emit the missing-PX/PY diagnostic row').toBeDefined();
+    expect(Number(diagnostic![0].n), 'exactly the one new stem with a NULL StartX axis is counted').toBe(1);
   });
 
   // -------------------------------------------------------------------------
