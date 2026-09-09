@@ -12,7 +12,7 @@ Only DBH occurrences are resolved on rerun. An unchanged violation reopens the s
 
 ## Establish and retain writer isolation
 
-The repository deploys Azure App Services `forestgeo-development` and `forestgeo-livesite` in `ForestGEO-ResourceGroup` (see `.github/workflows/dev-forestgeo-livesite.yml` and `main-forestgeo-livesite.yml`). Stopping these services is an available control for their ingress and in-process workers. A web page banner or the CLI host acknowledgement does not prevent writes.
+The repository deploys Azure App Services `forestgeo-development` and `forestgeo-livesite` in `forestgeo-rg` (see `.github/workflows/dev-forestgeo-livesite.yml` and `main-forestgeo-livesite.yml`). Azure inventory verified both apps in this resource group on 2026-09-09. Stopping these services is an available control for their ingress and in-process workers. A web page banner or the CLI host acknowledgement does not prevent writes.
 
 Before deployment, Mason must inventory and stop or deny access to **every** additional writer: separately hosted workers, scheduler jobs, researcher SQL sessions, scripts, and other app versions. Confirm the deployed worker topology with the responsible operator. The repository alone cannot establish that this inventory is complete. **Do not apply while any writer or its isolation mechanism is unaccounted for.** Scope locks exclude cooperating callers, but raw-query mutations and older live code do not all honor them. Online re-scoring requires #465 or equivalent authoritative protection across all writers.
 
@@ -21,16 +21,23 @@ Before deployment, Mason must inventory and stop or deny access to **every** add
 3. Stop both apps after draining. Where ingress restrictions cannot be established, stopping both apps prevents new app work, but any interrupted work must be explicitly reconciled and completed under controlled access before the sweep.
 
 ```sh
-az webapp stop --resource-group ForestGEO-ResourceGroup --name forestgeo-development
-az webapp stop --resource-group ForestGEO-ResourceGroup --name forestgeo-livesite
-az webapp show --resource-group ForestGEO-ResourceGroup --name forestgeo-development --query state --output tsv
-az webapp show --resource-group ForestGEO-ResourceGroup --name forestgeo-livesite --query state --output tsv
+az webapp stop --resource-group forestgeo-rg --name forestgeo-development
+az webapp stop --resource-group forestgeo-rg --name forestgeo-livesite
+az webapp show --resource-group forestgeo-rg --name forestgeo-development --query state --output tsv
+az webapp show --resource-group forestgeo-rg --name forestgeo-livesite --query state --output tsv
 ```
 
 4. Verify separately hosted workers and direct writers are stopped/restricted too. Retain restrictions through deployment, verification, sweep, comparisons, reconciliation, and any rollback.
-5. Deployment workflows restart apps. If deployment reopens ingress or restarts workers, immediately re-establish isolation and drain checks before continuing. Do not assume the pre-deploy stop persists.
+5. Include the separately hosted `submitingestionprocessor` function app in resource group `submitingestionprocessor`: the verified enabled `ingestionprocessor` function has an HTTP trigger. Drain it and stop it under the same maintenance authorization; record its prior state for restoration. `forestgeo-testing-app` was verified to target the separate `forestgeo-testing-mysql.mysql.database.azure.com` database, so it is outside this target’s confirmed writer set. Confirm direct SQL users and other scripts before signing off the inventory.
 
-A count of zero at one instant is evidence of a drained queue, not prevention of future work. The writer controls remain in force until explicit release.
+```sh
+az functionapp stop --resource-group submitingestionprocessor --name submitingestionprocessor
+az functionapp show --resource-group submitingestionprocessor --name submitingestionprocessor --query state --output tsv
+```
+
+6. Deployment workflows restart apps. If deployment reopens ingress or restarts workers, immediately re-establish isolation and drain checks before continuing. Do not assume the pre-deploy stop persists.
+
+The current Node startup instrumentation starts the provisioning recovery worker and upload-job sweeper; disabling async upload admission alone does not stop these existing-work consumers. Both apps had unrestricted ingress in the 2026-09-09 inventory, so no maintenance restriction is currently established by this document. A count of zero at one instant is evidence of a drained queue, not prevention of future work. The writer controls remain in force until explicit release.
 
 ## Read-only drain checks
 
@@ -90,7 +97,19 @@ Record unmeasured resources as unavailable. Historical counts (including 447 and
 
 The operator verifies every target schema before the first mutation: required tables, full definitions of both `BuildDBHChangePairs` and `RunSharedDBHChangeValidations`, both rule seeds and enabled states, and the executable revision. Verification compares parsed normalized bodies, allowing known SHOW CREATE/DEFINER formatting only; a marker substring is insufficient. The expected rollback manifest must describe the rollback bodies, not annualisation markers.
 
-Deploy the reviewed development revision and DBH procedure/seed changes while preserving unrelated enabled configuration. The shared database gets the procedure change without a main promotion. The old live app retains its DELETE retirement until normal promotion; do not promise permanent occurrence retention across old-app reruns. Avoid the deploy script's legacy full reset, which truncates site-specific validations and resets unrelated settings.
+Deploy the reviewed development revision and DBH procedure/seed changes while preserving unrelated enabled configuration. The shared database gets the procedure change without a main promotion. The old live app retains its DELETE retirement until normal promotion; do not promise permanent occurrence retention across old-app reruns. The corrected development and main workflows run `deploy:procedures` followed by `refresh:dbh-rules`. The second step reads the two DBH seeds from the canonical SQL and updates only their `Description` and `Definition`, preserving `IsEnabled`, `Criteria`, `ChangelogDefinition`, and all unrelated rows. It rejects missing, conflicting, or disabled DBH rules and verifies the full expected revision before each schema’s seed transaction commits. An explicitly selected quarantined schema is rejected; all-site deployment reports and excludes quarantined schemas consistently with the existing migration/procedure workflow. The later DBH sweep still requires every intended target to pass its own revision checks; deployment success with a quarantine is not network re-score completion. All selected schemas pass preflight before the first seed write. The legacy no-flag deploy command still exists for its old use cases; do not use it for this rollout because it truncates site-specific validations.
+
+The seed refresh is repeatable after a partial deployment, but stored-procedure DDL is not transactional and a multi-schema release is not one atomic transaction. A failure must block app deployment. Keep writers isolated, inspect the failed scope, and rerun the reviewed procedure/seed deployment; never treat an app restart or a failed Actions job as a database rollback. The workflow does not re-score existing measurement rows.
+
+Once reviewed procedures have been installed, the targeted seed commands are:
+
+```sh
+npm run refresh:dbh-rules -- --all-sites
+npm run refresh:dbh-rules -- --all-sites --apply \
+  --i-understand-this-writes-to "$AZURE_SQL_SERVER"
+```
+
+The `development_temp` GitHub environment had no approval protection on 2026-09-09. A development merge can therefore immediately reach shared-database DDL. Establish the maintenance window **before merging**, and require the PR's `unit`, `integration`, `e2e-tests`, and `realdb-smoke` checks plus the `gates` and `component` jobs to be green. Do not use an administrator bypass for this release. After deployment, perform an authenticated smoke check of census selection, measurements, validation configuration, and DBH diagnostics under controlled access, then re-establish the recorded writer controls before the ordered sweep.
 
 ## Measured isolated-copy budget
 
@@ -153,12 +172,105 @@ Prepare and test the old-rule manifest/procedure and seed patch **before** rollo
 
 For a committed census, procedure rollback alone does not restore validity. Under continued isolation, deploy and verify the tested old-rule manifest, then re-score from the earliest affected committed census through every later census. Verify both views, occurrence extracts, artifacts, and old-rule fixtures. Reconcile unknown commits first. Deleted history or erased override intent cannot be reconstructed automatically; compare saved snapshots and limit any restoration to verified unchanged rows. Never overwrite subsequent edits to force historical counts to match.
 
-The reviewed rollback assets are `db/rollback/2026-09-02-dbh-legacy-rules-procedures.sql` and `db/rollback/2026-09-02-dbh-legacy-rules-corequeries.sql`. Install only their two procedures and two seeds using the approved deployment connection. Preserve unrelated configuration. Then select those exact files for verification and the same atomic CLI:
+The reviewed rollback assets are `db/rollback/2026-09-02-dbh-legacy-rules-procedures.sql` and `db/rollback/2026-09-02-dbh-legacy-rules-corequeries.sql`. Keep every writer isolated and reconcile unknown outcomes before using this exact 12-schema rollback sequence. It installs only the two legacy procedures and refreshes only the two seed text fields; it does not re-score measurements. The MySQL client import was verified against a disposable local schema, and both normalized procedure definitions matched the rollback manifest.
+
+Configure a MySQL login path once on the operator machine. `mysql_config_editor` prompts for the password and writes its local login file; never put the password on a command line or in this document.
 
 ```sh
-export DBH_RESCORE_PROCEDURES_SQL="$PWD/db/rollback/2026-09-02-dbh-legacy-rules-procedures.sql"
-export DBH_RESCORE_COREQUERIES_SQL="$PWD/db/rollback/2026-09-02-dbh-legacy-rules-corequeries.sql"
-npx tsx scripts/rescore-dbh-validations.ts --all-sites
+mysql_config_editor set --login-path=forestgeo-dbh-rollback \
+  --host=forestgeo-mysqldataserver.mysql.database.azure.com \
+  --user=azureroot --password
+```
+
+From `frontend/` in the reviewed checkout, start **Bash** first. This is intentional: the block uses Bash arrays and `read -s -p`; do not paste it into an interactive zsh session line by line. It remains compatible with macOS’s Bash 3.2. The client invocation deliberately repeats host, user, port, and database even though the login path has defaults. TLS is required. Do **not** add `--force`: the MySQL client returns nonzero on SQL errors, and Bash stops on that failure.
+
+```sh
+/bin/bash --noprofile --norc
+```
+
+Then run this single fail-fast block inside that Bash shell:
+
+```bash
+set -euo pipefail
+
+MYSQL=/opt/homebrew/opt/mysql-client/bin/mysql
+ROLLBACK_PROCEDURES="$PWD/db/rollback/2026-09-02-dbh-legacy-rules-procedures.sql"
+ROLLBACK_SEEDS="$PWD/db/rollback/2026-09-02-dbh-legacy-rules-corequeries.sql"
+ROLLBACK_SCHEMAS=(
+  forestgeo_cooksbranch forestgeo_harvard forestgeo_ldw forestgeo_mpala
+  forestgeo_ngel_nyaki forestgeo_niobrara forestgeo_panama forestgeo_rabi
+  forestgeo_serc forestgeo_testing forestgeo_testing_mason forestgeo_wytham
+)
+test -r "$ROLLBACK_PROCEDURES"
+test -r "$ROLLBACK_SEEDS"
+
+# Fail closed if discovery is not exactly the audited 12-schema target. Query
+# every `forestgeo_` prefix, even an otherwise malformed name, so no new or
+# unaccounted target can be omitted. Command substitutions preserve mysql's
+# failure status under `set -e`; they are not process substitutions.
+discovered=$("$MYSQL" --login-path=forestgeo-dbh-rollback \
+  --host=forestgeo-mysqldataserver.mysql.database.azure.com \
+  --user=azureroot --port=3306 --ssl-mode=REQUIRED --batch --skip-column-names \
+  --execute "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE LEFT(SCHEMA_NAME, 10) = 'forestgeo_' ORDER BY SCHEMA_NAME")
+expected=$(printf '%s\n' "${ROLLBACK_SCHEMAS[@]}" | LC_ALL=C sort)
+[[ "$discovered" == "$expected" ]] || { printf 'Refusing unexpected schema scope: %s\n' "$discovered" >&2; exit 1; }
+
+# Quarantine is a deployment exception, never permission to include a site in
+# this explicit rollback scope.
+quarantined=$("$MYSQL" --login-path=forestgeo-dbh-rollback \
+  --host=forestgeo-mysqldataserver.mysql.database.azure.com \
+  --user=azureroot --port=3306 --ssl-mode=REQUIRED --batch --skip-column-names \
+  --execute "SELECT SchemaName FROM catalog.schema_contract_gate WHERE QuarantinedAt IS NOT NULL AND SchemaName IN ('forestgeo_cooksbranch','forestgeo_harvard','forestgeo_ldw','forestgeo_mpala','forestgeo_ngel_nyaki','forestgeo_niobrara','forestgeo_panama','forestgeo_rabi','forestgeo_serc','forestgeo_testing','forestgeo_testing_mason','forestgeo_wytham')")
+[[ -z "$quarantined" ]] || { printf 'Refusing quarantined rollback target(s): %s\n' "$quarantined" >&2; exit 1; }
+
+# mysql handles DELIMITER directives in this reviewed two-procedure file.
+for schema in "${ROLLBACK_SCHEMAS[@]}"; do
+  "$MYSQL" --login-path=forestgeo-dbh-rollback \
+    --host=forestgeo-mysqldataserver.mysql.database.azure.com \
+    --user=azureroot --port=3306 --ssl-mode=REQUIRED \
+    --database="$schema" < "$ROLLBACK_PROCEDURES"
+done
+
+# mysql2 does not consume mysql_config_editor login paths. Read the same secret
+# into this process only; it is never echoed or written to disk.
+export AZURE_SQL_SERVER=forestgeo-mysqldataserver.mysql.database.azure.com
+export AZURE_SQL_USER=azureroot
+export AZURE_SQL_PORT=3306
+read -r -s -p 'Azure MySQL password: ' AZURE_SQL_PASSWORD; echo
+export AZURE_SQL_PASSWORD
+
+export DBH_RESCORE_PROCEDURES_SQL="$ROLLBACK_PROCEDURES"
+export DBH_RESCORE_COREQUERIES_SQL="$ROLLBACK_SEEDS"
+
+# Verify every exact schema with no writes. This uses the existing normalized
+# manifest verifier for legacy procedure bodies while allowing current seed text.
+for schema in "${ROLLBACK_SCHEMAS[@]}"; do
+  npm run refresh:dbh-rules -- --schema "$schema"
+done
+
+# Apply only the two seed text fields. The helper verifies each full legacy
+# manifest before its seed transaction commits.
+for schema in "${ROLLBACK_SCHEMAS[@]}"; do
+  npm run refresh:dbh-rules -- --schema "$schema" --apply \
+    --i-understand-this-writes-to "$AZURE_SQL_SERVER"
+done
+
+# Do not re-score until every schema verifies the final legacy manifest and the
+# DBH sweep’s own read-only preflight succeeds.
+for schema in "${ROLLBACK_SCHEMAS[@]}"; do
+  npm run refresh:dbh-rules -- --schema "$schema"
+  npx tsx scripts/rescore-dbh-validations.ts --schema "$schema"
+done
+```
+
+DDL is not transactional. If a client invocation fails, leave writer isolation in place, inspect `SHOW CREATE PROCEDURE` for that schema, correct the specific client/SQL failure, and rerun the same reviewed file for the failed schema and every subsequently unverified schema. Do not infer rollback from an Actions failure or restart an app as recovery. If a seed apply fails, retain isolation and rerun the dry verification for all 12 schemas. Seed updates are individually transactional and repeatable; procedures are not.
+
+Only then use the separately approved ordered re-score apply command from the runbook, starting at the earliest affected committed census in every plot and continuing through later dependent censuses.
+
+After the block succeeds, use the same Bash shell and manifest environment for the approved ordered rollback sweep. Set a new private artifact directory for this attempt:
+
+```sh
+export DBH_RESCORE_TIMEOUT_MS=300000
 npx tsx scripts/rescore-dbh-validations.ts --all-sites \
   --apply --i-understand-this-writes-to forestgeo-mysqldataserver.mysql.database.azure.com \
   --artifact-dir /absolute/private/path/dbh-legacy-rollback
