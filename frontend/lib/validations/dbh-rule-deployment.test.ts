@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import path from 'path';
 import type { Connection } from 'mysql2/promise';
 import {
   assertEligibleDbhRuleRows,
@@ -20,6 +22,8 @@ const manifest: DbhExpectedManifest = {
     { validationID: 2, procedureName: 'ValidateDBHShrinkageExceedsMax', description: 'annual shrinkage', definition: 'CALL annual_shrinkage();' }
   ]
 };
+
+const migrated = (schemas: readonly string[]) => new Map(schemas.map(schema => [schema.toLowerCase(), { migrated: true, missingTables: [] }]));
 
 function rows(enabled = true) {
   return [
@@ -108,12 +112,37 @@ describe('DBH rule deployment arguments', () => {
       lastRunRef: 'test'
     };
     const quarantined = new Map([['forestgeo_quarantined', gate]]);
-    expect(selectDbhRuleDeploymentSchemas(['forestgeo_healthy', 'forestgeo_quarantined'], quarantined, false)).toMatchObject({
+    expect(
+      selectDbhRuleDeploymentSchemas(
+        ['forestgeo_healthy', 'forestgeo_quarantined'],
+        quarantined,
+        false,
+        migrated(['forestgeo_healthy', 'forestgeo_quarantined'])
+      )
+    ).toMatchObject({
       schemas: ['forestgeo_healthy'],
       quarantined: [{ schema: 'forestgeo_quarantined' }]
     });
-    expect(() => selectDbhRuleDeploymentSchemas(['forestgeo_quarantined'], quarantined, true)).toThrow(/explicitly selected/);
-    expect(() => selectDbhRuleDeploymentSchemas(['forestgeo_quarantined'], quarantined, false)).toThrow(/No eligible/);
+    expect(() => selectDbhRuleDeploymentSchemas(['forestgeo_quarantined'], quarantined, true, migrated(['forestgeo_quarantined']))).toThrow(
+      /explicitly selected/
+    );
+    expect(() => selectDbhRuleDeploymentSchemas(['forestgeo_quarantined'], quarantined, false, migrated(['forestgeo_quarantined']))).toThrow(/No eligible/);
+  });
+
+  it('matches procedures-only migration gating: all-site skips stale schemas, explicit selection fails', () => {
+    const migrationStatus = new Map([
+      ['forestgeo_ready', { migrated: true, missingTables: [] }],
+      ['forestgeo_stale', { migrated: false, missingTables: ['measurement_errors'] }]
+    ]);
+    expect(selectDbhRuleDeploymentSchemas(['forestgeo_ready', 'forestgeo_stale'], new Map(), false, migrationStatus)).toMatchObject({
+      schemas: ['forestgeo_ready'],
+      notMigrated: [{ schema: 'forestgeo_stale', missingTables: ['measurement_errors'] }]
+    });
+    expect(() => selectDbhRuleDeploymentSchemas(['forestgeo_stale'], new Map(), true, migrationStatus)).toThrow(/not migrated/);
+  });
+
+  it('fails closed when migration status cannot be determined', () => {
+    expect(() => selectDbhRuleDeploymentSchemas(['forestgeo_unknown'], new Map(), false, new Map())).toThrow(/could not determine migration status/);
   });
 });
 
@@ -148,16 +177,27 @@ describe('DBH rule seed refresh', () => {
     expect(conn.rollback).not.toHaveBeenCalled();
   });
 
-  it('fails closed for an identity collision or disabled DBH rule before opening a transaction', async () => {
+  it('fails closed for an identity collision before opening a transaction', async () => {
     const collision = rows();
     collision[0].ProcedureName = 'WrongProcedure';
     const identityConnection = connection(collision);
     await expect(refreshDbhRuleSeeds(identityConnection, ['forestgeo_testing'], manifest, true)).rejects.toThrow(/identity/);
     expect(identityConnection.beginTransaction).not.toHaveBeenCalled();
+  });
 
-    const disabledConnection = connection(rows(false));
-    await expect(refreshDbhRuleSeeds(disabledConnection, ['forestgeo_testing'], manifest, true)).rejects.toThrow(/disabled/);
-    expect(disabledConnection.beginTransaction).not.toHaveBeenCalled();
+  it('refreshes disabled DBH rules without re-enabling them', async () => {
+    const ruleRows = rows(false);
+    const conn = connection(ruleRows);
+
+    await refreshDbhRuleSeeds(conn, ['forestgeo_testing'], manifest, true);
+
+    expect(ruleRows.map(row => row.IsEnabled)).toEqual([0, 0]);
+    expect(ruleRows.map(row => row.Definition)).toEqual(['CALL annual_growth();', 'CALL annual_shrinkage();']);
+    expect(
+      (conn.query as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([sql]) => /^\s*UPDATE\s/i.test(String(sql)))
+        .every(([sql]) => !String(sql).includes('IsEnabled'))
+    ).toBe(true);
   });
 
   it('rejects a DBH procedure body that did not match the reviewed SQL manifest', async () => {
@@ -175,5 +215,14 @@ describe('DBH rule seed refresh', () => {
 
   it('rejects duplicate or missing DBH rows', () => {
     expect(() => assertEligibleDbhRuleRows([...rows(), { ...rows()[0] }], manifest, 'forestgeo_testing')).toThrow(/exactly two/);
+    expect(() => assertEligibleDbhRuleRows(rows(false), manifest, 'forestgeo_testing', { requireEnabled: true })).toThrow(/disabled/);
+  });
+});
+
+describe('DBH legacy rollback seed patch', () => {
+  it('preserves the existing enabled flags on duplicate DBH rows', () => {
+    const rollback = readFileSync(path.join(process.cwd(), 'db/rollback/2026-09-02-dbh-legacy-rules-corequeries.sql'), 'utf8');
+    expect(rollback).not.toMatch(/IsEnabled\s*=\s*VALUES\(IsEnabled\)/i);
+    expect(rollback.match(/ON DUPLICATE KEY UPDATE/gi) ?? []).toHaveLength(2);
   });
 });

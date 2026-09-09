@@ -4,6 +4,7 @@ import fs from 'fs';
 import { type Connection, type RowDataPacket } from 'mysql2/promise';
 import path from 'path';
 import { buildDbhRuleDeploymentManifest, refreshDbhRuleSeeds } from '@/lib/validations/dbh-rule-deployment';
+import { buildRealSweepDeps } from '@/lib/validations/dbh-rescore-cli';
 import type { TestDatabaseConfig } from '../setup/local-db-setup';
 import { setupTestDatabase, teardownTestDatabase } from '../setup/local-db-setup';
 
@@ -97,6 +98,24 @@ describe('DBH rule deployment — integration', () => {
     });
     expect(Buffer.isBuffer(custom.IsEnabled) ? custom.IsEnabled[0] : Number(custom.IsEnabled)).toBe(0);
   }, 120000);
+
+  it.each([{ disabledIDs: [1] }, { disabledIDs: [1, 2] }])(
+    'preserves operator-disabled DBH rules ($disabledIDs) during refresh, while the re-score sweep still rejects them',
+    async ({ disabledIDs }) => {
+      await connection.query(`UPDATE \`${schema}\`.sitespecificvalidations SET IsEnabled = FALSE WHERE ValidationID IN (?)`, [disabledIDs]);
+
+      await refreshDbhRuleSeeds(connection, [schema], manifest, true);
+
+      const rows = await validationRows();
+      expect(
+        rows
+          .filter(row => disabledIDs.includes(Number(row.ValidationID)))
+          .map(row => (Buffer.isBuffer(row.IsEnabled) ? row.IsEnabled[0] : Number(row.IsEnabled)))
+      ).toEqual(disabledIDs.map(() => 0));
+      await expect(buildRealSweepDeps(connection, manifest).verifySchema(schema)).rejects.toThrow(/differs/);
+    },
+    120000
+  );
 
   it('does not write any schema when a later all-schema preflight fails', async () => {
     await expect(refreshDbhRuleSeeds(connection, [schema, 'forestgeo_missing'], manifest, true)).rejects.toThrow();

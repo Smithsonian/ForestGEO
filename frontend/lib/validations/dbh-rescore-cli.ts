@@ -65,6 +65,18 @@ export function getDbhRuntimeSettings(environment: Record<string, string | undef
   return { host, user, password, port };
 }
 
+/** The operator CLIs use plaintext only for local development databases. */
+export function dbhRuntimeConnectionOptions(settings: ReturnType<typeof getDbhRuntimeSettings>): mysql.ConnectionOptions {
+  const local = settings.host === 'localhost' || settings.host === '127.0.0.1';
+  return {
+    ...settings,
+    timezone: 'Z',
+    multipleStatements: false,
+    connectTimeout: 10_000,
+    ...(!local && { ssl: { rejectUnauthorized: true, verifyIdentity: true } })
+  };
+}
+
 const positive = (value: string, flag: string) => {
   const number = Number(value);
   if (!Number.isInteger(number) || number <= 0) throw new DbhRescoreArgumentError(`${flag} must be a positive integer`);
@@ -209,8 +221,10 @@ export function buildRealSweepDeps(
   connection: mysql.Connection,
   manifest: DbhExpectedManifest,
   artifactPath?: string,
-  timeoutMs?: number
+  timeoutMs?: number,
+  options: { requireEnabled?: boolean } = {}
 ): DbhSweepDependencies {
+  const requireEnabled = options.requireEnabled ?? true;
   return {
     discoverScopes: async schema => {
       const qualified = sqlIdentifier(schema);
@@ -263,7 +277,7 @@ export function buildRealSweepDeps(
           actual[0].ProcedureName !== expected.procedureName ||
           actual[0].Description !== expected.description ||
           actual[0].Definition !== expected.definition ||
-          !enabled(actual[0].IsEnabled)
+          (requireEnabled && !enabled(actual[0].IsEnabled))
         )
           throw new Error(`${schema}: ValidationID ${expected.validationID} differs from expected revision ${manifest.revision}`);
       }

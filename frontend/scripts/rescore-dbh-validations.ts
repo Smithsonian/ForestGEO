@@ -10,6 +10,7 @@ import {
   buildDbhExpectedManifest,
   buildRealSweepDeps,
   createArtifactPath,
+  dbhRuntimeConnectionOptions,
   DbhRescoreArgumentError,
   getDbhRuntimeSettings,
   parseDbhRescoreArgs,
@@ -29,14 +30,7 @@ function applyTimeout(): number | undefined {
 }
 
 async function createVerificationConnection(settings: ReturnType<typeof getDbhRuntimeSettings>): Promise<mysql.Connection> {
-  const isLocal = settings.host === 'localhost' || settings.host === '127.0.0.1';
-  return mysql.createConnection({
-    ...settings,
-    timezone: 'Z',
-    multipleStatements: false,
-    connectTimeout: 10_000,
-    ...(!isLocal && { ssl: { rejectUnauthorized: false } })
-  });
+  return mysql.createConnection(dbhRuntimeConnectionOptions(settings));
 }
 
 async function main(): Promise<number> {

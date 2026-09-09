@@ -27,6 +27,7 @@ export class DbhRuleDeploymentArgumentError extends Error {}
 export interface DbhRuleDeploymentSelection {
   schemas: string[];
   quarantined: Array<{ schema: string; gate: SchemaGateRow }>;
+  notMigrated: Array<{ schema: string; missingTables: string[] }>;
 }
 
 const EXPECTED_IDENTITIES = new Map([
@@ -71,16 +72,29 @@ export function parseDbhRuleDeploymentArgs(argv: readonly string[]): DbhRuleDepl
 export function selectDbhRuleDeploymentSchemas(
   schemas: readonly string[],
   quarantined: ReadonlyMap<string, SchemaGateRow>,
-  explicitlySelected: boolean
+  explicitlySelected: boolean,
+  migrationStatus: ReadonlyMap<string, { migrated: boolean; missingTables: string[] }>
 ): DbhRuleDeploymentSelection {
+  for (const schema of schemas) {
+    if (!migrationStatus.has(schema.toLowerCase())) throw new Error(`${schema}: DBH rule refresh could not determine migration status`);
+  }
   const blocked = schemas.flatMap(schema => {
     const gate = quarantined.get(schema.toLowerCase());
     return gate ? [{ schema, gate }] : [];
   });
   if (explicitlySelected && blocked.length) throw new Error(`${blocked[0].schema}: DBH rule refresh refuses an explicitly selected quarantined schema`);
-  const selected = schemas.filter(schema => !quarantined.has(schema.toLowerCase()));
+  const notMigrated = schemas.flatMap(schema => {
+    if (quarantined.has(schema.toLowerCase())) return [];
+    const status = migrationStatus.get(schema.toLowerCase());
+    return status && !status.migrated ? [{ schema, missingTables: status.missingTables }] : [];
+  });
+  if (explicitlySelected && notMigrated.length)
+    throw new Error(
+      `${notMigrated[0].schema}: DBH rule refresh refuses an explicitly selected schema that is not migrated (missing tables: ${notMigrated[0].missingTables.join(', ')})`
+    );
+  const selected = schemas.filter(schema => !quarantined.has(schema.toLowerCase()) && migrationStatus.get(schema.toLowerCase())?.migrated !== false);
   if (selected.length === 0) throw new Error('No eligible ForestGEO schemas selected for DBH rule refresh');
-  return { schemas: selected, quarantined: blocked };
+  return { schemas: selected, quarantined: blocked, notMigrated };
 }
 
 /** The two SQL-owned seed definitions are parsed by the re-score manifest builder. */
@@ -88,7 +102,13 @@ export function buildDbhRuleDeploymentManifest(storedProcedures: string, coreQue
   return buildDbhExpectedManifest(storedProcedures, coreQueries);
 }
 
-export function assertEligibleDbhRuleRows(rows: readonly DbhRuleRow[], manifest: DbhExpectedManifest, schema: string): void {
+export function assertEligibleDbhRuleRows(
+  rows: readonly DbhRuleRow[],
+  manifest: DbhExpectedManifest,
+  schema: string,
+  options: { requireEnabled?: boolean } = {}
+): void {
+  const requireEnabled = options.requireEnabled ?? false;
   const expectedByID = new Map(manifest.seeds.map(seed => [seed.validationID, seed]));
   if (expectedByID.size !== 2) throw new Error(`DBH manifest ${manifest.revision} does not have exactly two seeds`);
   if (rows.length !== 2) throw new Error(`${schema}: expected exactly two DBH validation rows, found ${rows.length}`);
@@ -101,7 +121,8 @@ export function assertEligibleDbhRuleRows(rows: readonly DbhRuleRow[], manifest:
     const identity = EXPECTED_IDENTITIES.get(id);
     if (!expected || !identity || row.ProcedureName !== identity || expected.procedureName !== identity)
       throw new Error(`${schema}: DBH validation identity is missing or collides with another row`);
-    if (!enabled(row.IsEnabled)) throw new Error(`${schema}: DBH validation ${id} is disabled; enable it through the approved preparation process`);
+    if (requireEnabled && !enabled(row.IsEnabled))
+      throw new Error(`${schema}: DBH validation ${id} is disabled; enable it through the approved preparation process`);
   }
 }
 
@@ -137,9 +158,9 @@ export async function preflightDbhRuleDeployment(connection: mysql.Connection, s
       })
     };
     // This keeps the two current seed texts flexible, but requires the entire
-    // release structure (catalog, tables, procedures, identities, enabled
-    // state) to pass before any selected schema is changed.
-    await buildRealSweepDeps(connection, preflightManifest).verifySchema(schema);
+    // release structure (catalog, tables, procedures, identities) to pass
+    // before any selected schema is changed. Rule enablement is operator state.
+    await buildRealSweepDeps(connection, preflightManifest, undefined, undefined, { requireEnabled: false }).verifySchema(schema);
   }
 }
 
@@ -158,7 +179,7 @@ async function applyOneSchema(connection: mysql.Connection, schema: string, mani
 
     assertEligibleDbhRuleRows(await readDbhRows(connection, schema), manifest, schema);
     // Reuse the release sweep's complete revision verification before commit.
-    await buildRealSweepDeps(connection, manifest).verifySchema(schema);
+    await buildRealSweepDeps(connection, manifest, undefined, undefined, { requireEnabled: false }).verifySchema(schema);
     await connection.commit();
   } catch (error) {
     try {

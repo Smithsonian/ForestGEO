@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import path from 'path';
-import { buildDbhExpectedManifest, buildRealSweepDeps, getDbhRuntimeSettings, parseDbhRescoreArgs, runDbhRescoreCli } from './dbh-rescore-cli';
+import {
+  buildDbhExpectedManifest,
+  buildRealSweepDeps,
+  dbhRuntimeConnectionOptions,
+  getDbhRuntimeSettings,
+  parseDbhRescoreArgs,
+  runDbhRescoreCli
+} from './dbh-rescore-cli';
 import type { DbhSweepDependencies } from './dbh-rescore-sweep';
 
 const deps = (): DbhSweepDependencies => ({
@@ -91,6 +98,18 @@ describe('DBH runtime target', () => {
         TEST_DB_HOST: 'other-host'
       })
     ).toMatchObject({ host: '127.0.0.1', user: 'runtime', port: 3306 });
+  });
+
+  it('uses verified TLS for remote DBH operator connections and plaintext only locally', () => {
+    const remote = getDbhRuntimeSettings({
+      AZURE_SQL_SERVER: 'forestgeo-mysqldataserver.mysql.database.azure.com',
+      AZURE_SQL_USER: 'runtime',
+      AZURE_SQL_PASSWORD: 'secret',
+      AZURE_SQL_PORT: '3306'
+    });
+    const local = { ...remote, host: '127.0.0.1' };
+    expect(dbhRuntimeConnectionOptions(remote)).toMatchObject({ ssl: { rejectUnauthorized: true, verifyIdentity: true } });
+    expect(dbhRuntimeConnectionOptions(local)).not.toHaveProperty('ssl');
   });
 });
 
