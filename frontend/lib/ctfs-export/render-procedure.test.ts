@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { renderArtifact, renderRebuildViewFullTableArtifact, type RenderArtifactInput } from './render-procedure';
+import { MISSING_PLOT_COORDINATE_SCOPE } from '../csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../csv-to-sql-shared';
 
 const baseInput = (overrides: Partial<RenderArtifactInput> = {}): RenderArtifactInput => ({
@@ -35,6 +36,8 @@ const sampleMeasurement: MeasurementStagingRow = {
   Comments: null,
   LX: 1,
   LY: 1,
+  PX: 41,
+  PY: 61,
   PrimaryStem: null
 };
 
@@ -162,6 +165,24 @@ describe('renderArtifact', () => {
     expect(sql).toMatch(/Stage 8:/);
     expect(sql).toMatch(/Stage 9:/);
     expect(sql).toMatch(/Stage 10:/);
+  });
+
+  it('non-dry-run artifact carries PX/PY staging values, the missing-coordinate diagnostic, and the aligned eight-column Stage 7 insert', () => {
+    const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
+    // sampleMeasurement has LX=1, LY=1, PX=41, PY=61 — distinct values so a
+    // copy-from-LX/LY bug would not produce this exact staging INSERT tuple.
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE `staging_measurements`[\s\S]*PX\s+DECIMAL\(16,5\),[\s\S]*PY\s+DECIMAL\(16,5\),/);
+    expect(sql).toMatch(/,1,1,41,61,NULL\)/);
+    expect(sql).toMatch(new RegExp(`SELECT '${MISSING_PLOT_COORDINATE_SCOPE}' AS scope, COUNT\\(\\*\\) AS n`));
+    expect(sql).toMatch(/INSERT INTO Stem \(TreeID, StemTag, QuadratID, StemNumber, QX, QY, PX, PY\)/);
+    expect(sql).toMatch(/SELECT TreeID, StemTag, QuadratID, 0, LX, LY, PX, PY/);
+  });
+
+  it('reloadDryRun omits Stage 1 (staging table + PX/PY DDL) and Stage 7 (diagnostic + Stem insert)', () => {
+    const { sql } = renderArtifact(baseInput({ reloadDryRun: true, measurementRows: [sampleMeasurement] }));
+    expect(sql).not.toMatch(/CREATE TEMPORARY TABLE `staging_measurements`/);
+    expect(sql).not.toMatch(new RegExp(MISSING_PLOT_COORDINATE_SCOPE));
+    expect(sql).not.toMatch(/INSERT INTO Stem/);
   });
 
   it('non-dry-run does NOT emit the ViewFullTable rebuild CALL (D5: rebuild is a separate step)', () => {
