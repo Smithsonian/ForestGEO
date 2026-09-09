@@ -53,8 +53,8 @@ The following table lists all validation checks and their default status:
 
 | Validation Name                                                   | Description                                                              | Default State |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------- |
-| **ValidateDBHGrowthExceedsMax**                                   | Flag DBH measurements showing more than 65mm growth from previous census | Enabled       |
-| **ValidateDBHShrinkageExceedsMax**                                | Flag DBH measurements showing more than 5% decrease from previous census | Enabled       |
+| **ValidateDBHGrowthExceedsMax**                                   | Flag DBH measurements showing growth exceeding 65 mm/year from the previous census | Enabled       |
+| **ValidateDBHShrinkageExceedsMax**                                | Flag DBH measurements showing shrinkage of at least 5% per year from the previous census | Enabled       |
 | **ValidateFindAllInvalidSpeciesCodes**                            | Flag stems with species codes not defined in the Species List            | Enabled       |
 | **ValidateFindDuplicatedQuadratsByName**                          | Flag quadrats with duplicate names within a plot                         | Enabled       |
 | **ValidateFindDuplicateStemTreeTagCombinationsPerCensus**         | Flag tree/stem combinations recorded more than once in the same census   | Enabled       |
@@ -74,11 +74,21 @@ The following table lists all validation checks and their default status:
 
 #### Growth Validations
 
-These check for biologically implausible growth patterns. **As of 2026, cross-census growth checks operate correctly** — earlier versions of the app had a comparison bug that has since been fixed.
+These flag growth or shrinkage for review using the measurement dates and the immediately preceding census number. The prior measurement must be validated successfully.
 
-- **Growth > 65mm**: Trees typically don't grow more than 65mm diameter between censuses
-- **Shrinkage > 5%**: Trees rarely shrink significantly; large shrinkage often indicates measurement error
+- **Growth > 65 mm/year** *(V1)*: DBH increase converted to millimetres, divided by elapsed years. Exactly 65 mm/year does not flag.
+- **Shrinkage of at least 5% per year** *(V2)*: DBH change divided by prior DBH and elapsed years. An annual relative change of exactly −0.05 flags.
 - **Abnormally high DBH** *(V15)*: A diameter above 3500 mm exceeds anything plausible and almost always means a unit or transcription error
+
+Elapsed years equal the difference between the two measurement dates in days divided by 365.25.
+Both DBHs must be at least 10 mm (1 cm). Different non-missing HOM values suppress the check;
+either HOM may be missing. Missing DBH or dates, zero or negative intervals, and exempt
+statuses on either measurement skip the comparison. Short positive intervals remain eligible.
+A skipped comparison is not evidence that the measurement passed a growth check.
+
+DBH reruns retain occurrence rows, resolve stale findings, and reopen findings that still violate
+the rule. The original creation time and latest prior comparison are retained; this is not an
+immutable history. Previously overridden DBH findings can be flagged again.
 
 #### Cross-Census Position Validations
 

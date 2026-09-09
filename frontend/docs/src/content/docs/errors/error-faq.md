@@ -72,13 +72,17 @@ This page provides answers to frequently asked questions about errors and a comp
 
 **A:** Validation errors indicate potential data quality issues:
 
-- Growth too fast (>65mm)
-- Shrinkage too large (>5%)
+- Growth too fast (>65 mm/year)
+- Shrinkage of at least 5% per year (annual relative change ≤ −0.05)
 - Coordinates outside plot
 - Duplicate records
 - Invalid references (species, quadrats)
 
-These are checks to help ensure data accuracy.
+These are checks to help ensure data accuracy. DBH checks use elapsed days between measurement
+dates divided by 365.25, require both DBHs to be at least 10 mm (1 cm), and skip different
+non-missing HOM values. Either HOM may be missing. Missing DBH or dates, zero or reversed
+intervals, and exempt statuses on either measurement skip the comparison; short positive
+intervals are still checked.
 
 ### Q: Do validation errors prevent my data from being saved?
 
