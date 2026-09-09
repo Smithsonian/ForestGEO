@@ -1,6 +1,7 @@
-import { appendFile, mkdir, open } from 'fs/promises';
+import { mkdir, open } from 'fs/promises';
 import path from 'path';
 import mysql from 'mysql2/promise';
+import type { RowDataPacket } from 'mysql2';
 import { parseStoredProceduresSQL } from '@/scripts/deploy-validations-to-all-schemas';
 import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
@@ -28,6 +29,23 @@ export interface DbhExpectedManifest {
   procedures: Record<'BuildDBHChangePairs' | 'RunSharedDBHChangeValidations', string>;
   seeds: DbhExpectedSeed[];
 }
+
+type CensusScopeRow = RowDataPacket & {
+  censusID: number | string;
+  plotID: number | string;
+  plotCensusNumber: number | string;
+};
+type TableNameRow = RowDataPacket & { TABLE_NAME: string };
+type ProcedureDefinitionRow = RowDataPacket & { 'Create Procedure': string };
+type ValidationRuleRow = RowDataPacket & {
+  ValidationID: number | string;
+  ProcedureName: string;
+  Description: string;
+  Definition: string;
+  IsEnabled: number | boolean | Buffer;
+};
+type CensusRow = RowDataPacket & { CensusID: number | string; PlotCensusNumber: number | string };
+type CountRow = RowDataPacket & { count: number | string };
 
 /** DBH verification must use the process's application-pool target, not TEST_DB_* selector defaults. */
 export function getDbhRuntimeSettings(environment: Record<string, string | undefined> = process.env): {
@@ -196,10 +214,10 @@ export function buildRealSweepDeps(
   return {
     discoverScopes: async schema => {
       const qualified = sqlIdentifier(schema);
-      const [rows]: any = await connection.query(
+      const [rows] = await connection.query<CensusScopeRow[]>(
         `SELECT CensusID censusID, PlotID plotID, PlotCensusNumber plotCensusNumber FROM ${qualified}.census WHERE IsActive = TRUE`
       );
-      return rows.map((row: any) => ({ schema, censusID: Number(row.censusID), plotID: Number(row.plotID), plotCensusNumber: Number(row.plotCensusNumber) }));
+      return rows.map(row => ({ schema, censusID: Number(row.censusID), plotID: Number(row.plotID), plotCensusNumber: Number(row.plotCensusNumber) }));
     },
     verifySchema: async schema => {
       // Fail the all-target verification before any census mutation when the
@@ -221,25 +239,25 @@ export function buildRealSweepDeps(
         'measurementssummary',
         'viewfulltable'
       ];
-      const [tableRows]: any = await connection.query(`SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN (?)`, [
-        schema,
-        requiredTables
-      ]);
-      const found = new Set(tableRows.map((row: any) => String(row.TABLE_NAME)));
+      const [tableRows] = await connection.query<TableNameRow[]>(
+        `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN (?)`,
+        [schema, requiredTables]
+      );
+      const found = new Set(tableRows.map(row => row.TABLE_NAME));
       const missing = requiredTables.filter(table => !found.has(table));
       if (missing.length) throw new Error(`${schema}: required tables missing: ${missing.join(', ')}`);
       for (const [name, expected] of Object.entries(manifest.procedures)) {
-        const [rows]: any = await connection.query(`SHOW CREATE PROCEDURE ${sqlIdentifier(schema)}.${mysql.format('??', [name])}`);
+        const [rows] = await connection.query<ProcedureDefinitionRow[]>(`SHOW CREATE PROCEDURE ${sqlIdentifier(schema)}.${mysql.format('??', [name])}`);
         const actual = rows[0]?.['Create Procedure'];
         if (typeof actual !== 'string' || !sameDefinition(expected, actual))
           throw new Error(`${schema}: ${name} differs from expected revision ${manifest.revision}`);
       }
       const qualified = sqlIdentifier(schema);
-      const [rules]: any = await connection.query(
+      const [rules] = await connection.query<ValidationRuleRow[]>(
         `SELECT ValidationID, ProcedureName, Description, Definition, IsEnabled FROM ${qualified}.sitespecificvalidations WHERE ValidationID IN (1, 2)`
       );
       for (const expected of manifest.seeds) {
-        const actual = rules.filter((row: any) => Number(row.ValidationID) === expected.validationID);
+        const actual = rules.filter(row => Number(row.ValidationID) === expected.validationID);
         if (
           actual.length !== 1 ||
           actual[0].ProcedureName !== expected.procedureName ||
@@ -261,32 +279,32 @@ export function buildRealSweepDeps(
     },
     advisoryPreflight: async scope => {
       const qualified = sqlIdentifier(scope.schema);
-      const [censuses]: any = await connection.query(
+      const [censuses] = await connection.query<CensusRow[]>(
         `SELECT CensusID, PlotCensusNumber FROM ${qualified}.census WHERE PlotID=? AND CensusID=? AND IsActive=1`,
         [scope.plotID, scope.censusID]
       );
       const current = censuses[0];
       const ids = [scope.censusID];
       if (Number(current?.PlotCensusNumber) > 1) {
-        const [prior]: any = await connection.query(`SELECT CensusID FROM ${qualified}.census WHERE PlotID=? AND PlotCensusNumber=? AND IsActive=1`, [
-          scope.plotID,
-          Number(current.PlotCensusNumber) - 1
-        ]);
+        const [prior] = await connection.query<Array<RowDataPacket & Pick<CensusRow, 'CensusID'>>>(
+          `SELECT CensusID FROM ${qualified}.census WHERE PlotID=? AND PlotCensusNumber=? AND IsActive=1`,
+          [scope.plotID, Number(current.PlotCensusNumber) - 1]
+        );
         if (prior.length === 1) ids.push(Number(prior[0].CensusID));
       }
-      const [running]: any = await connection.query(
+      const [running] = await connection.query<CountRow[]>(
         `SELECT COUNT(*) count FROM ${qualified}.validation_runs WHERE PlotID=? AND CensusID IN (?) AND Status='running'`,
         [scope.plotID, ids]
       );
-      const [uploads]: any = await connection.query(
+      const [uploads] = await connection.query<CountRow[]>(
         `SELECT COUNT(*) count FROM ${qualified}.upload_sessions WHERE plot_id=? AND census_id IN (?) AND state IN ('initialized','uploading','uploaded','processing','collapsing')`,
         [scope.plotID, ids]
       );
-      const [pending]: any = await connection.query(
+      const [pending] = await connection.query<CountRow[]>(
         `SELECT COUNT(*) count FROM ${qualified}.coremeasurements WHERE CensusID IN (?) AND IsActive=TRUE AND StemGUID IS NOT NULL AND IsValidated IS NULL`,
         [ids]
       );
-      const [jobs]: any = await connection.query(
+      const [jobs] = await connection.query<CountRow[]>(
         `SELECT COUNT(*) count FROM catalog.background_jobs WHERE SchemaName=? AND PlotID=? AND CensusID IN (?)
          AND Status IN ('queued','running','cancel_requested','waiting_retry')`,
         [scope.schema, scope.plotID, ids]
