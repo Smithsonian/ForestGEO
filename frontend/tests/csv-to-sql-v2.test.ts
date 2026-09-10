@@ -16,9 +16,44 @@ import {
   LEGACY_DEFAULT_MEASURE_ID,
   TAXON_RANK_SUBSPECIES,
   TAXON_RANK_SPECIES,
+  MISSING_PLOT_COORDINATE_SCOPE,
   type Stage1Options
 } from '../lib/csv-to-sql-v2';
-import { type MeasurementStagingRow, type AttributeStagingRow } from '../lib/csv-to-sql-shared';
+import { type MeasurementStagingRow, type AttributeStagingRow, renderInsertChunksMeasurements } from '../lib/csv-to-sql-shared';
+
+/**
+ * Default MeasurementStagingRow for renderStage1 tests — every field
+ * populated with a distinct, recognizable value. Tests override only the
+ * field(s) they are actually exercising, per CLAUDE.md ("no unrelated
+ * boilerplate"); PX (41.25) and PY (62.5) are deliberately distinct from
+ * LX/LY (1.0) so an accidental LX->PX / LY->PY copy fails the assertion.
+ */
+function makeMeasurementRow(overrides: Partial<MeasurementStagingRow> = {}): MeasurementStagingRow {
+  return {
+    CoreMeasurementID: 1,
+    SourceRowIndex: 1,
+    Tag: 'T1',
+    StemTag: 'S1',
+    Mnemonic: 'FOO',
+    QuadratName: 'A1',
+    PlotCensusNumber: '1',
+    Family: 'Fooaceae',
+    Genus: 'Foo',
+    SpeciesName: 'foo',
+    SpeciesAuthority: 'L.',
+    SubspeciesName: null,
+    DBH: 12.3,
+    HOM: '1.3',
+    ExactDate: '2024-06-01',
+    Comments: null,
+    LX: 1.0,
+    LY: 1.0,
+    PX: 41.25,
+    PY: 62.5,
+    PrimaryStem: null,
+    ...overrides
+  };
+}
 
 describe('renderProcedureEnvelope', () => {
   const baseOpts = {
@@ -340,6 +375,8 @@ describe('renderStage1', () => {
       'Comments',
       'LX',
       'LY',
+      'PX',
+      'PY',
       'PrimaryStem',
       'TreeID',
       'StemID',
@@ -361,6 +398,15 @@ describe('renderStage1', () => {
   it('staging_measurements indexes CoreMeasurementID uniquely (Stage 9 joins on it)', () => {
     const sql = renderStage1(opts());
     expect(sql).toMatch(/UNIQUE KEY uxCoreMeasurementID \(CoreMeasurementID\)/);
+  });
+
+  it('staging_measurements declares PX and PY as nullable DECIMAL(16,5) (matches destination Stem.PX/PY after DBCHANGES2014f)', () => {
+    const sql = renderStage1(opts());
+    expect(sql).toMatch(/PX\s+DECIMAL\(16,5\),/);
+    expect(sql).toMatch(/PY\s+DECIMAL\(16,5\),/);
+    // Not FLOAT(8) — FLOAT staging would corrupt a value like 992.34567.
+    expect(sql).not.toMatch(/PX\s+FLOAT/);
+    expect(sql).not.toMatch(/PY\s+FLOAT/);
   });
 
   it('staging text columns are wider than CTFS destination widths so Stage 5 owns width errors', () => {
@@ -388,31 +434,24 @@ describe('renderStage1', () => {
   });
 
   it('emits INSERT chunks for measurement rows', () => {
-    const row: MeasurementStagingRow = {
-      CoreMeasurementID: 1,
-      SourceRowIndex: 1,
-      Tag: 'T1',
-      StemTag: 'S1',
-      Mnemonic: 'FOO',
-      QuadratName: 'A1',
-      PlotCensusNumber: '1',
-      Family: 'Fooaceae',
-      Genus: 'Foo',
-      SpeciesName: 'foo',
-      SpeciesAuthority: 'L.',
-      SubspeciesName: null,
-      DBH: 12.3,
-      HOM: '1.3',
-      ExactDate: '2024-06-01',
-      Comments: null,
-      LX: 1.0,
-      LY: 1.0,
-      PrimaryStem: null
-    };
+    const row = makeMeasurementRow();
     const sql = renderStage1(opts({ measurementRows: [row] }));
     expect(sql).toMatch(/INSERT INTO `staging_measurements` \(/);
     expect(sql).toMatch(/'T1','S1','FOO'/);
     expect(sql).toMatch(/'Fooaceae','Foo','foo','L\.'/);
+  });
+
+  it('INSERT column list declares PX/PY immediately after LX/LY, and VALUES tuple places PX/PY values in that same position', () => {
+    // LX/LY overridden to 1.25/2.5 (distinct from the 1.0 default) so the
+    // VALUES-position assertion below cannot be satisfied by coincidence.
+    const row = makeMeasurementRow({ LX: 1.25, LY: 2.5 });
+    const sql = renderStage1(opts({ measurementRows: [row] }));
+    // Column list: ..., LX, LY, PX, PY, PrimaryStem
+    expect(sql).toMatch(/INSERT INTO `staging_measurements` \([^)]*LX, LY, PX, PY, PrimaryStem\) VALUES/);
+    // VALUES tuple: LX and LY are unquoted numbers 1.25,2.5 immediately followed by
+    // PX,PY 41.25,62.5 — distinct values at each position, so an accidental
+    // LX->PX / LY->PY copy would fail this assertion.
+    expect(sql).toMatch(/,1\.25,2\.5,41\.25,62\.5,NULL\)/);
   });
 
   it('emits INSERT chunks for attribute rows (no positional TempMeasurementID)', () => {
@@ -423,31 +462,33 @@ describe('renderStage1', () => {
   });
 
   it('chunks at 1000 rows per multi-row VALUES', () => {
-    const row: MeasurementStagingRow = {
-      CoreMeasurementID: 1,
-      SourceRowIndex: 1,
-      Tag: 'T1',
-      StemTag: 'S1',
-      Mnemonic: 'FOO',
-      QuadratName: 'A1',
-      PlotCensusNumber: '1',
-      Family: 'F',
-      Genus: 'G',
-      SpeciesName: 'foo',
-      SpeciesAuthority: null,
-      SubspeciesName: null,
-      DBH: null,
-      HOM: null,
-      ExactDate: '2024-06-01',
-      Comments: null,
-      LX: null,
-      LY: null,
-      PrimaryStem: null
-    };
+    const row = makeMeasurementRow({ Family: 'F', Genus: 'G', SpeciesAuthority: null, DBH: null, HOM: null, LX: null, LY: null });
     const rows = Array.from({ length: 1500 }, (_, i) => ({ ...row, CoreMeasurementID: i + 1 }));
     const sql = renderStage1(opts({ measurementRows: rows }));
     const inserts = sql.match(/INSERT INTO `staging_measurements`/g) || [];
     expect(inserts.length).toBe(2); // 1000 + 500
+  });
+
+  it('PX/PY numeric values and SQL NULL survive a chunk boundary intact', () => {
+    // Force a 2-row chunk size so a 4-row batch straddles two INSERT statements,
+    // and give each row a distinct PX/PY (including a NULL pair) so a row
+    // silently dropped or reordered across the boundary would be caught.
+    const baseRow = makeMeasurementRow({ Family: 'F', Genus: 'G', SpeciesAuthority: null, DBH: null, HOM: null, LX: 0, LY: 0, PX: 0, PY: 0 });
+    const rows: MeasurementStagingRow[] = [
+      { ...baseRow, CoreMeasurementID: 1, PX: 41.25, PY: 62.5 }, // chunk 1
+      { ...baseRow, CoreMeasurementID: 2, PX: null, PY: 62.5 }, // chunk 1 — PX null, PY populated
+      { ...baseRow, CoreMeasurementID: 3, PX: 41.25, PY: null }, // chunk 2 — PY null, PX populated
+      { ...baseRow, CoreMeasurementID: 4, PX: null, PY: null } // chunk 2 — both null
+    ];
+    const chunks = renderInsertChunksMeasurements('staging_measurements', rows, 2);
+    expect(chunks, 'a 4-row batch at chunk size 2 must render exactly 2 INSERT statements').toHaveLength(2);
+    // Tuples end ...,LX,LY,PX,PY,PrimaryStem) — LX=LY=0 for every row here, so
+    // anchoring on ",0,0,<PX>,<PY>,NULL)" pins down PX/PY unambiguously per row
+    // (row 3's PY,PrimaryStem = NULL,NULL cannot be mistaken for row 4's PX,PY).
+    expect(chunks[0], 'row 1 (CoreMeasurementID=1): PX=41.25, PY=62.5').toMatch(/,0,0,41\.25,62\.5,NULL\)/);
+    expect(chunks[0], 'row 2 (CoreMeasurementID=2): PX=NULL, PY=62.5').toMatch(/,0,0,NULL,62\.5,NULL\)/);
+    expect(chunks[1], 'row 3 (CoreMeasurementID=3): PX=41.25, PY=NULL').toMatch(/,0,0,41\.25,NULL,NULL\)/);
+    expect(chunks[1], 'row 4 (CoreMeasurementID=4): PX=NULL, PY=NULL').toMatch(/,0,0,NULL,NULL,NULL\)/);
   });
 });
 
@@ -710,12 +751,45 @@ describe('renderStage7NewStems', () => {
     }
   });
 
-  it('inserts with LEGACY_DEFAULT_STEM_NUMBER = 0 hardcoded in literal', () => {
-    expect(sql()).toMatch(/SELECT TreeID, StemTag, QuadratID, 0, LX, LY/);
+  it('inserts with LEGACY_DEFAULT_STEM_NUMBER = 0 hardcoded in literal, carrying PX/PY through alongside QX/QY', () => {
+    expect(sql()).toMatch(/SELECT TreeID, StemTag, QuadratID, 0, LX, LY, PX, PY/);
+  });
+
+  it('INSERT column list is the aligned eight columns (TreeID, StemTag, QuadratID, StemNumber, QX, QY, PX, PY), only for StemID IS NULL rows', () => {
+    expect(sql()).toMatch(/INSERT INTO Stem \(TreeID, StemTag, QuadratID, StemNumber, QX, QY, PX, PY\)/);
+    expect(sql()).toMatch(/FROM `staging_measurements`\s+WHERE StemID IS NULL\s+ORDER BY TempID;/);
   });
 
   it('join-back uses (TreeID, StemTag, QuadratID) with NULL-safe StemTag', () => {
     expect(sql()).toMatch(/JOIN Stem s ON s\.TreeID = t\.TreeID\s+AND s\.StemTag <=> t\.StemTag\s+AND s\.QuadratID = t\.QuadratID/);
+  });
+
+  const diagnosticStatementRegex = new RegExp(
+    `SELECT '${MISSING_PLOT_COORDINATE_SCOPE}' AS scope, COUNT\\(\\*\\) AS n\\s+FROM \`staging_measurements\`\\s+WHERE StemID IS NULL AND \\(PX IS NULL OR PY IS NULL\\);`
+  );
+
+  it('emits a non-blocking diagnostic count of new stems missing PX or PY, scoped to StemID IS NULL rows', () => {
+    expect(sql()).toMatch(diagnosticStatementRegex);
+  });
+
+  it('the diagnostic SELECT does not touch Errors and is not a SIGNAL — it must not block the load', () => {
+    const s = sql();
+    const diagnosticStatement = s.match(diagnosticStatementRegex)?.[0];
+    // Scoped to the diagnostic statement itself — the staging table DDL
+    // legitimately has an Errors column, so a whole-fragment check would
+    // false-fail once Stage 7 starts referencing the staging table by name.
+    expect(diagnosticStatement, 'diagnostic statement must be present to scope this assertion').toBeDefined();
+    expect(diagnosticStatement).not.toMatch(/Errors/);
+    expect(s).not.toMatch(/SIGNAL/);
+  });
+
+  it('the diagnostic count SELECT is emitted before the Stem INSERT', () => {
+    const s = sql();
+    const diagnosticIdx = s.indexOf(`SELECT '${MISSING_PLOT_COORDINATE_SCOPE}'`);
+    const insertIdx = s.indexOf('INSERT INTO Stem (TreeID, StemTag, QuadratID, StemNumber, QX, QY, PX, PY)');
+    expect(diagnosticIdx).toBeGreaterThan(-1);
+    expect(insertIdx).toBeGreaterThan(-1);
+    expect(diagnosticIdx).toBeLessThan(insertIdx);
   });
 });
 

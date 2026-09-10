@@ -76,7 +76,9 @@ export async function selectMeasurements(conn: Connection, input: SelectInput): 
             cm.MeasurementDate     AS ExactDate,
             cm.Description         AS Comments,
             s.LocalX               AS LX,
-            s.LocalY               AS LY`)}
+            s.LocalY               AS LY,
+            q.StartX + s.LocalX    AS PX,
+            q.StartY + s.LocalY    AS PY`)}
        ORDER BY cm.CoreMeasurementID`
   );
   const [measurementsRaw] = await conn.query<any[]>(measurementsSql, [input.censusId, input.plotId]);
@@ -100,6 +102,8 @@ export async function selectMeasurements(conn: Connection, input: SelectInput): 
     Comments: r.Comments == null ? null : String(r.Comments),
     LX: r.LX == null ? null : Number(r.LX),
     LY: r.LY == null ? null : Number(r.LY),
+    PX: r.PX == null ? null : Number(r.PX),
+    PY: r.PY == null ? null : Number(r.PY),
     PrimaryStem: null
   }));
 

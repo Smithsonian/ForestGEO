@@ -36,6 +36,15 @@ const PLOT_ID = 1;
 // Unique DB name per test process to avoid cross-run collisions.
 const DB_NAME = `forestgeo_selectmeas_${process.pid}_${Date.now()}`;
 
+// PX/PY derivation fixtures: quadrats.StartX/StartY (origin) + stems.LocalX/LocalY
+// (local offset) = PX/PY. Named so the expected sums are traceable to their operands.
+const ORIGIN_X = 40;
+const ORIGIN_Y = 60;
+const LOCAL_X = 1.25;
+const LOCAL_Y = 2.5;
+const EXPECTED_PX = ORIGIN_X + LOCAL_X;
+const EXPECTED_PY = ORIGIN_Y + LOCAL_Y;
+
 // ---------------------------------------------------------------------------
 // Seed helpers
 // ---------------------------------------------------------------------------
@@ -55,6 +64,24 @@ async function loadSeedFile(conn: Connection): Promise<void> {
   for (const stmt of statements) {
     await conn.query(stmt);
   }
+}
+
+/**
+ * Set the seed quadrat's (QuadratID=1) origin — the operand selectMeasurements
+ * reads as `q.StartX`/`q.StartY` in the PX/PY derivation. Pass `null` for
+ * either axis to exercise the missing-origin case.
+ */
+async function setQuadratOrigin(conn: Connection, startX: number | null, startY: number | null): Promise<void> {
+  await conn.query('UPDATE quadrats SET StartX = ?, StartY = ? WHERE QuadratID = 1', [startX, startY]);
+}
+
+/**
+ * Set the seed stem's (StemGUID=1) local offset — the operand selectMeasurements
+ * reads as `s.LocalX`/`s.LocalY` in the PX/PY derivation. Pass `null` for
+ * either axis to exercise the missing-offset case.
+ */
+async function setStemLocalOffsets(conn: Connection, localX: number | null, localY: number | null): Promise<void> {
+  await conn.query('UPDATE stems SET LocalX = ?, LocalY = ? WHERE StemGUID = 1', [localX, localY]);
 }
 
 // ---------------------------------------------------------------------------
@@ -116,8 +143,16 @@ describe('selectMeasurements', () => {
     expect(row.HOM, 'HOM is serialized as a string (lexical form preserved)').toBe('1.300000');
     expect(row.ExactDate, 'ExactDate is a YYYY-MM-DD string').toBe('2024-06-01');
     expect(row.Comments, 'Comments maps from coremeasurements.Description; seed value is NULL').toBeNull();
-    expect(row.LX, 'LX maps from stems.LocalX').toBeCloseTo(1.0, 5);
-    expect(row.LY, 'LY maps from stems.LocalY').toBeCloseTo(1.0, 5);
+    expect(row.LX, 'LX maps from stems.LocalX').toBeCloseTo(LOCAL_X, 5);
+    expect(row.LY, 'LY maps from stems.LocalY').toBeCloseTo(LOCAL_Y, 5);
+
+    // PX/PY = quadrats.StartX/StartY + stems.LocalX/LocalY. The seed's origin
+    // (40/60) and local offset (1.25/2.5) are the same values as the ORIGIN_*/
+    // LOCAL_* constants above, so this happy-path row exercises the identical
+    // non-zero derivation as the dedicated "PX/PY plot coordinates" suite below —
+    // a seed edit that changes either pair must update these constants too.
+    expect(row.PX, `PX = quadrats.StartX (${ORIGIN_X}) + stems.LocalX (${LOCAL_X})`).toBeCloseTo(EXPECTED_PX, 5);
+    expect(row.PY, `PY = quadrats.StartY (${ORIGIN_Y}) + stems.LocalY (${LOCAL_Y})`).toBeCloseTo(EXPECTED_PY, 5);
 
     // MVP invariant: PrimaryStem is always null
     expect(row.PrimaryStem, 'PrimaryStem is always null in MVP').toBeNull();
@@ -434,5 +469,132 @@ describe('selectMeasurements', () => {
     // Expected CMAID order: 1 (LI), 5 (B), 20 (Z).
     const codes = attributeRows.map(a => a.TSMCode);
     expect(codes, 'attributes should be ordered by CMAID ASC within a measurement').toEqual(['LI', 'B', 'Z']);
+  });
+
+  // -------------------------------------------------------------------------
+  // PX/PY plot coordinates: PX = quadrats.StartX + stems.LocalX,
+  // PY = quadrats.StartY + stems.LocalY, each axis computed independently.
+  // -------------------------------------------------------------------------
+
+  describe('PX/PY plot coordinates', () => {
+    it('computes PX/PY as StartX+LocalX / StartY+LocalY for non-zero origins with decimal offsets', async () => {
+      await setQuadratOrigin(conn, ORIGIN_X, ORIGIN_Y);
+      await setStemLocalOffsets(conn, LOCAL_X, LOCAL_Y);
+
+      const { measurementRows } = await selectMeasurements(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+      expect(measurementRows).toHaveLength(1);
+      expect(measurementRows[0].PX, `PX = StartX(${ORIGIN_X}) + LocalX(${LOCAL_X}) = ${EXPECTED_PX}`).toBeCloseTo(EXPECTED_PX, 5);
+      expect(measurementRows[0].PY, `PY = StartY(${ORIGIN_Y}) + LocalY(${LOCAL_Y}) = ${EXPECTED_PY}`).toBeCloseTo(EXPECTED_PY, 5);
+      // QX/QY (LX/LY) stay the uploaded local offsets, unaffected by the origin.
+      expect(measurementRows[0].LX, 'LX is unchanged by the PX/PY derivation').toBeCloseTo(LOCAL_X, 5);
+      expect(measurementRows[0].LY, 'LY is unchanged by the PX/PY derivation').toBeCloseTo(LOCAL_Y, 5);
+    });
+
+    it('computes PX = 0 and PY = 0 when both origin and local offsets are exactly zero (zero is valid, not treated as missing)', async () => {
+      await setQuadratOrigin(conn, 0, 0);
+      await setStemLocalOffsets(conn, 0, 0);
+
+      const { measurementRows } = await selectMeasurements(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+      expect(measurementRows).toHaveLength(1);
+      expect(measurementRows[0].PX, 'PX must be the number 0, not null').toBe(0);
+      expect(measurementRows[0].PY, 'PY must be the number 0, not null').toBe(0);
+    });
+
+    it('PX is NULL when quadrats.StartX is NULL, independent of PY (StartY populated)', async () => {
+      await setQuadratOrigin(conn, null, ORIGIN_Y);
+      await setStemLocalOffsets(conn, LOCAL_X, LOCAL_Y);
+
+      const { measurementRows } = await selectMeasurements(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+      expect(measurementRows).toHaveLength(1);
+      expect(measurementRows[0].PX, 'PX must be SQL NULL when StartX is NULL — no substitution').toBeNull();
+      expect(measurementRows[0].PY, 'PY is unaffected by the missing StartX').toBeCloseTo(EXPECTED_PY, 5);
+    });
+
+    it('PY is NULL when quadrats.StartY is NULL, independent of PX (StartX populated)', async () => {
+      await setQuadratOrigin(conn, ORIGIN_X, null);
+      await setStemLocalOffsets(conn, LOCAL_X, LOCAL_Y);
+
+      const { measurementRows } = await selectMeasurements(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+      expect(measurementRows).toHaveLength(1);
+      expect(measurementRows[0].PX, 'PX is unaffected by the missing StartY').toBeCloseTo(EXPECTED_PX, 5);
+      expect(measurementRows[0].PY, 'PY must be SQL NULL when StartY is NULL — no substitution').toBeNull();
+    });
+
+    it('PX is NULL when stems.LocalX is NULL, independent of PY (LocalY populated)', async () => {
+      await setQuadratOrigin(conn, ORIGIN_X, ORIGIN_Y);
+      await setStemLocalOffsets(conn, null, LOCAL_Y);
+
+      const { measurementRows } = await selectMeasurements(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+      expect(measurementRows).toHaveLength(1);
+      expect(measurementRows[0].PX, 'PX must be SQL NULL when LocalX is NULL — no substitution').toBeNull();
+      expect(measurementRows[0].PY, 'PY is unaffected by the missing LocalX').toBeCloseTo(EXPECTED_PY, 5);
+    });
+
+    it('PY is NULL when stems.LocalY is NULL, independent of PX (LocalX populated)', async () => {
+      await setQuadratOrigin(conn, ORIGIN_X, ORIGIN_Y);
+      await setStemLocalOffsets(conn, LOCAL_X, null);
+
+      const { measurementRows } = await selectMeasurements(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+      expect(measurementRows).toHaveLength(1);
+      expect(measurementRows[0].PX, 'PX is unaffected by the missing LocalY').toBeCloseTo(EXPECTED_PX, 5);
+      expect(measurementRows[0].PY, 'PY must be SQL NULL when LocalY is NULL — no substitution').toBeNull();
+    });
+
+    it('a stem row missing its origin is still exported (not dropped) — PX/PY are NULL, every other field is intact', async () => {
+      await setQuadratOrigin(conn, null, null);
+
+      const { measurementRows } = await selectMeasurements(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+      expect(measurementRows, 'a missing quadrat origin must not exclude the row from export').toHaveLength(1);
+      expect(measurementRows[0].PX).toBeNull();
+      expect(measurementRows[0].PY).toBeNull();
+      expect(measurementRows[0].CoreMeasurementID).toBe(1);
+      expect(measurementRows[0].Tag).toBe('1');
+    });
+
+    it('computed PX/PY win over a conflicting uploaded stems.PlotX/PlotY — the derivation never reads PlotX/PlotY', async () => {
+      await setQuadratOrigin(conn, ORIGIN_X, ORIGIN_Y);
+      await setStemLocalOffsets(conn, LOCAL_X, LOCAL_Y);
+      await conn.query('UPDATE stems SET PlotX = 999.99, PlotY = 888.88 WHERE StemGUID = 1');
+
+      const { measurementRows } = await selectMeasurements(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+      expect(measurementRows).toHaveLength(1);
+      expect(measurementRows[0].PX, 'computed StartX+LocalX must win over the conflicting uploaded PlotX').toBeCloseTo(EXPECTED_PX, 5);
+      expect(measurementRows[0].PY, 'computed StartY+LocalY must win over the conflicting uploaded PlotY').toBeCloseTo(EXPECTED_PY, 5);
+    });
+
+    it('preserves eligibility, ordering, row counts, and attribute linkage unchanged when PX/PY are populated', async () => {
+      await setQuadratOrigin(conn, ORIGIN_X, ORIGIN_Y);
+      await conn.query(
+        `INSERT INTO coremeasurements
+           (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
+         VALUES (2, 1, 1, TRUE, '2024-06-02', 13.4, 1.3, 1)`
+      );
+      await conn.query("INSERT INTO cmattributes (CMAID, CoreMeasurementID, Code) VALUES (20, 2, 'LI')");
+
+      const { measurementRows, attributeRows } = await selectMeasurements(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+      expect(measurementRows).toHaveLength(2);
+      expect(
+        measurementRows.map(m => m.CoreMeasurementID),
+        'ordering by CoreMeasurementID ASC is unchanged'
+      ).toEqual([1, 2]);
+      for (const row of measurementRows) {
+        // Local offsets are unchanged from the seed default (LOCAL_X/LOCAL_Y);
+        // only the quadrat origin was overridden above.
+        expect(row.PX, `row ${row.CoreMeasurementID} PX = StartX(${ORIGIN_X}) + LocalX(${LOCAL_X}) = ${EXPECTED_PX}`).toBeCloseTo(EXPECTED_PX, 5);
+        expect(row.PY, `row ${row.CoreMeasurementID} PY = StartY(${ORIGIN_Y}) + LocalY(${LOCAL_Y}) = ${EXPECTED_PY}`).toBeCloseTo(EXPECTED_PY, 5);
+      }
+      expect(attributeRows).toHaveLength(2);
+      expect(attributeRows.find(a => a.CoreMeasurementID === 1)).toBeDefined();
+      expect(attributeRows.find(a => a.CoreMeasurementID === 2)).toBeDefined();
+    });
   });
 });
