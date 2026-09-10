@@ -89,21 +89,41 @@ function stripCommentLines(sql: string): string {
 /**
  * Runs every statement in a section's SQL text against `conn`, in order, on
  * the same session (so `SET @var := ...` state persists across sections the
- * way it does for a real operator's client). Collects every result row that
- * carries both a `metric` and an `n` column into a name -> number map —
- * this is the script's diagnostic convention (see the ops script header).
- * Sample-row SELECTs (different columns) execute normally but contribute
- * nothing to the returned map; assert on them with a direct query instead.
+ * way it does for a real operator's client). Returns each statement's raw
+ * result rows (or `null` for a statement with no result set, e.g. CREATE
+ * TABLE) in execution order — `executeSection` below collapses these into
+ * its metric/n map, but a caller that also needs a report-style section's
+ * other result sets (e.g. the sample-row diagnostic SELECTs in
+ * db/ops/2026-09-09-check-quadrat-origin-equivalence.sql) can index into
+ * this directly instead.
  */
-export async function executeSection(conn: mysql.Connection, sectionSql: string): Promise<MetricMap> {
-  const metrics: MetricMap = new Map();
+export async function executeSectionStatements(conn: mysql.Connection, sectionSql: string): Promise<(Record<string, unknown>[] | null)[]> {
   const cleaned = stripCommentLines(sectionSql);
+  const resultSets: (Record<string, unknown>[] | null)[] = [];
 
   for (const stmt of splitSqlFile(cleaned)) {
     if (!stmt.sql.trim()) continue;
     const [result] = await conn.query(stmt.sql);
-    if (!Array.isArray(result)) continue;
-    for (const row of result as Record<string, unknown>[]) {
+    resultSets.push(Array.isArray(result) ? (result as Record<string, unknown>[]) : null);
+  }
+
+  return resultSets;
+}
+
+/**
+ * Scans an `executeSectionStatements` result (one entry per statement) for
+ * every row shaped like `{ metric, n }` and collects them into a name ->
+ * number map — this is the script's diagnostic convention (see the ops
+ * script header). Sample-row SELECTs (different columns) contribute
+ * nothing to the returned map; index into the `executeSectionStatements`
+ * result directly to assert on those.
+ */
+export function collectMetrics(resultSets: (Record<string, unknown>[] | null)[]): MetricMap {
+  const metrics: MetricMap = new Map();
+
+  for (const rows of resultSets) {
+    if (!rows) continue;
+    for (const row of rows) {
       if (row && typeof row === 'object' && 'metric' in row && 'n' in row) {
         metrics.set(String(row.metric), Number(row.n));
       }
@@ -111,4 +131,13 @@ export async function executeSection(conn: mysql.Connection, sectionSql: string)
   }
 
   return metrics;
+}
+
+/**
+ * `collectMetrics(await executeSectionStatements(conn, sectionSql))` — the
+ * common case where a section's result sets are all `{ metric, n }` rows and
+ * a caller doesn't need the raw per-statement result sets.
+ */
+export async function executeSection(conn: mysql.Connection, sectionSql: string): Promise<MetricMap> {
+  return collectMetrics(await executeSectionStatements(conn, sectionSql));
 }

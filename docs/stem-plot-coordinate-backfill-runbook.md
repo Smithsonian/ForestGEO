@@ -55,26 +55,44 @@ table. These are the same number only for a plot that went through the
 ctfsweb migration and whose quadrats have not been re-uploaded or re-gridded
 since.
 
-Run `frontend/db/ops/2026-09-09-check-quadrat-origin-equivalence.sql` (added
-in a follow-up commit) before repairing a plot. It compares, per quadrat
-name, the app's `StartX/StartY` against the destination's
-`MIN(Coordinates.PX)/MIN(Coordinates.PY)`. Any quadrat present on only one
-side, or any mismatch beyond decimal storage precision, blocks the repair
-for that plot until the discrepancy is explained and one source is
-corrected.
+Run `frontend/db/ops/2026-09-09-check-quadrat-origin-equivalence.sql` before
+repairing a plot. It compares, per quadrat name, the app's `StartX/StartY`
+against the destination's `MIN(Coordinates.PX)/MIN(Coordinates.PY)`, and
+reports one go/no-go metric: `equivalence_ok`. It is 0 — do not proceed with
+the repair — if any quadrat name exists on only one side (app-only or
+destination-only), if a name is ambiguous (more than one row for that name,
+on either side), or if a matched name's origin disagrees beyond decimal
+storage precision. Run it in its own `inputs` → `setup` → `report` →
+`cleanup` order; its header documents every metric `report` prints.
 
-Pull the app side of the comparison with:
+Produce the app side of the comparison with the export query the script's
+own `inputs` section documents:
 
 ```sql
-SELECT QuadratName, StartX, StartY
+SELECT CONCAT(
+    '(', '''''',
+    REPLACE(REPLACE(REPLACE(REPLACE(QuadratName, '\\', '\\\\'), '''', ''''''), '\\', '\\\\'), '''', ''''''),
+    '''''', ', ', IFNULL(StartX,'NULL'), ', ', IFNULL(StartY,'NULL'), '),'
+  )
 FROM quadrats
 WHERE PlotID = <app plot id>
   AND IsActive = 1
 ORDER BY QuadratName;
 ```
 
-against the app's schema for the site (`forestgeo_<sitename>`). That result
-set is the VALUES list the equivalence-check script's app-side input needs.
+Do not use `QUOTE()` for this — it backslash-escapes an embedded apostrophe
+(e.g. `O'BRIEN` becomes `'O\'BRIEN'`), and that stray backslash corrupts the
+outer `'...'` literal once pasted. The `REPLACE` chain instead doubles every
+backslash and quote twice — once so the name round-trips through the
+generated `INSERT` statement's own string literal, once more so that whole
+result round-trips through the `@app_quadrat_origins` literal you paste it
+into.
+
+against the app's schema for the site (`forestgeo_<sitename>`). Paste every
+returned row, in order, into `@app_quadrat_origins`, then delete the
+trailing comma on the very last row — the query ends every row with `,` so
+the rows concatenate into a VALUES list, but the final row must not have one
+or the list is malformed SQL.
 
 ## 3. Maintenance window
 
