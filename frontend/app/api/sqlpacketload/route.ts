@@ -28,6 +28,7 @@ import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
 import { ReferenceReplacementInProgressError } from '@/lib/uploads/upload-session-replacement-marker';
 
 const REFERENCE_REPLACEMENT_IN_PROGRESS_CODE = 'REFERENCE_REPLACEMENT_IN_PROGRESS';
+const UPLOAD_SCOPE_REQUIRED_CODE = 'UPLOAD_SCOPE_REQUIRED';
 
 /**
  * Generate idempotency key for a batch of data
@@ -558,6 +559,33 @@ export async function POST(request: NextRequest) {
     }
   } else {
     const uploadRows = Object.values(fileRowSet);
+
+    // The session id decides whether this request runs a destructive clean re-upload reset,
+    // so it must belong to this plot and census and still be live, exactly as for measurements.
+    const fixedDataPlotID = toPositiveInteger(plot?.plotID);
+    const fixedDataCensusID = toPositiveInteger(census?.dateRanges?.[0]?.censusID);
+    if (!fixedDataPlotID || !fixedDataCensusID) {
+      return NextResponse.json(
+        { error: `A plot and census are required for ${formType} uploads.`, code: UPLOAD_SCOPE_REQUIRED_CODE },
+        { status: HTTPResponses.INVALID_REQUEST }
+      );
+    }
+    try {
+      await requireUploadSessionOwnership({
+        schema,
+        sessionId,
+        plotId: fixedDataPlotID,
+        censusId: fixedDataCensusID,
+        allowedStates: [TrackedUploadSessionState.INITIALIZED, TrackedUploadSessionState.UPLOADING],
+        contextLabel: `${formType} upload for ${fileName}`
+      });
+    } catch (error: unknown) {
+      if (error instanceof UploadSessionOwnershipError) {
+        ailogger.warn(`Rejected ${formType} upload for ${fileName}: ${error.message}`);
+        return NextResponse.json({ responseMessage: 'Upload session conflict', error: error.message, fileName }, { status: error.status });
+      }
+      throw error;
+    }
 
     while (retryCount <= maxRetries) {
       let rowId = '';

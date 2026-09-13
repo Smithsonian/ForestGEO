@@ -123,6 +123,14 @@ vi.mock('@/lib/db/connectionmanager', () => {
   return { default: { getInstance: () => manager } };
 });
 
+// The session-ownership gate reads upload_sessions through the app's own pool, which this
+// suite does not wire to its test connection. Ownership is pinned in app/api/sqlpacketload's
+// route tests; here it passes so the geometry boundary itself is what gets exercised.
+vi.mock('@/config/uploadsessiontracker', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/config/uploadsessiontracker')>()),
+  requireUploadSessionOwnership: vi.fn(async () => undefined)
+}));
+
 vi.mock('@/ailogger', () => ({
   default: {
     info: () => undefined,

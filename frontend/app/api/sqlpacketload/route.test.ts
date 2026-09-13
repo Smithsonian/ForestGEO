@@ -659,6 +659,37 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
   });
 
+  it('refuses a clean re-upload whose upload session does not own this plot and census, before any transaction starts', async () => {
+    const ownershipMessage = `Upload session ${TEST_SESSION_ID} does not own census ${TEST_CENSUS_ID} for species upload for species.csv (session census: 99)`;
+    requireUploadSessionOwnershipMock.mockRejectedValueOnce(new MockUploadSessionOwnershipError(ownershipMessage, HTTPResponses.CONFLICT));
+
+    const res = await POST(makeFixedDataRequest('species', { 'row-1': { spcode: 'newspc', species: 'novel' } }, { uploadMode: 'clean_reupload' }));
+
+    const body = await res?.json();
+    expect(res?.status, `response body: ${JSON.stringify(body)}`).toBe(HTTPResponses.CONFLICT);
+    expect(body.error).toBe(ownershipMessage);
+    expect(requireUploadSessionOwnershipMock).toHaveBeenCalledWith({
+      schema: 'forestgeo_testing',
+      sessionId: TEST_SESSION_ID,
+      plotId: TEST_PLOT_ID,
+      censusId: TEST_CENSUS_ID,
+      allowedStates: ['initialized', 'uploading'],
+      contextLabel: 'species upload for species.csv'
+    });
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects a fixed-data upload without a census before checking the session or touching the database', async () => {
+    const res = await POST(makeFixedDataRequest('attributes', { 'row-1': { code: 'alive', status: 'alive' } }, { census: undefined }));
+
+    const body = await res?.json();
+    expect(res?.status, `response body: ${JSON.stringify(body)}`).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body.code).toBe('UPLOAD_SCOPE_REQUIRED');
+    expect(requireUploadSessionOwnershipMock).not.toHaveBeenCalled();
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+  });
+
   it('re-runs the chunk instead of phantom-committing when the changelog write deadlocks', async () => {
     // The changelog shares the data transaction. A deadlock on the changelog statement rolls
     // the WHOLE transaction back server-side; if it were swallowed like a benign logging
