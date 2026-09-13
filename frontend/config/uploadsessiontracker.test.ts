@@ -234,4 +234,54 @@ describe('createUploadSession', () => {
     });
     expect(mocks.runQuery.mock.calls.at(-1)?.[2]).toEqual([created.sessionId, schema, 7, 9, 'mason', 'initialized', 'file.csv', 3, 'idem-1', 'clean_reupload']);
   });
+
+  it('starts a new session instead of handing back a completed one with the same idempotency key', async () => {
+    // Re-running a finished clean re-upload of unchanged files produces the same idempotency
+    // key. The old session already recorded its replacement marker, so reusing it would make
+    // the new upload skip the reset and silently append (#472).
+    const schema = 'forestgeo_uploadsession_completed_test';
+    const completedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const completedSessionID = 'completed-session-1';
+    mocks.getConn.mockResolvedValue({ release: vi.fn() });
+    mocks.runQuery
+      // findSessionByIdempotencyKey -> the earlier, finished upload of the same files
+      .mockResolvedValueOnce([
+        {
+          session_id: completedSessionID,
+          schema_name: schema,
+          plot_id: 7,
+          census_id: 9,
+          user_id: 'mason',
+          state: UploadSessionState.COMPLETED,
+          file_id: 'species.csv',
+          total_chunks: 1,
+          uploaded_chunks: 1,
+          processed_batches: 0,
+          total_batches: 0,
+          last_heartbeat: completedAt,
+          created_at: completedAt,
+          updated_at: completedAt,
+          error_message: null,
+          idempotency_key: 'idem-completed',
+          mode: 'clean_reupload'
+        }
+      ])
+      // abandonStaleSessionsForScope -> findActiveSessionsForPlotCensus
+      .mockResolvedValueOnce([])
+      // ensureUploadSessionScopeLock -> hasColumn, abandonDuplicateActiveScopeSessions, hasIndex
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce([{ count: 1 }])
+      // INSERT the new session
+      .mockResolvedValueOnce({ affectedRows: 1 });
+
+    const created = await createUploadSession(schema, 7, 9, 'mason', 'species.csv', 1, 'idem-completed', 'clean_reupload');
+
+    const insertCall = mocks.runQuery.mock.calls.at(-1);
+    console.log(`[createUploadSession] returned ${created.sessionId} (${created.state}); last statement: ${String(insertCall?.[1]).replace(/\s+/g, ' ')}`);
+    expect(created.sessionId).not.toBe(completedSessionID);
+    expect(created.state).toBe(UploadSessionState.INITIALIZED);
+    expect(String(insertCall?.[1])).toContain('INSERT INTO');
+    expect(insertCall?.[2]).toEqual([created.sessionId, schema, 7, 9, 'mason', 'initialized', 'species.csv', 1, 'idem-completed', 'clean_reupload']);
+  });
 });
