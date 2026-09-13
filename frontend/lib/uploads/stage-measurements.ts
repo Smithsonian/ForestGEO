@@ -30,13 +30,16 @@ import {
   ensureTemporaryMeasurementsSourceFormatColumn,
   findDroppedMeasurementCandidates,
   insertTemporaryMeasurementsInBatches,
-  ensureUploadSessionCensusReplacementColumn,
   isUnsignedIntFieldInvalid,
-  markUploadSessionCensusReplaced,
-  uploadSessionHasReplacedCensus,
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
+import {
+  CENSUS_REPLACEMENT_MARKER_COLUMN,
+  ensureUploadSessionReplacementMarkerColumn,
+  markUploadSessionReplacementCompleted,
+  uploadSessionHasCompletedReplacement
+} from '@/lib/uploads/upload-session-replacement-marker';
 
 const CHANGELOG_TABLE_NAME = 'file_upload';
 const MEASUREMENTS_FORM_TYPE = 'measurements';
@@ -210,7 +213,7 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
   // column check — a revisions or append upload issues no extra statement.
   const mayConsultCensusReplacementMarker = uploadSessionID !== null && uploadMode === UploadMode.CLEAN_REUPLOAD && !params.suppressCensusReplacementCleanup;
   if (mayConsultCensusReplacementMarker) {
-    await ensureUploadSessionCensusReplacementColumn(connectionManager, schema);
+    await ensureUploadSessionReplacementMarkerColumn(connectionManager, schema, CENSUS_REPLACEMENT_MARKER_COLUMN);
   }
 
   // Count rows BEFORE insert so we can measure the delta (important when
@@ -244,11 +247,12 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
       // two always agree — a rollback loses both and the retry cleans again, a
       // commit keeps both and later files skip.
       const sessionAlreadyReplacedCensus =
-        uploadSessionID !== null && (await uploadSessionHasReplacedCensus(connectionManager, schema, uploadSessionID, transactionID));
+        uploadSessionID !== null &&
+        (await uploadSessionHasCompletedReplacement(connectionManager, schema, uploadSessionID, CENSUS_REPLACEMENT_MARKER_COLUMN, transactionID));
       if (!sessionAlreadyReplacedCensus) {
         await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
         if (uploadSessionID !== null) {
-          await markUploadSessionCensusReplaced(connectionManager, schema, uploadSessionID, transactionID);
+          await markUploadSessionReplacementCompleted(connectionManager, schema, uploadSessionID, CENSUS_REPLACEMENT_MARKER_COLUMN, transactionID);
         }
       }
     }

@@ -6,13 +6,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { FileRow, SourceFormat } from '@/config/macros/formdetails';
 import { toFiniteNumber } from '@/config/measurementerrors';
-import {
-  CENSUS_REPLACEMENT_MARKER_COLUMN,
-  ensureUploadSessionReplacementMarkerColumn,
-  markUploadSessionReplacementCompleted,
-  resetUploadSessionReplacementMarkerCacheForTests,
-  uploadSessionHasCompletedReplacement
-} from '@/lib/uploads/upload-session-replacement-marker';
+import { isMissingTableError } from '@/lib/errorhelpers';
 
 export const TEMP_MEASUREMENT_INSERT_BATCH_SIZE = 1000;
 
@@ -43,16 +37,6 @@ export async function ensureTemporaryMeasurementsSourceFormatColumn(connectionMa
   }
 
   verifiedTemporaryMeasurementSourceFormatSchemas.add(schema);
-}
-
-function isMissingTableError(error: unknown, tableName?: string): boolean {
-  if (!error || typeof error !== 'object') return false;
-
-  const candidate = error as { code?: string; message?: string; sqlMessage?: string };
-  const message = `${candidate.message ?? ''} ${candidate.sqlMessage ?? ''}`.toLowerCase();
-  const tableMatch = tableName ? message.includes(tableName.toLowerCase()) : true;
-
-  return (candidate.code === 'ER_NO_SUCH_TABLE' || message.includes("doesn't exist") || message.includes('does not exist')) && tableMatch;
 }
 
 export interface DroppedMeasurementCandidate {
@@ -316,52 +300,6 @@ async function deleteInBoundedChunks(connectionManager: ConnectionManager, delet
     totalDeleted += deleted;
     if (deleted < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return totalDeleted;
   }
-}
-
-/**
- * Census replacement is one of two per-session replacement markers; the shared
- * mechanism (and the history behind it) lives in
- * `lib/uploads/upload-session-replacement-marker.ts`. These wrappers keep the
- * measurement-side vocabulary at the call sites in stage-measurements.
- */
-export { CENSUS_REPLACEMENT_MARKER_COLUMN };
-
-export async function ensureUploadSessionCensusReplacementColumn(connectionManager: ConnectionManager, schema: string): Promise<void> {
-  return ensureUploadSessionReplacementMarkerColumn(connectionManager, schema, CENSUS_REPLACEMENT_MARKER_COLUMN);
-}
-
-/** Test seam: the per-process memo would otherwise hide a dropped column between suites. */
-export function resetUploadSessionCensusReplacementColumnCacheForTests(): void {
-  resetUploadSessionReplacementMarkerCacheForTests();
-}
-
-/**
- * True when this upload session has already performed its census replacement.
- *
- * This used to be inferred from "the session has staged rows", which is only
- * ALMOST the same thing: if every row of the session's first file dropped as an
- * INSERT IGNORE duplicate, nothing was staged, and the next file read "no staged
- * rows" and re-ran the census-wide cleanup — deleting the failure rows the first
- * file had just recorded. That is the exact defect class #384 fixed, surviving in
- * the zero-staged edge.
- */
-export async function uploadSessionHasReplacedCensus(
-  connectionManager: ConnectionManager,
-  schema: string,
-  uploadSessionID: string,
-  transactionID: string
-): Promise<boolean> {
-  return uploadSessionHasCompletedReplacement(connectionManager, schema, uploadSessionID, CENSUS_REPLACEMENT_MARKER_COLUMN, transactionID);
-}
-
-/** Records that this session's census replacement has run. Same transaction as the cleanup. */
-export async function markUploadSessionCensusReplaced(
-  connectionManager: ConnectionManager,
-  schema: string,
-  uploadSessionID: string,
-  transactionID: string
-): Promise<void> {
-  return markUploadSessionReplacementCompleted(connectionManager, schema, uploadSessionID, CENSUS_REPLACEMENT_MARKER_COLUMN, transactionID);
 }
 
 /**

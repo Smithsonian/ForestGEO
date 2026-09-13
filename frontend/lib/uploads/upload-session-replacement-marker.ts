@@ -20,6 +20,7 @@ import { format } from 'mysql2/promise';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
+import { isMissingTableError } from '@/lib/errorhelpers';
 
 /** Column recording that a session's census replacement (measurements) has run. */
 export const CENSUS_REPLACEMENT_MARKER_COLUMN = 'census_replacement_completed_at';
@@ -29,19 +30,12 @@ export const REFERENCE_REPLACEMENT_MARKER_COLUMN = 'reference_replacement_comple
 
 export type UploadSessionReplacementMarkerColumn = typeof CENSUS_REPLACEMENT_MARKER_COLUMN | typeof REFERENCE_REPLACEMENT_MARKER_COLUMN;
 
+const UPLOAD_SESSIONS_TABLE = 'upload_sessions';
+
 const verifiedMarkerColumns = new Set<string>();
 
 function memoKey(schema: string, markerColumn: UploadSessionReplacementMarkerColumn): string {
   return `${schema}:${markerColumn}`;
-}
-
-function isMissingUploadSessionsTable(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const candidate = error as { code?: string; message?: string; sqlMessage?: string };
-  const message = `${candidate.message ?? ''} ${candidate.sqlMessage ?? ''}`.toLowerCase();
-  return (
-    (candidate.code === 'ER_NO_SUCH_TABLE' || message.includes("doesn't exist") || message.includes('does not exist')) && message.includes('upload_sessions')
-  );
 }
 
 /**
@@ -100,7 +94,7 @@ export async function uploadSessionHasCompletedReplacement(
     const rows = await connectionManager.executeQuery(probeSQL, [uploadSessionID], transactionID);
     return Array.isArray(rows) && rows.length > 0 && rows[0][markerColumn] !== null;
   } catch (error: unknown) {
-    if (!isMissingUploadSessionsTable(error)) throw error;
+    if (!isMissingTableError(error, UPLOAD_SESSIONS_TABLE)) throw error;
     // No session table in this schema: fall back to "has not replaced", which
     // reproduces the pre-marker behaviour (replace on every file) rather than
     // failing the upload outright.
@@ -130,6 +124,6 @@ export async function markUploadSessionReplacementCompleted(
       );
     }
   } catch (error: unknown) {
-    if (!isMissingUploadSessionsTable(error)) throw error;
+    if (!isMissingTableError(error, UPLOAD_SESSIONS_TABLE)) throw error;
   }
 }
