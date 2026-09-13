@@ -12,7 +12,8 @@ import { readValidationStream } from '@/components/processors/readvalidationstre
 import { isNetworkValidationFetchFailure } from '@/components/client/validationcore';
 import ailogger from '@/ailogger';
 import { getValidationTaskTimeoutMs, resolveValidationRunPersistence } from '@/config/validation-runner-utils';
-import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
+import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE, describeDbhFloorSkips } from '@/config/dbhchangevalidations';
+import type { DBHValidationSkipCounts } from '@/lib/validations/dbh-execution';
 
 const QUADRAT_MISMATCH_PROCEDURE = 'ValidateQuadratMismatchAcrossCensuses';
 const COORDINATE_DRIFT_PROCEDURE = 'ValidateCoordinateDriftAcrossCensuses';
@@ -25,9 +26,12 @@ export interface ValidationRunParams {
   censusID: number;
 }
 
+/** A passed task may carry a notice that is recorded with the run's messages without failing it. */
+type ValidationTaskOutcome = boolean | { notice: string };
+
 interface ValidationTask {
   name: string;
-  run: (signal: AbortSignal) => Promise<boolean>;
+  run: (signal: AbortSignal) => Promise<ValidationTaskOutcome>;
 }
 
 // ─── Module-level state ──────────────────────────────────────────────────────
@@ -154,9 +158,10 @@ function buildValidationTasks(validationMessages: ValidationMessages, schema: st
           const body = await response.json().catch(() => null);
           throw new Error(body?.error || `HTTP ${response.status}`);
         }
-        const result = await readValidationStream<{ success: boolean; error?: string }>(response, signal);
+        const result = await readValidationStream<{ success: boolean; error?: string; skipCounts?: DBHValidationSkipCounts }>(response, signal);
         if (!result.success) throw new Error(result.error ?? 'Shared DBH validation failed');
-        return true;
+        const notice = describeDbhFloorSkips(result.skipCounts?.skippedBelowDbhFloor ?? 0);
+        return notice ? { notice } : true;
       }
     });
   }
@@ -253,6 +258,7 @@ async function executeRun(params: ValidationRunParams, abortController: AbortCon
         throw new Error(`Validation returned failure for ${task.name}`);
       }
       completedSteps++;
+      if (typeof result === 'object') errorMessages.push(result.notice);
     } catch (err: any) {
       if (signal.aborted) {
         ailogger.info(`[ValidationRunner] Aborted during ${task.name}`);

@@ -3,6 +3,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import { buildMeasurementScopeLockName } from '@/config/measurementscopelock';
 import { MANAGER_OVERRIDE_ERROR_CODE } from '@/config/validationoverride';
+import { describeDbhFloorSkips } from '@/config/dbhchangevalidations';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { runCensusValidations } from '@/lib/uploads/validation-orchestrator';
 import { createResetValidationStatesQuery, createValidationOverrideQueries } from '@/components/datagrids/measurementscommonsutils';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
@@ -268,6 +271,26 @@ describe('rescoreDbhCensus transaction boundary', () => {
   async function runFormatted(requests: Array<{ query: string; params: Array<string | number> }>) {
     for (const request of requests) await connection.query(mysql.format(request.query, request.params));
   }
+
+  it('records DBH floor skips on the validation run as a notice without failing the run', async () => {
+    const belowFloor = await pair('FLOORNOTICE', 100, 9);
+    await pair('FLOORCLEAN', 100, 105);
+    expect(await validity(belowFloor.present), 'the present rows start pending').toBeNull();
+
+    const summary = await runCensusValidations(ConnectionManager.getInstance(), { schema, plotID, censusID: census2ID });
+
+    const expectedNotice = describeDbhFloorSkips(1);
+    expect(summary, 'a floor skip is a notice, not a failed step').toMatchObject({ failedSteps: 0, conflict: false, errors: [expectedNotice] });
+    const [runs] = await connection.query<RowDataPacket[]>('SELECT Status, ErrorMessages FROM validation_runs WHERE PlotID=? AND CensusID=?', [
+      plotID,
+      census2ID
+    ]);
+    expect(
+      runs.map(run => ({ status: run.Status, errorMessages: run.ErrorMessages })),
+      'the notice is stored on the run record that the status badge reads'
+    ).toEqual([{ status: 'completed', errorMessages: [expectedNotice] }]);
+    expect(await validity(belowFloor.present), 'the skipped row is still finalized').toBe(true);
+  }, 120000);
 
   it('holds and rolls back a census whose re-score would turn a valid row invalid, reporting the measurement IDs', async () => {
     const violates = await pair('HOLD', 100, 900);

@@ -19,3 +19,13 @@ export interface DbhChangeSkipCounts {
   SkippedImplausibleInterval: number;
   SkippedBelowDbhFloor: number;
 }
+
+/** Mirrors cMinDbhMm in BuildDBHChangePairs; comparisons below it are skipped, not judged. */
+export const DBH_COMPARISON_FLOOR_MM = 10;
+
+/** User-facing notice for DBH comparisons excluded by the floor, or null when none were. */
+export function describeDbhFloorSkips(skippedBelowDbhFloor: number): string | null {
+  if (skippedBelowDbhFloor <= 0) return null;
+  const comparisons = skippedBelowDbhFloor === 1 ? '1 DBH comparison was' : `${skippedBelowDbhFloor} DBH comparisons were`;
+  return `${comparisons} skipped because a diameter is missing or under ${DBH_COMPARISON_FLOOR_MM} mm after unit conversion. If this is unexpected, check the plot's DBH units.`;
+}

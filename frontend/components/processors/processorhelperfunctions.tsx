@@ -16,6 +16,7 @@ import {
 } from '@/lib/validations/dbh-execution';
 import type { CombinedDBHValidationResult, DBHValidationSkipCounts, ValidationExecutionParams } from '@/lib/validations/dbh-execution';
 import type { UpsertOperation } from '@/config/utils';
+import { describeDbhFloorSkips } from '@/config/dbhchangevalidations';
 
 export { finalizeValidatedRowsInTransaction, parseDbhValidationSkipCounts, prepareDBHValidationDefinitions, runSharedDBHChangeValidationsInTransaction };
 export type { CombinedDBHValidationResult, DBHValidationSkipCounts, ValidationExecutionParams };
@@ -478,11 +479,9 @@ export async function loadValidationDefinition(schema: string, validationProcedu
 }
 
 function reportDbhFloorSkips(schema: string, params: ValidationExecutionParams, skipCounts?: DBHValidationSkipCounts): void {
-  if (!skipCounts?.skippedBelowDbhFloor) return;
-  ailogger.warn(
-    `DBH checks skipped ${skipCounts.skippedBelowDbhFloor} comparison(s) because one or both diameters were missing or below 10 mm after unit conversion. If unexpected, check the plot's DBH units and recorded diameters.`,
-    { schema, censusID: params.p_CensusID ?? null, plotID: params.p_PlotID ?? null, ...skipCounts }
-  );
+  const notice = describeDbhFloorSkips(skipCounts?.skippedBelowDbhFloor ?? 0);
+  if (!notice) return;
+  ailogger.warn(notice, { schema, censusID: params.p_CensusID ?? null, plotID: params.p_PlotID ?? null, ...skipCounts });
 }
 
 // Generalized runValidation function

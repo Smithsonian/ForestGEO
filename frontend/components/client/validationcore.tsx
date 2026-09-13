@@ -6,7 +6,8 @@ import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ailogger from '@/ailogger';
 import { useAnimationCacheContext } from '@/app/contexts/animationcacheprovider';
 import { readValidationStream } from '@/components/processors/readvalidationstream';
-import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
+import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE, describeDbhFloorSkips } from '@/config/dbhchangevalidations';
+import type { DBHValidationSkipCounts } from '@/lib/validations/dbh-execution';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 type ValidationExecutionResult = { procedureName: string; success: boolean; error?: string };
@@ -81,6 +82,8 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
   const [validationMessages, setValidationMessages] = useState<ValidationMessages>({});
   const [isValidationComplete, setIsValidationComplete] = useState<boolean>(false);
   const [apiErrors, setApiErrors] = useState<string[]>([]);
+  // Shown with the issues but kept out of the result's errors, which callers treat as a failed validation.
+  const [validationNotices, setValidationNotices] = useState<string[]>([]);
   const [validationProgress, setValidationProgress] = useState<Record<string, number>>({});
   const [isUpdatingRows, setIsUpdatingRows] = useState<boolean>(false);
   const [isLoadingValidationList, setIsLoadingValidationList] = useState<boolean>(true);
@@ -280,16 +283,21 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             throw new Error(`Error executing shared DBH validations: ${serverError}`);
           }
 
-          const payload = await readValidationStream<{ success: boolean; ranGrowth: boolean; ranShrinkage: boolean; error?: string }>(
-            response,
-            abortControllerRef.current?.signal
-          );
+          const payload = await readValidationStream<{
+            success: boolean;
+            ranGrowth: boolean;
+            ranShrinkage: boolean;
+            error?: string;
+            skipCounts?: DBHValidationSkipCounts;
+          }>(response, abortControllerRef.current?.signal);
 
           if (!payload.success) {
             throw new Error(`Shared DBH validations failed: ${payload.error ?? 'unknown error'}`);
           }
 
+          const floorSkipNotice = describeDbhFloorSkips(payload.skipCounts?.skippedBelowDbhFloor ?? 0);
           if (isMounted.current) {
+            if (floorSkipNotice) setValidationNotices(prev => [...prev, floorSkipNotice]);
             setValidationProgress(prevProgress => ({
               ...prevProgress,
               [DBH_GROWTH_PROCEDURE]: 100,
@@ -746,8 +754,8 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             </Stack>
           ) : (
             <Stack spacing={3} sx={{ alignItems: 'center', textAlign: 'center' }}>
-              <Typography level="h3" color={apiErrors.length > 0 ? 'warning' : 'success'}>
-                {apiErrors.length > 0 ? 'Validation Completed with Issues' : 'Validation Complete'}
+              <Typography level="h3" color={apiErrors.length + validationNotices.length > 0 ? 'warning' : 'success'}>
+                {apiErrors.length + validationNotices.length > 0 ? 'Validation Completed with Issues' : 'Validation Complete'}
               </Typography>
 
               <Stack direction="row" spacing={2}>
@@ -776,6 +784,16 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
                       ...and {apiErrors.length - 3} more
                     </Typography>
                   )}
+                </Box>
+              )}
+
+              {validationNotices.length > 0 && (
+                <Box sx={{ mt: 2, p: 2, bgcolor: 'warning.softBg', borderRadius: 'md', maxWidth: '500px' }} role="status">
+                  {validationNotices.map(notice => (
+                    <Typography key={notice} level="body-xs" color="warning">
+                      {notice}
+                    </Typography>
+                  ))}
                 </Box>
               )}
             </Stack>

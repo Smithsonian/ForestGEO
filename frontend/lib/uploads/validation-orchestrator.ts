@@ -18,7 +18,7 @@ import {
 } from '@/components/processors/processorhelperfunctions';
 import { refreshMeasurementsSummaryForScope, refreshViewFullTableForScope } from '@/lib/measurementviewrefresh';
 import { createValidationRunRecord, updateValidationRunRecord } from '@/lib/validations/run-records';
-import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
+import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE, describeDbhFloorSkips } from '@/config/dbhchangevalidations';
 
 // Single source for these procedure names on the server. The client-side
 // copies in components/client/validationcore.tsx and config/validation-runner.ts
@@ -61,6 +61,8 @@ interface EnabledValidation {
 interface ValidationStepResult {
   success: boolean;
   errorMessage?: string;
+  /** Recorded with the run's messages without failing the step. */
+  notice?: string;
 }
 
 interface ValidationTask {
@@ -126,7 +128,8 @@ function buildValidationTasks(validations: EnabledValidation[], schema: string, 
       name: `${DBH_GROWTH_PROCEDURE}+${DBH_SHRINKAGE_PROCEDURE}`,
       execute: async () => {
         const result = await runCombinedDBHValidations(schema, executionParams);
-        return result.success ? { success: true } : { success: false, errorMessage: result.error ?? 'Shared DBH validation failed' };
+        if (!result.success) return { success: false, errorMessage: result.error ?? 'Shared DBH validation failed' };
+        return { success: true, notice: describeDbhFloorSkips(result.skipCounts?.skippedBelowDbhFloor ?? 0) ?? undefined };
       }
     });
   }
@@ -207,6 +210,7 @@ export async function runCensusValidations(connectionManager: ConnectionManager,
         const result = await task.execute();
         if (result.success) {
           completedSteps++;
+          if (result.notice) errors.push(result.notice);
         } else {
           failedSteps++;
           errors.push(`Failed: ${task.name} — ${result.errorMessage}`);
