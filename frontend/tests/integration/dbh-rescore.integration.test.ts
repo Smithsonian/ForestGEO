@@ -6,6 +6,9 @@ import { MANAGER_OVERRIDE_ERROR_CODE } from '@/config/validationoverride';
 import { describeDbhFloorSkips } from '@/config/dbhchangevalidations';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { runCensusValidations } from '@/lib/uploads/validation-orchestrator';
+import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
+import { BACKGROUND_JOB_TYPES, NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
+import { buildRealSweepDeps, type DbhExpectedManifest } from '@/lib/validations/dbh-rescore-cli';
 import { createResetValidationStatesQuery, createValidationOverrideQueries } from '@/components/datagrids/measurementscommonsutils';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
@@ -649,6 +652,55 @@ describe('rescoreDbhCensus transaction boundary', () => {
       databaseOutcome: 'not-started'
     });
     expect(await snapshot()).toEqual(before);
+  });
+
+  it.each([...ACTIVE_UPLOAD_SESSION_STATES])('defers the re-score and the CLI dry-run preflight while a prior-census upload is %s', async state => {
+    const seeded = await pair(`UP${state.slice(0, 4)}`, 100, 105);
+    await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID=?', [seeded.present]);
+    await connection.query("INSERT INTO upload_sessions (session_id,schema_name,plot_id,census_id,user_id,state) VALUES (?,?,?,?,'test',?)", [
+      `active-${state}`,
+      schema,
+      plotID,
+      census1ID,
+      state
+    ]);
+
+    expect(await rescoreDbhCensus({ schema, plotID, censusID: census2ID }, actual()), `an upload in state ${state} must defer the re-score`).toMatchObject({
+      outcome: 'deferred-pending',
+      blockingScope: { reason: 'upload' }
+    });
+    const preflight = await buildRealSweepDeps(connection, {} as DbhExpectedManifest).advisoryPreflight({
+      schema,
+      plotID,
+      censusID: census2ID,
+      plotCensusNumber: 2
+    });
+    expect(preflight, `the CLI dry run must also report an upload in state ${state}`).toEqual({ deferred: 'active upload' });
+  });
+
+  it.each([...NON_TERMINAL_BACKGROUND_JOB_STATUSES])('defers the re-score and the CLI dry-run preflight while a background job is %s', async status => {
+    const seeded = await pair(`JOB${status.slice(0, 4)}`, 100, 105);
+    await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID=?', [seeded.present]);
+    await connection.query('INSERT INTO catalog.background_jobs (JobType, SchemaName, PlotID, CensusID, CreatedBy, Status) VALUES (?, ?, ?, ?, ?, ?)', [
+      BACKGROUND_JOB_TYPES[0],
+      schema,
+      plotID,
+      census2ID,
+      'dbh-rescore-test',
+      status
+    ]);
+
+    expect(await rescoreDbhCensus({ schema, plotID, censusID: census2ID }, actual()), `a ${status} job must defer the re-score`).toMatchObject({
+      outcome: 'deferred-pending',
+      blockingScope: { reason: 'background-job' }
+    });
+    const preflight = await buildRealSweepDeps(connection, {} as DbhExpectedManifest).advisoryPreflight({
+      schema,
+      plotID,
+      censusID: census2ID,
+      plotCensusNumber: 2
+    });
+    expect(preflight, `the CLI dry run must also report a ${status} job`).toEqual({ deferred: 'active background job' });
   });
 
   it('uses a second real session for lock conflicts and cleans up partial acquisition', async () => {

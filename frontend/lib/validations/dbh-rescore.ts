@@ -10,6 +10,8 @@ import ConnectionManager, { getTransactionFailureOutcome, type TxExecutor } from
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { MANAGER_OVERRIDE_ERROR_CODE } from '@/config/validationoverride';
+import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
+import { NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { completeValidationRunRecordInTransaction, createValidationRunRecordInTransaction } from '@/lib/validations/run-records';
@@ -20,7 +22,6 @@ import {
 } from '@/lib/validations/dbh-execution';
 
 const DBH_VALIDATION_IDS = [1, 2] as const;
-const ACTIVE_UPLOAD_STATES = ['initialized', 'uploading', 'uploaded', 'processing', 'collapsing'] as const;
 
 export type DbhRescoreDatabaseOutcome = 'committed' | 'rolled-back' | 'not-started' | 'unknown';
 export type DbhRescoreOutcome = 'completed' | 'skipped-locked' | 'deferred-pending' | 'held-valid-to-invalid' | 'failed' | 'artifact-failed';
@@ -95,8 +96,8 @@ async function countActiveBackgroundJobs(scope: DbhRescoreScope, tx: TxExecutor)
   const rows = await tx.query<Array<{ count: number }>>(
     `SELECT COUNT(*) AS count FROM catalog.background_jobs
      WHERE SchemaName = ? AND PlotID = ? AND CensusID = ?
-       AND Status IN ('queued', 'running', 'cancel_requested', 'waiting_retry')`,
-    [scope.schema, scope.plotID, scope.censusID]
+       AND Status IN (${NON_TERMINAL_BACKGROUND_JOB_STATUSES.map(() => '?').join(', ')})`,
+    [scope.schema, scope.plotID, scope.censusID, ...NON_TERMINAL_BACKGROUND_JOB_STATUSES]
   );
   return asNumber(rows[0]?.count ?? 0);
 }
@@ -256,7 +257,7 @@ async function preflightScope(
   const uploadSQL = safeFormatQuery(
     scope.schema,
     `SELECT COUNT(*) AS count FROM ??.upload_sessions
-     WHERE plot_id = ? AND census_id = ? AND state IN (${ACTIVE_UPLOAD_STATES.map(() => '?').join(', ')})`
+     WHERE plot_id = ? AND census_id = ? AND state IN (${ACTIVE_UPLOAD_SESSION_STATES.map(() => '?').join(', ')})`
   );
   const pendingSQL = safeFormatQuery(
     scope.schema,
@@ -264,7 +265,7 @@ async function preflightScope(
   );
   for (const [reason, sql, params] of [
     ['running', runningSQL, [scope.plotID, scope.censusID]],
-    ['upload', uploadSQL, [scope.plotID, scope.censusID, ...ACTIVE_UPLOAD_STATES]],
+    ['upload', uploadSQL, [scope.plotID, scope.censusID, ...ACTIVE_UPLOAD_SESSION_STATES]],
     ['pending', pendingSQL, [scope.censusID]]
   ] as const) {
     const rows = (await tx.query(sql, [...params])) as Array<{ count: number }>;

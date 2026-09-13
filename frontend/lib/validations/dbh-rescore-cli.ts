@@ -5,6 +5,8 @@ import type { RowDataPacket } from 'mysql2';
 import { parseStoredProceduresSQL } from '@/scripts/deploy-validations-to-all-schemas';
 import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
+import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
+import { NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
 import { dbhRuleDigest, planDbhSweep, runDbhSweep, type DbhSweepDependencies, type DbhSweepScope } from './dbh-rescore-sweep';
 import { rescoreDbhCensus } from './dbh-rescore';
 
@@ -320,8 +322,8 @@ export function buildRealSweepDeps(
         [scope.plotID, ids]
       );
       const [uploads] = await connection.query<CountRow[]>(
-        `SELECT COUNT(*) count FROM ${qualified}.upload_sessions WHERE plot_id=? AND census_id IN (?) AND state IN ('initialized','uploading','uploaded','processing','collapsing')`,
-        [scope.plotID, ids]
+        `SELECT COUNT(*) count FROM ${qualified}.upload_sessions WHERE plot_id=? AND census_id IN (?) AND state IN (?)`,
+        [scope.plotID, ids, ACTIVE_UPLOAD_SESSION_STATES]
       );
       const [pending] = await connection.query<CountRow[]>(
         `SELECT COUNT(*) count FROM ${qualified}.coremeasurements WHERE CensusID IN (?) AND IsActive=TRUE AND StemGUID IS NOT NULL AND IsValidated IS NULL`,
@@ -329,8 +331,8 @@ export function buildRealSweepDeps(
       );
       const [jobs] = await connection.query<CountRow[]>(
         `SELECT COUNT(*) count FROM catalog.background_jobs WHERE SchemaName=? AND PlotID=? AND CensusID IN (?)
-         AND Status IN ('queued','running','cancel_requested','waiting_retry')`,
-        [scope.schema, scope.plotID, ids]
+         AND Status IN (?)`,
+        [scope.schema, scope.plotID, ids, NON_TERMINAL_BACKGROUND_JOB_STATUSES]
       );
       return Number(running[0]?.count ?? 0) > 0
         ? { deferred: 'running validation record' }
