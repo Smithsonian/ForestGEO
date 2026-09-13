@@ -116,6 +116,7 @@ vi.mock('@/ailogger', () => ({
 
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { upsertAttributeRows, upsertPersonnelRows, upsertSpeciesRows } from '@/lib/uploads/reference-data-writers';
+import { QuadratOverlapAcknowledgmentRequiredError, writeQuadratUpload } from '@/lib/ingestion/quadrat-write-boundary';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import {
   buildReferenceReplacementLockName,
@@ -153,6 +154,7 @@ const RESET_TABLES_IN_ORDER = [
   'measurementssummary',
   'coremeasurements',
   'stems',
+  'quadrats',
   'trees',
   'specieslimits',
   'species',
@@ -171,6 +173,21 @@ function speciesRow(code: string): FileRow {
 
 function attributeRow(code: string): FileRow {
   return { code, description: `description for ${code}`, status: ATTRIBUTE_STATUS };
+}
+
+const QUADRAT_SIDE_METRES = 20;
+const NO_OVERLAP_ACKNOWLEDGMENT = undefined;
+const SOUTH_WEST_REFERENCE_CORNER = undefined;
+
+/** Lays quadrats out left to right along one row starting at `firstColumn`, so files never overlap unless told to. */
+function quadratRows(codes: string[], firstColumn: number): FileRow[] {
+  return codes.map((code, index) => ({
+    quadrat: code,
+    startx: String((firstColumn + index) * QUADRAT_SIDE_METRES),
+    starty: '0',
+    dimx: String(QUADRAT_SIDE_METRES),
+    dimy: String(QUADRAT_SIDE_METRES)
+  }));
 }
 
 function personnelRow(code: string): FileRow {
@@ -289,6 +306,11 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
   async function activeAttributeCodes(): Promise<string[]> {
     const [rows] = await connection.query<RowDataPacket[]>(`SELECT Code FROM attributes WHERE IsActive = 1 ORDER BY Code`);
     return rows.map(row => String(row.Code));
+  }
+
+  async function activeQuadratNames(): Promise<string[]> {
+    const [rows] = await connection.query<RowDataPacket[]>(`SELECT QuadratName FROM quadrats WHERE PlotID = ? AND IsActive = 1 ORDER BY QuadratName`, [plotID]);
+    return rows.map(row => String(row.QuadratName));
   }
 
   async function censusPersonnelFirstNames(): Promise<string[]> {
@@ -514,6 +536,70 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
       expect(retry.updatedCount).toBe(FILE_A_CODES.length);
       expect(retry.insertedCount).toBe(0);
       expect(await censusPersonnelFirstNames()).toEqual([...FILE_A_CODES].sort());
+    });
+  });
+  describe('quadrats', () => {
+    const uploadQuadrats = (rows: FileRow[], uploadSessionID: string | null, uploadMode = UploadMode.CLEAN_REUPLOAD) =>
+      uploadFile(transactionID =>
+        writeQuadratUpload(
+          connectionManager,
+          schema,
+          plotID,
+          rows,
+          uploadMode,
+          NO_OVERLAP_ACKNOWLEDGMENT,
+          SOUTH_WEST_REFERENCE_CORNER,
+          uploadSessionID,
+          transactionID
+        )
+      );
+
+    it('keeps every file of one session: the second file must not delete the first file quadrats', async () => {
+      await seedUploadSession(SESSION_ONE);
+      await uploadQuadrats(quadratRows(FILE_A_CODES, 0), SESSION_ONE);
+      expect(await activeQuadratNames()).toEqual([...FILE_A_CODES].sort());
+
+      const secondFile = await uploadQuadrats(quadratRows(FILE_B_CODES, FILE_A_CODES.length), SESSION_ONE);
+      console.log(`[quadrats] second file result ${JSON.stringify(secondFile)}; statements: ${loggableStatements()}`);
+
+      expect(await activeQuadratNames()).toEqual([...FILE_A_CODES, ...FILE_B_CODES].sort());
+      expect(deleteStatementCount('quadrats')).toBe(1);
+      expect(await referenceReplacementMarker(SESSION_ONE)).not.toBeNull();
+    });
+
+    it('validates a later file of the session against the quadrats the earlier file wrote', async () => {
+      await seedUploadSession(SESSION_ONE);
+      await uploadQuadrats(quadratRows(FILE_A_CODES, 0), SESSION_ONE);
+
+      // FILEB01 lands exactly on FILEA01's footprint. Validated on its own the file is
+      // clean; only the combined layout shows the overlap.
+      const overlappingSecondFile = uploadQuadrats(quadratRows(FILE_B_CODES, 0), SESSION_ONE);
+
+      await expect(overlappingSecondFile).rejects.toBeInstanceOf(QuadratOverlapAcknowledgmentRequiredError);
+      expect(await activeQuadratNames()).toEqual([...FILE_A_CODES].sort());
+    });
+
+    it('replaces again for a genuinely new upload session', async () => {
+      await seedUploadSession(SESSION_ONE);
+      await uploadQuadrats(quadratRows(FILE_A_CODES, 0), SESSION_ONE);
+      await completeUploadSession(SESSION_ONE);
+
+      await seedUploadSession(SESSION_TWO);
+      await uploadQuadrats(quadratRows(LATER_SESSION_CODES, 0), SESSION_TWO);
+
+      expect(await activeQuadratNames()).toEqual([...LATER_SESSION_CODES].sort());
+      expect(deleteStatementCount('quadrats')).toBe(2);
+    });
+
+    it('is idempotent when a timed-out request is retried inside the same session', async () => {
+      await seedUploadSession(SESSION_ONE);
+      await uploadQuadrats(quadratRows(FILE_A_CODES, 0), SESSION_ONE);
+
+      const retry = await uploadQuadrats(quadratRows(FILE_A_CODES, 0), SESSION_ONE);
+
+      expect(retry.updatedCount).toBe(FILE_A_CODES.length);
+      expect(retry.insertedCount).toBe(0);
+      expect(await activeQuadratNames()).toEqual([...FILE_A_CODES].sort());
     });
   });
 });

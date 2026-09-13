@@ -576,6 +576,7 @@ export async function POST(request: NextRequest) {
             uploadMode,
             overlapAcknowledgment,
             body.coordinateReferenceCorner,
+            sessionId,
             transactionID
           );
         } else if (formType === 'attributes') {

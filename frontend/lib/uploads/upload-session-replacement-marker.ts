@@ -27,7 +27,7 @@ import { UploadMode } from '@/config/uploadmodes';
 /** Column recording that a session's census replacement (measurements) has run. */
 export const CENSUS_REPLACEMENT_MARKER_COLUMN = 'census_replacement_completed_at';
 
-/** Column recording that a session's reference-table replacement (species/attributes/personnel) has run. */
+/** Column recording that a session's reference-table replacement (species/attributes/personnel/quadrats) has run. */
 export const REFERENCE_REPLACEMENT_MARKER_COLUMN = 'reference_replacement_completed_at';
 
 export type UploadSessionReplacementMarkerColumn = typeof CENSUS_REPLACEMENT_MARKER_COLUMN | typeof REFERENCE_REPLACEMENT_MARKER_COLUMN;

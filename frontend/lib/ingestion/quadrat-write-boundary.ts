@@ -15,6 +15,7 @@ import {
 } from '@/lib/provisioning/quadrat-collection-validation';
 import type { QuadratCsvRow } from '@/lib/provisioning/types';
 import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
+import { claimReferenceTableReplacement, recordReferenceTableReplacement } from '@/lib/uploads/upload-session-replacement-marker';
 
 const MAX_LISTED_ISSUES = 20;
 
@@ -86,6 +87,7 @@ export async function writeQuadratUpload(
   uploadMode: UploadMode,
   overlapAcknowledgment: unknown,
   coordinateReferenceCorner: unknown,
+  uploadSessionID: string | null,
   transactionID: string
 ): Promise<QuadratWriteResult> {
   if (!plotID) {
@@ -181,7 +183,13 @@ export async function writeQuadratUpload(
     acknowledgedOverlapSummaries.push(overlapSummary);
   };
 
-  if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+  // A clean re-upload replaces the plot's quadrats once per upload session (#472). A later
+  // file of that session, like a revisions upload, lands on a layout that already has rows:
+  // it is validated against the combined layout and matched by name.
+  const replacesExistingRows = await claimReferenceTableReplacement(connectionManager, schema, uploadMode, uploadSessionID, transactionID);
+  const rowsMayAlreadyExist = !replacesExistingRows;
+
+  if (replacesExistingRows) {
     const cleanValidation = validateQuadratCollectionDetailed(incomingGeometry, plotBounds);
     if (cleanValidation.fatalIssues.length > 0) {
       throw new QuadratGeometryValidationError(formatGeometryIssues(cleanValidation.fatalIssues));
@@ -222,7 +230,7 @@ export async function writeQuadratUpload(
     await connectionManager.executeQuery(deleteSQL, [plotID], transactionID);
   }
 
-  if (uploadMode === UploadMode.REVISIONS) {
+  if (rowsMayAlreadyExist) {
     const existingQuadratsSQL = safeFormatQuery(
       schema,
       `SELECT QuadratID, QuadratName, StartX, StartY, DimensionX, DimensionY FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1`
@@ -232,7 +240,9 @@ export async function writeQuadratUpload(
 
     const existingActiveNames = existingQuadratList.map(row => String(row.QuadratName ?? ''));
     const incomingNames = rows.map(row => normalizeRequiredString(row.quadrat)).filter(Boolean);
-    if (quadratRevisionAppendsDivergentSet(existingActiveNames, incomingNames)) {
+    // The placeholder-grid guard protects revisions only: in a clean session the existing rows
+    // were written by this session's earlier files, not by grid provisioning.
+    if (uploadMode === UploadMode.REVISIONS && quadratRevisionAppendsDivergentSet(existingActiveNames, incomingNames)) {
       throw new Error(buildDivergentQuadratUploadError(plotID, existingActiveNames, incomingNames.length));
     }
 
@@ -329,7 +339,7 @@ export async function writeQuadratUpload(
       QuadratShape: normalizeOptionalString(row.quadratshape)
     };
 
-    if (uploadMode === UploadMode.REVISIONS) {
+    if (rowsMayAlreadyExist) {
       const existingSQL = safeFormatQuery(
         schema,
         `SELECT QuadratID FROM ??.quadrats WHERE PlotID = ? AND LOWER(QuadratName) = LOWER(?) AND IsActive = 1 LIMIT 1`
@@ -364,6 +374,10 @@ export async function writeQuadratUpload(
       transactionID
     );
     insertedCount += 1;
+  }
+
+  if (replacesExistingRows) {
+    await recordReferenceTableReplacement(connectionManager, schema, uploadSessionID, transactionID);
   }
 
   return {

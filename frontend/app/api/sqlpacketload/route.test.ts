@@ -744,6 +744,15 @@ describe('sqlpacketload fixed-data upload modes', () => {
       .mockResolvedValueOnce([{ reference_replacement_completed_at: null }]);
   }
 
+  /** A refused upload may read (plot bounds, the replacement claim) but must not have written anything. */
+  function expectNoWriteStatements() {
+    const statements: string[] = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]).replace(/\s+/g, ' '));
+    expect(
+      statements.filter(statement => /^\s*(DELETE|INSERT|UPDATE)\b/i.test(statement)),
+      `statements issued: ${statements.join(' | ')}`
+    ).toEqual([]);
+  }
+
   it('deletes existing personnel and inserts fresh in clean re-upload mode', async () => {
     handleUpsertMock.mockResolvedValueOnce({ id: 77, operation: 'inserted' });
     queueUnclaimedReferenceReplacement();
@@ -945,10 +954,11 @@ describe('sqlpacketload fixed-data upload modes', () => {
   });
 
   it('refuses quadrat clean re-upload when active quadrats are already referenced by stems', async () => {
+    // authoritative plot bounds lookup, then the session's replacement claim
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
-      // 1: authoritative plot bounds lookup
-      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
-      // 2: stem-safety blocking query
+      // stem-safety blocking query
       .mockResolvedValueOnce([
         { QuadratID: 11, QuadratName: '1011' },
         { QuadratID: 12, QuadratName: '1012' }
@@ -971,7 +981,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(body.error).toContain('1012');
     expect(body.error).toContain('stems and downstream measurements');
     expect(body.error).toContain('Use Revisions Upload instead');
-    const guardSQL = String(mockConnectionManager.executeQuery.mock.calls[1]?.[0]);
+    const guardSQL = String(mockConnectionManager.executeQuery.mock.calls.find((call: any[]) => String(call[0]).includes('.stems'))?.[0]);
     expect(guardSQL).toContain('FROM `forestgeo_testing`.stems');
     // Soft-deleted stems must not block the wipe; only live stems count.
     expect(guardSQL).toContain('s.IsActive = 1');
@@ -988,9 +998,9 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // Regression: the guard previously trimmed and filtered out blank names
     // before deciding whether to refuse, so a stem-referenced quadrat named
     // ' ' slipped past the check and the DELETE cascade destroyed its stems.
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
-      .mockResolvedValueOnce([{ QuadratID: 42, QuadratName: '   ' }]);
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    queueUnclaimedReferenceReplacement();
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ QuadratID: 42, QuadratName: '   ' }]);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -1013,10 +1023,11 @@ describe('sqlpacketload fixed-data upload modes', () => {
   });
 
   it('allows quadrat clean re-upload when the plot has no stems on active quadrats', async () => {
+    // authoritative plot bounds lookup, then the session's replacement claim
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
-      // 1: authoritative plot bounds lookup
-      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
-      // 2: dependency precheck returns nothing
+      // dependency precheck returns nothing
       .mockResolvedValueOnce([])
       // 3: DELETE FROM quadrats
       .mockResolvedValueOnce({ affectedRows: 0 })
@@ -1034,7 +1045,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     );
 
     expect(res?.status).toBe(200);
-    expect(String(mockConnectionManager.executeQuery.mock.calls[1]?.[0])).toContain('FROM `forestgeo_testing`.stems');
+    expect(mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('FROM `forestgeo_testing`.stems'))).toBe(true);
     // Positive anchor for the refusal test's zero-DELETE filter above: the wipe
     // must run here with exactly this SQL text, so a quoting change that would
     // make the negative filter vacuous fails loudly instead.
@@ -1247,13 +1258,16 @@ describe('sqlpacketload fixed-data upload modes', () => {
     ).overlapSummary;
     if (!overlapSummary) throw new Error('expected overlap summary');
     const acknowledgment = buildQuadratOverlapAcknowledgment([overlapSummary.layoutSignature]);
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
       // stem-safety precheck + DELETE + two INSERTs
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
       .mockResolvedValueOnce({ insertId: 1 })
       .mockResolvedValueOnce({ insertId: 2 })
+      // marker write
+      .mockResolvedValueOnce({ affectedRows: 1 })
       // changelog lookup + insert
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ insertId: 3 });
@@ -1310,7 +1324,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     const body = await res?.json();
     expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
     expect(body.overlapSummaries[0].layoutSignature).toMatch(/^quadrat-layout-v1-[0-9a-f]{16}$/);
-    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+    expectNoWriteStatements();
   });
 
   it('requires re-acknowledgment when the submitted layout signature is stale', async () => {
@@ -1334,7 +1348,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     const body = await res?.json();
     expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
     expect(body.overlapSummaries[0].layoutSignature).not.toBe('quadrat-layout-v1-0000000000000000');
-    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+    expectNoWriteStatements();
   });
 
   it('rolls acknowledged quadrat writes back when their provenance record cannot be stored', async () => {
@@ -1613,7 +1627,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     const body = await res?.json();
     expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
     expect(body.error).toContain('overlap');
-    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+    expectNoWriteStatements();
   });
 
   it('parses numeric JSON geometry values (not just strings) for a quadrat upload', async () => {
