@@ -78,11 +78,13 @@ This page provides answers to frequently asked questions about errors and a comp
 - Duplicate records
 - Invalid references (species, quadrats)
 
-These are checks to help ensure data accuracy. DBH checks use elapsed days between measurement
-dates divided by 365.25, require both DBHs to be at least 10 mm (1 cm), and skip different
-non-missing HOM values. Either HOM may be missing. Missing DBH or dates, zero or reversed
-intervals, and exempt statuses on either measurement skip the comparison; short positive
-intervals are still checked.
+These are checks to help ensure data accuracy. DBH checks divide the elapsed days between
+measurement dates by 365.25 when the measurements are at least 365 days apart. Measurements less
+than a year apart, or with a missing date, use total change instead: growth above 65 mm or a
+drop of more than 5%. Both DBHs must be at least 10 mm (1 cm), and different non-missing HOM
+values skip the check. Either HOM may be missing. Missing DBH, reversed dates, intervals longer
+than 20 years (usually a mistyped year), and exempt statuses on either measurement skip the
+comparison.
 
 ### Q: Do validation errors prevent my data from being saved?
 

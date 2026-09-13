@@ -217,11 +217,10 @@ describe('DBH change diagnostics integration', () => {
     const millimetreIntervals = millimetreSets.find((set: unknown) => Array.isArray(set) && set[0]?.SkippedNoInterval)?.[0];
     // The failed-floor counter includes pending comparisons with a missing DBH
     // as well as below-floor values, even without a date. Completed and
-    // status-exempt rows do not count. The existing interval counter stays
-    // gated by DBH eligibility, so the failed-floor missing-date row is not
-    // double-counted.
+    // status-exempt rows do not count. A missing date is compared with the
+    // absolute thresholds, so it is not an interval skip.
     expect(millimetreFloor).toMatchObject({ SkippedBelowDbhFloor: '3' });
-    expect(millimetreIntervals).toMatchObject({ SkippedNoInterval: '1', SkippedMissingDate: '1' });
+    expect(millimetreIntervals).toMatchObject({ SkippedNoInterval: '0' });
 
     // Reinterpretation under centimetres would otherwise make the pending NULL
     // DBH fixture carry into this independent conversion-boundary assertion.
@@ -241,24 +240,104 @@ describe('DBH change diagnostics integration', () => {
     expect(centimetreFloor).toMatchObject({ SkippedBelowDbhFloor: '1' });
   });
 
-  it('returns every interval reason, excludes noneligible rows from skip counts, and distinguishes no prior comparison', async () => {
-    const missing = await seed('DIAG_MISSING', 100, 200, '2025-01-01');
-    await connection.query('UPDATE coremeasurements SET MeasurementDate = NULL WHERE CoreMeasurementID = ?', [missing.presentID]);
-    const zero = await seed('DIAG_ZERO', 100, 200, '2024-01-01');
+  it('annualises only intervals of at least one year and applies the absolute legacy thresholds to shorter or undated comparisons', async () => {
+    const cases = [
+      {
+        label: 'missing present date, 100 -> 200 mm: absolute growth of 100 mm exceeds 65 mm',
+        tag: 'BASIS_NODATE',
+        prior: 100,
+        present: 200,
+        date: '2025-01-01',
+        clearPresentDate: true,
+        expect: { comparisonBasis: 'absolute', intervalDays: null, growthViolates: true, shrinkageViolates: false }
+      },
+      {
+        label: 'same-day remeasure, 100 -> 200 mm: absolute growth of 100 mm exceeds 65 mm',
+        tag: 'BASIS_ZERO',
+        prior: 100,
+        present: 200,
+        date: '2024-01-01',
+        expect: { comparisonBasis: 'absolute', intervalDays: 0, growthViolates: true, shrinkageViolates: false }
+      },
+      {
+        label: '60 days, 50 -> 49 mm: a 2% drop is within the absolute 5% shrinkage limit (annualised it would be -12%/yr)',
+        tag: 'BASIS_SHORT_SHRINK',
+        prior: 50,
+        present: 49,
+        date: '2024-03-01',
+        expect: { comparisonBasis: 'absolute', intervalDays: 60, growthViolates: false, shrinkageViolates: false }
+      },
+      {
+        label: '60 days, 100 -> 160 mm: 60 mm is within the absolute 65 mm growth limit (annualised it would be 365 mm/yr)',
+        tag: 'BASIS_SHORT_GROW',
+        prior: 100,
+        present: 160,
+        date: '2024-03-01',
+        expect: { comparisonBasis: 'absolute', intervalDays: 60, growthViolates: false, shrinkageViolates: false }
+      },
+      {
+        label: '364 days, 100 -> 94 mm: a 6% drop exceeds the absolute 5% shrinkage limit',
+        tag: 'BASIS_364_SHRINK',
+        prior: 100,
+        present: 94,
+        date: '2024-12-30',
+        expect: { comparisonBasis: 'absolute', intervalDays: 364, growthViolates: false, shrinkageViolates: true }
+      },
+      {
+        label: '365 days, 100 -> 166 mm: first annualised interval, 66 mm over 365 days exceeds 65 mm per year',
+        tag: 'BASIS_365_GROW',
+        prior: 100,
+        present: 166,
+        date: '2024-12-31',
+        expect: { comparisonBasis: 'annualised', intervalDays: 365, growthViolates: true, shrinkageViolates: false }
+      },
+      {
+        label: '20 years (7305 days), 100 -> 1300 mm: the longest plausible interval is annualised, 60 mm per year passes',
+        tag: 'BASIS_20Y',
+        prior: 100,
+        present: 1300,
+        date: '2044-01-01',
+        expect: { comparisonBasis: 'annualised', intervalDays: 7305, intervalSkipReason: null, growthViolates: false, shrinkageViolates: false }
+      }
+    ];
+    for (const testCase of cases) {
+      const ids = await seed(testCase.tag, testCase.prior, testCase.present, testCase.date);
+      if (testCase.clearPresentDate) await connection.query('UPDATE coremeasurements SET MeasurementDate = NULL WHERE CoreMeasurementID = ?', [ids.presentID]);
+      const result = await explain(ids.presentID);
+      expect(result.outcome, testCase.label).toBe('pairs-found');
+      if (result.outcome === 'pairs-found') {
+        expect(result.pairs[0], testCase.label).toMatchObject({ isEligible: true, intervalSkipReason: null, ...testCase.expect });
+      }
+    }
+  });
+
+  it('returns every interval skip reason, excludes noneligible rows from skip counts, and distinguishes no prior comparison', async () => {
     const negative = await seed('DIAG_NEGATIVE', 100, 200, '2023-01-01');
+    const implausible = await seed('DIAG_IMPLAUSIBLE', 100, 200, '2044-01-02');
     const floor = await seed('DIAG_SKIP_FLOOR', 100, 9, '2024-01-01');
     for (const [id, reason] of [
-      [missing.presentID, 'missing-date'],
-      [zero.presentID, 'zero-interval'],
-      [negative.presentID, 'negative-interval']
+      [negative.presentID, 'negative-interval'],
+      [implausible.presentID, 'implausible-interval']
     ] as const) {
       const result = await explain(id);
       expect(result.outcome).toBe('pairs-found');
-      if (result.outcome === 'pairs-found') expect(result.pairs[0].intervalSkipReason).toBe(reason);
+      if (result.outcome === 'pairs-found') {
+        expect(result.pairs[0], `a ${reason} pair must be skipped with no comparison basis and no verdict`).toMatchObject({
+          intervalSkipReason: reason,
+          comparisonBasis: null,
+          isEligible: false,
+          growthViolates: false,
+          shrinkageViolates: false
+        });
+      }
     }
     const [sets] = await connection.query<any[]>('CALL RunSharedDBHChangeValidations(?, ?, 1, 1)', [census2ID, plotID]);
     const counts = sets.find((set: unknown) => Array.isArray(set) && set[0]?.SkippedNoInterval)?.[0];
-    expect(counts).toMatchObject({ SkippedNoInterval: '3', SkippedMissingDate: '1', SkippedZeroInterval: '1', SkippedNegativeInterval: '1' });
+    expect(counts, 'the below-floor pair is excluded from interval skip counts').toMatchObject({
+      SkippedNoInterval: '2',
+      SkippedNegativeInterval: '1',
+      SkippedImplausibleInterval: '1'
+    });
     expect(floor.presentID).toBeTruthy();
     const [orphan] = await connection.query<any>('INSERT INTO coremeasurements (CensusID, MeasuredDBH, IsActive) VALUES (?, 20, 1)', [census1ID]);
     await expect(explainDbhChangePairs({ schema: config.database, coreMeasurementID: orphan.insertId })).resolves.toMatchObject({

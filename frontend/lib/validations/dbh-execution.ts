@@ -5,9 +5,8 @@ import { DBH_CHANGE_VALIDATION_IDS, DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDUR
 export type ValidationExecutionParams = { p_CensusID?: number | null; p_PlotID?: number | null };
 export type DBHValidationSkipCounts = {
   skippedNoInterval: number;
-  skippedMissingDate: number;
-  skippedZeroInterval: number;
   skippedNegativeInterval: number;
+  skippedImplausibleInterval: number;
   skippedBelowDbhFloor: number;
 };
 export type CombinedDBHValidationResult = { success: boolean; ranGrowth: boolean; ranShrinkage: boolean; skipCounts?: DBHValidationSkipCounts; error?: string };
@@ -26,9 +25,8 @@ export function parseDbhValidationSkipCounts(result: unknown): DBHValidationSkip
   };
   return {
     skippedNoInterval: n('SkippedNoInterval'),
-    skippedMissingDate: n('SkippedMissingDate'),
-    skippedZeroInterval: n('SkippedZeroInterval'),
     skippedNegativeInterval: n('SkippedNegativeInterval'),
+    skippedImplausibleInterval: n('SkippedImplausibleInterval'),
     skippedBelowDbhFloor: n('SkippedBelowDbhFloor')
   };
 }

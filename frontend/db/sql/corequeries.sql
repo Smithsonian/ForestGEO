@@ -6,10 +6,10 @@ truncate sitespecificvalidations;
 -- Keep the shared candidate SQL in that helper only; do not duplicate it here.
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)
-VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds 65 mm per year against the prior census (both DBH >= 10 mm, HOM unchanged)', 'measuredDBH',
+VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds 65 mm per year against the prior census, or 65 mm in total when under a year apart or undated (both DBH >= 10 mm, HOM unchanged)', 'measuredDBH',
         'CALL RunSharedDBHChangeValidations(@p_CensusID, @p_PlotID, 1, 0);', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
-VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage is at least 5 percent per year against the prior census (both DBH >= 10 mm, HOM unchanged)', 'measuredDBH',
+VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage is at least 5 percent per year against the prior census, or over 5 percent in total when under a year apart or undated (both DBH >= 10 mm, HOM unchanged)', 'measuredDBH',
         'CALL RunSharedDBHChangeValidations(@p_CensusID, @p_PlotID, 0, 1);', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)

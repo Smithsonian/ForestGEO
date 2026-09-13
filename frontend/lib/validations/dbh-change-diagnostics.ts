@@ -6,6 +6,7 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
 import type { TxExecutor } from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import type { DbhComparisonBasis, DbhIntervalSkipReason } from '@/config/dbhchangevalidations';
 
 export interface ExplainDbhChangePairsInput {
   schema: string;
@@ -42,7 +43,9 @@ export interface DbhChangePairFact {
   statusExempt: boolean;
   dbhsMeetFloor: boolean;
   homEligible: boolean;
-  intervalSkipReason: 'missing-date' | 'zero-interval' | 'negative-interval' | null;
+  intervalSkipReason: DbhIntervalSkipReason | null;
+  /** Null when the interval is skipped; 'absolute' for undated or sub-year intervals. */
+  comparisonBasis: DbhComparisonBasis | null;
   isEligible: boolean;
   growthViolates: boolean;
   shrinkageViolates: boolean;
@@ -89,7 +92,8 @@ function mapPair(row: Record<string, unknown>): DbhChangePairFact {
     statusExempt: asBoolean(row.StatusExempt),
     dbhsMeetFloor: asBoolean(row.DbhsMeetFloor),
     homEligible: asBoolean(row.HomEligible),
-    intervalSkipReason: row.IntervalSkipReason == null ? null : (String(row.IntervalSkipReason) as DbhChangePairFact['intervalSkipReason']),
+    intervalSkipReason: row.IntervalSkipReason == null ? null : (String(row.IntervalSkipReason) as DbhIntervalSkipReason),
+    comparisonBasis: row.ComparisonBasis == null ? null : (String(row.ComparisonBasis) as DbhComparisonBasis),
     isEligible: asBoolean(row.IsEligible),
     growthViolates: asBoolean(row.GrowthViolates),
     shrinkageViolates: asBoolean(row.ShrinkageViolates)

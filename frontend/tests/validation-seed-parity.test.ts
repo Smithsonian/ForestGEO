@@ -19,8 +19,14 @@ describe('DBH validation seed parity', () => {
     expect(core).toEqual(procedure);
     expect(core).toEqual(
       new Map([
-        [1, 'DBH growth exceeds 65 mm per year against the prior census (both DBH >= 10 mm, HOM unchanged)'],
-        [2, 'DBH shrinkage is at least 5 percent per year against the prior census (both DBH >= 10 mm, HOM unchanged)']
+        [
+          1,
+          'DBH growth exceeds 65 mm per year against the prior census, or 65 mm in total when under a year apart or undated (both DBH >= 10 mm, HOM unchanged)'
+        ],
+        [
+          2,
+          'DBH shrinkage is at least 5 percent per year against the prior census, or over 5 percent in total when under a year apart or undated (both DBH >= 10 mm, HOM unchanged)'
+        ]
       ])
     );
   });

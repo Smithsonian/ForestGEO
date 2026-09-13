@@ -801,6 +801,13 @@ BEGIN
     DECLARE cShrinkMaxRelativePerYear DECIMAL(10, 6) DEFAULT -0.05;
     DECLARE cMinDbhMm DECIMAL(10, 4) DEFAULT 10;
     DECLARE cDaysPerYear DECIMAL(8, 3) DEFAULT 365.25;
+    -- Shorter or undated comparisons use the absolute thresholds: annualising a
+    -- short interval turns measurement precision into an implausible yearly rate.
+    DECLARE cMinAnnualisedIntervalDays INT DEFAULT 365;
+    -- Longer intervals are almost always a mistyped year and would hide real change.
+    DECLARE cMaxPlausibleIntervalDays INT DEFAULT 7305;
+    DECLARE cAbsoluteGrowthMaxMm DECIMAL(10, 4) DEFAULT 65;
+    DECLARE cAbsoluteShrinkMinRatio DECIMAL(10, 6) DEFAULT 0.95;
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         DROP TEMPORARY TABLE IF EXISTS dbh_change_pairs;
@@ -827,6 +834,7 @@ BEGIN
         DbhsMeetFloor TINYINT NOT NULL DEFAULT 0,
         HomEligible TINYINT NOT NULL DEFAULT 0,
         IntervalSkipReason VARCHAR(32) NULL,
+        ComparisonBasis VARCHAR(16) NULL,
         IsEligible TINYINT NOT NULL DEFAULT 0,
         GrowthViolates TINYINT NOT NULL DEFAULT 0,
         ShrinkageViolates TINYINT NOT NULL DEFAULT 0,
@@ -882,17 +890,26 @@ BEGIN
 
     UPDATE dbh_change_pairs
     SET IntervalYears = CASE WHEN IntervalDays IS NULL THEN NULL ELSE CAST(IntervalDays AS DECIMAL(20, 10)) / cDaysPerYear END,
-        IntervalSkipReason = CASE WHEN IntervalDays IS NULL THEN 'missing-date' WHEN IntervalDays = 0 THEN 'zero-interval' WHEN IntervalDays < 0 THEN 'negative-interval' ELSE NULL END;
+        IntervalSkipReason = CASE WHEN IntervalDays < 0 THEN 'negative-interval' WHEN IntervalDays > cMaxPlausibleIntervalDays THEN 'implausible-interval' ELSE NULL END;
+
+    UPDATE dbh_change_pairs
+    SET ComparisonBasis = CASE WHEN IntervalSkipReason IS NOT NULL THEN NULL
+                               WHEN IntervalDays IS NULL OR IntervalDays < cMinAnnualisedIntervalDays THEN 'absolute'
+                               ELSE 'annualised' END;
 
     UPDATE dbh_change_pairs
     SET IsEligible = CASE WHEN StatusExempt = 0 AND DbhsMeetFloor = 1 AND HomEligible = 1 AND IntervalSkipReason IS NULL THEN 1 ELSE 0 END;
 
     -- Compare with interval days directly so the exact boundary is not affected by rounded years.
     UPDATE dbh_change_pairs
-    SET GrowthViolates = CASE WHEN IsEligible = 1
-                 AND (PresentDBH - PriorDBH) * UnitToMm * cDaysPerYear > cGrowthMaxMmPerYear * IntervalDays THEN 1 ELSE 0 END,
-        ShrinkageViolates = CASE WHEN IsEligible = 1 AND PriorDBH IS NOT NULL AND PriorDBH <> 0
-                 AND (PresentDBH - PriorDBH) * cDaysPerYear <= cShrinkMaxRelativePerYear * PriorDBH * IntervalDays THEN 1 ELSE 0 END;
+    SET GrowthViolates = CASE WHEN IsEligible = 1 AND (
+                     (ComparisonBasis = 'annualised' AND (PresentDBH - PriorDBH) * UnitToMm * cDaysPerYear > cGrowthMaxMmPerYear * IntervalDays)
+                  OR (ComparisonBasis = 'absolute' AND (PresentDBH - PriorDBH) * UnitToMm > cAbsoluteGrowthMaxMm)
+                 ) THEN 1 ELSE 0 END,
+        ShrinkageViolates = CASE WHEN IsEligible = 1 AND PriorDBH IS NOT NULL AND PriorDBH <> 0 AND (
+                     (ComparisonBasis = 'annualised' AND (PresentDBH - PriorDBH) * cDaysPerYear <= cShrinkMaxRelativePerYear * PriorDBH * IntervalDays)
+                  OR (ComparisonBasis = 'absolute' AND PresentDBH < PriorDBH * cAbsoluteShrinkMinRatio)
+                 ) THEN 1 ELSE 0 END;
 END $$
 
 -- Single source of truth for the shared DBH change candidate logic used by ValidationIDs 1 and 2.
@@ -932,9 +949,8 @@ BEGIN
 
     IF vRunGrowth = 0 AND vRunShrinkage = 0 THEN
         SELECT 0 AS SkippedNoInterval,
-               0 AS SkippedMissingDate,
-               0 AS SkippedZeroInterval,
                0 AS SkippedNegativeInterval,
+               0 AS SkippedImplausibleInterval,
                0 AS SkippedBelowDbhFloor;
         LEAVE shared_dbh;
     END IF;
@@ -1036,9 +1052,8 @@ BEGIN
     END IF;
 
     SELECT COALESCE(SUM(IntervalSkipReason IS NOT NULL), 0) AS SkippedNoInterval,
-           COALESCE(SUM(IntervalSkipReason = 'missing-date'), 0) AS SkippedMissingDate,
-           COALESCE(SUM(IntervalSkipReason = 'zero-interval'), 0) AS SkippedZeroInterval,
-           COALESCE(SUM(IntervalSkipReason = 'negative-interval'), 0) AS SkippedNegativeInterval
+           COALESCE(SUM(IntervalSkipReason = 'negative-interval'), 0) AS SkippedNegativeInterval,
+           COALESCE(SUM(IntervalSkipReason = 'implausible-interval'), 0) AS SkippedImplausibleInterval
     FROM dbh_change_pairs
     WHERE PresentIsValidated IS NULL AND StatusExempt = 0 AND DbhsMeetFloor = 1 AND HomEligible = 1;
     SELECT COALESCE(SUM(DbhsMeetFloor = 0), 0) AS SkippedBelowDbhFloor
@@ -1297,11 +1312,11 @@ begin
     -- Keep the shared candidate SQL in that helper only; do not duplicate it here.
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
-    VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds 65 mm per year against the prior census (both DBH >= 10 mm, HOM unchanged)', 'measuredDBH',
+    VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds 65 mm per year against the prior census, or 65 mm in total when under a year apart or undated (both DBH >= 10 mm, HOM unchanged)', 'measuredDBH',
             'CALL RunSharedDBHChangeValidations(@p_CensusID, @p_PlotID, 1, 0);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
-    VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage is at least 5 percent per year against the prior census (both DBH >= 10 mm, HOM unchanged)', 'measuredDBH',
+    VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage is at least 5 percent per year against the prior census, or over 5 percent in total when under a year apart or undated (both DBH >= 10 mm, HOM unchanged)', 'measuredDBH',
             'CALL RunSharedDBHChangeValidations(@p_CensusID, @p_PlotID, 0, 1);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)

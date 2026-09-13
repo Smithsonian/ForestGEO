@@ -94,10 +94,11 @@ Technical errors related to database and server issues.
 ---
 
 DBH shrinkage is flagged at an annual relative change of −0.05 or below (at least 5% per year).
-Elapsed years are measurement-date days divided by 365.25. Both DBHs must be at least 10 mm
-(1 cm); HOM must be equal unless either value is missing. Missing DBH or dates, zero or negative
-intervals, and exempt statuses on either measurement skip the check. Short positive intervals
-remain eligible.
+Elapsed years are measurement-date days divided by 365.25, for measurements at least 365 days
+apart. Measurements less than a year apart, or with a missing date, are judged on total change:
+growth above 65 mm or a drop of more than 5%. Both DBHs must be at least 10 mm (1 cm); HOM must be
+equal unless either value is missing. Missing DBH, reversed dates, intervals longer than 20 years,
+and exempt statuses on either measurement skip the check.
 
 ## Error Severity Levels
 

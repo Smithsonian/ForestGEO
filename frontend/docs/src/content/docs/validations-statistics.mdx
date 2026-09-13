@@ -81,9 +81,14 @@ These flag growth or shrinkage for review using the measurement dates and the im
 - **Abnormally high DBH** *(V15)*: A diameter above 3500 mm exceeds anything plausible and almost always means a unit or transcription error
 
 Elapsed years equal the difference between the two measurement dates in days divided by 365.25.
+Rates are only annualised when the measurements are at least 365 days apart. Measurements less
+than a year apart, or with a missing date, are judged on total change instead: growth above
+65 mm, or a drop of more than 5% of the prior DBH. Annualising a few weeks of change would turn
+ordinary measurement precision into an implausible yearly rate.
+
 Both DBHs must be at least 10 mm (1 cm). Different non-missing HOM values suppress the check;
-either HOM may be missing. Missing DBH or dates, zero or negative intervals, and exempt
-statuses on either measurement skip the comparison. Short positive intervals remain eligible.
+either HOM may be missing. Missing DBH, reversed dates, intervals longer than 20 years (almost
+always a mistyped year), and exempt statuses on either measurement skip the comparison.
 A skipped comparison is not evidence that the measurement passed a growth check.
 
 DBH reruns retain occurrence rows, resolve stale findings, and reopen findings that still violate
