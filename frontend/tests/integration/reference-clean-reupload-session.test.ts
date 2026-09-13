@@ -22,7 +22,7 @@
  *   npx vitest run --config vitest.integration.config.mts tests/integration/reference-clean-reupload-session.test.ts
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Connection, RowDataPacket } from 'mysql2/promise';
+import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import { setupTestDatabase, teardownTestDatabase, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
 import { UploadMode } from '@/config/uploadmodes';
 import type { FileRow } from '@/config/macros/formdetails';
@@ -47,7 +47,11 @@ const sharedState = vi.hoisted(() => ({
   activeTransactionID: null as string | null,
   transactionCounter: 0,
   /** Every statement the writers issued, so "did this request delete?" is directly observable. */
-  statements: [] as string[]
+  statements: [] as string[],
+  /** Named locks taken inside the active transaction; released when it ends, as ConnectionManager does. */
+  heldLockNames: [] as string[],
+  /** Runs after each writer statement, so a test can act from another connection mid-request. */
+  statementObserver: null as ((statement: string) => Promise<void>) | null
 }));
 
 vi.mock('@/lib/db/connectionmanager', () => {
@@ -59,11 +63,23 @@ vi.mock('@/lib/db/connectionmanager', () => {
       }
       sharedState.statements.push(query);
       const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
+      if (sharedState.statementObserver) await sharedState.statementObserver(query);
       return rows;
+    },
+    acquireApplicationLock: async (lockName: string, transactionID: string, timeoutMs: number) => {
+      if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: lock transactionID mismatch');
+      const [rows] = await sharedState.connection.query<RowDataPacket[]>('SELECT GET_LOCK(?, ?) AS acquired', [lockName, Math.ceil(timeoutMs / 1000)]);
+      const acquired = rows[0].acquired === 1;
+      if (acquired) sharedState.heldLockNames.push(lockName);
+      return acquired;
     },
     beginTransaction: async () => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       if (sharedState.activeTransactionID) throw new Error('ConnectionManager mock: transaction already active');
+      // ConnectionManager.beginTransaction runs every transaction at READ COMMITTED; the
+      // replacement claim depends on it to see a marker committed while it waited.
+      await sharedState.connection.query('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
       await sharedState.connection.beginTransaction();
       sharedState.transactionCounter += 1;
       sharedState.activeTransactionID = `${TRANSACTION_ID_PREFIX}${sharedState.transactionCounter}`;
@@ -72,14 +88,21 @@ vi.mock('@/lib/db/connectionmanager', () => {
     commitTransaction: async (transactionID: string) => {
       if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: commit transactionID mismatch');
       await sharedState.connection!.commit();
+      await releaseHeldLocks();
       sharedState.activeTransactionID = null;
     },
     rollbackTransaction: async (transactionID: string) => {
       if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: rollback transactionID mismatch');
       await sharedState.connection!.rollback();
+      await releaseHeldLocks();
       sharedState.activeTransactionID = null;
     }
   };
+  async function releaseHeldLocks(): Promise<void> {
+    for (const lockName of sharedState.heldLockNames.splice(0)) {
+      await sharedState.connection!.query('SELECT RELEASE_LOCK(?)', [lockName]);
+    }
+  }
   return { default: { getInstance: () => manager } };
 });
 
@@ -94,7 +117,11 @@ vi.mock('@/ailogger', () => ({
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { upsertAttributeRows, upsertPersonnelRows, upsertSpeciesRows } from '@/lib/uploads/reference-data-writers';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
-import { REFERENCE_REPLACEMENT_MARKER_COLUMN, resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
+import {
+  buildReferenceReplacementLockName,
+  REFERENCE_REPLACEMENT_MARKER_COLUMN,
+  resetUploadSessionReplacementMarkerCacheForTests
+} from '@/lib/uploads/upload-session-replacement-marker';
 
 // ---------------------------------------------------------------------------
 // Fixture vocabulary — one upload session, two files, as the route issues them.
@@ -112,6 +139,12 @@ const LATER_SESSION_CODES = ['LATER01'];
 const PREEXISTING_CODES = ['STALE01', 'STALE02'];
 
 const ATTRIBUTE_STATUS = 'alive';
+
+/** innodb_lock_wait_timeout floor: a heartbeat that waits this long on the session row was blocked. */
+const HEARTBEAT_LOCK_WAIT_TIMEOUT_SECONDS = 1;
+/** Long enough for a request that is NOT waiting on the lock to have finished outright. */
+const OVERLAPPING_REQUEST_SETTLE_MS = 750;
+const HEARTBEAT_WRITTEN = 'heartbeat-written';
 
 // Tables the writers own, emptied between cases in dependency order so no
 // FOREIGN_KEY_CHECKS override is needed (species cascades into trees, and the
@@ -146,6 +179,8 @@ function personnelRow(code: string): FileRow {
 
 describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)', () => {
   let connection: Connection;
+  /** A second session standing in for another request or the heartbeat endpoint. */
+  let peerConnection: Connection;
   let config: TestDatabaseConfig;
   let testData: TestData;
   let schema: string;
@@ -163,6 +198,13 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
     plotID = testData.plots[0].plotID;
     censusID = testData.census[0].censusID;
     sharedState.connection = connection;
+    peerConnection = await mysql.createConnection({
+      host: config.host,
+      port: config.port,
+      user: config.user,
+      password: config.password,
+      database: config.database
+    });
 
     // The replacement marker lives on upload_sessions, which the app creates on
     // demand. Using the production DDL also proves ensureUploadSessionsTable
@@ -172,6 +214,7 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
   }, 90000);
 
   afterAll(async () => {
+    await peerConnection?.end();
     sharedState.connection = null;
     await teardownTestDatabase(connection, config);
   });
@@ -185,6 +228,7 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
       await connection.query(`DELETE FROM ${table}`);
     }
     sharedState.statements = [];
+    sharedState.statementObserver = null;
     resetUploadSessionReplacementMarkerCacheForTests();
     console.log(`[beforeEach] cleared ${RESET_TABLES_IN_ORDER.join(', ')}`);
   });
@@ -225,6 +269,10 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
       await connectionManager.rollbackTransaction(transactionID);
       throw error;
     }
+  }
+
+  function loggableStatements(): string {
+    return sharedState.statements.map(statement => statement.replace(/\s+/g, ' ').trim()).join(' | ');
   }
 
   /** Counts only the table-scoped `DELETE FROM <schema>.<table>` resets, not the joined
@@ -365,6 +413,67 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
       expect(retry.updatedCount).toBe(FILE_A_CODES.length);
       expect(retry.insertedCount).toBe(0);
       expect(await activeAttributeCodes()).toEqual([...FILE_A_CODES].sort());
+    });
+
+    it('serializes an overlapping retry: the request that waited reads the committed marker and does not delete again', async () => {
+      await seedUploadSession(SESSION_ONE);
+
+      // The first request, still in flight on another connection: it holds the session's
+      // replacement lock, has replaced the table with file A and recorded the marker, but
+      // has not committed yet — the moment a client that timed out sends its retry.
+      await peerConnection.query('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
+      await peerConnection.beginTransaction();
+      const [lockRows] = await peerConnection.query<RowDataPacket[]>('SELECT GET_LOCK(?, 0) AS acquired', [
+        buildReferenceReplacementLockName(schema, SESSION_ONE)
+      ]);
+      expect(lockRows[0].acquired, 'the in-flight request must hold the lock for this case to mean anything').toBe(1);
+      for (const code of FILE_A_CODES) {
+        await peerConnection.query(`INSERT INTO attributes (Code, Description, Status, IsActive) VALUES (?, ?, ?, 1)`, [
+          code,
+          `in-flight ${code}`,
+          ATTRIBUTE_STATUS
+        ]);
+      }
+      await peerConnection.query(`UPDATE upload_sessions SET ${REFERENCE_REPLACEMENT_MARKER_COLUMN} = CURRENT_TIMESTAMP WHERE session_id = ?`, [SESSION_ONE]);
+
+      let retrySettled = false;
+      const retry = uploadAttributes(FILE_A_CODES, SESSION_ONE).finally(() => {
+        retrySettled = true;
+      });
+      await new Promise(resolve => setTimeout(resolve, OVERLAPPING_REQUEST_SETTLE_MS));
+      console.log(`[overlap] retry settled before the in-flight request committed: ${retrySettled}; statements so far: ${loggableStatements()}`);
+      expect(retrySettled, 'the retry must wait for the in-flight request of its own session').toBe(false);
+
+      await peerConnection.commit();
+      await peerConnection.query('SELECT RELEASE_LOCK(?)', [buildReferenceReplacementLockName(schema, SESSION_ONE)]);
+      const retryResult = await retry;
+      console.log(`[overlap] retry result ${JSON.stringify(retryResult)}; statements: ${loggableStatements()}`);
+
+      expect(deleteStatementCount('attributes'), 'the retry must not run the reset a second time').toBe(0);
+      expect(retryResult).toEqual({ insertedCount: 0, updatedCount: FILE_A_CODES.length, skippedCount: 0 });
+      expect(await activeAttributeCodes()).toEqual([...FILE_A_CODES].sort());
+    });
+
+    it('does not lock the session row while the rows are written, so a heartbeat mid-upload goes through', async () => {
+      await seedUploadSession(SESSION_ONE);
+      await peerConnection.query('SET SESSION innodb_lock_wait_timeout = ?', [HEARTBEAT_LOCK_WAIT_TIMEOUT_SECONDS]);
+
+      const heartbeatOutcomes: string[] = [];
+      sharedState.statementObserver = async statement => {
+        if (!/^\s*INSERT INTO \S+\.attributes\b/i.test(statement)) return;
+        try {
+          await peerConnection.query('UPDATE upload_sessions SET last_heartbeat = CURRENT_TIMESTAMP WHERE session_id = ?', [SESSION_ONE]);
+          heartbeatOutcomes.push(HEARTBEAT_WRITTEN);
+        } catch (error: unknown) {
+          heartbeatOutcomes.push(`heartbeat-blocked: ${(error as { code?: string }).code ?? String(error)}`);
+        }
+      };
+
+      await uploadAttributes(FILE_A_CODES, SESSION_ONE);
+      console.log(`[heartbeat] outcomes after each attribute insert: ${heartbeatOutcomes.join(', ')}`);
+
+      expect(heartbeatOutcomes).toEqual(FILE_A_CODES.map(() => HEARTBEAT_WRITTEN));
+      expect(await referenceReplacementMarker(SESSION_ONE), 'the marker must still be recorded, after the rows').not.toBeNull();
     });
   });
 

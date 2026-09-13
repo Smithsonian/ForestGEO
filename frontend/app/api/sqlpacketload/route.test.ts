@@ -7,7 +7,8 @@ import {
   resetTemporaryMeasurementsSourceFormatColumnCacheForTests,
   TEMP_MEASUREMENT_INSERT_BATCH_SIZE
 } from '@/lib/ingestion/temporary-measurements';
-import { resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
+import { REFERENCE_REPLACEMENT_LOCK_TIMEOUT_MS, resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
+import { HTTPResponses } from '@/config/macros';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { headerSignature } from '@/lib/column-mapping/mapping';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
@@ -54,7 +55,8 @@ vi.mock('@/lib/db/connectionmanager', () => {
   const beginTransaction = vi.fn().mockResolvedValue('tx-test');
   const commitTransaction = vi.fn().mockResolvedValue(undefined);
   const rollbackTransaction = vi.fn().mockResolvedValue(undefined);
-  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction };
+  const acquireApplicationLock = vi.fn().mockResolvedValue(true);
+  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction, acquireApplicationLock };
   return {
     default: {
       getInstance: () => instance
@@ -618,6 +620,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-fixed');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
+    mockConnectionManager.acquireApplicationLock.mockResolvedValue(true);
     handleUpsertMock.mockResolvedValue({ id: 1, operation: 'inserted' });
   });
 
@@ -726,8 +729,24 @@ describe('sqlpacketload fixed-data upload modes', () => {
     });
   });
 
+  /**
+   * A reference-table CLEAN_REUPLOAD first decides whether THIS request owns the
+   * destructive reset (#472): it reads the upload_sessions marker column state, takes
+   * the per-session lock (acquireApplicationLock, mocked to succeed), then probes the
+   * session's marker. Queue the two query answers so the writer's own statements line
+   * up with the mocks that follow. The marker itself is written after the rows.
+   */
+  function queueUnclaimedReferenceReplacement() {
+    mockConnectionManager.executeQuery
+      // marker column state lookup (information_schema)
+      .mockResolvedValueOnce([{ tableCount: 1, columnCount: 1 }])
+      // marker probe: this session has not replaced yet
+      .mockResolvedValueOnce([{ reference_replacement_completed_at: null }]);
+  }
+
   it('deletes existing personnel and inserts fresh in clean re-upload mode', async () => {
     handleUpsertMock.mockResolvedValueOnce({ id: 77, operation: 'inserted' });
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
       // DELETE censusactivepersonnel for this census
       .mockResolvedValueOnce({ affectedRows: 2 })
@@ -736,6 +755,8 @@ describe('sqlpacketload fixed-data upload modes', () => {
       // INSERT new personnel row
       .mockResolvedValueOnce({ insertId: 501 })
       // INSERT IGNORE censusactivepersonnel link
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      // marker write: this session's reset is recorded after the rows
       .mockResolvedValueOnce({ affectedRows: 1 })
       // changelog: SELECT existing entry
       .mockResolvedValueOnce([])
@@ -774,11 +795,17 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
   it('normalizes camelCase personnel roles before upserting', async () => {
     handleUpsertMock.mockResolvedValueOnce({ id: 77, operation: 'inserted' });
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([])
+      // DELETE censusactivepersonnel, DELETE orphaned personnel
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      // INSERT personnel, INSERT IGNORE censusactivepersonnel link
       .mockResolvedValueOnce({ insertId: 501 })
       .mockResolvedValueOnce({ affectedRows: 1 })
-      .mockResolvedValueOnce({ affectedRows: 0 })
+      // marker write
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      // changelog: SELECT existing entry, INSERT new entry
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ insertId: 3 });
 
@@ -822,22 +849,6 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
     expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
   });
-
-  /**
-   * A reference-table CLEAN_REUPLOAD first decides whether THIS request owns the
-   * destructive reset (#472): it reads the upload_sessions marker column state,
-   * probes the session's marker, and claims it. Queue those three answers so the
-   * writer's own statements line up with the mocks that follow.
-   */
-  function queueUnclaimedReferenceReplacement() {
-    mockConnectionManager.executeQuery
-      // marker column state lookup (information_schema)
-      .mockResolvedValueOnce([{ tableCount: 1, columnCount: 1 }])
-      // marker probe: this session has not replaced yet
-      .mockResolvedValueOnce([{ reference_replacement_completed_at: null }])
-      // marker claim
-      .mockResolvedValueOnce({ affectedRows: 1 });
-  }
 
   it('refuses species clean re-upload when active species rows are already referenced', async () => {
     // The dependency lookup is the FIRST executeQuery call in the species CLEAN_REUPLOAD
@@ -907,6 +918,30 @@ describe('sqlpacketload fixed-data upload modes', () => {
       String(call[0]).includes('DELETE FROM `forestgeo_testing`.species')
     );
     expect(speciesDeleteCalls.length).toBe(1);
+  });
+
+  it('answers 409 without deleting or retrying when another request of the same session still holds the replacement lock', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ tableCount: 1, columnCount: 1 }]);
+    mockConnectionManager.acquireApplicationLock.mockResolvedValueOnce(false);
+
+    const res = await POST(makeFixedDataRequest('species', { 'row-1': { spcode: 'newspc', species: 'novel' } }, { uploadMode: 'clean_reupload' }));
+
+    const body = await res?.json();
+    const statements: string[] = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
+    expect(res?.status, `response body: ${JSON.stringify(body)}`).toBe(HTTPResponses.CONFLICT);
+    expect(body.code).toBe('REFERENCE_REPLACEMENT_IN_PROGRESS');
+    expect(body.error).toContain(TEST_SESSION_ID);
+    expect(mockConnectionManager.acquireApplicationLock).toHaveBeenCalledWith(
+      expect.stringMatching(/^upload:reference:[0-9a-f]{40}$/),
+      'tx-fixed',
+      REFERENCE_REPLACEMENT_LOCK_TIMEOUT_MS
+    );
+    expect(
+      statements.filter(statement => /DELETE|INSERT|UPDATE/.test(statement)),
+      `no write may run once the lock is refused; statements: ${statements.join(' | ')}`
+    ).toEqual([]);
+    expect(mockConnectionManager.beginTransaction, 'a lock refusal is not a retryable infrastructure error').toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
   });
 
   it('refuses quadrat clean re-upload when active quadrats are already referenced by stems', async () => {

@@ -25,6 +25,9 @@ import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import { MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
 import { type FixedDataProcessingResult, upsertAttributeRows, upsertPersonnelRows, upsertSpeciesRows } from '@/lib/uploads/reference-data-writers';
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
+import { ReferenceReplacementInProgressError } from '@/lib/uploads/upload-session-replacement-marker';
+
+const REFERENCE_REPLACEMENT_IN_PROGRESS_CODE = 'REFERENCE_REPLACEMENT_IN_PROGRESS';
 
 /**
  * Generate idempotency key for a batch of data
@@ -759,6 +762,11 @@ export async function POST(request: NextRequest) {
             code: 'INVALID_QUADRAT_GEOMETRY'
           });
           return NextResponse.json({ error: error.message, code: 'INVALID_QUADRAT_GEOMETRY' }, { status: HTTPResponses.INVALID_REQUEST });
+        }
+
+        if (error instanceof ReferenceReplacementInProgressError) {
+          ailogger.warn(`Refused overlapping ${formType} upload request for ${fileName}: ${error.message}`, { schema, uploadMode, sessionId });
+          return NextResponse.json({ error: error.message, code: REFERENCE_REPLACEMENT_IN_PROGRESS_CODE }, { status: HTTPResponses.CONFLICT });
         }
 
         retryCount++;

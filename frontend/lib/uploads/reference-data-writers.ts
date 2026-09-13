@@ -18,12 +18,7 @@ import { handleUpsert } from '@/config/utils';
 import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
 import { RoleResult } from '@/lib/db/definitions/personnel';
 import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
-import {
-  ensureUploadSessionReplacementMarkerColumn,
-  markUploadSessionReplacementCompleted,
-  REFERENCE_REPLACEMENT_MARKER_COLUMN,
-  uploadSessionHasCompletedReplacement
-} from '@/lib/uploads/upload-session-replacement-marker';
+import { claimReferenceTableReplacement, recordReferenceTableReplacement } from '@/lib/uploads/upload-session-replacement-marker';
 
 export interface FixedDataProcessingResult {
   insertedCount: number;
@@ -79,42 +74,6 @@ function formatBlockedCleanReuploadValues(values: string[], maxValues: number = 
   return truncateAndJoin(uniqueValues, ', ', maxValues);
 }
 
-/**
- * Decides whether THIS request owns the destructive reset of a reference table.
- *
- * A CLEAN_REUPLOAD deletes the whole active table before writing the incoming
- * rows. The route issues one request per file, so without this the second file
- * of a multi-file upload deletes what the first file just committed — silently
- * (#472). The answer is a durable per-session marker written in the caller's
- * transaction, so the claim and the delete it guards commit or roll back together.
- *
- * A request with no upload session to key on keeps the pre-marker behaviour and
- * replaces, rather than silently appending to rows the user asked to replace.
- */
-async function claimReferenceTableReplacement(
-  connectionManager: ConnectionManager,
-  schema: string,
-  uploadMode: UploadMode,
-  uploadSessionID: string | null,
-  transactionID: string
-): Promise<boolean> {
-  if (uploadMode !== UploadMode.CLEAN_REUPLOAD) return false;
-  if (uploadSessionID === null) return true;
-
-  await ensureUploadSessionReplacementMarkerColumn(connectionManager, schema, REFERENCE_REPLACEMENT_MARKER_COLUMN);
-  const alreadyReplaced = await uploadSessionHasCompletedReplacement(
-    connectionManager,
-    schema,
-    uploadSessionID,
-    REFERENCE_REPLACEMENT_MARKER_COLUMN,
-    transactionID
-  );
-  if (alreadyReplaced) return false;
-
-  await markUploadSessionReplacementCompleted(connectionManager, schema, uploadSessionID, REFERENCE_REPLACEMENT_MARKER_COLUMN, transactionID);
-  return true;
-}
-
 export async function upsertAttributeRows(
   connectionManager: ConnectionManager,
   schema: string,
@@ -165,6 +124,10 @@ export async function upsertAttributeRows(
     const insertSQL = format(`INSERT INTO ??.attributes (Code, Description, Status, IsActive, DeletedAt) VALUES (?, ?, ?, 1, NULL)`, [schema]);
     await connectionManager.executeQuery(insertSQL, [code, description, status], transactionID);
     insertedCount += 1;
+  }
+
+  if (replacesExistingRows) {
+    await recordReferenceTableReplacement(connectionManager, schema, uploadSessionID, transactionID);
   }
 
   return { insertedCount, updatedCount, skippedCount };
@@ -332,6 +295,10 @@ export async function upsertSpeciesRows(
     insertedCount += 1;
   }
 
+  if (replacesExistingRows) {
+    await recordReferenceTableReplacement(connectionManager, schema, uploadSessionID, transactionID);
+  }
+
   return { insertedCount, updatedCount, skippedCount };
 }
 
@@ -433,6 +400,10 @@ export async function upsertPersonnelRows(
     const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
     await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
     insertedCount += 1;
+  }
+
+  if (replacesExistingRows) {
+    await recordReferenceTableReplacement(connectionManager, schema, uploadSessionID, transactionID);
   }
 
   return { insertedCount, updatedCount, skippedCount };

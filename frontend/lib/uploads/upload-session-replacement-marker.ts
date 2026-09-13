@@ -16,11 +16,13 @@
  * independent: measurements replace a census scope, reference tables replace a
  * whole table.
  */
+import { createHash } from 'crypto';
 import { format } from 'mysql2/promise';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { isMissingTableError } from '@/lib/errorhelpers';
+import { UploadMode } from '@/config/uploadmodes';
 
 /** Column recording that a session's census replacement (measurements) has run. */
 export const CENSUS_REPLACEMENT_MARKER_COLUMN = 'census_replacement_completed_at';
@@ -126,4 +128,94 @@ export async function markUploadSessionReplacementCompleted(
   } catch (error: unknown) {
     if (!isMissingTableError(error, UPLOAD_SESSIONS_TABLE)) throw error;
   }
+}
+
+/**
+ * How long a reference-table request waits for another request of the same upload
+ * session to commit before refusing. Below the client's 300s request timeout, so
+ * the refusal reaches the client instead of the client giving up first.
+ */
+export const REFERENCE_REPLACEMENT_LOCK_TIMEOUT_MS = 120_000;
+
+const REFERENCE_REPLACEMENT_LOCK_PREFIX = 'upload:reference:';
+const LOCK_NAME_DIGEST_LENGTH = 40;
+
+/** Another request of the same upload session is still writing the reference table. */
+export class ReferenceReplacementInProgressError extends Error {
+  constructor(uploadSessionID: string) {
+    super(
+      `Another request for upload session ${uploadSessionID} is still writing this table. ` +
+        `Retry once it finishes; the table is replaced only once per upload session.`
+    );
+    this.name = 'ReferenceReplacementInProgressError';
+  }
+}
+
+/** MySQL GET_LOCK names are capped at 64 characters, so the session scope is hashed. */
+export function buildReferenceReplacementLockName(schema: string, uploadSessionID: string): string {
+  const digest = createHash('sha256')
+    .update(JSON.stringify([schema, uploadSessionID]))
+    .digest('hex')
+    .slice(0, LOCK_NAME_DIGEST_LENGTH);
+  return `${REFERENCE_REPLACEMENT_LOCK_PREFIX}${digest}`;
+}
+
+/**
+ * Decides whether THIS request owns the destructive reset of a reference table
+ * (species, attributes, personnel, quadrats).
+ *
+ * A CLEAN_REUPLOAD deletes the table's active rows before writing the incoming
+ * ones, and the route issues one request per file, so without this the second
+ * file of a multi-file upload deletes what the first file committed (#472).
+ *
+ * The check is serialized per upload session by a named lock held until the
+ * caller's transaction ends. Transactions run at READ COMMITTED, so a request that
+ * waited on the lock reads the marker the earlier request committed, instead of
+ * both reading NULL and both deleting (an overlapping client retry). The marker
+ * row itself is not touched here: `recordReferenceTableReplacement` writes it
+ * after the rows, so the session row is locked only for the tail of the
+ * transaction and heartbeats are not blocked for the length of the upload.
+ *
+ * A request with no upload session to key on keeps the pre-marker behaviour and
+ * replaces, rather than silently appending to rows the user asked to replace.
+ */
+export async function claimReferenceTableReplacement(
+  connectionManager: ConnectionManager,
+  schema: string,
+  uploadMode: UploadMode,
+  uploadSessionID: string | null,
+  transactionID: string
+): Promise<boolean> {
+  if (uploadMode !== UploadMode.CLEAN_REUPLOAD) return false;
+  if (uploadSessionID === null) return true;
+
+  await ensureUploadSessionReplacementMarkerColumn(connectionManager, schema, REFERENCE_REPLACEMENT_MARKER_COLUMN);
+  const lockAcquired = await connectionManager.acquireApplicationLock(
+    buildReferenceReplacementLockName(schema, uploadSessionID),
+    transactionID,
+    REFERENCE_REPLACEMENT_LOCK_TIMEOUT_MS
+  );
+  if (!lockAcquired) {
+    throw new ReferenceReplacementInProgressError(uploadSessionID);
+  }
+
+  const alreadyReplaced = await uploadSessionHasCompletedReplacement(
+    connectionManager,
+    schema,
+    uploadSessionID,
+    REFERENCE_REPLACEMENT_MARKER_COLUMN,
+    transactionID
+  );
+  return !alreadyReplaced;
+}
+
+/** Records the reset `claimReferenceTableReplacement` granted. Call last, in the same transaction. */
+export async function recordReferenceTableReplacement(
+  connectionManager: ConnectionManager,
+  schema: string,
+  uploadSessionID: string | null,
+  transactionID: string
+): Promise<void> {
+  if (uploadSessionID === null) return;
+  await markUploadSessionReplacementCompleted(connectionManager, schema, uploadSessionID, REFERENCE_REPLACEMENT_MARKER_COLUMN, transactionID);
 }
