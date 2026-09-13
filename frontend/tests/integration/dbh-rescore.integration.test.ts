@@ -245,6 +245,42 @@ describe('rescoreDbhCensus transaction boundary', () => {
     await assertStates();
   });
 
+  it('leaves validated rows with a resolved DBH occurrence untouched, so a plot-wide run keeps them as prior comparisons', async () => {
+    const clearedPrior = await pair('CLEARED', 100, 900);
+    const [growthErrors] = await connection.query<RowDataPacket[]>("SELECT ErrorID FROM measurement_errors WHERE ErrorSource='validation' AND ErrorCode='1'");
+    const growthErrorID = growthErrors[0].ErrorID;
+    const resolvedAt = '2026-01-01 00:00:00';
+    await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID=?', [clearedPrior.prior]);
+    await connection.query('UPDATE coremeasurements SET IsValidated=NULL WHERE CoreMeasurementID=?', [clearedPrior.present]);
+    await connection.query('INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved, ResolvedAt) VALUES (?, ?, TRUE, ?)', [
+      clearedPrior.prior,
+      growthErrorID,
+      resolvedAt
+    ]);
+
+    await managerFor(connection).withTransaction(tx =>
+      runSharedDBHChangeValidationsInTransaction({ schema, tx, params: { p_CensusID: null, p_PlotID: plotID } })
+    );
+
+    const [priorRows] = await connection.query<RowDataPacket[]>(
+      'SELECT cm.IsValidated, mel.IsResolved, DATE_FORMAT(mel.ResolvedAt, "%Y-%m-%d %H:%i:%s") AS ResolvedAt FROM coremeasurements cm JOIN measurement_error_log mel ON mel.MeasurementID=cm.CoreMeasurementID WHERE cm.CoreMeasurementID=? AND mel.ErrorID=?',
+      [clearedPrior.prior, growthErrorID]
+    );
+    expect(
+      priorRows.map(row => ({ isValidated: bool(row.IsValidated), isResolved: bool(row.IsResolved), resolvedAt: row.ResolvedAt })),
+      'a validated prior-census row with a resolved DBH occurrence must not be reset or re-resolved by a plot-wide run'
+    ).toEqual([{ isValidated: true, isResolved: true, resolvedAt }]);
+
+    const [presentErrors] = await connection.query<RowDataPacket[]>('SELECT IsResolved FROM measurement_error_log WHERE MeasurementID=? AND ErrorID=?', [
+      clearedPrior.present,
+      growthErrorID
+    ]);
+    expect(
+      presentErrors.map(row => bool(row.IsResolved)),
+      'the present row must still be compared against its validated prior and flagged for 100 -> 900 mm growth'
+    ).toEqual([false]);
+  });
+
   it.each(['before', 'prepared'] as const)('rolls back exact measurements, errors, and views when %s artifact fails', async event => {
     const seeded = await pair('ART', 100, 900);
     await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID=?', [seeded.present]);

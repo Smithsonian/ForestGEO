@@ -41,7 +41,7 @@ async function scrub(tx: TxExecutor, schema: string, id: number, params: Validat
     plot = params.p_PlotID ?? null,
     scope = [VALIDATION_ERROR_SOURCE, String(id), census, census, plot, plot];
   await tx.query(
-    `UPDATE ${schema}.coremeasurements cm JOIN ${schema}.census c ON cm.CensusID=c.CensusID JOIN ${schema}.measurement_error_log mel ON mel.MeasurementID=cm.CoreMeasurementID JOIN ${schema}.measurement_errors me ON me.ErrorID=mel.ErrorID SET cm.IsValidated=NULL WHERE me.ErrorSource=? AND me.ErrorCode=? AND (cm.IsValidated=FALSE OR (mel.IsResolved=TRUE AND cm.IsValidated=TRUE)) AND cm.IsActive=TRUE AND cm.StemGUID IS NOT NULL AND (? IS NULL OR cm.CensusID=?) AND (? IS NULL OR c.PlotID=?)`,
+    `UPDATE ${schema}.coremeasurements cm JOIN ${schema}.census c ON cm.CensusID=c.CensusID JOIN ${schema}.measurement_error_log mel ON mel.MeasurementID=cm.CoreMeasurementID JOIN ${schema}.measurement_errors me ON me.ErrorID=mel.ErrorID SET cm.IsValidated=NULL WHERE me.ErrorSource=? AND me.ErrorCode=? AND mel.IsResolved=FALSE AND cm.IsValidated=FALSE AND cm.IsActive=TRUE AND cm.StemGUID IS NOT NULL AND (? IS NULL OR cm.CensusID=?) AND (? IS NULL OR c.PlotID=?)`,
     scope
   );
   await tx.query(
