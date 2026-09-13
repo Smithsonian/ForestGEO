@@ -30,6 +30,22 @@ describe('parseDbhRescoreArgs', () => {
     expect(() => parseDbhRescoreArgs(['--schema', 'forestgeo_testing', '--apply'])).toThrow(/requires/);
     expect(() => parseDbhRescoreArgs(['--schema', 'forestgeo_testing', '--schema', 'forestgeo_other'])).toThrow(/only once/);
     expect(() => parseDbhRescoreArgs(['--all-sites', '--plot', '1'])).toThrow(/requires --schema/);
+    expect(parseDbhRescoreArgs(['--schema', 'forestgeo_testing']).allowValidToInvalid, 'valid-to-invalid changes are held unless explicitly allowed').toBe(
+      false
+    );
+    expect(() => parseDbhRescoreArgs(['--schema', 'forestgeo_testing', '--allow-valid-to-invalid'])).toThrow(/only applies with --apply/);
+    expect(
+      parseDbhRescoreArgs([
+        '--schema',
+        'forestgeo_testing',
+        '--apply',
+        '--artifact-dir',
+        '/tmp/a',
+        '--i-understand-this-writes-to',
+        'host',
+        '--allow-valid-to-invalid'
+      ]).allowValidToInvalid
+    ).toBe(true);
   });
 
   it('accepts known SHOW CREATE formatting but rejects a substantive body change', async () => {
@@ -156,6 +172,28 @@ describe('DBH expected manifest', () => {
         'Read-only preflight forestgeo_testing/1/12#2: blocked by an earlier deferred scope in this plot',
         'Deferred scopes: forestgeo_testing/1/11#1, forestgeo_testing/1/12#2',
         'Earliest unfinished by plot: forestgeo_testing:1=11#1'
+      ])
+    );
+  });
+
+  it('reports a held valid-to-invalid census, defers its plot, and exits non-zero', async () => {
+    const dependency = deps();
+    dependency.rescore = vi.fn().mockResolvedValue({
+      outcome: 'held-valid-to-invalid',
+      databaseOutcome: 'rolled-back',
+      attemptID: 'held-attempt',
+      validToInvalidMeasurementIDs: [41, 42],
+      errors: ['DBH re-score would turn 2 valid measurement(s) invalid']
+    });
+    const log = vi.fn();
+    const args = parseDbhRescoreArgs(['--schema', 'forestgeo_testing', '--apply', '--artifact-dir', '/tmp/a', '--i-understand-this-writes-to', 'host']);
+
+    await expect(runDbhRescoreCli(args, dependency, log)).resolves.toBe(1);
+
+    expect(log.mock.calls.map(([line]) => line)).toEqual(
+      expect.arrayContaining([
+        'Held for review (attempt held-attempt): 2 valid measurement(s) would become invalid; IDs are in the artifact. Rerun with --allow-valid-to-invalid after review.',
+        'Deferred scopes: forestgeo_testing/1/1#1'
       ])
     );
   });

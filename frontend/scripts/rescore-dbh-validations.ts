@@ -18,7 +18,7 @@ import {
 } from '@/lib/validations/dbh-rescore-cli';
 
 function usage(): string {
-  return 'Usage: tsx scripts/rescore-dbh-validations.ts (--all-sites | --schema <name>) [--plot <id> [--census <id>]] [--artifact-dir <dir>] [--apply --i-understand-this-writes-to <host>]';
+  return 'Usage: tsx scripts/rescore-dbh-validations.ts (--all-sites | --schema <name>) [--plot <id> [--census <id>]] [--artifact-dir <dir>] [--apply --i-understand-this-writes-to <host> [--allow-valid-to-invalid]]';
 }
 
 function applyTimeout(): number | undefined {
@@ -50,7 +50,7 @@ async function main(): Promise<number> {
     : undefined;
   const connection = await createVerificationConnection(settings);
   try {
-    const deps = buildRealSweepDeps(connection, manifest, artifactPath, timeoutMs);
+    const deps = buildRealSweepDeps(connection, manifest, artifactPath, timeoutMs, { allowValidToInvalid: args.allowValidToInvalid });
     deps.discoverSchemas = args.allSites ? () => discoverSiteSchemas(connection) : undefined;
     if (args.apply) {
       await deps.writeArtifact({

@@ -2,6 +2,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import { buildMeasurementScopeLockName } from '@/config/measurementscopelock';
+import { MANAGER_OVERRIDE_ERROR_CODE } from '@/config/validationoverride';
+import { createResetValidationStatesQuery, createValidationOverrideQueries } from '@/components/datagrids/measurementscommonsutils';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import {
@@ -162,7 +164,14 @@ describe('rescoreDbhCensus transaction boundary', () => {
     const [growth] = await connection.query<RowDataPacket[]>("SELECT ErrorID FROM measurement_errors WHERE ErrorSource='validation' AND ErrorCode='1'");
     await connection.query('INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, FALSE)', [retired.present, growth[0].ErrorID]);
     await refreshMeasurementViewsForScope(managerFor(connection) as any, schema, plotID, census2ID);
-    const result = await rescoreDbhCensus({ schema, plotID, censusID: census2ID }, { writeArtifact: async () => undefined, attemptID: () => 'default-real' });
+    const result = await rescoreDbhCensus(
+      { schema, plotID, censusID: census2ID },
+      {
+        writeArtifact: async () => undefined,
+        attemptID: () => 'default-real',
+        allowValidToInvalid: true
+      }
+    );
     expect(result).toMatchObject({ outcome: 'completed', databaseOutcome: 'committed' });
     const [rows] = await connection.query<RowDataPacket[]>(
       'SELECT CoreMeasurementID, IsValidated FROM coremeasurements WHERE CoreMeasurementID IN (?,?) ORDER BY CoreMeasurementID',
@@ -243,6 +252,111 @@ describe('rescoreDbhCensus transaction boundary', () => {
       })
     );
     await assertStates();
+  });
+
+  async function validity(measurementID: number): Promise<boolean | null> {
+    const [rows] = await connection.query<RowDataPacket[]>('SELECT IsValidated FROM coremeasurements WHERE CoreMeasurementID=?', [measurementID]);
+    return bool(rows[0]?.IsValidated);
+  }
+  async function overrideMarkerCount(measurementID: number): Promise<number> {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      "SELECT COUNT(*) AS count FROM measurement_error_log mel JOIN measurement_errors me ON me.ErrorID=mel.ErrorID WHERE mel.MeasurementID=? AND me.ErrorSource='validation' AND me.ErrorCode=? AND mel.IsResolved=TRUE",
+      [measurementID, MANAGER_OVERRIDE_ERROR_CODE]
+    );
+    return Number(rows[0].count);
+  }
+  async function runFormatted(requests: Array<{ query: string; params: Array<string | number> }>) {
+    for (const request of requests) await connection.query(mysql.format(request.query, request.params));
+  }
+
+  it('holds and rolls back a census whose re-score would turn a valid row invalid, reporting the measurement IDs', async () => {
+    const violates = await pair('HOLD', 100, 900);
+    const stillValid = await pair('HOLD_OK', 100, 105);
+    await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID IN (?, ?)', [violates.present, stillValid.present]);
+    await refreshMeasurementViewsForScope(managerFor(connection) as any, schema, plotID, census2ID);
+    const before = await snapshot();
+    const artifacts: Array<{ event: string; data: Record<string, unknown> }> = [];
+
+    const result = await rescoreDbhCensus(
+      { schema, plotID, censusID: census2ID },
+      { attemptID: () => 'held-real', writeArtifact: async event => void artifacts.push({ event: event.event, data: event.data }) }
+    );
+
+    expect(result, 'a 100 -> 900 mm row that was valid must not silently become invalid').toMatchObject({
+      outcome: 'held-valid-to-invalid',
+      databaseOutcome: 'rolled-back',
+      validToInvalidMeasurementIDs: [violates.present]
+    });
+    expect(await snapshot(), 'the held census must be rolled back exactly').toEqual(before);
+    expect(artifacts.find(artifact => artifact.event === 'outcome')?.data, 'the outcome artifact must carry the IDs for operator review').toMatchObject({
+      validToInvalidMeasurementIDs: [violates.present]
+    });
+  });
+
+  it('applies valid-to-invalid changes only when the operator allows them, and records them in the prepared artifact', async () => {
+    const violates = await pair('ALLOW', 100, 900);
+    await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID=?', [violates.present]);
+    const artifacts: Array<{ event: string; data: Record<string, unknown> }> = [];
+
+    const result = await rescoreDbhCensus(
+      { schema, plotID, censusID: census2ID },
+      { ...actual(), allowValidToInvalid: true, writeArtifact: async event => void artifacts.push({ event: event.event, data: event.data }) }
+    );
+
+    expect(result).toMatchObject({ outcome: 'completed', databaseOutcome: 'committed', counts: { validToInvalidCount: 1 } });
+    expect(await validity(violates.present)).toBe(false);
+    expect(artifacts.find(artifact => artifact.event === 'prepared')?.data).toMatchObject({ validToInvalidMeasurementIDs: [violates.present] });
+  });
+
+  it('keeps a manager-overridden row valid through a re-score while re-scoring its un-overridden neighbours', async () => {
+    const overridden = await pair('OVERRIDDEN', 100, 900);
+    const neighbour = await pair('NEIGHBOUR', 100, 900);
+    const [growthErrors] = await connection.query<RowDataPacket[]>("SELECT ErrorID FROM measurement_errors WHERE ErrorSource='validation' AND ErrorCode='1'");
+    await connection.query('UPDATE coremeasurements SET IsValidated=FALSE WHERE CoreMeasurementID=?', [overridden.present]);
+    await connection.query('INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, FALSE)', [
+      overridden.present,
+      growthErrors[0].ErrorID
+    ]);
+    await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID=?', [neighbour.present]);
+    const [censusRows] = await connection.query<RowDataPacket[]>('SELECT PlotCensusNumber FROM census WHERE CensusID=?', [census2ID]);
+    await runFormatted(createValidationOverrideQueries(schema, plotID, Number(censusRows[0].PlotCensusNumber)));
+    expect(await overrideMarkerCount(neighbour.present), 'an already-valid row is outside the override scope').toBe(0);
+
+    expect(await validity(overridden.present), 'the override sets the failed row valid').toBe(true);
+    expect(await overrideMarkerCount(overridden.present), 'the override leaves a resolved marker instead of deleting occurrences').toBe(1);
+    const [growthOccurrence] = await connection.query<RowDataPacket[]>('SELECT IsResolved FROM measurement_error_log WHERE MeasurementID=? AND ErrorID=?', [
+      overridden.present,
+      growthErrors[0].ErrorID
+    ]);
+    expect(
+      growthOccurrence.map(row => bool(row.IsResolved)),
+      'the overridden DBH occurrence is resolved, not deleted'
+    ).toEqual([true]);
+
+    const result = await rescoreDbhCensus({ schema, plotID, censusID: census2ID }, { ...actual(), allowValidToInvalid: true });
+
+    expect(result).toMatchObject({ outcome: 'completed', counts: { preservedOverrideCount: 1, validToInvalidCount: 1 } });
+    expect(await validity(overridden.present), 'the overridden row must stay valid').toBe(true);
+    expect(await validity(neighbour.present), 'the un-overridden 100 -> 900 mm row is re-scored invalid').toBe(false);
+  });
+
+  it('drops a stale override marker once the overridden row is re-validated', async () => {
+    const overridden = await pair('STALE_OVERRIDE', 100, 900);
+    await connection.query('UPDATE coremeasurements SET IsValidated=FALSE WHERE CoreMeasurementID=?', [overridden.present]);
+    const [censusRows] = await connection.query<RowDataPacket[]>('SELECT PlotCensusNumber FROM census WHERE CensusID=?', [census2ID]);
+    await runFormatted(createValidationOverrideQueries(schema, plotID, Number(censusRows[0].PlotCensusNumber)));
+    expect(await overrideMarkerCount(overridden.present)).toBe(1);
+
+    await runFormatted([createResetValidationStatesQuery(schema, plotID, census2ID)]);
+    await managerFor(connection).withTransaction(async tx => {
+      await runSharedDBHChangeValidationsInTransaction({ schema, tx, params: { p_CensusID: census2ID, p_PlotID: plotID } });
+      await finalizeValidatedRowsInTransaction({ schema, tx, params: { p_CensusID: census2ID, p_PlotID: plotID } });
+    });
+
+    expect(await validity(overridden.present), 're-validation judges the row on its data again').toBe(false);
+    expect(await overrideMarkerCount(overridden.present), 'a re-validated row is no longer overridden').toBe(0);
+    const result = await rescoreDbhCensus({ schema, plotID, censusID: census2ID }, actual());
+    expect(result).toMatchObject({ outcome: 'completed', counts: { preservedOverrideCount: 0 } });
   });
 
   it('leaves validated rows with a resolved DBH occurrence untouched, so a plot-wide run keeps them as prior comparisons', async () => {
@@ -383,7 +497,7 @@ describe('rescoreDbhCensus transaction boundary', () => {
     try {
       const result = await rescoreDbhCensus(
         { schema, plotID, censusID: census2ID },
-        { writeArtifact: async () => undefined, attemptID: () => 'lost-real-commit-ack' }
+        { writeArtifact: async () => undefined, attemptID: () => 'lost-real-commit-ack', allowValidToInvalid: true }
       );
       expect(injected).toBe(true);
       expect(result).toMatchObject({ outcome: 'failed', databaseOutcome: 'committed', runID: expect.any(Number), provisionalRunID: expect.any(Number) });
@@ -428,7 +542,10 @@ describe('rescoreDbhCensus transaction boundary', () => {
         before
       );
       // A DBH-only retry is possible after the server has released transaction and advisory locks.
-      expect(await rescoreDbhCensus({ schema, plotID, censusID: census2ID }, actual())).toMatchObject({ outcome: 'completed', databaseOutcome: 'committed' });
+      expect(await rescoreDbhCensus({ schema, plotID, censusID: census2ID }, { ...actual(), allowValidToInvalid: true })).toMatchObject({
+        outcome: 'completed',
+        databaseOutcome: 'committed'
+      });
     } finally {
       await execution.end().catch(() => undefined);
     }
@@ -457,7 +574,10 @@ describe('rescoreDbhCensus transaction boundary', () => {
           await kill();
         };
       await assertRollback(rescoreDbhCensus({ schema, plotID, censusID: census2ID }, deps), before);
-      expect(await rescoreDbhCensus({ schema, plotID, censusID: census2ID }, actual())).toMatchObject({ outcome: 'completed', databaseOutcome: 'committed' });
+      expect(await rescoreDbhCensus({ schema, plotID, censusID: census2ID }, { ...actual(), allowValidToInvalid: true })).toMatchObject({
+        outcome: 'completed',
+        databaseOutcome: 'committed'
+      });
     } finally {
       await execution.end().catch(() => undefined);
     }
@@ -545,7 +665,9 @@ describe('rescoreDbhCensus transaction boundary', () => {
       }
     ]);
     await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID=?', [chain.census2MeasurementIDs[0]]);
-    expect(await rescoreDbhCensus({ schema, plotID, censusID: c3.censusID }, actual())).toMatchObject({ outcome: 'completed' });
+    expect(await rescoreDbhCensus({ schema, plotID, censusID: c3.censusID }, { ...actual(), allowValidToInvalid: true })).toMatchObject({
+      outcome: 'completed'
+    });
     expect(
       bool(
         (await connection.query<RowDataPacket[]>('SELECT IsValidated FROM coremeasurements WHERE CoreMeasurementID=?', [chain.census2MeasurementIDs[0]]))[0][0]

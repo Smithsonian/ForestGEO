@@ -2,6 +2,7 @@ import { GridFilterModel, GridPaginationModel, GridRowModel, GridSortModel } fro
 import { ExtendedGridFilterModel, TSSFilter, VisibleFilter } from '@/config/datagridhelpers';
 import { EDITABLE_FIELDS_BY_SURFACE, EditSurface, FIELD_ALIASES_BY_SURFACE, PER_COLUMN_DECIMAL_PRECISION } from '@/config/editplan/fieldpolicy';
 import { areArraysEqual, areFilterItemsEqual, isActiveFilterItem, sanitizeQuickFilterValues, toServerFilterItem } from '@/lib/datagrid/filterModel';
+import { MANAGER_OVERRIDE_ERROR_CODE, MANAGER_OVERRIDE_ERROR_MESSAGE } from '@/config/validationoverride';
 
 // Numeric edits that round to the existing value at server precision are
 // detected here so the client can (a) skip the API roundtrip and (b) tell the
@@ -186,6 +187,54 @@ export function createResetValidationStatesQuery(schema: string, plotID: number,
     params: [schema, schema, censusID, plotID],
     format: true
   };
+}
+
+/**
+ * Ordered statements for overriding every failed or pending row in one plot census.
+ * Occurrences are resolved rather than deleted and each overridden row gets a
+ * resolved manager-override marker, so the override stays auditable.
+ */
+export function createValidationOverrideQueries(schema: string, plotID: number, plotCensusNumber: number): FormattedQueryRequest[] {
+  const censusScope = `c.PlotID = ? AND c.PlotCensusNumber = ? AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL)`;
+  return [
+    {
+      query: `INSERT IGNORE INTO ??.measurement_errors (ErrorSource, ErrorCode, ErrorMessage) VALUES ('validation', ?, ?)`,
+      params: [schema, MANAGER_OVERRIDE_ERROR_CODE, MANAGER_OVERRIDE_ERROR_MESSAGE],
+      format: true
+    },
+    {
+      query: `UPDATE ??.measurement_error_log mel
+              JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+              JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
+              JOIN ??.census c ON c.CensusID = cm.CensusID
+              SET mel.IsResolved = TRUE,
+                  mel.ResolvedAt = NOW()
+              WHERE me.ErrorSource = 'validation'
+                AND mel.IsResolved = FALSE
+                AND ${censusScope}`,
+      params: [schema, schema, schema, schema, plotID, plotCensusNumber],
+      format: true
+    },
+    {
+      query: `INSERT INTO ??.measurement_error_log (MeasurementID, ErrorID, IsResolved, ResolvedAt)
+              SELECT cm.CoreMeasurementID, me.ErrorID, TRUE, NOW()
+              FROM ??.coremeasurements cm
+              JOIN ??.census c ON c.CensusID = cm.CensusID
+              JOIN ??.measurement_errors me ON me.ErrorSource = 'validation' AND me.ErrorCode = ?
+              WHERE ${censusScope}
+              ON DUPLICATE KEY UPDATE IsResolved = TRUE, ResolvedAt = NOW()`,
+      params: [schema, schema, schema, schema, MANAGER_OVERRIDE_ERROR_CODE, plotID, plotCensusNumber],
+      format: true
+    },
+    {
+      query: `UPDATE ??.coremeasurements cm
+              JOIN ??.census c ON c.CensusID = cm.CensusID
+              SET cm.IsValidated = TRUE
+              WHERE ${censusScope}`,
+      params: [schema, schema, plotID, plotCensusNumber],
+      format: true
+    }
+  ];
 }
 
 export const UNRESOLVED_ERRORS_SNACKBAR_MESSAGE = (count: number) => `${count} row(s) with unresolved errors — open View Errors to resolve them.`;

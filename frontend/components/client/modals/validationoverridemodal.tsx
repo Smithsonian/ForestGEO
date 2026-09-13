@@ -6,6 +6,9 @@ import { DialogContent, DialogTitle, Modal, ModalClose, ModalDialog } from '@mui
 import ConfirmationDialog from '@/components/client/modals/confirmationdialog';
 import CircularProgress from '@mui/joy/CircularProgress';
 import ailogger from '@/ailogger';
+import { createValidationOverrideQueries } from '@/components/datagrids/measurementscommonsutils';
+
+const OVERRIDE_MARKER_STEP_INDEX = 2;
 
 interface VOMProps {
   isValidationOverrideModalOpen: boolean;
@@ -23,38 +26,20 @@ export default function ValidationOverrideModal(props: VOMProps) {
   const currentCensus = useOrgCensusContext();
 
   const triggerOverride = useCallback(async () => {
-    const clearCMVQuery = `DELETE mel
-      FROM ${currentSite?.schemaName}.measurement_error_log AS mel
-      JOIN ${currentSite?.schemaName}.measurement_errors AS me
-          ON me.ErrorID = mel.ErrorID
-      JOIN ${currentSite?.schemaName}.coremeasurements AS cm
-          ON mel.MeasurementID = cm.CoreMeasurementID
-      JOIN ${currentSite?.schemaName}.census AS c
-          ON c.CensusID = cm.CensusID
-      WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
-        AND c.PlotID = ${currentPlot?.plotID}
-        AND me.ErrorSource = 'validation'
-        AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL);`;
-    const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm
-      JOIN ${currentSite?.schemaName}.census AS c ON c.CensusID = cm.CensusID
-      SET cm.IsValidated = TRUE
-      WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
-        AND c.PlotID = ${currentPlot?.plotID}
-        AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL)`;
-    const clearCMVResponse = await fetch(`/api/query`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(clearCMVQuery)
-    });
-    const clearCMVResultPacket = await clearCMVResponse.json();
-    if (clearCMVResultPacket.affectedRows === 0) throw new Error('CMV clear op failed');
-    const response = await fetch(`/api/query`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(query)
-    });
-    const resultPacket = await response.json();
-    if (resultPacket.affectedRows === 0) throw new Error('validation override failed');
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.plotCensusNumber) {
+      throw new Error('validation override requires a selected site, plot, and census');
+    }
+    const steps = createValidationOverrideQueries(currentSite.schemaName, currentPlot.plotID, currentCensus.plotCensusNumber);
+    for (const [index, step] of steps.entries()) {
+      const response = await fetch(`/api/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(step)
+      });
+      if (!response.ok) throw new Error(`validation override step ${index + 1} failed with status ${response.status}`);
+      const resultPacket = await response.json();
+      if (index === OVERRIDE_MARKER_STEP_INDEX && resultPacket.affectedRows === 0) throw new Error('validation override found no failed or pending rows');
+    }
   }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   // CRITICAL FIX: Store interval ref for cleanup to prevent memory leak

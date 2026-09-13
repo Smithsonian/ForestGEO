@@ -16,6 +16,7 @@ export interface DbhRescoreCliArgs {
   artifactDir?: string;
   apply: boolean;
   acknowledgedHost?: string;
+  allowValidToInvalid: boolean;
 }
 export class DbhRescoreArgumentError extends Error {}
 export interface DbhExpectedSeed {
@@ -84,7 +85,7 @@ const positive = (value: string, flag: string) => {
 };
 
 export function parseDbhRescoreArgs(argv: readonly string[]): DbhRescoreCliArgs {
-  const out: DbhRescoreCliArgs = { allSites: false, apply: false };
+  const out: DbhRescoreCliArgs = { allSites: false, apply: false, allowValidToInvalid: false };
   const seen = new Set<string>();
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
@@ -102,6 +103,7 @@ export function parseDbhRescoreArgs(argv: readonly string[]): DbhRescoreCliArgs 
     else if (flag === '--artifact-dir') out.artifactDir = value();
     else if (flag === '--apply') out.apply = true;
     else if (flag === '--i-understand-this-writes-to') out.acknowledgedHost = value();
+    else if (flag === '--allow-valid-to-invalid') out.allowValidToInvalid = true;
     else throw new DbhRescoreArgumentError(`Unknown or disallowed flag: ${flag}`);
   }
   if (out.allSites === Boolean(out.schema)) throw new DbhRescoreArgumentError('Specify exactly one of --all-sites or --schema');
@@ -111,6 +113,7 @@ export function parseDbhRescoreArgs(argv: readonly string[]): DbhRescoreCliArgs 
     throw new DbhRescoreArgumentError('--census requires --schema and --plot');
   if (out.apply && (!out.artifactDir || !out.acknowledgedHost))
     throw new DbhRescoreArgumentError('--apply requires --artifact-dir and --i-understand-this-writes-to <host>');
+  if (out.allowValidToInvalid && !out.apply) throw new DbhRescoreArgumentError('--allow-valid-to-invalid only applies with --apply');
   return out;
 }
 
@@ -173,6 +176,11 @@ export async function runDbhRescoreCli(args: DbhRescoreCliArgs, deps: DbhSweepDe
       log(`Read-only preflight ${key}#${scope.plotCensusNumber}: ${reason ?? 'ready'}`);
     }
   }
+  for (const held of result.results.filter(row => row.outcome === 'held-valid-to-invalid')) {
+    log(
+      `Held for review (attempt ${held.attemptID}): ${held.validToInvalidMeasurementIDs?.length ?? 0} valid measurement(s) would become invalid; IDs are in the artifact. Rerun with --allow-valid-to-invalid after review.`
+    );
+  }
   if (result.deferred.length)
     log(`Deferred scopes: ${result.deferred.map(scope => `${scope.schema}/${scope.plotID}/${scope.censusID}#${scope.plotCensusNumber}`).join(', ')}`);
   if (result.earliestUnfinished.size)
@@ -222,9 +230,10 @@ export function buildRealSweepDeps(
   manifest: DbhExpectedManifest,
   artifactPath?: string,
   timeoutMs?: number,
-  options: { requireEnabled?: boolean } = {}
+  options: { requireEnabled?: boolean; allowValidToInvalid?: boolean } = {}
 ): DbhSweepDependencies {
   const requireEnabled = options.requireEnabled ?? true;
+  const allowValidToInvalid = options.allowValidToInvalid ?? false;
   return {
     discoverScopes: async schema => {
       const qualified = sqlIdentifier(schema);
@@ -334,7 +343,11 @@ export function buildRealSweepDeps(
               : {};
     },
     rescore: scope =>
-      rescoreDbhCensus(scope, { timeoutMs, ...(artifactPath ? { writeArtifact: event => appendDurableJsonLine(artifactPath, { ...event }) } : {}) }),
+      rescoreDbhCensus(scope, {
+        timeoutMs,
+        allowValidToInvalid,
+        ...(artifactPath ? { writeArtifact: event => appendDurableJsonLine(artifactPath, { ...event }) } : {})
+      }),
     writeArtifact: async event => {
       if (artifactPath) await appendDurableJsonLine(artifactPath, event);
     },

@@ -2,6 +2,7 @@
 import ConnectionManager, { type TxExecutor } from '@/lib/db/connectionmanager';
 import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { DBH_CHANGE_VALIDATION_IDS, DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
+import { MANAGER_OVERRIDE_ERROR_CODE } from '@/config/validationoverride';
 export type ValidationExecutionParams = { p_CensusID?: number | null; p_PlotID?: number | null };
 export type DBHValidationSkipCounts = {
   skippedNoInterval: number;
@@ -97,6 +98,11 @@ export async function finalizeValidatedRowsInTransaction(input: {
   const { schema, tx, params, requireActiveStemGUID = false } = input,
     census = params.p_CensusID ?? null,
     plot = params.p_PlotID ?? null;
+  // A row being re-validated is judged on its data again, so any earlier manager override no longer applies.
+  await tx.query(
+    `DELETE mel FROM ${schema}.measurement_error_log mel JOIN ${schema}.measurement_errors me ON me.ErrorID=mel.ErrorID JOIN ${schema}.coremeasurements cm ON cm.CoreMeasurementID=mel.MeasurementID JOIN ${schema}.census c ON c.CensusID=cm.CensusID WHERE me.ErrorSource=? AND me.ErrorCode=? AND cm.IsValidated IS NULL AND (? IS NULL OR cm.CensusID=?) AND (? IS NULL OR c.PlotID=?)`,
+    [VALIDATION_ERROR_SOURCE, MANAGER_OVERRIDE_ERROR_CODE, census, census, plot, plot]
+  );
   const result: any = await tx.query(
     `UPDATE ${schema}.coremeasurements cm JOIN ${schema}.census c ON c.CensusID=cm.CensusID SET cm.IsValidated=CASE WHEN NOT EXISTS (SELECT 1 FROM ${schema}.measurement_error_log mel JOIN ${schema}.measurement_errors me ON me.ErrorID=mel.ErrorID WHERE mel.MeasurementID=cm.CoreMeasurementID AND mel.IsResolved=FALSE AND me.ErrorSource='validation') THEN TRUE ELSE FALSE END WHERE cm.IsValidated IS NULL ${requireActiveStemGUID ? 'AND cm.IsActive=TRUE AND cm.StemGUID IS NOT NULL' : ''} AND (? IS NULL OR cm.CensusID=?) AND (? IS NULL OR c.PlotID=?)`,
     [census, census, plot, plot]

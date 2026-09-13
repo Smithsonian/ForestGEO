@@ -8,7 +8,11 @@ Implementation and isolated-copy rehearsal do **not** authorize production deplo
 
 Growth flags above 65 mm/year; shrinkage flags at an annual relative change of −0.05 or below. Years are measurement-date days / 365.25, applied only to intervals of at least 365 days. Intervals under 365 days (including same-day) and missing dates use the absolute legacy thresholds: growth above 65 mm, or `presentDBH < priorDBH * 0.95`. Both DBHs must be at least 10 mm (1 cm). Unequal non-NULL HOM suppresses a comparison; either HOM may be NULL. Reversed intervals (`SkippedNegativeInterval`) and intervals over 7,305 days / 20 years (`SkippedImplausibleInterval`) skip; `SkippedNoInterval` is their total. Diagnostics report each pair's `ComparisonBasis` (`annualised`, `absolute`, or NULL when skipped). The immediately preceding census **number** supplies valid prior measurements; a gap is not filled using the nearest older census.
 
-Only DBH occurrences are resolved on rerun. An unchanged violation reopens the same occurrence, clears its resolution time, and updates its Prior* snapshot. Stale findings remain resolved, retaining their creation time and last comparison. These mutable rows are not an immutable history. Previously overridden DBH findings can reappear. Unrelated overrides are preserved by this DBH-only operation; unresolved non-DBH errors still affect final validity.
+Only DBH occurrences are resolved on rerun. An unchanged violation reopens the same occurrence, clears its resolution time, and updates its Prior* snapshot. Stale findings remain resolved, retaining their creation time and last comparison. These mutable rows are not an immutable history. Unresolved non-DBH errors still affect final validity.
+
+**Manager overrides.** The validation override modal resolves a row's validation occurrences instead of deleting them and records a resolved `MANAGER_OVERRIDE` occurrence on each overridden row. The re-score does not reset a valid row carrying that marker and reports them as `preservedOverrideCount`. Normal finalization deletes the marker from any row being re-validated (for example after "reset validation states"), so an override lasts only until the row is judged on its data again. Overrides made before this change left no marker and cannot be told apart from rows that passed on their own; they are caught by the valid-to-invalid hold below.
+
+**Valid-to-invalid hold.** When re-scoring a census would turn any previously valid row invalid, the attempt rolls back with outcome `held-valid-to-invalid`, lists the measurement IDs as `validToInvalidMeasurementIDs` in its outcome artifact, and defers later censuses in that plot. Review those rows (a pre-marker override is the case to look for), then rerun the census with `--allow-valid-to-invalid`. Allowed runs still record the IDs and `validToInvalidCount` in the `prepared` artifact.
 
 ## Establish and retain writer isolation
 
@@ -149,6 +153,11 @@ npx tsx scripts/rescore-dbh-validations.ts --schema forestgeo_wytham --plot 1
 npx tsx scripts/rescore-dbh-validations.ts --schema forestgeo_wytham --plot 1 --census 2 \
   --apply --i-understand-this-writes-to forestgeo-mysqldataserver.mysql.database.azure.com \
   --artifact-dir /absolute/private/path/dbh-census-retry
+
+# Only after reviewing a held census's validToInvalidMeasurementIDs:
+npx tsx scripts/rescore-dbh-validations.ts --schema forestgeo_wytham --plot 1 --census 2 \
+  --apply --i-understand-this-writes-to forestgeo-mysqldataserver.mysql.database.azure.com \
+  --artifact-dir /absolute/private/path/dbh-census-reviewed --allow-valid-to-invalid
 ```
 
 Plot/census IDs above are command-shape examples: substitute IDs from discovery, never assume those IDs identify the intended census. No `--validations`, `--recover-pending`, or full-validation fallback exists. Dry-run checks are advisory until rechecked under apply locks. Argument errors exit 2; any verification failure, deferral, database/artifact failure, or incomplete requested scope exits 1. A clean dry run or fully completed apply exits 0.
@@ -162,6 +171,7 @@ Keep the sweep arguments, source/procedure digests, ordered scopes, timestamps, 
 | Outcome | Required action |
 | --- | --- |
 | Not started / deferred | Remove the documented blocker separately, repeat prerequisite verification, and retry in order. |
+| Held valid-to-invalid | Confirmed rollback. Review the listed measurement IDs, then rerun that census and all later censuses in its plot with `--allow-valid-to-invalid`. |
 | Confirmed rolled back | Original durable scope state remains. Preserve the failure artifact and retry DBH directly after verifying prerequisites. No inserted run row should persist. |
 | Unknown | Halt. On a fresh connection, verify the completed run row belongs to this attempt. A matching completed row proves commit; an absent row proves rollback only after the original server session and transaction have ended. Do not cancel a possibly live attempt or infer rollback from a network error. |
 | Committed | Keep the completed run row and reconcile the required outcome artifact before proceeding. |

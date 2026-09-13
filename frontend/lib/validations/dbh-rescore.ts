@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import ConnectionManager, { getTransactionFailureOutcome, type TxExecutor } from '@/lib/db/connectionmanager';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
+import { MANAGER_OVERRIDE_ERROR_CODE } from '@/config/validationoverride';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { completeValidationRunRecordInTransaction, createValidationRunRecordInTransaction } from '@/lib/validations/run-records';
@@ -22,7 +23,7 @@ const DBH_VALIDATION_IDS = [1, 2] as const;
 const ACTIVE_UPLOAD_STATES = ['initialized', 'uploading', 'uploaded', 'processing', 'collapsing'] as const;
 
 export type DbhRescoreDatabaseOutcome = 'committed' | 'rolled-back' | 'not-started' | 'unknown';
-export type DbhRescoreOutcome = 'completed' | 'skipped-locked' | 'deferred-pending' | 'failed' | 'artifact-failed';
+export type DbhRescoreOutcome = 'completed' | 'skipped-locked' | 'deferred-pending' | 'held-valid-to-invalid' | 'failed' | 'artifact-failed';
 
 export interface DbhRescoreScope {
   schema: string;
@@ -48,6 +49,8 @@ export interface DbhRescoreResult {
   originalConnectionID?: number;
   blockingScope?: { censusID: number; plotID: number; reason: 'running' | 'upload' | 'pending' | 'background-job' };
   counts?: Record<string, number>;
+  /** Rows that were valid before the re-score and invalid after it. */
+  validToInvalidMeasurementIDs?: number[];
   before?: Record<string, unknown>;
   after?: Record<string, unknown>;
   errors: string[];
@@ -62,6 +65,8 @@ export interface DbhRescoreDependencies {
   writeArtifact?: (event: DbhRescoreArtifactEvent) => Promise<void>;
   attemptID?: () => string;
   timeoutMs?: number;
+  /** Without this, any valid row the re-score would turn invalid rolls the census back for operator review. */
+  allowValidToInvalid?: boolean;
   prepareDefinitions?: typeof prepareDBHValidationDefinitions;
   runDbh?: typeof runSharedDBHChangeValidationsInTransaction;
   finalize?: typeof finalizeValidatedRowsInTransaction;
@@ -78,6 +83,13 @@ export interface DbhRescoreReconciliationDependencies {
 }
 
 const attemptMarker = (attemptID: string) => `dbh-rescore-attempt:${attemptID}`;
+
+export class DbhRescoreValidToInvalidError extends Error {
+  constructor(readonly measurementIDs: number[]) {
+    super(`DBH re-score would turn ${measurementIDs.length} valid measurement(s) invalid; review them and rerun with valid-to-invalid changes allowed`);
+    this.name = 'DbhRescoreValidToInvalidError';
+  }
+}
 
 async function countActiveBackgroundJobs(scope: DbhRescoreScope, tx: TxExecutor): Promise<number> {
   const rows = await tx.query<Array<{ count: number }>>(
@@ -309,13 +321,43 @@ async function captureScopeState(tx: TxExecutor, scope: DbhRescoreScope): Promis
   return { validity: validityRows[0] ?? {}, measurements, dbhErrors: errors };
 }
 
+const MANAGER_OVERRIDE_EXISTS_SQL = `EXISTS (
+       SELECT 1 FROM ??.measurement_error_log mel
+       JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+       WHERE mel.MeasurementID = cm.CoreMeasurementID AND me.ErrorSource = 'validation' AND me.ErrorCode = ?)`;
+
+/** Manager-overridden valid rows keep their result; everything else in scope is re-scored. */
 async function resetCurrentScope(tx: TxExecutor, scope: DbhRescoreScope): Promise<number> {
   const sql = safeFormatQuery(
     scope.schema,
-    'UPDATE ??.coremeasurements SET IsValidated = NULL WHERE CensusID = ? AND IsActive = TRUE AND StemGUID IS NOT NULL AND IsValidated IS NOT NULL'
+    `UPDATE ??.coremeasurements cm SET cm.IsValidated = NULL
+     WHERE cm.CensusID = ? AND cm.IsActive = TRUE AND cm.StemGUID IS NOT NULL AND cm.IsValidated IS NOT NULL
+       AND NOT (cm.IsValidated = TRUE AND ${MANAGER_OVERRIDE_EXISTS_SQL})`
   );
-  const result = (await tx.query(sql, [scope.censusID])) as { affectedRows?: number };
+  const result = (await tx.query(sql, [scope.censusID, MANAGER_OVERRIDE_ERROR_CODE])) as { affectedRows?: number };
   return asNumber(result.affectedRows ?? 0);
+}
+
+async function countPreservedOverrides(tx: TxExecutor, scope: DbhRescoreScope): Promise<number> {
+  const sql = safeFormatQuery(
+    scope.schema,
+    `SELECT COUNT(*) AS count FROM ??.coremeasurements cm
+     WHERE cm.CensusID = ? AND cm.IsActive = TRUE AND cm.StemGUID IS NOT NULL AND cm.IsValidated = TRUE AND ${MANAGER_OVERRIDE_EXISTS_SQL}`
+  );
+  const rows = (await tx.query(sql, [scope.censusID, MANAGER_OVERRIDE_ERROR_CODE])) as Array<{ count: number }>;
+  return asNumber(rows[0]?.count ?? 0);
+}
+
+function validityOf(value: unknown): boolean | null {
+  if (value === null || value === undefined) return null;
+  return enabled(value);
+}
+
+function findValidToInvalidMeasurementIDs(before: Record<string, unknown>, after: Record<string, unknown>): number[] {
+  const afterValidity = new Map((after.measurements as Array<Record<string, unknown>>).map(row => [asNumber(row.MeasurementID), validityOf(row.IsValidated)]));
+  return (before.measurements as Array<Record<string, unknown>>)
+    .filter(row => validityOf(row.IsValidated) === true && afterValidity.get(asNumber(row.MeasurementID)) === false)
+    .map(row => asNumber(row.MeasurementID));
 }
 
 /**
@@ -429,6 +471,7 @@ export async function rescoreDbhCensus(scope: DbhRescoreScope, deps: DbhRescoreD
         beforeState = before;
         await writeArtifact({ event: 'before', attemptID, scope, provisionalRunID, data: { ...before, originalConnectionID } });
 
+        const preservedOverrideCount = await countPreservedOverrides(tx, scope);
         const resetCount = await resetCurrentScope(tx, scope);
         const execution = await runDbh({
           schema: scope.schema,
@@ -447,11 +490,25 @@ export async function rescoreDbhCensus(scope: DbhRescoreScope, deps: DbhRescoreD
         if (remainingPending > 0) throw new Error(`DBH re-score left ${remainingPending} eligible pending measurement(s)`);
         await refreshViews(connectionManager as ConnectionManager, scope.schema, scope.plotID, scope.censusID, tx.id);
         const after = await captureScopeState(tx, scope);
-        const counts = { resetCount, finalizedCount, ...(execution.skipCounts ?? {}) };
+        const validToInvalidMeasurementIDs = findValidToInvalidMeasurementIDs(before, after);
+        const counts = {
+          resetCount,
+          finalizedCount,
+          preservedOverrideCount,
+          validToInvalidCount: validToInvalidMeasurementIDs.length,
+          ...(execution.skipCounts ?? {})
+        };
         if (resetCount !== finalizedCount) {
           throw new Error(`DBH re-score reset/finalized mismatch (${resetCount} reset, ${finalizedCount} finalized)`);
         }
-        await writeArtifact({ event: 'prepared', attemptID, scope, provisionalRunID, data: { before, after, counts, originalConnectionID } });
+        if (validToInvalidMeasurementIDs.length > 0 && !deps.allowValidToInvalid) throw new DbhRescoreValidToInvalidError(validToInvalidMeasurementIDs);
+        await writeArtifact({
+          event: 'prepared',
+          attemptID,
+          scope,
+          provisionalRunID,
+          data: { before, after, counts, validToInvalidMeasurementIDs, originalConnectionID }
+        });
         await completeValidationRunRecordInTransaction(tx, scope.schema, provisionalRunID, {
           completedSteps: DBH_VALIDATION_IDS.length,
           failedSteps: 0,
@@ -464,6 +521,7 @@ export async function rescoreDbhCensus(scope: DbhRescoreScope, deps: DbhRescoreD
           runID: provisionalRunID,
           originalConnectionID,
           counts,
+          validToInvalidMeasurementIDs,
           before,
           after,
           errors: []
@@ -500,9 +558,11 @@ export async function rescoreDbhCensus(scope: DbhRescoreScope, deps: DbhRescoreD
     }
     // A reconciled commit remains a failed operator attempt until its required
     // outcome artifact is repaired and downstream work is explicitly resumed.
+    const heldValidToInvalid = error instanceof DbhRescoreValidToInvalidError && databaseOutcome === 'rolled-back';
     const result: DbhRescoreResult = {
-      outcome: 'failed',
+      outcome: heldValidToInvalid ? 'held-valid-to-invalid' : 'failed',
       databaseOutcome,
+      ...(error instanceof DbhRescoreValidToInvalidError ? { validToInvalidMeasurementIDs: error.measurementIDs } : {}),
       attemptID,
       errors,
       ...(runID ? { runID } : {}),
