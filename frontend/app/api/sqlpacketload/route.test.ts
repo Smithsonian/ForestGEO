@@ -690,6 +690,37 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
   });
 
+  it("writes one file_upload changelog entry per committed request, carrying only that request's counts", async () => {
+    // A retry after a client timeout, or a later upload of a file with the same name, is its own
+    // write. It must not be folded into (and double-count) an earlier entry for that name.
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql);
+      if (text.startsWith('SELECT')) return [{ Code: 'EXISTING' }];
+      return { affectedRows: 1, insertId: 11 };
+    });
+
+    const res = await POST(
+      makeFixedDataRequest('attributes', { 'row-1': { code: 'EXISTING', description: 'Retried', status: 'alive' } }, { uploadMode: 'revisions' })
+    );
+
+    expect(res?.status).toBe(HTTPResponses.OK);
+    const changelogStatements = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) => String(call[0]).includes('unifiedchangelog'));
+    console.log(`[changelog] statements: ${changelogStatements.map((call: any[]) => String(call[0]).replace(/\s+/g, ' ')).join(' | ')}`);
+    expect(changelogStatements, 'exactly one changelog statement: the INSERT, with no lookup or merge').toHaveLength(1);
+    const [insertSQL, insertParams] = changelogStatements[0];
+    expect(String(insertSQL)).toContain('INSERT INTO');
+    expect(insertParams.slice(0, 3)).toEqual(['file_upload', 'attributes.csv', 'INSERT']);
+    expect(JSON.parse(insertParams[3])).toEqual({
+      fileName: 'attributes.csv',
+      formType: 'attributes',
+      uploadMode: 'revisions',
+      rowCount: 1,
+      insertedCount: 0,
+      updatedCount: 1,
+      skippedCount: 0
+    });
+  });
+
   it('re-runs the chunk instead of phantom-committing when the changelog write deadlocks', async () => {
     // The changelog shares the data transaction. A deadlock on the changelog statement rolls
     // the WHOLE transaction back server-side; if it were swallowed like a benign logging
@@ -706,7 +737,6 @@ describe('sqlpacketload fixed-data upload modes', () => {
           }
           return { insertId: 9 };
         }
-        return []; // changelog lookup: no existing file_upload entry
       }
       if (text.startsWith('SELECT')) return []; // no existing attribute rows
       return { insertId: 1 };
@@ -734,8 +764,6 @@ describe('sqlpacketload fixed-data upload modes', () => {
       .mockResolvedValueOnce([])
       // Row 2: INSERT new row
       .mockResolvedValueOnce({ insertId: 9 })
-      // changelog: SELECT existing entry
-      .mockResolvedValueOnce([])
       // changelog: INSERT new entry
       .mockResolvedValueOnce({ insertId: 10 });
 
@@ -798,8 +826,6 @@ describe('sqlpacketload fixed-data upload modes', () => {
       .mockResolvedValueOnce({ affectedRows: 1 })
       // marker write: this session's reset is recorded after the rows
       .mockResolvedValueOnce({ affectedRows: 1 })
-      // changelog: SELECT existing entry
-      .mockResolvedValueOnce([])
       // changelog: INSERT new entry
       .mockResolvedValueOnce({ insertId: 3 });
 
@@ -845,8 +871,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
       .mockResolvedValueOnce({ affectedRows: 1 })
       // marker write
       .mockResolvedValueOnce({ affectedRows: 1 })
-      // changelog: SELECT existing entry, INSERT new entry
-      .mockResolvedValueOnce([])
+      // changelog: INSERT new entry
       .mockResolvedValueOnce({ insertId: 3 });
 
     const res = await POST(
@@ -1100,9 +1125,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
       .mockResolvedValueOnce([])
       // 4: INSERT new quadrat
       .mockResolvedValueOnce({ insertId: 3 })
-      // 5: changelog lookup
-      .mockResolvedValueOnce([])
-      // 6: changelog insert
+      // 5: changelog insert
       .mockResolvedValueOnce({ insertId: 4 });
 
     const res = await POST(
@@ -1161,9 +1184,8 @@ describe('sqlpacketload fixed-data upload modes', () => {
       ])
       // incoming E01 does not exist yet
       .mockResolvedValueOnce([])
-      // INSERT + changelog lookup + changelog insert
+      // INSERT + changelog insert
       .mockResolvedValueOnce({ insertId: 3 })
-      .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ insertId: 4 });
 
     const res = await POST(
@@ -1183,9 +1205,8 @@ describe('sqlpacketload fixed-data upload modes', () => {
       .mockResolvedValueOnce([{ QuadratID: 9, QuadratName: 'LEGACY', StartX: null, StartY: null, DimensionX: null, DimensionY: null }])
       // per-row lookup finds the row to update
       .mockResolvedValueOnce([{ QuadratID: 9 }])
-      // UPDATE + changelog lookup + changelog insert
+      // UPDATE + changelog insert
       .mockResolvedValueOnce({ affectedRows: 1 })
-      .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ insertId: 4 });
 
     const res = await POST(
@@ -1299,8 +1320,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
       .mockResolvedValueOnce({ insertId: 2 })
       // marker write
       .mockResolvedValueOnce({ affectedRows: 1 })
-      // changelog lookup + insert
-      .mockResolvedValueOnce([])
+      // changelog insert
       .mockResolvedValueOnce({ insertId: 3 });
 
     const res = await POST(
@@ -1392,13 +1412,16 @@ describe('sqlpacketload fixed-data upload modes', () => {
     ).overlapSummary;
     if (!overlapSummary) throw new Error('expected overlap summary');
 
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      // stem-safety precheck, DELETE, two INSERTs, marker write
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
       .mockResolvedValueOnce({ insertId: 1 })
       .mockResolvedValueOnce({ insertId: 2 })
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      // file_upload changelog insert, then the acknowledgment event fails
       .mockResolvedValueOnce({ insertId: 3 })
       .mockRejectedValueOnce(new Error('acknowledgment changelog unavailable'));
 
@@ -1617,16 +1640,18 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // existed; rejecting them would lock those sites out of quadrat management entirely.
     // The row below extends to x=100000, which would fail any real plot-bounds check --
     // proving the bounds check was skipped rather than run against coerced-to-zero bounds.
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: null, DimensionY: null }]);
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ DimensionX: null, DimensionY: null }])
       // stem-safety precheck: nothing blocking
       .mockResolvedValueOnce([])
       // DELETE FROM quadrats
       .mockResolvedValueOnce({ affectedRows: 0 })
       // INSERT new quadrat
       .mockResolvedValueOnce({ insertId: 1 })
-      // changelog lookup + insert
-      .mockResolvedValueOnce([])
+      // marker write
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      // changelog insert
       .mockResolvedValueOnce({ insertId: 2 });
 
     const res = await POST(

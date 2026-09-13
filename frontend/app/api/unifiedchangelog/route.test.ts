@@ -525,17 +525,17 @@ describe('Unified Changelog Tracking System', () => {
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-8');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
-      const exec = vi
-        .spyOn(cm, 'executeQuery')
-        // clean re-upload: DELETE existing attributes
-        .mockResolvedValueOnce({ affectedRows: 0 })
-        // upsertAttributeRows: row 1 (code='A') INSERT
-        .mockResolvedValueOnce({})
-        // upsertAttributeRows: row 2 (code='D') INSERT
-        .mockResolvedValueOnce({})
-        // changelog tracking
-        .mockResolvedValueOnce([]) // SELECT existing changelog entry (none)
-        .mockResolvedValueOnce({}); // INSERT changelog entry
+      // Keyed by statement: the clean re-upload first claims the session's replacement
+      // (marker column check, GET_LOCK, marker probe), then deletes, inserts both rows,
+      // records the marker and writes the changelog entry.
+      const exec = vi.spyOn(cm, 'executeQuery').mockImplementation(async (sql: unknown) => {
+        const text = String(sql);
+        if (text.includes('information_schema')) return [{ tableCount: 1, columnCount: 1 }];
+        if (text.includes('GET_LOCK')) return [{ acquired: 1 }];
+        if (text.includes('RELEASE_LOCK')) return [{ released: 1 }];
+        if (text.includes('reference_replacement_completed_at FROM')) return [{ reference_replacement_completed_at: null }];
+        return { affectedRows: 1, insertId: 1 };
+      });
 
       const fileRowSet = {
         'row-1': { code: 'A', description: 'Alive', status: 'alive' },
@@ -557,9 +557,12 @@ describe('Unified Changelog Tracking System', () => {
       expect(res).toBeDefined();
       expect(res!.status).toBe(HTTPResponses.OK);
 
-      // Verify ONE changelog entry was created
-      const changelogInsert = exec.mock.calls.find(call => String(call[0]).includes('INSERT INTO') && String(call[0]).includes('unifiedchangelog'));
-      expect(changelogInsert).toBeDefined();
+      // Verify ONE changelog entry was created, carrying this file's counts
+      const changelogStatements = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog'));
+      expect(changelogStatements).toHaveLength(1);
+      expect(String(changelogStatements[0][0])).toContain('INSERT INTO');
+      const metadata = JSON.parse((changelogStatements[0][1] as unknown[])[3] as string);
+      expect(metadata).toMatchObject({ fileName: 'attributes.csv', formType: 'attributes', rowCount: 2, insertedCount: 2 });
     });
 
     it('should create separate changelog entries for different files', async () => {

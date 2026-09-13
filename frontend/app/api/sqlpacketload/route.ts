@@ -643,60 +643,31 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Track file upload in unifiedchangelog (single row per file)
+        // One changelog entry per committed request. Reference-table files are sent whole, so
+        // a request is a file upload; a retry or a later upload under the same file name is its
+        // own write, and folding it into an earlier entry would double-count that entry.
         try {
-          const batchRowCount = Object.keys(fileRowSet).length;
           const censusID = census?.dateRanges?.[0]?.censusID;
-
-          // Check if we've already logged this file upload - use format() for schema
-          const existingEntrySQL = format(
-            `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
-             WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?
-             ORDER BY ChangeID DESC LIMIT 1`,
+          const uploadMetadata = JSON.stringify({
+            fileName,
+            formType,
+            uploadMode,
+            rowCount: Object.keys(fileRowSet).length,
+            insertedCount: fixedDataProcessingResult.insertedCount,
+            updatedCount: fixedDataProcessingResult.updatedCount,
+            skippedCount: fixedDataProcessingResult.skippedCount
+          });
+          const insertChangelogSQL = format(
+            `INSERT INTO ??.unifiedchangelog
+            (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
+            VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
             [schema]
           );
-          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID], transactionID);
-
-          if (existingEntry.length === 0) {
-            // First batch for this file - insert new entry
-            const uploadMetadata = JSON.stringify({
-              fileName,
-              formType,
-              uploadMode,
-              rowCount: batchRowCount,
-              insertedCount: fixedDataProcessingResult.insertedCount,
-              updatedCount: fixedDataProcessingResult.updatedCount,
-              skippedCount: fixedDataProcessingResult.skippedCount,
-              batchCount: 1
-            });
-            const insertChangelogSQL = format(
-              `INSERT INTO ??.unifiedchangelog
-              (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
-              VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
-              [schema]
-            );
-            await connectionManager.executeQuery(
-              insertChangelogSQL,
-              ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID],
-              transactionID
-            );
-          } else {
-            // Subsequent batch - update the existing entry with accumulated count
-            // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
-            const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
-            // Fixed-data files are sent whole, so a second entry under the same file name is a
-            // retry of the request or a later upload of the same name — never a chunk. The
-            // file-level changelog keeps the mode the first request recorded.
-            metadata.uploadMode = metadata.uploadMode || uploadMode;
-            metadata.lastChunkMode = uploadMode;
-            metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
-            metadata.insertedCount = (metadata.insertedCount || 0) + fixedDataProcessingResult.insertedCount;
-            metadata.updatedCount = (metadata.updatedCount || 0) + fixedDataProcessingResult.updatedCount;
-            metadata.skippedCount = (metadata.skippedCount || 0) + fixedDataProcessingResult.skippedCount;
-            metadata.batchCount = (metadata.batchCount || 1) + 1;
-            const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
-            await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
-          }
+          await connectionManager.executeQuery(
+            insertChangelogSQL,
+            ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID],
+            transactionID
+          );
 
           if (fixedDataProcessingResult.acknowledgedOverlapSummaries?.length) {
             await insertQuadratOverlapAcknowledgmentEvent(
