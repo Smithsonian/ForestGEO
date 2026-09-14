@@ -133,13 +133,8 @@ vi.mock('@/ailogger', () => ({
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
 import { ingestBatch } from '@/lib/uploads/ingest-batch';
-import {
-  COORDINATE_DRIFT_PROCEDURE,
-  DBH_GROWTH_PROCEDURE,
-  DBH_SHRINKAGE_PROCEDURE,
-  QUADRAT_MISMATCH_PROCEDURE,
-  runCensusValidations
-} from '@/lib/uploads/validation-orchestrator';
+import { COORDINATE_DRIFT_PROCEDURE, QUADRAT_MISMATCH_PROCEDURE, runCensusValidations } from '@/lib/uploads/validation-orchestrator';
+import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
 
 // ---------------------------------------------------------------------------
 // Fixture constants

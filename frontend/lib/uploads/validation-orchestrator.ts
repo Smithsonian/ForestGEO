@@ -20,11 +20,6 @@ import { refreshMeasurementsSummaryForScope, refreshViewFullTableForScope } from
 import { createValidationRunRecord, updateValidationRunRecord } from '@/lib/validations/run-records';
 import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE, describeDbhFloorSkips } from '@/config/dbhchangevalidations';
 
-// Single source for these procedure names on the server. The client-side
-// copies in components/client/validationcore.tsx and config/validation-runner.ts
-// must stay local — importing this module there would pull ConnectionManager
-// into the client bundle.
-export { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE };
 export const QUADRAT_MISMATCH_PROCEDURE = 'ValidateQuadratMismatchAcrossCensuses';
 export const COORDINATE_DRIFT_PROCEDURE = 'ValidateCoordinateDriftAcrossCensuses';
 
