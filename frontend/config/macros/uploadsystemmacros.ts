@@ -13,16 +13,7 @@ export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500MB per file
 export const MAX_FILE_SIZE_MB = 500;
 export const MAX_TOTAL_UPLOAD_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB total per upload session
 
-// Forms that upload a whole file in one request (everything except measurements)
-// buffer the entire file into a single JSON body and write it inside one server
-// transaction, row by row. The 256KB parse chunk used to bound that work; a
-// single-request upload needs its own ceiling, or a large file runs past the
-// 300s client fetch timeout and the retry re-issues the whole delete + insert.
-// 8MB is well over 80,000 reference rows — far beyond any real species,
-// attributes or personnel list — and a file above it can be split into several
-// files, which the session-scoped replacement marker uploads as one replacement.
-export const MAX_SINGLE_REQUEST_FILE_SIZE_BYTES = 8 * 1024 * 1024;
-export const MAX_SINGLE_REQUEST_FILE_SIZE_MB = 8;
+export { MAX_SINGLE_REQUEST_FILE_SIZE_BYTES, MAX_SINGLE_REQUEST_FILE_SIZE_MB } from '@/lib/uploads/reference-upload-limits';
 
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 Bytes';

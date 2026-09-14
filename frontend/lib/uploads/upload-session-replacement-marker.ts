@@ -41,9 +41,8 @@ function memoKey(schema: string, markerColumn: UploadSessionReplacementMarkerCol
 }
 
 /**
- * Self-heals a live schema whose upload_sessions predates a marker column, the
- * same way SourceFormat is handled for temporarymeasurements: the repair
- * migration is the durable fix, this keeps a not-yet-migrated schema working.
+ * Legacy measurement compatibility for schemas that predate the census marker.
+ * Reference uploads use the schema migration and do not call this helper.
  *
  * Runs OUTSIDE the caller's transaction on purpose — ALTER TABLE causes an
  * implicit commit in MySQL, so issuing it on the transaction's connection would
@@ -94,9 +93,12 @@ export async function uploadSessionHasCompletedReplacement(
   const probeSQL = safeFormatQuery(schema, `SELECT ${markerColumn} FROM ??.upload_sessions WHERE session_id = ? LIMIT 1`);
   try {
     const rows = await connectionManager.executeQuery(probeSQL, [uploadSessionID], transactionID);
+    if (markerColumn === REFERENCE_REPLACEMENT_MARKER_COLUMN && (!Array.isArray(rows) || rows.length !== 1)) {
+      throw new Error(`Upload session ${uploadSessionID} was not found; reference data was not replaced.`);
+    }
     return Array.isArray(rows) && rows.length > 0 && rows[0][markerColumn] !== null;
   } catch (error: unknown) {
-    if (!isMissingTableError(error, UPLOAD_SESSIONS_TABLE)) throw error;
+    if (markerColumn === REFERENCE_REPLACEMENT_MARKER_COLUMN || !isMissingTableError(error, UPLOAD_SESSIONS_TABLE)) throw error;
     // No session table in this schema: fall back to "has not replaced", which
     // reproduces the pre-marker behaviour (replace on every file) rather than
     // failing the upload outright.
@@ -117,6 +119,9 @@ export async function markUploadSessionReplacementCompleted(
   try {
     const result = await connectionManager.executeQuery(markSQL, [uploadSessionID], transactionID);
     if (Number((result as { affectedRows?: number })?.affectedRows ?? 0) === 0) {
+      if (markerColumn === REFERENCE_REPLACEMENT_MARKER_COLUMN) {
+        throw new Error(`Upload session ${uploadSessionID} was not found; reference replacement could not be recorded.`);
+      }
       // The marker lives on the session row, so a session id with no row cannot
       // be marked — and the next file of that "session" would replace again.
       // Never silent: this is the shape of the bug the marker replaced.
@@ -126,7 +131,7 @@ export async function markUploadSessionReplacementCompleted(
       );
     }
   } catch (error: unknown) {
-    if (!isMissingTableError(error, UPLOAD_SESSIONS_TABLE)) throw error;
+    if (markerColumn === REFERENCE_REPLACEMENT_MARKER_COLUMN || !isMissingTableError(error, UPLOAD_SESSIONS_TABLE)) throw error;
   }
 }
 
@@ -176,8 +181,8 @@ export function buildReferenceReplacementLockName(schema: string, uploadSessionI
  * after the rows, so the session row is locked only for the tail of the
  * transaction and heartbeats are not blocked for the length of the upload.
  *
- * A request with no upload session to key on keeps the pre-marker behaviour and
- * replaces, rather than silently appending to rows the user asked to replace.
+ * Reference uploads require the migrated marker and an existing session. A missing
+ * prerequisite fails the transaction; it must never restore per-request deletion.
  */
 export async function claimReferenceTableReplacement(
   connectionManager: ConnectionManager,
@@ -187,9 +192,8 @@ export async function claimReferenceTableReplacement(
   transactionID: string
 ): Promise<boolean> {
   if (uploadMode !== UploadMode.CLEAN_REUPLOAD) return false;
-  if (uploadSessionID === null) return true;
+  if (!uploadSessionID?.trim()) throw new Error('Upload session is required to replace reference data.');
 
-  await ensureUploadSessionReplacementMarkerColumn(connectionManager, schema, REFERENCE_REPLACEMENT_MARKER_COLUMN);
   const lockAcquired = await connectionManager.acquireApplicationLock(
     buildReferenceReplacementLockName(schema, uploadSessionID),
     transactionID,
@@ -216,6 +220,6 @@ export async function recordReferenceTableReplacement(
   uploadSessionID: string | null,
   transactionID: string
 ): Promise<void> {
-  if (uploadSessionID === null) return;
+  if (!uploadSessionID?.trim()) throw new Error('Upload session is required to record reference replacement.');
   await markUploadSessionReplacementCompleted(connectionManager, schema, uploadSessionID, REFERENCE_REPLACEMENT_MARKER_COLUMN, transactionID);
 }

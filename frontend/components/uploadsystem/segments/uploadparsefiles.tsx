@@ -57,6 +57,7 @@ import {
 } from '@/lib/provisioning/quadrat-collection-validation';
 import type { QuadratCsvRow } from '@/lib/provisioning/types';
 import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
+import { MAX_REFERENCE_UPLOAD_ROWS } from '@/lib/uploads/reference-upload-limits';
 
 export interface FileValidationStatus {
   fileName: string;
@@ -474,10 +475,8 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     return issues;
   }, [acceptedFiles, uploadForm]);
 
-  // Non-measurement forms upload each file as ONE request, so the whole file is buffered into a
-  // single JSON body and written inside one server transaction. Surface an oversized file at
-  // selection time rather than letting it run past the upload's 300s timeout, where the retry
-  // would re-issue the entire clean-reupload delete + insert.
+  // Reference files are buffered and committed whole. This byte limit bounds input size;
+  // a separate row limit bounds DB work when parsing and on the server.
   const singleRequestFileSizeIssues = useMemo(() => {
     if (!uploadForm || !uploadsWholeFileInOneRequest(uploadForm)) return [];
     return acceptedFiles
@@ -624,6 +623,12 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
             }}
           >
             <Stack spacing={3} sx={{ height: '100%' }}>
+              {uploadForm && uploadsWholeFileInOneRequest(uploadForm) && (
+                <Typography level="body-sm">
+                  Each file is saved together. Maximum {MAX_SINGLE_REQUEST_FILE_SIZE_MB} MB and {MAX_REFERENCE_UPLOAD_ROWS.toLocaleString('en-US')} rows per
+                  file.
+                </Typography>
+              )}
               <DropzoneCompact
                 onChange={handleFileChange}
                 hasFiles={acceptedFiles.length > 0}

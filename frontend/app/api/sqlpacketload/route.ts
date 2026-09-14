@@ -17,15 +17,21 @@ import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
 import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, type QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
 import { QuadratGeometryValidationError, QuadratOverlapAcknowledgmentRequiredError, writeQuadratUpload } from '@/lib/ingestion/quadrat-write-boundary';
 import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE } from '@/lib/ingestion/quadrat-overlap-contract';
-import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
 import { requireSession } from '@/lib/auth-helpers';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { assertSchemaAccess } from '@/lib/authz';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import { MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
-import { type FixedDataProcessingResult, upsertAttributeRows, upsertPersonnelRows, upsertSpeciesRows } from '@/lib/uploads/reference-data-writers';
+import {
+  type FixedDataProcessingResult,
+  ReferenceUploadValidationError,
+  upsertAttributeRows,
+  upsertPersonnelRows,
+  upsertSpeciesRows
+} from '@/lib/uploads/reference-data-writers';
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
 import { ReferenceReplacementInProgressError } from '@/lib/uploads/upload-session-replacement-marker';
+import { referenceUploadRowLimitError } from '@/lib/uploads/reference-upload-limits';
 
 const REFERENCE_REPLACEMENT_IN_PROGRESS_CODE = 'REFERENCE_REPLACEMENT_IN_PROGRESS';
 const UPLOAD_SCOPE_REQUIRED_CODE = 'UPLOAD_SCOPE_REQUIRED';
@@ -559,6 +565,10 @@ export async function POST(request: NextRequest) {
     }
   } else {
     const uploadRows = Object.values(fileRowSet);
+    const rowLimitError = referenceUploadRowLimitError(uploadRows.length);
+    if (rowLimitError) {
+      return NextResponse.json({ error: rowLimitError, code: 'REFERENCE_UPLOAD_TOO_MANY_ROWS' }, { status: HTTPResponses.INVALID_REQUEST });
+    }
 
     // The session id decides whether this request runs a destructive clean re-upload reset,
     // so it must belong to this plot and census and still be live, exactly as for measurements.
@@ -762,6 +772,10 @@ export async function POST(request: NextRequest) {
             code: 'INVALID_QUADRAT_GEOMETRY'
           });
           return NextResponse.json({ error: error.message, code: 'INVALID_QUADRAT_GEOMETRY' }, { status: HTTPResponses.INVALID_REQUEST });
+        }
+
+        if (error instanceof ReferenceUploadValidationError) {
+          return NextResponse.json({ error: error.message, code: 'INVALID_REFERENCE_DATA' }, { status: HTTPResponses.INVALID_REQUEST });
         }
 
         if (error instanceof ReferenceReplacementInProgressError) {

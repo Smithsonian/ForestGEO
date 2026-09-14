@@ -141,6 +141,7 @@ vi.mock('@/ailogger', () => ({
 
 // Route handler imported AFTER the mocks so they are wired before module load.
 import { POST } from '@/app/api/sqlpacketload/route';
+import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 
 function buildQuadratUploadRequest(body: Record<string, unknown>) {
   return new Request('http://localhost/api/sqlpacketload', {
@@ -189,6 +190,7 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
     plotID = testData.plots[0].plotID;
     censusID = testData.census[0].censusID;
     sharedState.connection = connection;
+    await ensureUploadSessionsTable(config.database);
   }, 90000);
 
   afterAll(async () => {
@@ -199,6 +201,13 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
   beforeEach(async () => {
     await cleanupTestMeasurements(connection, testData);
     await resetQuadratsToBaseline(connection, plotID);
+    // Clean uploads must have a real session row to persist the replacement marker.
+    await connection.query('DELETE FROM upload_sessions');
+    await connection.query(
+      `INSERT INTO upload_sessions (session_id, schema_name, plot_id, census_id, user_id, state)
+       VALUES (?, ?, ?, ?, ?, 'uploading')`,
+      ['quadrat-geometry-integration-session', config.database, plotID, censusID, AUTH_USER_EMAIL]
+    );
   });
 
   function baseRequestBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {

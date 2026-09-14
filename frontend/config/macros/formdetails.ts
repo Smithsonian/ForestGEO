@@ -16,9 +16,9 @@ export enum SourceFormat {
 
 /**
  * Measurement files are parsed and uploaded as size-bounded chunks; every other
- * form is parsed and uploaded whole, in a single request. Reference-table
- * uploads depend on that: their CLEAN_REUPLOAD deletes existing rows per
- * request, so a second request would erase what the first one wrote (#472).
+ * form is parsed and uploaded whole, in a single request, so each file's writes
+ * and validation succeed or roll back together. A session marker separately
+ * ensures a multi-file clean upload replaces existing data only once.
  *
  * One predicate, because the chunk-size decision and the progress estimate must
  * never drift apart.

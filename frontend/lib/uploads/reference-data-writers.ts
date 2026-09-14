@@ -1,5 +1,5 @@
 /**
- * Reference-data writers for the fixed-data upload path (attributes, species).
+ * Reference-data writers for the fixed-data upload path (attributes, species, personnel).
  *
  * These live outside `app/api/sqlpacketload/route.ts` for two reasons: a Next.js
  * route module may only export route fields, so nothing else can import them
@@ -7,8 +7,6 @@
  * dispatches to them by formType; the provisioned-site lifecycle test seeds a
  * fresh schema through them so its reference data is written by production code
  * rather than parallel test SQL.
- *
- * Moved verbatim from the route — no behavior change.
  */
 import type ConnectionManager from '@/lib/db/connectionmanager';
 import type { FileRow } from '@/config/macros/formdetails';
@@ -39,18 +37,20 @@ export function normalizeRequiredString(value: unknown): string {
   return String(value ?? '').trim();
 }
 
-function findDuplicateSpeciesCodes(rows: FileRow[]): string[] {
+export class ReferenceUploadValidationError extends Error {}
+
+function findDuplicateCodes(rows: FileRow[], codeForRow: (row: FileRow) => unknown): string[] {
   const seen = new Set<string>();
   const duplicates = new Set<string>();
 
   for (const row of rows) {
-    const speciesCode = normalizeOptionalString(row.spcode)?.toLowerCase();
-    if (!speciesCode) continue;
-    if (seen.has(speciesCode)) {
-      duplicates.add(speciesCode);
+    const code = normalizeOptionalString(codeForRow(row))?.toLowerCase();
+    if (!code) continue;
+    if (seen.has(code)) {
+      duplicates.add(code);
       continue;
     }
-    seen.add(speciesCode);
+    seen.add(code);
   }
 
   return Array.from(duplicates).sort();
@@ -85,6 +85,11 @@ export async function upsertAttributeRows(
   let insertedCount = 0;
   let updatedCount = 0;
   let skippedCount = 0;
+
+  const duplicateCodes = findDuplicateCodes(rows, row => row.code || row.codes);
+  if (duplicateCodes.length > 0) {
+    throw new ReferenceUploadValidationError(`Attribute upload contains duplicate Code values: ${truncateAndJoin(duplicateCodes, ', ')}`);
+  }
 
   const replacesExistingRows = await claimReferenceTableReplacement(connectionManager, schema, uploadMode, uploadSessionID, transactionID);
   if (replacesExistingRows) {
@@ -145,7 +150,7 @@ export async function upsertSpeciesRows(
   let updatedCount = 0;
   let skippedCount = 0;
 
-  const duplicateSpeciesCodes = findDuplicateSpeciesCodes(rows);
+  const duplicateSpeciesCodes = findDuplicateCodes(rows, row => row.spcode);
   if (duplicateSpeciesCodes.length > 0) {
     throw new Error(`Species upload contains duplicate SpeciesCode values: ${duplicateSpeciesCodes.join(', ')}`);
   }

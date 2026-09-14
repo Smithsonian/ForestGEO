@@ -267,6 +267,34 @@ describe('UploadFireSQL — the /api/sqlpacketload request body', () => {
     expect(uploadedRows).toHaveLength(codes.length);
     expect(new Set(uploadedRows.map(uploadedRow => uploadedRow[key]))).toEqual(new Set(codes));
   });
+  it('rejects a compact reference file above the row limit before sending any rows', async () => {
+    const csv = ['code,description,status', ...Array.from({ length: 10001 }, (_, i) => `A${i},description,alive`)].join('\n');
+    const file = new FileWithStream(new File([csv], 'attributes.csv', { type: 'text/csv' }), false);
+    expect(file.size).toBeLessThan(8 * 1024 * 1024);
+    render(
+      <UploadFireSQL
+        schema="forestgeo_testing"
+        uploadForm={FormType.attributes}
+        uploadMode={UploadMode.CLEAN_REUPLOAD}
+        sourceFormat={SourceFormat.csv}
+        personnelRecording=""
+        acceptedFiles={[file]}
+        parsedData={{}}
+        uploadCompleteMessage=""
+        selectedDelimiters={{ 'attributes.csv': ',' }}
+        quadratOverlapAcknowledgment={null}
+        onQuadratOverlapAcknowledgmentRequired={vi.fn()}
+        setUploadCompleteMessage={setUploadCompleteMessage}
+        setIsDataUnsaved={setIsDataUnsaved}
+        setUploadError={setUploadError}
+        setErrorComponent={setErrorComponent}
+        setReviewState={setReviewState}
+        setAllRowToCMID={setAllRowToCMID}
+      />
+    );
+    await waitFor(() => expect(setUploadError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('10,000 rows per file') })));
+    expect(fetchMock.mock.calls.filter(call => String(call[0]).includes('/api/sqlpacketload'))).toHaveLength(0);
+  });
 });
 
 // The rawPayload branch is only reachable on the measurements + column-mapping flow. Covered
@@ -297,7 +325,7 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
     vi.unstubAllGlobals();
   });
 
-  it.each([1, 10_000])('sends all %i measurement rows through the rawPayload branch, retaining chunking for large files', async rowCount => {
+  it.each([1, 10_001])('sends all %i measurement rows through the rawPayload branch, retaining chunking for large files', async rowCount => {
     const csvContent = ['tag,spcode,quadrat,lx,ly,date', ...Array.from({ length: rowCount }, (_, index) => `${index + 1},ABAL,Q0001,1.5,2.5,2020-01-01`)].join(
       '\n'
     );

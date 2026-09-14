@@ -42,6 +42,7 @@ import { CSV_RESOLVE_OPTIONS, collapseRowWithPlan, resolveHeaders, transformHead
 import { aliasesFor, makeLegacyCsvHeaderKey } from '@/lib/column-mapping/fields';
 import { transformMeasurementValue, validateMeasurementRow } from '@/lib/column-mapping/measurement-rows';
 import { UploadMode } from '@/config/uploadmodes';
+import { referenceUploadRowLimitError } from '@/lib/uploads/reference-upload-limits';
 import { evaluateUploadReconciliation, type UploadReconciliationVerdict } from '@/lib/ingestion/reconciliation';
 import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
 import { parseQuadratOverlapSummaries } from '@/lib/ingestion/quadrat-overlap-contract';
@@ -980,16 +981,22 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           delimiter: delimiter,
           header: true,
           skipEmptyLines: true,
-          // Reference-table files must use one request: CLEAN_REUPLOAD deletes existing rows
-          // per request, so later chunks would erase earlier ones (#472). This also keeps
-          // quadrat overlap validation and acknowledgment atomic at file scope. A chunk size
-          // past the file size makes Papa emit exactly one chunk.
+          // Reference files commit together, including duplicate-code validation and quadrat
+          // overlap acknowledgment. Session-scoped replacement preserves earlier files.
+          // A chunk size past the file size makes Papa emit exactly one chunk.
           chunkSize: uploadsWholeFileInOneRequest(uploadForm) ? Math.max(file.size + 1, chunkSize) : chunkSize,
           transformHeader,
           transform,
           chunk(results: ParseResult<FileRow>, parser) {
             actualChunkCount += 1;
             totalRows += results.data.length;
+            const rowLimitError = uploadsWholeFileInOneRequest(uploadForm) ? referenceUploadRowLimitError(totalRows) : null;
+            if (rowLimitError) {
+              chunkProcessingError = new Error(`${file.name}: ${rowLimitError}`);
+              markFatalUploadError(chunkProcessingError);
+              parser.abort();
+              return;
+            }
             if (serverResolves && actualChunkCount === 1) {
               // Capture the parsed header row once so every chunk ships the same authoritative
               // header list to the server. Fall back to the up-front extracted headers.

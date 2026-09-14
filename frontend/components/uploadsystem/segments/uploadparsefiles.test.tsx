@@ -340,9 +340,8 @@ describe('CSV mapping gating rule', () => {
 
 // ---------------------------------------------------------------------------
 // Single-request file size guard — species/attributes/personnel/quadrats upload a
-// whole file in ONE request (the CLEAN_REUPLOAD delete happens per request, so
-// they cannot be chunked). Nothing else bounds that request, so an oversized file
-// has to be refused at selection instead of running past the 300s upload timeout.
+// whole file in ONE request. Reject oversized source files at selection; row
+// counts are checked by the upload parser and the server separately.
 // ---------------------------------------------------------------------------
 describe('single-request upload size guard', () => {
   const SPECIES_FILE = 'species.csv';

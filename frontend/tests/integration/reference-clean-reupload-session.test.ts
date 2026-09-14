@@ -381,12 +381,12 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
       expect(await activeSpeciesCodes()).toEqual([...FILE_A_CODES].sort());
     });
 
-    it('still replaces on every request when the upload carries no session to scope it to', async () => {
-      await uploadSpecies(FILE_A_CODES, null);
-      await uploadSpecies(FILE_B_CODES, null);
+    it('refuses a clean upload without a session before deleting existing rows', async () => {
+      await uploadSpecies(FILE_A_CODES, null, UploadMode.REVISIONS);
+      await expect(uploadSpecies(FILE_B_CODES, null)).rejects.toThrow('Upload session is required');
 
-      expect(await activeSpeciesCodes()).toEqual([...FILE_B_CODES].sort());
-      expect(deleteStatementCount('species')).toBe(2);
+      expect(await activeSpeciesCodes()).toEqual([...FILE_A_CODES].sort());
+      expect(deleteStatementCount('species')).toBe(0);
     });
 
     it('leaves a revisions upload additive, with no delete at all', async () => {
@@ -400,6 +400,48 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
     });
   });
 
+  // Opt-in local workload measurement. The normal suite only runs correctness cases.
+  // REFERENCE_UPLOAD_BENCHMARK_ROWS=10000 npm run test:integration -- reference-clean-reupload-session.test.ts -t benchmark
+  const benchmarkRows = Number(process.env.REFERENCE_UPLOAD_BENCHMARK_ROWS || 0);
+  it.skipIf(!benchmarkRows).each(['attributes', 'species', 'personnel', 'quadrats'] as const)(
+    'benchmark: %s whole-file first write and retry',
+    async form => {
+      await seedUploadSession(SESSION_ONE);
+      const count = benchmarkRows;
+      const rows: FileRow[] = Array.from({ length: count }, (_, i): FileRow => {
+        const code = `A${String(i).padStart(7, '0')}`;
+        if (form === 'attributes') return { code, description: 'x'.repeat(32), status: 'alive' };
+        if (form === 'species') return { spcode: code, family: 'Family', genus: 'Genus', species: 'Species' };
+        if (form === 'personnel') return { firstname: code, lastname: 'Fieldworker', role: 'crew', roledescription: 'Field crew' };
+        return { quadrat: code, startx: String(i % 100), starty: String(Math.floor(i / 100)), dimx: '1', dimy: '1', area: '1' };
+      });
+      const csv = [Object.keys(rows[0]).join(','), ...rows.map(row => Object.values(row).join(','))].join('\n');
+      console.log(
+        '[benchmark fixture]',
+        JSON.stringify({ form, rows: count, csvBytes: Buffer.byteLength(csv), jsonBytes: Buffer.byteLength(JSON.stringify(rows)) })
+      );
+      for (const phase of ['first', 'retry']) {
+        let statements = 0;
+        const start = performance.now();
+        sharedState.statementObserver = async () => {
+          statements++;
+          if (performance.now() - start > 300000) throw new Error('benchmark reached the client 300s budget');
+        };
+        try {
+          const result = await uploadFile(tx => {
+            if (form === 'attributes') return upsertAttributeRows(connectionManager, schema, rows, UploadMode.CLEAN_REUPLOAD, SESSION_ONE, tx);
+            if (form === 'species') return upsertSpeciesRows(connectionManager, schema, rows, UploadMode.CLEAN_REUPLOAD, SESSION_ONE, tx);
+            if (form === 'personnel') return upsertPersonnelRows(connectionManager, schema, censusID, rows, UploadMode.CLEAN_REUPLOAD, SESSION_ONE, tx);
+            return writeQuadratUpload(connectionManager, schema, plotID, rows, UploadMode.CLEAN_REUPLOAD, null, 'SW', SESSION_ONE, tx);
+          });
+          console.log('[benchmark]', JSON.stringify({ form, phase, statements, seconds: (performance.now() - start) / 1000, result }));
+        } finally {
+          sharedState.statementObserver = null;
+        }
+      }
+    },
+    660000
+  );
   describe('attributes', () => {
     const uploadAttributes = (codes: string[], uploadSessionID: string | null, uploadMode = UploadMode.CLEAN_REUPLOAD) =>
       uploadFile(transactionID => upsertAttributeRows(connectionManager, schema, codes.map(attributeRow), uploadMode, uploadSessionID, transactionID));
@@ -435,6 +477,90 @@ describe('reference-table CLEAN_REUPLOAD is scoped to the upload session (#472)'
       expect(retry.updatedCount).toBe(FILE_A_CODES.length);
       expect(retry.insertedCount).toBe(0);
       expect(await activeAttributeCodes()).toEqual([...FILE_A_CODES].sort());
+    });
+
+    it.each(['first file', 'later file', 'revisions'] as const)('rejects duplicate codes within the %s before changing data', async scenario => {
+      await seedUploadSession(SESSION_ONE);
+      if (scenario === 'later file') await uploadAttributes(FILE_A_CODES, SESSION_ONE);
+      else await uploadAttributes(FILE_A_CODES, null, UploadMode.REVISIONS);
+      const markerBefore = await referenceReplacementMarker(SESSION_ONE);
+      const deletesBefore = deleteStatementCount('attributes');
+      const rows = [attributeRow('DUP'), { codes: ' dup ', description: 'conflicting value', status: ATTRIBUTE_STATUS }];
+      const mode = scenario === 'revisions' ? UploadMode.REVISIONS : UploadMode.CLEAN_REUPLOAD;
+
+      await expect(uploadFile(tx => upsertAttributeRows(connectionManager, schema, rows, mode, SESSION_ONE, tx))).rejects.toThrow(
+        'Attribute upload contains duplicate Code values: dup'
+      );
+      expect(await activeAttributeCodes()).toEqual([...FILE_A_CODES].sort());
+      expect(await referenceReplacementMarker(SESSION_ONE)).toBe(markerBefore);
+      expect(deleteStatementCount('attributes')).toBe(deletesBefore);
+    });
+
+    it('allows the same code in separate files and applies the later description', async () => {
+      await seedUploadSession(SESSION_ONE);
+      await uploadAttributes(FILE_A_CODES, SESSION_ONE);
+      const result = await uploadFile(tx =>
+        upsertAttributeRows(
+          connectionManager,
+          schema,
+          [{ ...attributeRow(FILE_A_CODES[0]), description: 'later description' }],
+          UploadMode.CLEAN_REUPLOAD,
+          SESSION_ONE,
+          tx
+        )
+      );
+      expect(result).toEqual({ insertedCount: 0, updatedCount: 1, skippedCount: 0 });
+      const [rows] = await connection.query<RowDataPacket[]>('SELECT Description FROM attributes WHERE Code = ?', [FILE_A_CODES[0]]);
+      expect(rows[0].Description).toBe('later description');
+      expect(await activeAttributeCodes()).toEqual([...FILE_A_CODES].sort());
+    });
+
+    it('refuses an unknown session before deleting existing data', async () => {
+      await uploadAttributes(FILE_A_CODES, null, UploadMode.REVISIONS);
+      await expect(uploadAttributes(FILE_B_CODES, SESSION_ONE)).rejects.toThrow('was not found');
+      expect(await activeAttributeCodes()).toEqual([...FILE_A_CODES].sort());
+      expect(deleteStatementCount('attributes')).toBe(0);
+    });
+
+    it('requires the migrated marker instead of altering the schema during an upload', async () => {
+      await seedUploadSession(SESSION_ONE);
+      await uploadAttributes(FILE_A_CODES, null, UploadMode.REVISIONS);
+      await connection.query(`ALTER TABLE upload_sessions DROP COLUMN ${REFERENCE_REPLACEMENT_MARKER_COLUMN}`);
+      try {
+        await expect(uploadAttributes(FILE_B_CODES, SESSION_ONE)).rejects.toMatchObject({ code: 'ER_BAD_FIELD_ERROR' });
+        expect(await activeAttributeCodes()).toEqual([...FILE_A_CODES].sort());
+        expect(deleteStatementCount('attributes')).toBe(0);
+        expect(sharedState.statements.some(sql => /^\s*ALTER TABLE/i.test(sql))).toBe(false);
+      } finally {
+        await connection.query(`ALTER TABLE upload_sessions ADD COLUMN ${REFERENCE_REPLACEMENT_MARKER_COLUMN} TIMESTAMP NULL DEFAULT NULL`);
+      }
+    });
+
+    it('rolls back the data if its session disappears before the marker can be recorded', async () => {
+      await seedUploadSession(SESSION_ONE);
+      await uploadAttributes(FILE_A_CODES, null, UploadMode.REVISIONS);
+      sharedState.statementObserver = async sql => {
+        if (/^\s*INSERT INTO \S+\.attributes\b/i.test(sql)) {
+          await peerConnection.query('DELETE FROM upload_sessions WHERE session_id = ?', [SESSION_ONE]);
+        }
+      };
+      await expect(uploadAttributes(FILE_B_CODES, SESSION_ONE)).rejects.toThrow('reference replacement could not be recorded');
+      expect(await activeAttributeCodes()).toEqual([...FILE_A_CODES].sort());
+    });
+
+    it('rolls back both the first replacement and its marker when a later write fails', async () => {
+      await seedUploadSession(SESSION_ONE);
+      await uploadAttributes(FILE_A_CODES, null, UploadMode.REVISIONS);
+      await expect(
+        uploadFile(async tx => {
+          await upsertAttributeRows(connectionManager, schema, FILE_B_CODES.map(attributeRow), UploadMode.CLEAN_REUPLOAD, SESSION_ONE, tx);
+          throw new Error('injected failure after recording the marker');
+        })
+      ).rejects.toThrow('injected failure');
+      expect(await activeAttributeCodes()).toEqual([...FILE_A_CODES].sort());
+      expect(await referenceReplacementMarker(SESSION_ONE)).toBeNull();
+      await uploadAttributes(FILE_B_CODES, SESSION_ONE);
+      expect(await activeAttributeCodes()).toEqual([...FILE_B_CODES].sort());
     });
 
     it('serializes an overlapping retry: the request that waited reads the committed marker and does not delete again', async () => {
