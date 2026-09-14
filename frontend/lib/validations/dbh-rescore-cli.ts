@@ -2,7 +2,7 @@ import { mkdir, open } from 'fs/promises';
 import path from 'path';
 import mysql from 'mysql2/promise';
 import type { RowDataPacket } from 'mysql2';
-import { parseStoredProceduresSQL } from '@/scripts/deploy-validations-to-all-schemas';
+import { parseStoredProceduresSQL } from '@/lib/db/stored-procedure-sql';
 import { DBH_CHANGE_VALIDATION_IDS, DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
 import { parseSiteValidationSeeds } from './validation-seed-parser';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';

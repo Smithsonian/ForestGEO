@@ -2,7 +2,6 @@ import mysql from 'mysql2/promise';
 import type { RowDataPacket } from 'mysql2';
 import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
-import type { SchemaGateRow } from '@/scripts/lib/schema-gate';
 import { buildDbhExpectedManifest, buildRealSweepDeps, type DbhExpectedManifest } from './dbh-rescore-cli';
 
 type DbhRuleRow = {
@@ -24,9 +23,9 @@ export interface DbhRuleDeploymentArgs {
 
 export class DbhRuleDeploymentArgumentError extends Error {}
 
-export interface DbhRuleDeploymentSelection {
+export interface DbhRuleDeploymentSelection<QuarantineGate> {
   schemas: string[];
-  quarantined: Array<{ schema: string; gate: SchemaGateRow }>;
+  quarantined: Array<{ schema: string; gate: QuarantineGate }>;
   notMigrated: Array<{ schema: string; missingTables: string[] }>;
 }
 
@@ -69,12 +68,12 @@ export function parseDbhRuleDeploymentArgs(argv: readonly string[]): DbhRuleDepl
 }
 
 /** Match the established deploy policy: all-site sweeps skip quarantines, while an explicit target fails closed. */
-export function selectDbhRuleDeploymentSchemas(
+export function selectDbhRuleDeploymentSchemas<QuarantineGate>(
   schemas: readonly string[],
-  quarantined: ReadonlyMap<string, SchemaGateRow>,
+  quarantined: ReadonlyMap<string, QuarantineGate>,
   explicitlySelected: boolean,
   migrationStatus: ReadonlyMap<string, { migrated: boolean; missingTables: string[] }>
-): DbhRuleDeploymentSelection {
+): DbhRuleDeploymentSelection<QuarantineGate> {
   for (const schema of schemas) {
     if (!migrationStatus.has(schema.toLowerCase())) throw new Error(`${schema}: DBH rule refresh could not determine migration status`);
   }

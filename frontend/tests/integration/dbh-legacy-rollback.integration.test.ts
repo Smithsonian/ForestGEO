@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import path from 'path';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
-import { parseStoredProceduresSQL } from '@/scripts/deploy-validations-to-all-schemas';
+import { parseStoredProceduresSQL } from '@/lib/db/stored-procedure-sql';
 import {
   cleanupTestMeasurements,
   insertCrossCensusMeasurements,
