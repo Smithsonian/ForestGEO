@@ -27,7 +27,7 @@ describe('DBH floor exclusions in normal validation', () => {
           { ValidationID: 2, IsEnabled: 1 }
         ];
       }
-      if (sql.includes('CALL forestgeo_testing.RunSharedDBHChangeValidations')) {
+      if (/CALL `?forestgeo_testing`?\.RunSharedDBHChangeValidations/.test(sql)) {
         return [[{ SkippedNoInterval: 0, SkippedBelowDbhFloor: '42' }], { affectedRows: 0 }];
       }
       return { affectedRows: 0 };

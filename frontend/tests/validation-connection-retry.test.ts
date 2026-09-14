@@ -123,7 +123,7 @@ describe('validation connection retries', () => {
           { ValidationID: 2, ProcedureName: 'ValidateDBHShrinkageExceedsMax', IsEnabled: 1 }
         ];
       }
-      if (sql.includes('CALL forestgeo_testing.RunSharedDBHChangeValidations')) {
+      if (sql.includes('CALL `forestgeo_testing`.RunSharedDBHChangeValidations')) {
         return [[{ SkippedNoInterval: 1, SkippedNegativeInterval: 0, SkippedImplausibleInterval: 1 }], [{ SkippedBelowDbhFloor: 2 }]];
       }
       return { affectedRows: 0 };
@@ -154,9 +154,9 @@ describe('validation connection retries', () => {
     await expect(runValidation(1, 'ValidateDBHGrowthExceedsMax', 'forestgeo_testing', 'SELECT 1')).resolves.toBe(true);
 
     const queries = mockConnectionManager.executeQuery.mock.calls.map(([sql]) => String(sql));
-    expect(queries.some(sql => sql.includes('UPDATE forestgeo_testing.coremeasurements cm') && sql.includes('mel.MeasurementID=cm.CoreMeasurementID'))).toBe(
-      true
-    );
+    expect(
+      queries.some(sql => sql.includes('UPDATE `forestgeo_testing`.coremeasurements cm') && sql.includes('mel.MeasurementID = cm.CoreMeasurementID'))
+    ).toBe(true);
     expect(queries.some(sql => sql.includes('DELETE cme FROM forestgeo_testing.measurement_error_log'))).toBe(false);
     expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('singleton-tx');
   });
