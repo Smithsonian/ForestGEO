@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Plot } from '@/lib/db/definitions/zones';
 import { OrgCensus } from '@/lib/db/definitions/timekeeping';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
-import { generateShortBatchID, handleUpsert } from '@/config/utils';
+import { generateShortBatchID } from '@/config/utils';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
@@ -17,8 +17,6 @@ import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
 import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT, type QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
 import { QuadratGeometryValidationError, QuadratOverlapAcknowledgmentRequiredError, writeQuadratUpload } from '@/lib/ingestion/quadrat-write-boundary';
 import { QUADRAT_OVERLAP_ACKNOWLEDGMENT_REQUIRED_CODE } from '@/lib/ingestion/quadrat-overlap-contract';
-import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
-import { RoleResult } from '@/lib/db/definitions/personnel';
 import { requireSession } from '@/lib/auth-helpers';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { assertSchemaAccess } from '@/lib/authz';
@@ -26,12 +24,17 @@ import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import { MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
 import {
   type FixedDataProcessingResult,
-  normalizeOptionalString,
-  normalizeRequiredString,
+  ReferenceUploadValidationError,
   upsertAttributeRows,
+  upsertPersonnelRows,
   upsertSpeciesRows
 } from '@/lib/uploads/reference-data-writers';
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
+import { ReferenceReplacementInProgressError } from '@/lib/uploads/upload-session-replacement-marker';
+import { referenceUploadRowLimitError } from '@/lib/uploads/reference-upload-limits';
+
+const REFERENCE_REPLACEMENT_IN_PROGRESS_CODE = 'REFERENCE_REPLACEMENT_IN_PROGRESS';
+const UPLOAD_SCOPE_REQUIRED_CODE = 'UPLOAD_SCOPE_REQUIRED';
 
 /**
  * Generate idempotency key for a batch of data
@@ -156,98 +159,6 @@ function isRetryableUploadError(error: unknown): boolean {
 
 function getUploadRetryDelayMs(attemptNumber: number): number {
   return Math.min(1000 * Math.pow(2, attemptNumber - 1), 10000);
-}
-
-async function upsertPersonnelRows(
-  connectionManager: ConnectionManager,
-  schema: string,
-  censusID: number | undefined,
-  rows: FileRow[],
-  uploadMode: UploadMode,
-  transactionID: string
-): Promise<FixedDataProcessingResult> {
-  if (!censusID) {
-    throw new Error('CensusID is required for personnel uploads');
-  }
-
-  let insertedCount = 0;
-  let updatedCount = 0;
-  let skippedCount = 0;
-
-  if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-    // Remove all census-active links for this census
-    const deleteCapSQL = format(`DELETE FROM ??.censusactivepersonnel WHERE CensusID = ?`, [schema]);
-    await connectionManager.executeQuery(deleteCapSQL, [censusID], transactionID);
-    // Remove personnel who are no longer linked to any census
-    const deleteOrphanedSQL = format(
-      `DELETE p FROM ??.personnel p
-       LEFT JOIN ??.censusactivepersonnel cap ON cap.PersonnelID = p.PersonnelID
-       WHERE cap.PersonnelID IS NULL AND p.IsActive = 1`,
-      [schema, schema]
-    );
-    await connectionManager.executeQuery(deleteOrphanedSQL, [], transactionID);
-  }
-
-  for (const row of rows) {
-    const firstName = normalizeRequiredString(row.firstname);
-    const lastName = normalizeRequiredString(row.lastname);
-    const roleName = normalizeRequiredString(row.role);
-    const roleDescription = normalizeOptionalString(row.roledescription);
-
-    if (!firstName || !lastName || !roleName) {
-      skippedCount += 1;
-      continue;
-    }
-
-    const normalizedRole = roleName
-      .replace(/([a-z])([A-Z])/g, '$1 $2')
-      .replace(/\s+/g, ' ')
-      .toLowerCase()
-      .trim();
-
-    const roleID = (
-      await handleUpsert<RoleResult>(
-        connectionManager,
-        schema,
-        'roles',
-        {
-          RoleName: normalizedRole,
-          RoleDescription: roleDescription
-        },
-        'RoleID',
-        transactionID
-      )
-    ).id;
-
-    if (uploadMode === UploadMode.REVISIONS) {
-      const existingSQL = format(
-        `SELECT p.PersonnelID FROM ??.personnel p
-         WHERE LOWER(p.FirstName) = LOWER(?) AND LOWER(p.LastName) = LOWER(?) AND p.IsActive = 1
-         LIMIT 1`,
-        [schema]
-      );
-      const existingRows = await connectionManager.executeQuery(existingSQL, [firstName, lastName], transactionID);
-
-      if (existingRows.length > 0) {
-        const personnelID = Number(existingRows[0].PersonnelID);
-        const updateSQL = format(`UPDATE ??.personnel SET FirstName = ?, LastName = ?, RoleID = ?, DeletedAt = NULL WHERE PersonnelID = ?`, [schema]);
-        await connectionManager.executeQuery(updateSQL, [firstName, lastName, roleID, personnelID], transactionID);
-        const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
-        await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
-        updatedCount += 1;
-        continue;
-      }
-    }
-
-    const insertSQL = format(`INSERT INTO ??.personnel (FirstName, LastName, RoleID, IsActive, DeletedAt) VALUES (?, ?, ?, 1, NULL)`, [schema]);
-    const insertResult = await connectionManager.executeQuery(insertSQL, [firstName, lastName, roleID], transactionID);
-    const personnelID = Number(insertResult.insertId);
-    const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
-    await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
-    insertedCount += 1;
-  }
-
-  return { insertedCount, updatedCount, skippedCount };
 }
 
 async function validateMeasurementUploadScope(
@@ -654,6 +565,37 @@ export async function POST(request: NextRequest) {
     }
   } else {
     const uploadRows = Object.values(fileRowSet);
+    const rowLimitError = referenceUploadRowLimitError(uploadRows.length);
+    if (rowLimitError) {
+      return NextResponse.json({ error: rowLimitError, code: 'REFERENCE_UPLOAD_TOO_MANY_ROWS' }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+
+    // The session id decides whether this request runs a destructive clean re-upload reset,
+    // so it must belong to this plot and census and still be live, exactly as for measurements.
+    const fixedDataPlotID = toPositiveInteger(plot?.plotID);
+    const fixedDataCensusID = toPositiveInteger(census?.dateRanges?.[0]?.censusID);
+    if (!fixedDataPlotID || !fixedDataCensusID) {
+      return NextResponse.json(
+        { error: `A plot and census are required for ${formType} uploads.`, code: UPLOAD_SCOPE_REQUIRED_CODE },
+        { status: HTTPResponses.INVALID_REQUEST }
+      );
+    }
+    try {
+      await requireUploadSessionOwnership({
+        schema,
+        sessionId,
+        plotId: fixedDataPlotID,
+        censusId: fixedDataCensusID,
+        allowedStates: [TrackedUploadSessionState.INITIALIZED, TrackedUploadSessionState.UPLOADING],
+        contextLabel: `${formType} upload for ${fileName}`
+      });
+    } catch (error: unknown) {
+      if (error instanceof UploadSessionOwnershipError) {
+        ailogger.warn(`Rejected ${formType} upload for ${fileName}: ${error.message}`);
+        return NextResponse.json({ responseMessage: 'Upload session conflict', error: error.message, fileName }, { status: error.status });
+      }
+      throw error;
+    }
 
     while (retryCount <= maxRetries) {
       let rowId = '';
@@ -672,12 +614,13 @@ export async function POST(request: NextRequest) {
             uploadMode,
             overlapAcknowledgment,
             body.coordinateReferenceCorner,
+            sessionId,
             transactionID
           );
         } else if (formType === 'attributes') {
-          fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
+          fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, sessionId, transactionID);
         } else if (formType === 'species') {
-          fixedDataProcessingResult = await upsertSpeciesRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
+          fixedDataProcessingResult = await upsertSpeciesRows(connectionManager, schema, uploadRows, uploadMode, sessionId, transactionID);
         } else if (formType === 'personnel') {
           fixedDataProcessingResult = await upsertPersonnelRows(
             connectionManager,
@@ -685,6 +628,7 @@ export async function POST(request: NextRequest) {
             census?.dateRanges?.[0]?.censusID,
             uploadRows,
             uploadMode,
+            sessionId,
             transactionID
           );
         } else {
@@ -709,60 +653,31 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Track file upload in unifiedchangelog (single row per file)
+        // One changelog entry per committed request. Reference-table files are sent whole, so
+        // a request is a file upload; a retry or a later upload under the same file name is its
+        // own write, and folding it into an earlier entry would double-count that entry.
         try {
-          const batchRowCount = Object.keys(fileRowSet).length;
           const censusID = census?.dateRanges?.[0]?.censusID;
-
-          // Check if we've already logged this file upload - use format() for schema
-          const existingEntrySQL = format(
-            `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
-             WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?
-             ORDER BY ChangeID DESC LIMIT 1`,
+          const uploadMetadata = JSON.stringify({
+            fileName,
+            formType,
+            uploadMode,
+            rowCount: Object.keys(fileRowSet).length,
+            insertedCount: fixedDataProcessingResult.insertedCount,
+            updatedCount: fixedDataProcessingResult.updatedCount,
+            skippedCount: fixedDataProcessingResult.skippedCount
+          });
+          const insertChangelogSQL = format(
+            `INSERT INTO ??.unifiedchangelog
+            (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
+            VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
             [schema]
           );
-          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID], transactionID);
-
-          if (existingEntry.length === 0) {
-            // First batch for this file - insert new entry
-            const uploadMetadata = JSON.stringify({
-              fileName,
-              formType,
-              uploadMode,
-              rowCount: batchRowCount,
-              insertedCount: fixedDataProcessingResult.insertedCount,
-              updatedCount: fixedDataProcessingResult.updatedCount,
-              skippedCount: fixedDataProcessingResult.skippedCount,
-              batchCount: 1
-            });
-            const insertChangelogSQL = format(
-              `INSERT INTO ??.unifiedchangelog
-              (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
-              VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
-              [schema]
-            );
-            await connectionManager.executeQuery(
-              insertChangelogSQL,
-              ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID],
-              transactionID
-            );
-          } else {
-            // Subsequent batch - update the existing entry with accumulated count
-            // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
-            const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
-            // Preserve the user's initial mode across chunked fixed-data uploads. Later
-            // quadrat chunks intentionally execute as revisions after the first clean-reset
-            // chunk, but the file-level changelog must continue to say clean_reupload.
-            metadata.uploadMode = metadata.uploadMode || uploadMode;
-            metadata.lastChunkMode = uploadMode;
-            metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
-            metadata.insertedCount = (metadata.insertedCount || 0) + fixedDataProcessingResult.insertedCount;
-            metadata.updatedCount = (metadata.updatedCount || 0) + fixedDataProcessingResult.updatedCount;
-            metadata.skippedCount = (metadata.skippedCount || 0) + fixedDataProcessingResult.skippedCount;
-            metadata.batchCount = (metadata.batchCount || 1) + 1;
-            const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
-            await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
-          }
+          await connectionManager.executeQuery(
+            insertChangelogSQL,
+            ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID],
+            transactionID
+          );
 
           if (fixedDataProcessingResult.acknowledgedOverlapSummaries?.length) {
             await insertQuadratOverlapAcknowledgmentEvent(
@@ -857,6 +772,15 @@ export async function POST(request: NextRequest) {
             code: 'INVALID_QUADRAT_GEOMETRY'
           });
           return NextResponse.json({ error: error.message, code: 'INVALID_QUADRAT_GEOMETRY' }, { status: HTTPResponses.INVALID_REQUEST });
+        }
+
+        if (error instanceof ReferenceUploadValidationError) {
+          return NextResponse.json({ error: error.message, code: 'INVALID_REFERENCE_DATA' }, { status: HTTPResponses.INVALID_REQUEST });
+        }
+
+        if (error instanceof ReferenceReplacementInProgressError) {
+          ailogger.warn(`Refused overlapping ${formType} upload request for ${fileName}: ${error.message}`, { schema, uploadMode, sessionId });
+          return NextResponse.json({ error: error.message, code: REFERENCE_REPLACEMENT_IN_PROGRESS_CODE }, { status: HTTPResponses.CONFLICT });
         }
 
         retryCount++;

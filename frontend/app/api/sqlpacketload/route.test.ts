@@ -7,10 +7,12 @@ import {
   resetTemporaryMeasurementsSourceFormatColumnCacheForTests,
   TEMP_MEASUREMENT_INSERT_BATCH_SIZE
 } from '@/lib/ingestion/temporary-measurements';
+import { REFERENCE_REPLACEMENT_LOCK_TIMEOUT_MS, resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
+import { HTTPResponses } from '@/config/macros';
+import { MAX_REFERENCE_UPLOAD_ROWS } from '@/lib/uploads/reference-upload-limits';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { headerSignature } from '@/lib/column-mapping/mapping';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
-import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
 import ailogger from '@/ailogger';
 import {
   buildQuadratOverlapAcknowledgment,
@@ -53,7 +55,8 @@ vi.mock('@/lib/db/connectionmanager', () => {
   const beginTransaction = vi.fn().mockResolvedValue('tx-test');
   const commitTransaction = vi.fn().mockResolvedValue(undefined);
   const rollbackTransaction = vi.fn().mockResolvedValue(undefined);
-  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction };
+  const acquireApplicationLock = vi.fn().mockResolvedValue(true);
+  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction, acquireApplicationLock };
   return {
     default: {
       getInstance: () => instance
@@ -236,6 +239,7 @@ describe('sqlpacketload measurement scope validation', () => {
     getCookieMock.mockResolvedValue(undefined);
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+    resetUploadSessionReplacementMarkerCacheForTests();
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
@@ -612,9 +616,11 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // a 'global' admin session clears it so these behavioral tests reach the handler body.
     authMock.mockResolvedValue({ user: { id: 'user-1', userStatus: 'global', sites: [] } });
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+    resetUploadSessionReplacementMarkerCacheForTests();
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-fixed');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
+    mockConnectionManager.acquireApplicationLock.mockResolvedValue(true);
     handleUpsertMock.mockResolvedValue({ id: 1, operation: 'inserted' });
   });
 
@@ -636,6 +642,24 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
   });
 
+  it('returns an actionable 400 for duplicate attribute codes without writing or retrying', async () => {
+    const response = await POST(
+      makeFixedDataRequest(
+        'attributes',
+        {
+          first: { code: 'DUP', description: 'first', status: 'alive' },
+          second: { codes: ' dup ', description: 'second', status: 'alive' }
+        },
+        { uploadMode: 'clean_reupload' }
+      )
+    );
+    expect(response?.status).toBe(400);
+    await expect(response?.json()).resolves.toMatchObject({ code: 'INVALID_REFERENCE_DATA', error: 'Attribute upload contains duplicate Code values: dup' });
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    expect(mockConnectionManager.beginTransaction).toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects an unknown upload mode instead of silently falling back to destructive clean re-upload', async () => {
     const res = await POST(
       makeFixedDataRequest(
@@ -651,6 +675,68 @@ describe('sqlpacketload fixed-data upload modes', () => {
     await expect(res?.json()).resolves.toMatchObject({ code: 'INVALID_UPLOAD_MODE' });
     expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
     expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('refuses a clean re-upload whose upload session does not own this plot and census, before any transaction starts', async () => {
+    const ownershipMessage = `Upload session ${TEST_SESSION_ID} does not own census ${TEST_CENSUS_ID} for species upload for species.csv (session census: 99)`;
+    requireUploadSessionOwnershipMock.mockRejectedValueOnce(new MockUploadSessionOwnershipError(ownershipMessage, HTTPResponses.CONFLICT));
+
+    const res = await POST(makeFixedDataRequest('species', { 'row-1': { spcode: 'newspc', species: 'novel' } }, { uploadMode: 'clean_reupload' }));
+
+    const body = await res?.json();
+    expect(res?.status, `response body: ${JSON.stringify(body)}`).toBe(HTTPResponses.CONFLICT);
+    expect(body.error).toBe(ownershipMessage);
+    expect(requireUploadSessionOwnershipMock).toHaveBeenCalledWith({
+      schema: 'forestgeo_testing',
+      sessionId: TEST_SESSION_ID,
+      plotId: TEST_PLOT_ID,
+      censusId: TEST_CENSUS_ID,
+      allowedStates: ['initialized', 'uploading'],
+      contextLabel: 'species upload for species.csv'
+    });
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects a fixed-data upload without a census before checking the session or touching the database', async () => {
+    const res = await POST(makeFixedDataRequest('attributes', { 'row-1': { code: 'alive', status: 'alive' } }, { census: undefined }));
+
+    const body = await res?.json();
+    expect(res?.status, `response body: ${JSON.stringify(body)}`).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body.code).toBe('UPLOAD_SCOPE_REQUIRED');
+    expect(requireUploadSessionOwnershipMock).not.toHaveBeenCalled();
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it("writes one file_upload changelog entry per committed request, carrying only that request's counts", async () => {
+    // A retry after a client timeout, or a later upload of a file with the same name, is its own
+    // write. It must not be folded into (and double-count) an earlier entry for that name.
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql);
+      if (text.startsWith('SELECT')) return [{ Code: 'EXISTING' }];
+      return { affectedRows: 1, insertId: 11 };
+    });
+
+    const res = await POST(
+      makeFixedDataRequest('attributes', { 'row-1': { code: 'EXISTING', description: 'Retried', status: 'alive' } }, { uploadMode: 'revisions' })
+    );
+
+    expect(res?.status).toBe(HTTPResponses.OK);
+    const changelogStatements = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) => String(call[0]).includes('unifiedchangelog'));
+    console.log(`[changelog] statements: ${changelogStatements.map((call: any[]) => String(call[0]).replace(/\s+/g, ' ')).join(' | ')}`);
+    expect(changelogStatements, 'exactly one changelog statement: the INSERT, with no lookup or merge').toHaveLength(1);
+    const [insertSQL, insertParams] = changelogStatements[0];
+    expect(String(insertSQL)).toContain('INSERT INTO');
+    expect(insertParams.slice(0, 3)).toEqual(['file_upload', 'attributes.csv', 'INSERT']);
+    expect(JSON.parse(insertParams[3])).toEqual({
+      fileName: 'attributes.csv',
+      formType: 'attributes',
+      uploadMode: 'revisions',
+      rowCount: 1,
+      insertedCount: 0,
+      updatedCount: 1,
+      skippedCount: 0
+    });
   });
 
   it('re-runs the chunk instead of phantom-committing when the changelog write deadlocks', async () => {
@@ -669,7 +755,6 @@ describe('sqlpacketload fixed-data upload modes', () => {
           }
           return { insertId: 9 };
         }
-        return []; // changelog lookup: no existing file_upload entry
       }
       if (text.startsWith('SELECT')) return []; // no existing attribute rows
       return { insertId: 1 };
@@ -697,8 +782,6 @@ describe('sqlpacketload fixed-data upload modes', () => {
       .mockResolvedValueOnce([])
       // Row 2: INSERT new row
       .mockResolvedValueOnce({ insertId: 9 })
-      // changelog: SELECT existing entry
-      .mockResolvedValueOnce([])
       // changelog: INSERT new entry
       .mockResolvedValueOnce({ insertId: 10 });
 
@@ -723,8 +806,31 @@ describe('sqlpacketload fixed-data upload modes', () => {
     });
   });
 
+  /**
+   * A reference-table CLEAN_REUPLOAD first decides whether THIS request owns the
+   * destructive reset (#472): it takes
+   * the per-session lock (acquireApplicationLock, mocked to succeed), then probes the
+   * session's marker. Queue its answer so the writer's own statements line
+   * up with the mocks that follow. The marker itself is written after the rows.
+   */
+  function queueUnclaimedReferenceReplacement() {
+    mockConnectionManager.executeQuery
+      // marker probe: this session has not replaced yet
+      .mockResolvedValueOnce([{ reference_replacement_completed_at: null }]);
+  }
+
+  /** A refused upload may read (plot bounds, the replacement claim) but must not have written anything. */
+  function expectNoWriteStatements() {
+    const statements: string[] = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]).replace(/\s+/g, ' '));
+    expect(
+      statements.filter(statement => /^\s*(DELETE|INSERT|UPDATE)\b/i.test(statement)),
+      `statements issued: ${statements.join(' | ')}`
+    ).toEqual([]);
+  }
+
   it('deletes existing personnel and inserts fresh in clean re-upload mode', async () => {
     handleUpsertMock.mockResolvedValueOnce({ id: 77, operation: 'inserted' });
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
       // DELETE censusactivepersonnel for this census
       .mockResolvedValueOnce({ affectedRows: 2 })
@@ -734,8 +840,8 @@ describe('sqlpacketload fixed-data upload modes', () => {
       .mockResolvedValueOnce({ insertId: 501 })
       // INSERT IGNORE censusactivepersonnel link
       .mockResolvedValueOnce({ affectedRows: 1 })
-      // changelog: SELECT existing entry
-      .mockResolvedValueOnce([])
+      // marker write: this session's reset is recorded after the rows
+      .mockResolvedValueOnce({ affectedRows: 1 })
       // changelog: INSERT new entry
       .mockResolvedValueOnce({ insertId: 3 });
 
@@ -771,12 +877,17 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
   it('normalizes camelCase personnel roles before upserting', async () => {
     handleUpsertMock.mockResolvedValueOnce({ id: 77, operation: 'inserted' });
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([])
+      // DELETE censusactivepersonnel, DELETE orphaned personnel
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      // INSERT personnel, INSERT IGNORE censusactivepersonnel link
       .mockResolvedValueOnce({ insertId: 501 })
       .mockResolvedValueOnce({ affectedRows: 1 })
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce([])
+      // marker write
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      // changelog: INSERT new entry
       .mockResolvedValueOnce({ insertId: 3 });
 
     const res = await POST(
@@ -825,6 +936,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // path, returning every active SpeciesCode that is already referenced by trees or
     // species limits. Once a SpeciesID is in use, deleting the active species list would
     // still cascade-delete dependent data even if the upload includes the same code again.
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery.mockResolvedValueOnce([{ SpeciesCode: 'querc1' }, { SpeciesCode: 'fagr2' }]);
 
     const res = await POST(
@@ -853,19 +965,21 @@ describe('sqlpacketload fixed-data upload modes', () => {
       String(call[0]).includes('DELETE FROM `forestgeo_testing`.species')
     );
     expect(deleteCalls.length).toBe(0);
-    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('specieslimits');
+    expect(mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('specieslimits'))).toBe(true);
   });
 
   it('allows species clean re-upload on a fresh site with no dependent references', async () => {
     // No trees or species limits reference the current active species rows, so the
     // wipe-and-reload remains safe.
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
       // 1: dependency precheck returns nothing
       .mockResolvedValueOnce([])
       // 2: DELETE FROM species
       .mockResolvedValueOnce({ affectedRows: 0 })
       // 3: INSERT new species
-      .mockResolvedValueOnce({ insertId: 1 });
+      .mockResolvedValueOnce({ insertId: 1 })
+      .mockResolvedValueOnce({ affectedRows: 1 });
 
     const res = await POST(
       makeFixedDataRequest(
@@ -878,7 +992,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     );
 
     expect(res?.status).toBe(200);
-    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('specieslimits');
+    expect(mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('specieslimits'))).toBe(true);
     // Positive anchor for the refusal test's zero-DELETE filter above: the wipe
     // must run here with exactly this SQL text, so a quoting change that would
     // make the negative filter vacuous fails loudly instead.
@@ -888,11 +1002,35 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(speciesDeleteCalls.length).toBe(1);
   });
 
+  it('answers 409 without deleting or retrying when another request of the same session still holds the replacement lock', async () => {
+    mockConnectionManager.acquireApplicationLock.mockResolvedValueOnce(false);
+
+    const res = await POST(makeFixedDataRequest('species', { 'row-1': { spcode: 'newspc', species: 'novel' } }, { uploadMode: 'clean_reupload' }));
+
+    const body = await res?.json();
+    const statements: string[] = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
+    expect(res?.status, `response body: ${JSON.stringify(body)}`).toBe(HTTPResponses.CONFLICT);
+    expect(body.code).toBe('REFERENCE_REPLACEMENT_IN_PROGRESS');
+    expect(body.error).toContain(TEST_SESSION_ID);
+    expect(mockConnectionManager.acquireApplicationLock).toHaveBeenCalledWith(
+      expect.stringMatching(/^upload:reference:[0-9a-f]{40}$/),
+      'tx-fixed',
+      REFERENCE_REPLACEMENT_LOCK_TIMEOUT_MS
+    );
+    expect(
+      statements.filter(statement => /DELETE|INSERT|UPDATE/.test(statement)),
+      `no write may run once the lock is refused; statements: ${statements.join(' | ')}`
+    ).toEqual([]);
+    expect(mockConnectionManager.beginTransaction, 'a lock refusal is not a retryable infrastructure error').toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
+  });
+
   it('refuses quadrat clean re-upload when active quadrats are already referenced by stems', async () => {
+    // authoritative plot bounds lookup, then the session's replacement claim
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
-      // 1: authoritative plot bounds lookup
-      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
-      // 2: stem-safety blocking query
+      // stem-safety blocking query
       .mockResolvedValueOnce([
         { QuadratID: 11, QuadratName: '1011' },
         { QuadratID: 12, QuadratName: '1012' }
@@ -915,7 +1053,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(body.error).toContain('1012');
     expect(body.error).toContain('stems and downstream measurements');
     expect(body.error).toContain('Use Revisions Upload instead');
-    const guardSQL = String(mockConnectionManager.executeQuery.mock.calls[1]?.[0]);
+    const guardSQL = String(mockConnectionManager.executeQuery.mock.calls.find((call: any[]) => String(call[0]).includes('.stems'))?.[0]);
     expect(guardSQL).toContain('FROM `forestgeo_testing`.stems');
     // Soft-deleted stems must not block the wipe; only live stems count.
     expect(guardSQL).toContain('s.IsActive = 1');
@@ -932,9 +1070,9 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // Regression: the guard previously trimmed and filtered out blank names
     // before deciding whether to refuse, so a stem-referenced quadrat named
     // ' ' slipped past the check and the DELETE cascade destroyed its stems.
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
-      .mockResolvedValueOnce([{ QuadratID: 42, QuadratName: '   ' }]);
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    queueUnclaimedReferenceReplacement();
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ QuadratID: 42, QuadratName: '   ' }]);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -957,15 +1095,17 @@ describe('sqlpacketload fixed-data upload modes', () => {
   });
 
   it('allows quadrat clean re-upload when the plot has no stems on active quadrats', async () => {
+    // authoritative plot bounds lookup, then the session's replacement claim
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
-      // 1: authoritative plot bounds lookup
-      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
-      // 2: dependency precheck returns nothing
+      // dependency precheck returns nothing
       .mockResolvedValueOnce([])
       // 3: DELETE FROM quadrats
       .mockResolvedValueOnce({ affectedRows: 0 })
       // 4: INSERT new quadrat
-      .mockResolvedValueOnce({ insertId: 1 });
+      .mockResolvedValueOnce({ insertId: 1 })
+      .mockResolvedValueOnce({ affectedRows: 1 });
 
     const res = await POST(
       makeFixedDataRequest(
@@ -978,7 +1118,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     );
 
     expect(res?.status).toBe(200);
-    expect(String(mockConnectionManager.executeQuery.mock.calls[1]?.[0])).toContain('FROM `forestgeo_testing`.stems');
+    expect(mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('FROM `forestgeo_testing`.stems'))).toBe(true);
     // Positive anchor for the refusal test's zero-DELETE filter above: the wipe
     // must run here with exactly this SQL text, so a quoting change that would
     // make the negative filter vacuous fails loudly instead.
@@ -1002,9 +1142,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
       .mockResolvedValueOnce([])
       // 4: INSERT new quadrat
       .mockResolvedValueOnce({ insertId: 3 })
-      // 5: changelog lookup
-      .mockResolvedValueOnce([])
-      // 6: changelog insert
+      // 5: changelog insert
       .mockResolvedValueOnce({ insertId: 4 });
 
     const res = await POST(
@@ -1063,9 +1201,8 @@ describe('sqlpacketload fixed-data upload modes', () => {
       ])
       // incoming E01 does not exist yet
       .mockResolvedValueOnce([])
-      // INSERT + changelog lookup + changelog insert
+      // INSERT + changelog insert
       .mockResolvedValueOnce({ insertId: 3 })
-      .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ insertId: 4 });
 
     const res = await POST(
@@ -1085,9 +1222,8 @@ describe('sqlpacketload fixed-data upload modes', () => {
       .mockResolvedValueOnce([{ QuadratID: 9, QuadratName: 'LEGACY', StartX: null, StartY: null, DimensionX: null, DimensionY: null }])
       // per-row lookup finds the row to update
       .mockResolvedValueOnce([{ QuadratID: 9 }])
-      // UPDATE + changelog lookup + changelog insert
+      // UPDATE + changelog insert
       .mockResolvedValueOnce({ affectedRows: 1 })
-      .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ insertId: 4 });
 
     const res = await POST(
@@ -1191,15 +1327,17 @@ describe('sqlpacketload fixed-data upload modes', () => {
     ).overlapSummary;
     if (!overlapSummary) throw new Error('expected overlap summary');
     const acknowledgment = buildQuadratOverlapAcknowledgment([overlapSummary.layoutSignature]);
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
       // stem-safety precheck + DELETE + two INSERTs
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
       .mockResolvedValueOnce({ insertId: 1 })
       .mockResolvedValueOnce({ insertId: 2 })
-      // changelog lookup + insert
-      .mockResolvedValueOnce([])
+      // marker write
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      // changelog insert
       .mockResolvedValueOnce({ insertId: 3 });
 
     const res = await POST(
@@ -1237,7 +1375,9 @@ describe('sqlpacketload fixed-data upload modes', () => {
   });
 
   it('does not treat a coerced false value as an overlap acknowledgment', async () => {
-    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([{ reference_replacement_completed_at: null }]);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -1254,11 +1394,13 @@ describe('sqlpacketload fixed-data upload modes', () => {
     const body = await res?.json();
     expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
     expect(body.overlapSummaries[0].layoutSignature).toMatch(/^quadrat-layout-v1-[0-9a-f]{16}$/);
-    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+    expectNoWriteStatements();
   });
 
   it('requires re-acknowledgment when the submitted layout signature is stale', async () => {
-    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([{ reference_replacement_completed_at: null }]);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -1278,7 +1420,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     const body = await res?.json();
     expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
     expect(body.overlapSummaries[0].layoutSignature).not.toBe('quadrat-layout-v1-0000000000000000');
-    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+    expectNoWriteStatements();
   });
 
   it('rolls acknowledged quadrat writes back when their provenance record cannot be stored', async () => {
@@ -1291,13 +1433,16 @@ describe('sqlpacketload fixed-data upload modes', () => {
     ).overlapSummary;
     if (!overlapSummary) throw new Error('expected overlap summary');
 
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      // stem-safety precheck, DELETE, two INSERTs, marker write
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
       .mockResolvedValueOnce({ insertId: 1 })
       .mockResolvedValueOnce({ insertId: 2 })
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      // file_upload changelog insert, then the acknowledgment event fails
       .mockResolvedValueOnce({ insertId: 3 })
       .mockRejectedValueOnce(new Error('acknowledgment changelog unavailable'));
 
@@ -1323,7 +1468,9 @@ describe('sqlpacketload fixed-data upload modes', () => {
   it('acknowledgment does NOT bypass non-overlap defects: an out-of-bounds row still rejects', async () => {
     // The acknowledgment covers exactly one condition. A file that is both overlapping AND
     // out of bounds must still fail on the bounds defect even with the acknowledgment set.
-    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }]);
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([{ reference_replacement_completed_at: null }]);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -1377,10 +1524,11 @@ describe('sqlpacketload fixed-data upload modes', () => {
   it('skips entirely-blank padding rows instead of rejecting the upload, and reports the skip count', async () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([{ reference_replacement_completed_at: null }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
       .mockResolvedValueOnce({ insertId: 1 })
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 1 })
       .mockResolvedValueOnce({ insertId: 2 });
 
     const res = await POST(
@@ -1452,19 +1600,23 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
   });
 
-  it('caps quadrat rows per request before running collection validation', async () => {
-    const fileRowSet: Record<string, unknown> = {};
-    for (let i = 0; i <= MAX_GENERATED_QUADRATS; i++) {
-      fileRowSet[`row-${i}`] = { quadrat: `Q${i}`, startx: i, starty: 0, dimx: 1, dimy: 1 };
-    }
-
-    const res = await POST(makeFixedDataRequest('quadrats', fileRowSet, { uploadMode: 'revisions' }));
-
-    expect(res?.status).toBe(400);
-    const body = await res?.json();
-    expect(body.code).toBe('INVALID_QUADRAT_GEOMETRY');
-    expect(body.error).toContain(`maximum allowed per request is ${MAX_GENERATED_QUADRATS}`);
+  it.each(['attributes', 'species', 'personnel', 'quadrats'] as const)('caps %s uploads before starting a transaction', async form => {
+    const fileRowSet = Object.fromEntries(Array.from({ length: MAX_REFERENCE_UPLOAD_ROWS + 1 }, (_, i) => [`row-${i}`, { code: `A${i}` }]));
+    const response = await POST(makeFixedDataRequest(form, fileRowSet, { uploadMode: 'revisions' }));
+    expect(response?.status).toBe(400);
+    await expect(response?.json()).resolves.toMatchObject({ code: 'REFERENCE_UPLOAD_TOO_MANY_ROWS', error: expect.stringContaining('10,000 rows per file') });
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+    expect(requireUploadSessionOwnershipMock).not.toHaveBeenCalled();
     expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('accepts exactly the reference row limit in one request', async () => {
+    const rows = Object.fromEntries(Array.from({ length: MAX_REFERENCE_UPLOAD_ROWS }, (_, i) => [`row-${i}`, { code: `A${i}`, status: 'alive' }]));
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: unknown) => (String(sql).startsWith('SELECT') ? [] : { affectedRows: 1 }));
+    const response = await POST(makeFixedDataRequest('attributes', rows, { uploadMode: 'revisions' }));
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({ insertedCount: MAX_REFERENCE_UPLOAD_ROWS });
+    expect(mockConnectionManager.commitTransaction).toHaveBeenCalledTimes(1);
   });
 
   it('preserves a geometry validation response when rollback itself fails', async () => {
@@ -1516,16 +1668,18 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // existed; rejecting them would lock those sites out of quadrat management entirely.
     // The row below extends to x=100000, which would fail any real plot-bounds check --
     // proving the bounds check was skipped rather than run against coerced-to-zero bounds.
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: null, DimensionY: null }]);
+    queueUnclaimedReferenceReplacement();
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ DimensionX: null, DimensionY: null }])
       // stem-safety precheck: nothing blocking
       .mockResolvedValueOnce([])
       // DELETE FROM quadrats
       .mockResolvedValueOnce({ affectedRows: 0 })
       // INSERT new quadrat
       .mockResolvedValueOnce({ insertId: 1 })
-      // changelog lookup + insert
-      .mockResolvedValueOnce([])
+      // marker write
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      // changelog insert
       .mockResolvedValueOnce({ insertId: 2 });
 
     const res = await POST(
@@ -1540,7 +1694,9 @@ describe('sqlpacketload fixed-data upload modes', () => {
   it('still holds overlapping rows for acknowledgment when the plot has non-positive dimensions on record', async () => {
     // Degraded (bounds-less) validation is not NO validation: unacknowledged overlaps must
     // still stop the file even when the plot record is unusable.
-    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ DimensionX: 0, DimensionY: 500 }]);
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ DimensionX: 0, DimensionY: 500 }])
+      .mockResolvedValueOnce([{ reference_replacement_completed_at: null }]);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -1557,7 +1713,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     const body = await res?.json();
     expect(body.code).toBe('QUADRAT_OVERLAPS_REQUIRE_ACKNOWLEDGMENT');
     expect(body.error).toContain('overlap');
-    expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
+    expectNoWriteStatements();
   });
 
   it('parses numeric JSON geometry values (not just strings) for a quadrat upload', async () => {
@@ -1566,12 +1722,14 @@ describe('sqlpacketload fixed-data upload modes', () => {
     mockConnectionManager.executeQuery
       // authoritative plot bounds lookup
       .mockResolvedValueOnce([{ DimensionX: 500, DimensionY: 500 }])
+      .mockResolvedValueOnce([{ reference_replacement_completed_at: null }])
       // stem-safety precheck: nothing blocking
       .mockResolvedValueOnce([])
       // DELETE FROM quadrats
       .mockResolvedValueOnce({ affectedRows: 0 })
       // INSERT new quadrat
-      .mockResolvedValueOnce({ insertId: 1 });
+      .mockResolvedValueOnce({ insertId: 1 })
+      .mockResolvedValueOnce({ affectedRows: 1 });
 
     const res = await POST(
       makeFixedDataRequest('quadrats', { 'row-1': { quadrat: 'NUM01', startx: 0, starty: 0, dimx: 20, dimy: 20 } }, { uploadMode: 'clean_reupload' })
@@ -1601,7 +1759,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
     expect(res?.status).toBe(503);
     await expect(res?.json()).resolves.toMatchObject({
-      error: 'Duplicate active species rows already exist for SpeciesCode "swars1". Remove the duplicates before uploading revisions.'
+      error: 'Duplicate active species rows already exist for SpeciesCode "swars1". Remove the duplicates before re-uploading.'
     });
     expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
   });
@@ -1742,6 +1900,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     getCookieMock.mockResolvedValue(undefined);
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+    resetUploadSessionReplacementMarkerCacheForTests();
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);

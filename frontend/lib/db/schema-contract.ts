@@ -61,9 +61,13 @@ export const CRITICAL_TABLES = [
  * `census_replacement_completed_at` is that column: without it a CLEAN_REUPLOAD
  * silently reverts to replacing the census on every file of a session, which is
  * how a second file destroys the failure rows the first one recorded.
+ *
+ * `reference_replacement_completed_at` is its reference-table twin: without it a
+ * clean re-upload of species/attributes/personnel deletes the whole table once
+ * per file, so the second file erases what the first one wrote (#472).
  */
 export const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
-  upload_sessions: ['census_replacement_completed_at']
+  upload_sessions: ['census_replacement_completed_at', 'reference_replacement_completed_at']
 };
 
 /**

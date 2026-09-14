@@ -16,13 +16,20 @@ import {
   Stack,
   Typography
 } from '@mui/joy';
-import { UploadParseFilesProps } from '@/config/macros/uploadsystemmacros';
+import { formatFileSize, MAX_SINGLE_REQUEST_FILE_SIZE_BYTES, MAX_SINGLE_REQUEST_FILE_SIZE_MB, UploadParseFilesProps } from '@/config/macros/uploadsystemmacros';
 // Using Box layout instead of Grid for better compatibility
 import { DropzoneCompact } from '@/components/uploadsystemhelpers/dropzonecompact';
 import { FileListEnhanced } from '@/components/uploadsystemhelpers/filelistenhanced';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
-import { FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat, TableHeadersByFormType } from '@/config/macros/formdetails';
+import {
+  FileRow,
+  FormType,
+  RequiredTableHeadersByFormType,
+  SourceFormat,
+  TableHeadersByFormType,
+  uploadsWholeFileInOneRequest
+} from '@/config/macros/formdetails';
 import { MAX_MEASUREMENT_FILE_ID_LENGTH, measurementFileIDLength, measurementFileIDValidationError, sanitizeUploadFileName } from '@/lib/uploads/file-names';
 import InfoIcon from '@mui/icons-material/Info';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -50,6 +57,7 @@ import {
 } from '@/lib/provisioning/quadrat-collection-validation';
 import type { QuadratCsvRow } from '@/lib/provisioning/types';
 import { MAX_GENERATED_QUADRATS } from '@/lib/provisioning/grid-generator';
+import { MAX_REFERENCE_UPLOAD_ROWS } from '@/lib/uploads/reference-upload-limits';
 
 export interface FileValidationStatus {
   fileName: string;
@@ -467,6 +475,21 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     return issues;
   }, [acceptedFiles, uploadForm]);
 
+  // Reference files are buffered and committed whole. This byte limit bounds input size;
+  // a separate row limit bounds DB work when parsing and on the server.
+  const singleRequestFileSizeIssues = useMemo(() => {
+    if (!uploadForm || !uploadsWholeFileInOneRequest(uploadForm)) return [];
+    return acceptedFiles
+      .filter(file => file.size > MAX_SINGLE_REQUEST_FILE_SIZE_BYTES)
+      .map(file => ({
+        fileName: file.name,
+        issues: [
+          `${formatFileSize(file.size)} exceeds the ${MAX_SINGLE_REQUEST_FILE_SIZE_MB} MB limit for ${uploadForm} uploads, which are sent as a ` +
+            `single request. Split the file into smaller files and select them together — one upload replaces the table once, across every file.`
+        ]
+      }));
+  }, [acceptedFiles, uploadForm]);
+
   // A file passes when its own header validation succeeded, or when a confirmed column mapping
   // covers its header-coverage gaps (structural issues like inconsistent column counts still block).
   const fileEffectivelyValid = useCallback(
@@ -483,10 +506,11 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   const allFilesValid = useMemo(() => {
     if (acceptedFiles.length === 0) return false;
     if (fileNameLengthIssues.length > 0) return false;
+    if (singleRequestFileSizeIssues.length > 0) return false;
     // ArcGIS .xlsx uploads bypass CSV header validation; the workbook contents are validated at pre-flight.
     if (sourceFormat === SourceFormat.arcgis_xlsx) return arcgisValidationIssues.length === 0;
     return acceptedFiles.every(file => fileEffectivelyValid(file.name));
-  }, [acceptedFiles, arcgisValidationIssues.length, fileEffectivelyValid, fileNameLengthIssues.length, sourceFormat]);
+  }, [acceptedFiles, arcgisValidationIssues.length, fileEffectivelyValid, fileNameLengthIssues.length, singleRequestFileSizeIssues.length, sourceFormat]);
 
   // Get all validation issues across all files
   const allValidationIssues = useMemo(() => {
@@ -503,8 +527,17 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
       }
     });
     const base = sourceFormat === SourceFormat.arcgis_xlsx ? [...arcgisValidationIssues, ...issues] : issues;
-    return [...fileNameLengthIssues, ...base];
-  }, [acceptedFiles, arcgisValidationIssues, fileEffectivelyValid, fileNameLengthIssues, fileValidationStatuses, mappingValidForFile, sourceFormat]);
+    return [...fileNameLengthIssues, ...singleRequestFileSizeIssues, ...base];
+  }, [
+    acceptedFiles,
+    arcgisValidationIssues,
+    fileEffectivelyValid,
+    fileNameLengthIssues,
+    fileValidationStatuses,
+    mappingValidForFile,
+    singleRequestFileSizeIssues,
+    sourceFormat
+  ]);
 
   // Check if any file is still being analyzed (no validation status yet)
   const isAnalyzing = useMemo(() => {
@@ -590,6 +623,12 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
             }}
           >
             <Stack spacing={3} sx={{ height: '100%' }}>
+              {uploadForm && uploadsWholeFileInOneRequest(uploadForm) && (
+                <Typography level="body-sm">
+                  Each file is saved together. Maximum {MAX_SINGLE_REQUEST_FILE_SIZE_MB} MB and {MAX_REFERENCE_UPLOAD_ROWS.toLocaleString('en-US')} rows per
+                  file.
+                </Typography>
+              )}
               <DropzoneCompact
                 onChange={handleFileChange}
                 hasFiles={acceptedFiles.length > 0}

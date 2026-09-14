@@ -295,6 +295,7 @@ export async function ensureUploadSessionsTable(schema: string): Promise<void> {
       idempotency_key VARCHAR(255),
       mode VARCHAR(32),
       census_replacement_completed_at TIMESTAMP NULL DEFAULT NULL,
+      reference_replacement_completed_at TIMESTAMP NULL DEFAULT NULL,
       active_scope_key VARCHAR(255)
         GENERATED ALWAYS AS (
           CASE
@@ -343,11 +344,9 @@ export async function createUploadSession(
   if (idempotencyKey) {
     const existing = await findSessionByIdempotencyKey(schema, idempotencyKey);
     if (existing) {
-      // If session completed successfully, return it (idempotent)
-      if (existing.state === UploadSessionState.COMPLETED) {
-        ailogger.info(`[UploadSessionTracker] Returning existing completed session for idempotency key: ${idempotencyKey}`);
-        return existing;
-      }
+      // A completed session is never handed back: the client re-sends every file for the
+      // session it gets, and a finished session already carries its replacement markers, so a
+      // repeated clean re-upload of unchanged files would silently skip the reset and append.
       // If session is in progress, return it to allow resume
       if (
         existing.state === UploadSessionState.INITIALIZED ||
@@ -359,7 +358,7 @@ export async function createUploadSession(
         ailogger.info(`[UploadSessionTracker] Returning existing in-progress session for idempotency key: ${idempotencyKey}`);
         return existing;
       }
-      // If session failed or was abandoned, allow new attempt
+      // If session completed, failed or was abandoned, start a new attempt
       ailogger.info(`[UploadSessionTracker] Previous session ${existing.sessionId} was ${existing.state}, creating new session`);
     }
   }

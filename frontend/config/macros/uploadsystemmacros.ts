@@ -13,6 +13,8 @@ export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500MB per file
 export const MAX_FILE_SIZE_MB = 500;
 export const MAX_TOTAL_UPLOAD_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB total per upload session
 
+export { MAX_SINGLE_REQUEST_FILE_SIZE_BYTES, MAX_SINGLE_REQUEST_FILE_SIZE_MB } from '@/lib/uploads/reference-upload-limits';
+
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 Bytes';
   const k = 1024;
