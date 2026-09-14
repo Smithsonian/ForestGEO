@@ -229,7 +229,7 @@ export function renderStage0(opts: Stage0Options): string {
       AND COLUMN_NAME IN ('PX', 'PY')
   ) <> 2 THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'Destination Stem.PX or Stem.PY is missing. Apply DBCHANGES2014f.sql to the destination, then retry.';
+      SET MESSAGE_TEXT = 'Destination Stem.PX or Stem.PY is missing. Stem does not match the Smithsonian DDL; restore both columns before publishing.';
   END IF;
 
   SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope,
