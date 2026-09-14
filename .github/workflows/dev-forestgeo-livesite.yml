@@ -302,24 +302,13 @@ jobs:
 
       # The legacy no-flag command replays corequeries.sql, which truncates every
       # site-specific validation. Keep procedure definitions current without
-      # changing validation configuration, then refresh only the two DBH rules.
+      # changing validation configuration; rule text changes ship as migrations.
       - name: Deploy stored procedures to all schemas
         env:
           AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
         run: |
           cd frontend/
           npm run deploy:procedures
-        continue-on-error: false
-
-      - name: Refresh annual DBH validation rules
-        env:
-          AZURE_SQL_SERVER: forestgeo-mysqldataserver.mysql.database.azure.com
-          AZURE_SQL_USER: azureroot
-          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
-          AZURE_SQL_PORT: '3306'
-        run: |
-          cd frontend/
-          npm run refresh:dbh-rules -- --all-sites --apply --i-understand-this-writes-to "$AZURE_SQL_SERVER"
         continue-on-error: false
 
       # Views are CREATE OR REPLACE artifacts, not migrations: they are redeployed

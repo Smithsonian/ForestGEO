@@ -11,6 +11,10 @@ import {
 } from './dbh-rescore-cli';
 import type { DbhSweepDependencies } from './dbh-rescore-sweep';
 
+const TWO_DBH_SEED_SQL =
+  "INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition) VALUES (1, 'growth', 'description one', 'x', 'definition one');\n" +
+  "INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition) VALUES (2, 'shrink', 'description two', 'x', 'definition two');";
+
 const deps = (): DbhSweepDependencies => ({
   discoverSchemas: vi.fn().mockResolvedValue(['forestgeo_testing']),
   discoverScopes: vi.fn().mockResolvedValue([{ schema: 'forestgeo_testing', plotID: 1, censusID: 1, plotCensusNumber: 1 }]),
@@ -51,7 +55,7 @@ describe('parseDbhRescoreArgs', () => {
   it('accepts known SHOW CREATE formatting but rejects a substantive body change', async () => {
     const manifest = buildDbhExpectedManifest(
       'DELIMITER $$\nCREATE PROCEDURE BuildDBHChangePairs() SQL SECURITY DEFINER BEGIN SELECT 65; END $$\nCREATE PROCEDURE RunSharedDBHChangeValidations() BEGIN CALL BuildDBHChangePairs(); END $$',
-      "VALUES (1, 'growth', 'description one', 'x', 'definition one');\nVALUES (2, 'shrink', 'description two', 'x', 'definition two');",
+      TWO_DBH_SEED_SQL,
       'r'
     );
     const response =
@@ -133,12 +137,27 @@ describe('DBH expected manifest', () => {
   it('uses whole procedure and seed bodies instead of a marker substring', () => {
     const manifest = buildDbhExpectedManifest(
       'DELIMITER $$\nCREATE PROCEDURE BuildDBHChangePairs() BEGIN SELECT 1; END $$\nCREATE PROCEDURE RunSharedDBHChangeValidations() BEGIN SELECT 2; END $$',
-      "VALUES (1, 'growth', 'description one', 'x', 'definition one');\nVALUES (2, 'shrink', 'description two', 'x', 'definition two');",
+      TWO_DBH_SEED_SQL,
       'rollback-r'
     );
     expect(manifest.revision).toBe('rollback-r');
     expect(manifest.procedures.BuildDBHChangePairs).toContain('SELECT 1');
     expect(manifest.seeds).toEqual(expect.arrayContaining([expect.objectContaining({ validationID: 2, definition: 'definition two' })]));
+  });
+
+  it('reads DBH seeds whose Criteria and Description contain escaped quotes, which the old regex parse could not match', () => {
+    const coreQueries = readFileSync(path.join(process.cwd(), 'db/sql/corequeries.sql'), 'utf8');
+    const quoted = coreQueries
+      .replace("'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds", "'ValidateDBHGrowthExceedsMax', 'Stem\\'s DBH growth exceeds")
+      .replace(/('ValidateDBHGrowthExceedsMax', '(?:''|\\'|[^'])*', )'measuredDBH'/, "$1'measured''DBH'");
+    expect(quoted, 'the fixture must inject a backslash-escaped Description quote').toContain("Stem\\'s DBH growth");
+    expect(quoted, 'the fixture must inject a doubled-quote Criteria').toContain("'measured''DBH'");
+
+    const manifest = buildDbhExpectedManifest(readFileSync(path.join(process.cwd(), 'db/sql/storedprocedures.sql'), 'utf8'), quoted);
+
+    const growth = manifest.seeds.find(seed => seed.validationID === 1);
+    expect(growth?.description).toMatch(/^Stem's DBH growth exceeds/);
+    expect(growth?.definition).toBe('CALL RunSharedDBHChangeValidations(@p_CensusID, @p_PlotID, 1, 0);');
   });
 
   it('builds the current deployment manifest from both SQL sources', () => {

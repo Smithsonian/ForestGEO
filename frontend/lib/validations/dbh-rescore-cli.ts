@@ -3,7 +3,8 @@ import path from 'path';
 import mysql from 'mysql2/promise';
 import type { RowDataPacket } from 'mysql2';
 import { parseStoredProceduresSQL } from '@/scripts/deploy-validations-to-all-schemas';
-import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
+import { DBH_CHANGE_VALIDATION_IDS, DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
+import { parseSiteValidationSeeds } from './validation-seed-parser';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
 import { NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
@@ -119,9 +120,6 @@ export function parseDbhRescoreArgs(argv: readonly string[]): DbhRescoreCliArgs 
   return out;
 }
 
-function unquoteSql(value: string): string {
-  return value.replace(/''/g, "'");
-}
 /** Build a revision contract from SQL, so rollback passes its own expected bodies. */
 export function buildDbhExpectedManifest(
   storedProcedures: string,
@@ -135,10 +133,14 @@ export function buildDbhExpectedManifest(
   }
   if (!expected.BuildDBHChangePairs || !expected.RunSharedDBHChangeValidations)
     throw new Error('Expected DBH procedure bodies are absent from the supplied manifest SQL');
-  const seeds: DbhExpectedSeed[] = [];
-  const expression = /VALUES\s*\(\s*([12])\s*,\s*'([^']+)'\s*,\s*'((?:''|[^'])*)'\s*,\s*'[^']*'\s*,\s*'((?:''|[^'])*)'/gi;
-  for (const match of coreQueries.matchAll(expression))
-    seeds.push({ validationID: Number(match[1]) as 1 | 2, procedureName: match[2], description: unquoteSql(match[3]), definition: unquoteSql(match[4]) });
+  const seeds: DbhExpectedSeed[] = parseSiteValidationSeeds(coreQueries)
+    .filter(seed => seed.validationID === DBH_CHANGE_VALIDATION_IDS.growth || seed.validationID === DBH_CHANGE_VALIDATION_IDS.shrinkage)
+    .map(seed => ({
+      validationID: seed.validationID as DbhExpectedSeed['validationID'],
+      procedureName: seed.procedureName,
+      description: seed.description,
+      definition: seed.definition
+    }));
   if (seeds.length !== 2 || new Set(seeds.map(seed => seed.validationID)).size !== 2)
     throw new Error('Expected DBH seed definitions are absent or ambiguous in the supplied manifest SQL');
   return { revision, procedures: expected as DbhExpectedManifest['procedures'], seeds };
