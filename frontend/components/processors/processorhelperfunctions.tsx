@@ -784,6 +784,8 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
     ELSE FALSE
   END
   WHERE cm.IsValidated IS NULL
+    AND cm.IsActive = TRUE
+    AND cm.StemGUID IS NOT NULL
     AND (? IS NULL OR c.CensusID = ?)
     AND (? IS NULL OR c.PlotID = ?);
     `;

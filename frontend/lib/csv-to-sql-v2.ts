@@ -31,6 +31,10 @@ export interface ProcedureEnvelopeOptions {
 export const LEGACY_DEFAULT_STEM_NUMBER = 0;
 export const LEGACY_DEFAULT_MEASURE_ID = 0;
 
+// Stage 7's non-blocking diagnostic scope label — shared with tests so the
+// string is asserted, not retyped.
+export const MISSING_PLOT_COORDINATE_SCOPE = 'New stems missing PX or PY';
+
 // Destination CTFS `Tree.Tag` column width. The Stage 0a destination probe and
 // the Stage 5 per-row length check share this so they can never drift; it must
 // match `CTFS_LIMITS.treeTag` in lib/ctfs-export/precondition.ts.
@@ -807,10 +811,16 @@ export function renderStage6NewTrees(opts: StageBulkInsertOptions): string {
 /**
  * Renders the Stage 7 procedure-body fragment.
  *
- * Two-statement pattern:
- *   1. INSERT into Stem for rows where StemID IS NULL, using LEGACY_DEFAULT_STEM_NUMBER
- *      for StemNumber and (LX, LY) mapped to (QX, QY), ordered by TempID.
- *   2. UPDATE staging to join back newly inserted Stems using (TreeID, StemTag, QuadratID)
+ * Three-statement pattern:
+ *   1. Non-blocking diagnostic: COUNT of new-stem rows (StemID IS NULL) missing
+ *      PX or PY. Always emitted, including zero. Purely informational — it does
+ *      not append to Errors and does not stop the load, because a missing
+ *      quadrat origin is a known, tolerated data gap (see #475).
+ *   2. INSERT into Stem for rows where StemID IS NULL, using LEGACY_DEFAULT_STEM_NUMBER
+ *      for StemNumber, (LX, LY) mapped to (QX, QY), and (PX, PY) carried straight
+ *      through from staging (already computed as StartX+LocalX / StartY+LocalY per
+ *      axis, independently nullable), ordered by TempID.
+ *   3. UPDATE staging to join back newly inserted Stems using (TreeID, StemTag, QuadratID)
  *      with NULL-safe <=> for StemTag.
  *
  * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
@@ -818,8 +828,12 @@ export function renderStage6NewTrees(opts: StageBulkInsertOptions): string {
 export function renderStage7NewStems(opts: StageBulkInsertOptions): string {
   const m = escapeSqlIdentifier(opts.measurementsTable);
   return `  -- Stage 7: bulk insert new Stems, set-based join-back
-  INSERT INTO Stem (TreeID, StemTag, QuadratID, StemNumber, QX, QY)
-    SELECT TreeID, StemTag, QuadratID, ${LEGACY_DEFAULT_STEM_NUMBER}, LX, LY
+  SELECT '${MISSING_PLOT_COORDINATE_SCOPE}' AS scope, COUNT(*) AS n
+    FROM ${m}
+   WHERE StemID IS NULL AND (PX IS NULL OR PY IS NULL);
+
+  INSERT INTO Stem (TreeID, StemTag, QuadratID, StemNumber, QX, QY, PX, PY)
+    SELECT TreeID, StemTag, QuadratID, ${LEGACY_DEFAULT_STEM_NUMBER}, LX, LY, PX, PY
       FROM ${m}
      WHERE StemID IS NULL
      ORDER BY TempID;

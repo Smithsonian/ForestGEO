@@ -1143,6 +1143,8 @@ BEGIN
     -- Materialize the previous-census lookup once per distinct tag/stem key from
     -- the current scope.  This preserves the original "any matching previous row"
     -- semantics while avoiding repeated tree/stem/quadrat joins for every insert path.
+    -- Keep the key table first: mixed tag collations can otherwise make MySQL start
+    -- from trees and miss the indexed key-to-tree-to-stem lookup path.
     INSERT INTO previous_cross_census_lookup
         (PreviousCensusID, TreeTag, StemTag, PreviousQuadratName, PreviousLocalX, PreviousLocalY)
     SELECT DISTINCT scope_keys.PreviousCensusID,
@@ -1152,11 +1154,11 @@ BEGIN
            s_prev.LocalX,
            s_prev.LocalY
     FROM current_cross_census_keys scope_keys
-             JOIN trees t_prev
+             STRAIGHT_JOIN trees t_prev
                   ON t_prev.CensusID = scope_keys.PreviousCensusID
                       AND t_prev.TreeTag = scope_keys.TreeTag
                       AND t_prev.IsActive = 1
-             JOIN stems s_prev
+             STRAIGHT_JOIN stems s_prev
                   ON s_prev.TreeID = t_prev.TreeID
                       AND s_prev.CensusID = scope_keys.PreviousCensusID
                       AND s_prev.StemTag = scope_keys.StemTag

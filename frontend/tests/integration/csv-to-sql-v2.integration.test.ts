@@ -26,7 +26,8 @@ import {
   renderStage8DBH,
   renderStage9DBHAttributes,
   renderStage10,
-  renderPostLoadViewFullTableCall
+  renderPostLoadViewFullTableCall,
+  MISSING_PLOT_COORDINATE_SCOPE
 } from '../../lib/csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../../lib/csv-to-sql-shared';
 
@@ -133,6 +134,8 @@ function makeMeasurement(overrides: Partial<MeasurementStagingRow> = {}): Measur
     Comments: null,
     LX: 1,
     LY: 1,
+    PX: 41,
+    PY: 61,
     PrimaryStem: null,
     ...overrides
   };
@@ -859,6 +862,260 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
     const [dbhRows] = await connection.query<mysql.RowDataPacket[]>('SELECT DBH FROM DBH WHERE CensusID = 2');
     const dbhValues = dbhRows.map((r: mysql.RowDataPacket) => Number(r.DBH));
     expect(dbhValues).not.toContain(55);
+  });
+
+  // -------------------------------------------------------------------------
+  // PX/PY plot coordinates on new Stem rows (#475)
+  // -------------------------------------------------------------------------
+
+  describe('PX/PY plot coordinates on new Stem rows', () => {
+    it('writes exact QX/QY and PX/PY for a new stem on an existing tree (M) and a new stem on a new tree (N), with independent per-axis NULL persistence', async () => {
+      await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+
+      // M: new stem on existing TreeID=1 — both PX and PY populated.
+      const mRow = makeMeasurement({
+        Tag: '1',
+        StemTag: '2',
+        DBH: 9,
+        LX: 1.25,
+        LY: 2.5,
+        PX: 41.25,
+        PY: 62.5,
+        PlotCensusNumber: CENSUS_NUMBER_2
+      });
+      // N: brand new tree — PX populated, PY NULL (missing StartY on that quadrat).
+      const nRowPyNull = makeMeasurement({
+        Tag: 'PXPY-N1',
+        StemTag: '1',
+        DBH: 20,
+        QuadratName: 'A2',
+        LX: 5,
+        LY: 6,
+        PX: 46,
+        PY: null,
+        PlotCensusNumber: CENSUS_NUMBER_2
+      });
+      // N: another brand new tree — PX NULL, PY populated (missing StartX on that quadrat).
+      const nRowPxNull = makeMeasurement({
+        Tag: 'PXPY-N2',
+        StemTag: '1',
+        DBH: 21,
+        QuadratName: 'B1',
+        LX: 7,
+        LY: 8,
+        PX: null,
+        PY: 68,
+        PlotCensusNumber: CENSUS_NUMBER_2
+      });
+
+      const artifact = buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_2,
+        lockName: LOCK_NAME_CENSUS_2,
+        allowReload: false,
+        measurementRows: [mRow, nRowPyNull, nRowPxNull],
+        attributeRows: []
+      });
+
+      await executeArtifact(connection, artifact);
+
+      // Destination Stem.QX/QY/PX/PY are all DECIMAL(16,5) after DBCHANGES2014f
+      // (see canonical-ddl.sql), so mysql2 returns them as fixed-precision
+      // strings (5 decimal places) — compare exactly rather than via Number()
+      // + toBeCloseTo, which would tolerate an off-by-a-few-µ regression.
+      const [mStem] = await connection.query<mysql.RowDataPacket[]>("SELECT QX, QY, PX, PY FROM Stem WHERE TreeID = 1 AND StemTag = '2'");
+      expect(mStem, 'M-row new stem on existing TreeID=1 must exist').toHaveLength(1);
+      expect(String(mStem[0].QX), 'QX = LX = 1.25 (unchanged by PX/PY)').toBe('1.25000');
+      expect(String(mStem[0].QY), 'QY = LY = 2.5 (unchanged by PX/PY)').toBe('2.50000');
+      expect(String(mStem[0].PX), 'M-row PX = 41.25').toBe('41.25000');
+      expect(String(mStem[0].PY), 'M-row PY = 62.5').toBe('62.50000');
+
+      const [nStem1] = await connection.query<mysql.RowDataPacket[]>(
+        "SELECT s.QX, s.QY, s.PX, s.PY FROM Stem s JOIN Tree t ON t.TreeID = s.TreeID WHERE t.Tag = 'PXPY-N1'"
+      );
+      expect(nStem1, 'N-row (PXPY-N1) new tree + new stem must exist').toHaveLength(1);
+      expect(String(nStem1[0].QX)).toBe('5.00000');
+      expect(String(nStem1[0].QY)).toBe('6.00000');
+      expect(String(nStem1[0].PX), 'PX populated for PXPY-N1').toBe('46.00000');
+      expect(nStem1[0].PY, 'PY must persist as SQL NULL, not 0 or a substituted value, for PXPY-N1').toBeNull();
+
+      const [nStem2] = await connection.query<mysql.RowDataPacket[]>(
+        "SELECT s.QX, s.QY, s.PX, s.PY FROM Stem s JOIN Tree t ON t.TreeID = s.TreeID WHERE t.Tag = 'PXPY-N2'"
+      );
+      expect(nStem2, 'N-row (PXPY-N2) new tree + new stem must exist').toHaveLength(1);
+      expect(nStem2[0].PX, 'PX must persist as SQL NULL, not 0 or a substituted value, for PXPY-N2').toBeNull();
+      expect(String(nStem2[0].PY), 'PY populated for PXPY-N2').toBe('68.00000');
+    });
+
+    it('stores a DECIMAL(16,5) PX value exactly, exposing what FLOAT(8) staging would have corrupted', async () => {
+      // 992.34567 has 5 decimal digits — exact under DECIMAL(16,5), but FLOAT(8)
+      // (the LX/LY staging type) cannot represent it exactly and would silently
+      // round-trip to a nearby value such as 992.34564.
+      const row = makeMeasurement({ Tag: 'PREC1', StemTag: '1', DBH: 10, PX: 992.34567, PY: 100.00001 });
+      const artifact = buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_1,
+        allowReload: false,
+        measurementRows: [row],
+        attributeRows: []
+      });
+
+      await executeArtifact(connection, artifact);
+
+      // Read as the raw string mysql2 returns for DECIMAL columns (no decimalNumbers
+      // pool option is set) so rounding introduced by Number() coercion cannot mask
+      // a staging-precision bug.
+      const [rows] = await connection.query<mysql.RowDataPacket[]>("SELECT PX, PY FROM Stem s JOIN Tree t ON t.TreeID = s.TreeID WHERE t.Tag = 'PREC1'");
+      expect(rows).toHaveLength(1);
+      expect(String(rows[0].PX), 'PX must round-trip through DECIMAL(16,5) staging with no precision loss').toBe('992.34567');
+      expect(String(rows[0].PY), 'PY must round-trip through DECIMAL(16,5) staging with no precision loss').toBe('100.00001');
+    });
+
+    it('a six-decimal-digit sum is rounded to DECIMAL(16,5) on staging INSERT under MySQL DECIMAL rounding — verified against the live server, not assumed', async () => {
+      // App-side operands (quadrats.StartX/StartY, stems.LocalX/LocalY) are
+      // DECIMAL(12,6); their sum can carry a 6th decimal digit that the
+      // DECIMAL(16,5) staging column cannot hold. 40.000001 + 1.000004 =
+      // 41.000005 is exactly such a case. We do not assume MySQL's rounding
+      // direction here — we insert the six-decimal value directly into a
+      // scratch DECIMAL(16,5) column and read back what the server actually did.
+      await connection.query('CREATE TEMPORARY TABLE decimal_rounding_probe (v DECIMAL(16,5))');
+      await connection.query('INSERT INTO decimal_rounding_probe (v) VALUES (41.000005)');
+      const [probeRows] = await connection.query<mysql.RowDataPacket[]>('SELECT v FROM decimal_rounding_probe');
+      const observedRounding = String(probeRows[0].v);
+
+      const row = makeMeasurement({ Tag: 'ROUND1', StemTag: '1', DBH: 10, PX: 41.000005, PY: 41.000005 });
+      const artifact = buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_1,
+        allowReload: false,
+        measurementRows: [row],
+        attributeRows: []
+      });
+
+      await executeArtifact(connection, artifact);
+
+      const [rows] = await connection.query<mysql.RowDataPacket[]>("SELECT PX, PY FROM Stem s JOIN Tree t ON t.TreeID = s.TreeID WHERE t.Tag = 'ROUND1'");
+      expect(rows).toHaveLength(1);
+      // The staging column and the destination Stem.PX/PY column are both
+      // DECIMAL(16,5), so the value observed on the scratch probe must match
+      // what actually landed on the published Stem row end-to-end.
+      expect(String(rows[0].PX), `staging DECIMAL(16,5) rounds 41.000005 to ${observedRounding}, per the live server`).toBe(observedRounding);
+      expect(String(rows[0].PY)).toBe(observedRounding);
+    });
+
+    it("a subsequent-census publish and an allowed reload leave a reused stem's populated AND NULL coordinates untouched (Stage 7 only inserts where StemID IS NULL)", async () => {
+      await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+
+      // Give the prior Stem (StemID=1, TreeID=1) a known PX/PY: PX populated, PY NULL.
+      await connection.query('UPDATE Stem SET PX = 41.25, PY = NULL WHERE StemID = 1');
+
+      // Census 2 O-row: same Tag/StemTag as the prior stem, but with DIFFERENT
+      // PX/PY on the staging row. If Stage 7 ever touched a matched stem, this
+      // would overwrite 41.25/NULL with 99/99.
+      const oRow = makeMeasurement({
+        Tag: '1',
+        StemTag: '1',
+        DBH: 11,
+        PX: 99,
+        PY: 99,
+        PlotCensusNumber: CENSUS_NUMBER_2
+      });
+      await executeArtifact(
+        connection,
+        buildArtifact({
+          destinationPlotId: DESTINATION_PLOT_ID,
+          censusNumber: CENSUS_NUMBER_2,
+          lockName: LOCK_NAME_CENSUS_2,
+          allowReload: false,
+          measurementRows: [oRow],
+          attributeRows: []
+        })
+      );
+
+      const [afterPublish] = await connection.query<mysql.RowDataPacket[]>('SELECT PX, PY FROM Stem WHERE StemID = 1');
+      expect(String(afterPublish[0].PX), 'a matched (O) publish must not touch the existing stem PX').toBe('41.25000');
+      expect(afterPublish[0].PY, 'a matched (O) publish must not touch the existing stem NULL PY').toBeNull();
+
+      // Reload Census 2 with allowReload=true and yet another conflicting PX/PY.
+      nextTempId = 500; // Avoid TempID collision with the prior loads (different procedure calls)
+      const reloadRow = makeMeasurement({
+        Tag: '1',
+        StemTag: '1',
+        DBH: 55,
+        PX: 12345,
+        PY: 54321,
+        PlotCensusNumber: CENSUS_NUMBER_2
+      });
+      await executeArtifact(
+        connection,
+        buildArtifact({
+          procedureName: 'ctfs_export_pxpy_reload_proc',
+          destinationPlotId: DESTINATION_PLOT_ID,
+          censusNumber: CENSUS_NUMBER_2,
+          lockName: LOCK_NAME_CENSUS_2,
+          allowReload: true,
+          reloadDryRun: false,
+          measurementRows: [reloadRow],
+          attributeRows: []
+        })
+      );
+
+      const [afterReload] = await connection.query<mysql.RowDataPacket[]>('SELECT PX, PY FROM Stem WHERE StemID = 1');
+      expect(String(afterReload[0].PX), 'an allowed reload must not touch the existing stem PX').toBe('41.25000');
+      expect(afterReload[0].PY, 'an allowed reload must not touch the existing stem NULL PY').toBeNull();
+    });
+
+    it('the diagnostic result set reports 0 when every new stem has both axes', async () => {
+      const fullyPopulated = [
+        makeMeasurement({ Tag: 'DIAG-A1', StemTag: '1', DBH: 10, PX: 10, PY: 10 }),
+        makeMeasurement({ Tag: 'DIAG-A2', StemTag: '1', DBH: 11, PX: 20, PY: 20 })
+      ];
+      const artifactA = buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_1,
+        allowReload: false,
+        measurementRows: fullyPopulated,
+        attributeRows: []
+      });
+      const resultSetsA = await executeArtifact(connection, artifactA);
+      const diagnosticA = resultSetsA.find(rs => rs.length > 0 && rs[0].scope === MISSING_PLOT_COORDINATE_SCOPE);
+      expect(diagnosticA, 'diagnostic result set must always be emitted, even when the count is 0').toBeDefined();
+      expect(Number(diagnosticA![0].n), 'both new stems have PX and PY, so the count is 0').toBe(0);
+    });
+
+    it('the diagnostic result set reports 1 when exactly one new stem is missing an axis, excluding a matched stem that is also missing an axis', async () => {
+      // Seed a prior stem (matched, not new) that already has a NULL PX — it
+      // must NOT count, because Stage 7 only scopes StemID IS NULL rows.
+      await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+      await connection.query('UPDATE Stem SET PX = NULL, PY = NULL WHERE StemID = 1');
+
+      const mixedRows = [
+        // O-row: matches the existing (NULL/NULL) stem — excluded from the new-stem scope.
+        makeMeasurement({ Tag: '1', StemTag: '1', DBH: 12, PX: 1, PY: 1, PlotCensusNumber: CENSUS_NUMBER_2 }),
+        // N-row: brand new stem missing PY only.
+        makeMeasurement({ Tag: 'DIAG-B1', StemTag: '1', DBH: 13, PX: 30, PY: null, PlotCensusNumber: CENSUS_NUMBER_2 })
+      ];
+      const artifactB = buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_2,
+        lockName: LOCK_NAME_CENSUS_2,
+        allowReload: false,
+        measurementRows: mixedRows,
+        attributeRows: []
+      });
+      const resultSetsB = await executeArtifact(connection, artifactB);
+      const diagnosticB = resultSetsB.find(rs => rs.length > 0 && rs[0].scope === MISSING_PLOT_COORDINATE_SCOPE);
+      expect(diagnosticB).toBeDefined();
+      expect(Number(diagnosticB![0].n), 'only the brand-new DIAG-B1 stem is missing an axis; the matched O-row stem is excluded from the new-stem scope').toBe(
+        1
+      );
+    });
+
+    // Reload dry-run omitting Stage 7 (diagnostic + Stem insert) is covered by
+    // lib/ctfs-export/render-procedure.test.ts's renderArtifact-based test —
+    // that exercises the real production composition path. A version of this
+    // test here would only exercise this file's own buildArtifact() ternary,
+    // not any production code.
   });
 
   // -------------------------------------------------------------------------

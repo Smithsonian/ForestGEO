@@ -40,6 +40,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { REQUIRED_PROCEDURES } from '@/lib/provisioning/steps/sql-steps';
+import { executorFor } from './lib/schema-cli';
+import { quarantineSkipDetail, readQuarantinedSchemas, type SchemaGateRow } from './lib/schema-gate';
 
 export const AZURE_HOST = 'forestgeo-mysqldataserver.mysql.database.azure.com';
 export const AZURE_USER = 'azureroot';
@@ -292,6 +294,7 @@ export interface DeployCliDeps {
   createConnection: (options: mysql.ConnectionOptions) => Promise<mysql.Connection>;
   discoverSchemas: (conn: mysql.Connection) => Promise<string[]>;
   checkMigrationStatus: (conn: mysql.Connection, schema: string) => Promise<{ migrated: boolean; missingTables: string[] }>;
+  readQuarantinedSchemas: (conn: mysql.Connection) => Promise<Map<string, SchemaGateRow>>;
   log: (message?: string) => void;
 }
 
@@ -317,6 +320,7 @@ export const realDeps: DeployCliDeps = {
   createConnection: options => mysql.createConnection(options),
   discoverSchemas: discoverForestGeoSchemas,
   checkMigrationStatus,
+  readQuarantinedSchemas: conn => readQuarantinedSchemas(executorFor(conn)),
   log: (message = '') => console.log(message)
 };
 
@@ -408,6 +412,10 @@ async function runForAllSchemas<TPrepared = undefined>(deps: DeployCliDeps, pass
     if (options.listSchemas) schemas.forEach(schema => deps.log(`  - ${schema}`));
     deps.log('');
 
+    // Read once on the discovery connection: a quarantined schema must not get
+    // procedures it may be structurally unable to run (the #399 failure shape).
+    const quarantined = await deps.readQuarantinedSchemas(discoveryConnection);
+
     const prepared = options.prepare ? await options.prepare() : (undefined as TPrepared);
     deps.log(options.operationMessage);
     const results: SchemaResult[] = [];
@@ -415,6 +423,15 @@ async function runForAllSchemas<TPrepared = undefined>(deps: DeployCliDeps, pass
     for (const schema of schemas) {
       deps.log(`Processing: ${schema}`);
       try {
+        const quarantineRow = quarantined.get(schema.toLowerCase());
+        if (quarantineRow) {
+          const detail = quarantineSkipDetail(quarantineRow);
+          deps.log(`  SKIPPED (quarantined) - ${detail}`);
+          results.push({ schema, status: 'skipped', detail });
+          deps.log('');
+          continue;
+        }
+
         if (options.requireMigrated) {
           const { migrated, missingTables } = await deps.checkMigrationStatus(discoveryConnection, schema);
           if (!migrated) {

@@ -23,6 +23,11 @@ export default defineConfig({
     // must run in Node — not jsdom — because the route uses Node-only modules)
     include: ['tests/integration/**/*.test.ts', 'lib/provisioning/**/*.test.ts', 'lib/ctfs-export/**/*.test.ts', 'app/api/admin/provision/**/*.test.ts'],
 
+    // Route suites queue ConnectionManager responses; the per-request schema
+    // quarantine lookup would consume one. See the file's comment for why the
+    // default is "nothing quarantined" and where the real behavior is proven.
+    setupFiles: ['tests/integration/setup/schema-quarantine-mock.ts'],
+
     // SAFETY: ConnectionManager connects via getPoolMonitorInstance(), whose
     // sqlConfig.host = process.env.AZURE_SQL_SERVER — which points at PRODUCTION
     // Azure MySQL by default. Force it to the local docker container for ALL

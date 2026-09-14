@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   applyPendingCatalogMigrations,
-  CATALOG_BACKGROUND_JOB_TABLES,
+  CATALOG_OWNED_TABLES,
   CATALOG_LEDGER_TABLE,
   CATALOG_MIGRATION_LOCK_NAME,
   CatalogTablesNotEmptyError,
@@ -24,9 +24,11 @@ import { SCHEMA_MIGRATION_MANIFEST } from '../db/migrations/manifest';
 import { TamperedMigrationError, type MigrationSource } from './apply-schema-migrations';
 
 const BACKGROUND_JOBS = 'background_jobs';
+const SCHEMA_CONTRACT_GATE = 'schema_contract_gate';
+const GATE_COLUMNS = ['SchemaName', 'LastPassedAt', 'LastFailedAt', 'QuarantinedAt', 'QuarantineReason', 'LastRunRef', 'UpdatedAt'];
 
 /** Columns matching the canonical migration for a given table. */
-function currentColumns(table: (typeof CATALOG_BACKGROUND_JOB_TABLES)[number]): LiveColumn[] {
+function currentColumns(table: (typeof CATALOG_OWNED_TABLES)[number]): LiveColumn[] {
   if (table === BACKGROUND_JOBS) {
     return [
       { name: 'JobID', columnType: 'bigint' },
@@ -85,11 +87,14 @@ function currentColumns(table: (typeof CATALOG_BACKGROUND_JOB_TABLES)[number]): 
       ].map(name => ({ name, columnType: 'varchar(64)' }))
     ];
   }
+  if (table === SCHEMA_CONTRACT_GATE) {
+    return GATE_COLUMNS.map(name => ({ name, columnType: 'varchar(64)' }));
+  }
   return ['EventID', 'JobID', 'EventType', 'Message', 'Details', 'CreatedAt'].map(name => ({ name, columnType: 'varchar(64)' }));
 }
 
 /** Indexes matching the canonical migration for a given table. */
-function currentIndexes(table: (typeof CATALOG_BACKGROUND_JOB_TABLES)[number]): LiveIndex[] {
+function currentIndexes(table: (typeof CATALOG_OWNED_TABLES)[number]): LiveIndex[] {
   return CATALOG_TABLE_CONTRACTS[table].requiredIndexes.map(index => ({
     name: index.name,
     columns: [...index.columns],
@@ -103,7 +108,7 @@ function makeSource(overrides: Partial<MigrationSource> = {}): MigrationSource {
 
 function cleanPreflight(): CatalogPreflight {
   return {
-    tables: CATALOG_BACKGROUND_JOB_TABLES.map(table => ({ table, state: 'absent' as const, differences: [], rowCount: null })),
+    tables: CATALOG_OWNED_TABLES.map(table => ({ table, state: 'absent' as const, differences: [], rowCount: null })),
     hasStale: false,
     staleRowTotal: 0
   };
@@ -233,7 +238,7 @@ describe('classifyCatalogTable — index contract', () => {
   });
 
   it('accepts the canonical index set for every owned table', () => {
-    for (const table of CATALOG_BACKGROUND_JOB_TABLES) {
+    for (const table of CATALOG_OWNED_TABLES) {
       expect(classifyCatalogTable(table, currentColumns(table), currentIndexes(table)).state).toBe('current');
     }
   });
@@ -258,12 +263,12 @@ describe('runCatalogPreflight', () => {
   it('reports stale tables with their row counts', async () => {
     const exec = vi.fn(async (sql: string, params?: unknown[]) => {
       if (sql.includes('information_schema.COLUMNS')) {
-        const table = String((params as unknown[])[1]) as (typeof CATALOG_BACKGROUND_JOB_TABLES)[number];
+        const table = String((params as unknown[])[1]) as (typeof CATALOG_OWNED_TABLES)[number];
         if (table !== BACKGROUND_JOBS) return currentColumns(table).map(column => ({ name: column.name, columnType: column.columnType }));
         return [...currentColumns(BACKGROUND_JOBS), { name: 'LastMessageID', columnType: 'varchar(128)' }];
       }
       if (sql.includes('information_schema.STATISTICS')) {
-        const table = String((params as unknown[])[1]) as (typeof CATALOG_BACKGROUND_JOB_TABLES)[number];
+        const table = String((params as unknown[])[1]) as (typeof CATALOG_OWNED_TABLES)[number];
         return currentIndexes(table).map(index => ({ name: index.name, nonUnique: index.unique ? 0 : 1, columns: index.columns.join(',') }));
       }
       if (sql.includes('COUNT(*)')) return [{ rowCount: sql.includes('background_jobs`') ? 7 : 0 }];
@@ -371,7 +376,8 @@ describe('remediateEmptyUnreleasedCatalogTables', () => {
       tables: [
         { table: 'background_job_events', state: 'absent', differences: [], rowCount: null },
         { table: 'background_job_files', state: 'absent', differences: [], rowCount: null },
-        { table: BACKGROUND_JOBS, state: 'stale', differences: ['legacy column LastMessageID present'], rowCount: 0 }
+        { table: BACKGROUND_JOBS, state: 'stale', differences: ['legacy column LastMessageID present'], rowCount: 0 },
+        { table: SCHEMA_CONTRACT_GATE, state: 'absent', differences: [], rowCount: null }
       ],
       hasStale: true,
       staleRowTotal: 0
@@ -380,10 +386,11 @@ describe('remediateEmptyUnreleasedCatalogTables', () => {
     const dropped = await remediateEmptyUnreleasedCatalogTables(exec as never, stale);
 
     // Children before the parent so FKs never block the drop.
-    expect(dropped).toEqual(['background_job_events', 'background_job_files', 'background_jobs']);
+    expect(dropped).toEqual([...CATALOG_OWNED_TABLES]);
     const droppedOrder = exec.mock.calls.map(([sql]) => String(sql)).filter(sql => sql.startsWith('DROP TABLE'));
     expect(droppedOrder[0]).toContain('background_job_events');
     expect(droppedOrder[2]).toContain('background_jobs');
+    expect(droppedOrder[3]).toContain(SCHEMA_CONTRACT_GATE);
   });
 
   it('refuses to drop when any owned table holds rows', async () => {
@@ -418,5 +425,29 @@ describe('parseCatalogRunnerArgs', () => {
 
   it('rejects an unknown flag rather than silently ignoring it', () => {
     expect(() => parseCatalogRunnerArgs(['--check', '--all-sites'])).toThrow(/Unknown argument/);
+  });
+});
+
+describe('classifyCatalogTable — schema_contract_gate', () => {
+  it('is absent when no columns exist', () => {
+    expect(classifyCatalogTable(SCHEMA_CONTRACT_GATE, null).state).toBe('absent');
+  });
+
+  it('is current with the seven contract columns', () => {
+    const result = classifyCatalogTable(SCHEMA_CONTRACT_GATE, currentColumns(SCHEMA_CONTRACT_GATE), currentIndexes(SCHEMA_CONTRACT_GATE));
+    console.log(`[gate classify] state=${result.state} differences=${JSON.stringify(result.differences)}`);
+    expect(result.state).toBe('current');
+  });
+
+  it('is stale when QuarantinedAt is missing', () => {
+    const columns = currentColumns(SCHEMA_CONTRACT_GATE).filter(column => column.name !== 'QuarantinedAt');
+    const result = classifyCatalogTable(SCHEMA_CONTRACT_GATE, columns, currentIndexes(SCHEMA_CONTRACT_GATE));
+    console.log(`[gate classify] state=${result.state} differences=${JSON.stringify(result.differences)}`);
+    expect(result.state).toBe('stale');
+    expect(result.differences.some(difference => difference.includes('QuarantinedAt'))).toBe(true);
+  });
+
+  it('is the last owned table so the drop order stays foreign-key safe', () => {
+    expect(CATALOG_OWNED_TABLES[CATALOG_OWNED_TABLES.length - 1]).toBe(SCHEMA_CONTRACT_GATE);
   });
 });

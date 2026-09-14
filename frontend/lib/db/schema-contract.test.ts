@@ -449,19 +449,21 @@ describe('presence-only required columns', () => {
     );
   });
 
-  it('passes when the table exists and carries the column', () => {
-    const live = liveContractWith('upload_sessions', {
-      census_replacement_completed_at: {
-        name: 'census_replacement_completed_at',
-        typeSignature: 'timestamp',
-        dataType: 'timestamp',
-        nullable: true,
-        defaultValue: null,
-        extra: '',
-        collation: null,
-        isText: false
-      }
+  it('passes when the table exists and carries every required column', () => {
+    const markerColumn = (name: string) => ({
+      name,
+      typeSignature: 'timestamp',
+      dataType: 'timestamp',
+      nullable: true,
+      defaultValue: null,
+      extra: '',
+      collation: null,
+      isText: false
     });
+    const live = liveContractWith(
+      'upload_sessions',
+      Object.fromEntries(REQUIRED_COLUMNS_BY_TABLE.upload_sessions.map(columnName => [columnName, markerColumn(columnName)]))
+    );
 
     expect(compareSchemaContracts(canonical, live, { tables: [], requiredIndexesByTable: {} }).failures).toEqual([]);
   });

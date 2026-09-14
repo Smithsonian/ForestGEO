@@ -28,6 +28,7 @@ function makeCliDeps(overrides: Partial<DeployCliDeps> = {}): DeployCliDeps {
     createConnection: vi.fn().mockResolvedValue(makeConnection()),
     discoverSchemas: vi.fn().mockResolvedValue([]),
     checkMigrationStatus: vi.fn().mockResolvedValue({ migrated: true, missingTables: [] }),
+    readQuarantinedSchemas: vi.fn().mockResolvedValue(new Map()),
     log: vi.fn(),
     ...overrides
   };
@@ -146,6 +147,33 @@ describe('main CLI dispatch', () => {
 
     await expect(main(['--activate-validation-19'], deps)).rejects.toThrow('schema discovery failed');
     expect(deps.log).toHaveBeenCalledWith('Discovery connection cleanup failed after schema discovery failed: discovery close failed');
+  });
+  it('skips a quarantined schema in every mode and never opens a connection to it', async () => {
+    const quarantinedRow = {
+      schemaName: 'forestgeo_new',
+      lastPassedAt: null,
+      lastFailedAt: new Date('2026-09-02T18:04:11Z'),
+      quarantinedAt: new Date('2026-09-02T18:04:11Z'),
+      quarantineReason: 'DRIFT [stems] column "PublishedStemID" missing',
+      lastRunRef: 'run'
+    };
+
+    for (const args of [[], ['--procedures-only'], ['--activate-validation-19']]) {
+      const discoveryConn = makeConnection();
+      const deps = makeCliDeps({
+        discoverSchemas: vi.fn().mockResolvedValue(['forestgeo_new']),
+        readQuarantinedSchemas: vi.fn().mockResolvedValue(new Map([['forestgeo_new', quarantinedRow]])),
+        createConnection: vi.fn().mockResolvedValue(discoveryConn)
+      });
+
+      await main(args, deps);
+
+      const logLines = (deps.log as ReturnType<typeof vi.fn>).mock.calls.map(([line]) => String(line ?? ''));
+      console.log(`[quarantine skip ${JSON.stringify(args)}] ${logLines.filter(line => /Quarantined/.test(line)).join(' | ')}`);
+      expect(logLines.some(line => line.includes('SKIPPED (quarantined) - Quarantined by the schema contract gate since 2026-09-02T18:04:11.000Z'))).toBe(true);
+      expect(deps.createConnection, 'only the discovery connection may be opened').toHaveBeenCalledTimes(1);
+      expect(deps.readQuarantinedSchemas).toHaveBeenCalledTimes(1);
+    }
   });
 });
 

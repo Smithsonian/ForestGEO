@@ -503,8 +503,8 @@ describe('provisioned-site lifecycle', () => {
     const connectionManager = ConnectionManager.getInstance();
     const transactionID = await connectionManager.beginTransaction();
     try {
-      const attributeResult = await upsertAttributeRows(connectionManager, SCHEMA_NAME, ATTRIBUTE_SEED_ROWS, UploadMode.REVISIONS, transactionID);
-      const speciesResult = await upsertSpeciesRows(connectionManager, SCHEMA_NAME, SPECIES_SEED_ROWS, UploadMode.REVISIONS, transactionID);
+      const attributeResult = await upsertAttributeRows(connectionManager, SCHEMA_NAME, ATTRIBUTE_SEED_ROWS, UploadMode.REVISIONS, null, transactionID);
+      const speciesResult = await upsertSpeciesRows(connectionManager, SCHEMA_NAME, SPECIES_SEED_ROWS, UploadMode.REVISIONS, null, transactionID);
       await connectionManager.commitTransaction(transactionID);
       console.log(
         `[seed] attributes inserted=${attributeResult.insertedCount} skipped=${attributeResult.skippedCount}; ` +

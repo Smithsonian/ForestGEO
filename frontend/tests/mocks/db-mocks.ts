@@ -159,6 +159,22 @@ vi.mock('@/lib/db/poolmonitorsingleton', () => ({
   }
 }));
 
+// -------------------------------------------------------------------
+// Site-scoped route wrappers consult catalog.schema_contract_gate on
+// every request (lib/schema-quarantine.ts). Route suites drive the
+// in-memory connection with a QUEUE of responses, so a real lookup
+// would consume one of their queued rows. Default to "not quarantined";
+// a suite that needs the quarantine path overrides findSchemaQuarantine.
+// lib/schema-quarantine.test.ts un-mocks this to test the real module.
+// -------------------------------------------------------------------
+vi.mock('@/lib/schema-quarantine', async origImport => {
+  const actual = await origImport<typeof import('@/lib/schema-quarantine')>();
+  return {
+    ...actual,
+    findSchemaQuarantine: vi.fn(async () => null)
+  };
+});
+
 // ----------------------------------------
 // Optional: mock mysql2/promise createPool
 // (not strictly needed since PoolMonitor is mocked,

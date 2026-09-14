@@ -54,7 +54,9 @@ const TRANSACTION_ID_PREFIX = 'quadrat-geometry-tx-';
 const sharedState = vi.hoisted(() => ({
   connection: null as Connection | null,
   activeTransactionID: null as string | null,
-  transactionCounter: 0
+  transactionCounter: 0,
+  /** Named locks taken inside the active transaction; released when it ends, as ConnectionManager does. */
+  heldLockNames: [] as string[]
 }));
 
 // A 'global' role clears assertSchemaAccess's schema-membership check so these tests
@@ -79,6 +81,14 @@ vi.mock('@/lib/db/connectionmanager', () => {
       const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
       return rows;
     },
+    acquireApplicationLock: async (lockName: string, transactionID: string, timeoutMs: number) => {
+      if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: lock transactionID mismatch');
+      const [rows] = await sharedState.connection.query<RowDataPacket[]>('SELECT GET_LOCK(?, ?) AS acquired', [lockName, Math.ceil(timeoutMs / 1000)]);
+      const acquired = rows[0].acquired === 1;
+      if (acquired) sharedState.heldLockNames.push(lockName);
+      return acquired;
+    },
     beginTransaction: async () => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       if (sharedState.activeTransactionID) throw new Error('ConnectionManager mock: transaction already active');
@@ -92,19 +102,34 @@ vi.mock('@/lib/db/connectionmanager', () => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: commit transactionID mismatch');
       await sharedState.connection.commit();
+      await releaseHeldLocks();
       sharedState.activeTransactionID = null;
     },
     rollbackTransaction: async (transactionID: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: rollback transactionID mismatch');
       await sharedState.connection.rollback();
+      await releaseHeldLocks();
       sharedState.activeTransactionID = null;
     },
     cleanupStaleTransactions: async () => undefined,
     closeConnection: async () => undefined
   };
+  async function releaseHeldLocks(): Promise<void> {
+    for (const lockName of sharedState.heldLockNames.splice(0)) {
+      await sharedState.connection!.query('SELECT RELEASE_LOCK(?)', [lockName]);
+    }
+  }
   return { default: { getInstance: () => manager } };
 });
+
+// The session-ownership gate reads upload_sessions through the app's own pool, which this
+// suite does not wire to its test connection. Ownership is pinned in app/api/sqlpacketload's
+// route tests; here it passes so the geometry boundary itself is what gets exercised.
+vi.mock('@/config/uploadsessiontracker', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/config/uploadsessiontracker')>()),
+  requireUploadSessionOwnership: vi.fn(async () => undefined)
+}));
 
 vi.mock('@/ailogger', () => ({
   default: {
@@ -116,6 +141,7 @@ vi.mock('@/ailogger', () => ({
 
 // Route handler imported AFTER the mocks so they are wired before module load.
 import { POST } from '@/app/api/sqlpacketload/route';
+import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 
 function buildQuadratUploadRequest(body: Record<string, unknown>) {
   return new Request('http://localhost/api/sqlpacketload', {
@@ -164,6 +190,7 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
     plotID = testData.plots[0].plotID;
     censusID = testData.census[0].censusID;
     sharedState.connection = connection;
+    await ensureUploadSessionsTable(config.database);
   }, 90000);
 
   afterAll(async () => {
@@ -174,6 +201,13 @@ describe('Quadrat upload geometry enforcement (server write boundary)', () => {
   beforeEach(async () => {
     await cleanupTestMeasurements(connection, testData);
     await resetQuadratsToBaseline(connection, plotID);
+    // Clean uploads must have a real session row to persist the replacement marker.
+    await connection.query('DELETE FROM upload_sessions');
+    await connection.query(
+      `INSERT INTO upload_sessions (session_id, schema_name, plot_id, census_id, user_id, state)
+       VALUES (?, ?, ?, ?, ?, 'uploading')`,
+      ['quadrat-geometry-integration-session', config.database, plotID, censusID, AUTH_USER_EMAIL]
+    );
   });
 
   function baseRequestBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
