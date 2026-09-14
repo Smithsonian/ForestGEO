@@ -146,11 +146,14 @@ import { POST as CLEARCENSUS_POST } from '../clearcensus/route';
 import { POST as SQLPACKETLOAD_POST } from '../sqlpacketload/route';
 
 // ========== Helpers ==========
-function makeRequest(url: string, method: string = 'GET', body?: any): any {
+// A reference-table clean re-upload is always sent under an upload session, as the upload client does.
+const SUPPORTING_DATA_UPLOAD_SESSION_ID = 'unifiedchangelog-attributes-session';
+
+function makeRequest(url: string, method: string = 'GET', body?: any, extraHeaders: Record<string, string> = {}): any {
   const req: any = new Request(url, {
     method,
     body: body ? JSON.stringify(body) : undefined,
-    headers: body ? { 'Content-Type': 'application/json' } : {}
+    headers: body ? { 'Content-Type': 'application/json', ...extraHeaders } : extraHeaders
   });
   req.nextUrl = new URL(url);
   req.json = async () => body;
@@ -525,14 +528,12 @@ describe('Unified Changelog Tracking System', () => {
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-8');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
-      // Keyed by statement: the clean re-upload first claims the session's replacement
-      // (marker column check, GET_LOCK, marker probe), then deletes, inserts both rows,
-      // records the marker and writes the changelog entry.
+      // The clean re-upload first claims the session's replacement (per-session lock, then the
+      // marker probe), then deletes, inserts both rows, records the marker and writes the
+      // changelog entry. Statements are answered by content, not call order.
+      vi.spyOn(cm, 'acquireApplicationLock').mockResolvedValueOnce(true);
       const exec = vi.spyOn(cm, 'executeQuery').mockImplementation(async (sql: unknown) => {
         const text = String(sql);
-        if (text.includes('information_schema')) return [{ tableCount: 1, columnCount: 1 }];
-        if (text.includes('GET_LOCK')) return [{ acquired: 1 }];
-        if (text.includes('RELEASE_LOCK')) return [{ released: 1 }];
         if (text.includes('reference_replacement_completed_at FROM')) return [{ reference_replacement_completed_at: null }];
         return { affectedRows: 1, insertId: 1 };
       });
@@ -542,20 +543,25 @@ describe('Unified Changelog Tracking System', () => {
         'row-2': { code: 'D', description: 'Dead', status: 'dead' }
       };
 
-      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
-        schema: 'testschema',
-        formType: 'attributes',
-        fileName: 'attributes.csv',
-        plot: { plotID: 1 },
-        census: { dateRanges: [{ censusID: 10 }] },
-        user: 'test-user',
-        fileRowSet
-      });
+      const req = makeRequest(
+        'http://localhost/api/sqlpacketload',
+        'POST',
+        {
+          schema: 'testschema',
+          formType: 'attributes',
+          fileName: 'attributes.csv',
+          plot: { plotID: 1 },
+          census: { dateRanges: [{ censusID: 10 }] },
+          user: 'test-user',
+          fileRowSet
+        },
+        { 'x-upload-session-id': SUPPORTING_DATA_UPLOAD_SESSION_ID }
+      );
 
       const res = await SQLPACKETLOAD_POST(req);
 
       expect(res).toBeDefined();
-      expect(res!.status).toBe(HTTPResponses.OK);
+      expect(res!.status, `response body: ${await res!.clone().text()}`).toBe(HTTPResponses.OK);
 
       // Verify ONE changelog entry was created, carrying this file's counts
       const changelogStatements = exec.mock.calls.filter(call => String(call[0]).includes('unifiedchangelog'));
