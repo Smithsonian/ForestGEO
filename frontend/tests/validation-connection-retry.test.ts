@@ -28,12 +28,8 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
-import {
-  parseDbhValidationSkipCounts,
-  runCombinedCrossCensusLocationValidations,
-  runSharedDBHChangeValidationsInTransaction,
-  runValidation
-} from '@/components/processors/processorhelperfunctions';
+import { runCombinedCrossCensusLocationValidations, runValidation } from '@/components/processors/processorhelperfunctions';
+import { parseDbhValidationSkipCounts, runSharedDBHChangeValidationsInTransaction } from '@/lib/validations/dbh-execution';
 
 describe('validation connection retries', () => {
   beforeEach(() => {

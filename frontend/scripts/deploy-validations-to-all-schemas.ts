@@ -254,7 +254,7 @@ function readSqlFileOrThrow(filePath: string): string {
   return fs.readFileSync(filePath, 'utf8');
 }
 
-export async function discoverForestGeoSchemas(conn: mysql.Connection): Promise<string[]> {
+async function discoverForestGeoSchemas(conn: mysql.Connection): Promise<string[]> {
   const [rows] = await conn.query<mysql.RowDataPacket[]>(
     `SELECT SCHEMA_NAME as schema_name
        FROM INFORMATION_SCHEMA.SCHEMATA

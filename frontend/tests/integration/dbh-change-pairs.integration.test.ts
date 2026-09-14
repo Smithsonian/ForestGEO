@@ -1,5 +1,5 @@
-/** Real-DB contract tests for the read-only DBH explanation path. */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+/** Real-DB contract tests for the comparison facts BuildDBHChangePairs computes for DBH validations 1 and 2. */
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import {
   cleanupTestMeasurements,
@@ -11,29 +11,24 @@ import {
   type TestData
 } from '../setup/local-db-setup';
 
-const state = vi.hoisted(() => ({ connection: null as Connection | null }));
-vi.mock('@/lib/db/connectionmanager', () => ({
-  default: {
-    getInstance: () => ({
-      withTransaction: async (fn: (tx: { id: string; query: (sql: string, values?: unknown[]) => Promise<unknown> }) => Promise<unknown>) => {
-        if (!state.connection) throw new Error('test connection unavailable');
-        await state.connection.beginTransaction();
-        try {
-          const result = await fn({ id: 'diagnostics-test', query: async (sql, values = []) => (await state.connection!.query(sql, values as any))[0] });
-          await state.connection.rollback();
-          return result;
-        } catch (error) {
-          await state.connection.rollback();
-          throw error;
-        }
-      }
-    })
-  }
-}));
+type PairFacts = {
+  presentCoreMeasurementID: number;
+  presentIsValidated: boolean | null;
+  unitToMm: number;
+  intervalDays: number | null;
+  statusExempt: boolean;
+  dbhsMeetFloor: boolean;
+  homEligible: boolean;
+  intervalSkipReason: string | null;
+  comparisonBasis: string | null;
+  isEligible: boolean;
+  growthViolates: boolean;
+  shrinkageViolates: boolean;
+};
 
-import { explainDbhChangePairs } from '@/lib/validations/dbh-change-diagnostics';
+const flag = (value: unknown): boolean => Number(value) === 1;
 
-describe('DBH change diagnostics integration', () => {
+describe('BuildDBHChangePairs comparison facts', () => {
   let connection: Connection;
   let testData: TestData;
   let config: { database: string };
@@ -49,7 +44,6 @@ describe('DBH change diagnostics integration', () => {
     connection = setup.connection;
     testData = setup.testData;
     config = setup.config;
-    state.connection = connection;
     ({
       census1: { censusID: census1ID },
       census2: { censusID: census2ID }
@@ -59,10 +53,7 @@ describe('DBH change diagnostics integration', () => {
     quadratName = testData.quadrats[0].QuadratName || testData.quadrats[0].Quadrat;
     await seedStatusAttributes(connection);
   }, 90000);
-  afterAll(async () => {
-    state.connection = null;
-    await teardownTestDatabase(connection, config);
-  });
+  afterAll(async () => teardownTestDatabase(connection, config));
   beforeEach(async () => {
     await cleanupTestMeasurements(connection, testData);
     await connection.query("UPDATE plots SET DefaultDBHUnits = 'mm' WHERE PlotID = ?", [plotID]);
@@ -88,44 +79,67 @@ describe('DBH change diagnostics integration', () => {
     ]);
     return { priorID: inserted.census1MeasurementIDs[0], presentID: inserted.census2MeasurementIDs[0] };
   }
-  async function explain(id: number) {
-    return explainDbhChangePairs({ schema: config.database, coreMeasurementID: id, censusID: census2ID, plotID });
+
+  /** Builds pairs for one measurement in the given schema and always drops the session temp table. */
+  async function readPairFacts(presentID: number): Promise<PairFacts[]> {
+    const schema = `\`${config.database}\``;
+    try {
+      await connection.query(`CALL ${schema}.BuildDBHChangePairs(?, ?, ?)`, [census2ID, plotID, presentID]);
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT * FROM ${schema}.dbh_change_pairs WHERE PresentCoreMeasurementID = ? ORDER BY PriorCoreMeasurementID DESC`,
+        [presentID]
+      );
+      return rows.map(row => ({
+        presentCoreMeasurementID: Number(row.PresentCoreMeasurementID),
+        presentIsValidated: row.PresentIsValidated == null ? null : flag(row.PresentIsValidated),
+        unitToMm: Number(row.UnitToMm),
+        intervalDays: row.IntervalDays == null ? null : Number(row.IntervalDays),
+        statusExempt: flag(row.StatusExempt),
+        dbhsMeetFloor: flag(row.DbhsMeetFloor),
+        homEligible: flag(row.HomEligible),
+        intervalSkipReason: row.IntervalSkipReason ?? null,
+        comparisonBasis: row.ComparisonBasis ?? null,
+        isEligible: flag(row.IsEligible),
+        growthViolates: flag(row.GrowthViolates),
+        shrinkageViolates: flag(row.ShrinkageViolates)
+      }));
+    } finally {
+      await connection.query(`DROP TEMPORARY TABLE IF EXISTS ${schema}.dbh_change_pairs`);
+    }
   }
 
-  it('explains NULL, TRUE, and FALSE present rows with identical comparison facts without durable writes', async () => {
-    const { presentID } = await seed('DIAG_STATES');
-    const before = await connection.query<RowDataPacket[]>('SELECT IsValidated FROM coremeasurements WHERE CoreMeasurementID = ?', [presentID]);
+  it('computes identical facts for NULL, TRUE, and FALSE present rows when asked for one measurement, without durable writes', async () => {
+    const { presentID } = await seed('PAIR_STATES');
     for (const value of [null, 1, 0]) {
       await connection.query('UPDATE coremeasurements SET IsValidated = ? WHERE CoreMeasurementID = ?', [value, presentID]);
-      const result = await explain(presentID);
-      expect(result.outcome).toBe('pairs-found');
-      if (result.outcome === 'pairs-found') {
-        expect(result.present.isValidated).toBe(value === null ? null : value === 1);
-        expect(result.pairs[0]).toMatchObject({ growthViolates: true, shrinkageViolates: false, dbhsMeetFloor: true, homEligible: true });
-      }
+      const pairs = await readPairFacts(presentID);
+      expect(pairs, `present IsValidated=${value}`).toHaveLength(1);
+      expect(pairs[0]).toMatchObject({
+        presentIsValidated: value === null ? null : value === 1,
+        growthViolates: true,
+        shrinkageViolates: false,
+        dbhsMeetFloor: true,
+        homEligible: true
+      });
     }
-    const [after] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM measurement_error_log WHERE MeasurementID = ?', [presentID]);
-    expect(after[0].count).toBe(0);
-    expect(before[0][0].IsValidated).toBeNull();
+    const [errors] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM measurement_error_log WHERE MeasurementID = ?', [presentID]);
+    expect(Number(errors[0].count), 'building pairs must not write occurrences').toBe(0);
   });
 
-  it('uses the requested schema for the routine temporary table when the connection default database differs', async () => {
-    const { presentID } = await seed('DIAG_DEFAULT_SCHEMA');
+  it('builds its temporary table in the routine schema when the connection default database differs', async () => {
+    const { presentID } = await seed('PAIR_DEFAULT_SCHEMA');
     await connection.query('USE information_schema');
     try {
-      await expect(explain(presentID)).resolves.toMatchObject({
-        outcome: 'pairs-found',
-        pairs: [{ presentCoreMeasurementID: presentID }]
-      });
+      expect((await readPairFacts(presentID)).map(pair => pair.presentCoreMeasurementID)).toEqual([presentID]);
     } finally {
       await connection.query(`USE \`${config.database}\``);
     }
   });
 
-  it('builds pending pairs in validation mode while explicit diagnostic calls explain pending, FALSE, and TRUE rows', async () => {
-    const pending = await seed('DIAG_PENDING');
-    const invalid = await seed('DIAG_FALSE');
-    const valid = await seed('DIAG_TRUE');
+  it('builds only pending pairs in validation mode while an explicit measurement ID covers pending, FALSE, and TRUE rows', async () => {
+    const pending = await seed('PAIR_PENDING');
+    const invalid = await seed('PAIR_FALSE');
+    const valid = await seed('PAIR_TRUE');
     await connection.query('UPDATE coremeasurements SET IsValidated=NULL WHERE CoreMeasurementID=?', [pending.presentID]);
     await connection.query('UPDATE coremeasurements SET IsValidated=FALSE WHERE CoreMeasurementID=?', [invalid.presentID]);
     await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID=?', [valid.presentID]);
@@ -142,59 +156,56 @@ describe('DBH change diagnostics integration', () => {
     }
 
     for (const id of [pending.presentID, invalid.presentID, valid.presentID]) {
-      await expect(explain(id)).resolves.toMatchObject({ outcome: 'pairs-found', pairs: [{ presentCoreMeasurementID: id }] });
+      expect(
+        (await readPairFacts(id)).map(pair => pair.presentCoreMeasurementID),
+        `explicit pairs for ${id}`
+      ).toEqual([id]);
     }
   });
 
-  it('reports DBH floor on either side, centimetre conversion, null DBH, HOM and status eligibility directly from SQL facts', async () => {
+  it('reports DBH floor on either side, centimetre conversion, null DBH, HOM and status eligibility', async () => {
     const cases = [
-      { tag: 'DIAG_FLOOR_PRESENT', prior: 100, present: 9, expect: { dbhsMeetFloor: false } },
-      { tag: 'DIAG_FLOOR_PRIOR', prior: 9, present: 100, expect: { dbhsMeetFloor: false } },
+      { tag: 'PAIR_FLOOR_PRESENT', prior: 100, present: 9, expect: { dbhsMeetFloor: false } },
+      { tag: 'PAIR_FLOOR_PRIOR', prior: 9, present: 100, expect: { dbhsMeetFloor: false } },
       {
-        tag: 'DIAG_NULL_DBH',
+        tag: 'PAIR_NULL_DBH',
         prior: 100,
         present: 200,
         sql: 'UPDATE coremeasurements SET MeasuredDBH = NULL WHERE CoreMeasurementID = ?',
-        target: 'presentID',
         expect: { dbhsMeetFloor: false }
       },
       {
-        tag: 'DIAG_HOM_DIFF',
+        tag: 'PAIR_HOM_DIFF',
         prior: 100,
         present: 200,
         sql: 'UPDATE coremeasurements SET MeasuredHOM = 2 WHERE CoreMeasurementID = ?',
-        target: 'presentID',
         expect: { homEligible: false }
       },
       {
-        tag: 'DIAG_HOM_NULL',
+        tag: 'PAIR_HOM_NULL',
         prior: 100,
         present: 200,
         sql: 'UPDATE coremeasurements SET MeasuredHOM = NULL WHERE CoreMeasurementID = ?',
-        target: 'presentID',
         expect: { homEligible: true }
       },
       {
-        tag: 'DIAG_STATUS',
+        tag: 'PAIR_STATUS',
         prior: 100,
         present: 200,
         sql: "UPDATE cmattributes SET Code = 'D' WHERE CoreMeasurementID = ?",
-        target: 'presentID',
         expect: { statusExempt: true }
       }
     ];
     for (const testCase of cases) {
       const ids = await seed(testCase.tag, testCase.prior, testCase.present);
-      if (testCase.sql) await connection.query(testCase.sql, [ids[testCase.target as keyof typeof ids]]);
-      const result = await explain(ids.presentID);
-      expect(result.outcome).toBe('pairs-found');
-      if (result.outcome === 'pairs-found') expect(result.pairs[0]).toMatchObject(testCase.expect);
+      if (testCase.sql) await connection.query(testCase.sql, [ids.presentID]);
+      const pairs = await readPairFacts(ids.presentID);
+      expect(pairs, testCase.tag).toHaveLength(1);
+      expect(pairs[0], testCase.tag).toMatchObject(testCase.expect);
     }
     await connection.query("UPDATE plots SET DefaultDBHUnits = 'cm' WHERE PlotID = ?", [plotID]);
-    const cm = await seed('DIAG_CM_FLOOR', 2, 0.9);
-    const cmResult = await explain(cm.presentID);
-    expect(cmResult.outcome).toBe('pairs-found');
-    if (cmResult.outcome === 'pairs-found') expect(cmResult.pairs[0]).toMatchObject({ unitToMm: 10, dbhsMeetFloor: false });
+    const centimetres = await seed('PAIR_CM_FLOOR', 2, 0.9);
+    expect(await readPairFacts(centimetres.presentID)).toMatchObject([{ unitToMm: 10, dbhsMeetFloor: false }]);
   });
 
   it('reports actionable DBH-floor skips separately from interval skips', async () => {
@@ -303,15 +314,13 @@ describe('DBH change diagnostics integration', () => {
     for (const testCase of cases) {
       const ids = await seed(testCase.tag, testCase.prior, testCase.present, testCase.date);
       if (testCase.clearPresentDate) await connection.query('UPDATE coremeasurements SET MeasurementDate = NULL WHERE CoreMeasurementID = ?', [ids.presentID]);
-      const result = await explain(ids.presentID);
-      expect(result.outcome, testCase.label).toBe('pairs-found');
-      if (result.outcome === 'pairs-found') {
-        expect(result.pairs[0], testCase.label).toMatchObject({ isEligible: true, intervalSkipReason: null, ...testCase.expect });
-      }
+      const pairs = await readPairFacts(ids.presentID);
+      expect(pairs, testCase.label).toHaveLength(1);
+      expect(pairs[0], testCase.label).toMatchObject({ isEligible: true, intervalSkipReason: null, ...testCase.expect });
     }
   });
 
-  it('returns every interval skip reason, excludes noneligible rows from skip counts, and distinguishes no prior comparison', async () => {
+  it('returns every interval skip reason, excludes noneligible rows from skip counts, and builds no pair for a measurement without a prior', async () => {
     const negative = await seed('DIAG_NEGATIVE', 100, 200, '2023-01-01');
     const implausible = await seed('DIAG_IMPLAUSIBLE', 100, 200, '2044-01-02');
     const floor = await seed('DIAG_SKIP_FLOOR', 100, 9, '2024-01-01');
@@ -319,17 +328,15 @@ describe('DBH change diagnostics integration', () => {
       [negative.presentID, 'negative-interval'],
       [implausible.presentID, 'implausible-interval']
     ] as const) {
-      const result = await explain(id);
-      expect(result.outcome).toBe('pairs-found');
-      if (result.outcome === 'pairs-found') {
-        expect(result.pairs[0], `a ${reason} pair must be skipped with no comparison basis and no verdict`).toMatchObject({
-          intervalSkipReason: reason,
-          comparisonBasis: null,
-          isEligible: false,
-          growthViolates: false,
-          shrinkageViolates: false
-        });
-      }
+      const pairs = await readPairFacts(id);
+      expect(pairs, reason).toHaveLength(1);
+      expect(pairs[0], `a ${reason} pair must be skipped with no comparison basis and no verdict`).toMatchObject({
+        intervalSkipReason: reason,
+        comparisonBasis: null,
+        isEligible: false,
+        growthViolates: false,
+        shrinkageViolates: false
+      });
     }
     const [sets] = await connection.query<any[]>('CALL RunSharedDBHChangeValidations(?, ?, 1, 1)', [census2ID, plotID]);
     const counts = sets.find((set: unknown) => Array.isArray(set) && set[0]?.SkippedNoInterval)?.[0];
@@ -339,9 +346,7 @@ describe('DBH change diagnostics integration', () => {
       SkippedImplausibleInterval: '1'
     });
     expect(floor.presentID).toBeTruthy();
-    const [orphan] = await connection.query<any>('INSERT INTO coremeasurements (CensusID, MeasuredDBH, IsActive) VALUES (?, 20, 1)', [census1ID]);
-    await expect(explainDbhChangePairs({ schema: config.database, coreMeasurementID: orphan.insertId })).resolves.toMatchObject({
-      outcome: 'no-eligible-prior-comparison'
-    });
+    const [orphan] = await connection.query<any>('INSERT INTO coremeasurements (CensusID, MeasuredDBH, IsActive) VALUES (?, 20, 1)', [census2ID]);
+    expect(await readPairFacts(orphan.insertId), 'a measurement with no prior stem has no comparison').toEqual([]);
   });
 });

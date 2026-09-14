@@ -20,18 +20,6 @@ export function isDbhChangeValidationID(validationID: number): validationID is D
   return (DBH_CHANGE_VALIDATION_ID_LIST as readonly number[]).includes(validationID);
 }
 
-export type DbhChangeKind = keyof typeof DBH_CHANGE_VALIDATION_IDS;
-export type DbhChangeProcedureName = (typeof DBH_CHANGE_PROCEDURE_NAMES)[number];
-export type DbhIntervalSkipReason = 'negative-interval' | 'implausible-interval';
-export type DbhComparisonBasis = 'annualised' | 'absolute';
-
-export interface DbhChangeSkipCounts {
-  SkippedNoInterval: number;
-  SkippedNegativeInterval: number;
-  SkippedImplausibleInterval: number;
-  SkippedBelowDbhFloor: number;
-}
-
 /** Mirrors cMinDbhMm in BuildDBHChangePairs; comparisons below it are skipped, not judged. */
 export const DBH_COMPARISON_FLOOR_MM = 10;
 

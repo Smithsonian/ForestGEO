@@ -18,9 +18,6 @@ import type { CombinedDBHValidationResult, DBHValidationSkipCounts, ValidationEx
 import type { UpsertOperation } from '@/config/utils';
 import { describeDbhFloorSkips, isDbhChangeValidationID } from '@/config/dbhchangevalidations';
 
-export { finalizeValidatedRowsInTransaction, parseDbhValidationSkipCounts, prepareDBHValidationDefinitions, runSharedDBHChangeValidationsInTransaction };
-export type { CombinedDBHValidationResult, DBHValidationSkipCounts, ValidationExecutionParams };
-
 // need to try integrating this into validation system:
 
 export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<void> {
