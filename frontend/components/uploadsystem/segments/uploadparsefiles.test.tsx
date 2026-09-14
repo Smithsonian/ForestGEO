@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { SourceFormat } from '@/config/macros/formdetails';
+import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { mappingApplies, seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import { UploadMode } from '@/config/uploadmodes';
-import { FileWithStream } from '@/config/macros/uploadsystemmacros';
+import { FileWithStream, MAX_SINGLE_REQUEST_FILE_SIZE_BYTES, MAX_SINGLE_REQUEST_FILE_SIZE_MB } from '@/config/macros/uploadsystemmacros';
 import { DelimiterIssueCode, type DelimiterIssue } from '@/components/uploadsystemhelpers/delimiterdetection';
 import UploadParseFiles from './uploadparsefiles';
 
@@ -98,10 +98,10 @@ function buildFile(name: string): FileWithStream {
   return new FileWithStream(raw, false);
 }
 
-function renderUploadParseFiles(files: FileWithStream[], setColumnMappingForFile: ReturnType<typeof vi.fn>) {
+function renderUploadParseFiles(files: FileWithStream[], setColumnMappingForFile: ReturnType<typeof vi.fn>, uploadForm: FormType = FormType.measurements) {
   render(
     <UploadParseFiles
-      uploadForm="measurements"
+      uploadForm={uploadForm}
       uploadMode={UploadMode.NEW}
       sourceFormat={SourceFormat.csv}
       acceptedFiles={files}
@@ -335,5 +335,55 @@ describe('CSV mapping gating rule', () => {
     const vB = validateMapping(mapping, fileB);
     expect(vB.valid).toBe(false);
     expect(vB.missingSourceColumns).toEqual(expect.arrayContaining(['X_Coord', 'Y_Coord']));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Single-request file size guard — species/attributes/personnel/quadrats upload a
+// whole file in ONE request. Reject oversized source files at selection; row
+// counts are checked by the upload parser and the server separately.
+// ---------------------------------------------------------------------------
+describe('single-request upload size guard', () => {
+  const SPECIES_FILE = 'species.csv';
+  const SPECIES_HEADERS = ['spcode', 'family', 'genus', 'species'];
+
+  function buildFileOfSize(name: string, byteCount: number): FileWithStream {
+    const raw = new File(['x'.repeat(byteCount)], name, { type: 'text/csv' });
+    expect(raw.size).toBe(byteCount);
+    return new FileWithStream(raw, false);
+  }
+
+  function renderSpeciesUpload(file: FileWithStream) {
+    fileValidationEvents.clear();
+    fileValidationEvents.set(file.name, { isValid: true, issues: [], headers: SPECIES_HEADERS });
+    act(() => {
+      renderUploadParseFiles([file], vi.fn(), FormType.species);
+    });
+  }
+
+  it('blocks a species file larger than the single-request limit and names the limit', () => {
+    renderSpeciesUpload(buildFileOfSize(SPECIES_FILE, MAX_SINGLE_REQUEST_FILE_SIZE_BYTES + 1));
+
+    expect(screen.getByText(new RegExp(`exceeds the ${MAX_SINGLE_REQUEST_FILE_SIZE_MB} MB limit for species uploads`))).toBeTruthy();
+    expect(screen.getByRole('button', { name: /fix validation errors to continue/i })).toBeDisabled();
+  });
+
+  it('accepts a species file at the limit', () => {
+    renderSpeciesUpload(buildFileOfSize(SPECIES_FILE, MAX_SINGLE_REQUEST_FILE_SIZE_BYTES));
+
+    expect(screen.queryByText(/exceeds the .* limit for species uploads/)).toBeNull();
+    expect(screen.getByRole('button', { name: /continue upload/i })).not.toBeDisabled();
+  });
+
+  it('does not apply the limit to measurements, which upload in chunks', () => {
+    const file = buildFileOfSize('measurements.csv', MAX_SINGLE_REQUEST_FILE_SIZE_BYTES + 1);
+    fileValidationEvents.clear();
+    fileValidationEvents.set(file.name, { isValid: true, issues: [], headers: CANONICAL_HEADERS });
+    act(() => {
+      renderUploadParseFiles([file], vi.fn(), FormType.measurements);
+    });
+
+    expect(screen.queryByText(/exceeds the .* limit/)).toBeNull();
+    expect(screen.getByRole('button', { name: /continue upload/i })).not.toBeDisabled();
   });
 });

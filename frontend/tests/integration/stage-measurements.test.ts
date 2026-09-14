@@ -92,7 +92,8 @@ vi.mock('@/ailogger', () => ({
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { countStagedRows, stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
-import { resetUploadSessionCensusReplacementColumnCacheForTests, TEMPORARY_MEASUREMENT_INSERT_COLUMNS } from '@/lib/ingestion/temporary-measurements';
+import { TEMPORARY_MEASUREMENT_INSERT_COLUMNS } from '@/lib/ingestion/temporary-measurements';
+import { resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -235,7 +236,7 @@ describe('stageMeasurementChunk — integration', () => {
     await connection.query('DELETE FROM coremeasurements');
     await connection.query('DELETE FROM uploadmetrics');
     await connection.query('DELETE FROM upload_sessions');
-    resetUploadSessionCensusReplacementColumnCacheForTests();
+    resetUploadSessionReplacementMarkerCacheForTests();
     console.log('[beforeEach] cleared temporarymeasurements + unifiedchangelog + coremeasurements + uploadmetrics + upload_sessions');
   });
 

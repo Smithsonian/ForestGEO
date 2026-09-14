@@ -69,6 +69,20 @@ export function errorMessageContains(error: unknown, substring: string): boolean
 }
 
 /**
+ * True when a MySQL statement failed because a table does not exist. With `tableName`,
+ * only when the error names that table, so a missing unrelated table still propagates.
+ */
+export function isMissingTableError(error: unknown, tableName?: string): boolean {
+  if (!error || typeof error !== 'object') return false;
+
+  const candidate = error as MySQLError;
+  const message = `${candidate.message ?? ''} ${candidate.sqlMessage ?? ''}`.toLowerCase();
+  const tableMatch = tableName ? message.includes(tableName.toLowerCase()) : true;
+
+  return (candidate.code === 'ER_NO_SUCH_TABLE' || message.includes("doesn't exist") || message.includes('does not exist')) && tableMatch;
+}
+
+/**
  * Convert unknown error to Error object
  * Creates new Error if needed, preserving original message
  */
