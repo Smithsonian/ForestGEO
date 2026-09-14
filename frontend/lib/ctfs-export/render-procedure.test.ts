@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { renderArtifact, renderRebuildViewFullTableArtifact, type RenderArtifactInput } from './render-procedure';
-import { MISSING_PLOT_COORDINATE_SCOPE } from '../csv-to-sql-v2';
+import { MISSING_PLOT_COORDINATE_SCOPE, DESTINATION_PLOT_COORDINATE_TYPE_SCOPE } from '../csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../csv-to-sql-shared';
 
 const baseInput = (overrides: Partial<RenderArtifactInput> = {}): RenderArtifactInput => ({
@@ -223,6 +223,22 @@ describe('renderArtifact', () => {
   it('declares the _tag_col_width scalar used by the Stage 0 width probe', () => {
     const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
     expect(sql).toMatch(/DECLARE _tag_col_width INT DEFAULT 0;/);
+  });
+
+  it('declares the _px_col_type and _py_col_type scalars used by the Stage 0a coordinate-type probe', () => {
+    const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
+    expect(sql).toMatch(/DECLARE _px_col_type TEXT DEFAULT NULL;/);
+    expect(sql).toMatch(/DECLARE _py_col_type TEXT DEFAULT NULL;/);
+  });
+
+  it('the Stem.PX/PY column-type probe runs in a reloadDryRun artifact (Stage 0a always emits)', () => {
+    // A dry run is where the operator learns what the destination looks like
+    // before committing anything. Stage 7 (which writes PX/PY) is skipped in a
+    // dry run, so this Stage 0a result set is the only place the destination
+    // storage type for those columns is surfaced ahead of a real publish.
+    const { sql } = renderArtifact(baseInput({ reloadDryRun: true, measurementRows: [sampleMeasurement] }));
+    expect(sql).not.toMatch(/Stage 1:/);
+    expect(sql).toContain(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope`);
   });
 
   it('allowReload=true (non-dry-run) emits Stage 0b but not SAVEPOINT', () => {

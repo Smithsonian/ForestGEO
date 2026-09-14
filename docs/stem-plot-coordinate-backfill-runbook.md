@@ -231,6 +231,13 @@ what MySQL's column type does automatically), but do not expect
 exact-string matches when checking live results manually the way the
 integration test does against the canonical `decimal(16,5)` schema.
 
+You do not have to query `information_schema` by hand to find out which
+case you are in: every publish artifact, including a dry run, emits a
+`Destination Stem.PX/PY column type` result set in Stage 0a that reports
+the live `COLUMN_TYPE` of both columns. `decimal(16,5)` means the widen has
+been applied; `float` means the tolerance above applies. It is a report,
+not a gate — the artifact does not refuse a `float` destination.
+
 ## 9. Recording results
 
 Record, on [issue #475](https://github.com/Smithsonian/ForestGEO/issues/475):

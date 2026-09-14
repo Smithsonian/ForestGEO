@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { createTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import { splitSqlFile } from '../../lib/provisioning/sql-runner';
 import { checkFinishedCensus, selectMeasurements, renderArtifact, renderRebuildViewFullTableArtifact } from '../../lib/ctfs-export';
-import { MISSING_PLOT_COORDINATE_SCOPE } from '../../lib/csv-to-sql-v2';
+import { MISSING_PLOT_COORDINATE_SCOPE, DESTINATION_PLOT_COORDINATE_TYPE_SCOPE } from '../../lib/csv-to-sql-v2';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,6 +63,23 @@ const EXPECTED_STEM_QX = SEED_STEM_LOCAL_X.toFixed(5);
 const EXPECTED_STEM_QY = SEED_STEM_LOCAL_Y.toFixed(5);
 const EXPECTED_STEM_PX = (SEED_QUADRAT_START_X + SEED_STEM_LOCAL_X).toFixed(5);
 const EXPECTED_STEM_PY = (SEED_QUADRAT_START_Y + SEED_STEM_LOCAL_Y).toFixed(5);
+
+// Destination Stem.PX/PY storage types the Stage 0a probe reports. The
+// canonical DDL's DBCHANGES2014f section widens them to decimal(16,5); a
+// destination that never ran that ALTER is still on the original float.
+const CANONICAL_PLOT_COORDINATE_COLUMN_TYPE = 'decimal(16,5)';
+const LEGACY_PLOT_COORDINATE_COLUMN_TYPE = 'float';
+
+// A quadrat origin chosen so that StartX + LocalX (= 992.34567) has more
+// significant digits than a single-precision FLOAT column can hold. The
+// staging table stores it exactly as DECIMAL(16,5); a FLOAT destination
+// rounds it on INSERT, which is the silent degradation the probe exists to
+// surface. The drift bounds are loose on purpose: the exact float32
+// neighbour depends on the server's float-to-text formatting, and the test
+// only needs to prove the stored value is no longer the staged one.
+const FLOAT_LOSSY_QUADRAT_START_X = 991.09567;
+const FLOAT_ROUNDING_MIN_DRIFT = 1e-6;
+const FLOAT_ROUNDING_MAX_DRIFT = 1e-3;
 
 // ---------------------------------------------------------------------------
 // CTFS DDL + app schema helpers
@@ -678,6 +695,71 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
     const dryRunArtifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1', reloadDryRun: true });
     expect(dryRunArtifact.sql).not.toMatch(/Stage 1:/);
     await expect(executeCtfsSql(ctfsConn, dryRunArtifact.sql)).rejects.toThrow(/Tree\.Tag is missing or narrower than 20 chars/);
+  });
+
+  // -------------------------------------------------------------------------
+  // Stem.PX/PY column-type probe (#475)
+  // -------------------------------------------------------------------------
+
+  it('Stage 0a reports decimal(16,5) for destination Stem.PX and Stem.PY on the canonical DBCHANGES2014f destination', async () => {
+    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
+    for (const stmt of splitSqlFile(ctfsSeed)) {
+      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
+    }
+
+    const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
+    const resultSets = await executeCtfsSql(ctfsConn, artifact.sql);
+
+    const probe = resultSets.find(rs => rs.length > 0 && rs[0].scope === DESTINATION_PLOT_COORDINATE_TYPE_SCOPE);
+    expect(probe, 'Stage 0a must always emit the Stem.PX/PY column-type row').toBeDefined();
+    expect(probe, 'the probe reports both axes in one row').toHaveLength(1);
+    expect(probe![0].px_column_type, 'canonical destination stores Stem.PX as decimal(16,5)').toBe(CANONICAL_PLOT_COORDINATE_COLUMN_TYPE);
+    expect(probe![0].py_column_type, 'canonical destination stores Stem.PY as decimal(16,5)').toBe(CANONICAL_PLOT_COORDINATE_COLUMN_TYPE);
+  });
+
+  it('a FLOAT-column destination is reported as float by the dry run, and the real publish still loads with PX stored at float precision', async () => {
+    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
+    for (const stmt of splitSqlFile(ctfsSeed)) {
+      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
+    }
+
+    // Simulate a destination that never applied the decimal(16,5) widen from
+    // DBCHANGES2014f (the DDL's own comment says "Have Taiwan run the update").
+    await ctfsConn.query('ALTER TABLE Stem MODIFY COLUMN PX float, MODIFY COLUMN PY float');
+    await appConn.query(`UPDATE \`${appSchema}\`.quadrats SET StartX = ? WHERE QuadratID = 1`, [FLOAT_LOSSY_QUADRAT_START_X]);
+
+    // The dry run must SURFACE the float storage without refusing the load —
+    // the #475 plan tolerates FLOAT destinations and documents the tolerance
+    // in the backfill runbook rather than blocking on it.
+    const dryRunArtifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1', reloadDryRun: true });
+    expect(dryRunArtifact.sql).not.toMatch(/Stage 1:/);
+    const dryRunResultSets = await executeCtfsSql(ctfsConn, dryRunArtifact.sql);
+    const dryRunProbe = dryRunResultSets.find(rs => rs.length > 0 && rs[0].scope === DESTINATION_PLOT_COORDINATE_TYPE_SCOPE);
+    expect(dryRunProbe, 'the dry run must emit the Stem.PX/PY column-type row (Stage 0a always runs)').toBeDefined();
+    expect(dryRunProbe![0].px_column_type, 'dry run reports the un-migrated float type for Stem.PX').toBe(LEGACY_PLOT_COORDINATE_COLUMN_TYPE);
+    expect(dryRunProbe![0].py_column_type, 'dry run reports the un-migrated float type for Stem.PY').toBe(LEGACY_PLOT_COORDINATE_COLUMN_TYPE);
+
+    const before = await captureCtfsCounts(ctfsConn);
+    const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
+    const resultSets = await executeCtfsSql(ctfsConn, artifact.sql);
+    const after = await captureCtfsCounts(ctfsConn);
+    expect(after.stem, 'a FLOAT destination must still receive the new Stem row — the probe is non-blocking').toBe(before.stem + 1);
+
+    const publishProbe = resultSets.find(rs => rs.length > 0 && rs[0].scope === DESTINATION_PLOT_COORDINATE_TYPE_SCOPE);
+    expect(publishProbe, 'the real publish emits the same column-type row').toBeDefined();
+    expect(publishProbe![0].px_column_type).toBe(LEGACY_PLOT_COORDINATE_COLUMN_TYPE);
+
+    // This is the degradation the probe makes visible: the staged DECIMAL(16,5)
+    // value does not survive a FLOAT column intact.
+    const [stemRows] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT PX FROM Stem');
+    expect(stemRows).toHaveLength(1);
+    const storedPx = Number(stemRows[0].PX);
+    const stagedPx = FLOAT_LOSSY_QUADRAT_START_X + SEED_STEM_LOCAL_X;
+    const drift = Math.abs(storedPx - stagedPx);
+    expect(drift, `FLOAT storage must have rounded the staged PX ${stagedPx} (stored ${storedPx})`).toBeGreaterThan(FLOAT_ROUNDING_MIN_DRIFT);
+    expect(drift, `the rounded PX ${storedPx} must still be the float32 neighbour of ${stagedPx}, not a different value`).toBeLessThan(
+      FLOAT_ROUNDING_MAX_DRIFT
+    );
   });
 });
 

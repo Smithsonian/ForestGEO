@@ -17,6 +17,7 @@ import {
   TAXON_RANK_SUBSPECIES,
   TAXON_RANK_SPECIES,
   MISSING_PLOT_COORDINATE_SCOPE,
+  DESTINATION_PLOT_COORDINATE_TYPE_SCOPE,
   type Stage1Options
 } from '../lib/csv-to-sql-v2';
 import { type MeasurementStagingRow, type AttributeStagingRow, renderInsertChunksMeasurements } from '../lib/csv-to-sql-shared';
@@ -206,6 +207,39 @@ describe('renderStage0', () => {
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
     expect(sql).toMatch(/DBHAttributes still has a CensusID column/);
     expect(sql).toMatch(/apply DBCHANGES2014f\.sql/);
+  });
+
+  it('reports the destination Stem.PX/PY column type as a Stage 0a result set', () => {
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
+    expect(sql).toMatch(
+      /SELECT COLUMN_TYPE INTO _px_col_type\s+FROM information_schema\.COLUMNS\s+WHERE TABLE_SCHEMA = DATABASE\(\)\s+AND TABLE_NAME = 'Stem'\s+AND COLUMN_NAME = 'PX';/
+    );
+    expect(sql).toMatch(
+      /SELECT COLUMN_TYPE INTO _py_col_type\s+FROM information_schema\.COLUMNS\s+WHERE TABLE_SCHEMA = DATABASE\(\)\s+AND TABLE_NAME = 'Stem'\s+AND COLUMN_NAME = 'PY';/
+    );
+    expect(sql).toContain(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope,`);
+    expect(sql).toMatch(/_px_col_type AS px_column_type,\s+_py_col_type AS py_column_type;/);
+  });
+
+  it('the Stem.PX/PY column-type probe never SIGNALs: a FLOAT destination is tolerated, only made visible', () => {
+    // The plan for #475 keeps FLOAT destinations loadable and documents the
+    // storage tolerance in the runbook instead. The probe must therefore be a
+    // bare result set between the SELECT INTOs and the reporting SELECT, with
+    // no SIGNAL anywhere in that span.
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
+    const probeStart = sql.indexOf('SELECT COLUMN_TYPE INTO _px_col_type');
+    const probeEnd = sql.indexOf(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope`);
+    expect(probeStart).toBeGreaterThan(-1);
+    expect(probeEnd).toBeGreaterThan(probeStart);
+    expect(sql.slice(probeStart, probeEnd)).not.toMatch(/SIGNAL/);
+  });
+
+  it('emits the Stem.PX/PY column-type probe on the allowReload path and when the CreateFullView probe is omitted', () => {
+    const reloadSql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: true });
+    expect(reloadSql).toContain(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope`);
+
+    const publishSql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false, includeViewFullTableProbe: false });
+    expect(publishSql).toContain(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope`);
   });
 
   it('sets @target_census_id and @target_plot_id session variables', () => {
