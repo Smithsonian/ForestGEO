@@ -101,6 +101,8 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
 
   if (status === 'idle') return null;
 
+  const hasNotices = status === 'completed' && errors.length > 0;
+
   return (
     <>
       <IconButton size="sm" variant="plain" onClick={() => setDetailOpen(true)} aria-label="Validation status" sx={{ position: 'relative' }}>
@@ -109,7 +111,7 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
             <CircularProgress size="sm" />
           </Badge>
         )}
-        {status === 'completed' && <CheckCircleOutlined color="success" />}
+        {status === 'completed' && (hasNotices ? <ErrorOutline color="warning" /> : <CheckCircleOutlined color="success" />)}
         {status === 'failed' && <ErrorOutline color="warning" />}
       </IconButton>
 
@@ -149,9 +151,20 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
             )}
 
             {status === 'completed' && (
-              <Chip variant="soft" color="success" size="sm">
-                All {progress.total} validations passed
-              </Chip>
+              <>
+                <Chip variant="soft" color={hasNotices ? 'warning' : 'success'} size="sm">
+                  {hasNotices ? 'Validation completed with notices' : `All ${progress.total} validations passed`}
+                </Chip>
+                {hasNotices && (
+                  <Stack spacing={1} role="status">
+                    {errors.map((notice, index) => (
+                      <Typography key={index} level="body-xs" color="warning">
+                        {notice}
+                      </Typography>
+                    ))}
+                  </Stack>
+                )}
+              </>
             )}
 
             {status === 'failed' && (

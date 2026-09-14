@@ -99,5 +99,10 @@ export const SCHEMA_MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = [
   {
     id: '2026-09-09-01-add-upload-session-reference-replacement-marker',
     file: 'schema-contract-repair/2026-09-09-01-add-upload-session-reference-replacement-marker.sql'
+  },
+  {
+    id: '2026-09-13-01-annual-dbh-rule-text',
+    file: 'schema-contract-repair/2026-09-13-01-annual-dbh-rule-text.sql',
+    failureCleanup: ['DROP PROCEDURE IF EXISTS mig_2026_09_13_01_raise_dbh_rule_conflict']
   }
 ] as const;

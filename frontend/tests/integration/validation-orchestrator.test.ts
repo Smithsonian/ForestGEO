@@ -133,13 +133,8 @@ vi.mock('@/ailogger', () => ({
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
 import { ingestBatch } from '@/lib/uploads/ingest-batch';
-import {
-  COORDINATE_DRIFT_PROCEDURE,
-  DBH_GROWTH_PROCEDURE,
-  DBH_SHRINKAGE_PROCEDURE,
-  QUADRAT_MISMATCH_PROCEDURE,
-  runCensusValidations
-} from '@/lib/uploads/validation-orchestrator';
+import { COORDINATE_DRIFT_PROCEDURE, QUADRAT_MISMATCH_PROCEDURE, runCensusValidations } from '@/lib/uploads/validation-orchestrator';
+import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -562,7 +557,7 @@ describe('runCensusValidations — integration', () => {
     });
 
     console.log(`[summary] ${JSON.stringify(summary)} onStepCalls=${onStepCalls}`);
-    expect(summary).toEqual({ totalSteps: 0, failedSteps: 0, errors: [], conflict: true });
+    expect(summary).toEqual({ totalSteps: 0, failedSteps: 0, errors: [], notices: [], conflict: true });
     expect(onStepCalls).toBe(0);
 
     // The pre-existing running row is untouched and no second row was created.

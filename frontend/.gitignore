@@ -65,3 +65,6 @@ yarn-error.log*
 
 # Ignore all-caps markdown files (tracking documents, etc.)
 [A-Z][A-Z_]*.md
+
+# Reviewed operator documentation belongs in the repository.
+!/docs/validation-rescore-runbook.md

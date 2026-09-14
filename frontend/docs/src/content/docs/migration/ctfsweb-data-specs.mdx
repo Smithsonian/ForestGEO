@@ -343,11 +343,18 @@ What ForestGEO actually checks:
 
 | Metric | Threshold | Validation |
 |--------|-----------|------------|
-| DBH growth | > 65 mm between censuses (absolute, not per year) | 1 |
-| DBH shrinkage | > 5% of the previous measurement | 2 |
+| DBH growth | > 65 mm/year | 1 |
+| DBH shrinkage | At least 5% of the previous DBH per year (annual relative change ≤ −0.05) | 2 |
 | Absolute DBH ceiling | > 3500 mm (350 cm) | 15 |
 | Position change | > 10 m from the previous census | 18 |
 | DBH against species bounds | outside the limits you set per species | 11 |
+
+For validations 1 and 2, elapsed years are the difference between measurement dates in days
+divided by 365.25. Both DBHs must be at least 10 mm (1 cm). Different non-missing HOM values
+suppress the comparison; either HOM may be missing. Missing DBH or dates, zero or reversed
+intervals, and exempt status codes on either measurement skip the comparison. A short positive
+interval is still checked. The prior measurement must be valid and in the immediately preceding
+census number.
 
 ForestGEO has no second "error" tier — a threshold is either crossed or it isn't, and crossing
 one records a finding against the row rather than rejecting it.
