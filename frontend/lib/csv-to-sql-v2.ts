@@ -52,8 +52,6 @@ export const TAXON_RANK_SPECIES = 2;
 // Live scalars only — resprout/cursor scratch removed with the pivot.
 // `_viewfulltable_installed` is populated by the Stage 0 ViewFullTable probe.
 // `_tag_col_width` is populated by the Stage 0 Tree.Tag width probe.
-// `_px_col_type` / `_py_col_type` are populated by the Stage 0 Stem.PX/PY
-// column-type probe; they stay NULL when the column is absent.
 const SCALAR_DECLARES = [
   'DECLARE _message TEXT;',
   'DECLARE _census_count INT DEFAULT 0;',
@@ -61,8 +59,6 @@ const SCALAR_DECLARES = [
   'DECLARE _existing_dbh_count INT DEFAULT 0;',
   'DECLARE _viewfulltable_installed INT DEFAULT 0;',
   'DECLARE _tag_col_width INT DEFAULT 0;',
-  'DECLARE _px_col_type TEXT DEFAULT NULL;',
-  'DECLARE _py_col_type TEXT DEFAULT NULL;',
   'DECLARE _lock_result INT DEFAULT 0;'
 ];
 
@@ -162,8 +158,8 @@ export interface Stage0Options {
  *   - DBHAttributes schema probe (post-2014f shape required; SIGNAL with
  *     install-DBCHANGES2014f message if the legacy CensusID column is present)
  *   - Tree.Tag width probe (SIGNAL if narrower than TREE_TAG_MAX_WIDTH)
- *   - Stem.PX/PY column-type report (a result set, never a SIGNAL — a FLOAT
- *     destination is tolerated but must be visible in the dry run, see #475)
+ *   - Stem.PX/PY column-type report (SIGNAL when either required column is
+ *     absent; existing FLOAT columns remain tolerated and visible, see #475)
  *   - ViewFullTable install probe (SIGNAL with helpful install message if
  *     ctfsweb_webuser.CreateFullView is missing; the post-procedure CALL
  *     would otherwise blow up after the data committed)
@@ -220,25 +216,29 @@ export function renderStage0(opts: Stage0Options): string {
   const plotCoordinateTypeProbe = `
   -- Report how the destination stores Stem.PX/PY. The exporter stages them as
   -- DECIMAL(16,5) (#475); a destination that never applied the DBCHANGES2014f
-  -- widen still has the original FLOAT columns and rounds on INSERT
-  -- (992.34567 -> 992.3457). That is tolerated, not refused — the backfill
-  -- runbook documents the storage tolerance — so this emits a result set
-  -- instead of a SIGNAL. Stage 0a always runs, so a dry run shows it too,
-  -- which is the only place the type is visible before a real publish.
-  -- A missing column leaves the scalar NULL rather than dropping the row.
-  SELECT COLUMN_TYPE INTO _px_col_type
+  -- widen still has the original FLOAT columns and may store 992.34567 near
+  -- 992.34564. FLOAT is tolerated and reported because the backfill runbook
+  -- documents that precision. A missing column is not a storage variant: the
+  -- real publish necessarily references both columns, so fail during Stage 0a
+  -- instead of allowing a dry run to report a false success.
+  IF (
+    SELECT COUNT(*)
     FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'Stem'
-      AND COLUMN_NAME = 'PX';
-  SELECT COLUMN_TYPE INTO _py_col_type
-    FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'Stem'
-      AND COLUMN_NAME = 'PY';
+      AND COLUMN_NAME IN ('PX', 'PY')
+  ) <> 2 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Destination Stem.PX or Stem.PY is missing. Apply DBCHANGES2014f.sql to the destination, then retry.';
+  END IF;
+
   SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope,
-         _px_col_type AS px_column_type,
-         _py_col_type AS py_column_type;
+         MAX(CASE WHEN COLUMN_NAME = 'PX' THEN COLUMN_TYPE END) AS px_column_type,
+         MAX(CASE WHEN COLUMN_NAME = 'PY' THEN COLUMN_TYPE END) AS py_column_type
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'Stem'
+      AND COLUMN_NAME IN ('PX', 'PY');
 `;
 
   const viewFullTableProbe =

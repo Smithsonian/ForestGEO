@@ -136,7 +136,7 @@ mysql -u <user> -p <destination_database> < <downloaded-sql-artifact>.sql
 You will see:
 
 - One or more `SELECT` result sets while the script runs, including reload counts when reload mode is enabled and a final tally when the load completes.
-- A `Destination Stem.PX/PY column type` result set from Stage 0a, in dry runs too. `decimal(16,5)` is the migrated destination; `float` means plot coordinates are stored at single precision there and may be rounded. It is informational and never stops the load.
+- A `Destination Stem.PX/PY column type` result set from Stage 0a, in dry runs too. `decimal(16,5)` is the migrated destination; `float` means plot coordinates are stored at single precision there and may be rounded. Existing types are informational, but the artifact stops before any data changes if either required column is missing. If the two axes differ or report another type, stop and ask a destination DBA to inspect the schema.
 - An `ERROR 1644 (45000): ...` line if anything fails. The procedure rolls back automatically; no partial data is committed.
 
 The final tally looks like:

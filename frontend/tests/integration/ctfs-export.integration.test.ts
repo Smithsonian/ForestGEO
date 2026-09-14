@@ -132,6 +132,13 @@ async function installCtfswebStub(conn: mysql.Connection): Promise<void> {
   }
 }
 
+async function seedCtfsCensus(conn: mysql.Connection): Promise<void> {
+  const content = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
+  for (const stmt of splitSqlFile(content)) {
+    if (stmt.sql.trim()) await conn.query(stmt.sql);
+  }
+}
+
 /**
  * Load tablestructures.sql (app schema DDL) then the ctfs-export app-db-seed.sql
  * into the app connection.
@@ -702,10 +709,7 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
   // -------------------------------------------------------------------------
 
   it('Stage 0a reports decimal(16,5) for destination Stem.PX and Stem.PY on the canonical DBCHANGES2014f destination', async () => {
-    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
-    for (const stmt of splitSqlFile(ctfsSeed)) {
-      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
-    }
+    await seedCtfsCensus(ctfsConn);
 
     const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
     const resultSets = await executeCtfsSql(ctfsConn, artifact.sql);
@@ -717,27 +721,35 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
     expect(probe![0].py_column_type, 'canonical destination stores Stem.PY as decimal(16,5)').toBe(CANONICAL_PLOT_COORDINATE_COLUMN_TYPE);
   });
 
-  it('a FLOAT-column destination is reported as float by the dry run, and the real publish still loads with PX stored at float precision', async () => {
-    const ctfsSeed = readFileSync(path.resolve(__dirname, '../fixtures/csv-to-sql-v2/seed-census-1.sql'), 'utf8');
-    for (const stmt of splitSqlFile(ctfsSeed)) {
-      if (stmt.sql.trim()) await ctfsConn.query(stmt.sql);
-    }
+  it('Stage 0a fails a dry run when either required Stem plot-coordinate column is missing', async () => {
+    await seedCtfsCensus(ctfsConn);
+    await ctfsConn.query('ALTER TABLE Stem DROP COLUMN PY');
+
+    const dryRunArtifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1', reloadDryRun: true });
+    expect(dryRunArtifact.sql).not.toMatch(/Stage 1:/);
+    await expect(executeCtfsSql(ctfsConn, dryRunArtifact.sql)).rejects.toThrow(/Destination Stem\.PX or Stem\.PY is missing/);
+  });
+
+  it('Stage 0a reports mixed Stem.PX/PY types independently in a dry run', async () => {
+    await seedCtfsCensus(ctfsConn);
+    await ctfsConn.query('ALTER TABLE Stem MODIFY COLUMN PX float');
+
+    const dryRunArtifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1', reloadDryRun: true });
+    const resultSets = await executeCtfsSql(ctfsConn, dryRunArtifact.sql);
+    const probe = resultSets.find(rs => rs.length > 0 && rs[0].scope === DESTINATION_PLOT_COORDINATE_TYPE_SCOPE);
+
+    expect(probe, 'the dry run must emit the Stem.PX/PY column-type row').toBeDefined();
+    expect(probe![0].px_column_type, 'PX reports its legacy type').toBe(LEGACY_PLOT_COORDINATE_COLUMN_TYPE);
+    expect(probe![0].py_column_type, 'PY independently retains the migrated type').toBe(CANONICAL_PLOT_COORDINATE_COLUMN_TYPE);
+  });
+
+  it('a FLOAT-column destination remains publishable and stores PX at float precision', async () => {
+    await seedCtfsCensus(ctfsConn);
 
     // Simulate a destination that never applied the decimal(16,5) widen from
     // DBCHANGES2014f (the DDL's own comment says "Have Taiwan run the update").
     await ctfsConn.query('ALTER TABLE Stem MODIFY COLUMN PX float, MODIFY COLUMN PY float');
     await appConn.query(`UPDATE \`${appSchema}\`.quadrats SET StartX = ? WHERE QuadratID = 1`, [FLOAT_LOSSY_QUADRAT_START_X]);
-
-    // The dry run must SURFACE the float storage without refusing the load —
-    // the #475 plan tolerates FLOAT destinations and documents the tolerance
-    // in the backfill runbook rather than blocking on it.
-    const dryRunArtifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1', reloadDryRun: true });
-    expect(dryRunArtifact.sql).not.toMatch(/Stage 1:/);
-    const dryRunResultSets = await executeCtfsSql(ctfsConn, dryRunArtifact.sql);
-    const dryRunProbe = dryRunResultSets.find(rs => rs.length > 0 && rs[0].scope === DESTINATION_PLOT_COORDINATE_TYPE_SCOPE);
-    expect(dryRunProbe, 'the dry run must emit the Stem.PX/PY column-type row (Stage 0a always runs)').toBeDefined();
-    expect(dryRunProbe![0].px_column_type, 'dry run reports the un-migrated float type for Stem.PX').toBe(LEGACY_PLOT_COORDINATE_COLUMN_TYPE);
-    expect(dryRunProbe![0].py_column_type, 'dry run reports the un-migrated float type for Stem.PY').toBe(LEGACY_PLOT_COORDINATE_COLUMN_TYPE);
 
     const before = await captureCtfsCounts(ctfsConn);
     const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
@@ -748,6 +760,7 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
     const publishProbe = resultSets.find(rs => rs.length > 0 && rs[0].scope === DESTINATION_PLOT_COORDINATE_TYPE_SCOPE);
     expect(publishProbe, 'the real publish emits the same column-type row').toBeDefined();
     expect(publishProbe![0].px_column_type).toBe(LEGACY_PLOT_COORDINATE_COLUMN_TYPE);
+    expect(publishProbe![0].py_column_type).toBe(LEGACY_PLOT_COORDINATE_COLUMN_TYPE);
 
     // This is the degradation the probe makes visible: the staged DECIMAL(16,5)
     // value does not survive a FLOAT column intact.

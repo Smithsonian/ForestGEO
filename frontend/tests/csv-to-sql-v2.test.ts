@@ -195,8 +195,8 @@ describe('renderStage0', () => {
   });
 
   it('preserves the exact whitespace seam between the CreateFullView probe and the census guard (default path)', () => {
-    // The renderStage0 body is assembled by concatenating three fragments
-    // (DBHAttributes probe + CreateFullView probe + census guard). This locks
+    // The renderStage0 body is assembled by concatenating four fragments
+    // (DBHAttributes + coordinate-type + CreateFullView probes + census guard). This locks
     // the seam so a future edit cannot silently collapse the blank-line
     // separator that keeps the emitted SQL readable and matches the goldens.
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
@@ -211,27 +211,20 @@ describe('renderStage0', () => {
 
   it('reports the destination Stem.PX/PY column type as a Stage 0a result set', () => {
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
-    expect(sql).toMatch(
-      /SELECT COLUMN_TYPE INTO _px_col_type\s+FROM information_schema\.COLUMNS\s+WHERE TABLE_SCHEMA = DATABASE\(\)\s+AND TABLE_NAME = 'Stem'\s+AND COLUMN_NAME = 'PX';/
-    );
-    expect(sql).toMatch(
-      /SELECT COLUMN_TYPE INTO _py_col_type\s+FROM information_schema\.COLUMNS\s+WHERE TABLE_SCHEMA = DATABASE\(\)\s+AND TABLE_NAME = 'Stem'\s+AND COLUMN_NAME = 'PY';/
-    );
     expect(sql).toContain(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope,`);
-    expect(sql).toMatch(/_px_col_type AS px_column_type,\s+_py_col_type AS py_column_type;/);
+    expect(sql).toMatch(/MAX\(CASE WHEN COLUMN_NAME = 'PX' THEN COLUMN_TYPE END\) AS px_column_type,/);
+    expect(sql).toMatch(/MAX\(CASE WHEN COLUMN_NAME = 'PY' THEN COLUMN_TYPE END\) AS py_column_type/);
+    expect(sql).not.toMatch(/_px_col_type|_py_col_type/);
   });
 
-  it('the Stem.PX/PY column-type probe never SIGNALs: a FLOAT destination is tolerated, only made visible', () => {
-    // The plan for #475 keeps FLOAT destinations loadable and documents the
-    // storage tolerance in the runbook instead. The probe must therefore be a
-    // bare result set between the SELECT INTOs and the reporting SELECT, with
-    // no SIGNAL anywhere in that span.
+  it('pins the public Stem.PX/PY diagnostic scope label', () => {
+    expect(DESTINATION_PLOT_COORDINATE_TYPE_SCOPE).toBe('Destination Stem.PX/PY column type');
+  });
+
+  it('fails when either Stem.PX/PY column is absent without rejecting an existing FLOAT type', () => {
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
-    const probeStart = sql.indexOf('SELECT COLUMN_TYPE INTO _px_col_type');
-    const probeEnd = sql.indexOf(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope`);
-    expect(probeStart).toBeGreaterThan(-1);
-    expect(probeEnd).toBeGreaterThan(probeStart);
-    expect(sql.slice(probeStart, probeEnd)).not.toMatch(/SIGNAL/);
+    expect(sql).toMatch(/COLUMN_NAME IN \('PX', 'PY'\)[\s\S]+<> 2 THEN[\s\S]+Destination Stem\.PX or Stem\.PY is missing/);
+    expect(sql).not.toMatch(/COLUMN_TYPE\s*(?:=|<>|IN)\s*['(]float/i);
   });
 
   it('emits the Stem.PX/PY column-type probe on the allowReload path and when the CreateFullView probe is omitted', () => {

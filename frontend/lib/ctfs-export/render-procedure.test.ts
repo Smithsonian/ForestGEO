@@ -225,12 +225,6 @@ describe('renderArtifact', () => {
     expect(sql).toMatch(/DECLARE _tag_col_width INT DEFAULT 0;/);
   });
 
-  it('declares the _px_col_type and _py_col_type scalars used by the Stage 0a coordinate-type probe', () => {
-    const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
-    expect(sql).toMatch(/DECLARE _px_col_type TEXT DEFAULT NULL;/);
-    expect(sql).toMatch(/DECLARE _py_col_type TEXT DEFAULT NULL;/);
-  });
-
   it('the Stem.PX/PY column-type probe runs in a reloadDryRun artifact (Stage 0a always emits)', () => {
     // A dry run is where the operator learns what the destination looks like
     // before committing anything. Stage 7 (which writes PX/PY) is skipped in a
