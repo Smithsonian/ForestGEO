@@ -10,6 +10,8 @@ import ConnectionManager, { getTransactionFailureOutcome, type TxExecutor } from
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { MANAGER_OVERRIDE_ERROR_CODE } from '@/config/validationoverride';
+import { DBH_CHANGE_VALIDATION_ID_LIST } from '@/config/dbhchangevalidations';
+import { bitToBoolean } from '@/config/macros/bitconversion';
 import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
 import { NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
@@ -20,8 +22,6 @@ import {
   prepareDBHValidationDefinitions,
   runSharedDBHChangeValidationsInTransaction
 } from '@/lib/validations/dbh-execution';
-
-const DBH_VALIDATION_IDS = [1, 2] as const;
 
 export type DbhRescoreDatabaseOutcome = 'committed' | 'rolled-back' | 'not-started' | 'unknown';
 export type DbhRescoreOutcome = 'completed' | 'skipped-locked' | 'deferred-pending' | 'held-valid-to-invalid' | 'failed' | 'artifact-failed';
@@ -163,10 +163,6 @@ function isObservedZeroCount(value: unknown): boolean {
   return value !== null && value !== undefined && Number.isInteger(Number(value)) && Number(value) === 0;
 }
 
-function enabled(value: unknown): boolean {
-  return Buffer.isBuffer(value) ? value[0] === 1 : Number(value) === 1 || value === true;
-}
-
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -233,18 +229,18 @@ async function discoverScope(
   }
   const current = await loadScope(executor, scope.schema, scope.plotID, scope.censusID, forUpdate);
   const currentRow = allCensuses.find(row => asNumber(row.CensusID) === scope.censusID);
-  if (!currentRow || !enabled(currentRow.IsActive)) throw new Error(`Census ${scope.censusID} is not active for DBH re-score`);
+  if (!currentRow || !bitToBoolean(currentRow.IsActive)) throw new Error(`Census ${scope.censusID} is not active for DBH re-score`);
   const prior = await loadPriorScope(executor, scope.schema, scope.plotID, asNumber(current.PlotCensusNumber), forUpdate);
   const priorRow = prior && allCensuses.find(row => asNumber(row.CensusID) === asNumber(prior.CensusID));
-  if (priorRow && !enabled(priorRow.IsActive)) throw new Error(`Immediate prior census ${prior.CensusID} is not active for DBH re-score`);
+  if (priorRow && !bitToBoolean(priorRow.IsActive)) throw new Error(`Immediate prior census ${prior.CensusID} is not active for DBH re-score`);
   return { current, prior };
 }
 
 async function assertBothDbhRulesEnabled(executor: { query: TxExecutor['query'] }, schema: string): Promise<void> {
   const sql = safeFormatQuery(schema, 'SELECT ValidationID, IsEnabled FROM ??.sitespecificvalidations WHERE ValidationID IN (?, ?) FOR UPDATE');
-  const rows = (await executor.query(sql, [...DBH_VALIDATION_IDS])) as Array<{ ValidationID: number; IsEnabled: unknown }>;
-  const found = new Map(rows.map(row => [asNumber(row.ValidationID), enabled(row.IsEnabled)]));
-  if (!found.get(1) || !found.get(2) || found.size !== DBH_VALIDATION_IDS.length) {
+  const rows = (await executor.query(sql, [...DBH_CHANGE_VALIDATION_ID_LIST])) as Array<{ ValidationID: number; IsEnabled: unknown }>;
+  const found = new Map(rows.map(row => [asNumber(row.ValidationID), bitToBoolean(row.IsEnabled)]));
+  if (DBH_CHANGE_VALIDATION_ID_LIST.some(validationID => !found.get(validationID)) || found.size !== DBH_CHANGE_VALIDATION_ID_LIST.length) {
     throw new Error('Both fixed DBH validations (1 and 2) must be enabled before re-score');
   }
 }
@@ -316,7 +312,7 @@ async function captureScopeState(tx: TxExecutor, scope: DbhRescoreScope): Promis
   );
   const [validityRows, errors, measurements] = await Promise.all([
     tx.query(validitySQL, [scope.plotID, scope.censusID]) as Promise<Array<Record<string, unknown>>>,
-    tx.query(errorSQL, [scope.plotID, scope.censusID, ...DBH_VALIDATION_IDS]) as Promise<Array<Record<string, unknown>>>,
+    tx.query(errorSQL, [scope.plotID, scope.censusID, ...DBH_CHANGE_VALIDATION_ID_LIST]) as Promise<Array<Record<string, unknown>>>,
     tx.query(measurementSQL, [scope.plotID, scope.censusID]) as Promise<Array<Record<string, unknown>>>
   ]);
   return { validity: validityRows[0] ?? {}, measurements, dbhErrors: errors };
@@ -351,7 +347,7 @@ async function countPreservedOverrides(tx: TxExecutor, scope: DbhRescoreScope): 
 
 function validityOf(value: unknown): boolean | null {
   if (value === null || value === undefined) return null;
-  return enabled(value);
+  return bitToBoolean(value);
 }
 
 function findValidToInvalidMeasurementIDs(before: Record<string, unknown>, after: Record<string, unknown>): number[] {
@@ -467,7 +463,7 @@ export async function rescoreDbhCensus(scope: DbhRescoreScope, deps: DbhRescoreD
           }
         }
 
-        provisionalRunID = await createValidationRunRecordInTransaction(tx, scope.schema, scope.plotID, scope.censusID, DBH_VALIDATION_IDS.length);
+        provisionalRunID = await createValidationRunRecordInTransaction(tx, scope.schema, scope.plotID, scope.censusID, DBH_CHANGE_VALIDATION_ID_LIST.length);
         const before = await captureScopeState(tx, scope);
         beforeState = before;
         await writeArtifact({ event: 'before', attemptID, scope, provisionalRunID, data: { ...before, originalConnectionID } });
@@ -511,7 +507,7 @@ export async function rescoreDbhCensus(scope: DbhRescoreScope, deps: DbhRescoreD
           data: { before, after, counts, validToInvalidMeasurementIDs, originalConnectionID }
         });
         await completeValidationRunRecordInTransaction(tx, scope.schema, provisionalRunID, {
-          completedSteps: DBH_VALIDATION_IDS.length,
+          completedSteps: DBH_CHANGE_VALIDATION_ID_LIST.length,
           failedSteps: 0,
           errorMessages: [attemptMarker(attemptID)]
         });

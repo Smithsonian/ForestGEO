@@ -4,6 +4,7 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import mysql from 'mysql2/promise';
+import { DBH_CHANGE_VALIDATION_ID_LIST } from '@/config/dbhchangevalidations';
 import { discoverSiteSchemas } from './lib/schema-cli';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import {
@@ -61,7 +62,7 @@ async function main(): Promise<number> {
         timeoutMs,
         configuredHost: settings.host,
         configuredUser: settings.user,
-        fixedValidationIDs: [1, 2]
+        fixedValidationIDs: DBH_CHANGE_VALIDATION_ID_LIST
       });
     }
     console.log(`Configured database: ${settings.user}@${settings.host}:${settings.port}; expected revision ${manifest.revision}`);

@@ -1,6 +1,13 @@
 import mysql from 'mysql2/promise';
 import type { RowDataPacket } from 'mysql2';
-import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
+import {
+  DBH_CHANGE_PROCEDURE_BY_VALIDATION_ID,
+  DBH_CHANGE_VALIDATION_ID_LIST,
+  DBH_GROWTH_PROCEDURE,
+  DBH_SHRINKAGE_PROCEDURE,
+  isDbhChangeValidationID
+} from '@/config/dbhchangevalidations';
+import { bitToBoolean } from '@/config/macros/bitconversion';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { buildDbhExpectedManifest, buildRealSweepDeps, type DbhExpectedManifest } from './dbh-rescore-cli';
 
@@ -27,15 +34,6 @@ export interface DbhRuleDeploymentSelection<QuarantineGate> {
   schemas: string[];
   quarantined: Array<{ schema: string; gate: QuarantineGate }>;
   notMigrated: Array<{ schema: string; missingTables: string[] }>;
-}
-
-const EXPECTED_IDENTITIES = new Map([
-  [1, DBH_GROWTH_PROCEDURE],
-  [2, DBH_SHRINKAGE_PROCEDURE]
-]);
-
-function enabled(value: unknown): boolean {
-  return Buffer.isBuffer(value) ? value[0] === 1 : value === true || Number(value) === 1;
 }
 
 function qualified(schema: string, table: string): string {
@@ -113,14 +111,13 @@ export function assertEligibleDbhRuleRows(
   if (rows.length !== 2) throw new Error(`${schema}: expected exactly two DBH validation rows, found ${rows.length}`);
 
   for (const row of rows) {
-    const numericID = Number(row.ValidationID);
-    if (numericID !== 1 && numericID !== 2) throw new Error(`${schema}: DBH validation identity is missing or collides with another row`);
-    const id = numericID;
+    const id = Number(row.ValidationID);
+    if (!isDbhChangeValidationID(id)) throw new Error(`${schema}: DBH validation identity is missing or collides with another row`);
     const expected = expectedByID.get(id);
-    const identity = EXPECTED_IDENTITIES.get(id);
+    const identity = DBH_CHANGE_PROCEDURE_BY_VALIDATION_ID.get(id);
     if (!expected || !identity || row.ProcedureName !== identity || expected.procedureName !== identity)
       throw new Error(`${schema}: DBH validation identity is missing or collides with another row`);
-    if (requireEnabled && !enabled(row.IsEnabled))
+    if (requireEnabled && !bitToBoolean(row.IsEnabled))
       throw new Error(`${schema}: DBH validation ${id} is disabled; enable it through the approved preparation process`);
   }
 }
@@ -129,9 +126,9 @@ async function readDbhRows(connection: mysql.Connection, schema: string, lockRow
   const [rows] = await connection.query<Array<DbhRuleRow & RowDataPacket>>(
     `SELECT ValidationID, ProcedureName, Description, Definition, Criteria, ChangelogDefinition, IsEnabled
        FROM ${qualified(schema, 'sitespecificvalidations')}
-      WHERE ValidationID IN (1, 2) OR ProcedureName IN (?, ?)
+      WHERE ValidationID IN (?) OR ProcedureName IN (?, ?)
       ORDER BY ValidationID${lockRows ? ' FOR UPDATE' : ''}`,
-    [DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE]
+    [DBH_CHANGE_VALIDATION_ID_LIST, DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE]
   );
   return rows;
 }

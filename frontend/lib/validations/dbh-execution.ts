@@ -2,7 +2,14 @@
 import ConnectionManager, { type TxExecutor } from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
-import { DBH_CHANGE_VALIDATION_IDS, DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
+import {
+  DBH_CHANGE_VALIDATION_ID_LIST,
+  DBH_CHANGE_VALIDATION_IDS,
+  DBH_GROWTH_PROCEDURE,
+  DBH_SHRINKAGE_PROCEDURE,
+  isDbhChangeValidationID
+} from '@/config/dbhchangevalidations';
+import { bitToBoolean } from '@/config/macros/bitconversion';
 import { MANAGER_OVERRIDE_ERROR_CODE } from '@/config/validationoverride';
 export type ValidationExecutionParams = { p_CensusID?: number | null; p_PlotID?: number | null };
 export type DBHValidationSkipCounts = {
@@ -15,10 +22,6 @@ export type CombinedDBHValidationResult = { success: boolean; ranGrowth: boolean
 
 type ValidationRuleRow = { ValidationID: number | string; IsEnabled: unknown };
 type AffectedRowsResult = { affectedRows?: number };
-
-function isBitFlagSet(value: unknown): boolean {
-  return Buffer.isBuffer(value) ? value[0] === 1 : Boolean(value);
-}
 
 function scopeParams(params: ValidationExecutionParams): Array<number | null> {
   const censusID = params.p_CensusID ?? null;
@@ -46,8 +49,20 @@ export function parseDbhValidationSkipCounts(result: unknown): DBHValidationSkip
 }
 
 export async function prepareDBHValidationDefinitions(connectionManager: ConnectionManager, schema: string): Promise<void> {
-  await ensureMeasurementErrorDefinition(connectionManager, schema, VALIDATION_ERROR_SOURCE, '1', `Validation ${DBH_GROWTH_PROCEDURE}`);
-  await ensureMeasurementErrorDefinition(connectionManager, schema, VALIDATION_ERROR_SOURCE, '2', `Validation ${DBH_SHRINKAGE_PROCEDURE}`);
+  await ensureMeasurementErrorDefinition(
+    connectionManager,
+    schema,
+    VALIDATION_ERROR_SOURCE,
+    String(DBH_CHANGE_VALIDATION_IDS.growth),
+    `Validation ${DBH_GROWTH_PROCEDURE}`
+  );
+  await ensureMeasurementErrorDefinition(
+    connectionManager,
+    schema,
+    VALIDATION_ERROR_SOURCE,
+    String(DBH_CHANGE_VALIDATION_IDS.shrinkage),
+    `Validation ${DBH_SHRINKAGE_PROCEDURE}`
+  );
 }
 
 /**
@@ -102,7 +117,7 @@ export async function prepareDBHValidationRunInTransaction(input: {
   requireActiveStemGUID?: boolean;
 }): Promise<void> {
   const { schema, tx, validationID, params } = input;
-  if (validationID !== DBH_CHANGE_VALIDATION_IDS.growth && validationID !== DBH_CHANGE_VALIDATION_IDS.shrinkage) {
+  if (!isDbhChangeValidationID(validationID)) {
     throw new Error(`Unsupported DBH validation ID: ${validationID}`);
   }
   await resetStaleDbhOccurrences(tx, schema, validationID, params);
@@ -116,10 +131,12 @@ export async function runSharedDBHChangeValidationsInTransaction(input: {
 }): Promise<Omit<CombinedDBHValidationResult, 'success'>> {
   const { schema, tx, params = {} } = input;
   const rules: ValidationRuleRow[] = await tx.query(
-    safeFormatQuery(schema, 'SELECT ValidationID, IsEnabled FROM ??.sitespecificvalidations WHERE ValidationID IN (1,2)')
+    safeFormatQuery(schema, 'SELECT ValidationID, IsEnabled FROM ??.sitespecificvalidations WHERE ValidationID IN (?, ?)'),
+    [...DBH_CHANGE_VALIDATION_ID_LIST]
   );
-  const growthEnabled = isBitFlagSet(rules.find(rule => Number(rule.ValidationID) === 1)?.IsEnabled);
-  const shrinkageEnabled = isBitFlagSet(rules.find(rule => Number(rule.ValidationID) === 2)?.IsEnabled);
+  const isRuleEnabled = (validationID: number) => bitToBoolean(rules.find(rule => Number(rule.ValidationID) === validationID)?.IsEnabled);
+  const growthEnabled = isRuleEnabled(DBH_CHANGE_VALIDATION_IDS.growth);
+  const shrinkageEnabled = isRuleEnabled(DBH_CHANGE_VALIDATION_IDS.shrinkage);
   if (growthEnabled) await resetStaleDbhOccurrences(tx, schema, DBH_CHANGE_VALIDATION_IDS.growth, params);
   if (shrinkageEnabled) await resetStaleDbhOccurrences(tx, schema, DBH_CHANGE_VALIDATION_IDS.shrinkage, params);
   const procedureResult =

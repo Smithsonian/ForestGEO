@@ -16,7 +16,7 @@ import {
 } from '@/lib/validations/dbh-execution';
 import type { CombinedDBHValidationResult, DBHValidationSkipCounts, ValidationExecutionParams } from '@/lib/validations/dbh-execution';
 import type { UpsertOperation } from '@/config/utils';
-import { describeDbhFloorSkips } from '@/config/dbhchangevalidations';
+import { describeDbhFloorSkips, isDbhChangeValidationID } from '@/config/dbhchangevalidations';
 
 export { finalizeValidatedRowsInTransaction, parseDbhValidationSkipCounts, prepareDBHValidationDefinitions, runSharedDBHChangeValidationsInTransaction };
 export type { CombinedDBHValidationResult, DBHValidationSkipCounts, ValidationExecutionParams };
@@ -368,7 +368,7 @@ async function prepareValidationRun(
     id: transactionID,
     query: (query, values) => connectionManager.executeQuery(query, values, transactionID)
   };
-  if (validationProcedureID === 1 || validationProcedureID === 2) {
+  if (isDbhChangeValidationID(validationProcedureID)) {
     await prepareDBHValidationRunInTransaction({ schema, tx, validationID: validationProcedureID, params });
     return;
   }
@@ -517,7 +517,7 @@ export async function runValidation(
 
       const executionResult = await connectionManager.executeQuery(finalCursorQuery, [], transactionID);
       await connectionManager.commitTransaction(transactionID ?? '');
-      if (validationProcedureID === 1 || validationProcedureID === 2) {
+      if (isDbhChangeValidationID(validationProcedureID)) {
         reportDbhFloorSkips(schema, params, parseDbhValidationSkipCounts(executionResult));
       }
       return true;

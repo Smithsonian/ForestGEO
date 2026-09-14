@@ -1,7 +1,6 @@
 import { createHash } from 'crypto';
 import type { DbhRescoreResult, DbhRescoreScope } from '@/lib/validations/dbh-rescore';
-
-export const DBH_RESCORING_VALIDATION_IDS = [1, 2] as const;
+import { DBH_CHANGE_VALIDATION_ID_LIST } from '@/config/dbhchangevalidations';
 
 export interface DbhSweepScope extends DbhRescoreScope {
   plotCensusNumber: number;
@@ -89,7 +88,7 @@ export async function runDbhSweep(plan: DbhSweepPlan, deps: DbhSweepDependencies
   await deps.writeArtifact({
     event: 'sweep-plan',
     at: deps.now(),
-    fixedValidationIDs: DBH_RESCORING_VALIDATION_IDS,
+    fixedValidationIDs: DBH_CHANGE_VALIDATION_ID_LIST,
     order: plan.scopes,
     followOn: plan.followOn,
     targetSchemas: schemas,

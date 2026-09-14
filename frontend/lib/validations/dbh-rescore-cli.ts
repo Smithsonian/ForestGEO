@@ -3,7 +3,14 @@ import path from 'path';
 import mysql from 'mysql2/promise';
 import type { RowDataPacket } from 'mysql2';
 import { parseStoredProceduresSQL } from '@/lib/db/stored-procedure-sql';
-import { DBH_CHANGE_VALIDATION_IDS, DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
+import {
+  DBH_CHANGE_VALIDATION_ID_LIST,
+  DBH_GROWTH_PROCEDURE,
+  DBH_SHRINKAGE_PROCEDURE,
+  isDbhChangeValidationID,
+  type DbhChangeValidationID
+} from '@/config/dbhchangevalidations';
+import { bitToBoolean } from '@/config/macros/bitconversion';
 import { parseSiteValidationSeeds } from './validation-seed-parser';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
@@ -23,7 +30,7 @@ export interface DbhRescoreCliArgs {
 }
 export class DbhRescoreArgumentError extends Error {}
 export interface DbhExpectedSeed {
-  validationID: 1 | 2;
+  validationID: DbhChangeValidationID;
   procedureName: string;
   description: string;
   definition: string;
@@ -133,14 +140,11 @@ export function buildDbhExpectedManifest(
   }
   if (!expected.BuildDBHChangePairs || !expected.RunSharedDBHChangeValidations)
     throw new Error('Expected DBH procedure bodies are absent from the supplied manifest SQL');
-  const seeds: DbhExpectedSeed[] = parseSiteValidationSeeds(coreQueries)
-    .filter(seed => seed.validationID === DBH_CHANGE_VALIDATION_IDS.growth || seed.validationID === DBH_CHANGE_VALIDATION_IDS.shrinkage)
-    .map(seed => ({
-      validationID: seed.validationID as DbhExpectedSeed['validationID'],
-      procedureName: seed.procedureName,
-      description: seed.description,
-      definition: seed.definition
-    }));
+  const seeds: DbhExpectedSeed[] = parseSiteValidationSeeds(coreQueries).flatMap(seed =>
+    isDbhChangeValidationID(seed.validationID)
+      ? [{ validationID: seed.validationID, procedureName: seed.procedureName, description: seed.description, definition: seed.definition }]
+      : []
+  );
   if (seeds.length !== 2 || new Set(seeds.map(seed => seed.validationID)).size !== 2)
     throw new Error('Expected DBH seed definitions are absent or ambiguous in the supplied manifest SQL');
   return { revision, procedures: expected as DbhExpectedManifest['procedures'], seeds };
@@ -211,9 +215,6 @@ function normalizeDefinition(value: string): string {
 function sameDefinition(expected: string, actual: string): boolean {
   return normalizeDefinition(expected) === normalizeDefinition(actual);
 }
-function enabled(value: unknown): boolean {
-  return Buffer.isBuffer(value) ? value[0] === 1 : value === true || Number(value) === 1;
-}
 function sqlIdentifier(schema: string): string {
   validateSchemaOrThrow(schema);
   return mysql.format('??', [schema]);
@@ -281,7 +282,8 @@ export function buildRealSweepDeps(
       }
       const qualified = sqlIdentifier(schema);
       const [rules] = await connection.query<ValidationRuleRow[]>(
-        `SELECT ValidationID, ProcedureName, Description, Definition, IsEnabled FROM ${qualified}.sitespecificvalidations WHERE ValidationID IN (1, 2)`
+        `SELECT ValidationID, ProcedureName, Description, Definition, IsEnabled FROM ${qualified}.sitespecificvalidations WHERE ValidationID IN (?)`,
+        [DBH_CHANGE_VALIDATION_ID_LIST]
       );
       for (const expected of manifest.seeds) {
         const actual = rules.filter(row => Number(row.ValidationID) === expected.validationID);
@@ -290,7 +292,7 @@ export function buildRealSweepDeps(
           actual[0].ProcedureName !== expected.procedureName ||
           actual[0].Description !== expected.description ||
           actual[0].Definition !== expected.definition ||
-          (requireEnabled && !enabled(actual[0].IsEnabled))
+          (requireEnabled && !bitToBoolean(actual[0].IsEnabled))
         )
           throw new Error(`${schema}: ValidationID ${expected.validationID} differs from expected revision ${manifest.revision}`);
       }

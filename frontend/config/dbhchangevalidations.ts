@@ -8,6 +8,18 @@ export const DBH_GROWTH_PROCEDURE = 'ValidateDBHGrowthExceedsMax';
 export const DBH_SHRINKAGE_PROCEDURE = 'ValidateDBHShrinkageExceedsMax';
 export const DBH_CHANGE_PROCEDURE_NAMES = [DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE] as const;
 
+export const DBH_CHANGE_VALIDATION_ID_LIST = [DBH_CHANGE_VALIDATION_IDS.growth, DBH_CHANGE_VALIDATION_IDS.shrinkage] as const;
+export type DbhChangeValidationID = (typeof DBH_CHANGE_VALIDATION_ID_LIST)[number];
+
+export const DBH_CHANGE_PROCEDURE_BY_VALIDATION_ID: ReadonlyMap<DbhChangeValidationID, (typeof DBH_CHANGE_PROCEDURE_NAMES)[number]> = new Map([
+  [DBH_CHANGE_VALIDATION_IDS.growth, DBH_GROWTH_PROCEDURE],
+  [DBH_CHANGE_VALIDATION_IDS.shrinkage, DBH_SHRINKAGE_PROCEDURE]
+]);
+
+export function isDbhChangeValidationID(validationID: number): validationID is DbhChangeValidationID {
+  return (DBH_CHANGE_VALIDATION_ID_LIST as readonly number[]).includes(validationID);
+}
+
 export type DbhChangeKind = keyof typeof DBH_CHANGE_VALIDATION_IDS;
 export type DbhChangeProcedureName = (typeof DBH_CHANGE_PROCEDURE_NAMES)[number];
 export type DbhIntervalSkipReason = 'negative-interval' | 'implausible-interval';
