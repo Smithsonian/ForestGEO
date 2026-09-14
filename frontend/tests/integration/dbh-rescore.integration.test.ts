@@ -206,7 +206,7 @@ describe('rescoreDbhCensus transaction boundary', () => {
     expect(rows.map(r => bool(r.IsValidated))).toEqual([false, false]);
   });
 
-  it('preserves no-stem ingestion rows and their DBH occurrences in both normal and guarded scrub modes', async () => {
+  it('preserves no-stem ingestion rows and their DBH occurrences across repeated scrubs', async () => {
     const invalidNullStem = await pair('SCRUB_FALSE', 100, 105);
     const pendingNullStem = await pair('SCRUB_PENDING', 100, 105);
     const validStem = await pair('SCRUB_STEM', 100, 105);
@@ -253,8 +253,7 @@ describe('rescoreDbhCensus transaction boundary', () => {
         schema,
         tx,
         validationID: 1,
-        params: { p_CensusID: census2ID, p_PlotID: plotID },
-        requireActiveStemGUID: true
+        params: { p_CensusID: census2ID, p_PlotID: plotID }
       })
     );
     await assertStates();

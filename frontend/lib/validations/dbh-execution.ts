@@ -114,7 +114,6 @@ export async function prepareDBHValidationRunInTransaction(input: {
   tx: TxExecutor;
   validationID: number;
   params: ValidationExecutionParams;
-  requireActiveStemGUID?: boolean;
 }): Promise<void> {
   const { schema, tx, validationID, params } = input;
   if (!isDbhChangeValidationID(validationID)) {
@@ -127,7 +126,6 @@ export async function runSharedDBHChangeValidationsInTransaction(input: {
   schema: string;
   tx: TxExecutor;
   params?: ValidationExecutionParams;
-  requireActiveStemGUID?: boolean;
 }): Promise<Omit<CombinedDBHValidationResult, 'success'>> {
   const { schema, tx, params = {} } = input;
   const rules: ValidationRuleRow[] = await tx.query(

@@ -133,8 +133,7 @@ describe('validation connection retries', () => {
       runSharedDBHChangeValidationsInTransaction({
         schema: 'forestgeo_testing',
         tx: { id: 'owner-tx', query: query as any },
-        params: { p_CensusID: 7, p_PlotID: 3 },
-        requireActiveStemGUID: true
+        params: { p_CensusID: 7, p_PlotID: 3 }
       })
     ).resolves.toEqual({
       ranGrowth: true,

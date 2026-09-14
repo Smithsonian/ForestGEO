@@ -473,8 +473,7 @@ export async function rescoreDbhCensus(scope: DbhRescoreScope, deps: DbhRescoreD
         const execution = await runDbh({
           schema: scope.schema,
           tx,
-          params: { p_CensusID: scope.censusID, p_PlotID: scope.plotID },
-          requireActiveStemGUID: true
+          params: { p_CensusID: scope.censusID, p_PlotID: scope.plotID }
         });
         if (!execution.ranGrowth || !execution.ranShrinkage) throw new Error('Both fixed DBH validations must execute during re-score');
         const finalizedCount = await finalize({
