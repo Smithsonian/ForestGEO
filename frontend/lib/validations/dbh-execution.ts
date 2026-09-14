@@ -156,6 +156,7 @@ export async function finalizeValidatedRowsInTransaction(input: {
   requireActiveStemGUID?: boolean;
 }): Promise<number> {
   const { schema, tx, params, requireActiveStemGUID = false } = input;
+  const activeStemFilter = requireActiveStemGUID ? 'AND cm.IsActive = TRUE AND cm.StemGUID IS NOT NULL' : '';
   // A row being re-validated is judged on its data again, so any earlier manager override no longer applies.
   await tx.query(
     safeFormatQuery(
@@ -164,12 +165,11 @@ export async function finalizeValidatedRowsInTransaction(input: {
        JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
        JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
        JOIN ??.census c ON c.CensusID = cm.CensusID
-       WHERE me.ErrorSource = ? AND me.ErrorCode = ? AND cm.IsValidated IS NULL
+       WHERE me.ErrorSource = ? AND me.ErrorCode = ? AND cm.IsValidated IS NULL ${activeStemFilter}
          AND (? IS NULL OR cm.CensusID = ?) AND (? IS NULL OR c.PlotID = ?)`
     ),
     [VALIDATION_ERROR_SOURCE, MANAGER_OVERRIDE_ERROR_CODE, ...scopeParams(params)]
   );
-  const activeStemFilter = requireActiveStemGUID ? 'AND cm.IsActive = TRUE AND cm.StemGUID IS NOT NULL' : '';
   const result: AffectedRowsResult = await tx.query(
     safeFormatQuery(
       schema,

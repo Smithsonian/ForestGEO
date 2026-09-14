@@ -75,6 +75,8 @@ export interface MeasurementStagingRow {
   Comments: string | null;
   LX: number | null;
   LY: number | null;
+  PX: number | null;
+  PY: number | null;
   PrimaryStem: 'main' | 'secondary' | null;
 }
 
@@ -350,6 +352,8 @@ export function renderCreateStagingMeasurements(tableName: string): string {
     `  Comments            VARCHAR(256),`,
     `  LX                  FLOAT(8),`,
     `  LY                  FLOAT(8),`,
+    `  PX                  DECIMAL(16,5),`,
+    `  PY                  DECIMAL(16,5),`,
     `  PrimaryStem         VARCHAR(20),`,
     `  TreeID              INT UNSIGNED,`,
     `  StemID              INT UNSIGNED,`,
@@ -411,6 +415,8 @@ const MEASUREMENT_INSERT_COLUMNS = [
   'Comments',
   'LX',
   'LY',
+  'PX',
+  'PY',
   'PrimaryStem'
 ] as const satisfies ReadonlyArray<keyof MeasurementStagingRow>;
 

@@ -18,8 +18,10 @@ VALUES (1, 1, 1, '2024-01-01', '2024-12-31', 'Precondition test census');
 
 -- quadrats: QuadratID=1, PlotID=1, QuadratName='A1'
 -- QuadratName≤8 chars (CTFS dest limit)
+-- StartX/StartY=40.0/60.0 (non-zero, distinct axes): with a zero origin PX/PY
+-- would equal LX/LY and a PX=LX / PY=LY copy bug would pass undetected.
 INSERT INTO quadrats (QuadratID, PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, IsActive)
-VALUES (1, 1, 'A1', 0.0, 0.0, 20, 20, 400.0, 1);
+VALUES (1, 1, 'A1', 40.0, 60.0, 20, 20, 400.0, 1);
 
 -- family: FamilyID=1, Family='Testaceae' (9 chars ≤ 64 CTFS limit)
 INSERT INTO family (FamilyID, Family, IsActive) VALUES (1, 'Testaceae', 1);
@@ -46,8 +48,11 @@ VALUES (1, '1', 1, 1, 1);
 
 -- stems: StemGUID=1, TreeID=1, QuadratID=1, CensusID=1
 --   StemTag='1' (1 char ≤ 32 CTFS limit), IsActive=1
+--   LocalX/LocalY=1.25/2.5 (distinct decimal axes, alongside the non-zero
+--   quadrat origin above) so PX/PY = StartX/StartY + LocalX/LocalY (41.25,
+--   62.5) is distinguishable from LX/LY (1.25, 2.5) in every assertion.
 INSERT INTO stems (StemGUID, TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
-VALUES (1, 1, 1, 1, '1', 1.0, 1.0, 1);
+VALUES (1, 1, 1, 1, '1', 1.25, 2.5, 1);
 
 -- coremeasurements: CoreMeasurementID=1, CensusID=1, StemGUID=1
 --   IsValidated=TRUE, Description=NULL (≤128 chars for CTFS DBH.Comments)

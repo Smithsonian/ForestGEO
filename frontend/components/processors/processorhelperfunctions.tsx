@@ -777,7 +777,7 @@ export async function updateValidatedRows(schema: string, params: ValidationExec
       id: transactionID,
       query: (query, values) => connectionManager.executeQuery(query, values, transactionID)
     };
-    await finalizeValidatedRowsInTransaction({ schema, tx, params });
+    await finalizeValidatedRowsInTransaction({ schema, tx, params, requireActiveStemGUID: true });
     await connectionManager.commitTransaction(transactionID ?? '');
   } catch (error: any) {
     await connectionManager.rollbackTransaction(transactionID ?? '');

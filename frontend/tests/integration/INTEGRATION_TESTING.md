@@ -675,6 +675,81 @@ frontend/tests/integration/
 
 **Negative tests are critical** - they prove the stored procedure validations work correctly by confirming that valid data (e.g., <10m drift, same quadrat) passes through without triggering failures.
 
+## Testing `db/ops` operator scripts
+
+`db/ops/*.sql` files (see `db/ops/2026-07-09-cleanup-duplicate-quadrat-grid.sql` for
+the header precedent) are one-off, hand-run repair scripts — Suzanne or another
+operator pastes them into a MySQL client against a live schema. The app never
+executes them, so they need a different kind of integration test than the
+validation suites above: one that proves the *actual script text* behaves as
+documented, not a test-owned reimplementation of its SQL.
+
+### The `-- SECTION:` / `(metric, n)` conventions
+
+A testable ops script follows two conventions (see
+`db/ops/2026-09-09-backfill-stem-plot-coordinates.sql` for a full example):
+
+- **Section markers.** Every logical step starts with a line matching exactly
+  `-- SECTION: <name>` and runs to the next marker (or EOF). Nothing executable
+  may appear before the first marker — only header comments (SYMPTOM, ROOT
+  CAUSE, WHAT THIS SCRIPT DOES/REFUSES TO DO, HOW TO RUN, METRICS). This lets a
+  test run one named step in isolation, in the operator's own order, instead of
+  the whole file at once.
+- **Diagnostic rows.** Every count an operator (or a test) needs to read is
+  emitted as its own result set: `SELECT '<metric_name>' AS metric, <expr> AS n;`
+  — one row per metric, several metrics may be UNIONed into one result set.
+  Sample-row `SELECT`s (for eyeballing specific rows) may use any other
+  columns; they are simply not collected as metrics. Metric names are the
+  script's public contract — list them all in the header comment.
+
+### The executor: `tests/integration/helpers/ops-script-sections.ts`
+
+- `readOpsScriptSections(filePath)` reads a script and splits it on the
+  `-- SECTION:` markers, returning `{ preamble, sections }` — `preamble` is
+  everything before the first marker (a test should assert it is comment/blank
+  only), and `sections` is a `Map<string, string>` whose **insertion order
+  matches the file's marker order** (so `Array.from(sections.keys())` is a
+  cheap way to assert section order). Since the script file is static for a
+  whole test run, call this once at module scope, not inside `beforeEach`.
+- `executeSectionStatements(conn, sectionSql)` strips `--` comment lines,
+  splits the section into individual statements (via `splitSqlFile`), runs
+  them in order on `conn`, and returns each statement's raw result rows (or
+  `null` for a statement with no result set, e.g. `CREATE TABLE`) as an array
+  — one entry per statement, in execution order. Use this directly when a
+  section's sample-row `SELECT`s (different columns per statement) need
+  asserting on, not just its `{ metric, n }` rows — index into the returned
+  array by statement position. See
+  `tests/integration/quadrat-origin-equivalence.integration.test.ts` for a
+  script (`db/ops/2026-09-09-check-quadrat-origin-equivalence.sql`) whose
+  `report` section emits one metrics statement plus four differently-shaped
+  sample-row listings, asserted on this way.
+- `collectMetrics(resultSets)` scans an `executeSectionStatements` result for
+  every row shaped like `{ metric, n }` and collects them into a
+  `Map<string, number>` — the script's diagnostic convention. Non-metric rows
+  are skipped, so it is safe to pass it a whole section's result sets (sample
+  rows and all) rather than pre-filtering down to the metrics statement.
+- `executeSection(conn, sectionSql)` is
+  `collectMetrics(await executeSectionStatements(conn, sectionSql))` — the
+  common case where a caller only needs the `{ metric, n }` rows and not the
+  raw per-statement result sets.
+
+A test typically: creates an isolated database and loads the relevant
+destination DDL (see `tests/integration/helpers/ctfs-destination-ddl.ts` for
+the Smithsonian/CTFS-shaped case), seeds fixture rows, then calls
+`executeSection` (or `executeSectionStatements`, when it also needs sample
+rows) section-by-section in the exact order the runbook tells the operator to
+run them — substituting only the `inputs` section (which must contain nothing
+but `SET @... := ...;` statements) with test-specific values. See
+`tests/integration/stem-plot-coordinate-backfill.integration.test.ts` (which
+also drives both the seed SQL and every expected count from one array of
+scenario rows, so the two can never silently drift apart) and
+`tests/integration/quadrat-origin-equivalence.integration.test.ts` for two
+complete worked examples.
+
+The next `db/ops` script that needs a test should follow this same shape —
+section markers, `(metric, n)` diagnostics, and this file's exports to drive
+it — rather than inventing a new convention.
+
 ## Future Enhancements
 
 1. **Snapshot testing** - Compare validation results against known-good snapshots
