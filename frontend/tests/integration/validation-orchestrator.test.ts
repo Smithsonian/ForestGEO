@@ -557,7 +557,7 @@ describe('runCensusValidations — integration', () => {
     });
 
     console.log(`[summary] ${JSON.stringify(summary)} onStepCalls=${onStepCalls}`);
-    expect(summary).toEqual({ totalSteps: 0, failedSteps: 0, errors: [], conflict: true });
+    expect(summary).toEqual({ totalSteps: 0, failedSteps: 0, errors: [], notices: [], conflict: true });
     expect(onStepCalls).toBe(0);
 
     // The pre-existing running row is untouched and no second row was created.

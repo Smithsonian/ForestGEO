@@ -282,7 +282,7 @@ describe('rescoreDbhCensus transaction boundary', () => {
     const summary = await runCensusValidations(ConnectionManager.getInstance(), { schema, plotID, censusID: census2ID });
 
     const expectedNotice = describeDbhFloorSkips(1);
-    expect(summary, 'a floor skip is a notice, not a failed step').toMatchObject({ failedSteps: 0, conflict: false, errors: [expectedNotice] });
+    expect(summary, 'a floor skip is a notice, not a failed step').toMatchObject({ failedSteps: 0, conflict: false, errors: [], notices: [expectedNotice] });
     const [runs] = await connection.query<RowDataPacket[]>('SELECT Status, ErrorMessages FROM validation_runs WHERE PlotID=? AND CensusID=?', [
       plotID,
       census2ID
