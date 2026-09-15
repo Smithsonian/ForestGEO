@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { createSchemaStep, initTablesStep, deployProceduresStep, seedValidationsStep } from './sql-steps';
 import type { StepContext, ProvisioningInput } from '../types';
+import { testDbServerOptions } from '@/tests/setup/test-db-connection';
 
 describe('SQL-file steps', () => {
   const SCHEMA_NAME = `forestgeo_sqlsteps_test_${process.pid}`;
@@ -10,10 +11,7 @@ describe('SQL-file steps', () => {
 
   beforeAll(async () => {
     catalogPool = mysql.createPool({
-      host: process.env.TEST_DB_HOST || 'localhost',
-      port: Number(process.env.TEST_DB_PORT || 3306),
-      user: process.env.TEST_DB_USER || 'root',
-      password: process.env.TEST_DB_PASSWORD || 'testpassword',
+      ...testDbServerOptions(),
       multipleStatements: false,
       connectionLimit: 5
     });

@@ -173,6 +173,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { upsertAttributeRows, upsertSpeciesRows } from '@/lib/uploads/reference-data-writers';
 import { runJobIfClaimable, type WorkerDeps } from '@/lib/background-jobs/worker';
 import type { BackgroundJobFileRecord } from '@/lib/background-jobs/types';
+import { testDbServerOptions } from '../setup/test-db-connection';
 
 // ---------------------------------------------------------------------------
 // Safety guard — this file DROPs a database and writes to the shared catalog
@@ -180,9 +181,6 @@ import type { BackgroundJobFileRecord } from '@/lib/background-jobs/types';
 // ---------------------------------------------------------------------------
 
 const TEST_DB_HOST = process.env.TEST_DB_HOST || 'localhost';
-const TEST_DB_PORT = Number(process.env.TEST_DB_PORT || 3306);
-const TEST_DB_USER = process.env.TEST_DB_USER || 'root';
-const TEST_DB_PASSWORD = process.env.TEST_DB_PASSWORD || 'testpassword';
 
 if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
   throw new Error(
@@ -351,10 +349,7 @@ describe('provisioned-site lifecycle', () => {
 
   beforeAll(async () => {
     catalogPool = mysql.createPool({
-      host: TEST_DB_HOST,
-      port: TEST_DB_PORT,
-      user: TEST_DB_USER,
-      password: TEST_DB_PASSWORD,
+      ...testDbServerOptions(),
       multipleStatements: true,
       charset: 'UTF8MB4_0900_AI_CI',
       connectionLimit: 5
@@ -373,10 +368,7 @@ describe('provisioned-site lifecycle', () => {
     await runProvisioning(runId, catalogPool);
 
     siteConnection = await mysql.createConnection({
-      host: TEST_DB_HOST,
-      port: TEST_DB_PORT,
-      user: TEST_DB_USER,
-      password: TEST_DB_PASSWORD,
+      ...testDbServerOptions(),
       database: SCHEMA_NAME,
       // Must match lib/db/poolmonitorsingleton.ts and lib/provisioning/steps/
       // sql-steps.ts buildSitePool. mysql2's default connection collation is

@@ -30,6 +30,7 @@ import {
   MISSING_PLOT_COORDINATE_SCOPE
 } from '../../lib/csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../../lib/csv-to-sql-shared';
+import { testDbServerOptions } from '../setup/test-db-connection';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1127,10 +1128,7 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
 
     // Acquire the lock on a separate connection to simulate a concurrent run.
     const conn2 = await mysql.createConnection({
-      host: DEFAULT_TEST_CONFIG.host,
-      user: DEFAULT_TEST_CONFIG.user,
-      password: DEFAULT_TEST_CONFIG.password,
-      port: DEFAULT_TEST_CONFIG.port,
+      ...testDbServerOptions(),
       database: dbName
     });
 

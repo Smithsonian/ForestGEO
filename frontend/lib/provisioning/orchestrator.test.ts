@@ -26,6 +26,7 @@ import {
 } from './orchestrator';
 import ailogger from '@/ailogger';
 import type { ProvisioningInput } from './types';
+import { testDbServerOptions } from '@/tests/setup/test-db-connection';
 
 const CATALOG_TABLES_FILE = path.join(process.cwd(), 'db/sql/catalog-provisioning-tables.sql');
 const POLL_INTERVAL_MS = 200;
@@ -399,10 +400,7 @@ describe('orchestrator', () => {
 
   beforeAll(async () => {
     pool = mysql.createPool({
-      host: process.env.TEST_DB_HOST || 'localhost',
-      port: Number(process.env.TEST_DB_PORT || 3306),
-      user: process.env.TEST_DB_USER || 'root',
-      password: process.env.TEST_DB_PASSWORD || 'testpassword',
+      ...testDbServerOptions(),
       multipleStatements: true,
       connectionLimit: 10
     });
@@ -988,10 +986,7 @@ describe('orchestrator', () => {
       // Use a dedicated pool so the WeakMap-cached bootstrap promise from the
       // shared `pool` does not short-circuit the test.
       const isolatedPool = mysql.createPool({
-        host: process.env.TEST_DB_HOST || 'localhost',
-        port: Number(process.env.TEST_DB_PORT || 3306),
-        user: process.env.TEST_DB_USER || 'root',
-        password: process.env.TEST_DB_PASSWORD || 'testpassword',
+        ...testDbServerOptions(),
         multipleStatements: true,
         connectionLimit: 4
       });

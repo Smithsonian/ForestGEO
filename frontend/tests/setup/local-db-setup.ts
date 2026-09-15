@@ -20,7 +20,8 @@
  *   });
  */
 
-import mysql from 'mysql2/promise';
+import mysql, { type ConnectionOptions } from 'mysql2/promise';
+import { TEST_DB_DRIVER_TIMEZONE, testDbServerOptions } from './test-db-connection';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -52,6 +53,7 @@ export interface TestDatabaseConfig {
   port: number;
   database: string;
   multipleStatements: boolean;
+  timezone?: ConnectionOptions['timezone'];
 }
 
 // Type definitions for test data entities
@@ -105,10 +107,7 @@ export interface TestData {
 // Default configuration for local testing
 // These defaults match docker-compose.yml for seamless local development
 export const DEFAULT_TEST_CONFIG: TestDatabaseConfig = {
-  host: process.env.TEST_DB_HOST || 'localhost',
-  user: process.env.TEST_DB_USER || 'root',
-  password: process.env.TEST_DB_PASSWORD || 'testpassword',
-  port: parseInt(process.env.TEST_DB_PORT || '3306'),
+  ...testDbServerOptions(),
   database: `forestgeo_test_${process.env.VITEST_POOL_ID || 'default'}`,
   multipleStatements: true
 };
@@ -150,6 +149,7 @@ async function connectWithRetry(config: TestDatabaseConfig, retryConfig = CONNEC
         password: config.password,
         port: config.port,
         multipleStatements: true,
+        timezone: config.timezone ?? TEST_DB_DRIVER_TIMEZONE,
         charset: 'UTF8MB4_0900_AI_CI',
         ...(isRemoteHost && { ssl: { rejectUnauthorized: false } })
       });

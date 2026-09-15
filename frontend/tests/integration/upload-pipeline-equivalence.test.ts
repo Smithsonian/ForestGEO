@@ -57,10 +57,6 @@ if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
   );
 }
 
-const TEST_DB_PORT = Number(process.env.TEST_DB_PORT || 3306);
-const TEST_DB_USER = process.env.TEST_DB_USER || 'root';
-const TEST_DB_PASSWORD = process.env.TEST_DB_PASSWORD || 'testpassword';
-
 // ---------------------------------------------------------------------------
 // Shared state bridge — identical pattern to upload-worker.test.ts: route every
 // schema-side query through one real MySQL connection, and the catalog through
@@ -172,6 +168,7 @@ import { ingestBatch } from '@/lib/uploads/ingest-batch';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { recordFailedMeasurementRows } from '@/lib/uploads/record-invalid-rows';
 import type { FailedMeasurementsRDS } from '@/lib/db/definitions/core';
+import { testDbServerOptions } from '../setup/test-db-connection';
 
 // ---------------------------------------------------------------------------
 // Fixture — ONE CSV through both pipelines.
@@ -275,10 +272,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
     sharedState.connection = connection;
 
     catalogPool = mysql.createPool({
-      host: TEST_DB_HOST,
-      port: TEST_DB_PORT,
-      user: TEST_DB_USER,
-      password: TEST_DB_PASSWORD,
+      ...testDbServerOptions(),
       connectionLimit: 5
     });
     sharedState.catalogPool = catalogPool;
