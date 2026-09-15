@@ -21,7 +21,8 @@
  *
  * Usage:
  *   npx tsx scripts/check-schema-contract.ts --all-sites
- *   npx tsx scripts/check-schema-contract.ts --schema forestgeo_test_default
+ *   (run the integration suite with TEST_DB_NAMESPACE=local first; singleFork makes the pool id 1, so the harness schema is forestgeo_test_local_1)
+ *   npx tsx scripts/check-schema-contract.ts --schema forestgeo_test_local_1
  */
 
 import path from 'path';

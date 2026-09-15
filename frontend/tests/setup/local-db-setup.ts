@@ -20,8 +20,9 @@
  *   });
  */
 
+import { createHash } from 'crypto';
 import mysql, { type ConnectionOptions } from 'mysql2/promise';
-import { TEST_DB_DRIVER_TIMEZONE, testDbServerOptions } from './test-db-connection';
+import { TEST_DB_DRIVER_TIMEZONE, TEST_DB_NAME_PREFIX, testDbServerOptions } from './test-db-connection';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -104,11 +105,50 @@ export interface TestData {
   attributes: TestAttribute[];
 }
 
+export { TEST_DB_NAME_PREFIX } from './test-db-connection';
+const TEST_DB_NAME_SEGMENT_PATTERN = /^[a-z0-9_]{1,32}$/;
+const WORKTREE_NAMESPACE_HEX_LENGTH = 8;
+
+/**
+ * Picks the namespace segment of the test database name.
+ *
+ * An explicit TEST_DB_NAMESPACE wins so an operator can predict the name.
+ * Otherwise the worktree path is hashed: two checkouts running the suite at
+ * once get different schemas, while a rerun in the same checkout reuses (and
+ * therefore reclaims, via DROP DATABASE IF EXISTS) its own schema. A process
+ * ID would also separate concurrent runs, but it leaks one schema per
+ * aborted run and nothing can predict it from outside the process. The hash
+ * key is the directory the suite is started from, so always launch it from
+ * `frontend/`; two concurrent runs in the same checkout still share one
+ * schema.
+ */
+export function resolveTestDatabaseNamespace(explicitNamespace: string | undefined, worktreePath: string): string {
+  if (explicitNamespace) {
+    if (!TEST_DB_NAME_SEGMENT_PATTERN.test(explicitNamespace)) {
+      throw new Error(`TEST_DB_NAMESPACE ${JSON.stringify(explicitNamespace)} must match ${TEST_DB_NAME_SEGMENT_PATTERN}`);
+    }
+    return explicitNamespace;
+  }
+  return createHash('sha256').update(worktreePath).digest('hex').slice(0, WORKTREE_NAMESPACE_HEX_LENGTH);
+}
+
+export function testDatabaseName(namespace: string, poolId: string): string {
+  for (const [segmentName, segment] of [
+    ['namespace', namespace],
+    ['pool id', poolId]
+  ] as const) {
+    if (!TEST_DB_NAME_SEGMENT_PATTERN.test(segment)) {
+      throw new Error(`test database ${segmentName} ${JSON.stringify(segment)} must match ${TEST_DB_NAME_SEGMENT_PATTERN}`);
+    }
+  }
+  return `${TEST_DB_NAME_PREFIX}${namespace}_${poolId}`;
+}
+
 // Default configuration for local testing
 // These defaults match docker-compose.yml for seamless local development
 export const DEFAULT_TEST_CONFIG: TestDatabaseConfig = {
   ...testDbServerOptions(),
-  database: `forestgeo_test_${process.env.VITEST_POOL_ID || 'default'}`,
+  database: testDatabaseName(resolveTestDatabaseNamespace(process.env.TEST_DB_NAMESPACE, process.cwd()), process.env.VITEST_POOL_ID || 'default'),
   multipleStatements: true
 };
 

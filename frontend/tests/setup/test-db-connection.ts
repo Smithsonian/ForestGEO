@@ -11,6 +11,8 @@
 
 export const TEST_DB_DRIVER_TIMEZONE = 'Z';
 
+export const TEST_DB_NAME_PREFIX = 'forestgeo_test_';
+
 export interface TestDbServerOptions {
   host: string;
   port: number;
