@@ -17,7 +17,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
+import { setupTestDatabase, teardownTestDatabase, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
+import { TEST_DB_DRIVER_TIMEZONE } from '../setup/test-db-connection';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 
 function toBool(value: unknown): boolean {
@@ -68,10 +69,14 @@ const EXPECTED_TABLES = [
 // Expected stored procedures
 const EXPECTED_PROCEDURES = ['bulkingestionprocess'] as const;
 
+// A fixed instant, not new Date(), so the offset a local-zone driver applies,
+// and therefore the delta this test reports, is the same on every run.
+const DATE_BINDING_PROBE_ISO = '2024-01-02T03:04:05.000Z';
+
 describe('Infrastructure Validation', () => {
   let connection: Connection;
   let testData: TestData;
-  let config: { database: string };
+  let config: TestDatabaseConfig;
 
   beforeAll(async () => {
     const setup = await setupTestDatabase();
@@ -93,6 +98,46 @@ describe('Infrastructure Validation', () => {
     it('should be using the correct test database', async () => {
       const [result] = await connection.query<RowDataPacket[]>('SELECT DATABASE() as db');
       expect(result[0].db).toMatch(/^forestgeo_test_/);
+    });
+
+    it('runs against a MySQL server whose session clock is UTC', async () => {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT @@session.time_zone AS sessionTimeZone,
+                @@system_time_zone AS systemTimeZone,
+                TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) AS serverOffsetSeconds`
+      );
+      const { sessionTimeZone, systemTimeZone, serverOffsetSeconds } = rows[0];
+      const serverOffset = Number(serverOffsetSeconds);
+      expect(
+        serverOffset,
+        `MySQL at ${config.host}:${config.port} runs NOW() ${serverOffset}s from UTC ` +
+          `(session time_zone=${sessionTimeZone}, system_time_zone=${systemTimeZone}). ` +
+          'The app and this harness both require a UTC server. Run `lsof -nP -iTCP:3306 -sTCP:LISTEN`: ' +
+          'only the Docker proxy should own the port; a Homebrew or scratch mysqld runs in the host zone.'
+      ).toBe(0);
+    });
+
+    it('binds and decodes timestamps as UTC on the harness connection', async () => {
+      const [serverClock] = await connection.query<RowDataPacket[]>('SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) AS serverOffsetSeconds');
+      const serverOffsetSeconds = Number(serverClock[0].serverOffsetSeconds);
+
+      const fixedInstant = new Date(DATE_BINDING_PROBE_ISO);
+      const [bound] = await connection.query<RowDataPacket[]>('SELECT UNIX_TIMESTAMP(?) * 1000 AS boundEpochMs', [fixedInstant]);
+      const boundEpochMs = Number(bound[0].boundEpochMs);
+      expect(
+        boundEpochMs,
+        `mysql2 encoded ${DATE_BINDING_PROBE_ISO} ${boundEpochMs - fixedInstant.getTime()}ms off the instant ` +
+          `(runtime offset ${new Date().getTimezoneOffset()} min, server offset ${serverOffsetSeconds}s). ` +
+          `DEFAULT_TEST_CONFIG.timezone must be '${TEST_DB_DRIVER_TIMEZONE}'; ` +
+          'a non-zero server offset means the server-clock test above is the real failure, not the driver.'
+      ).toBe(fixedInstant.getTime());
+
+      const [clock] = await connection.query<RowDataPacket[]>('SELECT NOW() AS nowValue, UNIX_TIMESTAMP(NOW()) * 1000 AS nowEpochMs');
+      const decodedNowMs = new Date(clock[0].nowValue).getTime();
+      expect(
+        decodedNowMs,
+        `mysql2 decoded NOW() ${decodedNowMs - Number(clock[0].nowEpochMs)}ms off the server epoch; the harness connection is not decoding DATETIME as UTC`
+      ).toBe(Number(clock[0].nowEpochMs));
     });
   });
 
