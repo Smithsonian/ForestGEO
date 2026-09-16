@@ -12,6 +12,8 @@ import type { GridColDef, GridPreProcessEditCellProps } from '@mui/x-data-grid';
 // The component's module-level E2E_DISABLE_VIRTUALIZATION constant is read once at import
 // time. It must be true before IsolatedDataGridCommons is imported, or the real DataGrid
 // virtualizes rows out of the jsdom DOM and the seeded row never renders.
+// Never unset afterward: vitest.config.mts sets poolOptions.threads.isolate: true, so this
+// file's module registry (and this env var) is isolated per file and never leaks to others.
 vi.hoisted(() => {
   process.env.NEXT_PUBLIC_E2E_TESTING = 'true';
 });
@@ -26,8 +28,6 @@ import { preprocessor } from '@/components/client/datagridcolumns';
 const mockFetch = vi.fn();
 const mockTriggerRefresh = vi.fn();
 
-// This suite never installs fake timers (vi.useFakeTimers is never called), so there is
-// nothing for an afterEach(() => vi.useRealTimers()) to undo.
 const TEST_SCHEMA = 'testschema';
 // GridEditInputCell's own default when no debounceMs override is passed (see its L~53
 // in node_modules/@mui/x-data-grid/components/cell/GridEditInputCell.js).
@@ -35,10 +35,10 @@ const MUI_DEFAULT_EDIT_DEBOUNCE_MS = 200;
 // Long enough to clear MUI's default debounce (with headroom) even if a regression
 // reintroduced it - this is the "normal", not-fast-clicking case.
 const PAST_DEBOUNCE_WAIT_MS = MUI_DEFAULT_EDIT_DEBOUNCE_MS + 100;
-// The delayed-save test awaits PAST_DEBOUNCE_WAIT_MS on real timers on top of the render
-// + PATCH round trip other tests in this file need; give it headroom above that wait
-// rather than vitest's default 15s testTimeout headroom guess.
-const DELAYED_SAVE_TEST_TIMEOUT_MS = PAST_DEBOUNCE_WAIT_MS + 5000;
+// Headroom for the render + PATCH round trip the delayed-save test still has to do after
+// its PAST_DEBOUNCE_WAIT_MS real-timer wait, on top of CI-load jitter.
+const GRID_RENDER_SLACK_MS = 5000;
+const DELAYED_SAVE_TEST_TIMEOUT_MS = PAST_DEBOUNCE_WAIT_MS + GRID_RENDER_SLACK_MS;
 
 const ATTRIBUTE_CODE = 'DIR26';
 const ORIGINAL_DESCRIPTION = 'Original attribute description';
@@ -302,16 +302,24 @@ describe('IsolatedDataGridCommons - real MUI edit-cell debounce (#481)', () => {
     // wire preProcessEditCellProps: params => preprocessor(params). That column config
     // makes setRowEditingEditCellValue take a DIFFERENT branch than the first test above
     // (useGridRowEditing.js ~L494-531): the typed value is written via
-    // updateOrDeleteFieldState inside the `new Promise` executor, ahead of an async
-    // preprocessor() call, instead of the unconditional synchronous write the
-    // no-preProcessEditCellProps branch uses. Nothing else in this suite exercises that
-    // branch - this pins that it is ALSO fixed by EDIT_CELL_DEBOUNCE_MS=0, not just the
-    // plain-column branch.
+    // updateOrDeleteFieldState inside the `new Promise` executor, ahead of MUI's
+    // Promise.resolve(...).then(...) continuation (preprocessor itself is synchronous;
+    // MUI is what defers applying its result), instead of the unconditional synchronous
+    // write the no-preProcessEditCellProps branch uses. Nothing else in this suite
+    // exercises that branch - this pins that it is ALSO fixed by EDIT_CELL_DEBOUNCE_MS=0,
+    // not just the plain-column branch.
     const getPatchBody = mockAttributesFetch(SEEDED_ROW_WITH_DBH);
     const { container } = renderAttributesGridWithDBHColumn();
 
+    // Query the gridcell directly rather than screen.getByText(String(ORIGINAL_DBH)):
+    // the default numeric colDef (gridNumericColDef.js) formats cell values with
+    // Number.prototype.toLocaleString(), which is locale-sensitive and need not match a
+    // plain String() of the number. [role="gridcell"] excludes the "DBH" column header,
+    // which also carries data-field="measuredDBH".
     await waitFor(() => {
-      expect(screen.getByText(String(ORIGINAL_DBH))).toBeInTheDocument();
+      const dbhCell = container.querySelector('[role="gridcell"][data-field="measuredDBH"]');
+      expect(dbhCell, 'the measuredDBH cell must render before editing starts').not.toBeNull();
+      expect(dbhCell?.textContent).toBe(ORIGINAL_DBH.toLocaleString());
     });
     const input = await enterEditModeAndGetCellInput(container, 'measuredDBH');
 
