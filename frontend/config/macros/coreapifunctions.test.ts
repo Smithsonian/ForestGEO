@@ -331,6 +331,7 @@ describe('CoreAPIFunctions', () => {
       expect(mockConnectionManager.beginTransaction).toHaveBeenCalled();
       expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('transaction-123');
       expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ changed: true });
     });
 
     it('rolls back via withTransaction when a write fails', async () => {
@@ -595,6 +596,34 @@ describe('CoreAPIFunctions', () => {
         expect(rows[0].plotID).toBe(17);
         expect(rows[0].censusID).toBe(1);
         expectChangelogWritesAreTransactionScoped(mockConnectionManager);
+      });
+
+      /**
+       * REGRESSION (#481): a matched UPDATE whose persisted before/after
+       * snapshots are identical (the grid resent a value that already matched
+       * the database) must report success without a changelog row — but the
+       * response body used to give the client no way to tell that apart from a
+       * real edit, so the grid toasted "Row successfully updated!" either way.
+       */
+      it('reports changed:false and logs nothing for a matched re-save that changes no column', async () => {
+        const persistedRow = { PlotID: 17, PlotName: 'Harvard Forest', DefaultDBHUnits: 'cm' };
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            newRow: { PlotID: 17, PlotName: 'Harvard Forest', DefaultDBHUnits: 'cm' },
+            oldRow: persistedRow
+          })
+        });
+
+        mockPatchSnapshots(persistedRow, persistedRow);
+
+        const response = await PATCH(mockRequest, {
+          params: Promise.resolve({ dataType: 'plots', slugs: [TEST_SCHEMA, 'plotID'] })
+        });
+
+        expect(response.status).toBe(HTTPResponses.OK);
+        await expect(response.json()).resolves.toMatchObject({ changed: false });
+        expect(changelogRows(mockConnectionManager), 'a no-op save must not fabricate a changelog row').toHaveLength(0);
       });
 
       it('writes nothing when the UPDATE matches zero rows', async () => {

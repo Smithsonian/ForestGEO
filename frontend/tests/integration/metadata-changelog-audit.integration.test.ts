@@ -544,6 +544,87 @@ describe('census context', () => {
   });
 });
 
+describe('attributes', () => {
+  /**
+   * REGRESSION (#481): the grid PATCHed the attribute's UNCHANGED description
+   * back to the server. The handler correctly matched the row, correctly found
+   * persistedBefore === persistedAfter, and correctly logged nothing — but the
+   * 200 body gave the grid no way to tell "matched and changed" from "matched
+   * and already had that value", so it toasted "Row successfully updated!" for
+   * an edit that never happened.
+   */
+  const SEEDED_ATTRIBUTE_CODE = 'A';
+  const SEEDED_ATTRIBUTE_DESCRIPTION = 'Alive';
+  const SEEDED_ATTRIBUTE_STATUS = 'alive';
+  const CORRECTED_ATTRIBUTE_DESCRIPTION = 'Alive, standing';
+
+  /** RDS-shaped (camelCase) attributes row, the shape the grid PATCHes with. */
+  function attributeGridRow(): Record<string, unknown> {
+    return {
+      id: 1,
+      code: SEEDED_ATTRIBUTE_CODE,
+      description: SEEDED_ATTRIBUTE_DESCRIPTION,
+      status: SEEDED_ATTRIBUTE_STATUS
+    };
+  }
+
+  it('answers changed:false and logs nothing when the save carries the persisted values', async () => {
+    const oldRow = attributeGridRow();
+
+    // The exact #481 shape: newRow is byte-for-byte the same as oldRow, the way
+    // isolateddatagridcommons re-sends the grid row unchanged.
+    const response = await patchRow('attributes', 'code', oldRow, { ...oldRow });
+    expect(response.status, 'a matched no-op save must still report success').toBe(HTTPResponses.OK);
+
+    const body = await response.json();
+    // eslint-disable-next-line no-console
+    console.log('[metadata-changelog-audit] attributes no-op save response body:', body);
+    expect(body.changed, 'the client has no other way to tell "matched" from "matched and changed"').toBe(false);
+
+    const rows = await readChangelog('attributes');
+    logChangelog('attributes no-op save', rows);
+    expect(rows, 'a no-op save must not fabricate a changelog row').toHaveLength(0);
+  });
+
+  it('records a description edit as an UPDATE with no plot scope', async () => {
+    const oldRow = attributeGridRow();
+    const newRow = { ...oldRow, description: CORRECTED_ATTRIBUTE_DESCRIPTION };
+
+    const response = await patchRow('attributes', 'code', oldRow, newRow);
+    expect(response.status, 'the attributes PATCH must succeed').toBe(HTTPResponses.OK);
+
+    const body = await response.json();
+    // eslint-disable-next-line no-console
+    console.log('[metadata-changelog-audit] attributes description edit response body:', body);
+    expect(body.changed, 'a real edit must report changed:true').toBe(true);
+
+    const rows = await readChangelog('attributes');
+    logChangelog('attributes description edit', rows);
+
+    expect(rows).toHaveLength(1);
+    const [entry] = rows;
+    expect(entry.Operation).toBe(CHANGELOG_OPERATION.UPDATE);
+    expect(entry.RecordID).toBe(SEEDED_ATTRIBUTE_CODE);
+    expect(entry.PlotID, 'attributes has no PlotID column').toBeNull();
+    expect(entry.ChangedBy).toBe(TEST_USER_EMAIL);
+
+    const before = rowState(entry.OldRowState)!;
+    const after = rowState(entry.NewRowState)!;
+    expect(before.Description).toBe(SEEDED_ATTRIBUTE_DESCRIPTION);
+    expect(after.Description).toBe(CORRECTED_ATTRIBUTE_DESCRIPTION);
+
+    // Field-by-field: the log must show WHICH column moved, not just that a row
+    // exists — that would pass even if both states were identical.
+    const changedFields = Object.keys(after).filter(field => JSON.stringify(after[field]) !== JSON.stringify(before[field]));
+    expect(changedFields).toEqual(['Description']);
+
+    const [attributesAfter] = await setupConnection!.query<RowDataPacket[]>(`SELECT Description FROM \`${schema}\`.attributes WHERE Code = ?`, [
+      SEEDED_ATTRIBUTE_CODE
+    ]);
+    expect(attributesAfter[0].Description).toBe(CORRECTED_ATTRIBUTE_DESCRIPTION);
+  });
+});
+
 describe('ChangedBy attribution', () => {
   it('truncates an over-length session identity instead of rolling the edit back', async () => {
     // ChangedBy is varchar(64). Under STRICT_TRANS_TABLES an over-length value
