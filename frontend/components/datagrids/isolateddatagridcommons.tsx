@@ -884,11 +884,15 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           await onDataUpdate(updatedRow, promiseArguments.oldRow);
         }
       } catch (error: unknown) {
-        // updateRow already toasts its own fetch errors before rejecting; editFlowOverride
-        // does not, so without this the Save-icon flow (whose promiseArguments.reject is a
-        // no-op set in handleSaveClick) would swallow a rejected override silently.
-        const message = error instanceof Error ? error.message : String(error);
-        setSnackbar({ children: `Error: ${message}`, severity: 'error' });
+        // updateRow already toasts its own fetch errors before rejecting, but it rejects
+        // with the GridRowModel it failed to save, not an Error — toasting unconditionally
+        // here would stringify that row (`[object Object]`) and overwrite updateRow's
+        // already-accurate toast (there's a single snackbar slot; last write wins). Only
+        // editFlowOverride rejects with an Error, so gating on `instanceof Error` toasts
+        // exactly the case updateRow doesn't already cover, and leaves updateRow's toast alone.
+        if (error instanceof Error) {
+          setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+        }
         promiseArguments.reject(error);
       }
 
