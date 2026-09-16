@@ -115,6 +115,12 @@ function rowState(value: ChangelogRow['OldRowState']): Record<string, unknown> |
   return typeof value === 'string' ? JSON.parse(value) : value;
 }
 
+/** Verbose logging for a PATCH response body, mirroring logChangelog's style. */
+function logResponseBody(label: string, body: unknown): void {
+  // eslint-disable-next-line no-console
+  console.log(`[metadata-changelog-audit] ${label}:`, body);
+}
+
 function logChangelog(label: string, rows: ChangelogRow[]): void {
   // eslint-disable-next-line no-console
   console.log(
@@ -454,6 +460,12 @@ describe('personnel census activity', () => {
     const activation = await patchRow('personnel', 'personnelID', gridRow, { ...gridRow, censusActive: true });
     expect(activation.status, 'the personnel PATCH must succeed').toBe(HTTPResponses.OK);
 
+    const activationBody = await activation.json();
+    logResponseBody('personnel activation response', activationBody);
+    // The personnel row itself is untouched by this edit; only the new
+    // censusactivepersonnel relation makes this a real mutation.
+    expect(activationBody.changed, 'activating a relation is a real change').toBe(true);
+
     const activated = await readRelations(personnelID);
     expect(activated, 'toggling censusActive on must persist the relation, not silently no-op').toHaveLength(1);
     expect(Number(activated[0].CensusID)).toBe(censusID);
@@ -470,6 +482,11 @@ describe('personnel census activity', () => {
 
     const deactivation = await patchRow('personnel', 'personnelID', gridRow, { ...gridRow, censusActive: false });
     expect(deactivation.status).toBe(HTTPResponses.OK);
+
+    const deactivationBody = await deactivation.json();
+    logResponseBody('personnel deactivation response', deactivationBody);
+    expect(deactivationBody.changed, 'removing a relation is a real change').toBe(true);
+
     expect(await readRelations(personnelID), 'toggling censusActive off must remove the relation').toHaveLength(0);
 
     const deactivationRows = await readChangelog('censusactivepersonnel');
@@ -554,22 +571,34 @@ describe('attributes', () => {
    * an edit that never happened.
    */
   const SEEDED_ATTRIBUTE_CODE = 'A';
-  const SEEDED_ATTRIBUTE_DESCRIPTION = 'Alive';
-  const SEEDED_ATTRIBUTE_STATUS = 'alive';
   const CORRECTED_ATTRIBUTE_DESCRIPTION = 'Alive, standing';
 
+  /**
+   * Reads the seeded attribute row from the DB rather than hardcoding its
+   * Description/Status, the same way seededPlot() does for plots. The edit
+   * test below permanently rewrites this row's Description, so a test that
+   * assumed the original seed text would only pass when it happened to run
+   * first.
+   */
+  async function seededAttribute(code: string = SEEDED_ATTRIBUTE_CODE): Promise<Record<string, unknown>> {
+    const [rows] = await setupConnection!.query<RowDataPacket[]>(`SELECT * FROM \`${schema}\`.attributes WHERE Code = ?`, [code]);
+    expect(rows, `the harness must seed attribute code ${code}`).toHaveLength(1);
+    return rows[0] as Record<string, unknown>;
+  }
+
   /** RDS-shaped (camelCase) attributes row, the shape the grid PATCHes with. */
-  function attributeGridRow(): Record<string, unknown> {
+  function attributeGridRow(attribute: Record<string, unknown>): Record<string, unknown> {
     return {
       id: 1,
-      code: SEEDED_ATTRIBUTE_CODE,
-      description: SEEDED_ATTRIBUTE_DESCRIPTION,
-      status: SEEDED_ATTRIBUTE_STATUS
+      code: attribute.Code,
+      description: attribute.Description,
+      status: attribute.Status
     };
   }
 
   it('answers changed:false and logs nothing when the save carries the persisted values', async () => {
-    const oldRow = attributeGridRow();
+    const attribute = await seededAttribute();
+    const oldRow = attributeGridRow(attribute);
 
     // The exact #481 shape: newRow is byte-for-byte the same as oldRow, the way
     // isolateddatagridcommons re-sends the grid row unchanged.
@@ -577,8 +606,7 @@ describe('attributes', () => {
     expect(response.status, 'a matched no-op save must still report success').toBe(HTTPResponses.OK);
 
     const body = await response.json();
-    // eslint-disable-next-line no-console
-    console.log('[metadata-changelog-audit] attributes no-op save response body:', body);
+    logResponseBody('attributes no-op save response', body);
     expect(body.changed, 'the client has no other way to tell "matched" from "matched and changed"').toBe(false);
 
     const rows = await readChangelog('attributes');
@@ -587,15 +615,15 @@ describe('attributes', () => {
   });
 
   it('records a description edit as an UPDATE with no plot scope', async () => {
-    const oldRow = attributeGridRow();
+    const attribute = await seededAttribute();
+    const oldRow = attributeGridRow(attribute);
     const newRow = { ...oldRow, description: CORRECTED_ATTRIBUTE_DESCRIPTION };
 
     const response = await patchRow('attributes', 'code', oldRow, newRow);
     expect(response.status, 'the attributes PATCH must succeed').toBe(HTTPResponses.OK);
 
     const body = await response.json();
-    // eslint-disable-next-line no-console
-    console.log('[metadata-changelog-audit] attributes description edit response body:', body);
+    logResponseBody('attributes description edit response', body);
     expect(body.changed, 'a real edit must report changed:true').toBe(true);
 
     const rows = await readChangelog('attributes');
@@ -610,7 +638,7 @@ describe('attributes', () => {
 
     const before = rowState(entry.OldRowState)!;
     const after = rowState(entry.NewRowState)!;
-    expect(before.Description).toBe(SEEDED_ATTRIBUTE_DESCRIPTION);
+    expect(before.Description).toBe(attribute.Description);
     expect(after.Description).toBe(CORRECTED_ATTRIBUTE_DESCRIPTION);
 
     // Field-by-field: the log must show WHICH column moved, not just that a row

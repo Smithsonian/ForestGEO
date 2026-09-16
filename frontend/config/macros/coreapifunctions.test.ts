@@ -354,9 +354,39 @@ describe('CoreAPIFunctions', () => {
       expect(response.status).toBe(500);
     });
 
+    /**
+     * A slice-driving stand-in for the mocked handleUpsertForSlices: real
+     * production code (components/processors/processorhelperfunctions.tsx)
+     * invokes its 6th argument (onSliceUpsert) once per family/genus/species
+     * slice. A bare `mockResolvedValue` never calls that observer, so PATCH's
+     * slicesChanged tracking — and recordTaxonomySliceUpsert, which runs for
+     * real inside the observer — would otherwise have zero coverage here.
+     */
+    function mockHandleUpsertForSlicesDriving(slices: { sliceKey: string; id: number; operation: string; rowData: Record<string, unknown> }[]) {
+      return async (_cm: unknown, _schema: unknown, _newRow: unknown, _config: unknown, _txID: unknown, onSliceUpsert: (slice: unknown) => Promise<void>) => {
+        const insertedIds: Record<string, number> = {};
+        for (const slice of slices) {
+          insertedIds[slice.sliceKey] = slice.id;
+          await onSliceUpsert?.(slice);
+        }
+        return insertedIds;
+      };
+    }
+
     it('should handle alltaxonomiesview dataType with handleUpsertForSlices', async () => {
       const { handleUpsertForSlices } = await import('@/components/processors/processorhelperfunctions');
-      (handleUpsertForSlices as any).mockResolvedValue({ family: 1, genus: 2, species: 3 });
+      mockTaxonomyReadback({
+        family: { FamilyID: 1, Family: 'Fabaceae' },
+        genus: { GenusID: 2, FamilyID: 1, Genus: 'Acacia' },
+        species: { SpeciesID: 3, GenusID: 2, SpeciesCode: 'ACACIA' }
+      });
+      (handleUpsertForSlices as any).mockImplementation(
+        mockHandleUpsertForSlicesDriving([
+          { sliceKey: 'family', id: 1, operation: 'unchanged', rowData: {} },
+          { sliceKey: 'genus', id: 2, operation: 'unchanged', rowData: {} },
+          { sliceKey: 'species', id: 3, operation: 'unchanged', rowData: {} }
+        ])
+      );
 
       const mockRequest = new NextRequest('http://localhost/api/test', {
         method: 'PATCH',
@@ -383,6 +413,45 @@ describe('CoreAPIFunctions', () => {
         expect.any(Function)
       );
       expect(response.status).toBe(200);
+      // Every slice reported 'unchanged': no mutation was recorded, so the
+      // response must say so rather than defaulting to a false changed:true.
+      await expect(response.json()).resolves.toMatchObject({ changed: false });
+      expect(changelogRows(mockConnectionManager), 'an unchanged slice must not fabricate a changelog row').toHaveLength(0);
+    });
+
+    it('reports changed:true when one alltaxonomiesview slice actually upserted', async () => {
+      const { handleUpsertForSlices } = await import('@/components/processors/processorhelperfunctions');
+      mockTaxonomyReadback({
+        family: { FamilyID: 1, Family: 'Fabaceae' },
+        genus: { GenusID: 2, FamilyID: 1, Genus: 'Acacia' },
+        species: { SpeciesID: 3, GenusID: 2, SpeciesCode: 'ACACIB' }
+      });
+      (handleUpsertForSlices as any).mockImplementation(
+        mockHandleUpsertForSlicesDriving([
+          { sliceKey: 'family', id: 1, operation: 'unchanged', rowData: {} },
+          { sliceKey: 'genus', id: 2, operation: 'unchanged', rowData: {} },
+          { sliceKey: 'species', id: 3, operation: 'updated', rowData: {} }
+        ])
+      );
+
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          newRow: { SpeciesCode: 'ACACIB' },
+          oldRow: { SpeciesCode: 'ACACIA' }
+        })
+      });
+
+      const response = await PATCH(mockRequest, {
+        params: Promise.resolve({ dataType: 'alltaxonomiesview', slugs: [TEST_SCHEMA, 'speciesID'] })
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ changed: true });
+      const rows = changelogRows(mockConnectionManager);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].tableName).toBe('species');
+      expect(rows[0].operation).toBe('UPDATE');
     });
 
     /**
@@ -435,6 +504,11 @@ describe('CoreAPIFunctions', () => {
       const hasInsertQuery = queries.some((q: string) => typeof q === 'string' && q.includes('INSERT INTO') && q.includes('censusactivepersonnel'));
       expect(hasInsertQuery, 'toggling censusActive on must write the relation, not silently no-op').toBe(true);
 
+      // The personnel row itself is unchanged (mockPersonnelRelationQueries
+      // returns the same persisted row for both snapshots), so only the new
+      // relation makes this a real mutation — changed must reflect that.
+      await expect(response.json()).resolves.toMatchObject({ changed: true });
+
       const auditRows = changelogRows(mockConnectionManager);
       expect(auditRows).toHaveLength(1);
       expect(auditRows[0].tableName).toBe('censusactivepersonnel');
@@ -454,6 +528,10 @@ describe('CoreAPIFunctions', () => {
       const queries = mockConnectionManager.executeQuery.mock.calls.map((call: any) => call[0]);
       const hasDeleteQuery = queries.some((q: string) => typeof q === 'string' && q.trimStart().toUpperCase().startsWith('DELETE'));
       expect(hasDeleteQuery, 'toggling censusActive off must remove the relation').toBe(true);
+
+      // Same reasoning as the activation case: the personnel row is unchanged,
+      // so only the removed relation makes this a real mutation.
+      await expect(response.json()).resolves.toMatchObject({ changed: true });
 
       const auditRows = changelogRows(mockConnectionManager);
       expect(auditRows).toHaveLength(1);
