@@ -5,8 +5,9 @@
 // mocked grid cannot reproduce this: the bug lives inside MUI's own editing-state hook.
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
+import type { GridColDef, GridPreProcessEditCellProps } from '@mui/x-data-grid';
 
 // The component's module-level E2E_DISABLE_VIRTUALIZATION constant is read once at import
 // time. It must be true before IsolatedDataGridCommons is imported, or the real DataGrid
@@ -16,19 +17,59 @@ vi.hoisted(() => {
 });
 
 import IsolatedDataGridCommons from './isolateddatagridcommons';
+// The real preprocessor wired onto stemLocalX/stemLocalY/measuredDBH/measuredHOM in
+// production (components/client/datagridcolumns.tsx ~L559-748, reaching the commons via
+// isolatedmsvstagingdatagrid.tsx). Using it here - not a hand-rolled stand-in - is what
+// makes the third test below pin the real preProcessEditCellProps codepath.
+import { preprocessor } from '@/components/client/datagridcolumns';
 
 const mockFetch = vi.fn();
 const mockTriggerRefresh = vi.fn();
+
+// This suite never installs fake timers (vi.useFakeTimers is never called), so there is
+// nothing for an afterEach(() => vi.useRealTimers()) to undo.
+const TEST_SCHEMA = 'testschema';
+// GridEditInputCell's own default when no debounceMs override is passed (see its L~53
+// in node_modules/@mui/x-data-grid/components/cell/GridEditInputCell.js).
+const MUI_DEFAULT_EDIT_DEBOUNCE_MS = 200;
+// Long enough to clear MUI's default debounce (with headroom) even if a regression
+// reintroduced it - this is the "normal", not-fast-clicking case.
+const PAST_DEBOUNCE_WAIT_MS = MUI_DEFAULT_EDIT_DEBOUNCE_MS + 100;
+// The delayed-save test awaits PAST_DEBOUNCE_WAIT_MS on real timers on top of the render
+// + PATCH round trip other tests in this file need; give it headroom above that wait
+// rather than vitest's default 15s testTimeout headroom guess.
+const DELAYED_SAVE_TEST_TIMEOUT_MS = PAST_DEBOUNCE_WAIT_MS + 5000;
 
 const ATTRIBUTE_CODE = 'DIR26';
 const ORIGINAL_DESCRIPTION = 'Original attribute description';
 const EDITED_DESCRIPTION = 'Edited attribute description';
 const SEEDED_ROW = { id: 1, code: ATTRIBUTE_CODE, description: ORIGINAL_DESCRIPTION };
 
-const ATTRIBUTE_GRID_COLUMNS = [
+const ATTRIBUTE_GRID_COLUMNS: GridColDef[] = [
   { field: 'id', editable: false },
   { field: 'code', editable: true },
   { field: 'description', editable: true }
+];
+
+// Mirrors stemLocalX/measuredDBH/measuredHOM in datagridcolumns.tsx: a `type: 'number'`
+// column with a real preProcessEditCellProps validator wired in. The gridType/route
+// wiring below is still 'attributes' - a stand-in for isolatedmsvstagingdatagrid.tsx's
+// measurementssummary grid, which needs a census context this file's mocks don't set up -
+// because the MUI-internal codepath under test (setRowEditingEditCellValue's
+// preProcessEditCellProps branch, useGridRowEditing.js ~L494-531) is selected purely by
+// this column config, not by gridType.
+const ORIGINAL_DBH = 10.5;
+const EDITED_DBH = 15.25;
+const SEEDED_ROW_WITH_DBH = { ...SEEDED_ROW, measuredDBH: ORIGINAL_DBH };
+const ATTRIBUTE_GRID_COLUMNS_WITH_DBH: GridColDef[] = [
+  ...ATTRIBUTE_GRID_COLUMNS,
+  {
+    field: 'measuredDBH',
+    headerName: 'DBH',
+    editable: true,
+    type: 'number',
+    preProcessEditCellProps: (params: GridPreProcessEditCellProps) => preprocessor(params)
+  }
 ];
 
 vi.mock('@/lib/db/definitions/views', () => ({
@@ -63,7 +104,7 @@ vi.mock('@/app/contexts/compat-hooks', () => ({
   usePlotContext: () => ({ plotID: 1, plotName: 'Test Plot' }),
   useOrgCensusContext: () => ({ plotCensusNumber: 1, dateRanges: [{ censusID: 1 }] }),
   useQuadratContext: () => ({ quadratID: undefined }),
-  useSiteContext: () => ({ schemaName: 'testschema', siteName: 'Test Site' })
+  useSiteContext: () => ({ schemaName: TEST_SCHEMA, siteName: 'Test Site' })
 }));
 
 vi.mock('@/app/contexts/datavalidityprovider', () => ({
@@ -130,19 +171,35 @@ function renderAttributesGrid() {
   );
 }
 
-function mockAttributesFetch(patchResponse: { changed?: boolean } = { changed: true }) {
+function renderAttributesGridWithDBHColumn() {
+  return render(
+    <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+      <IsolatedDataGridCommons
+        gridType="attributes"
+        gridColumns={ATTRIBUTE_GRID_COLUMNS_WITH_DBH}
+        refresh={false}
+        setRefresh={vi.fn()}
+        dynamicButtons={[]}
+        initialRow={{ code: '', description: '', measuredDBH: 0 }}
+        onDataUpdate={vi.fn().mockResolvedValue(undefined)}
+      />
+    </SWRConfig>
+  );
+}
+
+function mockAttributesFetch(seedRow: Record<string, unknown>) {
   let patchBody: { oldRow: unknown; newRow: Record<string, unknown> } | undefined;
   mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === 'PATCH') {
       patchBody = JSON.parse(String(init.body));
       return {
         ok: true,
-        json: async () => ({ message: 'Update successful', ...patchResponse })
+        json: async () => ({ message: 'Update successful', changed: true })
       } as Response;
     }
     return {
       ok: true,
-      json: async () => ({ output: [SEEDED_ROW], totalCount: 1, finishedQuery: 'SELECT 1 FROM attributes' })
+      json: async () => ({ output: [seedRow], totalCount: 1, finishedQuery: 'SELECT 1 FROM attributes' })
     } as Response;
   });
   return () => patchBody;
@@ -157,15 +214,15 @@ function mockAttributesFetch(patchResponse: { changed?: boolean } = { changed: t
 const EDIT_ACTION_NAME = 'Edit this row';
 const SAVE_ACTION_NAME = 'Save your changes';
 
-async function enterEditModeAndGetDescriptionInput(container: HTMLElement) {
+async function enterEditModeAndGetCellInput(container: HTMLElement, field: string) {
   fireEvent.click(await screen.findByRole('menuitem', { name: EDIT_ACTION_NAME }));
 
   await waitFor(() => {
     expect(screen.getByRole('menuitem', { name: SAVE_ACTION_NAME })).toBeInTheDocument();
   });
 
-  const input = container.querySelector<HTMLInputElement>('[data-field="description"] input');
-  expect(input, 'the description cell must render a real <input> once the row enters edit mode').not.toBeNull();
+  const input = container.querySelector<HTMLInputElement>(`[data-field="${field}"] input`);
+  expect(input, `the ${field} cell must render a real <input> once the row enters edit mode`).not.toBeNull();
   return input as HTMLInputElement;
 }
 
@@ -175,18 +232,14 @@ describe('IsolatedDataGridCommons - real MUI edit-cell debounce (#481)', () => {
     global.fetch = mockFetch as any;
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("PATCHes the just-typed value when Save is clicked inside GridEditInputCell's 200ms debounce window", async () => {
-    const getPatchBody = mockAttributesFetch({ changed: true });
+    const getPatchBody = mockAttributesFetch(SEEDED_ROW);
     const { container } = renderAttributesGrid();
 
     await waitFor(() => {
       expect(screen.getByText(ORIGINAL_DESCRIPTION)).toBeInTheDocument();
     });
-    const input = await enterEditModeAndGetDescriptionInput(container);
+    const input = await enterEditModeAndGetCellInput(container, 'description');
 
     // No await, no timer advance between these two calls: this is the user's fast-click
     // window the bug lived in. If MUI's default 200ms debounce is still in effect, the
@@ -204,28 +257,67 @@ describe('IsolatedDataGridCommons - real MUI edit-cell debounce (#481)', () => {
     const body = getPatchBody();
     console.log('PATCH body (fast-click, same tick as the keystroke):', JSON.stringify(body));
 
-    expect(String(mockFetch.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[0])).toContain('/api/fixeddata/attributes/testschema/code');
+    expect(String(mockFetch.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[0])).toContain(`/api/fixeddata/attributes/${TEST_SCHEMA}/code`);
     expect(body?.newRow.description, 'a Save click in the same tick as the keystroke must still PATCH the typed value, not the pre-edit value').toBe(
       EDITED_DESCRIPTION
     );
   });
 
-  it('still PATCHes the typed value when Save is clicked well after the debounce window elapses (normal case)', async () => {
-    const getPatchBody = mockAttributesFetch({ changed: true });
-    const { container } = renderAttributesGrid();
+  it(
+    'still PATCHes the typed value when Save is clicked well after the debounce window elapses (normal case)',
+    async () => {
+      const getPatchBody = mockAttributesFetch(SEEDED_ROW);
+      const { container } = renderAttributesGrid();
+
+      await waitFor(() => {
+        expect(screen.getByText(ORIGINAL_DESCRIPTION)).toBeInTheDocument();
+      });
+
+      const input = await enterEditModeAndGetCellInput(container, 'description');
+
+      fireEvent.change(input, { target: { value: EDITED_DESCRIPTION } });
+
+      // Real timers: let MUI's (now-zero, but this proves the non-regression case regardless
+      // of the debounce value) internal timer machinery run its course before saving.
+      await new Promise(resolve => setTimeout(resolve, PAST_DEBOUNCE_WAIT_MS));
+
+      fireEvent.click(screen.getByRole('menuitem', { name: SAVE_ACTION_NAME }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+
+      await waitFor(() => {
+        const patchCalls = mockFetch.mock.calls.filter(([, init]) => init?.method === 'PATCH');
+        expect(patchCalls).toHaveLength(1);
+      });
+
+      const body = getPatchBody();
+      console.log('PATCH body (delayed Save, well past the debounce window):', JSON.stringify(body));
+
+      expect(body?.newRow.description, 'a Save click well after the debounce window must PATCH the typed value').toBe(EDITED_DESCRIPTION);
+    },
+    DELAYED_SAVE_TEST_TIMEOUT_MS
+  );
+
+  it('PATCHes the typed number when Save is clicked on a preProcessEditCellProps column inside the debounce window', async () => {
+    // stemLocalX/stemLocalY/measuredDBH/measuredHOM (datagridcolumns.tsx ~L684-748) all
+    // wire preProcessEditCellProps: params => preprocessor(params). That column config
+    // makes setRowEditingEditCellValue take a DIFFERENT branch than the first test above
+    // (useGridRowEditing.js ~L494-531): the typed value is written via
+    // updateOrDeleteFieldState inside the `new Promise` executor, ahead of an async
+    // preprocessor() call, instead of the unconditional synchronous write the
+    // no-preProcessEditCellProps branch uses. Nothing else in this suite exercises that
+    // branch - this pins that it is ALSO fixed by EDIT_CELL_DEBOUNCE_MS=0, not just the
+    // plain-column branch.
+    const getPatchBody = mockAttributesFetch(SEEDED_ROW_WITH_DBH);
+    const { container } = renderAttributesGridWithDBHColumn();
 
     await waitFor(() => {
-      expect(screen.getByText(ORIGINAL_DESCRIPTION)).toBeInTheDocument();
+      expect(screen.getByText(String(ORIGINAL_DBH))).toBeInTheDocument();
     });
+    const input = await enterEditModeAndGetCellInput(container, 'measuredDBH');
 
-    const input = await enterEditModeAndGetDescriptionInput(container);
-
-    fireEvent.change(input, { target: { value: EDITED_DESCRIPTION } });
-
-    // Real timers: let MUI's (now-zero, but this proves the non-regression case regardless
-    // of the debounce value) internal timer machinery run its course before saving.
-    await new Promise(resolve => setTimeout(resolve, 300));
-
+    // Same fast-click shape as the first test: no await, no timer advance, between the
+    // keystroke and the Save click.
+    fireEvent.change(input, { target: { value: String(EDITED_DBH) } });
     fireEvent.click(screen.getByRole('menuitem', { name: SAVE_ACTION_NAME }));
     fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
 
@@ -235,8 +327,11 @@ describe('IsolatedDataGridCommons - real MUI edit-cell debounce (#481)', () => {
     });
 
     const body = getPatchBody();
-    console.log('PATCH body (delayed Save, well past the debounce window):', JSON.stringify(body));
+    console.log('PATCH body (fast-click on a preProcessEditCellProps column):', JSON.stringify(body));
 
-    expect(body?.newRow.description, 'a Save click well after the debounce window must PATCH the typed value').toBe(EDITED_DESCRIPTION);
-  }, 10000);
+    expect(
+      body?.newRow.measuredDBH,
+      'a Save click in the same tick as the keystroke must PATCH the typed number even on a preProcessEditCellProps column, not the pre-edit value'
+    ).toBe(EDITED_DBH);
+  });
 });
