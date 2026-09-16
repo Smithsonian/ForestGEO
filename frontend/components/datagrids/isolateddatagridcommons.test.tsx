@@ -17,6 +17,7 @@ const mockTriggerRefresh = vi.fn();
 const observedGetRowHeightProps: unknown[] = [];
 let echoSamePaginationOnRender = false;
 let capturedProcessPromises: Promise<unknown>[] = [];
+const NON_JSON_ERROR_BODY = 'Service temporarily unavailable: upstream database connection refused';
 const DETACHED_ROW_ID = 'row-dropped-by-refetch';
 const ORIGINAL_TEST_SP_CODE = 'TEST_SP_CODE_A';
 const UPDATED_TEST_SP_CODE = 'TEST_SP_CODE_B';
@@ -406,17 +407,15 @@ describe('IsolatedDataGridCommons', () => {
       if (init?.method === 'PATCH') {
         patchCount += 1;
         if (patchCount === 1) {
-          return {
-            ok: false,
+          // A real Response: its body is a single-use stream, so a helper that calls
+          // json() before text() cannot recover this body and the message is lost.
+          return new Response(NON_JSON_ERROR_BODY, {
             status: 503,
             statusText: 'Service Unavailable',
-            json: async () => {
-              throw new Error('not JSON');
-            },
-            text: async () => ''
-          } as unknown as Response;
+            headers: { 'Content-Type': 'text/plain' }
+          });
         }
-        return { ok: true, status: 200, json: async () => ({ message: 'updated' }) } as Response;
+        return new Response(JSON.stringify({ message: 'updated' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       return { ok: true, json: async () => ({ output: [patchCount ? updatedRow : originalRow], totalCount: 1, finishedQuery: 'SELECT 1' }) } as Response;
     });
@@ -441,7 +440,7 @@ describe('IsolatedDataGridCommons', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('HTTP 503'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(NON_JSON_ERROR_BODY));
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -528,7 +527,10 @@ describe('IsolatedDataGridCommons', () => {
     mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'POST') {
         postCount += 1;
-        return { ok: true, json: async () => ({ message: 'created', createdIDs: { personnel: 42 } }) } as Response;
+        return new Response(JSON.stringify({ message: 'created', createdIDs: { personnel: 42 } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
       }
       return { ok: true, json: async () => ({ output: [postCount ? createdRow : originalRow], totalCount: 1, finishedQuery: 'SELECT 1' }) } as Response;
     });
@@ -647,7 +649,7 @@ describe('IsolatedDataGridCommons', () => {
     mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'POST') {
         postCount += 1;
-        return { ok: true, json: async () => ({ message: 'created' }) } as Response;
+        return new Response(JSON.stringify({ message: 'created' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       listCount += 1;
       if (listCount > 1) throw new Error('refresh unavailable');

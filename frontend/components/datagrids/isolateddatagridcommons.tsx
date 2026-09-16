@@ -145,16 +145,22 @@ function assertStableExistingRowIdentity(newRow: GridRowModel, oldRow: GridRowMo
   }
 }
 
+// A response body is a single-use stream: json() consumes it even when parsing throws,
+// so a text() retry afterwards fails with "body used already" and the server's message
+// is lost — exactly the non-JSON error bodies (App Service HTML 502, text/plain 500)
+// this helper exists to surface. Read the body once, then decide how to interpret it.
 async function readResponsePayload(response: Response): Promise<unknown> {
+  let body: string;
   try {
-    return await response.json();
+    body = await response.text();
   } catch {
-    try {
-      const text = await response.text();
-      return text.trim() ? text : null;
-    } catch {
-      return null;
-    }
+    return null;
+  }
+  if (!body.trim()) return null;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
   }
 }
 
