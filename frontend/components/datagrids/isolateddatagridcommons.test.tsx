@@ -8,6 +8,7 @@ import IsolatedDataGridCommons, {
   readPersistedGridLayout,
   writePersistedGridLayout
 } from './isolateddatagridcommons';
+import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
 import { LOADING_BAR_VISIBLE_DELAY_MS } from '@/components/loading';
 
 const mockFetch = vi.fn();
@@ -15,6 +16,7 @@ const mockGetRowWithUpdatedValues = vi.fn();
 const mockTriggerRefresh = vi.fn();
 const observedGetRowHeightProps: unknown[] = [];
 let echoSamePaginationOnRender = false;
+let capturedProcessPromises: Promise<unknown>[] = [];
 const ORIGINAL_TEST_SP_CODE = 'TEST_SP_CODE_A';
 const UPDATED_TEST_SP_CODE = 'TEST_SP_CODE_B';
 
@@ -149,7 +151,7 @@ vi.mock('@/config/styleddatagrid', async () => {
         const previousMode = previousModes[rowID]?.mode;
         const nextMode = modeConfig?.mode;
 
-        if (previousMode === 'edit' && nextMode === 'view' && props.processRowUpdate) {
+        if (previousMode === 'edit' && nextMode === 'view' && !modeConfig?.ignoreModifications && props.processRowUpdate) {
           const oldRow = rows.find((row: any) => String(row.id) === rowID);
           const newRow = mockGetRowWithUpdatedValues(rowID, 'anyField') ?? oldRow;
           void props.processRowUpdate(newRow, oldRow).catch(() => {});
@@ -180,6 +182,9 @@ vi.mock('@/config/styleddatagrid', async () => {
         </button>
         <button type="button" onClick={() => props.slots?.pagination?.infiniteScroll?.onToggle?.(false)}>
           Test Toggle Infinite Off
+        </button>
+        <button type="button" onClick={() => void props.slotProps?.toolbar?.handleAddNewRow?.()}>
+          Test Add New Row
         </button>
         <button
           type="button"
@@ -219,6 +224,19 @@ vi.mock('@/config/styleddatagrid', async () => {
           Open Draft Panel Filter
         </button>
         <div data-testid="row-state">{JSON.stringify(rows)}</div>
+        <div data-testid="grid-saving">{String(Boolean(props['aria-busy']))}</div>
+        <button
+          type="button"
+          onClick={() => {
+            const oldRow = rows.find((row: any) => row.isNew === true) ?? rows[0];
+            if (oldRow) {
+              const processPromise = props.processRowUpdate?.({ ...oldRow, isNew: true }, { ...oldRow, isNew: true });
+              if (processPromise) capturedProcessPromises.push(processPromise);
+            }
+          }}
+        >
+          Test Process New Row
+        </button>
         {rows.map((row: any) => {
           const actionColumn = columns.find((column: any) => typeof column.getActions === 'function');
           if (!actionColumn) return null;
@@ -244,6 +262,7 @@ describe('IsolatedDataGridCommons', () => {
     vi.clearAllMocks();
     observedGetRowHeightProps.length = 0;
     echoSamePaginationOnRender = false;
+    capturedProcessPromises = [];
     global.fetch = mockFetch as any;
     localStorage.clear();
   });
@@ -265,20 +284,16 @@ describe('IsolatedDataGridCommons', () => {
 
     mockGetRowWithUpdatedValues.mockReturnValue(updatedRow);
 
-    let patchSeen = false;
-    mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === 'PATCH') {
-        patchSeen = true;
-        return {
-          ok: true,
-          json: async () => ({ message: 'Update successful' })
-        } as Response;
-      }
-
+    let saveSeen = false;
+    const editFlowOverride = vi.fn(async (row: any) => {
+      saveSeen = true;
+      return row;
+    });
+    mockFetch.mockImplementation(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       return {
         ok: true,
         json: async () => ({
-          output: [patchSeen ? updatedRow : originalRow],
+          output: [saveSeen ? updatedRow : originalRow],
           totalCount: 1,
           finishedQuery: 'SELECT 1'
         })
@@ -298,6 +313,7 @@ describe('IsolatedDataGridCommons', () => {
           dynamicButtons={[]}
           initialRow={originalRow}
           onDataUpdate={vi.fn().mockResolvedValue(undefined)}
+          editFlowOverride={editFlowOverride}
         />
       </SWRConfig>
     );
@@ -320,16 +336,346 @@ describe('IsolatedDataGridCommons', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
 
     await waitFor(() => {
-      const patchCalls = mockFetch.mock.calls.filter(([, init]) => init?.method === 'PATCH');
       const listCalls = mockFetch.mock.calls.filter(([, init]) => !init?.method || init.method === 'GET');
 
-      expect(patchCalls).toHaveLength(1);
-      expect(String(patchCalls[0][0])).toContain('/api/fixeddata/failedmeasurements/testschema/failedMeasurementID');
-      expect(String(patchCalls[0][1]?.body)).toContain(UPDATED_TEST_SP_CODE);
+      expect(editFlowOverride).toHaveBeenCalledWith(updatedRow, originalRow);
+      expect(mockFetch.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(0);
 
       expect(listCalls).toHaveLength(initialListCallCount + 1);
       expect(screen.getByTestId('row-state').textContent).toContain(UPDATED_TEST_SP_CODE);
     });
+  });
+
+  it('rejects failed-measurement saves without an override and keeps the row editable', async () => {
+    const originalRow = { id: 1, failedMeasurementID: 123, spCode: ORIGINAL_TEST_SP_CODE };
+    const updatedRow = { ...originalRow, spCode: UPDATED_TEST_SP_CODE };
+    mockGetRowWithUpdatedValues.mockReturnValue(updatedRow);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+    } as Response);
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="failedmeasurements"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'spCode', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('preview/apply flow'));
+    expect(mockFetch.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+  });
+
+  it('surfaces non-JSON HTTP errors and allows a supported legacy update to retry', async () => {
+    const originalRow = { id: 1, personID: 123, personName: 'Original' };
+    const updatedRow = { ...originalRow, personName: 'Updated' };
+    let patchCount = 0;
+    mockGetRowWithUpdatedValues.mockReturnValue(updatedRow);
+    mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PATCH') {
+        patchCount += 1;
+        if (patchCount === 1) {
+          return {
+            ok: false,
+            status: 503,
+            statusText: 'Service Unavailable',
+            json: async () => {
+              throw new Error('not JSON');
+            },
+            text: async () => ''
+          } as unknown as Response;
+        }
+        return { ok: true, status: 200, json: async () => ({ message: 'updated' }) } as Response;
+      }
+      return { ok: true, json: async () => ({ output: [patchCount ? updatedRow : originalRow], totalCount: 1, finishedQuery: 'SELECT 1' }) } as Response;
+    });
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="personnel"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'personName', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Original'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('HTTP 503'));
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(patchCount).toBe(2));
+    expect(screen.getByTestId('row-state').textContent).toContain('Updated');
+  });
+
+  it('rejects an existing row whose edited ID changes before any mutation', async () => {
+    const originalRow = { id: 1, personID: 123, personName: 'Original' };
+    const changedRow = { ...originalRow, id: 2, personName: 'Changed' };
+    const editFlowOverride = vi.fn(async (row: any) => row);
+    mockGetRowWithUpdatedValues.mockReturnValue(changedRow);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+    } as Response);
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="personnel"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'personName', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+          editFlowOverride={editFlowOverride}
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Original'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('ID changed'));
+    expect(editFlowOverride).not.toHaveBeenCalled();
+    expect(mockFetch.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(0);
+  });
+
+  it('rejects an existing row whose edited ID is missing before any mutation', async () => {
+    const originalRow = { id: 1, personID: 123, personName: 'Original' };
+    const missingIDRow = { ...originalRow, id: undefined, personName: 'Changed' };
+    mockGetRowWithUpdatedValues.mockReturnValue(missingIDRow);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+    } as Response);
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="personnel"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'personName', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Original'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('edited ID is missing'));
+    expect(mockFetch.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(0);
+  });
+
+  it('creates an explicit new row with one POST after confirmation', async () => {
+    const originalRow = { id: 1, personID: 123, personName: 'Original' };
+    const createdRow = { ...originalRow, id: 42, personnelID: 42 };
+    let postCount = 0;
+    mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        postCount += 1;
+        return { ok: true, json: async () => ({ message: 'created', createdIDs: { personnel: 42 } }) } as Response;
+      }
+      return { ok: true, json: async () => ({ output: [postCount ? createdRow : originalRow], totalCount: 1, finishedQuery: 'SELECT 1' }) } as Response;
+    });
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="personnel"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'personName', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Original'));
+    fireEvent.click(screen.getByRole('button', { name: 'Test Add New Row' }));
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"isNew":true'));
+    fireEvent.click(screen.getByRole('button', { name: 'Test Process New Row' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Test Process New Row' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(postCount).toBe(1));
+    expect(capturedProcessPromises).toHaveLength(2);
+    await expect(capturedProcessPromises[0]).resolves.toMatchObject({ personnelID: 42 });
+    await expect(capturedProcessPromises[1]).resolves.toMatchObject({ personnelID: 42 });
+    expect(screen.getByTestId('row-state').textContent).toContain('"personnelID":42');
+    expect(JSON.parse(screen.getByTestId('row-state').textContent ?? '[]')).toHaveLength(1);
+  });
+
+  it('blocks editing a created row until refresh supplies its missing server ID', async () => {
+    const originalRow = { id: 1, personID: 123, personName: 'Original' };
+    let postCount = 0;
+    let listCount = 0;
+    mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        postCount += 1;
+        return { ok: true, json: async () => ({ message: 'created' }) } as Response;
+      }
+      listCount += 1;
+      if (listCount > 1) throw new Error('refresh unavailable');
+      return { ok: true, json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' }) } as Response;
+    });
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="personnel"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'personName', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Original'));
+    fireEvent.click(screen.getByRole('button', { name: 'Test Add New Row' }));
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"isNew":true'));
+    fireEvent.click(screen.getByRole('button', { name: 'Test Process New Row' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(postCount).toBe(1));
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"creationNeedsRefresh":true'));
+    await waitFor(() => expect(screen.getByTestId('grid-saving')).toHaveTextContent('false'));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' }).at(-1)!);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
+    expect(postCount).toBe(1);
+  });
+
+  it('commits a typed partial save locally when the follow-up refresh fails', async () => {
+    const originalRow = { id: 1, personID: 123, personName: 'Original' };
+    const updatedRow = { ...originalRow, personName: 'Updated' };
+    let saveCount = 0;
+    let listCount = 0;
+    mockGetRowWithUpdatedValues.mockReturnValue(updatedRow);
+    const editFlowOverride = vi.fn(async () => {
+      saveCount += 1;
+      if (saveCount === 1) throw new RowSaveFinalizationError('Changes were saved, but reingestion failed', updatedRow);
+      return updatedRow;
+    });
+    mockFetch.mockImplementation(async () => {
+      listCount += 1;
+      if (listCount > 1) throw new Error('refresh unavailable');
+      return { ok: true, json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' }) } as Response;
+    });
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="personnel"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'personName', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+          editFlowOverride={editFlowOverride}
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Original'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Updated'));
+    expect(screen.getByRole('alert')).toHaveTextContent('Changes were saved, but reingestion failed');
+    expect(editFlowOverride).toHaveBeenCalledWith(updatedRow, originalRow);
+  });
+
+  it('ignores a duplicate confirmation while the first save is pending', async () => {
+    const originalRow = { id: 1, personID: 123, personName: 'Original' };
+    const updatedRow = { ...originalRow, personName: 'Updated' };
+    let resolveSave: ((row: typeof updatedRow) => void) | undefined;
+    const editFlowOverride = vi.fn(
+      () =>
+        new Promise<typeof updatedRow>(resolve => {
+          resolveSave = resolve;
+        })
+    );
+    mockGetRowWithUpdatedValues.mockReturnValue(updatedRow);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+    } as Response);
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="personnel"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'personName', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+          editFlowOverride={editFlowOverride}
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Original'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
+    const confirm = await screen.findByRole('button', { name: 'Save Changes' });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    await waitFor(() => expect(editFlowOverride).toHaveBeenCalledTimes(1));
+    resolveSave?.(updatedRow);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('successfully updated'));
   });
 
   it('keeps the grid mounted while debounced server filters are loading', async () => {
