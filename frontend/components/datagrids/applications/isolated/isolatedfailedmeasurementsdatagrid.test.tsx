@@ -5,6 +5,7 @@ import IsolatedFailedMeasurementsDataGrid, {
   hasStoredCurrentIngestionFailures,
   isReadyForReingestion
 } from './isolatedfailedmeasurementsdatagrid';
+import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
 
 // Mock MUI DataGrid to avoid CSS import issues
 vi.mock('@mui/x-data-grid', () => ({
@@ -67,7 +68,7 @@ vi.mock('@/app/contexts/userselectionprovider', () => ({
 }));
 
 vi.mock('@/components/datagrids/isolateddatagridcommons', () => ({
-  default: ({ onDataUpdate, onDataLoaded, editFlowOverride }: any) => {
+  default: ({ onDataUpdate, onDataLoaded, editFlowOverride, gridColumns }: any) => {
     // Expose onDataUpdate / editFlowOverride for testing
     if (onDataUpdate) {
       (window as any).testOnDataUpdate = onDataUpdate;
@@ -82,6 +83,7 @@ vi.mock('@/components/datagrids/isolateddatagridcommons', () => ({
     } else {
       delete (window as any).testOnDataLoaded;
     }
+    (window as any).testGridColumns = gridColumns;
     return <div data-testid="datagrid-commons">Mock DataGrid</div>;
   }
 }));
@@ -135,6 +137,7 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
     global.fetch = vi.fn();
     delete (window as any).testOnDataUpdate;
     delete (window as any).testOnDataLoaded;
+    delete (window as any).testGridColumns;
     delete (window as any).testEditFlowOverride;
     mockBeginEdit.mockReset();
     mockConfirmDialog.mockReset();
@@ -205,185 +208,6 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
     });
   });
 
-  describe('Bug Fix: Edits should persist to database even with validation errors', () => {
-    // TODO: These integration tests require complex component rendering and context setup
-    // The actual bug fixes have been verified through code review and modal tests
-    // Consider refactoring to test isolated functions or moving to E2E tests
-    it.skip('should call PATCH endpoint to save edits before checking validation', async () => {
-      const mockNewRow = {
-        id: 1,
-        failedMeasurementID: 123,
-        tag: '011375',
-        stemTag: '5',
-        spCode: 'newspecies', // User changed this
-        quadrat: '0904',
-        x: 18.4,
-        y: 9.9,
-        dbh: 12.0,
-        hom: 1.3,
-        date: '1994-12-05',
-        codes: '',
-        failureReasons: 'SpCode invalid' // Still has errors
-      };
-
-      const mockOldRow = {
-        id: 1,
-        failedMeasurementID: 123,
-        tag: '011375',
-        stemTag: '5',
-        spCode: 'oldspecies', // Original value
-        quadrat: '0904',
-        x: 18.4,
-        y: 9.9,
-        dbh: 12.0,
-        hom: 1.3,
-        date: '1994-12-05',
-        codes: '',
-        failureReasons: 'SpCode invalid'
-      };
-
-      // Mock successful PATCH
-      (global.fetch as any).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ message: 'Update successful', updatedIDs: { failedmeasurements: 123 } })
-      });
-
-      // Mock loadSelectableOptions
-      const { loadSelectableOptions } = await import('@/components/client/clientmacros');
-      (loadSelectableOptions as any).mockResolvedValue(undefined);
-
-      render(<IsolatedFailedMeasurementsDataGrid />);
-
-      await waitFor(() => {
-        expect((window as any).testOnDataUpdate).toBeDefined();
-      });
-
-      // Call the onDataUpdate callback
-      await (window as any).testOnDataUpdate(mockNewRow, mockOldRow);
-
-      // Verify PATCH was called to save edits
-      await waitFor(() => {
-        const fetchCalls = (global.fetch as any).mock.calls;
-
-        // First call should be PATCH to save edits
-        expect(fetchCalls[0][0]).toContain('/api/fixeddata/failedmeasurements/testschema/123');
-        expect(fetchCalls[0][1].method).toBe('PATCH');
-        expect(fetchCalls[0][1].body).toContain('newspecies'); // New value is being saved
-      });
-    });
-
-    it.skip('should save edits and reingest when validation passes', async () => {
-      const mockNewRow = {
-        id: 1,
-        failedMeasurementID: 123,
-        tag: '011375',
-        stemTag: '5',
-        spCode: 'validcode',
-        quadrat: '0904',
-        x: 18.4,
-        y: 9.9,
-        dbh: 12.0,
-        hom: 1.3,
-        date: '1994-12-05',
-        codes: 'M',
-        failureReasons: '' // No validation errors
-      };
-
-      const mockOldRow = {
-        id: 1,
-        failedMeasurementID: 123,
-        tag: '011375',
-        stemTag: '5',
-        spCode: 'oldcode',
-        quadrat: '0904',
-        x: 18.4,
-        y: 9.9,
-        dbh: 0,
-        hom: 0,
-        date: '1994-12-05',
-        codes: '',
-        failureReasons: 'Missing Codes and DBH'
-      };
-
-      // Mock successful PATCH
-      (global.fetch as any).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ message: 'Update successful' })
-      });
-
-      // Mock successful reingest
-      (global.fetch as any).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ message: 'Success' })
-      });
-
-      const { loadSelectableOptions } = await import('@/components/client/clientmacros');
-      (loadSelectableOptions as any).mockResolvedValue(undefined);
-
-      render(<IsolatedFailedMeasurementsDataGrid />);
-
-      await waitFor(() => {
-        expect((window as any).testOnDataUpdate).toBeDefined();
-      });
-
-      await (window as any).testOnDataUpdate(mockNewRow, mockOldRow);
-
-      await waitFor(() => {
-        const fetchCalls = (global.fetch as any).mock.calls;
-
-        // First: PATCH to save edits
-        expect(fetchCalls[0][0]).toContain('/api/fixeddata/failedmeasurements');
-        expect(fetchCalls[0][1].method).toBe('PATCH');
-
-        // Second: Reingest the row
-        expect(fetchCalls[1][0]).toContain('/api/reingestsinglefailure/testschema/123');
-
-        // Third: Reload selectable options to pick up new codes
-        expect(loadSelectableOptions).toHaveBeenCalled();
-      });
-    });
-
-    it.skip('should handle PATCH failure gracefully', async () => {
-      const mockNewRow = {
-        id: 1,
-        failedMeasurementID: 123,
-        tag: '011375',
-        stemTag: '5',
-        spCode: 'newcode',
-        quadrat: '0904',
-        x: 18.4,
-        y: 9.9,
-        dbh: 12.0,
-        hom: 1.3,
-        date: '1994-12-05',
-        codes: '',
-        failureReasons: 'SpCode invalid'
-      };
-
-      const mockOldRow = { ...mockNewRow, spCode: 'oldcode' };
-
-      // Mock failed PATCH
-      (global.fetch as any).mockResolvedValueOnce({
-        ok: false,
-        status: 500
-      });
-
-      render(<IsolatedFailedMeasurementsDataGrid />);
-
-      await waitFor(() => {
-        expect((window as any).testOnDataUpdate).toBeDefined();
-      });
-
-      // Should not throw error, but log it
-      await expect((window as any).testOnDataUpdate(mockNewRow, mockOldRow)).resolves.not.toThrow();
-
-      const ailogger = await import('@/ailogger');
-      await waitFor(() => {
-        expect(ailogger.default.error).toHaveBeenCalledWith('Failed to save row:', expect.any(Error));
-      });
-    });
-  });
-
   describe('Bug Fix: Validation error message deduplication', () => {
     it('should deduplicate failure reasons for the same column', () => {
       // This is tested via the displayFailureReason function
@@ -432,6 +256,53 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
       expect(mockEditFlowArgs).toHaveProperty('schema');
       expect(mockEditFlowArgs).toHaveProperty('plotID');
       expect(mockEditFlowArgs).toHaveProperty('censusID');
+    });
+
+    it('keeps identity and validation metadata columns read-only while allowing correction fields', async () => {
+      await mountGridWithOptions();
+
+      const columns = (window as any).testGridColumns as Array<{ field: string; editable?: boolean }>;
+      const editableByField = Object.fromEntries(columns.map(column => [column.field, column.editable]));
+
+      expect(editableByField).toMatchObject({
+        id: false,
+        failedMeasurementID: false,
+        plotID: false,
+        censusID: false,
+        currentFailureReasons: false,
+        description: false,
+        originalFailureReasons: false,
+        lastValidatedAt: false,
+        tag: true,
+        stemTag: true,
+        spCode: true,
+        quadrat: true,
+        x: true,
+        y: true,
+        dbh: true,
+        hom: true,
+        date: true,
+        codes: true
+      });
+    });
+
+    it('returns unchanged nonnumeric edit props and preserves numeric validation metadata', async () => {
+      await mountGridWithOptions();
+
+      const columns = (window as any).testGridColumns as Array<{
+        field: string;
+        preProcessEditCellProps?: (params: any) => any;
+      }>;
+      const speciesColumn = columns.find(column => column.field === 'spCode');
+      const dbhColumn = columns.find(column => column.field === 'dbh');
+      const speciesProps = { value: 'CRATSN', error: true, isProcessingProps: false, customMetadata: 'retained' };
+      const numericProps = { value: '12.345', error: true, isProcessingProps: true, customMetadata: 'retained' };
+
+      expect(speciesColumn?.preProcessEditCellProps?.({ props: speciesProps })).toBe(speciesProps);
+      expect(dbhColumn?.preProcessEditCellProps?.({ props: numericProps })).toEqual({
+        ...numericProps,
+        value: 12.35
+      });
     });
 
     it('invokes editFlow.beginEdit with the failed measurement ID and the canonical diff only', async () => {
@@ -512,13 +383,14 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
         date: '1994-12-05',
         codes: 'M'
       };
-      const newRow = { ...oldRow, dbh: 14.0 };
+      const newRow = { ...oldRow, dbh: 14.0, spCode: 'INVALID' };
 
       await (window as any).testEditFlowOverride(newRow, oldRow);
 
       await waitFor(() => {
         expect(screen.getByTestId('undo-toast-777')).toBeInTheDocument();
       });
+      expect(global.fetch).not.toHaveBeenCalled();
     });
 
     it('does not show UndoToast when the same save automatically reingests the row', async () => {
@@ -629,36 +501,61 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
       const urls = fetchCalls.map(([url]: any[]) => url);
       expect(urls.some((u: string) => u.includes('/api/fixeddata/failedmeasurements/'))).toBe(false);
     });
-  });
 
-  describe('Valid codes only selection', () => {
-    // TODO: This integration test requires full component rendering
-    // The autocomplete logic has been verified through code review
-    // Consider moving to E2E tests or refactoring to test the autocomplete logic in isolation
-    it.skip('should only show valid codes in autocomplete', async () => {
-      const { loadSelectableOptions } = await import('@/components/client/clientmacros');
+    it('propagates apply rejection without attempting reingestion or showing success state', async () => {
+      await mountGridWithOptions();
 
-      // Mock API response with valid codes
+      mockBeginEdit.mockRejectedValue(new Error('apply failed (503)'));
+      const oldRow = {
+        id: 1,
+        failedMeasurementID: 123,
+        spCode: 'old',
+        quadrat: '0101',
+        tag: '011375',
+        stemTag: '5',
+        x: 1,
+        y: 2,
+        dbh: 3,
+        hom: 4,
+        codes: '',
+        date: '1994-12-05'
+      };
+
+      await expect((window as any).testEditFlowOverride({ ...oldRow, spCode: 'new' }, oldRow)).rejects.toThrow('apply failed (503)');
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(screen.queryByTestId(/undo-toast-/)).not.toBeInTheDocument();
+    });
+
+    it('reports a partial-success error when reingestion fails after apply succeeds', async () => {
+      await mountGridWithOptions();
+
+      mockBeginEdit.mockResolvedValue({ editOperationID: 999 });
       (global.fetch as any).mockResolvedValue({
-        ok: true,
-        json: async () => [
-          { Code: 'M', Description: 'Multiple stems' },
-          { Code: 'D', Description: 'Dead' },
-          { Code: 'P', Description: 'Prior' }
-        ]
+        ok: false,
+        status: 503,
+        json: async () => ({ message: 'reingestion unavailable' })
       });
+      const oldRow = {
+        id: 1,
+        failedMeasurementID: 123,
+        spCode: 'CRATSN',
+        quadrat: '0101',
+        tag: '011375',
+        stemTag: '5',
+        x: 1,
+        y: 2,
+        dbh: 3,
+        hom: 4,
+        codes: 'M',
+        date: '1994-12-05'
+      };
 
-      const mockSetSelectableOpts = vi.fn();
-      const mockSite = { schemaName: 'testschema' };
-      const mockPlot = { plotID: 1 };
-      const mockCensus = { plotCensusNumber: 1 };
-
-      await loadSelectableOptions(mockSite as any, mockPlot as any, mockCensus as any, mockSetSelectableOpts);
-
-      // Verify only valid codes are set
-      await waitFor(() => {
-        expect(mockSetSelectableOpts).toHaveBeenCalledWith(expect.any(Function));
-      });
+      const saveError = await (window as any).testEditFlowOverride({ ...oldRow, dbh: 4 }, oldRow).catch((error: unknown) => error);
+      expect(saveError).toBeInstanceOf(RowSaveFinalizationError);
+      expect(saveError).toHaveProperty('message', 'Changes were saved, but reingestion unavailable');
+      expect(saveError).toHaveProperty('persistedRow.dbh', 4);
+      expect(mockBeginEdit).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId('undo-toast-999')).not.toBeInTheDocument();
     });
   });
 });
