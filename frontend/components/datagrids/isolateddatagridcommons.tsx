@@ -119,6 +119,10 @@ export type IsolatedDataGridCommonsHandle = {
 // build guard refuses production builds with this flag set.
 const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
 
+export const ROW_UPDATED_MESSAGE = 'Row updated!';
+export const NEW_ROW_ADDED_MESSAGE = 'New row added!';
+export const NO_CHANGES_SAVED_MESSAGE = 'No changes were saved: the row already matched the values you entered.';
+
 const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
 const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
@@ -772,7 +776,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       schemaName: string | undefined,
       newRow: GridRowModel,
       oldRow: GridRowModel,
-      setSnackbar: (value: { children: string; severity: 'error' | 'success' }) => void,
+      setSnackbar: (value: { children: string; severity: AlertProps['severity'] }) => void,
       setIsNewRowAdded: (value: boolean) => void,
       setShouldAddRowAfterFetch: (value: boolean) => void,
       refetchData: () => Promise<unknown>,
@@ -807,10 +811,18 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           throw new Error(responseJSON.message || 'An unknown error occurred');
         }
 
-        setSnackbar({
-          children: oldRow.isNew ? 'New row added!' : 'Row updated!',
-          severity: 'success'
-        });
+        // `changed` is only reported by endpoints backed by the bulkingestionprocess-style
+        // PATCH/POST handlers (see Task 1, HEAD 3bf25d0e). Endpoints that don't report it —
+        // e.g. `/api/administrative/fetch/[type]` — omit the field entirely, which is treated
+        // the same as `true` for backward compatibility.
+        if (responseJSON?.changed === false) {
+          setSnackbar({ children: NO_CHANGES_SAVED_MESSAGE, severity: 'info' });
+        } else {
+          setSnackbar({
+            children: oldRow.isNew ? NEW_ROW_ADDED_MESSAGE : ROW_UPDATED_MESSAGE,
+            severity: 'success'
+          });
+        }
 
         if (oldRow.isNew) {
           setIsNewRowAdded(false);
@@ -843,20 +855,26 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         }));
 
         const isNewRow = promiseArguments.oldRow.isNew || !confirmedRow.id;
-        const updatedRow =
-          editFlowOverride && !isNewRow
-            ? await editFlowOverride(confirmedRow, promiseArguments.oldRow)
-            : await updateRow(
-                gridType,
-                currentSite?.schemaName,
-                confirmedRow,
-                promiseArguments.oldRow,
-                setSnackbar,
-                setIsNewRowAdded,
-                setShouldAddRowAfterFetch,
-                refetch,
-                paginationModel
-              );
+        let updatedRow: GridRowModel;
+        if (editFlowOverride && !isNewRow) {
+          // The preview flow (e.g. failed-measurements correction) never goes through
+          // updateRow, so it never sees the server's `changed` flag. It always represents
+          // a deliberate, already-previewed change, so it keeps its own success toast here.
+          updatedRow = await editFlowOverride(confirmedRow, promiseArguments.oldRow);
+          setSnackbar({ children: ROW_UPDATED_MESSAGE, severity: 'success' });
+        } else {
+          updatedRow = await updateRow(
+            gridType,
+            currentSite?.schemaName,
+            confirmedRow,
+            promiseArguments.oldRow,
+            setSnackbar,
+            setIsNewRowAdded,
+            setShouldAddRowAfterFetch,
+            refetch,
+            paginationModel
+          );
+        }
 
         promiseArguments.resolve(updatedRow);
         if (isInfiniteOn) await infinite.refresh();
@@ -961,8 +979,10 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       } else if (promiseArguments) {
         try {
           const resolvedRow = confirmedRow || promiseArguments.newRow;
+          // performSaveAction's editFlowOverride/updateRow branches each set their own
+          // response-driven snackbar (success, or the no-changes info toast); this handler
+          // must not overwrite that with a blanket success toast.
           await performSaveAction(promiseArguments.newRow.id, resolvedRow);
-          setSnackbar({ children: 'Row successfully updated!', severity: 'success' });
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);
           setSnackbar({ children: `Error: ${message}`, severity: 'error' });

@@ -6,7 +6,9 @@ import IsolatedDataGridCommons, {
   FILTER_APPLY_DEBOUNCE_MS,
   gridLayoutStorageKey,
   readPersistedGridLayout,
-  writePersistedGridLayout
+  writePersistedGridLayout,
+  ROW_UPDATED_MESSAGE,
+  NO_CHANGES_SAVED_MESSAGE
 } from './isolateddatagridcommons';
 import { LOADING_BAR_VISIBLE_DELAY_MS } from '@/components/loading';
 
@@ -679,6 +681,149 @@ describe('IsolatedDataGridCommons', () => {
     );
     await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
     expect(screen.getByTestId('export-csv-handler-present').textContent).toBe('false');
+  });
+
+  describe('no-op save reporting', () => {
+    const originalRow = {
+      id: 1,
+      failedMeasurementID: 123,
+      spCode: ORIGINAL_TEST_SP_CODE
+    };
+    const updatedRow = {
+      ...originalRow,
+      spCode: UPDATED_TEST_SP_CODE
+    };
+
+    const renderFailedMeasurementsGrid = (extraProps: Record<string, unknown> = {}) => {
+      mockGetRowWithUpdatedValues.mockReturnValue(updatedRow);
+      return render(
+        <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+          <IsolatedDataGridCommons
+            gridType="failedmeasurements"
+            gridColumns={[
+              { field: 'id', editable: false },
+              { field: 'spCode', editable: true }
+            ]}
+            refresh={false}
+            setRefresh={vi.fn()}
+            dynamicButtons={[]}
+            initialRow={originalRow}
+            onDataUpdate={vi.fn().mockResolvedValue(undefined)}
+            {...extraProps}
+          />
+        </SWRConfig>
+      );
+    };
+
+    const driveEditSaveConfirm = async () => {
+      await waitFor(() => {
+        expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE);
+      });
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+    };
+
+    it('shows the no-changes info toast, and neither success toast, when the PATCH reports changed:false', async () => {
+      mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          return {
+            ok: true,
+            json: async () => ({ message: 'Update successful', changed: false })
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+        } as Response;
+      });
+
+      renderFailedMeasurementsGrid();
+      await driveEditSaveConfirm();
+
+      expect(await screen.findByText(NO_CHANGES_SAVED_MESSAGE), 'a changed:false PATCH response must surface the no-changes info toast').toBeInTheDocument();
+      expect(screen.queryByText(ROW_UPDATED_MESSAGE), 'the success toast must not also appear alongside the no-changes toast').not.toBeInTheDocument();
+      expect(screen.queryByText('Row successfully updated!'), 'the confirm-modal success toast must not paper over a no-op save').not.toBeInTheDocument();
+    });
+
+    it('shows the ROW_UPDATED_MESSAGE success toast when the PATCH reports changed:true', async () => {
+      let patchSeen = false;
+      mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          patchSeen = true;
+          return {
+            ok: true,
+            json: async () => ({ message: 'Update successful', changed: true })
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({ output: [patchSeen ? updatedRow : originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+        } as Response;
+      });
+
+      renderFailedMeasurementsGrid();
+      await driveEditSaveConfirm();
+
+      expect(await screen.findByText(ROW_UPDATED_MESSAGE), 'a changed:true PATCH response must surface the success toast').toBeInTheDocument();
+      expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'a real change must not surface the no-changes toast').not.toBeInTheDocument();
+    });
+
+    it('falls back to the success toast when the PATCH body omits changed (backward compatibility)', async () => {
+      let patchSeen = false;
+      mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          patchSeen = true;
+          return {
+            ok: true,
+            json: async () => ({ message: 'Update successful' })
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({ output: [patchSeen ? updatedRow : originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+        } as Response;
+      });
+
+      renderFailedMeasurementsGrid();
+      await driveEditSaveConfirm();
+
+      expect(
+        await screen.findByText(ROW_UPDATED_MESSAGE),
+        'an endpoint that does not report changed must keep reporting success (e.g. /api/administrative/fetch)'
+      ).toBeInTheDocument();
+      expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'omitted changed must never be treated as a no-op').not.toBeInTheDocument();
+    });
+
+    it('still shows the success toast for the editFlowOverride preview flow, which never calls updateRow', async () => {
+      let overrideCalled = false;
+      mockFetch.mockImplementation(async (_input: RequestInfo | URL) => {
+        return {
+          ok: true,
+          json: async () => ({ output: [overrideCalled ? updatedRow : originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+        } as Response;
+      });
+
+      const editFlowOverride = vi.fn().mockImplementation(async () => {
+        overrideCalled = true;
+        return updatedRow;
+      });
+      renderFailedMeasurementsGrid({ editFlowOverride });
+      await driveEditSaveConfirm();
+
+      expect(await screen.findByText(ROW_UPDATED_MESSAGE), 'the preview flow must keep reporting success on its own').toBeInTheDocument();
+      expect(editFlowOverride, 'the preview flow bypasses updateRow entirely').toHaveBeenCalledTimes(1);
+      expect(
+        mockFetch.mock.calls.some(([, init]) => init?.method === 'PATCH'),
+        'editFlowOverride must not also PATCH via updateRow'
+      ).toBe(false);
+    });
   });
 
   describe('persisted column layout', () => {
