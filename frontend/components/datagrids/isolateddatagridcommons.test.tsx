@@ -107,10 +107,15 @@ vi.mock('@mui/x-data-grid', () => ({
     </button>
   ),
   GridColDef: {},
+  // Never invoked by StyledDataGridMock below (it doesn't call colDef.renderEditCell),
+  // this stub only has to exist so importing it from the component under test doesn't
+  // throw "does not provide an export named 'GridEditInputCell'".
+  GridEditInputCell: () => null,
   GridEventListener: {},
   GridFilterOperator: {},
   GridFilterModel: {},
   GridPreProcessEditCellProps: {},
+  GridRenderEditCellParams: {},
   GridRowEditStopReasons: { rowFocusOut: 'rowFocusOut' },
   GridRowId: {},
   GridRowModel: {},

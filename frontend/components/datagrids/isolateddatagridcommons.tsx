@@ -19,9 +19,11 @@ import {
   GridColDef,
   GridColumnResizeParams,
   GridColumnVisibilityModel,
+  GridEditInputCell,
   GridEventListener,
   GridFilterModel,
   GridPaginationModel,
+  GridRenderEditCellParams,
   GridRowEditStopReasons,
   GridRowId,
   GridRowModel,
@@ -118,6 +120,33 @@ export type IsolatedDataGridCommonsHandle = {
 // guidance) keeps assertions deterministic; production behavior is unchanged, and the
 // build guard refuses production builds with this flag set.
 const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
+
+// The Save icon (handleSaveClick, below) reads `getRowWithUpdatedValues` synchronously
+// on click. MUI's own flush of a keystroke into its editing state is a PRIVATE api
+// (`runPendingEditCellValueMutation`, unstable_ prefixed and not exposed by
+// useGridApiRef()) that only otherwise runs on Enter/blur/stopRowEditMode - paths this
+// grid deliberately suppresses (see handleCellKeyDown/handleRowEditStop) so a fast
+// Save click can land inside GridEditInputCell's 200ms debounce window and read the
+// pre-keystroke value. Passing debounceMs=0 makes MUI write the edited value into its
+// editing state on every keystroke instead of waiting out a timer, so the synchronous
+// read is always current.
+const EDIT_CELL_DEBOUNCE_MS = 0;
+
+// Only string/number columns default to GridEditInputCell (gridStringColDef.js /
+// gridNumericColDef.js); date/dateTime/singleSelect/boolean/actions columns render a
+// different edit cell and must be left untouched. A column with a custom
+// renderEditCell already controls its own commit behavior and is skipped too.
+function withImmediateEditCellCommit(columns: GridColDef[]): GridColDef[] {
+  return columns.map(column => {
+    const usesDefaultEditInputCell =
+      column.editable && !column.renderEditCell && (column.type === undefined || column.type === 'string' || column.type === 'number');
+    if (!usesDefaultEditInputCell) return column;
+    return {
+      ...column,
+      renderEditCell: (params: GridRenderEditCellParams) => <GridEditInputCell {...params} debounceMs={EDIT_CELL_DEBOUNCE_MS} />
+    };
+  });
+}
 
 export const ROW_UPDATED_MESSAGE = 'Row updated!';
 export const NEW_ROW_ADDED_MESSAGE = 'New row added!';
@@ -1404,7 +1433,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   );
 
   const columns = useMemo(() => {
-    return [...applyFilterToColumns(gridColumns), ...(locked ? [] : [getGridActionsColumn()])];
+    return [...withImmediateEditCellCommit(applyFilterToColumns(gridColumns)), ...(locked ? [] : [getGridActionsColumn()])];
   }, [gridColumns, locked, getGridActionsColumn]);
 
   const filteredColumns = useMemo(() => {
