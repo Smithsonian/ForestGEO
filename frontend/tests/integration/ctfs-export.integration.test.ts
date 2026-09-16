@@ -27,6 +27,7 @@ import { createTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG } from '.
 import { splitSqlFile } from '../../lib/provisioning/sql-runner';
 import { checkFinishedCensus, selectMeasurements, renderArtifact, renderRebuildViewFullTableArtifact } from '../../lib/ctfs-export';
 import { MISSING_PLOT_COORDINATE_SCOPE, DESTINATION_PLOT_COORDINATE_TYPE_SCOPE } from '../../lib/csv-to-sql-v2';
+import { testDbServerOptions } from '../setup/test-db-connection';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -280,10 +281,7 @@ const createdDatabases: string[] = [];
 afterAll(async () => {
   if (createdDatabases.length === 0) return;
   const conn = await mysql.createConnection({
-    host: DEFAULT_TEST_CONFIG.host,
-    user: DEFAULT_TEST_CONFIG.user,
-    password: DEFAULT_TEST_CONFIG.password,
-    port: DEFAULT_TEST_CONFIG.port
+    ...testDbServerOptions()
   });
   try {
     const [rows] = await conn.query<mysql.RowDataPacket[]>('SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN (?)', [createdDatabases]);

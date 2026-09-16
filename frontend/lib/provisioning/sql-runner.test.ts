@@ -3,6 +3,7 @@ import path from 'path';
 import { readFileSync } from 'fs';
 import mysql from 'mysql2/promise';
 import { splitSqlFile, executeSqlFile, STATEMENT_PREVIEW_MAX_LENGTH } from './sql-runner';
+import { testDbServerOptions } from '@/tests/setup/test-db-connection';
 
 const TABLES_FILE = path.join(process.cwd(), 'db/sql/tablestructures.sql');
 const PROCS_FILE = path.join(process.cwd(), 'db/sql/storedprocedures.sql');
@@ -105,10 +106,7 @@ describe('executeSqlFile', () => {
 
   beforeAll(async () => {
     pool = mysql.createPool({
-      host: process.env.TEST_DB_HOST || 'localhost',
-      port: Number(process.env.TEST_DB_PORT || 3306),
-      user: process.env.TEST_DB_USER || 'root',
-      password: process.env.TEST_DB_PASSWORD || 'testpassword',
+      ...testDbServerOptions(),
       multipleStatements: false,
       connectionLimit: 5
     });

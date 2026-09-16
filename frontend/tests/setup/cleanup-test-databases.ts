@@ -1,4 +1,4 @@
-#!/usr/bin/env npx ts-node
+#!/usr/bin/env npx tsx
 /**
  * Cleanup script for orphan test databases.
  *
@@ -6,9 +6,9 @@
  * This handles cases where tests crash before teardown runs.
  *
  * Usage:
- *   npx ts-node tests/setup/cleanup-test-databases.ts
- *   npx ts-node tests/setup/cleanup-test-databases.ts --dry-run
- *   npx ts-node tests/setup/cleanup-test-databases.ts --max-age-hours=1
+ *   npx tsx tests/setup/cleanup-test-databases.ts
+ *   npx tsx tests/setup/cleanup-test-databases.ts --dry-run
+ *   npx tsx tests/setup/cleanup-test-databases.ts --max-age-hours=1
  *
  * Options:
  *   --dry-run          Show what would be deleted without actually deleting
@@ -17,8 +17,9 @@
  */
 
 import mysql from 'mysql2/promise';
+import { TEST_DB_NAME_PREFIX } from './test-db-connection';
 
-const TEST_DB_PREFIX = 'forestgeo_test_';
+const TEST_DB_LIKE_PATTERN = `${TEST_DB_NAME_PREFIX.replace(/_/g, '\\_')}%`;
 
 interface CleanupOptions {
   dryRun: boolean;
@@ -55,7 +56,7 @@ function parseArgs(): CleanupOptions {
 Cleanup script for orphan test databases.
 
 Usage:
-  npx ts-node tests/setup/cleanup-test-databases.ts [options]
+  npx tsx tests/setup/cleanup-test-databases.ts [options]
 
 Options:
   --dry-run          Show what would be deleted without actually deleting
@@ -65,13 +66,13 @@ Options:
 
 Examples:
   # Show all test databases without deleting
-  npx ts-node tests/setup/cleanup-test-databases.ts --dry-run
+  npx tsx tests/setup/cleanup-test-databases.ts --dry-run
 
   # Delete all test databases older than 1 hour
-  npx ts-node tests/setup/cleanup-test-databases.ts --max-age-hours=1 --force
+  npx tsx tests/setup/cleanup-test-databases.ts --max-age-hours=1 --force
 
   # Interactive cleanup of all test databases
-  npx ts-node tests/setup/cleanup-test-databases.ts
+  npx tsx tests/setup/cleanup-test-databases.ts
 `);
       process.exit(0);
     }
@@ -81,7 +82,7 @@ Examples:
 }
 
 async function getTestDatabases(connection: mysql.Connection): Promise<DatabaseInfo[]> {
-  const [rows] = await connection.query<mysql.RowDataPacket[]>(`SHOW DATABASES LIKE '${TEST_DB_PREFIX}%'`);
+  const [rows] = await connection.query<mysql.RowDataPacket[]>(`SHOW DATABASES LIKE '${TEST_DB_LIKE_PATTERN}'`);
 
   const databases: DatabaseInfo[] = [];
 
