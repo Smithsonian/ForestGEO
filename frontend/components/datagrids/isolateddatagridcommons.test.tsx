@@ -747,9 +747,42 @@ describe('IsolatedDataGridCommons', () => {
       renderFailedMeasurementsGrid();
       await driveEditSaveConfirm();
 
-      expect(await screen.findByText(NO_CHANGES_SAVED_MESSAGE), 'a changed:false PATCH response must surface the no-changes info toast').toBeInTheDocument();
+      const alert = await screen.findByRole('alert');
+      expect(alert, 'a changed:false PATCH response must surface the no-changes info toast').toHaveTextContent(NO_CHANGES_SAVED_MESSAGE);
+      expect(alert, 'the no-changes toast must render as an info Alert, not success, so it reads as a warning rather than a confirmation').toHaveClass(
+        'MuiAlert-standardInfo'
+      );
       expect(screen.queryByText(ROW_UPDATED_MESSAGE), 'the success toast must not also appear alongside the no-changes toast').not.toBeInTheDocument();
       expect(screen.queryByText('Row successfully updated!'), 'the confirm-modal success toast must not paper over a no-op save').not.toBeInTheDocument();
+    });
+
+    it('shows the no-changes info toast for the plain #481 shape: an edit that resubmits the unmodified row', async () => {
+      // The exact repro from #481: the user "edits" a field but the grid's getRowWithUpdatedValues
+      // hands back a row identical to what's on the server, and the server correctly reports
+      // changed:false. This must not be confused with a fetch/parse failure or a real update.
+      mockGetRowWithUpdatedValues.mockReturnValue(originalRow);
+      mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          expect(String(init.body), 'the PATCH body must carry the unmodified row, not a synthetic diff').toContain(ORIGINAL_TEST_SP_CODE);
+          return {
+            ok: true,
+            json: async () => ({ message: 'Update successful', changed: false })
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+        } as Response;
+      });
+
+      renderFailedMeasurementsGrid();
+      await driveEditSaveConfirm();
+
+      const alert = await screen.findByRole('alert');
+      expect(alert, 'an identical-row resubmit with changed:false must surface the no-changes info toast, not a success toast').toHaveTextContent(
+        NO_CHANGES_SAVED_MESSAGE
+      );
+      expect(screen.queryByText(ROW_UPDATED_MESSAGE), 'an unmodified row must never be reported as a successful update').not.toBeInTheDocument();
     });
 
     it('shows the ROW_UPDATED_MESSAGE success toast when the PATCH reports changed:true', async () => {
@@ -801,7 +834,12 @@ describe('IsolatedDataGridCommons', () => {
       expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'omitted changed must never be treated as a no-op').not.toBeInTheDocument();
     });
 
-    it('still shows the success toast for the editFlowOverride preview flow, which never calls updateRow', async () => {
+    it('does not layer a commons-owned success toast onto a resolved editFlowOverride, which owns its own outcome messaging', async () => {
+      // applyEditViaPreviewFlow (isolatedfailedmeasurementsdatagrid.tsx) sometimes resolves
+      // without applying anything - e.g. an empty editable diff, or unresolved failure reasons
+      // remaining - in which case IT is responsible for telling the user what happened (undo
+      // toast, silent reingest, or nothing). If isolateddatagridcommons also toasted success
+      // here, a no-op override would hit the exact #481 bug class this branch exists to avoid.
       let overrideCalled = false;
       mockFetch.mockImplementation(async (_input: RequestInfo | URL) => {
         return {
@@ -817,12 +855,38 @@ describe('IsolatedDataGridCommons', () => {
       renderFailedMeasurementsGrid({ editFlowOverride });
       await driveEditSaveConfirm();
 
-      expect(await screen.findByText(ROW_UPDATED_MESSAGE), 'the preview flow must keep reporting success on its own').toBeInTheDocument();
-      expect(editFlowOverride, 'the preview flow bypasses updateRow entirely').toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(editFlowOverride, 'the preview flow bypasses updateRow entirely').toHaveBeenCalledTimes(1);
+      });
       expect(
         mockFetch.mock.calls.some(([, init]) => init?.method === 'PATCH'),
         'editFlowOverride must not also PATCH via updateRow'
       ).toBe(false);
+      expect(screen.queryByText(ROW_UPDATED_MESSAGE), 'commons must not assert success on the override’s behalf').not.toBeInTheDocument();
+      expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'commons must not assert a no-op on the override’s behalf either').not.toBeInTheDocument();
+      expect(
+        screen.queryByText('Row successfully updated!'),
+        'the removed confirm-modal toast must stay removed for the override path too'
+      ).not.toBeInTheDocument();
+    });
+
+    it('shows an error toast with the failure message when editFlowOverride rejects, instead of swallowing it', async () => {
+      // performSaveAction's catch previously only called promiseArguments.reject, which is a
+      // no-op for the Save-icon flow (handleSaveClick sets resolve/reject to no-ops), so a
+      // rejected override silently reported nothing to the user.
+      const failureMessage = 'preview apply failed';
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+      } as Response);
+
+      const editFlowOverride = vi.fn().mockRejectedValue(new Error(failureMessage));
+      renderFailedMeasurementsGrid({ editFlowOverride });
+      await driveEditSaveConfirm();
+
+      expect(await screen.findByText(`Error: ${failureMessage}`), 'a rejected editFlowOverride must surface its error message in a toast').toBeInTheDocument();
+      expect(screen.queryByText(ROW_UPDATED_MESSAGE), 'a failed save must never show the success toast').not.toBeInTheDocument();
+      expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'a failed save must never show the no-changes toast').not.toBeInTheDocument();
     });
   });
 

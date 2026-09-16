@@ -121,7 +121,7 @@ const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true
 
 export const ROW_UPDATED_MESSAGE = 'Row updated!';
 export const NEW_ROW_ADDED_MESSAGE = 'New row added!';
-export const NO_CHANGES_SAVED_MESSAGE = 'No changes were saved: the row already matched the values you entered.';
+export const NO_CHANGES_SAVED_MESSAGE = 'No changes were saved: the server recorded no update for this row.';
 
 const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
 const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
@@ -800,7 +800,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
         });
-        let responseJSON;
+        let responseJSON: { message?: string; changed?: boolean; updatedIDs?: Record<string, number> } | undefined;
         try {
           responseJSON = await response.json();
         } catch (e: unknown) {
@@ -808,13 +808,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         }
 
         if (!response.ok) {
-          throw new Error(responseJSON.message || 'An unknown error occurred');
+          throw new Error(responseJSON?.message || 'An unknown error occurred');
         }
 
-        // `changed` is only reported by endpoints backed by the bulkingestionprocess-style
-        // PATCH/POST handlers (see Task 1, HEAD 3bf25d0e). Endpoints that don't report it —
-        // e.g. `/api/administrative/fetch/[type]` — omit the field entirely, which is treated
-        // the same as `true` for backward compatibility.
+        // `changed` is reported by the fixeddata PATCH handler in config/macros/coreapifunctions.ts.
+        // Endpoints that don't report it, e.g. /api/administrative/fetch/[type], omit the field
+        // entirely, which is treated the same as `true` for backward compatibility.
         if (responseJSON?.changed === false) {
           setSnackbar({ children: NO_CHANGES_SAVED_MESSAGE, severity: 'info' });
         } else {
@@ -857,11 +856,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         const isNewRow = promiseArguments.oldRow.isNew || !confirmedRow.id;
         let updatedRow: GridRowModel;
         if (editFlowOverride && !isNewRow) {
-          // The preview flow (e.g. failed-measurements correction) never goes through
-          // updateRow, so it never sees the server's `changed` flag. It always represents
-          // a deliberate, already-previewed change, so it keeps its own success toast here.
+          // The preview flow (e.g. failed-measurements correction) owns its own outcome
+          // messaging (an undo toast on an applied edit, silent reingestion on a clean
+          // row, or a no-op when the diff/remaining reasons made it skip beginEdit
+          // entirely) — this commons component cannot know which of those happened, so
+          // it must not layer a blanket success toast on top.
           updatedRow = await editFlowOverride(confirmedRow, promiseArguments.oldRow);
-          setSnackbar({ children: ROW_UPDATED_MESSAGE, severity: 'success' });
         } else {
           updatedRow = await updateRow(
             gridType,
@@ -883,7 +883,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         if (onDataUpdate) {
           await onDataUpdate(updatedRow, promiseArguments.oldRow);
         }
-      } catch (error) {
+      } catch (error: unknown) {
+        // updateRow already toasts its own fetch errors before rejecting; editFlowOverride
+        // does not, so without this the Save-icon flow (whose promiseArguments.reject is a
+        // no-op set in handleSaveClick) would swallow a rejected override silently.
+        const message = error instanceof Error ? error.message : String(error);
+        setSnackbar({ children: `Error: ${message}`, severity: 'error' });
         promiseArguments.reject(error);
       }
 
