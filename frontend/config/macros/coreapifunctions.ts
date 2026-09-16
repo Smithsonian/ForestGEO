@@ -343,7 +343,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
     // pooled connection.
     const changedBy = await changelogChangedBy();
 
-    const updateIDs = await connectionManager.withTransaction(async tx => {
+    const { updateIDs, changed } = await connectionManager.withTransaction(async tx => {
       if (dataType === 'alltaxonomiesview') {
         let queryConfig;
         switch (dataType) {
@@ -354,9 +354,14 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             throw new Error('Incorrect view call');
         }
 
-        return await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig, tx.id, async slice =>
-          recordTaxonomySliceUpsert(tx, schema, slice as Parameters<typeof recordTaxonomySliceUpsert>[2], changedBy)
-        );
+        // recordTaxonomySliceUpsert no-ops on an 'unchanged' slice, so the view
+        // as a whole changed iff at least one family/genus/species slice did not.
+        let slicesChanged = false;
+        const sliceIDs = await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig, tx.id, async slice => {
+          if (slice.operation !== 'unchanged') slicesChanged = true;
+          await recordTaxonomySliceUpsert(tx, schema, slice as Parameters<typeof recordTaxonomySliceUpsert>[2], changedBy);
+        });
+        return { updateIDs: sliceIDs, changed: slicesChanged };
       }
 
       const mapper = MapperFactory.getMapper<any, any>(dataType);
@@ -376,6 +381,11 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
       const { [demappedGridID]: updatedGridIDKey, ...remainingProperties } = newRowData;
 
       let dataToUpdate;
+      // Set when the personnel branch inserts or deletes a censusactivepersonnel
+      // relation. The personnel row itself may be byte-for-byte unchanged (the
+      // grid re-sends the whole row for any edit), so this has to be tracked
+      // separately from the rowStatesDiffer check at the end.
+      let relationChanged = false;
       const censusCookie = await getCookie('censusID');
       // The census cookie is CLEARED by writing an empty string rather than by
       // deleting it (components/sidebar/censusselector, useOrgCensusDispatch), so
@@ -422,6 +432,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
               previousGridIDKey
             ]);
             const persistedRelation = await loadSinglePersistedRow(tx, schema, 'censusactivepersonnel', [{ column: 'CAPID', value: insertResult.insertId }]);
+            relationChanged = true;
             await recordMutation({
               tx,
               schema,
@@ -435,6 +446,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           } else if (desiredActive === CENSUS_ACTIVE_DISABLED && existingRelation) {
             const deleteSQL = safeFormatQuery(schema, 'DELETE FROM ??.censusactivepersonnel WHERE CAPID = ?');
             await tx.query(deleteSQL, [existingRelation.CAPID]);
+            relationChanged = true;
             await recordMutation({
               tx,
               schema,
@@ -476,7 +488,8 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
       // A matched re-save is a successful request but not a mutation. Suppress a
       // false UPDATE event by comparing the database snapshots, not request data.
-      if (rowStatesDiffer(persistedBefore, persistedAfter)) {
+      const rowChanged = rowStatesDiffer(persistedBefore, persistedAfter);
+      if (rowChanged) {
         await recordMutation({
           tx,
           schema,
@@ -491,10 +504,15 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         });
       }
 
-      return { [dataType]: persistedAfter[demappedGridID] };
+      return { updateIDs: { [dataType]: persistedAfter[demappedGridID] }, changed: rowChanged || relationChanged };
     });
 
-    return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
+    // `changed` tells the client whether this PATCH actually recorded a
+    // mutation, distinct from `message`/`updatedIDs` above which describe a
+    // successfully MATCHED row regardless of whether anything moved (#481: a
+    // grid bug resent the persisted value unchanged, and the 200 body gave the
+    // client no way to tell that apart from a real edit).
+    return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs, changed }, { status: HTTPResponses.OK });
   } catch (error: any) {
     if (error instanceof MutationRequestError) return mutationErrorResponse(error);
     // A zero-row UPDATE must not report success: surface the NOT_FOUND status the
