@@ -17,8 +17,9 @@ const mockTriggerRefresh = vi.fn();
 const observedGetRowHeightProps: unknown[] = [];
 let echoSamePaginationOnRender = false;
 let capturedProcessPromises: Promise<unknown>[] = [];
-const NON_JSON_ERROR_BODY = 'Service temporarily unavailable: upstream database connection refused';
+const ADMIN_TEST_EMAIL = 'admin@example.org';
 const DETACHED_ROW_ID = 'row-dropped-by-refetch';
+const NON_JSON_ERROR_BODY = 'Service temporarily unavailable: upstream database connection refused';
 const ORIGINAL_TEST_SP_CODE = 'TEST_SP_CODE_A';
 const UPDATED_TEST_SP_CODE = 'TEST_SP_CODE_B';
 
@@ -640,6 +641,57 @@ describe('IsolatedDataGridCommons', () => {
     await expect(capturedProcessPromises[0]).rejects.toThrow('This grid is locked');
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('This grid is locked'));
     expect(mockFetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+  });
+
+  it('keeps an administrative row editable after creation by using the identifier the admin route returns', async () => {
+    const originalRow = { id: 1, userID: 7, firstName: 'Original', lastName: 'Admin' };
+    let postCount = 0;
+    mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        postCount += 1;
+        return new Response(JSON.stringify({ message: 'Successfully inserted', userID: 99, createdIDs: { users: 99 } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    });
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="users"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'firstName', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+          adminEmail={ADMIN_TEST_EMAIL}
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Original'));
+    fireEvent.click(screen.getByRole('button', { name: 'Test Add New Row' }));
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"isNew":true'));
+    fireEvent.click(screen.getByRole('button', { name: 'Test Process New Row' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(postCount).toBe(1));
+
+    const [postURL] = mockFetch.mock.calls.find(([, init]) => init?.method === 'POST') ?? [];
+    expect(String(postURL)).toContain('/api/administrative/fetch/users');
+
+    // The admin route's identifier must land on the row, so it is addressable by the
+    // admin PATCH handler (WHERE UserID = ?) without waiting for a refetch.
+    await expect(capturedProcessPromises[0]).resolves.toMatchObject({ userID: 99 });
+    const savedRows = JSON.parse(screen.getByTestId('row-state').textContent ?? '[]');
+    expect(savedRows.some((row: any) => row.userID === 99 && row.creationNeedsRefresh === undefined)).toBe(true);
   });
 
   it('blocks editing a created row until refresh supplies its missing server ID', async () => {

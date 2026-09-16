@@ -45,6 +45,15 @@ export function getGridID(gridType: string): string {
       return 'validationID';
     case 'failedmeasurements':
       return 'failedMeasurementID';
+    // Administrative catalog grids. These never reach the fixeddata route, but the
+    // shared grid uses this mapping to stamp the identifier a newly created row needs
+    // before it can be edited again.
+    case 'users':
+      return 'userID';
+    case 'sites':
+      return 'siteID';
+    case 'usersiterelations':
+      return 'userSiteRelationID';
     default:
       return 'breakage';
   }

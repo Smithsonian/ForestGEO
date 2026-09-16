@@ -176,6 +176,14 @@ function responseErrorMessage(payload: unknown, response: Response): string {
   return `HTTP ${response.status}${statusText ? ` ${statusText}` : ''}`;
 }
 
+// An auto-increment identifier of 0 means the insert produced no usable key, so it must
+// not be stamped onto the row as if it addressed a real record.
+function normalizeCreatedID(value: unknown): string | number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : undefined;
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  return undefined;
+}
+
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -870,9 +878,10 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       if (isExplicitNewRow(oldRow)) {
         setIsNewRowAdded(false);
         setShouldAddRowAfterFetch(false);
-        const createdID =
-          responseJSON && typeof responseJSON === 'object' ? (responseJSON as { createdIDs?: Record<string, unknown> }).createdIDs?.[gridType] : undefined;
-        const hasCreatedID = createdID !== undefined && createdID !== null && createdID !== '';
+        const createdID = normalizeCreatedID(
+          responseJSON && typeof responseJSON === 'object' ? (responseJSON as { createdIDs?: Record<string, unknown> }).createdIDs?.[gridType] : undefined
+        );
+        const hasCreatedID = createdID !== undefined;
         return {
           ...requestRow,
           ...(hasCreatedID ? { [gridID]: createdID, ...(gridID === 'id' ? { id: createdID } : {}) } : {}),
