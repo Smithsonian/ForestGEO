@@ -815,19 +815,23 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     }
   }, [currentPlot, currentCensus, currentSite, gridType, filterModel, fetchFullData, setSnackbar]);
 
+  // Returns whether a dialog actually opened. Callers that arm pendingSaveRef before
+  // calling this MUST disarm it on false: the ref is only cleared from the dialog's
+  // confirm/cancel handlers, so a silent no-op here would leave every save, delete,
+  // add and edit entry point permanently short-circuited on the stale ref.
   const openConfirmationDialog = useCallback(
-    (actionType: 'save' | 'delete', actionId: GridRowId) => {
-      setPendingAction({ actionType, actionId });
-
+    (actionType: 'save' | 'delete', actionId: GridRowId): boolean => {
       const row = gridRows.find(row => String(row.id) === String(actionId));
-      if (row) {
-        if (actionType === 'delete') {
-          setPendingDeleteRow(row);
-          setIsDeleteDialogOpen(true);
-        } else {
-          setIsDialogOpen(true);
-        }
+      if (!row) return false;
+
+      setPendingAction({ actionType, actionId });
+      if (actionType === 'delete') {
+        setPendingDeleteRow(row);
+        setIsDeleteDialogOpen(true);
+      } else {
+        setIsDialogOpen(true);
       }
+      return true;
     },
     [gridRows]
   );
@@ -928,10 +932,24 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const performSaveAction = useCallback(
     async (id: GridRowId, confirmedRow: GridRowModel): Promise<SaveOutcome | null> => {
-      if (locked || !promiseArguments) return null;
+      if (!promiseArguments) return null;
       const pending = promiseArguments;
       const key = rowKey(pending.oldRow.id ?? id);
-      if (isSavingRef.current || saveInFlightRef.current.has(key)) return null;
+
+      // MUI is awaiting pending.promise for a new row. Bailing out without settling it
+      // strands the row in edit mode with no feedback, so refuse loudly instead: the
+      // rejection both frees the grid and reaches the caller's snackbar.
+      const refuse = (message: string): Error => {
+        const error = new Error(message);
+        if (!pending.settled) {
+          pending.settled = true;
+          pending.reject(error);
+        }
+        return error;
+      };
+      if (locked) throw refuse('This grid is locked, so the row could not be saved.');
+      if (isSavingRef.current || saveInFlightRef.current.has(key)) throw refuse('Another row save is already in progress.');
+
       saveInFlightRef.current.add(key);
       isSavingRef.current = true;
       setIsSaving(true);
@@ -1105,10 +1123,14 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         pendingSaveRef.current = pending;
         setPromiseArguments(pending);
 
-        openConfirmationDialog('save', id);
+        if (!openConfirmationDialog('save', id)) {
+          pendingSaveRef.current = null;
+          setPromiseArguments(null);
+          setSnackbar({ children: `Cannot save row ${String(id)} because it is no longer present in the grid. Refresh and retry.`, severity: 'error' });
+        }
       }
     },
-    [locked, rowModesModel, gridRows, localApiRef, openConfirmationDialog]
+    [locked, rowModesModel, gridRows, localApiRef, openConfirmationDialog, setSnackbar]
   );
 
   const handleDeleteClick = useCallback(
@@ -1189,7 +1211,11 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         const pending: PendingSave = { resolve: resolvePending, reject: rejectPending, oldRow, newRow, promise: pendingPromise };
         pendingSaveRef.current = pending;
         setPromiseArguments(pending);
-        openConfirmationDialog('save', oldRow.id);
+        if (!openConfirmationDialog('save', oldRow.id)) {
+          pendingSaveRef.current = null;
+          setPromiseArguments(null);
+          throw new Error(`Cannot save row ${String(oldRow.id)} because it is no longer present in the grid. Refresh and retry.`);
+        }
         return pendingPromise;
       }
 

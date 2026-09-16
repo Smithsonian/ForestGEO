@@ -17,6 +17,7 @@ const mockTriggerRefresh = vi.fn();
 const observedGetRowHeightProps: unknown[] = [];
 let echoSamePaginationOnRender = false;
 let capturedProcessPromises: Promise<unknown>[] = [];
+const DETACHED_ROW_ID = 'row-dropped-by-refetch';
 const ORIGINAL_TEST_SP_CODE = 'TEST_SP_CODE_A';
 const UPDATED_TEST_SP_CODE = 'TEST_SP_CODE_B';
 
@@ -236,6 +237,21 @@ vi.mock('@/config/styleddatagrid', async () => {
           }}
         >
           Test Process New Row
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            // A new row whose local copy a refetch already discarded: MUI still holds
+            // it in edit state and will hand it back to processRowUpdate.
+            const detachedRow = { id: DETACHED_ROW_ID, isNew: true };
+            const processPromise = props.processRowUpdate?.(detachedRow, detachedRow);
+            if (processPromise) {
+              processPromise.catch(() => {});
+              capturedProcessPromises.push(processPromise);
+            }
+          }}
+        >
+          Test Process Detached New Row
         </button>
         {rows.map((row: any) => {
           const actionColumn = columns.find((column: any) => typeof column.getActions === 'function');
@@ -545,6 +561,83 @@ describe('IsolatedDataGridCommons', () => {
     await expect(capturedProcessPromises[1]).resolves.toMatchObject({ personnelID: 42 });
     expect(screen.getByTestId('row-state').textContent).toContain('"personnelID":42');
     expect(JSON.parse(screen.getByTestId('row-state').textContent ?? '[]')).toHaveLength(1);
+  });
+
+  it('does not wedge the grid when a new row disappears before its confirmation dialog can open', async () => {
+    const originalRow = { id: 1, personID: 123, personName: 'Original' };
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+    } as Response);
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="personnel"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'personName', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Original'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test Process Detached New Row' }));
+
+    // The promise MUI awaits must settle rather than hang forever.
+    expect(capturedProcessPromises).toHaveLength(1);
+    await expect(capturedProcessPromises[0]).rejects.toThrow(`Cannot save row ${DETACHED_ROW_ID}`);
+    expect(screen.queryByRole('button', { name: 'Save Changes' })).not.toBeInTheDocument();
+    expect(mockFetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+
+    // The pending-save lock must have been released: every other entry point on the
+    // grid short-circuits on it, so a stuck ref leaves the whole grid read-only.
+    fireEvent.click(screen.getByRole('button', { name: 'Test Add New Row' }));
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"isNew":true'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test Process New Row' }));
+    expect(await screen.findByRole('button', { name: 'Save Changes' })).toBeInTheDocument();
+  });
+
+  it('rejects the awaited new-row save with a message when the grid is locked at confirmation time', async () => {
+    const originalRow = { id: 1, personID: 123, personName: 'Original' };
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+    } as Response);
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="personnel"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'personName', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+          locked
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Original'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test Process New Row' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+
+    expect(capturedProcessPromises).toHaveLength(1);
+    await expect(capturedProcessPromises[0]).rejects.toThrow('This grid is locked');
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('This grid is locked'));
+    expect(mockFetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
   });
 
   it('blocks editing a created row until refresh supplies its missing server ID', async () => {
