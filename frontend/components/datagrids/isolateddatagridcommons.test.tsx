@@ -1429,14 +1429,21 @@ describe('IsolatedDataGridCommons', () => {
       ).toBeInTheDocument();
       expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'a real change on the direct path must not surface the no-changes toast').not.toBeInTheDocument();
       expect(patchURL, 'the direct path must still PATCH the real fixeddata endpoint').toContain(`/api/fixeddata/attributes/${TEST_SCHEMA}/code`);
+      expect(capturedProcessPromises, 'the mock button must have actually invoked processRowUpdate').toHaveLength(1);
+      await expect(
+        capturedProcessPromises[0],
+        'MUI still needs the saved row back from processRowUpdate, independent of the toast it now also shows'
+      ).resolves.toMatchObject(updatedAttributeRow);
     });
 
     it('shows the NO_CHANGES_SAVED_MESSAGE info toast on the direct row-edit path (no confirm dialog) when the PATCH reports changed:false', async () => {
       // Same #481 no-op shape as the confirm-dialog tests above, but exercised through
       // processRowUpdate's direct success branch instead of handleConfirmAction. Before this
       // fix, a no-op save on this path reported nothing at all.
-      mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      let patchURL: string | undefined;
+      mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
         if (init?.method === 'PATCH') {
+          patchURL = String(input);
           return new Response(JSON.stringify({ message: 'Update successful', changed: false }), {
             status: HTTPResponses.OK,
             headers: { 'Content-Type': 'application/json' }
@@ -1460,6 +1467,47 @@ describe('IsolatedDataGridCommons', () => {
         screen.queryByText(ROW_UPDATED_MESSAGE),
         'the success toast must not also appear alongside the direct-path no-changes toast'
       ).not.toBeInTheDocument();
+      expect(patchURL, 'the direct path must still PATCH the real fixeddata endpoint').toContain(`/api/fixeddata/attributes/${TEST_SCHEMA}/code`);
+      expect(capturedProcessPromises, 'the mock button must have actually invoked processRowUpdate').toHaveLength(1);
+      await expect(
+        capturedProcessPromises[0],
+        'a no-op save must still hand MUI back the row it submitted, independent of the info toast'
+      ).resolves.toMatchObject(updatedAttributeRow);
+    });
+
+    it('leads with the no-changes fact, and never claims a save happened, on the direct row-edit path when a changed:false save also fails to refresh', async () => {
+      // Mirrors the confirm-dialog version of this test above: outcome.changed === false must be
+      // checked before outcome.followUpError so a no-op save whose post-save refresh then fails is
+      // never reported as "Changes were saved, but the grid could not refresh" - the server already
+      // said nothing was saved. describeSaveOutcome backs both paths, so the direct path must get
+      // this right too, not just handleConfirmAction.
+      const refreshFailureMessage = 'onDataUpdate rejected: could not refresh the grid';
+      mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          return new Response(JSON.stringify({ message: 'Update successful', changed: false }), {
+            status: HTTPResponses.OK,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        return {
+          ok: true,
+          json: async () => ({ output: [originalAttributeRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+        } as Response;
+      });
+
+      renderEditableGrid('attributes', originalAttributeRow, updatedAttributeRow, {
+        onDataUpdate: vi.fn().mockRejectedValue(new Error(refreshFailureMessage))
+      });
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(originalAttributeRow.description));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Test Process Row' }));
+
+      const alert = await screen.findByRole('alert');
+      expect(alert, 'a no-op save whose refresh also fails must still lead with the no-changes fact on the direct path').toHaveTextContent(
+        NO_CHANGES_SAVED_MESSAGE
+      );
+      expect(alert, 'the refresh failure must be reported alongside the no-changes fact, not silently dropped').toHaveTextContent(refreshFailureMessage);
+      expect(alert.textContent, 'must never claim the save happened when changed:false says it did not').not.toContain('Changes were saved');
     });
 
     it('falls back to the success toast when the PATCH body omits changed (backward compatibility)', async () => {

@@ -242,9 +242,8 @@ export const GRID_REFRESH_FAILED_MESSAGE = 'The grid could not refresh';
 
 // Single source of truth for how a SaveOutcome becomes a snackbar. Shared by the confirm-dialog
 // save path (handleConfirmAction) and the direct row-edit path (processRowUpdate) so both report
-// the same outcome the same way. `null` is reserved for an outcome with nothing to say; every
-// branch below is exhaustive for a real SaveOutcome, so it is never actually returned.
-function describeSaveOutcome(outcome: SaveOutcome, isNewRow: boolean): { children: string; severity: AlertProps['severity'] } | null {
+// the same outcome the same way.
+function describeSaveOutcome(outcome: SaveOutcome, isNewRow: boolean): Pick<AlertProps, 'children' | 'severity'> {
   if (outcome.partialError) {
     return { children: outcome.partialError.message, severity: 'error' };
   }
@@ -1165,8 +1164,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           const resolvedRow = confirmedRow || promiseArguments.newRow;
           const outcome = await performSaveAction(promiseArguments.oldRow.id, resolvedRow);
           if (outcome) {
-            const description = describeSaveOutcome(outcome, isExplicitNewRow(promiseArguments.oldRow));
-            if (description) setSnackbar(description);
+            setSnackbar(describeSaveOutcome(outcome, isExplicitNewRow(promiseArguments.oldRow)));
           }
         } catch (error: unknown) {
           const message = asError(error).message;
@@ -1324,8 +1322,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         const updatedRow = persisted.row;
         const followUpError = await finishPersistedSave(updatedRow, oldRow);
         const outcome: SaveOutcome = { row: updatedRow, changed: persisted.changed, followUpError };
-        const description = describeSaveOutcome(outcome, isExplicitNewRow(oldRow));
-        if (description) setSnackbar(description);
+        // The isExplicitNewRow(oldRow) branch above already returns early, so an explicit new
+        // row never reaches this point - isNewRow is always false here.
+        setSnackbar(describeSaveOutcome(outcome, false));
         return updatedRow;
       } catch (error: unknown) {
         if (error instanceof RowSaveFinalizationError) {
