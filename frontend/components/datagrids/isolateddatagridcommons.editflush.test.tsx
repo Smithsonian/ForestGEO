@@ -192,10 +192,13 @@ function mockAttributesFetch(seedRow: Record<string, unknown>) {
   mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === 'PATCH') {
       patchBody = JSON.parse(String(init.body));
-      return {
-        ok: true,
-        json: async () => ({ message: 'Update successful', changed: true })
-      } as Response;
+      // A real Response: isolateddatagridcommons' updateRow reads the body via
+      // readResponsePayload's response.text(), which a plain { json: async () => ... }
+      // stub does not provide.
+      return new Response(JSON.stringify({ message: 'Update successful', changed: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
     return {
       ok: true,

@@ -23,6 +23,8 @@ import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast from '@/components/editplan/undotoast';
 import { buildEditableFieldsDiffForSurface } from '@/components/datagrids/measurementscommonsutils';
+import { isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
+import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
 
 interface IsolatedFailedMeasurementsDataGridProps {
   onRowReingested?: () => void;
@@ -104,10 +106,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     schema: currentSite?.schemaName ?? '',
     plotID: currentPlot?.plotID ?? 0,
     censusID: activeCensusID ?? 0,
-    dataType: 'failedmeasurements',
-    onError: error => {
-      setEditFlowError(error.message);
-    }
+    dataType: 'failedmeasurements'
   });
 
   useEffect(() => {
@@ -223,11 +222,13 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
       const reasons = computeFailureReasons(newRow);
       const updatedRow: GridRowModel = { ...newRow, failureReasons: reasons, currentFailureReasons: reasons };
       let editOperationID: number | null = null;
+      let persistenceCompleted = false;
 
       if (Object.keys(editableDiff).length > 0) {
         try {
           const applyResult = await editFlow.beginEdit(failedMeasurementID, editableDiff);
           editOperationID = applyResult.editOperationID;
+          persistenceCompleted = true;
         } catch (error: unknown) {
           const err = error instanceof Error ? error : new Error(String(error));
           ailogger.error('Failed to save row via edit preview flow:', err);
@@ -261,8 +262,11 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
         setRefresh(true);
       } catch (error: unknown) {
         const err = error instanceof Error ? error : new Error(String(error));
-        ailogger.error('Failed to finalize row save:', err);
-        throw err;
+        const finalError = persistenceCompleted
+          ? new RowSaveFinalizationError(`Changes were saved, but ${err.message}`, updatedRow as Record<string, unknown>)
+          : err;
+        ailogger.error('Failed to finalize row save:', finalError);
+        throw finalError;
       }
 
       return updatedRow;
@@ -343,9 +347,10 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     return [
       ...FailedMeasurementsGridColumns.map(column => {
         const isReasonColumn = ['currentFailureReasons', 'description', 'originalFailureReasons', 'failureReasons', 'lastValidatedAt'].includes(column.field);
+        const editable = column.editable !== false && isFieldEditableOnSurface('failedmeasurements', column.field);
         return {
           ...column,
-          editable: !isReasonColumn,
+          editable,
           renderCell: (params: any) => {
             if (isReasonColumn) {
               const displayValue = column.field === 'description' ? formatDetailedFailureDescription(params.value) : params.value;
@@ -457,7 +462,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
             }
           },
           valueFormatter: (value: any) => (['dbh', 'hom', 'x', 'y'].includes(column.field) ? Number(value).toFixed(2) : value),
-          preProcessEditCellProps: (params: any) => (['dbh', 'hom', 'x', 'y'].includes(column.field) ? preprocessor(params) : {})
+          preProcessEditCellProps: (params: any) => (['dbh', 'hom', 'x', 'y'].includes(column.field) ? preprocessor(params) : params.props)
         };
       })
     ];
