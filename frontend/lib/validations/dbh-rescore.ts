@@ -12,6 +12,7 @@
  * belong to one connection and one transaction.
  */
 import { randomUUID } from 'crypto';
+import { DBH_RESCORE_ATTEMPT_PREFIX } from '@/config/validationrunmessages';
 import ConnectionManager, { getTransactionFailureOutcome, type TxExecutor } from '@/lib/db/connectionmanager';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
@@ -89,7 +90,7 @@ export interface DbhRescoreReconciliationDependencies {
   originalConnectionID?: number;
 }
 
-const attemptMarker = (attemptID: string) => `dbh-rescore-attempt:${attemptID}`;
+const attemptMarker = (attemptID: string) => `${DBH_RESCORE_ATTEMPT_PREFIX}${attemptID}`;
 
 export class DbhRescoreValidToInvalidError extends Error {
   constructor(readonly measurementIDs: number[]) {

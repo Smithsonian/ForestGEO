@@ -150,6 +150,18 @@ describe('/api/validations/run authz', () => {
   });
 
   describe('GET (fromQuery schema resolver)', () => {
+    it('keeps recovery markers in storage but excludes them from user-facing run messages', async () => {
+      await mockNonAdminSession(MEMBER_EMAIL, MEMBER_SCHEMA)();
+      const messages = ['dbh-rescore-attempt:completed-attempt', '2 DBH comparisons were skipped'];
+      dbSpies.executeQuery.mockResolvedValueOnce([{ RunID: INSERTED_RUN_ID, Status: 'completed', ErrorMessages: messages }] as any);
+      const { GET } = await import('@/app/api/validations/run/route');
+      const response = await GET(getRequest(MEMBER_SCHEMA), EMPTY_ROUTE_CONTEXT);
+      expect(response.status).toBe(HTTP_OK);
+      expect((await response.json()).run.ErrorMessages).toEqual(['2 DBH comparisons were skipped']);
+      expect(messages).toEqual(['dbh-rescore-attempt:completed-attempt', '2 DBH comparisons were skipped']);
+      expect(dbSpies.executeQuery).toHaveBeenCalledTimes(1);
+    });
+
     it('denies an out-of-scope schema with 403 and runs no SQL', async () => {
       await mockNonAdminSession(ATTACKER_EMAIL, MEMBER_SCHEMA)();
 

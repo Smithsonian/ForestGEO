@@ -1,15 +1,16 @@
 /** Real-MySQL proofs for the all-or-nothing DBH re-score boundary. */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import { buildMeasurementScopeLockName } from '@/config/measurementscopelock';
 import { MANAGER_OVERRIDE_ERROR_CODE } from '@/config/validationoverride';
 import { describeDbhFloorSkips } from '@/config/dbhchangevalidations';
-import ConnectionManager from '@/lib/db/connectionmanager';
+import ConnectionManager, { type TxExecutor } from '@/lib/db/connectionmanager';
 import { runCensusValidations } from '@/lib/uploads/validation-orchestrator';
 import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
 import { BACKGROUND_JOB_TYPES, NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
 import { buildRealSweepDeps, type DbhExpectedManifest } from '@/lib/validations/dbh-rescore-cli';
-import { createResetValidationStatesQuery, createValidationOverrideQueries } from '@/components/datagrids/measurementscommonsutils';
+import { createResetValidationStatesQuery } from '@/components/datagrids/measurementscommonsutils';
+import { overrideValidationScope } from '@/lib/validations/override';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import {
@@ -29,14 +30,14 @@ import {
   type TestData
 } from '../setup/local-db-setup';
 
-type Tx = { id: string; query(sql: string, params?: unknown[]): Promise<unknown> };
+type Tx = TxExecutor;
 type Fault = (sql: string, params: unknown[]) => Promise<void> | void;
 function managerFor(connection: Connection, fault?: Fault) {
   let sequence = 0;
   const locks = new Set<string>();
-  const query = async (sql: string, params: unknown[] = []) => {
+  const query = async <T = unknown>(sql: string, params: unknown[] = []): Promise<T> => {
     await fault?.(sql, params);
-    return (await connection.query(sql, params))[0];
+    return (await connection.query(sql, params))[0] as T;
   };
   return {
     executeQuery: query,
@@ -93,7 +94,7 @@ describe('rescoreDbhCensus transaction boundary', () => {
       "CREATE TABLE IF NOT EXISTS validation_runs (RunID INT AUTO_INCREMENT PRIMARY KEY, PlotID INT NOT NULL, CensusID INT NOT NULL, Status ENUM ('running','completed','failed','cancelled') NOT NULL DEFAULT 'running', TotalSteps INT NOT NULL DEFAULT 0, CompletedSteps INT NOT NULL DEFAULT 0, FailedSteps INT NOT NULL DEFAULT 0, CurrentStep VARCHAR(100), ErrorMessages JSON, StartedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CompletedAt DATETIME NULL) ENGINE=InnoDB"
     );
     await connection.query(
-      "CREATE TABLE IF NOT EXISTS upload_sessions (session_id VARCHAR(64) PRIMARY KEY, schema_name VARCHAR(64), plot_id INT, census_id INT, user_id VARCHAR(255), state ENUM ('initialized','uploading','uploaded','processing','collapsing','completed','failed','abandoned','cleaned_up') NOT NULL DEFAULT 'initialized') ENGINE=InnoDB"
+      "CREATE TABLE IF NOT EXISTS upload_sessions (session_id VARCHAR(64) PRIMARY KEY, schema_name VARCHAR(64), plot_id INT, census_id INT, user_id VARCHAR(255), last_heartbeat TIMESTAMP NULL, updated_at TIMESTAMP NULL, created_at TIMESTAMP NULL, state ENUM ('initialized','uploading','uploaded','processing','collapsing','completed','failed','abandoned','cleaned_up') NOT NULL DEFAULT 'initialized') ENGINE=InnoDB"
     );
     await connection.query('CREATE DATABASE IF NOT EXISTS catalog');
     await connection.query(
@@ -343,8 +344,7 @@ describe('rescoreDbhCensus transaction boundary', () => {
       growthErrors[0].ErrorID
     ]);
     await connection.query('UPDATE coremeasurements SET IsValidated=TRUE WHERE CoreMeasurementID=?', [neighbour.present]);
-    const [censusRows] = await connection.query<RowDataPacket[]>('SELECT PlotCensusNumber FROM census WHERE CensusID=?', [census2ID]);
-    await runFormatted(createValidationOverrideQueries(schema, plotID, Number(censusRows[0].PlotCensusNumber)));
+    await overrideValidationScope(ConnectionManager.getInstance(), { schema, plotID, censusID: census2ID });
     expect(await overrideMarkerCount(neighbour.present), 'an already-valid row is outside the override scope').toBe(0);
 
     expect(await validity(overridden.present), 'the override sets the failed row valid').toBe(true);
@@ -365,11 +365,35 @@ describe('rescoreDbhCensus transaction boundary', () => {
     expect(await validity(neighbour.present), 'the un-overridden 100 -> 900 mm row is re-scored invalid').toBe(false);
   });
 
+  it('rolls back override markers, error resolution and validity when the final view refresh fails', async () => {
+    const row = await pair('OVERRIDE_ATOMIC', 100, 900);
+    await connection.query('UPDATE coremeasurements SET IsValidated=FALSE WHERE CoreMeasurementID=?', [row.present]);
+    const [errors] = await connection.query<RowDataPacket[]>("SELECT ErrorID FROM measurement_errors WHERE ErrorSource='validation' AND ErrorCode='1'");
+    await connection.query('INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, FALSE)', [row.present, errors[0].ErrorID]);
+    const before = await snapshot();
+    const cm = ConnectionManager.getInstance();
+    const execute = cm.executeQuery.bind(cm);
+    const failure = new Error('Injected override view refresh failure');
+    const spy = vi.spyOn(cm, 'executeQuery').mockImplementation(async (sql, params, transactionID) => {
+      if (sql.includes('INSERT IGNORE INTO') && sql.includes('viewfulltable')) throw failure;
+      return execute(sql, params, transactionID);
+    });
+    try {
+      await expect(overrideValidationScope(cm, { schema, plotID, censusID: census2ID })).rejects.toThrow(failure.message);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await snapshot(), 'all persisted state must roll back after a late override failure').toEqual(before);
+    expect(await overrideMarkerCount(row.present)).toBe(0);
+    // A direct retry also proves the failed transaction released its scope lock.
+    expect(await overrideValidationScope(cm, { schema, plotID, censusID: census2ID })).toBeGreaterThan(0);
+    expect(await validity(row.present)).toBe(true);
+  });
+
   it('drops a stale override marker once the overridden row is re-validated', async () => {
     const overridden = await pair('STALE_OVERRIDE', 100, 900);
     await connection.query('UPDATE coremeasurements SET IsValidated=FALSE WHERE CoreMeasurementID=?', [overridden.present]);
-    const [censusRows] = await connection.query<RowDataPacket[]>('SELECT PlotCensusNumber FROM census WHERE CensusID=?', [census2ID]);
-    await runFormatted(createValidationOverrideQueries(schema, plotID, Number(censusRows[0].PlotCensusNumber)));
+    await overrideValidationScope(ConnectionManager.getInstance(), { schema, plotID, censusID: census2ID });
     expect(await overrideMarkerCount(overridden.present)).toBe(1);
 
     await runFormatted([createResetValidationStatesQuery(schema, plotID, census2ID)]);

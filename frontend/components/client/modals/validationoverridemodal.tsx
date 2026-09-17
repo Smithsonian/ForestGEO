@@ -2,13 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import { DialogContent, DialogTitle, Modal, ModalClose, ModalDialog } from '@mui/joy';
+import { Alert, DialogContent, DialogTitle, Modal, ModalClose, ModalDialog } from '@mui/joy';
 import ConfirmationDialog from '@/components/client/modals/confirmationdialog';
 import CircularProgress from '@mui/joy/CircularProgress';
 import ailogger from '@/ailogger';
-import { createValidationOverrideQueries } from '@/components/datagrids/measurementscommonsutils';
-
-const OVERRIDE_MARKER_STEP_INDEX = 2;
 
 interface VOMProps {
   isValidationOverrideModalOpen: boolean;
@@ -20,33 +17,31 @@ export default function ValidationOverrideModal(props: VOMProps) {
   const [openConfirmOverrideModal, setOpenConfirmOverrideModal] = useState(true); // starting with confirmation
   const [isOverrideConfirmed, setIsOverrideConfirmed] = useState(false); // need confirmation for override
   const [startOverride, setStartOverride] = useState(false);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
   const [overrideProgress, setOverrideProgress] = useState<number | null>(null); // track override progress
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const censusID = currentCensus?.dateRanges?.[0]?.censusID;
 
   const triggerOverride = useCallback(async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.plotCensusNumber) {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !censusID) {
       throw new Error('validation override requires a selected site, plot, and census');
     }
-    const steps = createValidationOverrideQueries(currentSite.schemaName, currentPlot.plotID, currentCensus.plotCensusNumber);
-    for (const [index, step] of steps.entries()) {
-      const response = await fetch(`/api/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(step)
-      });
-      if (!response.ok) throw new Error(`validation override step ${index + 1} failed with status ${response.status}`);
-      const resultPacket = await response.json();
-      if (index === OVERRIDE_MARKER_STEP_INDEX && resultPacket.affectedRows === 0) throw new Error('validation override found no failed or pending rows');
-    }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
+    const response = await fetch('/api/validations/override', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schema: currentSite.schemaName, plotID: currentPlot.plotID, censusID })
+    });
+    if (!response.ok) throw new Error(`Validation override failed with status ${response.status}`);
+  }, [currentSite?.schemaName, currentPlot?.plotID, censusID]);
 
   // CRITICAL FIX: Store interval ref for cleanup to prevent memory leak
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (startOverride) {
+      setOverrideError(null);
       setOverrideProgress(0);
       triggerOverride()
         .then(() => {
@@ -68,8 +63,9 @@ export default function ValidationOverrideModal(props: VOMProps) {
           // Store interval ref for cleanup
           progressIntervalRef.current = interval;
         })
-        .catch((error: any) => {
-          ailogger.error('Override operation failed:', error);
+        .catch((error: unknown) => {
+          ailogger.error('Override operation failed:', error instanceof Error ? error : undefined);
+          setOverrideError('Override could not be confirmed. Close this dialog and refresh the census before retrying.');
           setStartOverride(false);
         });
     }
@@ -113,6 +109,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
             />
           )}
           {startOverride && overrideProgress !== null && <CircularProgress determinate value={overrideProgress} />}
+          {overrideError && <Alert color="danger">{overrideError}</Alert>}
         </DialogContent>
       </ModalDialog>
     </Modal>

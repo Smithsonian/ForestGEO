@@ -19,12 +19,20 @@ All checkboxes below are pending. September 9 inventories, counts, and rehearsal
 
 ### Review findings to disposition before apply
 
-The September 17 source review identified two unresolved issues. The documentation update does not fix them or claim they have caused a production incident:
+The September 17 reconciliation implements both corrections; the release record must name the tested revision before apply:
 
-- The override modal sends four separate SQL requests, so a partial failure can leave error resolution, the override marker, and validity inconsistent. Implement an atomic server operation or record and rehearse an explicit operational mitigation that prevents concurrent overrides and reconciles any partially applied override state before the sweep. Re-scoring must not assume an unchecked marker is trustworthy.
-- Re-score attempt identifiers are stored in `validation_runs.ErrorMessages`, which the completed-run badge also displays as notices. Separate recovery metadata from user messages, or explicitly review and document the temporary UI impact and how recovery evidence will be preserved. Do not erase the attempt marker to hide a warning while reconciliation or rollback still depends on it.
+- The override modal now calls one admin-only, site-authorized `/api/validations/override` operation. The server acquires the shared census lock, checks active work, and commits error resolution, override markers, validity, and both materialized views in one transaction. A real-MySQL regression injects a failure at the final view refresh and verifies complete rollback and successful retry. This prevents new partial overrides; it does not repair or prove the intent of historical partially applied operations. Re-scoring must still review historical discrepancies and valid-to-invalid holds.
+- Attempt identifiers remain in `validation_runs.ErrorMessages` for durable reconciliation. The run-status API filters the reserved `dbh-rescore-attempt:` metadata prefix from public notices without changing the stored row or hiding genuine validation messages. Keep this small compatibility filter after tool retirement while historical rows still contain markers. No new metadata table or schema migration is needed for this temporary tool.
 
-Record the chosen correction or mitigation, verification evidence, and reviewer in the completion record before production apply. The duplicate dry-run/execution preflights also need to remain consistent for this release; do not enlarge the tool into a permanent framework to address that duplication.
+Record verification evidence and reviewer in the completion record before production apply. The duplicate dry-run/execution preflights also need to remain consistent for this release; do not enlarge the tool into a permanent framework to address that duplication.
+
+### September 17 readiness refresh
+
+The read-only audit at 17:48 UTC found 13 schemas (including `forestgeo_sinharaja`) and 25 active plot/census scopes. Sinharaja has no active census; verify its rule deployment separately and do not invent a successful re-score scope. The older 12-schema/20-scope inventory and rehearsal below are historical. Re-discover targets immediately before apply and reconcile any difference.
+
+Four scopes contain 242,137 eligible pending measurements requiring ordinary validation before DBH-only re-scoring: Harvard census 13 (1) and 15 (85,641), Mpala census 2 (156,492), and Testing Mason census 19 (3), all plot 1. There were no nonterminal catalog jobs; two SERC validation rows and two upload sessions still report nonterminal states outside the active census inventory. Their ages alone do not prove completion. Reconcile these against current census state, workers, sessions, and transactions under isolation; do not relabel them merely to satisfy a preflight.
+
+The previous local rehearsal snapshot is unavailable. A fresh protected copy and final-revision annual/legacy rollback rehearsal remain prerequisites. The tracked [September 17 release record](../../docs/notes/2026-09-17-dbh-release-status.md) distinguishes finished checks from remaining production work.
 
 ## Rules and retained state
 
@@ -202,7 +210,7 @@ Prepare and test the old-rule manifest/procedure and seed patch **before** rollo
 
 For a committed census, procedure rollback alone does not restore validity. Under continued isolation, deploy and verify the tested old-rule manifest, then re-score from the earliest affected committed census through every later census. Verify both views, occurrence extracts, artifacts, and old-rule fixtures. Reconcile unknown commits first. Deleted history or erased override intent cannot be reconstructed automatically; compare saved snapshots and limit any restoration to verified unchanged rows. Never overwrite subsequent edits to force historical counts to match.
 
-The reviewed rollback assets are `db/rollback/2026-09-02-dbh-legacy-rules-procedures.sql` and `db/rollback/2026-09-02-dbh-legacy-rules-corequeries.sql`. Keep every writer isolated and reconcile unknown outcomes before using this exact 12-schema rollback sequence. It installs only the two legacy procedures and refreshes only the two seed text fields; it does not re-score measurements. The MySQL client import was verified against a disposable local schema, and both normalized procedure definitions matched the rollback manifest.
+The reviewed rollback assets are `db/rollback/2026-09-02-dbh-legacy-rules-procedures.sql` and `db/rollback/2026-09-02-dbh-legacy-rules-corequeries.sql`. Keep every writer isolated and reconcile unknown outcomes before using this explicit 13-schema rollback sequence, refreshed from the September 17 inventory. It installs only the two legacy procedures and refreshes only the two seed text fields; it does not re-score measurements. The MySQL client import was verified against a disposable local schema, and both normalized procedure definitions matched the rollback manifest.
 
 Configure a MySQL login path once on the operator machine. `mysql_config_editor` prompts for the password and writes its local login file; never put the password on a command line or in this document.
 
@@ -229,12 +237,12 @@ ROLLBACK_SEEDS="$PWD/db/rollback/2026-09-02-dbh-legacy-rules-corequeries.sql"
 ROLLBACK_SCHEMAS=(
   forestgeo_cooksbranch forestgeo_harvard forestgeo_ldw forestgeo_mpala
   forestgeo_ngel_nyaki forestgeo_niobrara forestgeo_panama forestgeo_rabi
-  forestgeo_serc forestgeo_testing forestgeo_testing_mason forestgeo_wytham
+  forestgeo_serc forestgeo_sinharaja forestgeo_testing forestgeo_testing_mason forestgeo_wytham
 )
 test -r "$ROLLBACK_PROCEDURES"
 test -r "$ROLLBACK_SEEDS"
 
-# Fail closed if discovery is not exactly the audited 12-schema target. Query
+# Fail closed if discovery is not exactly the audited 13-schema target. Query
 # every `forestgeo_` prefix, even an otherwise malformed name, so no new or
 # unaccounted target can be omitted. Command substitutions preserve mysql's
 # failure status under `set -e`; they are not process substitutions.
@@ -250,7 +258,7 @@ expected=$(printf '%s\n' "${ROLLBACK_SCHEMAS[@]}" | LC_ALL=C sort)
 quarantined=$("$MYSQL" --login-path=forestgeo-dbh-rollback \
   --host=forestgeo-mysqldataserver.mysql.database.azure.com \
   --user=azureroot --port=3306 --ssl-mode=VERIFY_IDENTITY --batch --skip-column-names \
-  --execute "SELECT SchemaName FROM catalog.schema_contract_gate WHERE QuarantinedAt IS NOT NULL AND SchemaName IN ('forestgeo_cooksbranch','forestgeo_harvard','forestgeo_ldw','forestgeo_mpala','forestgeo_ngel_nyaki','forestgeo_niobrara','forestgeo_panama','forestgeo_rabi','forestgeo_serc','forestgeo_testing','forestgeo_testing_mason','forestgeo_wytham')")
+  --execute "SELECT SchemaName FROM catalog.schema_contract_gate WHERE QuarantinedAt IS NOT NULL AND SchemaName IN ('forestgeo_cooksbranch','forestgeo_harvard','forestgeo_ldw','forestgeo_mpala','forestgeo_ngel_nyaki','forestgeo_niobrara','forestgeo_panama','forestgeo_rabi','forestgeo_serc','forestgeo_sinharaja','forestgeo_testing','forestgeo_testing_mason','forestgeo_wytham')")
 [[ -z "$quarantined" ]] || { printf 'Refusing quarantined rollback target(s): %s\n' "$quarantined" >&2; exit 1; }
 
 # mysql handles DELIMITER directives in this reviewed two-procedure file.
@@ -293,7 +301,7 @@ for schema in "${ROLLBACK_SCHEMAS[@]}"; do
 done
 ```
 
-DDL is not transactional. If a client invocation fails, leave writer isolation in place, inspect `SHOW CREATE PROCEDURE` for that schema, correct the specific client/SQL failure, and rerun the same reviewed file for the failed schema and every subsequently unverified schema. Do not infer rollback from an Actions failure or restart an app as recovery. If a seed apply fails, retain isolation and rerun the dry verification for all 12 schemas. Seed updates are individually transactional and repeatable; procedures are not.
+DDL is not transactional. If a client invocation fails, leave writer isolation in place, inspect `SHOW CREATE PROCEDURE` for that schema, correct the specific client/SQL failure, and rerun the same reviewed file for the failed schema and every subsequently unverified schema. Do not infer rollback from an Actions failure or restart an app as recovery. If a seed apply fails, retain isolation and rerun the dry verification for all 13 schemas. Seed updates are individually transactional and repeatable; procedures are not.
 
 Only then use the separately approved ordered re-score apply command from the runbook, starting at the earliest affected committed census in every plot and continuing through later dependent censuses.
 

@@ -5,6 +5,7 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { fromBody, fromQuery, withRouteAuthz } from '@/lib/route-authz';
 import { createValidationRunRecord, EmptyValidationRunUpdateError, updateValidationRunRecord } from '@/lib/validations/run-records';
+import { publicValidationRunMessages } from '@/config/validationrunmessages';
 
 export const runtime = 'nodejs';
 
@@ -79,7 +80,8 @@ async function getHandler(request: NextRequest) {
     const rows = await connectionManager.executeQuery(query, [Number(plotID), Number(censusID)]);
     const run = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
 
-    return NextResponse.json({ run }, { status: HTTPResponses.OK });
+    const publicRun = run ? { ...run, ErrorMessages: publicValidationRunMessages(run.ErrorMessages) } : null;
+    return NextResponse.json({ run: publicRun }, { status: HTTPResponses.OK });
   } catch (e: any) {
     ailogger.error('Error fetching validation run:', e);
     return NextResponse.json({ error: e.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
