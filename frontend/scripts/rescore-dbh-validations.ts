@@ -1,4 +1,11 @@
-/** Operator entry point for the fixed ValidationID 1/2 DBH re-score sweep. */
+/**
+ * TEMPORARY: one-time historical DBH migration (decision 2026-09-17).
+ * Retire after every intended/downstream census is accepted, all outcomes are
+ * reconciled, evidence is archived, and the recorded rollback window has ended
+ * with Mason or a named delegate's sign-off. Do not schedule or expose as an API.
+ * Keep ordinary validation and shared safety fixes when removing this tool.
+ * Lifecycle and removal inventory: frontend/docs/validation-rescore-runbook.md.
+ */
 import { randomUUID } from 'crypto';
 import { readFile } from 'fs/promises';
 import path from 'path';

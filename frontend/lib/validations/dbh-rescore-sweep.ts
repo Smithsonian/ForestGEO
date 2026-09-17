@@ -1,3 +1,10 @@
+/**
+ * TEMPORARY: ordered sweep for the one-time DBH migration (decision 2026-09-17).
+ * Retire after all intended/downstream censuses are accepted, outcomes reconciled,
+ * evidence archived, and the recorded rollback window ends with Mason or a named
+ * delegate's sign-off. This is not a permanent scheduler or re-scoring service.
+ * Lifecycle and removal inventory: frontend/docs/validation-rescore-runbook.md.
+ */
 import { createHash } from 'crypto';
 import type { DbhRescoreResult, DbhRescoreScope } from '@/lib/validations/dbh-rescore';
 import { DBH_CHANGE_VALIDATION_ID_LIST } from '@/config/dbhchangevalidations';

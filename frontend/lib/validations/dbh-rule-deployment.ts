@@ -1,3 +1,10 @@
+/**
+ * TEMPORARY: rollback seed support for the one-time DBH migration (2026-09-17).
+ * Retire after all intended/downstream censuses are accepted, outcomes reconciled,
+ * evidence archived, and the recorded rollback window ends with Mason or a named
+ * delegate's sign-off. Audit consumers; retain applied migrations and shared parsers.
+ * Lifecycle and removal inventory: frontend/docs/validation-rescore-runbook.md.
+ */
 import mysql from 'mysql2/promise';
 import type { RowDataPacket } from 'mysql2';
 import {

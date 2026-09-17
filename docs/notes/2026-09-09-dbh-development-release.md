@@ -2,6 +2,8 @@
 
 Prepared on 2026-09-09 for `codex/annualised-dbh-validation-cluster` → `forestgeo-app-development`, incorporating merged PR #471 (`056de23b`). The development app uses the shared production database. This is a release preparation record, not authorization to merge, stop services, change production data, or run the sweep.
 
+**Lifecycle update, 2026-09-17:** Mason chose a one-time historical re-score, followed by removal of its dedicated tooling after accepted completion and an agreed rollback window. See the [decision](2026-09-17-dbh-one-time-rescore.md), [lifecycle and completion record](../../frontend/docs/validation-rescore-runbook.md#one-time-migration-lifecycle), and [retirement inventory](../../frontend/docs/validation-rescore-runbook.md#retire-the-dedicated-migration-tool). Ordinary annualised validation and shared safety fixes remain. The observations below remain dated evidence; this update does not mark production readiness or execution complete.
+
 ## Release behavior
 
 Validations 1/2 use measurement-date annual growth/shrinkage rules for intervals of at least 365 days; shorter or undated comparisons use the absolute legacy thresholds, and reversed or over-20-year intervals are skipped and counted. The re-score keeps manager-overridden valid rows and holds any census it would turn a valid row invalid in, until the operator reviews the listed IDs and reruns with `--allow-valid-to-invalid`. Reruns retain and resolve DBH occurrences. The operator re-scores exactly both enabled rules, one atomic transaction per census, in dependency order; both views and the completed run marker commit together. The tested legacy rollback assets preserve the atomic service and resolution behavior.
@@ -14,36 +16,37 @@ Merging to development triggers deployment automatically: `development_temp` has
 
 The audit covered the approved 12 site schemas and 20 active censuses. It used a read-only transaction and made no production writes.
 
-| Check | Observed result |
-| --- | --- |
-| DBH validations 1/2 | Correct identities, both enabled in all 12 schemas |
-| Schema contract gate | All 12 previously passed; none quarantined |
-| Active validation runs | 0 |
-| Active upload sessions | 0 |
-| Active catalog upload jobs | 0 queued/running/cancel-requested/waiting-retry |
-| Running provisioning jobs | 0 |
-| Eligible pending measurements | **156,492 in Mpala; 3 in testing_mason** |
-| All site migration manifests | No pending, failed, or checksum-mismatched entries across all 12 ledgers |
-| Catalog migration manifest | No pending, failed, or checksum-mismatched entries |
+| Check                         | Observed result                                                          |
+| ----------------------------- | ------------------------------------------------------------------------ |
+| DBH validations 1/2           | Correct identities, both enabled in all 12 schemas                       |
+| Schema contract gate          | All 12 previously passed; none quarantined                               |
+| Active validation runs        | 0                                                                        |
+| Active upload sessions        | 0                                                                        |
+| Active catalog upload jobs    | 0 queued/running/cancel-requested/waiting-retry                          |
+| Running provisioning jobs     | 0                                                                        |
+| Eligible pending measurements | **156,492 in Mpala; 3 in testing_mason**                                 |
+| All site migration manifests  | No pending, failed, or checksum-mismatched entries across all 12 ledgers |
+| Catalog migration manifest    | No pending, failed, or checksum-mismatched entries                       |
 
 The last recorded development Actions failure (2026-09-02, run 33678589318) was a validation-19 checksum mismatch. Current source and all 12 production ledgers now match, so that specific blocker has been resolved. The recorded contract passes and zero counts are observations at audit time, not a fresh migration execution or proof that future submissions are prevented.
 
 ## Writer inventory and maintenance controls
 
-| Resource | Resource group | Observed state / relevance |
-| --- | --- | --- |
-| `forestgeo-development` | `forestgeo-rg` | Running, unrestricted ingress; async upload admission enabled; in-process upload/provisioning workers |
-| `forestgeo-livesite` | `forestgeo-rg` | Running, unrestricted ingress; old app versions and in-process workers must be accounted for |
-| `submitingestionprocessor` | `submitingestionprocessor` | Running; enabled HTTP ingestion function; same production database hostname |
-| `polluserinformation` | `forestgeo-rg` | Running; account lookup function, review any additional write behavior with its owner |
-| `forestgeo-testing-app` | `forestgeo-testing-rg` | Running against the separate testing database; outside the confirmed shared-database target |
-| Direct SQL users, scripts, other clients | Operator inventory | **Not yet attested stopped or excluded** |
+| Resource                                 | Resource group             | Observed state / relevance                                                                            |
+| ---------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `forestgeo-development`                  | `forestgeo-rg`             | Running, unrestricted ingress; async upload admission enabled; in-process upload/provisioning workers |
+| `forestgeo-livesite`                     | `forestgeo-rg`             | Running, unrestricted ingress; old app versions and in-process workers must be accounted for          |
+| `submitingestionprocessor`               | `submitingestionprocessor` | Running; enabled HTTP ingestion function; same production database hostname                           |
+| `polluserinformation`                    | `forestgeo-rg`             | Running; account lookup function, review any additional write behavior with its owner                 |
+| `forestgeo-testing-app`                  | `forestgeo-testing-rg`     | Running against the separate testing database; outside the confirmed shared-database target           |
+| Direct SQL users, scripts, other clients | Operator inventory         | **Not yet attested stopped or excluded**                                                              |
 
 The resource group is `forestgeo-rg`, not the formerly documented `ForestGEO-ResourceGroup`. The runbook and workflow restart references have been corrected. App ingress restrictions are not currently in place. The Node startup path starts job recovery/sweeping; an admission feature flag alone does not stop existing-work consumers. Deploy/restart can resume workers, so recheck them after deployment and before the sweep.
 
 ## Operator sequence and remaining blockers
 
-- [ ] **Merge prerequisite:** merge the main-branch change `fix/main-hold-validation-deploy-for-shared-db`, which removes main's validation deploy step, and confirm the next main deploy no longer runs `deploy-validations-to-all-schemas.ts`. Until it merges, any main deploy after this PR reaches development truncates `sitespecificvalidations` and reinstalls the older DBH procedures on the shared database. The later dev → main promotion conflicts on that workflow hunk; resolve it in favour of this PR's procedures-only deploy and DBH rule refresh.
+- [ ] **Reverify main's deploy hold at release:** promotion #478 (`b790f684`, 2026-09-14) removed main's legacy validation-deploy step; the original instruction to merge that hold is superseded. Confirm the current main workflow and relevant deployment run still cannot replay the old seeds/procedures onto the shared database. The later dev → main promotion must retain this PR's procedures-only deployment plus the DBH rule-text migration, not restore the legacy seed reset or add the operator rollback refresher to deployment.
+- [ ] Record the owner, exact source/runtime and evidence archive, intended scope ledger, and rollback-window start/end. Disposition the non-atomic override and recovery-marker notice findings described in the runbook before apply; these documentation changes do not fix them.
 - [ ] Re-run the isolated production-copy rehearsal at the final PR head. The recorded rehearsal, timings and rollback projections predate the minimum-interval rule, the override marker and the valid-to-invalid hold, so they are not evidence for the current rules.
 - [ ] Name the maintenance owner (Mason or a recorded delegate), reserve the window, and attest the complete writer inventory.
 - [ ] Complete the 156,495 pending measurements separately through normal validation under the current rules. Capture before/after validity and non-DBH override effects. Do not reset pending rows to bypass preflight. The isolated Mpala preparation needed a separately reviewed cross-census-location query-plan adjustment; its diagnostic SQL/performance evidence is retained privately and is not included as an unreviewed application change in this release.
@@ -55,6 +58,7 @@ The resource group is `forestgeo-rg`, not the formerly documented `ForestGEO-Res
 - [ ] Verify the exact annual manifest, run the read-only DBH sweep, then explicitly apply the ordered sweep with `DBH_RESCORE_TIMEOUT_MS=300000` and a private artifact directory.
 - [ ] Reconcile every outcome, both views, counts, prior snapshots, and later dependent scopes. If rollback is needed, restore the reviewed legacy two-procedure manifest, refresh only its two seed fields, and re-score in order under continued isolation. Do not revert the transaction safety fixes or force historical counts.
 - [ ] Release restrictions only after all requested and affected scopes succeed and the operator records sign-off. Restore only resources that were running before maintenance. Results messages remain a separate operator action.
+- [ ] After acceptance and the recorded rollback window, obtain retirement sign-off and remove only dedicated migration tooling using the runbook inventory. Preserve runtime validation, applied migrations, evidence, and a recoverable tool revision; update memory only after removal is integrated.
 
 ## Evidence and operating budget
 

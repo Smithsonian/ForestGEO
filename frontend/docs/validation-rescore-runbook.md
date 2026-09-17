@@ -1,14 +1,36 @@
 # Annualised DBH re-score operator runbook
 
+**Lifecycle decision, 2026-09-17:** this is a one-time historical migration. Retain its dedicated tooling through accepted completion and a recorded rollback window, then remove it using the [retirement checklist](#retire-the-dedicated-migration-tool). Normal validation keeps the annualised rules. Do not add a recurring sweep, permanent API, or UI for this tool without a new requirement. See the [decision record](../../docs/notes/2026-09-17-dbh-one-time-rescore.md).
+
 This procedure re-scores only validations 1 and 2, in census-number order. Each census is one transaction: reset, retirement, DBH checks, finalization, both materialized views, and the completed run record commit together. The database and artifact filesystem do not commit atomically; their outcomes must be reconciled separately.
 
 Implementation and isolated-copy rehearsal do **not** authorize production deployment, a production sweep, or sending results. Mason owns the maintenance window and its release, or records a named delegate before starting. Push/PR and production operations require their separate handoff authorization.
+
+## One-time migration lifecycle
+
+All checkboxes below are pending. September 9 inventories, counts, and rehearsal timings later in this document are historical evidence, not proof of current readiness or a completed production re-score.
+
+1. **Prepare:** record the owner, approved target scopes, exact reviewed source revision, private evidence location, recoverable snapshot, and rollback-window start/end in the [completion record](#completion-record). The operator chooses the window; this document sets no default duration. Preserve the reviewed revision in retained Git history or a durable ref, the lockfile, and runtime/tool versions. Rehearse execution and legacy rollback at that exact revision against a fresh isolated production copy.
+2. **Resolve release prerequisites:** use the [release checklist](../../docs/notes/2026-09-09-dbh-development-release.md), including the review findings below. Repeat revision/drain checks and attest all writers. A dry run is advisory; do not infer permission to apply from a successful exit code.
+3. **Execute under the approved maintenance controls:** deploy the reviewed rules and run the ordered commands below. Preserve overrides, review any valid-to-invalid hold, and retain artifacts for every attempt. Single-census success does not complete its dependent later censuses.
+4. **Reconcile and accept:** complete the scope ledger for every intended census and affected downstream census; verify durable outcomes, both views, reviewed validity changes, override handling, and diagnostic counts. Resolve unknown, deferred, held, and artifact-failed outcomes before acceptance. Do not count a disabled, quarantined, or skipped site as successfully re-scored. Record any approved exclusion and its reason separately; an intended deferred scope keeps the rollout incomplete.
+5. **Retain for rollback:** Mason or a named delegate records acceptance and release of maintenance controls. Keep the executable migration/rollback tools and protected evidence through the recorded rollback window. Normal application use can resume after acceptance; the rollback window is not an extended outage. If later changes require rollback, establish a new approved window and reconcile intervening edits rather than restoring old counts blindly. Extend and record the rollback window if an unresolved incident requires it.
+6. **Retire:** only after the window expires, evidence is archived, all intended/downstream scopes are accepted, and the owner explicitly signs off, prepare the removal change described below. This runbook does not perform or pre-authorize that removal.
+
+### Review findings to disposition before apply
+
+The September 17 source review identified two unresolved issues. The documentation update does not fix them or claim they have caused a production incident:
+
+- The override modal sends four separate SQL requests, so a partial failure can leave error resolution, the override marker, and validity inconsistent. Implement an atomic server operation or record and rehearse an explicit operational mitigation that prevents concurrent overrides and reconciles any partially applied override state before the sweep. Re-scoring must not assume an unchecked marker is trustworthy.
+- Re-score attempt identifiers are stored in `validation_runs.ErrorMessages`, which the completed-run badge also displays as notices. Separate recovery metadata from user messages, or explicitly review and document the temporary UI impact and how recovery evidence will be preserved. Do not erase the attempt marker to hide a warning while reconciliation or rollback still depends on it.
+
+Record the chosen correction or mitigation, verification evidence, and reviewer in the completion record before production apply. The duplicate dry-run/execution preflights also need to remain consistent for this release; do not enlarge the tool into a permanent framework to address that duplication.
 
 ## Rules and retained state
 
 Growth flags above 65 mm/year; shrinkage flags at an annual relative change of −0.05 or below. Years are measurement-date days / 365.25, applied only to intervals of at least 365 days. Intervals under 365 days (including same-day) and missing dates use the absolute legacy thresholds: growth above 65 mm, or `presentDBH < priorDBH * 0.95`. Both DBHs must be at least 10 mm (1 cm). Unequal non-NULL HOM suppresses a comparison; either HOM may be NULL. Reversed intervals (`SkippedNegativeInterval`) and intervals over 7,305 days / 20 years (`SkippedImplausibleInterval`) skip; `SkippedNoInterval` is their total. Diagnostics report each pair's `ComparisonBasis` (`annualised`, `absolute`, or NULL when skipped). The immediately preceding census **number** supplies valid prior measurements; a gap is not filled using the nearest older census.
 
-Only DBH occurrences are resolved on rerun. An unchanged violation reopens the same occurrence, clears its resolution time, and updates its Prior* snapshot. Stale findings remain resolved, retaining their creation time and last comparison. These mutable rows are not an immutable history. Unresolved non-DBH errors still affect final validity.
+Only DBH occurrences are resolved on rerun. An unchanged violation reopens the same occurrence, clears its resolution time, and updates its Prior\* snapshot. Stale findings remain resolved, retaining their creation time and last comparison. These mutable rows are not an immutable history. Unresolved non-DBH errors still affect final validity.
 
 **Manager overrides.** The validation override modal resolves a row's validation occurrences instead of deleting them and records a resolved `MANAGER_OVERRIDE` occurrence on each overridden row. The re-score does not reset a valid row carrying that marker and reports them as `preservedOverrideCount`. Normal finalization deletes the marker from any row being re-validated (for example after "reset validation states"), so an override lasts only until the row is judged on its data again. Overrides made before this change left no marker and cannot be told apart from rows that passed on their own; they are caught by the valid-to-invalid hold below.
 
@@ -162,15 +184,15 @@ A failed/locked/pending scope defers all later requested censuses in that plot. 
 
 Keep the sweep arguments, source/procedure digests, ordered scopes, timestamps, attempt IDs, provisional run IDs, initial per-row validity, before/after DBH occurrences (`MeasurementID`, `ErrorID`, `CreatedAt`, `IsResolved`, `ResolvedAt`, `Prior*`), interval diagnostics, errors, and earliest unfinished census. Unobserved counts are unavailable, not zero.
 
-| Outcome | Required action |
-| --- | --- |
-| Not started / deferred | Remove the documented blocker separately, repeat prerequisite verification, and retry in order. |
-| Held valid-to-invalid | Confirmed rollback. Review the listed measurement IDs, then rerun that census and all later censuses in its plot with `--allow-valid-to-invalid`. |
-| Confirmed rolled back | Original durable scope state remains. Preserve the failure artifact and retry DBH directly after verifying prerequisites. No inserted run row should persist. |
-| Unknown | Halt. On a fresh connection, verify the completed run row belongs to this attempt. A matching completed row proves commit; an absent row proves rollback only after the original server session and transaction have ended. Do not cancel a possibly live attempt or infer rollback from a network error. |
-| Committed | Keep the completed run row and reconcile the required outcome artifact before proceeding. |
-| Artifact failed before commit | Roll back and repair storage; verify the database outcome before retry. |
-| Artifact failed after commit | Database remains committed. Exit nonzero and stop; repair/reconstruct the outcome artifact using the verified attempt/run record. Never change the completed record to failed or rerun blindly. |
+| Outcome                       | Required action                                                                                                                                                                                                                                                                                           |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Not started / deferred        | Remove the documented blocker separately, repeat prerequisite verification, and retry in order.                                                                                                                                                                                                           |
+| Held valid-to-invalid         | Confirmed rollback. Review the listed measurement IDs, then rerun that census and all later censuses in its plot with `--allow-valid-to-invalid`.                                                                                                                                                         |
+| Confirmed rolled back         | Original durable scope state remains. Preserve the failure artifact and retry DBH directly after verifying prerequisites. No inserted run row should persist.                                                                                                                                             |
+| Unknown                       | Halt. On a fresh connection, verify the completed run row belongs to this attempt. A matching completed row proves commit; an absent row proves rollback only after the original server session and transaction have ended. Do not cancel a possibly live attempt or infer rollback from a network error. |
+| Committed                     | Keep the completed run row and reconcile the required outcome artifact before proceeding.                                                                                                                                                                                                                 |
+| Artifact failed before commit | Roll back and repair storage; verify the database outcome before retry.                                                                                                                                                                                                                                   |
+| Artifact failed after commit  | Database remains committed. Exit nonzero and stop; repair/reconstruct the outcome artifact using the verified attempt/run record. Never change the completed record to failed or rerun blindly.                                                                                                           |
 
 The `before` artifact is captured under locks and durably written before reset. `prepared` means the writes are ready inside the transaction, not that they committed. Only acknowledged commit or successful reconciliation permits a committed outcome. A provisional run ID is not a persisted record.
 
@@ -286,4 +308,68 @@ npx tsx scripts/rescore-dbh-validations.ts --all-sites \
 
 Unset both manifest variables before verifying or applying annual rules again. These variables choose the expected SQL manifest; they do not deploy SQL or change which two validation IDs execute.
 
-Mason releases isolation and the deployment freeze only after every target and affected later census succeeds, artifacts reconcile, discrepancies are explained, and spot checks cover thresholds, HOM, interval skips, Prior* and non-DBH overrides. Record release time and the operator's decision. Then restore the recorded ingress/worker controls and start both apps. Results mail is a separate operator action.
+Mason releases isolation and the deployment freeze only after every target and affected later census succeeds, artifacts reconcile, discrepancies are explained, and spot checks cover thresholds, HOM, interval skips, Prior\* and non-DBH overrides. Record release time and the operator's decision. Then restore the recorded ingress/worker controls and start both apps. Results mail is a separate operator action.
+
+## Completion record
+
+Copy this record into the private operator evidence archive and fill it in as work occurs. Blank fields and unchecked boxes are incomplete, not implicit approval. Keep raw measurement extracts, credentials, and snapshot contents out of Git; tracked records may reference their protected locations.
+
+```text
+Migration: one-time annualised DBH historical re-score (PR #473)
+Owner / named delegate:
+Production execution authorization and maintenance window:
+Target database / approved schema-plot-census inventory:
+Explicit exclusions, reasons, approver, and any remaining work:
+Reviewed tool Git SHA and durable repository/ref/archive location:
+Deployed application SHA / SQL manifest hashes:
+Node / package-manager / MySQL client and server versions / lockfile reference:
+Private evidence archive and access owner:
+Recoverable snapshot reference / timestamp / consistency limits:
+Final-revision rehearsal and recovery verification evidence:
+Override atomicity finding: correction or mitigation / evidence / reviewer:
+Recovery-marker notice finding: correction or mitigation / evidence / reviewer:
+Rollback-window start (date, time, timezone):
+Rollback-window end (date, time, timezone):
+Rollback-window approver / any extension and reason:
+Scope ledger and all attempt/artifact locations:
+All intended and affected downstream scopes accepted at / by:
+Maintenance controls released at / by:
+Rollback-window closure and incident disposition:
+Retirement authorized at / by:
+Removal change revision / checks / retained recovery revision:
+```
+
+Use one row per scope, linking all retries and attempts rather than overwriting failed evidence:
+
+| Schema / plot / census / census number | Attempt IDs / durable run ID | Database and artifact outcome | Validity changes, holds and overrides reviewed | Both views / diagnostic checks | Later dependent scopes complete      | Evidence / acceptance by and at |
+| -------------------------------------- | ---------------------------- | ----------------------------- | ---------------------------------------------- | ------------------------------ | ------------------------------------ | ------------------------------- |
+| Fill from approved inventory           | Record every attempt         | Pending until reconciled      | Pending                                        | Pending                        | Pending or explicitly not applicable | Private reference / pending     |
+
+- [ ] Every approved scope has a reconciled final committed outcome and accepted artifacts; earlier failed attempts are explained.
+- [ ] No intended scope or downstream work remains unknown, deferred, held, or artifact-failed. Exclusions are separately approved and never reported as successful re-scores.
+- [ ] Expected validity changes, preserved overrides, both views, prior snapshots, and interval/floor diagnostics have been checked against rehearsal and explained differences.
+- [ ] Private evidence and the recoverable source/runtime are archived; the operator has verified access and the recovery procedure.
+- [ ] Maintenance release and migration acceptance are signed. The recorded rollback window has ended without unresolved incidents, and retirement is separately signed.
+
+## Retire the dedicated migration tool
+
+Prepare a focused removal change after the completion record is signed. Check actual callers at that time; this inventory describes the current branch, not permission to delete everything with `dbh` in its name. Do not leave a disabled permanent service or automatic expiry mechanism behind.
+
+| Candidate for removal after dependency audit                                                                                                       | Scope                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `frontend/scripts/rescore-dbh-validations.ts`                                                                                                      | Historical sweep entry point                                                                                   |
+| `frontend/lib/validations/dbh-rescore.ts`, `dbh-rescore-cli.ts`, `dbh-rescore-sweep.ts`                                                            | Dedicated execution, CLI, ordering, reconciliation, and artifact orchestration                                 |
+| `frontend/scripts/refresh-dbh-rule-seeds.ts`, `frontend/lib/validations/dbh-rule-deployment.ts`, package script `refresh:dbh-rules`                | Operator-only rollback seed refresh; remove together with its re-score helper dependencies                     |
+| `frontend/lib/validations/dbh-rescore{,-cli,-sweep}.test.ts`, `dbh-rule-deployment.test.ts`, `dbh-legacy-rollback-manifest.test.ts`                | Tests exclusive to the retired tool; preserve or move any ordinary validation assertions first                 |
+| `frontend/tests/integration/dbh-rescore.integration.test.ts`, `dbh-rule-deployment.integration.test.ts`, `dbh-legacy-rollback.integration.test.ts` | Migration-only integration coverage; keep reusable runtime regressions in the active suite                     |
+| `frontend/db/rollback/2026-09-02-dbh-legacy-rules-{procedures,corequeries}.sql`                                                                    | Temporary legacy manifests, after the exact files remain recoverable with the archived tool revision           |
+| `DBH_RESCORE_TIMEOUT_MS`, `DBH_RESCORE_PROCEDURES_SQL`, `DBH_RESCORE_COREQUERIES_SQL`                                                              | Dedicated operator settings and live configuration references, if any; historical instructions remain archived |
+
+**Keep:** annualised procedures and canonical rule definitions; the applied `2026-09-13-01-annual-dbh-rule-text` migration and manifest/ledger history; shared `dbh-execution.ts`; ordinary validation, finalization, overrides and notices; `stored-procedure-sql.ts` and shared seed parsing; independently justified connection-manager correctness fixes. Preserve their regression tests. In particular, the stored-procedure parser is used by ordinary deployment, and the seed parser supports migration parity coverage.
+
+The transactional run-record helpers in `run-records.ts` and DBH configuration exports need an individual caller audit. Remove only exports whose remaining uses disappear with the migration; keep ordinary run creation/update, shared constants, and any still-used transaction helpers. Do not drop tables, historical run rows, or override markers as part of code retirement.
+
+1. Retain the exact runnable tool revision, lockfile/runtime versions, both SQL manifests, evidence references, and verified recovery instructions before deleting source. A SHA with no retained repository object is not an archive. Recovering the tool later requires an isolated checkout and fresh target/revision checks; it is not permission to rerun an old binary against changed production data.
+2. Search imports, package scripts, workflows, operator configuration, and documentation for each removed module/setting. Update active links; label execution sections of this runbook as archived and point to the retained revision. Keep this runbook, the decision record, and acceptance evidence references.
+3. Run type/lint/build checks and the retained DBH, override, finalization, connection, migration/deployment and upload validation regressions appropriate to the removal. Verify ordinary validation works with the dedicated tool absent. Preserve meaningful runtime tests instead of deleting them just because they were added in PR #473.
+4. Run `graphify update .`, record the reviewed removal revision/checks, and update project memory to **retired** with the recovery reference. Do not change that status until the removal is actually integrated.

@@ -1,4 +1,11 @@
-/** Refresh only the two DBH validation descriptions/definitions after procedure deployment. */
+/**
+ * TEMPORARY: rollback seed refresh for the one-time DBH migration (2026-09-17).
+ * Retain through accepted completion of all intended/downstream censuses,
+ * reconciliation, evidence archival, and the recorded rollback window; remove
+ * with Mason or a named delegate's sign-off after checking remaining callers.
+ * Routine deployment uses migrations, not this operator-only rollback tool.
+ * Lifecycle and removal inventory: frontend/docs/validation-rescore-runbook.md.
+ */
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';

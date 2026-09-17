@@ -1,4 +1,10 @@
 /**
+ * TEMPORARY: one-time historical DBH migration (decision 2026-09-17).
+ * Retire after all intended/downstream censuses are accepted, outcomes reconciled,
+ * evidence archived, and the recorded rollback window ends with Mason or a named
+ * delegate's sign-off. Preserve shared execution, finalization, and safety fixes.
+ * Lifecycle and removal inventory: frontend/docs/validation-rescore-runbook.md.
+ *
  * Atomic, fixed-rule DBH re-score for one census.
  *
  * This deliberately does not use the upload validation orchestrator: the

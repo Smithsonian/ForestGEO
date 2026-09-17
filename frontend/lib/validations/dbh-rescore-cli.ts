@@ -1,3 +1,10 @@
+/**
+ * TEMPORARY: CLI support for the one-time DBH migration (decision 2026-09-17).
+ * Retire after all intended/downstream censuses are accepted, outcomes reconciled,
+ * evidence archived, and the recorded rollback window ends with Mason or a named
+ * delegate's sign-off. Audit rollback-tool consumers before removing exports.
+ * Lifecycle and removal inventory: frontend/docs/validation-rescore-runbook.md.
+ */
 import { mkdir, open } from 'fs/promises';
 import path from 'path';
 import mysql from 'mysql2/promise';
