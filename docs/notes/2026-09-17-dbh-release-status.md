@@ -1,6 +1,6 @@
 # Annualised DBH release progress — 2026-09-17
 
-Mason requested reconciling PR #473 with current development, merging it, and executing the [one-time migration runbook](../../frontend/docs/validation-rescore-runbook.md). This authorizes the release work; maintenance timing, complete external-writer inventory, protected production-copy approval, and the rollback retention window still need resolution before the dependent production steps. No production writes or service stops have occurred in this session.
+Mason requested reconciling PR #473 with current development, merging it, and executing the [one-time migration runbook](../../frontend/docs/validation-rescore-runbook.md). This authorizes the release work; maintenance timing, complete external-writer inventory, and the rollback retention window still need resolution before the dependent production steps. No production writes or service stops have occurred in this session.
 
 ## Source reconciliation
 
@@ -8,6 +8,7 @@ Mason requested reconciling PR #473 with current development, merging it, and ex
 - Development revision `369f0f90` integrated without conflicts by merge `57bee9ea`.
 - Lifecycle annotations and retirement instructions committed as `a96b46bb`.
 - Subsequent correction: one authenticated, admin-only override endpoint replaces four independent SQL requests. It reuses the census lock, scope conflict checks, transaction owner, and materialized-view refresher. Error resolution, manager markers, validity, and views now commit or roll back together.
+- Rehearsal follow-up: the first atomic override implementation rebuilt every row in a census, then its UI callback rebuilt the summary again. Testing Mason's ordinary census-wide refresh took over two minutes, so the override now uses the existing measurement-ID view helper in bounded batches within its transaction; its UI only reloads rows/counts. This removes the duplicate work and limits refreshes to overridden rows.
 - Subsequent correction: public validation-run responses omit reserved recovery markers but retain genuine notices. Database markers remain available for uncertain-commit reconciliation, including after tool retirement.
 
 ## Verification
@@ -15,6 +16,7 @@ Mason requested reconciling PR #473 with current development, merging it, and ex
 - Reconciled branch before the two runtime corrections: 247 unit-test files, 3,548 tests passed.
 - Corrections: 248 unit-test files / 3,558 tests passed, followed by 17 targeted endpoint, policy and UI tests after the final census-selection/error-feedback correction; 42 focused integration tests passed under `TZ=Europe/Bratislava`. Coverage includes a late view-refresh failure rolling back all override state and a successful retry, and notices retaining real warnings without mutating stored metadata.
 - Formatting, ESLint and production build: passed. Dependency cycles remained 33 (baseline 33); production `any` usage remained below its baseline. Standalone `tsc` still reports inherited test-file diagnostics, with no added diagnostic compared with an isolated checkout of `57bee9ea`; the DBH test transaction adapter now conforms to the shared generic executor type. No production-source type diagnostics remain. Full integration suite: 137 files passed, 1,268 tests passed and 7 skipped, under `TZ=Europe/Bratislava` (659 seconds).
+- Override refresh follow-up: 249 unit-test files / 3,560 tests passed; 35 focused MySQL integration tests and the production build passed. Fresh CI is required on the follow-up revision.
 - `graphify update .`: completed after code changes.
 
 Local validation logs and read-only readiness evidence are in the private operator directory `/private/tmp/forestgeo-dbh-release-20260917` and sibling `/private/tmp/forestgeo-dbh-sept17-*.log` files. These temporary locations are working evidence, not the durable archive required for acceptance.
@@ -44,9 +46,9 @@ No nonterminal catalog jobs were observed. SERC run IDs 3/5 and upload sessions 
 
 Both production-connected web apps and the ingestion function are currently running. A point-in-time read-only audit does not attest all writers or establish isolation. The testing app's configuration was rechecked and targets `forestgeo-testing-mysql.mysql.database.azure.com`, outside this rollout. The separate `polluserinformation/polluserstate` function has an HTTP trigger; its trigger metadata alone does not attest its writer behavior.
 
-## Remaining release sequence
+## Execution progress and remaining release sequence
 
-1. Obtain approval for the protected full production rehearsal copy; the previous local snapshot is unavailable. Rehearse ordinary-validation preparation, legacy baseline, annual sweep, valid-to-invalid review, and legacy rollback on the fresh isolated copy at the final reviewed revision. Preserve scope comparisons and timings.
+1. The protected production-copy export was explicitly approved and completed at 19:24 UTC. The 157,930,784-byte gzip archive passed integrity verification (SHA-256 `8b8c075489bda6b3f3af53d19e67bdad4e7ee59699976894bb7f25097ba05f08`). It remains read-only in the private evidence directory. Restore to isolated `127.0.0.1:3307` completed at 19:37 UTC, with local-only definer replacements and no changes to the source archive. All 13 schema migrations/contracts and both procedure manifests passed. Ordinary validation prepared all 242,137 pending rows in the four scopes without failed steps. The legacy baseline, annual sweep, failure-injection proof, and legacy rollback remain in progress; preserve scope comparisons and timings.
 2. Complete final-head CI and record the exact revision. Prepare durable evidence and recovery access.
 3. Confirm maintenance timing, direct SQL users/scripts/schedulers, and rollback-window start/end. Refresh readiness; isolate and drain every writer. Take and verify a fresh recoverable snapshot under these controls.
 4. Merge PR #473 only after these prerequisites. The development workflow deploys to the shared production database, so merging is a production-release step. Verify deployment and restore isolation if workflow restarts reopen access.

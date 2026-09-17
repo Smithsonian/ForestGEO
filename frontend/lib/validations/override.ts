@@ -4,7 +4,10 @@ import { safeFormatQuery, validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { MANAGER_OVERRIDE_ERROR_CODE, MANAGER_OVERRIDE_ERROR_MESSAGE } from '@/config/validationoverride';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { assertNoActiveMeasurementScopeConflict, ScopeAccessError, ScopeBusyError, type MeasurementScopeInput } from '@/config/editplan/scopeguard';
-import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
+import { refreshMeasurementViewsForCoreMeasurements } from '@/lib/measurementviewrefresh';
+
+// Bound SQL parameters for large overrides; every batch stays in the same transaction.
+const OVERRIDE_VIEW_REFRESH_BATCH_SIZE = 1000;
 
 interface FormattedQueryRequest {
   query: string;
@@ -74,12 +77,27 @@ export async function overrideValidationScope(cm: ConnectionManager, scope: Meas
     );
     if (census.length !== 1) throw new ScopeAccessError('The active census does not belong to the selected plot');
     await assertNoActiveMeasurementScopeConflict(cm, scope, tx.id);
+    const targets = await tx.query<Array<{ CoreMeasurementID: number }>>(
+      safeFormatQuery(
+        scope.schema,
+        'SELECT CoreMeasurementID FROM ??.coremeasurements WHERE CensusID = ? AND (IsValidated = FALSE OR IsValidated IS NULL) ORDER BY CoreMeasurementID FOR UPDATE'
+      ),
+      [scope.censusID]
+    );
+    if (targets.length === 0) return 0;
     let affectedRows = 0;
     for (const step of createValidationOverrideQueries(scope.schema, scope.plotID, scope.censusID)) {
       const result = await tx.query<{ affectedRows: number }>(format(step.query, step.params));
       affectedRows = result.affectedRows;
     }
-    if (affectedRows > 0) await refreshMeasurementViewsForScope(cm, scope.schema, scope.plotID, scope.censusID, tx.id);
+    for (let offset = 0; offset < targets.length; offset += OVERRIDE_VIEW_REFRESH_BATCH_SIZE) {
+      await refreshMeasurementViewsForCoreMeasurements(
+        cm,
+        scope.schema,
+        targets.slice(offset, offset + OVERRIDE_VIEW_REFRESH_BATCH_SIZE).map(row => row.CoreMeasurementID),
+        tx.id
+      );
+    }
     return affectedRows;
   });
 }
