@@ -1,18 +1,12 @@
 /**
  * Provisioned-site lifecycle (integration, real MySQL).
  *
- * The whole point of this file is the SUBJECT, not the assertions: every other
- * integration suite builds its schema with `tests/setup/local-db-setup.ts`
- * `loadSchema`, whose naive semicolon split silently drops any statement whose
- * chunk opens with a `--` banner comment (`upload_errors`, `upload_sessions`,
- * `validation_runs` are the known casualties — upload-worker.test.ts hand-creates
- * two of them to compensate). Production provisioning uses a DIFFERENT splitter,
- * `lib/provisioning/sql-runner.ts` `splitSqlFile`.
- *
- * So the async upload path has never been proven against a schema built the way
- * production builds one. This file provisions a site through the real
- * orchestrator chain, asserts the result satisfies the schema contract, uploads
- * measurements into it, and tears it down.
+ * The whole point of this file is the SUBJECT, not the assertions: production
+ * provisioning builds its schema with a different splitter
+ * (`lib/provisioning/sql-runner.ts` `splitSqlFile`) than the test-only
+ * `loadSchema` every other integration suite uses. This file provisions a site
+ * through the real orchestrator chain, asserts the result satisfies the schema
+ * contract, uploads measurements into it, and tears it down.
  *
  * Coverage that exists nowhere else:
  *   - `runProvisioning` executing the full STEPS chain (every other test either
@@ -249,11 +243,11 @@ const PROVISIONING_INPUT: ProvisioningInput = {
 };
 
 /**
- * Tables that `loadSchema` silently drops. Asserting them by name is the single
- * highest-value check in this file: it is the only place in the suite where
- * these three are proven to come from production DDL.
+ * `loadSchema` now creates these three from canonical DDL too, but this test
+ * is still the only place they're proven to come from PRODUCTION provisioning
+ * DDL specifically, independent of the test-only loader.
  */
-const TABLES_LOADSCHEMA_DROPS = ['upload_errors', 'upload_sessions', 'validation_runs'] as const;
+const TABLES_FORMERLY_DROPPED_BY_LOADSCHEMA = ['upload_errors', 'upload_sessions', 'validation_runs'] as const;
 
 /** Created by tablestructures.sql; redeployed on every deploy by scripts/deploy-taxonomy-views-to-all-schemas.ts. */
 const TAXONOMY_VIEWS = ['alltaxonomiesview', 'stemtaxonomiesview'] as const;
@@ -618,13 +612,11 @@ describe('provisioned-site lifecycle', () => {
       expect(liveContract.defaultCollation).toBe(TARGET_TEXT_COLLATION);
     });
 
-    it('creates the three tables loadSchema silently drops', async () => {
-      // tests/setup/local-db-setup.ts loadSchema skips statements whose chunk
-      // begins with a '--' banner comment, so these three are absent from every
-      // other integration suite's schema (upload-worker.test.ts creates two of
-      // them inline). Production's splitter must not have that hole.
+    it('creates upload_errors, upload_sessions, and validation_runs from production provisioning DDL', async () => {
+      // Proves these three come from PRODUCTION's DDL path (runProvisioning
+      // above), not from the test-only loadSchema.
       const tables = await objectNamesOfType(BASE_TABLE_TYPE);
-      for (const table of TABLES_LOADSCHEMA_DROPS) {
+      for (const table of TABLES_FORMERLY_DROPPED_BY_LOADSCHEMA) {
         expect(tables, `provisioning did not create ${table}`).toContain(table);
       }
     });
@@ -816,9 +808,8 @@ describe('provisioned-site lifecycle', () => {
       const [metrics] = await siteConnection.query<RowDataPacket[]>(`SELECT status FROM uploadmetrics WHERE fileID = ?`, [MEASUREMENT_FILE_NAME]);
       expect(metrics.map(row => String(row.status))).toEqual([UPLOADMETRICS_COMPLETED]);
 
-      // upload_sessions and validation_runs exist here only because PRODUCTION
-      // provisioning created them — loadSchema drops both, so these two
-      // assertions are meaningless in every other integration suite.
+      // upload_sessions and validation_runs are proven here to come from
+      // PRODUCTION provisioning DDL, not the test-only loadSchema.
       const [sessions] = await siteConnection.query<RowDataPacket[]>(`SELECT state FROM upload_sessions WHERE file_id = ?`, [`async-job-${uploadJobId}`]);
       expect(sessions.length, 'the worker never opened an upload session').toBeGreaterThan(0);
       expect(

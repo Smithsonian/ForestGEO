@@ -311,23 +311,8 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
     const [censusRows] = await connection.query<RowDataPacket[]>(`SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = 1`, [plotB]);
     censusB = Number(censusRows[0].CensusID);
 
-    // validation_runs and upload_sessions are skipped by loadSchema's
-    // semicolon-split filter — same workaround as upload-worker.test.ts.
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${schema}\`.validation_runs (
-        RunID          INT AUTO_INCREMENT PRIMARY KEY,
-        PlotID         INT NOT NULL,
-        CensusID       INT NOT NULL,
-        Status         ENUM ('running', 'completed', 'failed', 'cancelled') NOT NULL DEFAULT 'running',
-        TotalSteps     INT NOT NULL DEFAULT 0,
-        CompletedSteps INT NOT NULL DEFAULT 0,
-        FailedSteps    INT NOT NULL DEFAULT 0,
-        CurrentStep    VARCHAR(100) NULL,
-        ErrorMessages  JSON NULL,
-        StartedAt      DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        CompletedAt    DATETIME NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
+    // upload_sessions must exist before the worker run below; create it via
+    // the production bootstrap (same as upload-worker.test.ts).
     await ensureUploadSessionsTable(schema);
 
     // Catalog rows in FK-safe order: events → files → jobs.
