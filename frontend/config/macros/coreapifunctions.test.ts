@@ -331,6 +331,7 @@ describe('CoreAPIFunctions', () => {
       expect(mockConnectionManager.beginTransaction).toHaveBeenCalled();
       expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('transaction-123');
       expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ changed: true });
     });
 
     it('rolls back via withTransaction when a write fails', async () => {
@@ -353,9 +354,39 @@ describe('CoreAPIFunctions', () => {
       expect(response.status).toBe(500);
     });
 
+    /**
+     * A slice-driving stand-in for the mocked handleUpsertForSlices: real
+     * production code (components/processors/processorhelperfunctions.tsx)
+     * invokes its 6th argument (onSliceUpsert) once per family/genus/species
+     * slice. A bare `mockResolvedValue` never calls that observer, so PATCH's
+     * slicesChanged tracking — and recordTaxonomySliceUpsert, which runs for
+     * real inside the observer — would otherwise have zero coverage here.
+     */
+    function mockHandleUpsertForSlicesDriving(slices: { sliceKey: string; id: number; operation: string; rowData: Record<string, unknown> }[]) {
+      return async (_cm: unknown, _schema: unknown, _newRow: unknown, _config: unknown, _txID: unknown, onSliceUpsert: (slice: unknown) => Promise<void>) => {
+        const insertedIds: Record<string, number> = {};
+        for (const slice of slices) {
+          insertedIds[slice.sliceKey] = slice.id;
+          await onSliceUpsert?.(slice);
+        }
+        return insertedIds;
+      };
+    }
+
     it('should handle alltaxonomiesview dataType with handleUpsertForSlices', async () => {
       const { handleUpsertForSlices } = await import('@/components/processors/processorhelperfunctions');
-      (handleUpsertForSlices as any).mockResolvedValue({ family: 1, genus: 2, species: 3 });
+      mockTaxonomyReadback({
+        family: { FamilyID: 1, Family: 'Fabaceae' },
+        genus: { GenusID: 2, FamilyID: 1, Genus: 'Acacia' },
+        species: { SpeciesID: 3, GenusID: 2, SpeciesCode: 'ACACIA' }
+      });
+      (handleUpsertForSlices as any).mockImplementation(
+        mockHandleUpsertForSlicesDriving([
+          { sliceKey: 'family', id: 1, operation: 'unchanged', rowData: {} },
+          { sliceKey: 'genus', id: 2, operation: 'unchanged', rowData: {} },
+          { sliceKey: 'species', id: 3, operation: 'unchanged', rowData: {} }
+        ])
+      );
 
       const mockRequest = new NextRequest('http://localhost/api/test', {
         method: 'PATCH',
@@ -382,6 +413,89 @@ describe('CoreAPIFunctions', () => {
         expect.any(Function)
       );
       expect(response.status).toBe(200);
+      // Every slice reported 'unchanged': no mutation was recorded, so the
+      // response must say so rather than defaulting to a false changed:true.
+      await expect(response.json()).resolves.toMatchObject({ changed: false });
+      expect(changelogRows(mockConnectionManager), 'an unchanged slice must not fabricate a changelog row').toHaveLength(0);
+    });
+
+    it('reports changed:true when one alltaxonomiesview slice actually upserted', async () => {
+      const { handleUpsertForSlices } = await import('@/components/processors/processorhelperfunctions');
+      mockTaxonomyReadback({
+        family: { FamilyID: 1, Family: 'Fabaceae' },
+        genus: { GenusID: 2, FamilyID: 1, Genus: 'Acacia' },
+        species: { SpeciesID: 3, GenusID: 2, SpeciesCode: 'ACACIB' }
+      });
+      (handleUpsertForSlices as any).mockImplementation(
+        mockHandleUpsertForSlicesDriving([
+          { sliceKey: 'family', id: 1, operation: 'unchanged', rowData: {} },
+          { sliceKey: 'genus', id: 2, operation: 'unchanged', rowData: {} },
+          { sliceKey: 'species', id: 3, operation: 'updated', rowData: {} }
+        ])
+      );
+
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          newRow: { SpeciesCode: 'ACACIB' },
+          oldRow: { SpeciesCode: 'ACACIA' }
+        })
+      });
+
+      const response = await PATCH(mockRequest, {
+        params: Promise.resolve({ dataType: 'alltaxonomiesview', slugs: [TEST_SCHEMA, 'speciesID'] })
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ changed: true });
+      const rows = changelogRows(mockConnectionManager);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].tableName).toBe('species');
+      expect(rows[0].operation).toBe('UPDATE');
+    });
+
+    /**
+     * PIN: recordTaxonomySliceUpsert must be awaited for every slice the observer
+     * receives, not just until the first one that changed. A `slicesChanged ||
+     * (await recordTaxonomySliceUpsert(...))` refactor that short-circuits the
+     * `await` behind `||` would still report changed:true from the first changed
+     * slice, but silently drop the changelog row for every slice after it - and
+     * the single-changed-slice test above would stay green regardless. Two
+     * non-adjacent slices (family, species) changing, with genus unchanged in
+     * between, pins that both still get recorded.
+     */
+    it('records a changelog row for every changed alltaxonomiesview slice, not just the first', async () => {
+      const { handleUpsertForSlices } = await import('@/components/processors/processorhelperfunctions');
+      mockTaxonomyReadback({
+        family: { FamilyID: 1, Family: 'Fabaceae2' },
+        genus: { GenusID: 2, FamilyID: 1, Genus: 'Acacia' },
+        species: { SpeciesID: 3, GenusID: 2, SpeciesCode: 'ACACIB' }
+      });
+      (handleUpsertForSlices as any).mockImplementation(
+        mockHandleUpsertForSlicesDriving([
+          { sliceKey: 'family', id: 1, operation: 'updated', rowData: {} },
+          { sliceKey: 'genus', id: 2, operation: 'unchanged', rowData: {} },
+          { sliceKey: 'species', id: 3, operation: 'updated', rowData: {} }
+        ])
+      );
+
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          newRow: { Family: 'Fabaceae2', SpeciesCode: 'ACACIB' },
+          oldRow: { Family: 'Fabaceae', SpeciesCode: 'ACACIA' }
+        })
+      });
+
+      const response = await PATCH(mockRequest, {
+        params: Promise.resolve({ dataType: 'alltaxonomiesview', slugs: [TEST_SCHEMA, 'speciesID'] })
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ changed: true });
+      const rows = changelogRows(mockConnectionManager);
+      expect(rows, 'a changelog row must be recorded for every changed slice, not just the first').toHaveLength(2);
+      expect(rows.map(row => row.tableName)).toEqual(['family', 'species']);
     });
 
     /**
@@ -434,6 +548,11 @@ describe('CoreAPIFunctions', () => {
       const hasInsertQuery = queries.some((q: string) => typeof q === 'string' && q.includes('INSERT INTO') && q.includes('censusactivepersonnel'));
       expect(hasInsertQuery, 'toggling censusActive on must write the relation, not silently no-op').toBe(true);
 
+      // The personnel row itself is unchanged (mockPersonnelRelationQueries
+      // returns the same persisted row for both snapshots), so only the new
+      // relation makes this a real mutation — changed must reflect that.
+      await expect(response.json()).resolves.toMatchObject({ changed: true });
+
       const auditRows = changelogRows(mockConnectionManager);
       expect(auditRows).toHaveLength(1);
       expect(auditRows[0].tableName).toBe('censusactivepersonnel');
@@ -453,6 +572,10 @@ describe('CoreAPIFunctions', () => {
       const queries = mockConnectionManager.executeQuery.mock.calls.map((call: any) => call[0]);
       const hasDeleteQuery = queries.some((q: string) => typeof q === 'string' && q.trimStart().toUpperCase().startsWith('DELETE'));
       expect(hasDeleteQuery, 'toggling censusActive off must remove the relation').toBe(true);
+
+      // Same reasoning as the activation case: the personnel row is unchanged,
+      // so only the removed relation makes this a real mutation.
+      await expect(response.json()).resolves.toMatchObject({ changed: true });
 
       const auditRows = changelogRows(mockConnectionManager);
       expect(auditRows).toHaveLength(1);
@@ -595,6 +718,34 @@ describe('CoreAPIFunctions', () => {
         expect(rows[0].plotID).toBe(17);
         expect(rows[0].censusID).toBe(1);
         expectChangelogWritesAreTransactionScoped(mockConnectionManager);
+      });
+
+      /**
+       * REGRESSION (#481): a matched UPDATE whose persisted before/after
+       * snapshots are identical (the grid resent a value that already matched
+       * the database) must report success without a changelog row — but the
+       * response body used to give the client no way to tell that apart from a
+       * real edit, so the grid toasted "Row successfully updated!" either way.
+       */
+      it('reports changed:false and logs nothing for a matched re-save that changes no column', async () => {
+        const persistedRow = { PlotID: 17, PlotName: 'Harvard Forest', DefaultDBHUnits: 'cm' };
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            newRow: { PlotID: 17, PlotName: 'Harvard Forest', DefaultDBHUnits: 'cm' },
+            oldRow: persistedRow
+          })
+        });
+
+        mockPatchSnapshots(persistedRow, persistedRow);
+
+        const response = await PATCH(mockRequest, {
+          params: Promise.resolve({ dataType: 'plots', slugs: [TEST_SCHEMA, 'plotID'] })
+        });
+
+        expect(response.status).toBe(HTTPResponses.OK);
+        await expect(response.json()).resolves.toMatchObject({ changed: false });
+        expect(changelogRows(mockConnectionManager), 'a no-op save must not fabricate a changelog row').toHaveLength(0);
       });
 
       it('writes nothing when the UPDATE matches zero rows', async () => {

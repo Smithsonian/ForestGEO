@@ -19,9 +19,11 @@ import {
   GridColDef,
   GridColumnResizeParams,
   GridColumnVisibilityModel,
+  GridEditInputCell,
   GridEventListener,
   GridFilterModel,
   GridPaginationModel,
+  GridRenderEditCellParams,
   GridRowEditStopReasons,
   GridRowId,
   GridRowModel,
@@ -118,8 +120,13 @@ type PendingSave = {
 
 type PersistedGridRow = GridRowModel & { creationNeedsRefresh?: boolean };
 
+// `changed` is undefined when the persistence path cannot report whether the server
+// made a change (an editFlowOverride, or an endpoint that omits the flag).
+type PersistResult = { row: GridRowModel; changed?: boolean };
+
 type SaveOutcome = {
   row: GridRowModel;
+  changed?: boolean;
   partialError?: Error;
   followUpError?: Error;
 };
@@ -200,6 +207,65 @@ export type IsolatedDataGridCommonsHandle = {
 // guidance) keeps assertions deterministic; production behavior is unchanged, and the
 // build guard refuses production builds with this flag set.
 const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
+
+// The Save icon (handleSaveClick, below) reads `getRowWithUpdatedValues` synchronously
+// on click. MUI's own flush of a keystroke into its editing state is a PRIVATE api
+// (`runPendingEditCellValueMutation`, unstable_ prefixed and not exposed by
+// useGridApiRef()) that only otherwise runs on Enter/blur/stopRowEditMode - paths this
+// grid deliberately suppresses (see handleCellKeyDown/handleRowEditStop) so a fast
+// Save click can land inside GridEditInputCell's 200ms debounce window and read the
+// pre-keystroke value. Passing debounceMs=0 makes MUI write the edited value into its
+// editing state on every keystroke instead of waiting out a timer, so the synchronous
+// read is always current.
+const EDIT_CELL_DEBOUNCE_MS = 0;
+
+// Only string/number columns default to GridEditInputCell (gridStringColDef.js /
+// gridNumericColDef.js); date/dateTime/singleSelect/boolean/actions columns render a
+// different edit cell and must be left untouched. A column with a custom
+// renderEditCell already controls its own commit behavior and is skipped too.
+function withImmediateEditCellCommit(columns: GridColDef[]): GridColDef[] {
+  return columns.map(column => {
+    const usesDefaultEditInputCell =
+      column.editable && !column.renderEditCell && (column.type === undefined || column.type === 'string' || column.type === 'number');
+    if (!usesDefaultEditInputCell) return column;
+    return {
+      ...column,
+      renderEditCell: (params: GridRenderEditCellParams) => <GridEditInputCell {...params} debounceMs={EDIT_CELL_DEBOUNCE_MS} />
+    };
+  });
+}
+
+export const ROW_UPDATED_MESSAGE = 'Row successfully updated!';
+export const NEW_ROW_ADDED_MESSAGE = 'New row added!';
+export const NO_CHANGES_SAVED_MESSAGE = 'No changes were saved: the server recorded no update for this row.';
+export const GRID_REFRESH_FAILED_MESSAGE = 'The grid could not refresh';
+
+// Single source of truth for how a SaveOutcome becomes a snackbar. Shared by the confirm-dialog
+// save path (handleConfirmAction) and the direct row-edit path (processRowUpdate) so both report
+// the same outcome the same way.
+function describeSaveOutcome(outcome: SaveOutcome, isNewRow: boolean): Pick<AlertProps, 'children' | 'severity'> {
+  if (outcome.partialError) {
+    return { children: outcome.partialError.message, severity: 'error' };
+  }
+  if (outcome.changed === false) {
+    // A no-op save is not itself an error, but a refresh failure on top of it is -
+    // outrank the plain follow-up-refresh-failed branch below so this never reports
+    // "Changes were saved" (outcome.changed === false says the opposite happened).
+    return {
+      children: outcome.followUpError
+        ? `${NO_CHANGES_SAVED_MESSAGE} ${GRID_REFRESH_FAILED_MESSAGE}: ${outcome.followUpError.message}`
+        : NO_CHANGES_SAVED_MESSAGE,
+      severity: outcome.followUpError ? 'error' : 'info'
+    };
+  }
+  if (outcome.followUpError) {
+    return {
+      children: `Changes were saved, but ${GRID_REFRESH_FAILED_MESSAGE.toLowerCase()}: ${outcome.followUpError.message}`,
+      severity: 'error'
+    };
+  }
+  return { children: isNewRow ? NEW_ROW_ADDED_MESSAGE : ROW_UPDATED_MESSAGE, severity: 'success' };
+}
 
 const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
 const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
@@ -851,7 +917,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   );
 
   const updateRow = useCallback(
-    async (gridType: string, schemaName: string | undefined, newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
+    async (gridType: string, schemaName: string | undefined, newRow: GridRowModel, oldRow: GridRowModel): Promise<PersistResult> => {
       assertStableExistingRowIdentity(newRow, oldRow);
       const gridID = getGridID(gridType);
       const requestRow = { ...newRow };
@@ -882,25 +948,40 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           responseJSON && typeof responseJSON === 'object' ? (responseJSON as { createdIDs?: Record<string, unknown> }).createdIDs?.[gridType] : undefined
         );
         const hasCreatedID = createdID !== undefined;
+        // `changed` is intentionally omitted (undefined) on the POST/insert branch: the
+        // fixeddata handler's `changed` flag describes whether a PATCH's UPDATE altered a
+        // row, which has no POST/insert equivalent - a future POST response that happened
+        // to include `changed: false` must never be read as "no rows were inserted".
         return {
-          ...requestRow,
-          ...(hasCreatedID ? { [gridID]: createdID, ...(gridID === 'id' ? { id: createdID } : {}) } : {}),
-          isNew: false,
-          ...(hasCreatedID ? {} : { creationNeedsRefresh: true })
+          row: {
+            ...requestRow,
+            ...(hasCreatedID ? { [gridID]: createdID, ...(gridID === 'id' ? { id: createdID } : {}) } : {}),
+            isNew: false,
+            ...(hasCreatedID ? {} : { creationNeedsRefresh: true })
+          }
         };
       }
-      return requestRow;
+      // `changed` is reported by the fixeddata PATCH handler in config/macros/coreapifunctions.ts.
+      // An absent flag (e.g. /api/administrative/fetch/[type], which doesn't report it) yields
+      // `undefined` here, and handleConfirmAction's toast decision defers to success for that case.
+      const changed =
+        responseJSON && typeof responseJSON === 'object' && typeof (responseJSON as { changed?: unknown }).changed === 'boolean'
+          ? (responseJSON as { changed: boolean }).changed
+          : undefined;
+      return { row: requestRow, changed };
     },
     [currentPlot?.plotID, currentCensus?.dateRanges, adminEmail, setIsNewRowAdded, setShouldAddRowAfterFetch]
   );
 
   const persistRow = useCallback(
-    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
+    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<PersistResult> => {
       assertStableExistingRowIdentity(newRow, oldRow);
       const isNewRow = isExplicitNewRow(oldRow);
       if (!isNewRow && editFlowOverride) {
         try {
-          return await editFlowOverride(newRow, oldRow);
+          // The override cannot report whether the server made a change, so `changed` is
+          // left undefined rather than guessed.
+          return { row: await editFlowOverride(newRow, oldRow) };
         } catch (error: unknown) {
           const err = asError(error);
           throw err;
@@ -971,9 +1052,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
       try {
         let updatedRow: GridRowModel;
+        let changed: boolean | undefined;
         let partialError: Error | undefined;
         try {
-          updatedRow = await persistRow(confirmedRow, pending.oldRow);
+          const persisted = await persistRow(confirmedRow, pending.oldRow);
+          updatedRow = persisted.row;
+          changed = persisted.changed;
         } catch (error: unknown) {
           if (!(error instanceof RowSaveFinalizationError)) throw asError(error);
           updatedRow = error.persistedRow as GridRowModel;
@@ -992,7 +1076,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           pending.resolve(updatedRow);
         }
         const followUpError = await finishPersistedSave(updatedRow, pending.oldRow);
-        return { row: updatedRow, partialError, followUpError };
+        return { row: updatedRow, changed, partialError, followUpError };
       } catch (error: unknown) {
         if (!pending.settled) {
           pending.settled = true;
@@ -1079,12 +1163,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         try {
           const resolvedRow = confirmedRow || promiseArguments.newRow;
           const outcome = await performSaveAction(promiseArguments.oldRow.id, resolvedRow);
-          if (outcome?.partialError) {
-            setSnackbar({ children: outcome.partialError.message, severity: 'error' });
-          } else if (outcome?.followUpError) {
-            setSnackbar({ children: `Changes were saved, but the grid could not refresh: ${outcome.followUpError.message}`, severity: 'error' });
-          } else if (outcome) {
-            setSnackbar({ children: isExplicitNewRow(promiseArguments.oldRow) ? 'New row added!' : 'Row successfully updated!', severity: 'success' });
+          if (outcome) {
+            setSnackbar(describeSaveOutcome(outcome, isExplicitNewRow(promiseArguments.oldRow)));
           }
         } catch (error: unknown) {
           const message = asError(error).message;
@@ -1196,7 +1276,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     ref,
     () => ({
       updateRow: async (newRow: GridRowModel, oldRow: GridRowModel) => {
-        return await persistRow(newRow, oldRow);
+        const persisted = await persistRow(newRow, oldRow);
+        return persisted.row;
       },
       fetchPaginatedData: async () => {
         await refetch();
@@ -1237,18 +1318,20 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       isSavingRef.current = true;
       setIsSaving(true);
       try {
-        const updatedRow = await persistRow(newRow, oldRow);
+        const persisted = await persistRow(newRow, oldRow);
+        const updatedRow = persisted.row;
         const followUpError = await finishPersistedSave(updatedRow, oldRow);
-        if (followUpError) {
-          setSnackbar({ children: `Changes were saved, but the grid could not refresh: ${followUpError.message}`, severity: 'error' });
-        }
+        const outcome: SaveOutcome = { row: updatedRow, changed: persisted.changed, followUpError };
+        // The isExplicitNewRow(oldRow) branch above already returns early, so an explicit new
+        // row never reaches this point - isNewRow is always false here.
+        setSnackbar(describeSaveOutcome(outcome, false));
         return updatedRow;
       } catch (error: unknown) {
         if (error instanceof RowSaveFinalizationError) {
           const persistedRow = error.persistedRow as GridRowModel;
           const followUpError = await finishPersistedSave(persistedRow, oldRow);
           setSnackbar({
-            children: followUpError ? `Changes were saved, but the grid could not refresh: ${followUpError.message}` : error.message,
+            children: followUpError ? `Changes were saved, but ${GRID_REFRESH_FAILED_MESSAGE.toLowerCase()}: ${followUpError.message}` : error.message,
             severity: 'error'
           });
           return persistedRow;
@@ -1487,7 +1570,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   );
 
   const columns = useMemo(() => {
-    return [...applyFilterToColumns(gridColumns), ...(locked ? [] : [getGridActionsColumn()])];
+    return [...withImmediateEditCellCommit(applyFilterToColumns(gridColumns)), ...(locked ? [] : [getGridActionsColumn()])];
   }, [gridColumns, locked, getGridActionsColumn]);
 
   const filteredColumns = useMemo(() => {
