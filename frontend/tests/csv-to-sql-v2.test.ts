@@ -17,6 +17,7 @@ import {
   TAXON_RANK_SUBSPECIES,
   TAXON_RANK_SPECIES,
   MISSING_PLOT_COORDINATE_SCOPE,
+  DESTINATION_PLOT_COORDINATE_TYPE_SCOPE,
   type Stage1Options
 } from '../lib/csv-to-sql-v2';
 import { type MeasurementStagingRow, type AttributeStagingRow, renderInsertChunksMeasurements } from '../lib/csv-to-sql-shared';
@@ -194,8 +195,8 @@ describe('renderStage0', () => {
   });
 
   it('preserves the exact whitespace seam between the CreateFullView probe and the census guard (default path)', () => {
-    // The renderStage0 body is assembled by concatenating three fragments
-    // (DBHAttributes probe + CreateFullView probe + census guard). This locks
+    // The renderStage0 body is assembled by concatenating four fragments
+    // (DBHAttributes + coordinate-type + CreateFullView probes + census guard). This locks
     // the seam so a future edit cannot silently collapse the blank-line
     // separator that keeps the emitted SQL readable and matches the goldens.
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
@@ -206,6 +207,32 @@ describe('renderStage0', () => {
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
     expect(sql).toMatch(/DBHAttributes still has a CensusID column/);
     expect(sql).toMatch(/apply DBCHANGES2014f\.sql/);
+  });
+
+  it('reports the destination Stem.PX/PY column type as a Stage 0a result set', () => {
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
+    expect(sql).toContain(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope,`);
+    expect(sql).toMatch(/MAX\(CASE WHEN COLUMN_NAME = 'PX' THEN COLUMN_TYPE END\) AS px_column_type,/);
+    expect(sql).toMatch(/MAX\(CASE WHEN COLUMN_NAME = 'PY' THEN COLUMN_TYPE END\) AS py_column_type/);
+    expect(sql).not.toMatch(/_px_col_type|_py_col_type/);
+  });
+
+  it('pins the public Stem.PX/PY diagnostic scope label', () => {
+    expect(DESTINATION_PLOT_COORDINATE_TYPE_SCOPE).toBe('Destination Stem.PX/PY column type');
+  });
+
+  it('fails when either Stem.PX/PY column is absent without rejecting an existing FLOAT type', () => {
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
+    expect(sql).toMatch(/COLUMN_NAME IN \('PX', 'PY'\)[\s\S]+<> 2 THEN[\s\S]+Destination Stem\.PX or Stem\.PY is missing/);
+    expect(sql).not.toMatch(/COLUMN_TYPE\s*(?:=|<>|IN)\s*['(]float/i);
+  });
+
+  it('emits the Stem.PX/PY column-type probe on the allowReload path and when the CreateFullView probe is omitted', () => {
+    const reloadSql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: true });
+    expect(reloadSql).toContain(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope`);
+
+    const publishSql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false, includeViewFullTableProbe: false });
+    expect(publishSql).toContain(`SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope`);
   });
 
   it('sets @target_census_id and @target_plot_id session variables', () => {

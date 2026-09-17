@@ -189,7 +189,12 @@ function buildInput(schema: string, plotID: number, censusID: number, coreMeasur
 }
 
 async function loadCoreMeasurement(connection: Connection, coreMeasurementID: number): Promise<Record<string, unknown>> {
-  const [rows] = await connection.query<RowDataPacket[]>('SELECT * FROM coremeasurements WHERE CoreMeasurementID = ? LIMIT 1', [coreMeasurementID]);
+  // MeasurementDateYmd is formatted server-side so the assertion reads the
+  // stored calendar day without going through the driver's Date decoding.
+  const [rows] = await connection.query<RowDataPacket[]>(
+    "SELECT *, DATE_FORMAT(MeasurementDate, '%Y-%m-%d') AS MeasurementDateYmd FROM coremeasurements WHERE CoreMeasurementID = ? LIMIT 1",
+    [coreMeasurementID]
+  );
   if (rows.length === 0) throw new Error('coremeasurements row vanished');
   return rows[0] as Record<string, unknown>;
 }
@@ -350,16 +355,14 @@ describe('writeFailedMeasurements (integration)', () => {
       await cm.commitTransaction(txID);
 
       const afterCm = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
-      const storedDate = afterCm.MeasurementDate;
-      // MySQL DATE columns return Date objects from mysql2; normalize either way.
-      const storedDateAsIso = storedDate instanceof Date ? storedDate.toISOString().split('T')[0] : String(storedDate).split('T')[0].split(' ')[0];
-      expect(storedDateAsIso).toBe(NEW_DATE_YMD);
+      expect(afterCm.MeasurementDateYmd, 'stored SQL DATE retains the requested calendar day').toBe(NEW_DATE_YMD);
 
       // afterState reflects the normalized date.
-      const afterStoredDate = (result.afterState[0].row as any).MeasurementDate;
-      const afterStoredDateAsIso =
-        afterStoredDate instanceof Date ? afterStoredDate.toISOString().split('T')[0] : String(afterStoredDate).split('T')[0].split(' ')[0];
-      expect(afterStoredDateAsIso).toBe(NEW_DATE_YMD);
+      const afterStateDate = (result.afterState[0].row as Record<string, unknown>).MeasurementDate;
+      expect(afterStateDate, 'afterState carries the mysql2-decoded Date').toBeInstanceOf(Date);
+      expect((afterStateDate as Date).toISOString().slice(0, 10), 'afterState Date decodes to the requested day under the harness UTC driver pin').toBe(
+        NEW_DATE_YMD
+      );
     });
   });
 
@@ -478,9 +481,7 @@ describe('writeFailedMeasurements (integration)', () => {
       expect(afterCm.UploadFileID).toBe(INITIAL_UPLOAD_FILE_ID);
       expect(afterCm.UploadBatchID).toBe(INITIAL_UPLOAD_BATCH_ID);
 
-      const storedDate = afterCm.MeasurementDate;
-      const storedDateAsIso = storedDate instanceof Date ? storedDate.toISOString().split('T')[0] : String(storedDate).split('T')[0].split(' ')[0];
-      expect(storedDateAsIso).toBe(NEW_DATE_YMD);
+      expect(afterCm.MeasurementDateYmd, 'stored SQL DATE retains the requested calendar day').toBe(NEW_DATE_YMD);
     });
   });
 

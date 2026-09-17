@@ -41,6 +41,19 @@ let config: TestDatabaseConfig;
 
 type ThreadedConnection = Connection & { threadId?: number };
 type ProcedureResults = RowDataPacket[] | RowDataPacket[][];
+const PHASE_TIMING_COLUMNS = [
+  'validation_ms',
+  'dedupe_ms',
+  'reference_ms',
+  'prev_lookup_ms',
+  'cross_census_ms',
+  'tree_stem_insert_ms',
+  'stem_crossid_ms',
+  'core_insert_ms',
+  'attributes_ms',
+  'soft_validation_ms',
+  'total_duration_ms'
+] as const;
 
 class BenchmarkCallTimeoutError extends Error {
   constructor(batchID: string) {
@@ -170,6 +183,25 @@ beforeAll(async () => {
   connection = setup.connection;
   testData = setup.testData;
   config = setup.config;
+  const [environmentRows] = await connection.query<RowDataPacket[]>(
+    `SELECT @@version AS mysql_version,
+            @@version_comment AS mysql_version_comment,
+            @@global.innodb_buffer_pool_size AS innodb_buffer_pool_size,
+            @@session.time_zone AS session_time_zone,
+            @@system_time_zone AS system_time_zone,
+            NOW(6) AS database_now,
+            UTC_TIMESTAMP(6) AS utc_now`
+  );
+  console.log(
+    `[scale-benchmark] environment ${JSON.stringify({
+      host: config.host,
+      port: config.port,
+      database: config.database,
+      runtime_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      runtime_offset_minutes: new Date().getTimezoneOffset(),
+      ...environmentRows[0]
+    })}`
+  );
 }, 90000);
 
 afterAll(async () => {
@@ -193,6 +225,12 @@ describe('Ingestion scale benchmark (0 / 10k / 20k existing measurements)', () =
 
         const resultRow = Array.isArray(results[0]) ? (results[0] as RowDataPacket[])[0] : results[0];
         expect(resultRow?.batch_failed, `batch ${batchID}: ${resultRow?.message}`).toBeFalsy();
+        console.log(
+          `[scale-benchmark] phases ${JSON.stringify({
+            batchID,
+            ...Object.fromEntries(PHASE_TIMING_COLUMNS.map(column => [column, resultRow?.[column]]))
+          })}`
+        );
 
         // The benchmark must measure REAL ingestion — a batch that silently failed
         // its rows would be fast for the wrong reason.

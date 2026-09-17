@@ -27,6 +27,7 @@ import { applyPendingCatalogMigrations, ensureCatalogDatabase, loadCatalogMigrat
 import { loadMigrationSources, runCli } from '@/scripts/apply-schema-migrations';
 import { SCHEMA_GATE_TABLE } from '@/scripts/lib/schema-gate';
 import { CATALOG_DATABASE_NAME } from '@/db/migrations/catalog-manifest';
+import { testDbServerOptions } from '../setup/test-db-connection';
 
 const TEST_DB_HOST = process.env.TEST_DB_HOST || 'localhost';
 if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
@@ -81,19 +82,13 @@ describe('schema contract gate — quarantine (integration)', () => {
 
   beforeAll(async () => {
     server = await mysql.createConnection({
-      host: DEFAULT_TEST_CONFIG.host,
-      port: DEFAULT_TEST_CONFIG.port,
-      user: DEFAULT_TEST_CONFIG.user,
-      password: DEFAULT_TEST_CONFIG.password,
+      ...testDbServerOptions(),
       multipleStatements: true
     });
 
     await ensureCatalogDatabase({ ...DEFAULT_TEST_CONFIG, allowedHosts: [TEST_DB_HOST] });
     const catalog = await mysql.createConnection({
-      host: DEFAULT_TEST_CONFIG.host,
-      port: DEFAULT_TEST_CONFIG.port,
-      user: DEFAULT_TEST_CONFIG.user,
-      password: DEFAULT_TEST_CONFIG.password,
+      ...testDbServerOptions(),
       database: CATALOG_DATABASE_NAME,
       multipleStatements: true
     });

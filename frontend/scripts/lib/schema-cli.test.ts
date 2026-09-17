@@ -60,6 +60,16 @@ describe('createSchemaCliConnection', () => {
     expect(createConnection).toHaveBeenCalledWith(expect.objectContaining({ ssl: { rejectUnauthorized: true } }));
     createConnection.mockRestore();
   });
+
+  it('pins the CLI connection to the UTC driver timezone the runtime pool uses', async () => {
+    const createConnection = vi.spyOn(mysql, 'createConnection').mockResolvedValue({} as mysql.Connection);
+    const settings = { host: '127.0.0.1', user: 'root', password: 'testpassword', port: 3306, allowedHosts: LOCAL_HOSTS };
+
+    await createSchemaCliConnection(settings);
+
+    expect(createConnection).toHaveBeenCalledWith(expect.objectContaining({ timezone: 'Z' }));
+    createConnection.mockRestore();
+  });
 });
 
 describe('resolveConnectionSettings', () => {

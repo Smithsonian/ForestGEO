@@ -35,6 +35,9 @@ export const LEGACY_DEFAULT_MEASURE_ID = 0;
 // string is asserted, not retyped.
 export const MISSING_PLOT_COORDINATE_SCOPE = 'New stems missing PX or PY';
 
+// Stage 0a's non-blocking destination Stem.PX/PY column-type report (#475).
+export const DESTINATION_PLOT_COORDINATE_TYPE_SCOPE = 'Destination Stem.PX/PY column type';
+
 // Destination CTFS `Tree.Tag` column width. The Stage 0a destination probe and
 // the Stage 5 per-row length check share this so they can never drift; it must
 // match `CTFS_LIMITS.treeTag` in lib/ctfs-export/precondition.ts.
@@ -154,6 +157,9 @@ export interface Stage0Options {
  * Always emits:
  *   - DBHAttributes schema probe (post-2014f shape required; SIGNAL with
  *     install-DBCHANGES2014f message if the legacy CensusID column is present)
+ *   - Tree.Tag width probe (SIGNAL if narrower than TREE_TAG_MAX_WIDTH)
+ *   - Stem.PX/PY column-type report (SIGNAL when either required column is
+ *     absent; existing FLOAT columns remain tolerated and visible, see #475)
  *   - ViewFullTable install probe (SIGNAL with helpful install message if
  *     ctfsweb_webuser.CreateFullView is missing; the post-procedure CALL
  *     would otherwise blow up after the data committed)
@@ -207,6 +213,34 @@ export function renderStage0(opts: Stage0Options): string {
   END IF;
 `;
 
+  const plotCoordinateTypeProbe = `
+  -- Report how the destination stores Stem.PX/PY. The exporter stages them as
+  -- DECIMAL(16,5) (#475); a destination that never applied the DBCHANGES2014f
+  -- widen still has the original FLOAT columns and may store 992.34567 near
+  -- 992.34564. FLOAT is tolerated and reported because the backfill runbook
+  -- documents that precision. A missing column is not a storage variant: the
+  -- real publish necessarily references both columns, so fail during Stage 0a
+  -- instead of allowing a dry run to report a false success.
+  IF (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'Stem'
+      AND COLUMN_NAME IN ('PX', 'PY')
+  ) <> 2 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Destination Stem.PX or Stem.PY is missing. Stem does not match the Smithsonian DDL; restore both columns before publishing.';
+  END IF;
+
+  SELECT '${DESTINATION_PLOT_COORDINATE_TYPE_SCOPE}' AS scope,
+         MAX(CASE WHEN COLUMN_NAME = 'PX' THEN COLUMN_TYPE END) AS px_column_type,
+         MAX(CASE WHEN COLUMN_NAME = 'PY' THEN COLUMN_TYPE END) AS py_column_type
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'Stem'
+      AND COLUMN_NAME IN ('PX', 'PY');
+`;
+
   const viewFullTableProbe =
     opts.includeViewFullTableProbe === false
       ? ''
@@ -246,7 +280,7 @@ export function renderStage0(opts: Stage0Options): string {
   SET @target_plot_id := ${opts.destinationPlotId};
 `;
 
-  const guard = dbhAttributesProbe + viewFullTableProbe + censusGuard;
+  const guard = dbhAttributesProbe + plotCoordinateTypeProbe + viewFullTableProbe + censusGuard;
 
   if (opts.allowReload) {
     return guard;

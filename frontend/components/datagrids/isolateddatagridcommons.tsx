@@ -19,9 +19,11 @@ import {
   GridColDef,
   GridColumnResizeParams,
   GridColumnVisibilityModel,
+  GridEditInputCell,
   GridEventListener,
   GridFilterModel,
   GridPaginationModel,
+  GridRenderEditCellParams,
   GridRowEditStopReasons,
   GridRowId,
   GridRowModel,
@@ -62,6 +64,7 @@ import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel'
 import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
 import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS, getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
+import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
   if (value === undefined || value === null || value === '') {
@@ -106,6 +109,92 @@ function describeFixedDataRow(row: GridRowModel | null): string {
   return label === undefined ? 'this row' : `“${String(label)}”`;
 }
 
+type PendingSave = {
+  resolve: (value: GridRowModel) => void;
+  reject: (reason?: unknown) => void;
+  newRow: GridRowModel;
+  oldRow: GridRowModel;
+  settled?: boolean;
+  promise?: Promise<GridRowModel>;
+};
+
+type PersistedGridRow = GridRowModel & { creationNeedsRefresh?: boolean };
+
+// `changed` is undefined when the persistence path cannot report whether the server
+// made a change (an editFlowOverride, or an endpoint that omits the flag).
+type PersistResult = { row: GridRowModel; changed?: boolean };
+
+type SaveOutcome = {
+  row: GridRowModel;
+  changed?: boolean;
+  partialError?: Error;
+  followUpError?: Error;
+};
+
+function isExplicitNewRow(row: GridRowModel | null | undefined): boolean {
+  return row?.isNew === true;
+}
+
+function rowKey(id: GridRowId | null | undefined): string {
+  return id === null || id === undefined ? '' : String(id);
+}
+
+function assertStableExistingRowIdentity(newRow: GridRowModel, oldRow: GridRowModel): void {
+  if (isExplicitNewRow(oldRow)) return;
+  if (oldRow.id === null || oldRow.id === undefined || oldRow.id === '') {
+    throw new Error('Cannot save this existing row because its original ID is missing. Refresh and retry.');
+  }
+  if (newRow.id === null || newRow.id === undefined || newRow.id === '') {
+    throw new Error(`Cannot save row ${String(oldRow.id)} because its edited ID is missing. Refresh and retry.`);
+  }
+  if (String(newRow.id) !== String(oldRow.id)) {
+    throw new Error(`Cannot save row ${String(oldRow.id)} because its ID changed to ${String(newRow.id)}. Refresh and retry.`);
+  }
+}
+
+// A response body is a single-use stream: json() consumes it even when parsing throws,
+// so a text() retry afterwards fails with "body used already" and the server's message
+// is lost — exactly the non-JSON error bodies (App Service HTML 502, text/plain 500)
+// this helper exists to surface. Read the body once, then decide how to interpret it.
+async function readResponsePayload(response: Response): Promise<unknown> {
+  let body: string;
+  try {
+    body = await response.text();
+  } catch {
+    return null;
+  }
+  if (!body.trim()) return null;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
+  }
+}
+
+function responseErrorMessage(payload: unknown, response: Response): string {
+  if (payload && typeof payload === 'object') {
+    const message = (payload as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+    const error = (payload as { error?: unknown }).error;
+    if (typeof error === 'string' && error.trim()) return error.trim();
+  }
+  if (typeof payload === 'string' && payload.trim()) return payload.trim();
+  const statusText = typeof response.statusText === 'string' ? response.statusText.trim() : '';
+  return `HTTP ${response.status}${statusText ? ` ${statusText}` : ''}`;
+}
+
+// An auto-increment identifier of 0 means the insert produced no usable key, so it must
+// not be stamped onto the row as if it addressed a real record.
+function normalizeCreatedID(value: unknown): string | number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : undefined;
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  return undefined;
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 export type IsolatedDataGridCommonsHandle = {
   updateRow: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<GridRowModel>;
   fetchPaginatedData: () => Promise<void>;
@@ -118,6 +207,65 @@ export type IsolatedDataGridCommonsHandle = {
 // guidance) keeps assertions deterministic; production behavior is unchanged, and the
 // build guard refuses production builds with this flag set.
 const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
+
+// The Save icon (handleSaveClick, below) reads `getRowWithUpdatedValues` synchronously
+// on click. MUI's own flush of a keystroke into its editing state is a PRIVATE api
+// (`runPendingEditCellValueMutation`, unstable_ prefixed and not exposed by
+// useGridApiRef()) that only otherwise runs on Enter/blur/stopRowEditMode - paths this
+// grid deliberately suppresses (see handleCellKeyDown/handleRowEditStop) so a fast
+// Save click can land inside GridEditInputCell's 200ms debounce window and read the
+// pre-keystroke value. Passing debounceMs=0 makes MUI write the edited value into its
+// editing state on every keystroke instead of waiting out a timer, so the synchronous
+// read is always current.
+const EDIT_CELL_DEBOUNCE_MS = 0;
+
+// Only string/number columns default to GridEditInputCell (gridStringColDef.js /
+// gridNumericColDef.js); date/dateTime/singleSelect/boolean/actions columns render a
+// different edit cell and must be left untouched. A column with a custom
+// renderEditCell already controls its own commit behavior and is skipped too.
+function withImmediateEditCellCommit(columns: GridColDef[]): GridColDef[] {
+  return columns.map(column => {
+    const usesDefaultEditInputCell =
+      column.editable && !column.renderEditCell && (column.type === undefined || column.type === 'string' || column.type === 'number');
+    if (!usesDefaultEditInputCell) return column;
+    return {
+      ...column,
+      renderEditCell: (params: GridRenderEditCellParams) => <GridEditInputCell {...params} debounceMs={EDIT_CELL_DEBOUNCE_MS} />
+    };
+  });
+}
+
+export const ROW_UPDATED_MESSAGE = 'Row successfully updated!';
+export const NEW_ROW_ADDED_MESSAGE = 'New row added!';
+export const NO_CHANGES_SAVED_MESSAGE = 'No changes were saved: the server recorded no update for this row.';
+export const GRID_REFRESH_FAILED_MESSAGE = 'The grid could not refresh';
+
+// Single source of truth for how a SaveOutcome becomes a snackbar. Shared by the confirm-dialog
+// save path (handleConfirmAction) and the direct row-edit path (processRowUpdate) so both report
+// the same outcome the same way.
+function describeSaveOutcome(outcome: SaveOutcome, isNewRow: boolean): Pick<AlertProps, 'children' | 'severity'> {
+  if (outcome.partialError) {
+    return { children: outcome.partialError.message, severity: 'error' };
+  }
+  if (outcome.changed === false) {
+    // A no-op save is not itself an error, but a refresh failure on top of it is -
+    // outrank the plain follow-up-refresh-failed branch below so this never reports
+    // "Changes were saved" (outcome.changed === false says the opposite happened).
+    return {
+      children: outcome.followUpError
+        ? `${NO_CHANGES_SAVED_MESSAGE} ${GRID_REFRESH_FAILED_MESSAGE}: ${outcome.followUpError.message}`
+        : NO_CHANGES_SAVED_MESSAGE,
+      severity: outcome.followUpError ? 'error' : 'info'
+    };
+  }
+  if (outcome.followUpError) {
+    return {
+      children: `Changes were saved, but ${GRID_REFRESH_FAILED_MESSAGE.toLowerCase()}: ${outcome.followUpError.message}`,
+      severity: 'error'
+    };
+  }
+  return { children: isNewRow ? NEW_ROW_ADDED_MESSAGE : ROW_UPDATED_MESSAGE, severity: 'success' };
+}
 
 const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
 const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
@@ -241,17 +389,13 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [pendingDeleteRow, setPendingDeleteRow] = useState<GridRowModel | null>(null);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [hidingEmpty, setHidingEmpty] = useState(defaultHideEmpty);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
     actionId: null
   });
-  const [promiseArguments, setPromiseArguments] = useState<{
-    resolve: (value: GridRowModel) => void;
-    reject: (reason?: unknown) => void;
-    newRow: GridRowModel;
-    oldRow: GridRowModel;
-  } | null>(null);
+  const [promiseArguments, setPromiseArguments] = useState<PendingSave | null>(null);
   const [hasLoadedGrid, setHasLoadedGrid] = useState(false);
 
   const resetPageOnFilterCommit = useCallback(() => {
@@ -283,7 +427,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const internalApiRef = useGridApiRef();
   const localApiRef = apiRef === undefined ? internalApiRef : apiRef;
 
-  const skipNextProcessRowUpdateRef = useRef(false);
+  const saveInFlightRef = useRef(new Set<string>());
+  const isSavingRef = useRef(false);
+  const pendingSaveRef = useRef<PendingSave | null>(null);
 
   // Persisted per-gridType column layout, read once per gridType. Held in a ref so the
   // change handlers can merge partial updates (visibility vs. widths) without re-reading
@@ -749,40 +895,36 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     }
   }, [currentPlot, currentCensus, currentSite, gridType, filterModel, fetchFullData, setSnackbar]);
 
+  // Returns whether a dialog actually opened. Callers that arm pendingSaveRef before
+  // calling this MUST disarm it on false: the ref is only cleared from the dialog's
+  // confirm/cancel handlers, so a silent no-op here would leave every save, delete,
+  // add and edit entry point permanently short-circuited on the stale ref.
   const openConfirmationDialog = useCallback(
-    (actionType: 'save' | 'delete', actionId: GridRowId) => {
-      setPendingAction({ actionType, actionId });
-
+    (actionType: 'save' | 'delete', actionId: GridRowId): boolean => {
       const row = gridRows.find(row => String(row.id) === String(actionId));
-      if (row) {
-        if (actionType === 'delete') {
-          setPendingDeleteRow(row);
-          setIsDeleteDialogOpen(true);
-        } else {
-          setIsDialogOpen(true);
-        }
+      if (!row) return false;
+
+      setPendingAction({ actionType, actionId });
+      if (actionType === 'delete') {
+        setPendingDeleteRow(row);
+        setIsDeleteDialogOpen(true);
+      } else {
+        setIsDialogOpen(true);
       }
+      return true;
     },
     [gridRows]
   );
 
   const updateRow = useCallback(
-    async (
-      gridType: string,
-      schemaName: string | undefined,
-      newRow: GridRowModel,
-      oldRow: GridRowModel,
-      setSnackbar: (value: { children: string; severity: 'error' | 'success' }) => void,
-      setIsNewRowAdded: (value: boolean) => void,
-      setShouldAddRowAfterFetch: (value: boolean) => void,
-      refetchData: () => Promise<unknown>,
-      _paginationModel: { page: number }
-    ): Promise<GridRowModel> => {
+    async (gridType: string, schemaName: string | undefined, newRow: GridRowModel, oldRow: GridRowModel): Promise<PersistResult> => {
+      assertStableExistingRowIdentity(newRow, oldRow);
       const gridID = getGridID(gridType);
-      if ('date' in newRow && newRow.date) {
-        const parsedDate = moment(newRow.date, 'YYYY-MM-DD', true);
+      const requestRow = { ...newRow };
+      if ('date' in requestRow && requestRow.date) {
+        const parsedDate = moment(requestRow.date, 'YYYY-MM-DD', true);
         if (parsedDate.isValid()) {
-          newRow.date = parsedDate.format('YYYY-MM-DD');
+          requestRow.date = parsedDate.format('YYYY-MM-DD');
         }
       }
       let fetchProcessQuery =
@@ -790,105 +932,164 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           ? createPostPatchQuery(schemaName ?? '', gridType, gridID)
           : createPostPatchQuery(schemaName ?? '', gridType, gridID, currentPlot?.plotID, currentCensus?.dateRanges?.[0]?.censusID);
       if (adminEmail) fetchProcessQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
-      try {
-        const response = await fetch(fetchProcessQuery, {
-          method: oldRow.isNew ? 'POST' : 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
-        });
-        let responseJSON;
-        try {
-          responseJSON = await response.json();
-        } catch (e: unknown) {
-          ailogger.error('Error parsing response JSON:', e instanceof Error ? e : new Error(String(e)));
-        }
-
-        if (!response.ok) {
-          throw new Error(responseJSON.message || 'An unknown error occurred');
-        }
-
-        setSnackbar({
-          children: oldRow.isNew ? 'New row added!' : 'Row updated!',
-          severity: 'success'
-        });
-
-        if (oldRow.isNew) {
-          setIsNewRowAdded(false);
-          setShouldAddRowAfterFetch(false);
-          await refetchData();
-        }
-
-        return newRow;
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        setSnackbar({ children: `Error: ${message}`, severity: 'error' });
-        return Promise.reject(newRow);
+      const response = await fetch(fetchProcessQuery, {
+        method: isExplicitNewRow(oldRow) ? 'POST' : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldRow, newRow: requestRow })
+      });
+      const responseJSON = await readResponsePayload(response);
+      if (!response.ok) {
+        throw new Error(responseErrorMessage(responseJSON, response));
       }
+      if (isExplicitNewRow(oldRow)) {
+        setIsNewRowAdded(false);
+        setShouldAddRowAfterFetch(false);
+        const createdID = normalizeCreatedID(
+          responseJSON && typeof responseJSON === 'object' ? (responseJSON as { createdIDs?: Record<string, unknown> }).createdIDs?.[gridType] : undefined
+        );
+        const hasCreatedID = createdID !== undefined;
+        // `changed` is intentionally omitted (undefined) on the POST/insert branch: the
+        // fixeddata handler's `changed` flag describes whether a PATCH's UPDATE altered a
+        // row, which has no POST/insert equivalent - a future POST response that happened
+        // to include `changed: false` must never be read as "no rows were inserted".
+        return {
+          row: {
+            ...requestRow,
+            ...(hasCreatedID ? { [gridID]: createdID, ...(gridID === 'id' ? { id: createdID } : {}) } : {}),
+            isNew: false,
+            ...(hasCreatedID ? {} : { creationNeedsRefresh: true })
+          }
+        };
+      }
+      // `changed` is reported by the fixeddata PATCH handler in config/macros/coreapifunctions.ts.
+      // An absent flag (e.g. /api/administrative/fetch/[type], which doesn't report it) yields
+      // `undefined` here, and handleConfirmAction's toast decision defers to success for that case.
+      const changed =
+        responseJSON && typeof responseJSON === 'object' && typeof (responseJSON as { changed?: unknown }).changed === 'boolean'
+          ? (responseJSON as { changed: boolean }).changed
+          : undefined;
+      return { row: requestRow, changed };
     },
-    [currentPlot?.plotID, currentCensus?.dateRanges, adminEmail]
+    [currentPlot?.plotID, currentCensus?.dateRanges, adminEmail, setIsNewRowAdded, setShouldAddRowAfterFetch]
+  );
+
+  const persistRow = useCallback(
+    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<PersistResult> => {
+      assertStableExistingRowIdentity(newRow, oldRow);
+      const isNewRow = isExplicitNewRow(oldRow);
+      if (!isNewRow && editFlowOverride) {
+        try {
+          // The override cannot report whether the server made a change, so `changed` is
+          // left undefined rather than guessed.
+          return { row: await editFlowOverride(newRow, oldRow) };
+        } catch (error: unknown) {
+          const err = asError(error);
+          throw err;
+        }
+      }
+      if (!isNewRow && gridType === 'failedmeasurements') {
+        throw new Error('Failed measurement edits require the preview/apply flow; no edit override is configured.');
+      }
+      if ((oldRow as PersistedGridRow).creationNeedsRefresh === true) {
+        throw new Error('This row was created, but its server ID is unavailable until refresh completes. Refresh and retry.');
+      }
+      return updateRow(gridType, currentSite?.schemaName, newRow, oldRow);
+    },
+    [editFlowOverride, gridType, currentSite?.schemaName, updateRow]
+  );
+
+  const finishPersistedSave = useCallback(
+    async (updatedRow: GridRowModel, oldRow: GridRowModel): Promise<Error | undefined> => {
+      // Commit the authoritative saved row locally before any refresh can fail.
+      // This keeps a partial-success edit visible and gives a retry the right old row.
+      if (isInfiniteOn) {
+        infinite.upsertRow(updatedRow);
+      } else {
+        setRows(prevRows => {
+          const index = prevRows.findIndex(row => String(row.id) === String(updatedRow.id) || String(row.id) === String(oldRow.id));
+          if (index < 0) return [...prevRows, updatedRow];
+          const nextRows = [...prevRows];
+          nextRows[index] = updatedRow;
+          return nextRows;
+        });
+      }
+      try {
+        if (isInfiniteOn) await infinite.refresh();
+        if (onDataUpdate) await onDataUpdate(updatedRow, oldRow);
+        triggerRefresh([gridType as keyof UnifiedValidityFlags]);
+        await refetch();
+      } catch (error: unknown) {
+        return asError(error);
+      }
+      return undefined;
+    },
+    [isInfiniteOn, infinite, setRows, onDataUpdate, triggerRefresh, gridType, refetch]
   );
 
   const performSaveAction = useCallback(
-    async (id: GridRowId, confirmedRow: GridRowModel) => {
-      if (locked || !promiseArguments) return;
+    async (id: GridRowId, confirmedRow: GridRowModel): Promise<SaveOutcome | null> => {
+      if (!promiseArguments) return null;
+      const pending = promiseArguments;
+      const key = rowKey(pending.oldRow.id ?? id);
+
+      // MUI is awaiting pending.promise for a new row. Bailing out without settling it
+      // strands the row in edit mode with no feedback, so refuse loudly instead: the
+      // rejection both frees the grid and reaches the caller's snackbar.
+      const refuse = (message: string): Error => {
+        const error = new Error(message);
+        if (!pending.settled) {
+          pending.settled = true;
+          pending.reject(error);
+        }
+        return error;
+      };
+      if (locked) throw refuse('This grid is locked, so the row could not be saved.');
+      if (isSavingRef.current || saveInFlightRef.current.has(key)) throw refuse('Another row save is already in progress.');
+
+      saveInFlightRef.current.add(key);
+      isSavingRef.current = true;
+      setIsSaving(true);
 
       try {
-        // Confirmation-driven saves already persist via updateRow below. When the
-        // row mode flips back to view, MUI will invoke processRowUpdate; skip the
-        // next invocation so the row is not patched a second time.
-        skipNextProcessRowUpdateRef.current = true;
+        let updatedRow: GridRowModel;
+        let changed: boolean | undefined;
+        let partialError: Error | undefined;
+        try {
+          const persisted = await persistRow(confirmedRow, pending.oldRow);
+          updatedRow = persisted.row;
+          changed = persisted.changed;
+        } catch (error: unknown) {
+          if (!(error instanceof RowSaveFinalizationError)) throw asError(error);
+          updatedRow = error.persistedRow as GridRowModel;
+          partialError = error;
+        }
+
+        // Persistence is complete before leaving edit mode. MUI's supported
+        // ignoreModifications transition prevents a second processRowUpdate call.
         setRowModesModel(prevModel => ({
           ...prevModel,
-          [id]: { mode: GridRowModes.View }
+          [id]: { mode: GridRowModes.View, ignoreModifications: true }
         }));
 
-        const isNewRow = promiseArguments.oldRow.isNew || !confirmedRow.id;
-        const updatedRow =
-          editFlowOverride && !isNewRow
-            ? await editFlowOverride(confirmedRow, promiseArguments.oldRow)
-            : await updateRow(
-                gridType,
-                currentSite?.schemaName,
-                confirmedRow,
-                promiseArguments.oldRow,
-                setSnackbar,
-                setIsNewRowAdded,
-                setShouldAddRowAfterFetch,
-                refetch,
-                paginationModel
-              );
-
-        promiseArguments.resolve(updatedRow);
-        if (isInfiniteOn) await infinite.refresh();
-        else infinite.upsertRow(updatedRow);
-
-        if (onDataUpdate) {
-          await onDataUpdate(updatedRow, promiseArguments.oldRow);
+        if (!pending.settled) {
+          pending.settled = true;
+          pending.resolve(updatedRow);
         }
-      } catch (error) {
-        promiseArguments.reject(error);
+        const followUpError = await finishPersistedSave(updatedRow, pending.oldRow);
+        return { row: updatedRow, changed, partialError, followUpError };
+      } catch (error: unknown) {
+        if (!pending.settled) {
+          pending.settled = true;
+          pending.reject(error);
+        }
+        throw asError(error);
+      } finally {
+        saveInFlightRef.current.delete(key);
+        isSavingRef.current = false;
+        setIsSaving(false);
       }
-
-      triggerRefresh([gridType as keyof UnifiedValidityFlags]);
-      await refetch();
     },
-    [
-      locked,
-      promiseArguments,
-      gridType,
-      currentSite,
-      setSnackbar,
-      setIsNewRowAdded,
-      setShouldAddRowAfterFetch,
-      paginationModel,
-      triggerRefresh,
-      refetch,
-      updateRow,
-      onDataUpdate,
-      editFlowOverride,
-      infinite,
-      isInfiniteOn
-    ]
+    [locked, promiseArguments, persistRow, finishPersistedSave, setRowModesModel]
   );
 
   const performDeleteAction = useCallback(
@@ -961,34 +1162,42 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       } else if (promiseArguments) {
         try {
           const resolvedRow = confirmedRow || promiseArguments.newRow;
-          await performSaveAction(promiseArguments.newRow.id, resolvedRow);
-          setSnackbar({ children: 'Row successfully updated!', severity: 'success' });
+          const outcome = await performSaveAction(promiseArguments.oldRow.id, resolvedRow);
+          if (outcome) {
+            setSnackbar(describeSaveOutcome(outcome, isExplicitNewRow(promiseArguments.oldRow)));
+          }
         } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = asError(error).message;
           setSnackbar({ children: `Error: ${message}`, severity: 'error' });
         }
       }
 
       setPendingAction({ actionType: '', actionId: null });
+      if (pendingSaveRef.current === promiseArguments) pendingSaveRef.current = null;
       setPromiseArguments(null);
     },
     [pendingAction, promiseArguments, performDeleteAction, performSaveAction, setSnackbar]
   );
 
   const handleCancelAction = useCallback(() => {
+    if (isSavingRef.current) return;
     setIsDialogOpen(false);
     setIsDeleteDialogOpen(false);
     setPendingDeleteRow(null);
     if (promiseArguments) {
-      promiseArguments.reject(new Error('Action cancelled by user'));
+      if (!promiseArguments.settled) {
+        promiseArguments.settled = true;
+        promiseArguments.reject(new Error('Action cancelled by user'));
+      }
     }
     setPendingAction({ actionType: '', actionId: null });
+    if (pendingSaveRef.current === promiseArguments) pendingSaveRef.current = null;
     setPromiseArguments(null);
   }, [promiseArguments]);
 
   const handleSaveClick = useCallback(
     (id: GridRowId) => () => {
-      if (locked) return;
+      if (locked || isSavingRef.current || pendingSaveRef.current || saveInFlightRef.current.has(rowKey(id))) return;
 
       const updatedRowModesModel = { ...rowModesModel };
       if (!updatedRowModesModel[id] || updatedRowModesModel[id].mode === undefined) {
@@ -999,23 +1208,29 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
       const updatedRow = localApiRef.current?.getRowWithUpdatedValues(id, 'anyField');
 
-      if (oldRow && updatedRow) {
-        setPromiseArguments({
+      if (oldRow && updatedRow && !pendingSaveRef.current) {
+        const pending: PendingSave = {
           resolve: (_value: GridRowModel) => {},
           reject: (_reason?: unknown) => {},
           oldRow,
           newRow: updatedRow
-        });
+        };
+        pendingSaveRef.current = pending;
+        setPromiseArguments(pending);
 
-        openConfirmationDialog('save', id);
+        if (!openConfirmationDialog('save', id)) {
+          pendingSaveRef.current = null;
+          setPromiseArguments(null);
+          setSnackbar({ children: `Cannot save row ${String(id)} because it is no longer present in the grid. Refresh and retry.`, severity: 'error' });
+        }
       }
     },
-    [locked, rowModesModel, gridRows, localApiRef, openConfirmationDialog]
+    [locked, rowModesModel, gridRows, localApiRef, openConfirmationDialog, setSnackbar]
   );
 
   const handleDeleteClick = useCallback(
     (id: GridRowId) => () => {
-      if (locked) return;
+      if (locked || isSavingRef.current || pendingSaveRef.current) return;
       if (gridType === 'census') {
         const rowToDelete = gridRows.find(row => String(row.id) === String(id));
         if (currentCensus && rowToDelete && rowToDelete.censusID === currentCensus.dateRanges?.[0]?.censusID) {
@@ -1029,7 +1244,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   );
 
   const handleAddNewRow = useCallback(async () => {
-    if (locked) return;
+    if (locked || isSavingRef.current || pendingSaveRef.current) return;
     if (isNewRowAdded) return;
     const newRowCount = rowCount + 1;
     const calculatedNewLastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
@@ -1057,109 +1272,78 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     setIsNewRowAdded(true);
   }, [locked, isNewRowAdded, rowCount, paginationModel, initialRow, setRows, setRowModesModel, fieldToFocus]);
 
-  useImperativeHandle(ref, () => ({
-    updateRow: async (newRow: GridRowModel, oldRow: GridRowModel) => {
-      return await updateRow(
-        gridType,
-        currentSite?.schemaName,
-        newRow,
-        oldRow,
-        setSnackbar,
-        setIsNewRowAdded,
-        setShouldAddRowAfterFetch,
-        refetch,
-        paginationModel
-      );
-    },
-    fetchPaginatedData: async () => {
-      await refetch();
-    },
-    showSnackbar: (message: string, severity: 'success' | 'error') => {
-      setSnackbar({ children: message, severity });
-    }
-  }));
+  useImperativeHandle(
+    ref,
+    () => ({
+      updateRow: async (newRow: GridRowModel, oldRow: GridRowModel) => {
+        const persisted = await persistRow(newRow, oldRow);
+        return persisted.row;
+      },
+      fetchPaginatedData: async () => {
+        await refetch();
+      },
+      showSnackbar: (message: string, severity: 'success' | 'error') => {
+        setSnackbar({ children: message, severity });
+      }
+    }),
+    [persistRow, refetch]
+  );
 
   const processRowUpdate = useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel) => {
-      if (skipNextProcessRowUpdateRef.current) {
-        skipNextProcessRowUpdateRef.current = false;
-        return newRow;
-      }
+      assertStableExistingRowIdentity(newRow, oldRow);
+      if (isSavingRef.current) throw new Error('Another row save is already in progress.');
 
-      if (newRow?.isNew && !newRow?.id) {
-        return oldRow;
-      }
-
-      if (newRow.isNew || !newRow.id) {
-        setPromiseArguments({
-          resolve: async (confirmedRow: GridRowModel) => {
-            try {
-              const updatedRow = await updateRow(
-                gridType,
-                currentSite?.schemaName,
-                confirmedRow,
-                oldRow,
-                setSnackbar,
-                setIsNewRowAdded,
-                setShouldAddRowAfterFetch,
-                refetch,
-                paginationModel
-              );
-              return updatedRow;
-            } catch (error: unknown) {
-              const message = error instanceof Error ? error.message : String(error);
-              setSnackbar({ children: `Error: ${message}`, severity: 'error' });
-              return Promise.reject(error);
-            }
-          },
-          reject: reason => {
-            return Promise.reject(reason);
-          },
-          oldRow,
-          newRow
+      if (isExplicitNewRow(oldRow)) {
+        const existingPending = pendingSaveRef.current;
+        if (existingPending?.promise && rowKey(existingPending.oldRow.id) === rowKey(oldRow.id)) return existingPending.promise;
+        if (existingPending) throw new Error('A row save is already awaiting confirmation.');
+        let resolvePending!: (value: GridRowModel) => void;
+        let rejectPending!: (reason?: unknown) => void;
+        const pendingPromise = new Promise<GridRowModel>((resolve, reject) => {
+          resolvePending = resolve;
+          rejectPending = reject;
         });
-
-        openConfirmationDialog('save', newRow.id);
-        return Promise.reject(new Error('Row update interrupted for new row, awaiting confirmation'));
+        const pending: PendingSave = { resolve: resolvePending, reject: rejectPending, oldRow, newRow, promise: pendingPromise };
+        pendingSaveRef.current = pending;
+        setPromiseArguments(pending);
+        if (!openConfirmationDialog('save', oldRow.id)) {
+          pendingSaveRef.current = null;
+          setPromiseArguments(null);
+          throw new Error(`Cannot save row ${String(oldRow.id)} because it is no longer present in the grid. Refresh and retry.`);
+        }
+        return pendingPromise;
       }
 
+      isSavingRef.current = true;
+      setIsSaving(true);
       try {
-        const updatedRow = editFlowOverride
-          ? await editFlowOverride(newRow, oldRow)
-          : await updateRow(
-              gridType,
-              currentSite?.schemaName,
-              newRow,
-              oldRow,
-              setSnackbar,
-              setIsNewRowAdded,
-              setShouldAddRowAfterFetch,
-              refetch,
-              paginationModel
-            );
-        if (isInfiniteOn) await infinite.refresh();
-        else infinite.upsertRow(updatedRow);
+        const persisted = await persistRow(newRow, oldRow);
+        const updatedRow = persisted.row;
+        const followUpError = await finishPersistedSave(updatedRow, oldRow);
+        const outcome: SaveOutcome = { row: updatedRow, changed: persisted.changed, followUpError };
+        // The isExplicitNewRow(oldRow) branch above already returns early, so an explicit new
+        // row never reaches this point - isNewRow is always false here.
+        setSnackbar(describeSaveOutcome(outcome, false));
         return updatedRow;
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        setSnackbar({ children: `Error: ${message}`, severity: 'error' });
-        return Promise.reject(error);
+        if (error instanceof RowSaveFinalizationError) {
+          const persistedRow = error.persistedRow as GridRowModel;
+          const followUpError = await finishPersistedSave(persistedRow, oldRow);
+          setSnackbar({
+            children: followUpError ? `Changes were saved, but ${GRID_REFRESH_FAILED_MESSAGE.toLowerCase()}: ${followUpError.message}` : error.message,
+            severity: 'error'
+          });
+          return persistedRow;
+        }
+        const err = asError(error);
+        throw err;
+      } finally {
+        isSavingRef.current = false;
+        setIsSaving(false);
       }
     },
-    [
-      gridType,
-      currentSite?.schemaName,
-      setSnackbar,
-      setIsNewRowAdded,
-      setShouldAddRowAfterFetch,
-      refetch,
-      paginationModel,
-      openConfirmationDialog,
-      updateRow,
-      editFlowOverride,
-      infinite,
-      isInfiniteOn
-    ]
+    [setSnackbar, openConfirmationDialog, persistRow, finishPersistedSave]
   );
 
   const handleRowModesModelChange = useCallback((newRowModesModel: GridRowModesModel) => {
@@ -1190,14 +1374,23 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const handleCloseSnackbar = useCallback(() => setSnackbar(null), []);
 
   const handleRowEditStop = useCallback<GridEventListener<'rowEditStop'>>((params, event) => {
+    if (isSavingRef.current) {
+      event.defaultMuiPrevented = true;
+      return;
+    }
     if (params.reason === GridRowEditStopReasons.rowFocusOut) {
       event.defaultMuiPrevented = true;
     }
   }, []);
 
   const handleEditClick = useCallback(
-    (id: GridRowId) => () => {
-      if (locked) return;
+    (id: GridRowId, actionRow?: GridRowModel) => () => {
+      if (locked || isSavingRef.current || pendingSaveRef.current) return;
+      const row = (actionRow ?? gridRows.find(candidate => String(candidate.id) === String(id))) as PersistedGridRow | undefined;
+      if (row?.creationNeedsRefresh) {
+        setSnackbar({ children: 'Refresh the grid before editing this newly created row.', severity: 'error' });
+        return;
+      }
       setRowModesModel(prevModel => ({
         ...prevModel,
         [id]: { mode: GridRowModes.Edit }
@@ -1210,17 +1403,17 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         }
       });
     },
-    [locked, localApiRef, gridColumns]
+    [locked, localApiRef, gridColumns, gridRows, setSnackbar]
   );
 
   const handleCancelClick = useCallback(
     (id: GridRowId, event?: React.MouseEvent | React.KeyboardEvent) => {
-      if (locked) return;
+      if (locked || isSavingRef.current || saveInFlightRef.current.has(rowKey(id))) return;
       event?.preventDefault();
 
       const row = gridRows.find(row => String(row.id) === String(id));
 
-      if (row?.isNew) {
+      if (row?.isNew === true) {
         setRows(oldRows => oldRows.filter(row => row.id !== id));
 
         setRowModesModel(prevModel => {
@@ -1255,7 +1448,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const handleCellDoubleClick = useCallback<GridEventListener<'cellDoubleClick'>>(
     params => {
-      if (locked) return;
+      if (locked || isSavingRef.current || pendingSaveRef.current) return;
       setRowModesModel(prevModel => ({
         ...prevModel,
         [params.id]: { mode: GridRowModes.Edit }
@@ -1266,6 +1459,10 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const handleCellKeyDown = useCallback<GridEventListener<'cellKeyDown'>>(
     (_params, event) => {
+      if (isSavingRef.current) {
+        event.defaultMuiPrevented = true;
+        return;
+      }
       if (event.key === 'Enter' && !locked) {
         event.defaultMuiPrevented = true;
       }
@@ -1277,11 +1474,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   );
 
   const handleProcessRowUpdateError = useCallback((error: Error) => {
-    ailogger.error('Row update error:', error);
-    setSnackbar({
-      children: 'Error updating row',
-      severity: 'error'
-    });
+    const err = asError(error);
+    ailogger.error('Row update error:', err);
+    setSnackbar({ children: `Error: ${err.message}`, severity: 'error' });
   }, []);
 
   const rowsRef = useRef(gridRows);
@@ -1311,9 +1506,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       try {
         return await processRowUpdate(newRow, oldRow);
       } catch (error: unknown) {
-        ailogger.error('Error processing row update:', error instanceof Error ? error : new Error(String(error)));
-        setSnackbar({ children: 'Error updating row', severity: 'error' });
-        return Promise.reject(error);
+        const err = asError(error);
+        ailogger.error('Error processing row update:', err);
+        throw err;
       }
     },
     [processRowUpdate]
@@ -1359,7 +1554,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       width: 112,
       minWidth: 112,
       cellClassName: 'actions',
-      getActions: ({ id }) => {
+      getActions: ({ id, row }) => {
         if (!rowModesModel[id]?.mode) return [];
         const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
         if (isInEditMode && !locked) {
@@ -1368,14 +1563,14 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             getEnhancedCellAction('Cancel', <CancelIcon />, (e: React.MouseEvent<HTMLButtonElement>) => handleCancelClick(id, e))
           ];
         }
-        return [getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id)), getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id))];
+        return [getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id, row)), getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id))];
       }
     }),
     [rowModesModel, locked, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, handleDeleteClick]
   );
 
   const columns = useMemo(() => {
-    return [...applyFilterToColumns(gridColumns), ...(locked ? [] : [getGridActionsColumn()])];
+    return [...withImmediateEditCellCommit(applyFilterToColumns(gridColumns)), ...(locked ? [] : [getGridActionsColumn()])];
   }, [gridColumns, locked, getGridActionsColumn]);
 
   const filteredColumns = useMemo(() => {
@@ -1487,8 +1682,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             <>
               <StyledDataGrid
                 aria-label={getGridTypeLabel(gridType)}
+                aria-busy={isSaving}
                 apiRef={localApiRef}
-                sx={GRID_ROOT_SX}
+                sx={{ ...GRID_ROOT_SX, ...(isSaving ? { pointerEvents: 'none' } : {}) }}
                 rows={gridRows}
                 columns={filteredColumns}
                 editMode="row"
@@ -1501,7 +1697,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
                 onCellKeyDown={handleCellKeyDown}
                 processRowUpdate={handleProcessRowUpdate}
                 onProcessRowUpdateError={handleProcessRowUpdateError}
-                loading={gridLoading}
+                loading={gridLoading || isSaving}
                 paginationMode="server"
                 filterMode="server"
                 onPaginationModelChange={handlePaginationModelChange}
