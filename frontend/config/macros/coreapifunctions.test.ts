@@ -455,6 +455,50 @@ describe('CoreAPIFunctions', () => {
     });
 
     /**
+     * PIN: recordTaxonomySliceUpsert must be awaited for every slice the observer
+     * receives, not just until the first one that changed. A `slicesChanged ||
+     * (await recordTaxonomySliceUpsert(...))` refactor that short-circuits the
+     * `await` behind `||` would still report changed:true from the first changed
+     * slice, but silently drop the changelog row for every slice after it - and
+     * the single-changed-slice test above would stay green regardless. Two
+     * non-adjacent slices (family, species) changing, with genus unchanged in
+     * between, pins that both still get recorded.
+     */
+    it('records a changelog row for every changed alltaxonomiesview slice, not just the first', async () => {
+      const { handleUpsertForSlices } = await import('@/components/processors/processorhelperfunctions');
+      mockTaxonomyReadback({
+        family: { FamilyID: 1, Family: 'Fabaceae2' },
+        genus: { GenusID: 2, FamilyID: 1, Genus: 'Acacia' },
+        species: { SpeciesID: 3, GenusID: 2, SpeciesCode: 'ACACIB' }
+      });
+      (handleUpsertForSlices as any).mockImplementation(
+        mockHandleUpsertForSlicesDriving([
+          { sliceKey: 'family', id: 1, operation: 'updated', rowData: {} },
+          { sliceKey: 'genus', id: 2, operation: 'unchanged', rowData: {} },
+          { sliceKey: 'species', id: 3, operation: 'updated', rowData: {} }
+        ])
+      );
+
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          newRow: { Family: 'Fabaceae2', SpeciesCode: 'ACACIB' },
+          oldRow: { Family: 'Fabaceae', SpeciesCode: 'ACACIA' }
+        })
+      });
+
+      const response = await PATCH(mockRequest, {
+        params: Promise.resolve({ dataType: 'alltaxonomiesview', slugs: [TEST_SCHEMA, 'speciesID'] })
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ changed: true });
+      const rows = changelogRows(mockConnectionManager);
+      expect(rows, 'a changelog row must be recorded for every changed slice, not just the first').toHaveLength(2);
+      expect(rows.map(row => row.tableName)).toEqual(['family', 'species']);
+    });
+
+    /**
      * REGRESSION: the handler once matched the RAW body against `CensusActive`,
      * but the grid sends `censusActive` (isolatedpersonneldatagrid: field
      * 'censusActive'; isolateddatagridcommons JSON.stringifies the row as-is).

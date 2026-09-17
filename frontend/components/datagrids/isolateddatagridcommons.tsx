@@ -1312,7 +1312,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         const updatedRow = persisted.row;
         const followUpError = await finishPersistedSave(updatedRow, oldRow);
         if (followUpError) {
-          setSnackbar({ children: `Changes were saved, but the grid could not refresh: ${followUpError.message}`, severity: 'error' });
+          setSnackbar({ children: `Changes were saved, but ${GRID_REFRESH_FAILED_MESSAGE.toLowerCase()}: ${followUpError.message}`, severity: 'error' });
         }
         return updatedRow;
       } catch (error: unknown) {
@@ -1320,7 +1320,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           const persistedRow = error.persistedRow as GridRowModel;
           const followUpError = await finishPersistedSave(persistedRow, oldRow);
           setSnackbar({
-            children: followUpError ? `Changes were saved, but the grid could not refresh: ${followUpError.message}` : error.message,
+            children: followUpError ? `Changes were saved, but ${GRID_REFRESH_FAILED_MESSAGE.toLowerCase()}: ${followUpError.message}` : error.message,
             severity: 'error'
           });
           return persistedRow;
