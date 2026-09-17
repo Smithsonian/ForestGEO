@@ -167,14 +167,18 @@ interface CreatedRowAudit {
  *
  * An upsert overwrites the row before anything can read it, so an UPDATE here
  * carries no prior state — see recordMutation's oldRowState contract.
+ *
+ * Returns whether it actually recorded a mutation (false for an 'unchanged'
+ * slice), so a caller upserting multiple slices has one source of truth for
+ * whether any of them changed, instead of re-deriving it from `operation`.
  */
 async function recordTaxonomySliceUpsert(
   tx: TxExecutor,
   schema: string,
   slice: { sliceKey: string; id: number; operation: UpsertOperation; rowData: Record<string, unknown> },
   changedBy: string
-): Promise<void> {
-  if (slice.operation === 'unchanged') return;
+): Promise<boolean> {
+  if (slice.operation === 'unchanged') return false;
   const persistedRow = await loadSinglePersistedRow(tx, schema, slice.sliceKey, [
     { column: `${slice.sliceKey.charAt(0).toUpperCase()}${slice.sliceKey.slice(1)}ID`, value: slice.id }
   ]);
@@ -184,6 +188,7 @@ async function recordTaxonomySliceUpsert(
       ? { ...shared, operation: ChangelogOperation.INSERT, newRowState: persistedRow }
       : { ...shared, operation: ChangelogOperation.UPDATE, oldRowState: null, newRowState: persistedRow }
   );
+  return true;
 }
 
 /** One removed row awaiting its changelog entry. */
@@ -354,12 +359,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             throw new Error('Incorrect view call');
         }
 
-        // recordTaxonomySliceUpsert no-ops on an 'unchanged' slice, so the view
-        // as a whole changed iff at least one family/genus/species slice did not.
+        // recordTaxonomySliceUpsert's own return value is the one source of truth for
+        // whether a slice changed; the view as a whole changed iff any slice did.
         let slicesChanged = false;
         const sliceIDs = await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig, tx.id, async slice => {
-          if (slice.operation !== 'unchanged') slicesChanged = true;
-          await recordTaxonomySliceUpsert(tx, schema, slice as Parameters<typeof recordTaxonomySliceUpsert>[2], changedBy);
+          const sliceChanged = await recordTaxonomySliceUpsert(tx, schema, slice as Parameters<typeof recordTaxonomySliceUpsert>[2], changedBy);
+          slicesChanged = slicesChanged || sliceChanged;
         });
         return { updateIDs: sliceIDs, changed: slicesChanged };
       }

@@ -238,6 +238,7 @@ function withImmediateEditCellCommit(columns: GridColDef[]): GridColDef[] {
 export const ROW_UPDATED_MESSAGE = 'Row successfully updated!';
 export const NEW_ROW_ADDED_MESSAGE = 'New row added!';
 export const NO_CHANGES_SAVED_MESSAGE = 'No changes were saved: the server recorded no update for this row.';
+export const GRID_REFRESH_FAILED_MESSAGE = 'The grid could not refresh';
 
 const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
 const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
@@ -913,12 +914,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       if (!response.ok) {
         throw new Error(responseErrorMessage(responseJSON, response));
       }
-      // `changed` is reported by the fixeddata PATCH handler in config/macros/coreapifunctions.ts;
-      // endpoints that omit it (e.g. /api/administrative/fetch/[type]) are treated as changed.
-      const changed =
-        responseJSON && typeof responseJSON === 'object' && typeof (responseJSON as { changed?: unknown }).changed === 'boolean'
-          ? (responseJSON as { changed: boolean }).changed
-          : undefined;
       if (isExplicitNewRow(oldRow)) {
         setIsNewRowAdded(false);
         setShouldAddRowAfterFetch(false);
@@ -926,16 +921,26 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           responseJSON && typeof responseJSON === 'object' ? (responseJSON as { createdIDs?: Record<string, unknown> }).createdIDs?.[gridType] : undefined
         );
         const hasCreatedID = createdID !== undefined;
+        // `changed` is intentionally omitted (undefined) on the POST/insert branch: the
+        // fixeddata handler's `changed` flag describes whether a PATCH's UPDATE altered a
+        // row, which has no POST/insert equivalent - a future POST response that happened
+        // to include `changed: false` must never be read as "no rows were inserted".
         return {
           row: {
             ...requestRow,
             ...(hasCreatedID ? { [gridID]: createdID, ...(gridID === 'id' ? { id: createdID } : {}) } : {}),
             isNew: false,
             ...(hasCreatedID ? {} : { creationNeedsRefresh: true })
-          },
-          changed
+          }
         };
       }
+      // `changed` is reported by the fixeddata PATCH handler in config/macros/coreapifunctions.ts.
+      // An absent flag (e.g. /api/administrative/fetch/[type], which doesn't report it) yields
+      // `undefined` here, and handleConfirmAction's toast decision defers to success for that case.
+      const changed =
+        responseJSON && typeof responseJSON === 'object' && typeof (responseJSON as { changed?: unknown }).changed === 'boolean'
+          ? (responseJSON as { changed: boolean }).changed
+          : undefined;
       return { row: requestRow, changed };
     },
     [currentPlot?.plotID, currentCensus?.dateRanges, adminEmail, setIsNewRowAdded, setShouldAddRowAfterFetch]
@@ -1133,10 +1138,21 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           const outcome = await performSaveAction(promiseArguments.oldRow.id, resolvedRow);
           if (outcome?.partialError) {
             setSnackbar({ children: outcome.partialError.message, severity: 'error' });
-          } else if (outcome?.followUpError) {
-            setSnackbar({ children: `Changes were saved, but the grid could not refresh: ${outcome.followUpError.message}`, severity: 'error' });
           } else if (outcome?.changed === false) {
-            setSnackbar({ children: NO_CHANGES_SAVED_MESSAGE, severity: 'info' });
+            // A no-op save is not itself an error, but a refresh failure on top of it is -
+            // outrank the plain follow-up-refresh-failed branch below so this never reports
+            // "Changes were saved" (outcome.changed === false says the opposite happened).
+            setSnackbar({
+              children: outcome.followUpError
+                ? `${NO_CHANGES_SAVED_MESSAGE} ${GRID_REFRESH_FAILED_MESSAGE}: ${outcome.followUpError.message}`
+                : NO_CHANGES_SAVED_MESSAGE,
+              severity: outcome.followUpError ? 'error' : 'info'
+            });
+          } else if (outcome?.followUpError) {
+            setSnackbar({
+              children: `Changes were saved, but ${GRID_REFRESH_FAILED_MESSAGE.toLowerCase()}: ${outcome.followUpError.message}`,
+              severity: 'error'
+            });
           } else if (outcome) {
             setSnackbar({ children: isExplicitNewRow(promiseArguments.oldRow) ? NEW_ROW_ADDED_MESSAGE : ROW_UPDATED_MESSAGE, severity: 'success' });
           }

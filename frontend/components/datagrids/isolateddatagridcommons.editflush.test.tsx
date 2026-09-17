@@ -8,6 +8,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
 import type { GridColDef, GridPreProcessEditCellProps } from '@mui/x-data-grid';
+import { HTTPResponses } from '@/config/macros';
 
 // The component's module-level E2E_DISABLE_VIRTUALIZATION constant is read once at import
 // time. It must be true before IsolatedDataGridCommons is imported, or the real DataGrid
@@ -196,7 +197,7 @@ function mockAttributesFetch(seedRow: Record<string, unknown>) {
       // readResponsePayload's response.text(), which a plain { json: async () => ... }
       // stub does not provide.
       return new Response(JSON.stringify({ message: 'Update successful', changed: true }), {
-        status: 200,
+        status: HTTPResponses.OK,
         headers: { 'Content-Type': 'application/json' }
       });
     }

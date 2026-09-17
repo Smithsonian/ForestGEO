@@ -8,6 +8,7 @@ import IsolatedDataGridCommons, {
   readPersistedGridLayout,
   writePersistedGridLayout,
   ROW_UPDATED_MESSAGE,
+  NEW_ROW_ADDED_MESSAGE,
   NO_CHANGES_SAVED_MESSAGE
 } from './isolateddatagridcommons';
 import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
@@ -25,6 +26,7 @@ const DETACHED_ROW_ID = 'row-dropped-by-refetch';
 const NON_JSON_ERROR_BODY = 'Service temporarily unavailable: upstream database connection refused';
 const ORIGINAL_TEST_SP_CODE = 'TEST_SP_CODE_A';
 const UPDATED_TEST_SP_CODE = 'TEST_SP_CODE_B';
+const TEST_SCHEMA = 'testschema';
 
 vi.mock('@/lib/db/definitions/views', () => ({
   getAllTaxonomiesViewHCs: () => ({}),
@@ -58,6 +60,8 @@ vi.mock('@/app/contexts/compat-hooks', () => ({
   usePlotContext: () => ({ plotID: 1, plotName: 'Test Plot' }),
   useOrgCensusContext: () => ({ plotCensusNumber: 1, dateRanges: [{ censusID: 1 }] }),
   useQuadratContext: () => ({ quadratID: undefined }),
+  // Vitest hoists vi.mock() factories above module-scope const declarations, so this
+  // literal cannot reference the TEST_SCHEMA constant used later in the file.
   useSiteContext: () => ({ schemaName: 'testschema', siteName: 'Test Site' })
 }));
 
@@ -1182,31 +1186,50 @@ describe('IsolatedDataGridCommons', () => {
     expect(screen.getByTestId('export-csv-handler-present').textContent).toBe('false');
   });
 
+  // gridType 'attributes' drives every case below except the two editFlowOverride ones:
+  // persistRow refuses an existing-row save for gridType 'failedmeasurements' without an
+  // editFlowOverride (PR #483's preview/apply guard, see 'rejects failed-measurement saves
+  // without an override' above), which would short-circuit before ever reaching
+  // updateRow/fetch. This suite exercises the generic PATCH `changed`-flag reporting, and the
+  // real #481 repro is the Attributes grid's DIR26 edit, not a failed-measurement correction -
+  // so it uses attributes' own gridID ('code') and fields, matching
+  // isolateddatagridcommons.editflush.test.tsx's fixture. The two editFlowOverride tests keep
+  // gridType 'failedmeasurements': that is the real preview/apply wiring
+  // isolatedfailedmeasurementsdatagrid.tsx uses, and an override bypasses the guard above
+  // regardless of gridType.
   describe('no-op save reporting', () => {
-    const originalRow = {
-      id: 1,
-      failedMeasurementID: 123,
-      spCode: ORIGINAL_TEST_SP_CODE
-    };
-    const updatedRow = {
-      ...originalRow,
-      spCode: UPDATED_TEST_SP_CODE
-    };
+    const ATTRIBUTE_CODE = 'DIR26';
+    const originalAttributeRow = { id: 1, code: ATTRIBUTE_CODE, description: 'Original attribute description' };
+    const updatedAttributeRow = { ...originalAttributeRow, description: 'Edited attribute description' };
+    const ATTRIBUTE_GRID_COLUMNS = [
+      { field: 'id', editable: false },
+      { field: 'code', editable: false },
+      { field: 'description', editable: true }
+    ];
 
-    const renderFailedMeasurementsGrid = (extraProps: Record<string, unknown> = {}) => {
-      mockGetRowWithUpdatedValues.mockReturnValue(updatedRow);
+    const originalFailedMeasurementRow = { id: 1, failedMeasurementID: 123, spCode: ORIGINAL_TEST_SP_CODE };
+    const updatedFailedMeasurementRow = { ...originalFailedMeasurementRow, spCode: UPDATED_TEST_SP_CODE };
+    const FAILED_MEASUREMENT_GRID_COLUMNS = [
+      { field: 'id', editable: false },
+      { field: 'spCode', editable: true }
+    ];
+
+    const renderEditableGrid = (
+      gridType: string,
+      row: Record<string, unknown>,
+      rowAfterEdit: Record<string, unknown>,
+      extraProps: Record<string, unknown> = {}
+    ) => {
+      mockGetRowWithUpdatedValues.mockReturnValue(rowAfterEdit);
       return render(
         <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
           <IsolatedDataGridCommons
-            gridType="failedmeasurements"
-            gridColumns={[
-              { field: 'id', editable: false },
-              { field: 'spCode', editable: true }
-            ]}
+            gridType={gridType}
+            gridColumns={gridType === 'attributes' ? ATTRIBUTE_GRID_COLUMNS : FAILED_MEASUREMENT_GRID_COLUMNS}
             refresh={false}
             setRefresh={vi.fn()}
             dynamicButtons={[]}
-            initialRow={originalRow}
+            initialRow={row}
             onDataUpdate={vi.fn().mockResolvedValue(undefined)}
             {...extraProps}
           />
@@ -1214,9 +1237,9 @@ describe('IsolatedDataGridCommons', () => {
       );
     };
 
-    const driveEditSaveConfirm = async () => {
+    const driveEditSaveConfirm = async (originalText: string) => {
       await waitFor(() => {
-        expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE);
+        expect(screen.getByTestId('row-state').textContent).toContain(originalText);
       });
 
       fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
@@ -1230,6 +1253,44 @@ describe('IsolatedDataGridCommons', () => {
     };
 
     it('shows the no-changes info toast, and neither success toast, when the PATCH reports changed:false', async () => {
+      let patchURL: string | undefined;
+      mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          patchURL = String(input);
+          return new Response(JSON.stringify({ message: 'Update successful', changed: false }), {
+            status: HTTPResponses.OK,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        return {
+          ok: true,
+          json: async () => ({ output: [originalAttributeRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+        } as Response;
+      });
+
+      renderEditableGrid('attributes', originalAttributeRow, updatedAttributeRow);
+      await driveEditSaveConfirm(originalAttributeRow.description);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert, 'a changed:false PATCH response must surface the no-changes info toast').toHaveTextContent(NO_CHANGES_SAVED_MESSAGE);
+      expect(alert, 'the no-changes toast must render as an info Alert, not success, so it reads as a warning rather than a confirmation').toHaveClass(
+        'MuiAlert-standardInfo'
+      );
+      expect(screen.queryByText(ROW_UPDATED_MESSAGE), 'the success toast must not also appear alongside the no-changes toast').not.toBeInTheDocument();
+      expect(screen.queryByText('Row successfully updated!'), 'the confirm-modal success toast must not paper over a no-op save').not.toBeInTheDocument();
+      expect(patchURL, 'the attributes grid must PATCH the real fixeddata endpoint keyed on its gridID (code)').toContain(
+        `/api/fixeddata/attributes/${TEST_SCHEMA}/code`
+      );
+    });
+
+    it('leads with the no-changes fact, and never claims a save happened, when a changed:false save also fails to refresh', async () => {
+      // handleConfirmAction must check outcome.changed === false BEFORE outcome.followUpError:
+      // a no-op save (the server made no change) whose post-save refresh then fails must not be
+      // reported as "Changes were saved, but the grid could not refresh" - the server already
+      // said nothing was saved, so that phrasing would be a false claim on top of a real error.
+      // finishPersistedSave folds a rejecting onDataUpdate into followUpError, so a rejecting
+      // onDataUpdate here reproduces the exact case it catches.
+      const refreshFailureMessage = 'onDataUpdate rejected: could not refresh the grid';
       mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
         if (init?.method === 'PATCH') {
           return new Response(JSON.stringify({ message: 'Update successful', changed: false }), {
@@ -1239,31 +1300,26 @@ describe('IsolatedDataGridCommons', () => {
         }
         return {
           ok: true,
-          json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+          json: async () => ({ output: [originalAttributeRow], totalCount: 1, finishedQuery: 'SELECT 1' })
         } as Response;
       });
 
-      // 'attributes', not 'failedmeasurements': persistRow refuses an existing-row save for
-      // gridType 'failedmeasurements' without an editFlowOverride (PR #483's preview/apply
-      // guard) before ever reaching updateRow/fetch; this block exercises the generic PATCH
-      // `changed`-flag reporting, and the real #481 repro is the Attributes grid's DIR26 edit.
-      renderFailedMeasurementsGrid({ gridType: 'attributes' });
-      await driveEditSaveConfirm();
+      renderEditableGrid('attributes', originalAttributeRow, updatedAttributeRow, {
+        onDataUpdate: vi.fn().mockRejectedValue(new Error(refreshFailureMessage))
+      });
+      await driveEditSaveConfirm(originalAttributeRow.description);
 
       const alert = await screen.findByRole('alert');
-      expect(alert, 'a changed:false PATCH response must surface the no-changes info toast').toHaveTextContent(NO_CHANGES_SAVED_MESSAGE);
-      expect(alert, 'the no-changes toast must render as an info Alert, not success, so it reads as a warning rather than a confirmation').toHaveClass(
-        'MuiAlert-standardInfo'
-      );
-      expect(screen.queryByText(ROW_UPDATED_MESSAGE), 'the success toast must not also appear alongside the no-changes toast').not.toBeInTheDocument();
-      expect(screen.queryByText('Row successfully updated!'), 'the confirm-modal success toast must not paper over a no-op save').not.toBeInTheDocument();
+      expect(alert, 'a no-op save whose refresh also fails must still lead with the no-changes fact').toHaveTextContent(NO_CHANGES_SAVED_MESSAGE);
+      expect(alert, 'the refresh failure must be reported alongside the no-changes fact, not silently dropped').toHaveTextContent(refreshFailureMessage);
+      expect(alert.textContent, 'must never claim the save happened when changed:false says it did not').not.toContain('Changes were saved');
     });
 
     it('shows the no-changes info toast for the plain #481 shape: an edit that resubmits the unmodified row', async () => {
       // The exact repro from #481: the user "edits" a field but the grid's getRowWithUpdatedValues
       // hands back a row identical to what's on the server, and the server correctly reports
       // changed:false. This must not be confused with a fetch/parse failure or a real update.
-      let capturedPatchBody: { oldRow: unknown; newRow: { spCode: string } } | undefined;
+      let capturedPatchBody: { oldRow: unknown; newRow: { description: string } } | undefined;
       mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
         if (init?.method === 'PATCH') {
           capturedPatchBody = JSON.parse(String(init.body));
@@ -1274,29 +1330,29 @@ describe('IsolatedDataGridCommons', () => {
         }
         return {
           ok: true,
-          json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+          json: async () => ({ output: [originalAttributeRow], totalCount: 1, finishedQuery: 'SELECT 1' })
         } as Response;
       });
 
-      // 'attributes', not 'failedmeasurements': persistRow refuses an existing-row save for
-      // gridType 'failedmeasurements' without an editFlowOverride (PR #483's preview/apply
-      // guard) before ever reaching updateRow/fetch; this block exercises the generic PATCH
-      // `changed`-flag reporting, and the real #481 repro is the Attributes grid's DIR26 edit.
-      renderFailedMeasurementsGrid({ gridType: 'attributes' });
-      // renderFailedMeasurementsGrid's first statement points getRowWithUpdatedValues at
-      // updatedRow, so this must be set afterward - it's read later, inside handleSaveClick,
-      // when the Save icon is clicked - to actually exercise "the user's edit round-trips
-      // to an unchanged row" instead of silently submitting a real change.
-      mockGetRowWithUpdatedValues.mockReturnValue(originalRow);
-      await driveEditSaveConfirm();
+      renderEditableGrid('attributes', originalAttributeRow, updatedAttributeRow);
+      // renderEditableGrid's first statement points getRowWithUpdatedValues at rowAfterEdit, so
+      // this must be set afterward - it's read later, inside handleSaveClick, when the Save icon
+      // is clicked - to actually exercise "the user's edit round-trips to an unchanged row"
+      // instead of silently submitting a real change.
+      mockGetRowWithUpdatedValues.mockReturnValue(originalAttributeRow);
+      await driveEditSaveConfirm(originalAttributeRow.description);
 
       const alert = await screen.findByRole('alert');
       expect(alert, 'an identical-row resubmit with changed:false must surface the no-changes info toast, not a success toast').toHaveTextContent(
         NO_CHANGES_SAVED_MESSAGE
       );
       expect(screen.queryByText(ROW_UPDATED_MESSAGE), 'an unmodified row must never be reported as a successful update').not.toBeInTheDocument();
-      expect(capturedPatchBody?.newRow.spCode, 'the PATCH body must carry the unmodified row, not a synthetic diff').toBe(ORIGINAL_TEST_SP_CODE);
-      expect(capturedPatchBody?.newRow.spCode, 'this test only proves something if the submitted row is NOT the updated value').not.toBe(UPDATED_TEST_SP_CODE);
+      expect(capturedPatchBody?.newRow.description, 'the PATCH body must carry the unmodified row, not a synthetic diff').toBe(
+        originalAttributeRow.description
+      );
+      expect(capturedPatchBody?.newRow.description, 'this test only proves something if the submitted row is NOT the updated value').not.toBe(
+        updatedAttributeRow.description
+      );
     });
 
     it('shows the ROW_UPDATED_MESSAGE success toast when the PATCH reports changed:true', async () => {
@@ -1311,16 +1367,12 @@ describe('IsolatedDataGridCommons', () => {
         }
         return {
           ok: true,
-          json: async () => ({ output: [patchSeen ? updatedRow : originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+          json: async () => ({ output: [patchSeen ? updatedAttributeRow : originalAttributeRow], totalCount: 1, finishedQuery: 'SELECT 1' })
         } as Response;
       });
 
-      // 'attributes', not 'failedmeasurements': persistRow refuses an existing-row save for
-      // gridType 'failedmeasurements' without an editFlowOverride (PR #483's preview/apply
-      // guard) before ever reaching updateRow/fetch; this block exercises the generic PATCH
-      // `changed`-flag reporting, and the real #481 repro is the Attributes grid's DIR26 edit.
-      renderFailedMeasurementsGrid({ gridType: 'attributes' });
-      await driveEditSaveConfirm();
+      renderEditableGrid('attributes', originalAttributeRow, updatedAttributeRow);
+      await driveEditSaveConfirm(originalAttributeRow.description);
 
       expect(await screen.findByText(ROW_UPDATED_MESSAGE), 'a changed:true PATCH response must surface the success toast').toBeInTheDocument();
       expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'a real change must not surface the no-changes toast').not.toBeInTheDocument();
@@ -1338,22 +1390,72 @@ describe('IsolatedDataGridCommons', () => {
         }
         return {
           ok: true,
-          json: async () => ({ output: [patchSeen ? updatedRow : originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+          json: async () => ({ output: [patchSeen ? updatedAttributeRow : originalAttributeRow], totalCount: 1, finishedQuery: 'SELECT 1' })
         } as Response;
       });
 
-      // 'attributes', not 'failedmeasurements': persistRow refuses an existing-row save for
-      // gridType 'failedmeasurements' without an editFlowOverride (PR #483's preview/apply
-      // guard) before ever reaching updateRow/fetch; this block exercises the generic PATCH
-      // `changed`-flag reporting, and the real #481 repro is the Attributes grid's DIR26 edit.
-      renderFailedMeasurementsGrid({ gridType: 'attributes' });
-      await driveEditSaveConfirm();
+      renderEditableGrid('attributes', originalAttributeRow, updatedAttributeRow);
+      await driveEditSaveConfirm(originalAttributeRow.description);
 
       expect(
         await screen.findByText(ROW_UPDATED_MESSAGE),
         'an endpoint that does not report changed must keep reporting success (e.g. /api/administrative/fetch)'
       ).toBeInTheDocument();
       expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'omitted changed must never be treated as a no-op').not.toBeInTheDocument();
+    });
+
+    it('shows NEW_ROW_ADDED_MESSAGE, never the no-changes toast, after a POST - even one whose response includes changed:false', async () => {
+      // updateRow derives `changed` only on the existing-row/PATCH branch (see the PersistResult
+      // comment above it); the POST/insert branch always returns `changed: undefined`. This uses
+      // the idiom from 'creates an explicit new row with one POST after confirmation' above, and
+      // additionally has the POST response carry changed:false - a shape the real fixeddata POST
+      // handler doesn't send today - to prove a future one could not misreport a real insert as
+      // the #481 no-op bug.
+      const originalRow = { id: 1, personID: 123, personName: 'Original' };
+      const createdRow = { ...originalRow, id: 42, personnelID: 42 };
+      let postCount = 0;
+      mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          postCount += 1;
+          return new Response(JSON.stringify({ message: 'created', createdIDs: { personnel: 42 }, changed: false }), {
+            status: HTTPResponses.OK,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        return { ok: true, json: async () => ({ output: [postCount ? createdRow : originalRow], totalCount: 1, finishedQuery: 'SELECT 1' }) } as Response;
+      });
+
+      render(
+        <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+          <IsolatedDataGridCommons
+            gridType="personnel"
+            gridColumns={[
+              { field: 'id', editable: false },
+              { field: 'personName', editable: true }
+            ]}
+            refresh={false}
+            setRefresh={vi.fn()}
+            dynamicButtons={[]}
+            initialRow={originalRow}
+          />
+        </SWRConfig>
+      );
+
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Original'));
+      fireEvent.click(screen.getByRole('button', { name: 'Test Add New Row' }));
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"isNew":true'));
+      fireEvent.click(screen.getByRole('button', { name: 'Test Process New Row' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+      await waitFor(() => expect(postCount).toBe(1));
+
+      expect(
+        await screen.findByText(NEW_ROW_ADDED_MESSAGE),
+        'a POST/insert must report success even if its response body happens to include changed:false'
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(NO_CHANGES_SAVED_MESSAGE),
+        'the POST/insert branch must never derive `changed` from the response, or a future changed:false there would misreport a real insert as the #481 no-op bug'
+      ).not.toBeInTheDocument();
     });
 
     it('shows the ROW_UPDATED_MESSAGE success toast once editFlowOverride resolves, without issuing its own PATCH', async () => {
@@ -1366,16 +1468,20 @@ describe('IsolatedDataGridCommons', () => {
       mockFetch.mockImplementation(async (_input: RequestInfo | URL) => {
         return {
           ok: true,
-          json: async () => ({ output: [overrideCalled ? updatedRow : originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+          json: async () => ({
+            output: [overrideCalled ? updatedFailedMeasurementRow : originalFailedMeasurementRow],
+            totalCount: 1,
+            finishedQuery: 'SELECT 1'
+          })
         } as Response;
       });
 
       const editFlowOverride = vi.fn().mockImplementation(async () => {
         overrideCalled = true;
-        return updatedRow;
+        return updatedFailedMeasurementRow;
       });
-      renderFailedMeasurementsGrid({ editFlowOverride });
-      await driveEditSaveConfirm();
+      renderEditableGrid('failedmeasurements', originalFailedMeasurementRow, updatedFailedMeasurementRow, { editFlowOverride });
+      await driveEditSaveConfirm(ORIGINAL_TEST_SP_CODE);
 
       await waitFor(() => {
         expect(editFlowOverride, 'the preview flow bypasses updateRow entirely').toHaveBeenCalledTimes(1);
@@ -1398,12 +1504,12 @@ describe('IsolatedDataGridCommons', () => {
       const failureMessage = 'preview apply failed';
       mockFetch.mockResolvedValue({
         ok: true,
-        json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+        json: async () => ({ output: [originalFailedMeasurementRow], totalCount: 1, finishedQuery: 'SELECT 1' })
       } as Response);
 
       const editFlowOverride = vi.fn().mockRejectedValue(new Error(failureMessage));
-      renderFailedMeasurementsGrid({ editFlowOverride });
-      await driveEditSaveConfirm();
+      renderEditableGrid('failedmeasurements', originalFailedMeasurementRow, updatedFailedMeasurementRow, { editFlowOverride });
+      await driveEditSaveConfirm(ORIGINAL_TEST_SP_CODE);
 
       expect(await screen.findByText(`Error: ${failureMessage}`), 'a rejected editFlowOverride must surface its error message in a toast').toBeInTheDocument();
       expect(screen.queryByText(ROW_UPDATED_MESSAGE), 'a failed save must never show the success toast').not.toBeInTheDocument();
@@ -1425,16 +1531,12 @@ describe('IsolatedDataGridCommons', () => {
         }
         return {
           ok: true,
-          json: async () => ({ output: [originalRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+          json: async () => ({ output: [originalAttributeRow], totalCount: 1, finishedQuery: 'SELECT 1' })
         } as Response;
       });
 
-      // 'attributes', not 'failedmeasurements': persistRow refuses an existing-row save for
-      // gridType 'failedmeasurements' without an editFlowOverride (PR #483's preview/apply
-      // guard) before ever reaching updateRow/fetch; this block exercises the generic PATCH
-      // `changed`-flag reporting, and the real #481 repro is the Attributes grid's DIR26 edit.
-      renderFailedMeasurementsGrid({ gridType: 'attributes' });
-      await driveEditSaveConfirm();
+      renderEditableGrid('attributes', originalAttributeRow, updatedAttributeRow);
+      await driveEditSaveConfirm(originalAttributeRow.description);
 
       expect(
         await screen.findByText(`Error: ${serverErrorMessage}`),
