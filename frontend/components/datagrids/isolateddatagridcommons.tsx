@@ -240,6 +240,34 @@ export const NEW_ROW_ADDED_MESSAGE = 'New row added!';
 export const NO_CHANGES_SAVED_MESSAGE = 'No changes were saved: the server recorded no update for this row.';
 export const GRID_REFRESH_FAILED_MESSAGE = 'The grid could not refresh';
 
+// Single source of truth for how a SaveOutcome becomes a snackbar. Shared by the confirm-dialog
+// save path (handleConfirmAction) and the direct row-edit path (processRowUpdate) so both report
+// the same outcome the same way. `null` is reserved for an outcome with nothing to say; every
+// branch below is exhaustive for a real SaveOutcome, so it is never actually returned.
+function describeSaveOutcome(outcome: SaveOutcome, isNewRow: boolean): { children: string; severity: AlertProps['severity'] } | null {
+  if (outcome.partialError) {
+    return { children: outcome.partialError.message, severity: 'error' };
+  }
+  if (outcome.changed === false) {
+    // A no-op save is not itself an error, but a refresh failure on top of it is -
+    // outrank the plain follow-up-refresh-failed branch below so this never reports
+    // "Changes were saved" (outcome.changed === false says the opposite happened).
+    return {
+      children: outcome.followUpError
+        ? `${NO_CHANGES_SAVED_MESSAGE} ${GRID_REFRESH_FAILED_MESSAGE}: ${outcome.followUpError.message}`
+        : NO_CHANGES_SAVED_MESSAGE,
+      severity: outcome.followUpError ? 'error' : 'info'
+    };
+  }
+  if (outcome.followUpError) {
+    return {
+      children: `Changes were saved, but ${GRID_REFRESH_FAILED_MESSAGE.toLowerCase()}: ${outcome.followUpError.message}`,
+      severity: 'error'
+    };
+  }
+  return { children: isNewRow ? NEW_ROW_ADDED_MESSAGE : ROW_UPDATED_MESSAGE, severity: 'success' };
+}
+
 const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
 const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
@@ -1136,25 +1164,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         try {
           const resolvedRow = confirmedRow || promiseArguments.newRow;
           const outcome = await performSaveAction(promiseArguments.oldRow.id, resolvedRow);
-          if (outcome?.partialError) {
-            setSnackbar({ children: outcome.partialError.message, severity: 'error' });
-          } else if (outcome?.changed === false) {
-            // A no-op save is not itself an error, but a refresh failure on top of it is -
-            // outrank the plain follow-up-refresh-failed branch below so this never reports
-            // "Changes were saved" (outcome.changed === false says the opposite happened).
-            setSnackbar({
-              children: outcome.followUpError
-                ? `${NO_CHANGES_SAVED_MESSAGE} ${GRID_REFRESH_FAILED_MESSAGE}: ${outcome.followUpError.message}`
-                : NO_CHANGES_SAVED_MESSAGE,
-              severity: outcome.followUpError ? 'error' : 'info'
-            });
-          } else if (outcome?.followUpError) {
-            setSnackbar({
-              children: `Changes were saved, but ${GRID_REFRESH_FAILED_MESSAGE.toLowerCase()}: ${outcome.followUpError.message}`,
-              severity: 'error'
-            });
-          } else if (outcome) {
-            setSnackbar({ children: isExplicitNewRow(promiseArguments.oldRow) ? NEW_ROW_ADDED_MESSAGE : ROW_UPDATED_MESSAGE, severity: 'success' });
+          if (outcome) {
+            const description = describeSaveOutcome(outcome, isExplicitNewRow(promiseArguments.oldRow));
+            if (description) setSnackbar(description);
           }
         } catch (error: unknown) {
           const message = asError(error).message;
@@ -1311,9 +1323,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         const persisted = await persistRow(newRow, oldRow);
         const updatedRow = persisted.row;
         const followUpError = await finishPersistedSave(updatedRow, oldRow);
-        if (followUpError) {
-          setSnackbar({ children: `Changes were saved, but ${GRID_REFRESH_FAILED_MESSAGE.toLowerCase()}: ${followUpError.message}`, severity: 'error' });
-        }
+        const outcome: SaveOutcome = { row: updatedRow, changed: persisted.changed, followUpError };
+        const description = describeSaveOutcome(outcome, isExplicitNewRow(oldRow));
+        if (description) setSnackbar(description);
         return updatedRow;
       } catch (error: unknown) {
         if (error instanceof RowSaveFinalizationError) {

@@ -255,6 +255,24 @@ vi.mock('@/config/styleddatagrid', async () => {
         <button
           type="button"
           onClick={() => {
+            // Simulates MUI committing an edit via Tab-out-of-last-cell/programmatic stop,
+            // which calls processRowUpdate directly - no Save-icon click, no confirm dialog.
+            const oldRow = rows.find((row: any) => row.isNew !== true) ?? rows[0];
+            if (oldRow) {
+              const newRow = mockGetRowWithUpdatedValues(oldRow.id, 'anyField') ?? oldRow;
+              const processPromise = props.processRowUpdate?.(newRow, oldRow);
+              if (processPromise) {
+                processPromise.catch(() => {});
+                capturedProcessPromises.push(processPromise);
+              }
+            }
+          }}
+        >
+          Test Process Row
+        </button>
+        <button
+          type="button"
+          onClick={() => {
             // A new row whose local copy a refetch already discarded: MUI still holds
             // it in edit state and will hand it back to processRowUpdate.
             const detachedRow = { id: DETACHED_ROW_ID, isNew: true };
@@ -1376,6 +1394,72 @@ describe('IsolatedDataGridCommons', () => {
 
       expect(await screen.findByText(ROW_UPDATED_MESSAGE), 'a changed:true PATCH response must surface the success toast').toBeInTheDocument();
       expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'a real change must not surface the no-changes toast').not.toBeInTheDocument();
+    });
+
+    it('shows the ROW_UPDATED_MESSAGE success toast on the direct row-edit path (no confirm dialog) when the PATCH reports changed:true', async () => {
+      // processRowUpdate's own success branch (MUI calls this directly when row edit stops via
+      // Tab-out-of-last-cell or programmatically, bypassing the Save-icon confirm dialog
+      // entirely) used to toast nothing on success or a no-op. describeSaveOutcome now backs
+      // both paths, so this must report the same outcome handleConfirmAction does.
+      let patchURL: string | undefined;
+      let patchSeen = false;
+      mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          patchURL = String(input);
+          patchSeen = true;
+          return new Response(JSON.stringify({ message: 'Update successful', changed: true }), {
+            status: HTTPResponses.OK,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        return {
+          ok: true,
+          json: async () => ({ output: [patchSeen ? updatedAttributeRow : originalAttributeRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+        } as Response;
+      });
+
+      renderEditableGrid('attributes', originalAttributeRow, updatedAttributeRow);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(originalAttributeRow.description));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Test Process Row' }));
+
+      expect(
+        await screen.findByText(ROW_UPDATED_MESSAGE),
+        'the direct row-edit path must report success too, not just the confirm-dialog path'
+      ).toBeInTheDocument();
+      expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'a real change on the direct path must not surface the no-changes toast').not.toBeInTheDocument();
+      expect(patchURL, 'the direct path must still PATCH the real fixeddata endpoint').toContain(`/api/fixeddata/attributes/${TEST_SCHEMA}/code`);
+    });
+
+    it('shows the NO_CHANGES_SAVED_MESSAGE info toast on the direct row-edit path (no confirm dialog) when the PATCH reports changed:false', async () => {
+      // Same #481 no-op shape as the confirm-dialog tests above, but exercised through
+      // processRowUpdate's direct success branch instead of handleConfirmAction. Before this
+      // fix, a no-op save on this path reported nothing at all.
+      mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          return new Response(JSON.stringify({ message: 'Update successful', changed: false }), {
+            status: HTTPResponses.OK,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        return {
+          ok: true,
+          json: async () => ({ output: [originalAttributeRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+        } as Response;
+      });
+
+      renderEditableGrid('attributes', originalAttributeRow, updatedAttributeRow);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(originalAttributeRow.description));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Test Process Row' }));
+
+      const alert = await screen.findByRole('alert');
+      expect(alert, 'a changed:false PATCH on the direct path must surface the no-changes info toast').toHaveTextContent(NO_CHANGES_SAVED_MESSAGE);
+      expect(alert, 'the no-changes toast on the direct path must render as an info Alert, not success').toHaveClass('MuiAlert-standardInfo');
+      expect(
+        screen.queryByText(ROW_UPDATED_MESSAGE),
+        'the success toast must not also appear alongside the direct-path no-changes toast'
+      ).not.toBeInTheDocument();
     });
 
     it('falls back to the success toast when the PATCH body omits changed (backward compatibility)', async () => {
