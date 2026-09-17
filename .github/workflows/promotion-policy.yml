@@ -1,0 +1,42 @@
+name: Promotion Policy
+
+on:
+  pull_request:
+    branches: [main, forestgeo-app-development]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promotion-policy-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  promotion-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Main PRs run the checker already reviewed and landed in dev, never the
+      # promotion branch's copy. Dev PRs exercise their proposed checker changes.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref == 'main' && 'forestgeo-app-development' || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+      - name: Test promotion policy
+        run: node --test scripts/check-promotion.test.mjs
+      - name: Verify dev-first promotion
+        env:
+          PR_BASE_REF: ${{ github.base_ref }}
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          export DEV_SHA="$(git rev-parse refs/remotes/origin/forestgeo-app-development)"
+          node scripts/check-promotion.mjs
