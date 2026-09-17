@@ -32,7 +32,7 @@ The read-only audit at 17:48 UTC found 13 schemas (including `forestgeo_sinharaj
 
 Four scopes contain 242,137 eligible pending measurements requiring ordinary validation before DBH-only re-scoring: Harvard census 13 (1) and 15 (85,641), Mpala census 2 (156,492), and Testing Mason census 19 (3), all plot 1. There were no nonterminal catalog jobs; two SERC validation rows and two upload sessions still report nonterminal states outside the active census inventory. Their ages alone do not prove completion. Reconcile these against current census state, workers, sessions, and transactions under isolation; do not relabel them merely to satisfy a preflight.
 
-The previous local rehearsal snapshot is unavailable. A fresh protected copy and final-revision annual/legacy rollback rehearsal remain prerequisites. The tracked [September 17 release record](../../docs/notes/2026-09-17-dbh-release-status.md) distinguishes finished checks from remaining production work.
+The previous local snapshot was unavailable; a newly approved protected production copy was exported and restored on September 17. Its 25-scope legacy baseline, fixed-prior comparison, annualized sweep, timeout recovery, and largest-census injected rollback have completed. The full legacy restoration comparison is still required before release. The tracked [September 17 release record](../../docs/notes/2026-09-17-dbh-release-status.md) distinguishes finished checks from remaining production work.
 
 ## Rules and retained state
 
@@ -93,6 +93,11 @@ FROM catalog.background_jobs
 WHERE Status IN ('queued', 'running', 'cancel_requested', 'waiting_retry')
 ORDER BY SchemaName, PlotID, CensusID, JobID;
 
+SELECT RunID, SchemaName, Status, StartedAt, WorkerHeartbeatAt
+FROM catalog.provisioning_runs
+WHERE Status = 'running'
+ORDER BY SchemaName, RunID;
+
 SELECT c.PlotID, c.CensusID, c.PlotCensusNumber, COUNT(*) AS EligiblePending
 FROM target_schema.coremeasurements cm
 JOIN target_schema.census c ON c.CensusID = cm.CensusID
@@ -112,6 +117,8 @@ FROM performance_schema.metadata_locks
 WHERE OBJECT_TYPE = 'USER LEVEL LOCK';
 ```
 
+Provisioning runs must be drained too: startup can resume them independently of the upload-job sweeper. Include the `polluserinformation` account-lookup function in the writer inventory; either verify its deployed code is read-only for this target or isolate it as well. An HTTP trigger alone does not establish its write behavior.
+
 Current **and** immediate-prior pending work defer a scope. Running records block regardless of age. Verify stopped application work, absence of its server session/transaction, and released scope locks before an operator reconciles a stale normal run record through the normal lifecycle. Age alone is never permission for takeover. Do not use the manual reset button to recover a DBH attempt. Complete pre-existing pending work separately through normal validation and record any non-DBH override changes before restarting DBH preflight.
 
 ## Rehearsal and revision verification
@@ -126,6 +133,8 @@ Before production sign-off, the copy must demonstrate:
 - Lost commit acknowledgement and post-commit artifact failure reconciliation.
 - Old-rule rollback from the earliest affected committed census through every later census.
 - The largest census transaction's row/pair counts, duration, artifact preparation, lock duration, commit/rollback time, and resource observations. Choose an explicit transaction timeout and full maintenance-window budget from these measurements. If cost is unacceptable, revise the design rather than adding intermediate commits.
+
+**September 17 timing qualification:** the fresh copy completed its legacy baseline in 860.341 seconds. A 300,000 ms annualized attempt timed out in Testing Mason census 55's view refresh and halted the sweep with an unknown outcome while MySQL was still rolling back. Fresh-connection reconciliation later proved rollback; all six saved projections matched and the provisional run was absent. Resuming only unfinished scopes with 600,000 ms completed that census in 601.399 seconds including commit and artifact work. The same slow period affected a single-row definition update, which waited over 150 seconds for commit; these timings cannot be attributed solely to DBH computation. Retain both attempts and the recovery evidence. The ten-minute retry leaves insufficient timing margin by itself; record a reviewed production timeout and full maintenance budget before apply. Do not copy the older five-minute setting without qualification.
 
 Record unmeasured resources as unavailable. Historical counts (including 447 and Ngel Nyaki 7/313) are reference observations, not fixed acceptance targets. Explain differences using source changes, predicates, prior validity, and overrides.
 
@@ -164,7 +173,8 @@ Set `AZURE_SQL_SERVER`, `AZURE_SQL_USER`, `AZURE_SQL_PASSWORD`, and `AZURE_SQL_P
 Keep the operator machine awake and connected throughout the sweep and reconciliation. On macOS, prefix the command with `caffeinate -i` to prevent idle sleep while the CLI runs. The isolated rehearsal demonstrated that machine sleep can suspend both database work and the operator's timeout timer; exclude such interrupted timings when choosing the transaction budget.
 
 ```sh
-export DBH_RESCORE_TIMEOUT_MS=300000
+: "${DBH_RESCORE_TIMEOUT_MS:?Set the reviewed transaction timeout in milliseconds before running this release}"
+export DBH_RESCORE_TIMEOUT_MS
 
 npx tsx scripts/rescore-dbh-validations.ts --all-sites
 
@@ -308,7 +318,8 @@ Only then use the separately approved ordered re-score apply command from the ru
 After the block succeeds, use the same Bash shell and manifest environment for the approved ordered rollback sweep. Set a new private artifact directory for this attempt:
 
 ```sh
-export DBH_RESCORE_TIMEOUT_MS=300000
+: "${DBH_RESCORE_TIMEOUT_MS:?Set the reviewed transaction timeout in milliseconds before running this release}"
+export DBH_RESCORE_TIMEOUT_MS
 npx tsx scripts/rescore-dbh-validations.ts --all-sites \
   --apply --i-understand-this-writes-to forestgeo-mysqldataserver.mysql.database.azure.com \
   --artifact-dir /absolute/private/path/dbh-legacy-rollback
