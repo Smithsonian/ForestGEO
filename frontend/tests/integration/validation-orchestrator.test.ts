@@ -133,13 +133,8 @@ vi.mock('@/ailogger', () => ({
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
 import { ingestBatch } from '@/lib/uploads/ingest-batch';
-import {
-  COORDINATE_DRIFT_PROCEDURE,
-  DBH_GROWTH_PROCEDURE,
-  DBH_SHRINKAGE_PROCEDURE,
-  QUADRAT_MISMATCH_PROCEDURE,
-  runCensusValidations
-} from '@/lib/uploads/validation-orchestrator';
+import { COORDINATE_DRIFT_PROCEDURE, QUADRAT_MISMATCH_PROCEDURE, runCensusValidations } from '@/lib/uploads/validation-orchestrator';
+import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE } from '@/config/dbhchangevalidations';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -206,26 +201,6 @@ describe('runCensusValidations — integration', () => {
     plotID = testData.plots[0].plotID;
     censusID = testData.census[0].censusID;
     sharedState.connection = connection;
-
-    // validation_runs is defined in tablestructures.sql but loadSchema's
-    // semicolon-split filter silently skips it (the statement chunk begins
-    // with a '--' comment block). Create it here with the production DDL so
-    // run-record assertions exercise the real column set.
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${schema}\`.validation_runs (
-        RunID          INT AUTO_INCREMENT PRIMARY KEY,
-        PlotID         INT NOT NULL,
-        CensusID       INT NOT NULL,
-        Status         ENUM ('running', 'completed', 'failed', 'cancelled') NOT NULL DEFAULT 'running',
-        TotalSteps     INT NOT NULL DEFAULT 0,
-        CompletedSteps INT NOT NULL DEFAULT 0,
-        FailedSteps    INT NOT NULL DEFAULT 0,
-        CurrentStep    VARCHAR(100) NULL,
-        ErrorMessages  JSON NULL,
-        StartedAt      DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        CompletedAt    DATETIME NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
 
     console.log(`[setup] schema=${schema} plotID=${plotID} censusID=${censusID}`);
   }, 120000);
@@ -562,7 +537,7 @@ describe('runCensusValidations — integration', () => {
     });
 
     console.log(`[summary] ${JSON.stringify(summary)} onStepCalls=${onStepCalls}`);
-    expect(summary).toEqual({ totalSteps: 0, failedSteps: 0, errors: [], conflict: true });
+    expect(summary).toEqual({ totalSteps: 0, failedSteps: 0, errors: [], notices: [], conflict: true });
     expect(onStepCalls).toBe(0);
 
     // The pre-existing running row is untouched and no second row was created.

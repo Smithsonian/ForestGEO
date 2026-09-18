@@ -18,13 +18,8 @@ import {
 } from '@/components/processors/processorhelperfunctions';
 import { refreshMeasurementsSummaryForScope, refreshViewFullTableForScope } from '@/lib/measurementviewrefresh';
 import { createValidationRunRecord, updateValidationRunRecord } from '@/lib/validations/run-records';
+import { DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE, describeDbhFloorSkips } from '@/config/dbhchangevalidations';
 
-// Single source for these procedure names on the server. The client-side
-// copies in components/client/validationcore.tsx and config/validation-runner.ts
-// must stay local — importing this module there would pull ConnectionManager
-// into the client bundle.
-export const DBH_GROWTH_PROCEDURE = 'ValidateDBHGrowthExceedsMax';
-export const DBH_SHRINKAGE_PROCEDURE = 'ValidateDBHShrinkageExceedsMax';
 export const QUADRAT_MISMATCH_PROCEDURE = 'ValidateQuadratMismatchAcrossCensuses';
 export const COORDINATE_DRIFT_PROCEDURE = 'ValidateCoordinateDriftAcrossCensuses';
 
@@ -49,6 +44,8 @@ export interface CensusValidationSummary {
    */
   failedSteps: number;
   errors: string[];
+  /** Informational messages; callers must not retry or fail a job because of these. */
+  notices: string[];
   conflict: boolean;
 }
 
@@ -61,6 +58,8 @@ interface EnabledValidation {
 interface ValidationStepResult {
   success: boolean;
   errorMessage?: string;
+  /** Recorded with the run's messages without failing the step. */
+  notice?: string;
 }
 
 interface ValidationTask {
@@ -126,7 +125,8 @@ function buildValidationTasks(validations: EnabledValidation[], schema: string, 
       name: `${DBH_GROWTH_PROCEDURE}+${DBH_SHRINKAGE_PROCEDURE}`,
       execute: async () => {
         const result = await runCombinedDBHValidations(schema, executionParams);
-        return result.success ? { success: true } : { success: false, errorMessage: result.error ?? 'Shared DBH validation failed' };
+        if (!result.success) return { success: false, errorMessage: result.error ?? 'Shared DBH validation failed' };
+        return { success: true, notice: describeDbhFloorSkips(result.skipCounts?.skippedBelowDbhFloor ?? 0) ?? undefined };
       }
     });
   }
@@ -154,12 +154,14 @@ async function finalizeRunRecordOnError(
   schema: string,
   runID: number,
   errors: string[],
+  notices: string[],
   originalError: Error
 ): Promise<void> {
   try {
     await updateValidationRunRecord(connectionManager, schema, runID, {
       status: 'failed',
-      errorMessages: [...errors, `Unexpected error: ${originalError.message}`]
+      errorMessages: [...errors, `Unexpected error: ${originalError.message}`],
+      notices
     });
   } catch (finalizeError: any) {
     ailogger.warn(`[ValidationOrchestrator] Could not finalize run record ${runID} after error: ${finalizeError.message}`);
@@ -185,19 +187,20 @@ export async function runCensusValidations(connectionManager: ConnectionManager,
   if (tasks.length === 0) {
     // Mirrors the client runner: nothing to run, nothing to record.
     ailogger.info(`[ValidationOrchestrator] No enabled validations for ${schema} — skipping run`);
-    return { totalSteps: 0, failedSteps: 0, errors: [], conflict: false };
+    return { totalSteps: 0, failedSteps: 0, errors: [], notices: [], conflict: false };
   }
 
   const created = await createValidationRunRecord(connectionManager, schema, plotID, censusID, tasks.length);
   if (created.conflict || created.runID === null) {
     ailogger.warn(`[ValidationOrchestrator] Conflict creating validation run for ${schema} plot ${plotID} census ${censusID} — skipping`);
-    return { totalSteps: 0, failedSteps: 0, errors: [], conflict: true };
+    return { totalSteps: 0, failedSteps: 0, errors: [], notices: [], conflict: true };
   }
   const runID = created.runID;
 
   let completedSteps = 0;
   let failedSteps = 0;
   const errors: string[] = [];
+  const notices: string[] = [];
 
   try {
     for (const task of tasks) {
@@ -207,6 +210,7 @@ export async function runCensusValidations(connectionManager: ConnectionManager,
         const result = await task.execute();
         if (result.success) {
           completedSteps++;
+          if (result.notice) notices.push(result.notice);
         } else {
           failedSteps++;
           errors.push(`Failed: ${task.name} — ${result.errorMessage}`);
@@ -221,7 +225,8 @@ export async function runCensusValidations(connectionManager: ConnectionManager,
       await updateValidationRunRecord(connectionManager, schema, runID, {
         completedSteps,
         failedSteps,
-        errorMessages: errors.length > 0 ? errors : undefined
+        errorMessages: errors,
+        notices
       });
 
       try {
@@ -267,13 +272,14 @@ export async function runCensusValidations(connectionManager: ConnectionManager,
       status: finalStatus,
       completedSteps,
       failedSteps,
-      errorMessages: errors.length > 0 ? errors : undefined
+      errorMessages: errors,
+      notices
     });
 
     ailogger.info(`[ValidationOrchestrator] Run ${runID} ${finalStatus}: ${completedSteps} passed, ${failedSteps} failed`);
-    return { totalSteps: tasks.length, failedSteps, errors, conflict: false };
+    return { totalSteps: tasks.length, failedSteps, errors, notices, conflict: false };
   } catch (unexpectedError: any) {
-    await finalizeRunRecordOnError(connectionManager, schema, runID, errors, unexpectedError);
+    await finalizeRunRecordOnError(connectionManager, schema, runID, errors, notices, unexpectedError);
     throw unexpectedError;
   }
 }

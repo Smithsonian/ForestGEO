@@ -1817,9 +1817,11 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         {isValidationOverrideModalOpen && (
           <ValidationOverrideModal
             isValidationOverrideModalOpen={isValidationOverrideModalOpen}
-            handleValidationOverrideModalClose={async (overridePerformed: boolean) =>
-              await handleCloseModal(setIsValidationOverrideModalOpen, overridePerformed)
-            }
+            handleValidationOverrideModalClose={async (overridePerformed: boolean) => {
+              setIsValidationOverrideModalOpen(false);
+              // The atomic override already refreshed both views for the changed rows.
+              if (overridePerformed) await Promise.all([runFetchPaginated(), refreshCounts()]);
+            }}
           />
         )}
         {isResetValidationModalOpen && (

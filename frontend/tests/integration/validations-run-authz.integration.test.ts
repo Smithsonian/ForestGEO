@@ -150,6 +150,29 @@ describe('/api/validations/run authz', () => {
   });
 
   describe('GET (fromQuery schema resolver)', () => {
+    it('keeps recovery markers in storage but excludes them from user-facing run messages', async () => {
+      await mockNonAdminSession(MEMBER_EMAIL, MEMBER_SCHEMA)();
+      const messages = ['dbh-rescore-attempt:completed-attempt', '2 DBH comparisons were skipped'];
+      dbSpies.executeQuery.mockResolvedValueOnce([{ RunID: INSERTED_RUN_ID, Status: 'completed', ErrorMessages: messages }] as any);
+      const { GET } = await import('@/app/api/validations/run/route');
+      const response = await GET(getRequest(MEMBER_SCHEMA), EMPTY_ROUTE_CONTEXT);
+      expect(response.status).toBe(HTTP_OK);
+      expect((await response.json()).run).toMatchObject({ ErrorMessages: [], Notices: ['2 DBH comparisons were skipped'] });
+      expect(messages).toEqual(['dbh-rescore-attempt:completed-attempt', '2 DBH comparisons were skipped']);
+      expect(dbSpies.executeQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns explicit notices separately from failures', async () => {
+      await mockNonAdminSession(MEMBER_EMAIL, MEMBER_SCHEMA)();
+      dbSpies.executeQuery.mockResolvedValueOnce([
+        { RunID: INSERTED_RUN_ID, Status: 'failed', ErrorMessages: ['Refresh failed'], Notices: ['Below floor'] }
+      ] as any);
+      const { GET } = await import('@/app/api/validations/run/route');
+      const response = await GET(getRequest(MEMBER_SCHEMA), EMPTY_ROUTE_CONTEXT);
+      expect((await response.json()).run).toMatchObject({ ErrorMessages: ['Refresh failed'], Notices: ['Below floor'] });
+      expect(dbSpies.executeQuery).toHaveBeenCalledWith(expect.not.stringContaining('RescoreAttemptID'), expect.any(Array));
+    });
+
     it('denies an out-of-scope schema with 403 and runs no SQL', async () => {
       await mockNonAdminSession(ATTACKER_EMAIL, MEMBER_SCHEMA)();
 
@@ -175,6 +198,35 @@ describe('/api/validations/run authz', () => {
   });
 
   describe('PATCH (fromBody schema resolver)', () => {
+    it.each([{ notices: 'message' }, { notices: [5] }, { errorMessages: [null] }, { errorMessages: ['dbh-rescore-attempt:forged'] }])(
+      'rejects malformed message arrays before storage: %j',
+      async messages => {
+        await mockNonAdminSession(MEMBER_EMAIL, MEMBER_SCHEMA)();
+        const { PATCH } = await import('@/app/api/validations/run/route');
+        const request = new NextRequest('http://localhost/api/validations/run', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ schema: MEMBER_SCHEMA, runID: 5, ...messages })
+        });
+        const response = await PATCH(request, EMPTY_ROUTE_CONTEXT);
+        expect(response.status).toBe(HTTP_INVALID_REQUEST);
+        expect(dbSpies.executeQuery).not.toHaveBeenCalled();
+      }
+    );
+
+    it('persists notices and failures in their own fields and ignores client recovery metadata', async () => {
+      await mockNonAdminSession(MEMBER_EMAIL, MEMBER_SCHEMA)();
+      const { PATCH } = await import('@/app/api/validations/run/route');
+      const request = new NextRequest('http://localhost/api/validations/run', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ schema: MEMBER_SCHEMA, runID: 5, errorMessages: ['Failure'], notices: ['Notice'], rescoreAttemptID: 'forged' })
+      });
+      const response = await PATCH(request, EMPTY_ROUTE_CONTEXT);
+      expect(response.status).toBe(HTTP_OK);
+      expect(dbSpies.executeQuery).toHaveBeenCalledWith(expect.stringContaining('ErrorMessages = ?, Notices = ?'), ['["Failure"]', '["Notice"]', 5]);
+    });
+
     it('denies an out-of-scope schema with 403 and runs no SQL', async () => {
       await mockNonAdminSession(ATTACKER_EMAIL, MEMBER_SCHEMA)();
 

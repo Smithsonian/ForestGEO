@@ -40,7 +40,14 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import mysql, { type Connection, type Pool, type RowDataPacket } from 'mysql2/promise';
-import { cleanupTestMeasurements, setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
+import {
+  cleanupTestMeasurements,
+  createAdditionalCensus,
+  insertDirectMeasurements,
+  setupTestDatabase,
+  teardownTestDatabase,
+  type TestData
+} from '../setup/local-db-setup';
 
 // ---------------------------------------------------------------------------
 // Safety guard — setupTestDatabase DROPs/CREATEs its schema and this suite
@@ -177,6 +184,7 @@ import { UPLOAD_JOB_MAX_RETRIES, type BackgroundJobFileRecord } from '@/lib/back
 import { createUploadSession, ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { FormType, SourceFormat, type FileRow } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
+import { describeDbhFloorSkips } from '@/config/dbhchangevalidations';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
 import { testDbServerOptions } from '../setup/test-db-connection';
@@ -267,28 +275,8 @@ describe('runJobIfClaimable — integration', () => {
       [schema]
     );
 
-    // validation_runs is defined in tablestructures.sql but loadSchema's
-    // semicolon-split filter silently skips it (the statement chunk begins
-    // with a '--' comment block). Same workaround as validation-orchestrator.
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${schema}\`.validation_runs (
-        RunID          INT AUTO_INCREMENT PRIMARY KEY,
-        PlotID         INT NOT NULL,
-        CensusID       INT NOT NULL,
-        Status         ENUM ('running', 'completed', 'failed', 'cancelled') NOT NULL DEFAULT 'running',
-        TotalSteps     INT NOT NULL DEFAULT 0,
-        CompletedSteps INT NOT NULL DEFAULT 0,
-        FailedSteps    INT NOT NULL DEFAULT 0,
-        CurrentStep    VARCHAR(100) NULL,
-        ErrorMessages  JSON NULL,
-        StartedAt      DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        CompletedAt    DATETIME NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
-
-    // upload_sessions suffers the same loadSchema filter skip; create it via
-    // the production bootstrap (the worker also calls this, but beforeEach's
-    // cleanup needs the table to exist before the first run).
+    // upload_sessions must exist before beforeEach's cleanup runs; create it
+    // via the production bootstrap (the worker also calls this itself).
     await ensureUploadSessionsTable(schema);
 
     console.log(`[setup] schema=${schema} plotID=${plotID} censusID=${censusID}`);
@@ -324,13 +312,13 @@ describe('runJobIfClaimable — integration', () => {
   // Helpers
   // -------------------------------------------------------------------------
 
-  async function createTwoFileJob(): Promise<number> {
+  async function createTwoFileJob(targetCensusID = censusID): Promise<number> {
     const job = await createUploadBackgroundJob(
       catalogPool,
       {
         schema,
         plotID,
-        censusID,
+        censusID: targetCensusID,
         uploadMode: UploadMode.CLEAN_REUPLOAD,
         sourceFormat: SourceFormat.csv,
         formType: FormType.measurements,
@@ -472,6 +460,45 @@ describe('runJobIfClaimable — integration', () => {
     const sessionStates = await fetchWorkerSessionStates(jobID);
     console.log(`[happy] worker session states: ${JSON.stringify(sessionStates)}`);
     expect(sessionStates).toEqual(['completed']);
+  }, 180000);
+
+  it('completes an upload with a DBH floor notice without retrying or failing the job', async () => {
+    const current = await createAdditionalCensus(
+      connection,
+      { ...testData, census: [...testData.census] },
+      {
+        plotCensusNumber: 2,
+        startDate: '2024-01-01',
+        endDate: '2024-12-31'
+      }
+    );
+    // A validated prior measurement below the floor matches W1001 in the uploaded CSV.
+    await insertDirectMeasurements(connection, testData, censusID, [
+      {
+        treeTag: 'W1001',
+        stemTag: '1',
+        speciesCode: 'ACERRU',
+        quadratName: 'Q01',
+        x: 1.5,
+        y: 2.5,
+        dbh: 0.5,
+        hom: 1.3,
+        date: '2023-03-15',
+        codes: 'A'
+      }
+    ]);
+    const jobID = await createTwoFileJob(current.censusID);
+
+    await runJobIfClaimable(jobID, healthyDeps());
+
+    const [runs] = await connection.query<RowDataPacket[]>('SELECT Status, FailedSteps, ErrorMessages, Notices FROM validation_runs WHERE CensusID = ?', [
+      current.censusID
+    ]);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ Status: 'completed', FailedSteps: 0, ErrorMessages: [], Notices: [describeDbhFloorSkips(1)] });
+    const job = await getBackgroundJob(catalogPool, jobID);
+    expect(job).toMatchObject({ status: 'completed', retryCount: 0, lastError: null, percentComplete: 100 });
+    expect(await fetchWorkerSessionStates(jobID)).toEqual(['completed']);
   }, 180000);
 
   // -------------------------------------------------------------------------

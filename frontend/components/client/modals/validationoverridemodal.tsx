@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import { DialogContent, DialogTitle, Modal, ModalClose, ModalDialog } from '@mui/joy';
+import { Alert, DialogContent, DialogTitle, Modal, ModalClose, ModalDialog } from '@mui/joy';
 import ConfirmationDialog from '@/components/client/modals/confirmationdialog';
 import CircularProgress from '@mui/joy/CircularProgress';
 import ailogger from '@/ailogger';
@@ -17,51 +17,31 @@ export default function ValidationOverrideModal(props: VOMProps) {
   const [openConfirmOverrideModal, setOpenConfirmOverrideModal] = useState(true); // starting with confirmation
   const [isOverrideConfirmed, setIsOverrideConfirmed] = useState(false); // need confirmation for override
   const [startOverride, setStartOverride] = useState(false);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
   const [overrideProgress, setOverrideProgress] = useState<number | null>(null); // track override progress
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const censusID = currentCensus?.dateRanges?.[0]?.censusID;
 
   const triggerOverride = useCallback(async () => {
-    const clearCMVQuery = `DELETE mel
-      FROM ${currentSite?.schemaName}.measurement_error_log AS mel
-      JOIN ${currentSite?.schemaName}.measurement_errors AS me
-          ON me.ErrorID = mel.ErrorID
-      JOIN ${currentSite?.schemaName}.coremeasurements AS cm
-          ON mel.MeasurementID = cm.CoreMeasurementID
-      JOIN ${currentSite?.schemaName}.census AS c
-          ON c.CensusID = cm.CensusID
-      WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
-        AND c.PlotID = ${currentPlot?.plotID}
-        AND me.ErrorSource = 'validation'
-        AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL);`;
-    const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm
-      JOIN ${currentSite?.schemaName}.census AS c ON c.CensusID = cm.CensusID
-      SET cm.IsValidated = TRUE
-      WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
-        AND c.PlotID = ${currentPlot?.plotID}
-        AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL)`;
-    const clearCMVResponse = await fetch(`/api/query`, {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !censusID) {
+      throw new Error('validation override requires a selected site, plot, and census');
+    }
+    const response = await fetch('/api/validations/override', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(clearCMVQuery)
+      body: JSON.stringify({ schema: currentSite.schemaName, plotID: currentPlot.plotID, censusID })
     });
-    const clearCMVResultPacket = await clearCMVResponse.json();
-    if (clearCMVResultPacket.affectedRows === 0) throw new Error('CMV clear op failed');
-    const response = await fetch(`/api/query`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(query)
-    });
-    const resultPacket = await response.json();
-    if (resultPacket.affectedRows === 0) throw new Error('validation override failed');
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
+    if (!response.ok) throw new Error(`Validation override failed with status ${response.status}`);
+  }, [currentSite?.schemaName, currentPlot?.plotID, censusID]);
 
   // CRITICAL FIX: Store interval ref for cleanup to prevent memory leak
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (startOverride) {
+      setOverrideError(null);
       setOverrideProgress(0);
       triggerOverride()
         .then(() => {
@@ -83,8 +63,9 @@ export default function ValidationOverrideModal(props: VOMProps) {
           // Store interval ref for cleanup
           progressIntervalRef.current = interval;
         })
-        .catch((error: any) => {
-          ailogger.error('Override operation failed:', error);
+        .catch((error: unknown) => {
+          ailogger.error('Override operation failed:', error instanceof Error ? error : undefined);
+          setOverrideError('Override could not be confirmed. Close this dialog and refresh the census before retrying.');
           setStartOverride(false);
         });
     }
@@ -128,6 +109,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
             />
           )}
           {startOverride && overrideProgress !== null && <CircularProgress determinate value={overrideProgress} />}
+          {overrideError && <Alert color="danger">{overrideError}</Alert>}
         </DialogContent>
       </ModalDialog>
     </Modal>

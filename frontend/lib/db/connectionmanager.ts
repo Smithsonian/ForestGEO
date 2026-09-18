@@ -18,6 +18,30 @@ interface MySQLError extends Error {
 }
 
 /**
+ * A managed transaction cannot acknowledge a successful commit after its
+ * dedicated connection has disappeared.  Callers must reconcile its durable
+ * outcome instead of treating the legacy cleanup no-op as a commit.
+ */
+export class TransactionConnectionLostError extends Error {
+  constructor(transactionId: string) {
+    super(`Transaction ${transactionId} was finalized before commit acknowledgement`);
+    this.name = 'TransactionConnectionLostError';
+  }
+}
+
+export interface TransactionFailureOutcome {
+  databaseOutcome: 'rolled-back' | 'unknown';
+  connectionID?: number;
+}
+
+// Preserve the original thrown error (and retry codes) while exposing only
+// outcomes acknowledged by the owning transaction connection.
+const transactionFailures = new WeakMap<object, TransactionFailureOutcome>();
+export function getTransactionFailureOutcome(error: unknown): TransactionFailureOutcome | undefined {
+  return error !== null && (typeof error === 'object' || typeof error === 'function') ? transactionFailures.get(error as object) : undefined;
+}
+
+/**
  * Scoped query executor handed to `ConnectionManager.withTransaction` callbacks.
  *
  * `query` runs a statement on the transaction's dedicated connection — callers
@@ -317,7 +341,7 @@ class ConnectionManager {
   }
 
   // Commit a transaction
-  public async commitTransaction(transactionId: string): Promise<void> {
+  public async commitTransaction(transactionId: string, options?: { requireActive?: boolean }): Promise<void> {
     const connection = this.transactionConnections.get(transactionId);
 
     if (!connection) {
@@ -329,11 +353,16 @@ class ConnectionManager {
         if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
         this.transactionMeta.delete(transactionId);
       }
-      return; // Avoid throwing an error for an already finalized transaction
+      if (options?.requireActive) {
+        throw new TransactionConnectionLostError(transactionId);
+      }
+      return; // Compatibility no-op for legacy direct callers.
     }
 
+    let committed = false;
     try {
       await connection.commit();
+      committed = true;
       ailogger.info(chalk.green(`Transaction committed: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
 
       // Flush buffered changelog entries now that the transaction is committed
@@ -347,8 +376,14 @@ class ConnectionManager {
       throw error;
     } finally {
       // Clean up application locks before releasing connection
-      await this.cleanupApplicationLocks(transactionId);
-      connection.release();
+      if (committed) {
+        await this.cleanupApplicationLocks(transactionId);
+        connection.release();
+      } else {
+        // A failed COMMIT acknowledgement must never return a possibly live
+        // transaction to the pool. Session termination permits reconciliation.
+        connection.destroy();
+      }
       this.transactionConnections.delete(transactionId);
 
       // CRITICAL FIX: Clean up metadata to prevent leaks
@@ -365,7 +400,7 @@ class ConnectionManager {
   }
 
   // Rollback a transaction
-  public async rollbackTransaction(transactionId: string): Promise<void> {
+  public async rollbackTransaction(transactionId: string, options?: { requireActive?: boolean }): Promise<void> {
     const connection = this.transactionConnections.get(transactionId);
 
     if (!connection) {
@@ -377,11 +412,14 @@ class ConnectionManager {
         if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
         this.transactionMeta.delete(transactionId);
       }
-      return; // Avoid throwing an error for an already finalized transaction
+      if (options?.requireActive) throw new TransactionConnectionLostError(transactionId);
+      return; // Compatibility no-op for legacy direct callers.
     }
 
+    let rolledBack = false;
     try {
       await connection.rollback();
+      rolledBack = true;
       ailogger.warn(chalk.yellow(`Transaction rolled back: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
@@ -392,8 +430,12 @@ class ConnectionManager {
       discardTransactionChangelog(transactionId);
 
       // Clean up application locks before releasing connection
-      await this.cleanupApplicationLocks(transactionId);
-      connection.release();
+      if (rolledBack) {
+        await this.cleanupApplicationLocks(transactionId);
+        connection.release();
+      } else {
+        connection.destroy();
+      }
       this.transactionConnections.delete(transactionId);
 
       // CRITICAL FIX: Clean up metadata to prevent leaks
@@ -589,7 +631,11 @@ class ConnectionManager {
       // success path
       if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
       if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
-      await this.commitTransaction(transactionId!);
+      // A managed callback may only report success after this specific
+      // transaction's COMMIT is acknowledged.  The compatibility no-op used
+      // by direct legacy callers would otherwise turn a destroyed connection
+      // into a false success.
+      await this.commitTransaction(transactionId!, { requireActive: true });
       this.transactionMeta.delete(transactionId!);
       return result;
     } catch (err: unknown) {
@@ -628,14 +674,21 @@ class ConnectionManager {
         }
       }
 
+      let rollbackConfirmed = false;
       try {
-        await this.rollbackTransaction(transactionId!);
+        await this.rollbackTransaction(transactionId!, { requireActive: true });
+        rollbackConfirmed = true;
       } catch (rbErr: unknown) {
         ailogger.error(`Rollback failed for transaction ${transactionId!}: ${getErrorMessage(rbErr)}`);
       }
 
+      const failure = err !== null && (typeof err === 'object' || typeof err === 'function') ? err : new Error(String(err));
+      transactionFailures.set(failure as object, {
+        databaseOutcome: rollbackConfirmed ? 'rolled-back' : 'unknown',
+        connectionID: (connection as PoolConnectionWithThreadId).threadId
+      });
       this.transactionMeta.delete(transactionId!);
-      throw err;
+      throw failure;
     }
   }
 

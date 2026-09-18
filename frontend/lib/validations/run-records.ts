@@ -6,6 +6,7 @@
  * now a thin wrapper over these functions; its GET handler is untouched.
  */
 import type ConnectionManager from '@/lib/db/connectionmanager';
+import type { TxExecutor } from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import ailogger from '@/ailogger';
@@ -35,7 +36,77 @@ export interface ValidationRunUpdate {
   completedSteps?: number;
   failedSteps?: number;
   errorMessages?: string[];
+  notices?: string[];
   status?: ValidationRunTerminalStatus;
+}
+
+/**
+ * The DBH re-score owns one larger measurement transaction, so its run record
+ * must use that transaction rather than the normal create/update wrappers
+ * below (which intentionally own their own transactions for the upload flow).
+ */
+export async function createValidationRunRecordInTransaction(
+  tx: TxExecutor,
+  schema: string,
+  plotID: number,
+  censusID: number,
+  totalSteps: number
+): Promise<number> {
+  const query = safeFormatQuery(
+    schema,
+    `INSERT INTO ??.validation_runs (PlotID, CensusID, TotalSteps, Status)
+     VALUES (?, ?, ?, 'running')`
+  );
+  const result = (await tx.query(query, [plotID, censusID, totalSteps])) as { insertId?: number };
+  const runID = Number(result?.insertId);
+  if (!Number.isInteger(runID) || runID <= 0) {
+    throw new Error(`Unable to create a validation run record for plot ${plotID}, census ${censusID}`);
+  }
+  return runID;
+}
+
+/** Complete the provisional DBH record, rejecting a lost or replaced row. */
+export async function completeValidationRunRecordInTransaction(
+  tx: TxExecutor,
+  schema: string,
+  runID: number,
+  update: Pick<ValidationRunUpdate, 'completedSteps' | 'failedSteps' | 'currentStep' | 'errorMessages' | 'notices'> & { rescoreAttemptID?: string } = {}
+): Promise<void> {
+  const setClauses = ["Status = 'completed'", 'CompletedAt = NOW()'];
+  const params: unknown[] = [];
+
+  if (update.completedSteps !== undefined) {
+    setClauses.push('CompletedSteps = ?');
+    params.push(update.completedSteps);
+  }
+  if (update.failedSteps !== undefined) {
+    setClauses.push('FailedSteps = ?');
+    params.push(update.failedSteps);
+  }
+  if (update.currentStep !== undefined) {
+    setClauses.push('CurrentStep = ?');
+    params.push(update.currentStep);
+  }
+  if (update.errorMessages !== undefined) {
+    setClauses.push('ErrorMessages = ?');
+    params.push(JSON.stringify(update.errorMessages));
+  }
+  if (update.notices !== undefined) {
+    setClauses.push('Notices = ?');
+    params.push(JSON.stringify(update.notices));
+  }
+
+  if (update.rescoreAttemptID !== undefined) {
+    setClauses.push('RescoreAttemptID = ?');
+    params.push(update.rescoreAttemptID);
+  }
+
+  params.push(runID);
+  const query = safeFormatQuery(schema, `UPDATE ??.validation_runs SET ${setClauses.join(', ')} WHERE RunID = ? AND Status = 'running'`);
+  const result = (await tx.query(query, params)) as { affectedRows?: number };
+  if (Number(result?.affectedRows ?? 0) !== 1) {
+    throw new Error(`Validation run ${runID} was not running when DBH re-score tried to complete it`);
+  }
 }
 
 /** Thrown when an update is requested with no fields set — callers map this to a 400. */
@@ -180,6 +251,10 @@ export async function updateValidationRunRecord(
   if (update.errorMessages !== undefined) {
     setClauses.push('ErrorMessages = ?');
     params.push(JSON.stringify(update.errorMessages));
+  }
+  if (update.notices !== undefined) {
+    setClauses.push('Notices = ?');
+    params.push(JSON.stringify(update.notices));
   }
 
   // Set CompletedAt when transitioning to a terminal status

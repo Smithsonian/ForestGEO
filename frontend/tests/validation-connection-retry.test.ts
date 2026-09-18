@@ -28,7 +28,8 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
-import { runCombinedCrossCensusLocationValidations } from '@/components/processors/processorhelperfunctions';
+import { runCombinedCrossCensusLocationValidations, runValidation } from '@/components/processors/processorhelperfunctions';
+import { parseDbhValidationSkipCounts, runSharedDBHChangeValidationsInTransaction } from '@/lib/validations/dbh-execution';
 
 describe('validation connection retries', () => {
   beforeEach(() => {
@@ -77,5 +78,93 @@ describe('validation connection retries', () => {
     expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-1');
     expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('tx-2');
     expect(ensureMeasurementErrorDefinition).toHaveBeenCalledTimes(4);
+  });
+
+  it('reads DBH skip counts by their SQL result names rather than CALL result-set position', () => {
+    const counts = parseDbhValidationSkipCounts([
+      [{ unrelated: true }],
+      [
+        {
+          SkippedNoInterval: '6',
+          SkippedNegativeInterval: 1,
+          SkippedImplausibleInterval: '5'
+        },
+        [{ SkippedBelowDbhFloor: '4' }]
+      ],
+      { affectedRows: 0 }
+    ]);
+
+    expect(counts).toEqual({
+      skippedNoInterval: 6,
+      skippedNegativeInterval: 1,
+      skippedImplausibleInterval: 5,
+      skippedBelowDbhFloor: 4
+    });
+  });
+
+  it('returns zero DBH skip counts when no result set is returned', () => {
+    expect(parseDbhValidationSkipCounts([])).toEqual({
+      skippedNoInterval: 0,
+      skippedNegativeInterval: 0,
+      skippedImplausibleInterval: 0,
+      skippedBelowDbhFloor: 0
+    });
+  });
+
+  it('uses only the caller transaction for DBH scrub and execution', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT ValidationID')) {
+        return [
+          { ValidationID: 1, ProcedureName: 'ValidateDBHGrowthExceedsMax', IsEnabled: 1 },
+          { ValidationID: 2, ProcedureName: 'ValidateDBHShrinkageExceedsMax', IsEnabled: 1 }
+        ];
+      }
+      if (sql.includes('CALL `forestgeo_testing`.RunSharedDBHChangeValidations')) {
+        return [[{ SkippedNoInterval: 1, SkippedNegativeInterval: 0, SkippedImplausibleInterval: 1 }], [{ SkippedBelowDbhFloor: 2 }]];
+      }
+      return { affectedRows: 0 };
+    });
+
+    await expect(
+      runSharedDBHChangeValidationsInTransaction({
+        schema: 'forestgeo_testing',
+        tx: { id: 'owner-tx', query: query as any },
+        params: { p_CensusID: 7, p_PlotID: 3 }
+      })
+    ).resolves.toEqual({
+      ranGrowth: true,
+      ranShrinkage: true,
+      skipCounts: { skippedNoInterval: 1, skippedNegativeInterval: 0, skippedImplausibleInterval: 1, skippedBelowDbhFloor: 2 }
+    });
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.rollbackTransaction).not.toHaveBeenCalled();
+    expect(query.mock.calls.some(([sql]) => String(sql).includes('cm.StemGUID IS NOT NULL'))).toBe(true);
+  });
+
+  it('uses the server DBH scrub when the normal singleton wrapper runs validation 1', async () => {
+    mockConnectionManager.beginTransaction.mockResolvedValue('singleton-tx');
+    mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 0 });
+
+    await expect(runValidation(1, 'ValidateDBHGrowthExceedsMax', 'forestgeo_testing', 'SELECT 1')).resolves.toBe(true);
+
+    const queries = mockConnectionManager.executeQuery.mock.calls.map(([sql]) => String(sql));
+    expect(
+      queries.some(sql => sql.includes('UPDATE `forestgeo_testing`.coremeasurements cm') && sql.includes('mel.MeasurementID = cm.CoreMeasurementID'))
+    ).toBe(true);
+    expect(queries.some(sql => sql.includes('DELETE cme FROM forestgeo_testing.measurement_error_log'))).toBe(false);
+    expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('singleton-tx');
+  });
+
+  it('keeps DELETE cleanup for a non-DBH singleton validation', async () => {
+    mockConnectionManager.beginTransaction.mockResolvedValue('singleton-tx');
+    mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 0 });
+
+    await expect(runValidation(19, 'ValidateDuplicateTags', 'forestgeo_testing', 'SELECT 1')).resolves.toBe(true);
+
+    expect(mockConnectionManager.executeQuery.mock.calls.some(([sql]) => String(sql).includes('DELETE cme FROM forestgeo_testing.measurement_error_log'))).toBe(
+      true
+    );
+    expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('singleton-tx');
   });
 });
