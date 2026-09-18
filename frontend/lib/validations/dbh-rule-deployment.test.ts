@@ -48,7 +48,7 @@ function rows(enabled = true) {
   ];
 }
 
-function connection(ruleRows = rows(), options: { mismatchAfterUpdate?: boolean; bodyMismatch?: boolean } = {}) {
+function connection(ruleRows = rows(), options: { mismatchAfterUpdate?: boolean; bodyMismatch?: boolean; missingRunStorage?: boolean } = {}) {
   let updates = 0;
   const query = vi.fn(async (sql: string, params: unknown[] = []) => {
     if (sql.includes('SHOW CREATE PROCEDURE')) {
@@ -85,6 +85,10 @@ function connection(ruleRows = rows(), options: { mismatchAfterUpdate?: boolean;
       return [TABLE_NAME.map(name => ({ TABLE_NAME: name })), []];
     }
     if (sql.includes('catalog.background_jobs')) return [[], []];
+    if (sql.startsWith('SELECT RescoreAttemptID, Notices FROM ')) {
+      if (options.missingRunStorage) throw new Error('Unknown column RescoreAttemptID');
+      return [[], []];
+    }
     throw new Error(`Unexpected query: ${sql}`);
   });
   return {
@@ -198,6 +202,13 @@ describe('DBH rule seed refresh', () => {
         .filter(([sql]) => /^\s*UPDATE\s/i.test(String(sql)))
         .every(([sql]) => !String(sql).includes('IsEnabled'))
     ).toBe(true);
+  });
+
+  it('rejects a schema missing recovery storage before opening a seed transaction', async () => {
+    const conn = connection(rows(), { missingRunStorage: true });
+    await expect(refreshDbhRuleSeeds(conn, ['forestgeo_testing'], manifest, true)).rejects.toThrow(/Unknown column RescoreAttemptID/);
+    expect(conn.beginTransaction).not.toHaveBeenCalled();
+    expect(conn.query).not.toHaveBeenCalledWith(expect.stringMatching(/^\s*UPDATE\s/i), expect.anything());
   });
 
   it('rejects a DBH procedure body that did not match the reviewed SQL manifest', async () => {
