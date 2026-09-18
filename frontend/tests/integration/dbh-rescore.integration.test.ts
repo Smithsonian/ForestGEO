@@ -90,12 +90,7 @@ describe('rescoreDbhCensus transaction boundary', () => {
     plotID = testData.plots[0].plotID;
     speciesCode = testData.species[0].SpeciesCode || testData.species[0].Mnemonic;
     quadratName = testData.quadrats[0].QuadratName || testData.quadrats[0].Quadrat;
-    await connection.query(
-      "CREATE TABLE IF NOT EXISTS validation_runs (RunID INT AUTO_INCREMENT PRIMARY KEY, PlotID INT NOT NULL, CensusID INT NOT NULL, Status ENUM ('running','completed','failed','cancelled') NOT NULL DEFAULT 'running', TotalSteps INT NOT NULL DEFAULT 0, CompletedSteps INT NOT NULL DEFAULT 0, FailedSteps INT NOT NULL DEFAULT 0, CurrentStep VARCHAR(100), ErrorMessages JSON, StartedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CompletedAt DATETIME NULL) ENGINE=InnoDB"
-    );
-    await connection.query(
-      "CREATE TABLE IF NOT EXISTS upload_sessions (session_id VARCHAR(64) PRIMARY KEY, schema_name VARCHAR(64), plot_id INT, census_id INT, user_id VARCHAR(255), last_heartbeat TIMESTAMP NULL, updated_at TIMESTAMP NULL, created_at TIMESTAMP NULL, state ENUM ('initialized','uploading','uploaded','processing','collapsing','completed','failed','abandoned','cleaned_up') NOT NULL DEFAULT 'initialized') ENGINE=InnoDB"
-    );
+
     await connection.query('CREATE DATABASE IF NOT EXISTS catalog');
     await connection.query(
       "CREATE TABLE IF NOT EXISTS catalog.background_jobs (JobID INT AUTO_INCREMENT PRIMARY KEY, SchemaName VARCHAR(64), PlotID INT, CensusID INT, Status ENUM ('queued','running','cancel_requested','waiting_retry','completed','failed','cancelled') NOT NULL) ENGINE=InnoDB"
@@ -284,14 +279,14 @@ describe('rescoreDbhCensus transaction boundary', () => {
 
     const expectedNotice = describeDbhFloorSkips(1);
     expect(summary, 'a floor skip is a notice, not a failed step').toMatchObject({ failedSteps: 0, conflict: false, errors: [], notices: [expectedNotice] });
-    const [runs] = await connection.query<RowDataPacket[]>('SELECT Status, ErrorMessages FROM validation_runs WHERE PlotID=? AND CensusID=?', [
+    const [runs] = await connection.query<RowDataPacket[]>('SELECT Status, ErrorMessages, Notices FROM validation_runs WHERE PlotID=? AND CensusID=?', [
       plotID,
       census2ID
     ]);
     expect(
-      runs.map(run => ({ status: run.Status, errorMessages: run.ErrorMessages })),
+      runs.map(run => ({ status: run.Status, errorMessages: run.ErrorMessages, notices: run.Notices })),
       'the notice is stored on the run record that the status badge reads'
-    ).toEqual([{ status: 'completed', errorMessages: [expectedNotice] }]);
+    ).toEqual([{ status: 'completed', errorMessages: [], notices: [expectedNotice] }]);
     expect(await validity(belowFloor.present), 'the skipped row is still finalized').toBe(true);
   }, 120000);
 
@@ -551,10 +546,13 @@ describe('rescoreDbhCensus transaction boundary', () => {
       expect(injected).toBe(true);
       expect(result).toMatchObject({ outcome: 'failed', databaseOutcome: 'committed', runID: expect.any(Number), provisionalRunID: expect.any(Number) });
       expect(result.runID).toBe(result.provisionalRunID);
-      const [run] = await connection.query<RowDataPacket[]>('SELECT Status, ErrorMessages FROM validation_runs WHERE RunID=?', [result.runID]);
+      const [run] = await connection.query<RowDataPacket[]>('SELECT Status, ErrorMessages, RescoreAttemptID FROM validation_runs WHERE RunID=?', [
+        result.runID
+      ]);
       expect(run).toHaveLength(1);
       expect(run[0].Status).toBe('completed');
-      expect(JSON.stringify(run[0].ErrorMessages)).toContain('dbh-rescore-attempt:lost-real-commit-ack');
+      expect(run[0].RescoreAttemptID).toBe('lost-real-commit-ack');
+      expect(run[0].ErrorMessages).toEqual([]);
       const [rows] = await connection.query<RowDataPacket[]>(
         'SELECT CoreMeasurementID, IsValidated FROM coremeasurements WHERE CoreMeasurementID IN (?,?) ORDER BY CoreMeasurementID',
         [violates.present, clean.present]
@@ -675,6 +673,13 @@ describe('rescoreDbhCensus transaction boundary', () => {
       databaseOutcome: 'not-started'
     });
     expect(await snapshot()).toEqual(before);
+    const preflight = await buildRealSweepDeps(connection, {} as DbhExpectedManifest).advisoryPreflight({
+      schema,
+      plotID,
+      censusID: census2ID,
+      plotCensusNumber: 2
+    });
+    expect(preflight).toEqual({ deferred: { running: 'running validation record', pending: 'eligible pending measurements', upload: 'active upload' }[kind] });
   });
 
   it.each([...ACTIVE_UPLOAD_SESSION_STATES])('defers the re-score and the CLI dry-run preflight while a prior-census upload is %s', async state => {
@@ -814,23 +819,26 @@ describe('rescoreDbhCensus transaction boundary', () => {
     expect(bothGone.databaseOutcome).toBe('rolled-back');
   });
 
-  it('recognizes a completed marker from a fresh session while the original session remains alive', async () => {
-    const attempt = 'live-session-committed';
-    const [insert] = await connection.query<mysql.ResultSetHeader>(
-      "INSERT INTO validation_runs (PlotID,CensusID,TotalSteps,Status,ErrorMessages) VALUES (?, ?, 2, 'completed', JSON_ARRAY(?))",
-      [plotID, census2ID, `dbh-rescore-attempt:${attempt}`]
-    );
-    const [owner] = await connection.query<RowDataPacket[]>('SELECT CONNECTION_ID() AS id');
-    const fresh = await mysql.createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: 'testpassword', database: schema });
-    try {
-      expect(
-        await reconcileDbhRescoreAttempt({ schema, plotID, censusID: census2ID }, attempt, {
-          originalConnectionID: Number(owner[0].id),
-          queryFresh: async (sql, params) => (await fresh.query(sql, params ?? []))[0] as any
-        })
-      ).toMatchObject({ databaseOutcome: 'committed', runID: insert.insertId });
-    } finally {
-      await fresh.end();
+  it.each(['RescoreAttemptID', 'ErrorMessages'] as const)(
+    'recognizes completed %s evidence from a fresh session while the original session remains alive',
+    async field => {
+      const attempt = 'live-session-committed';
+      const [insert] = await connection.query<mysql.ResultSetHeader>(
+        `INSERT INTO validation_runs (PlotID,CensusID,TotalSteps,Status,${field}) VALUES (?, ?, 2, 'completed', ?)`,
+        [plotID, census2ID, field === 'RescoreAttemptID' ? attempt : JSON.stringify([`dbh-rescore-attempt:${attempt}`])]
+      );
+      const [owner] = await connection.query<RowDataPacket[]>('SELECT CONNECTION_ID() AS id');
+      const fresh = await mysql.createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: 'testpassword', database: schema });
+      try {
+        expect(
+          await reconcileDbhRescoreAttempt({ schema, plotID, censusID: census2ID }, attempt, {
+            originalConnectionID: Number(owner[0].id),
+            queryFresh: async (sql, params) => (await fresh.query(sql, params ?? []))[0] as any
+          })
+        ).toMatchObject({ databaseOutcome: 'committed', runID: insert.insertId });
+      } finally {
+        await fresh.end();
+      }
     }
-  });
+  );
 });

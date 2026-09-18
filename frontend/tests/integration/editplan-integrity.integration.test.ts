@@ -539,36 +539,6 @@ describe('editplan bulk hash drift — tampered payload (integration)', () => {
     testData = setup.testData;
     config = setup.config;
     sharedState.connection = connection;
-
-    // upload_sessions and validation_runs are defined in tablestructures.sql
-    // but loadSchema silently skips them because their CREATE TABLE statements
-    // follow comment blocks that begin with '--' after the semicolon split
-    // filter. Create them directly here so assertNoConflictingApplyActivity
-    // can query them without throwing ER_NO_SUCH_TABLE.
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${config.database}\`.upload_sessions (
-        session_id VARCHAR(64) NOT NULL PRIMARY KEY,
-        schema_name VARCHAR(64) NOT NULL,
-        plot_id INT NOT NULL,
-        census_id INT NOT NULL,
-        user_id VARCHAR(255) NOT NULL DEFAULT 'test',
-        state ENUM('initialized','uploading','uploaded','processing','collapsing','completed','failed','abandoned','cleaned_up')
-          NOT NULL DEFAULT 'initialized',
-        last_heartbeat TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
-
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${config.database}\`.validation_runs (
-        RunID INT AUTO_INCREMENT PRIMARY KEY,
-        PlotID INT NOT NULL,
-        CensusID INT NOT NULL,
-        Status ENUM('running','completed','failed') NOT NULL DEFAULT 'running',
-        StartedAt TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
   }, 90000);
 
   afterAll(async () => {
@@ -868,31 +838,6 @@ describe('editplan P2 preview/apply parity — TreeStemResolution blocking error
     testData = setup.testData;
     config = setup.config;
     sharedState.connection = connection;
-
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${config.database}\`.upload_sessions (
-        session_id VARCHAR(64) NOT NULL PRIMARY KEY,
-        schema_name VARCHAR(64) NOT NULL,
-        plot_id INT NOT NULL,
-        census_id INT NOT NULL,
-        user_id VARCHAR(255) NOT NULL DEFAULT 'test',
-        state ENUM('initialized','uploading','uploaded','processing','collapsing','completed','failed','abandoned','cleaned_up')
-          NOT NULL DEFAULT 'initialized',
-        last_heartbeat TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
-
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${config.database}\`.validation_runs (
-        RunID INT AUTO_INCREMENT PRIMARY KEY,
-        PlotID INT NOT NULL,
-        CensusID INT NOT NULL,
-        Status ENUM('running','completed','failed') NOT NULL DEFAULT 'running',
-        StartedAt TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
   }, 90000);
 
   afterAll(async () => {

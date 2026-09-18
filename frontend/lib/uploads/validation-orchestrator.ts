@@ -154,12 +154,14 @@ async function finalizeRunRecordOnError(
   schema: string,
   runID: number,
   errors: string[],
+  notices: string[],
   originalError: Error
 ): Promise<void> {
   try {
     await updateValidationRunRecord(connectionManager, schema, runID, {
       status: 'failed',
-      errorMessages: [...errors, `Unexpected error: ${originalError.message}`]
+      errorMessages: [...errors, `Unexpected error: ${originalError.message}`],
+      notices
     });
   } catch (finalizeError: any) {
     ailogger.warn(`[ValidationOrchestrator] Could not finalize run record ${runID} after error: ${finalizeError.message}`);
@@ -223,7 +225,8 @@ export async function runCensusValidations(connectionManager: ConnectionManager,
       await updateValidationRunRecord(connectionManager, schema, runID, {
         completedSteps,
         failedSteps,
-        errorMessages: errors.length + notices.length > 0 ? [...errors, ...notices] : undefined
+        errorMessages: errors,
+        notices
       });
 
       try {
@@ -269,13 +272,14 @@ export async function runCensusValidations(connectionManager: ConnectionManager,
       status: finalStatus,
       completedSteps,
       failedSteps,
-      errorMessages: errors.length + notices.length > 0 ? [...errors, ...notices] : undefined
+      errorMessages: errors,
+      notices
     });
 
     ailogger.info(`[ValidationOrchestrator] Run ${runID} ${finalStatus}: ${completedSteps} passed, ${failedSteps} failed`);
     return { totalSteps: tasks.length, failedSteps, errors, notices, conflict: false };
   } catch (unexpectedError: any) {
-    await finalizeRunRecordOnError(connectionManager, schema, runID, [...errors, ...notices], unexpectedError);
+    await finalizeRunRecordOnError(connectionManager, schema, runID, errors, notices, unexpectedError);
     throw unexpectedError;
   }
 }

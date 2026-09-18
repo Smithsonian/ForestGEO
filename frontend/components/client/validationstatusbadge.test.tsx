@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   status: 'completed',
   progress: { completed: 2, total: 2, current: '' },
   errors: [] as string[],
+  notices: [] as string[],
   startValidationRun: vi.fn(),
   updateValidationProgress: vi.fn(),
   completeValidationRun: vi.fn()
@@ -25,11 +26,12 @@ describe('ValidationStatusBadge completion messages', () => {
   beforeEach(() => {
     state.status = 'completed';
     state.errors = [];
+    state.notices = [];
   });
 
   it('shows persisted notices for a completed run without presenting a failure', () => {
     const notice = describeDbhFloorSkips(42)!;
-    state.errors = [notice];
+    state.notices = [notice];
 
     openDetails();
 
@@ -49,10 +51,12 @@ describe('ValidationStatusBadge completion messages', () => {
   it('still displays failures and their messages for failed runs', () => {
     state.status = 'failed';
     state.errors = ['Failed to refresh measurement views'];
+    state.notices = ['One comparison skipped'];
 
     openDetails();
 
     expect(screen.getByText('1 validation failed')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('One comparison skipped');
     expect(screen.getByText(state.errors[0])).toBeInTheDocument();
     expect(screen.queryByText('Validation completed with notices')).not.toBeInTheDocument();
   });

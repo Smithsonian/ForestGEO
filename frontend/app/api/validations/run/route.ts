@@ -5,7 +5,7 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { fromBody, fromQuery, withRouteAuthz } from '@/lib/route-authz';
 import { createValidationRunRecord, EmptyValidationRunUpdateError, updateValidationRunRecord } from '@/lib/validations/run-records';
-import { publicValidationRunMessages } from '@/config/validationrunmessages';
+import { DBH_RESCORE_ATTEMPT_PREFIX, publicValidationRunMessages } from '@/config/validationrunmessages';
 
 export const runtime = 'nodejs';
 
@@ -70,7 +70,7 @@ async function getHandler(request: NextRequest) {
     const query = safeFormatQuery(
       schema,
       `SELECT RunID, PlotID, CensusID, Status, TotalSteps, CompletedSteps,
-              FailedSteps, CurrentStep, ErrorMessages, StartedAt, CompletedAt
+              FailedSteps, CurrentStep, ErrorMessages, Notices, StartedAt, CompletedAt
        FROM ??.validation_runs
        WHERE PlotID = ? AND CensusID = ?
        ORDER BY RunID DESC
@@ -80,7 +80,15 @@ async function getHandler(request: NextRequest) {
     const rows = await connectionManager.executeQuery(query, [Number(plotID), Number(censusID)]);
     const run = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
 
-    const publicRun = run ? { ...run, ErrorMessages: publicValidationRunMessages(run.ErrorMessages) } : null;
+    const messages = publicValidationRunMessages(run?.ErrorMessages);
+    const legacyNotices = run?.Status === 'completed' && run.Notices == null;
+    const publicRun = run
+      ? {
+          ...run,
+          ErrorMessages: legacyNotices ? [] : messages,
+          Notices: legacyNotices ? messages : run.Notices
+        }
+      : null;
     return NextResponse.json({ run: publicRun }, { status: HTTPResponses.OK });
   } catch (e: any) {
     ailogger.error('Error fetching validation run:', e);
@@ -99,13 +107,23 @@ async function patchHandler(request: NextRequest) {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
-    const { schema, runID, completedSteps, failedSteps, currentStep, status, errorMessages } = await request.json();
+    const { schema, runID, completedSteps, failedSteps, currentStep, status, errorMessages, notices } = await request.json();
 
     if (!schema || !runID) {
       return NextResponse.json({ error: 'Missing required parameters: schema, runID' }, { status: HTTPResponses.INVALID_REQUEST });
     }
 
-    await updateValidationRunRecord(connectionManager, schema, runID, { completedSteps, failedSteps, currentStep, status, errorMessages });
+    if (
+      [errorMessages, notices].some(messages => messages !== undefined && (!Array.isArray(messages) || messages.some(message => typeof message !== 'string')))
+    ) {
+      return NextResponse.json({ error: 'errorMessages and notices must be arrays of strings' }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+
+    if ([...(errorMessages ?? []), ...(notices ?? [])].some(message => message.startsWith(DBH_RESCORE_ATTEMPT_PREFIX))) {
+      return NextResponse.json({ error: 'Recovery metadata cannot be supplied as validation messages' }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+
+    await updateValidationRunRecord(connectionManager, schema, runID, { completedSteps, failedSteps, currentStep, status, errorMessages, notices });
 
     return NextResponse.json({ success: true }, { status: HTTPResponses.OK });
   } catch (e: any) {

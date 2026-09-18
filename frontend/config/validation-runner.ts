@@ -241,6 +241,7 @@ async function executeRun(params: ValidationRunParams, abortController: AbortCon
   let completedSteps = 0;
   let failedSteps = 0;
   const errorMessages: string[] = [];
+  const notices: string[] = [];
   let hadBlockingFailure = false;
 
   for (const task of tasks) {
@@ -258,7 +259,7 @@ async function executeRun(params: ValidationRunParams, abortController: AbortCon
         throw new Error(`Validation returned failure for ${task.name}`);
       }
       completedSteps++;
-      if (typeof result === 'object') errorMessages.push(result.notice);
+      if (typeof result === 'object') notices.push(result.notice);
     } catch (err: any) {
       if (signal.aborted) {
         ailogger.info(`[ValidationRunner] Aborted during ${task.name}`);
@@ -289,12 +290,14 @@ async function executeRun(params: ValidationRunParams, abortController: AbortCon
 
     store.updateValidationProgress({
       completed: completedSteps,
-      errors: errorMessages.length > 0 ? errorMessages : undefined
+      errors: errorMessages,
+      notices
     });
     await patchRun(schema, runID, {
       completedSteps,
       failedSteps,
-      errorMessages: errorMessages.length > 0 ? errorMessages : undefined
+      errorMessages,
+      notices
     });
   }
 
@@ -334,12 +337,13 @@ async function executeRun(params: ValidationRunParams, abortController: AbortCon
   }
 
   const finalStatus = failedSteps > 0 ? 'failed' : 'completed';
-  store.completeValidationRun(finalStatus, errorMessages);
+  store.completeValidationRun(finalStatus, errorMessages, notices);
   await patchRun(schema, runID, {
     status: finalStatus,
     completedSteps,
     failedSteps,
-    errorMessages: errorMessages.length > 0 ? errorMessages : undefined
+    errorMessages,
+    notices
   });
 
   ailogger.info(`[ValidationRunner] Run complete: ${completedSteps} passed, ${failedSteps} failed`);
@@ -407,9 +411,10 @@ export const ValidationRunner = {
         store.startValidationRun(run.RunID, run.TotalSteps);
         store.updateValidationProgress({
           completed: run.CompletedSteps,
-          errors: run.ErrorMessages ?? undefined
+          errors: run.ErrorMessages ?? [],
+          notices: run.Notices ?? []
         });
-        store.completeValidationRun(run.Status, run.ErrorMessages ?? undefined);
+        store.completeValidationRun(run.Status, run.ErrorMessages ?? [], run.Notices ?? []);
         return true;
       }
 

@@ -17,10 +17,10 @@ import ConnectionManager, { getTransactionFailureOutcome, type TxExecutor } from
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { MANAGER_OVERRIDE_ERROR_CODE } from '@/config/validationoverride';
-import { DBH_CHANGE_VALIDATION_ID_LIST } from '@/config/dbhchangevalidations';
+import { DBH_CHANGE_VALIDATION_ID_LIST, describeDbhFloorSkips } from '@/config/dbhchangevalidations';
 import { bitToBoolean } from '@/config/macros/bitconversion';
-import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
-import { NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
+import { preflightDbhScope, type DbhRescoreScope } from './dbh-rescore-preflight';
+export type { DbhRescoreScope } from './dbh-rescore-preflight';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { completeValidationRunRecordInTransaction, createValidationRunRecordInTransaction } from '@/lib/validations/run-records';
@@ -32,12 +32,6 @@ import {
 
 export type DbhRescoreDatabaseOutcome = 'committed' | 'rolled-back' | 'not-started' | 'unknown';
 export type DbhRescoreOutcome = 'completed' | 'skipped-locked' | 'deferred-pending' | 'held-valid-to-invalid' | 'failed' | 'artifact-failed';
-
-export interface DbhRescoreScope {
-  schema: string;
-  plotID: number;
-  censusID: number;
-}
 
 export interface DbhRescoreArtifactEvent {
   event: 'before' | 'prepared' | 'committed' | 'outcome' | 'reconciled';
@@ -90,23 +84,11 @@ export interface DbhRescoreReconciliationDependencies {
   originalConnectionID?: number;
 }
 
-const attemptMarker = (attemptID: string) => `${DBH_RESCORE_ATTEMPT_PREFIX}${attemptID}`;
-
 export class DbhRescoreValidToInvalidError extends Error {
   constructor(readonly measurementIDs: number[]) {
     super(`DBH re-score would turn ${measurementIDs.length} valid measurement(s) invalid; review them and rerun with valid-to-invalid changes allowed`);
     this.name = 'DbhRescoreValidToInvalidError';
   }
-}
-
-async function countActiveBackgroundJobs(scope: DbhRescoreScope, tx: TxExecutor): Promise<number> {
-  const rows = await tx.query<Array<{ count: number }>>(
-    `SELECT COUNT(*) AS count FROM catalog.background_jobs
-     WHERE SchemaName = ? AND PlotID = ? AND CensusID = ?
-       AND Status IN (${NON_TERMINAL_BACKGROUND_JOB_STATUSES.map(() => '?').join(', ')})`,
-    [scope.schema, scope.plotID, scope.censusID, ...NON_TERMINAL_BACKGROUND_JOB_STATUSES]
-  );
-  return asNumber(rows[0]?.count ?? 0);
 }
 
 /** A completed atomic run proves commit; absence only proves rollback after session termination. */
@@ -116,14 +98,15 @@ export async function reconcileDbhRescoreAttempt(
   deps: DbhRescoreReconciliationDependencies
 ): Promise<Pick<DbhRescoreResult, 'databaseOutcome' | 'runID' | 'errors'>> {
   validateScopeInput(scope);
+  // Read legacy evidence for interrupted older attempts; new runs only write RescoreAttemptID.
   const sql = safeFormatQuery(
     scope.schema,
     `SELECT RunID FROM ??.validation_runs
      WHERE PlotID = ? AND CensusID = ? AND Status = 'completed'
-       AND JSON_CONTAINS(ErrorMessages, JSON_QUOTE(?)) = 1
+       AND (RescoreAttemptID = ? OR (RescoreAttemptID IS NULL AND JSON_CONTAINS(ErrorMessages, JSON_QUOTE(?)) = 1))
      ORDER BY RunID DESC LIMIT 1`
   );
-  const rows = (await deps.queryFresh(sql, [scope.plotID, scope.censusID, attemptMarker(attemptID)])) as Array<{ RunID: number }>;
+  const rows = (await deps.queryFresh(sql, [scope.plotID, scope.censusID, attemptID, `${DBH_RESCORE_ATTEMPT_PREFIX}${attemptID}`])) as Array<{ RunID: number }>;
   const runID = Number(rows[0]?.RunID);
   if (Number.isInteger(runID) && runID > 0) return { databaseOutcome: 'committed', runID, errors: [] };
 
@@ -142,7 +125,9 @@ export async function reconcileDbhRescoreAttempt(
   // The original session can commit between the first marker read and the
   // disappearance checks above. Re-read after both have ended so that race
   // is reported as committed rather than incorrectly as rolled back.
-  const finalRows = (await deps.queryFresh(sql, [scope.plotID, scope.censusID, attemptMarker(attemptID)])) as Array<{ RunID: number }>;
+  const finalRows = (await deps.queryFresh(sql, [scope.plotID, scope.censusID, attemptID, `${DBH_RESCORE_ATTEMPT_PREFIX}${attemptID}`])) as Array<{
+    RunID: number;
+  }>;
   const finalRunID = Number(finalRows[0]?.RunID);
   if (Number.isInteger(finalRunID) && finalRunID > 0) return { databaseOutcome: 'committed', runID: finalRunID, errors: [] };
   return { databaseOutcome: 'rolled-back', errors: [] };
@@ -250,32 +235,6 @@ async function assertBothDbhRulesEnabled(executor: { query: TxExecutor['query'] 
   if (DBH_CHANGE_VALIDATION_ID_LIST.some(validationID => !found.get(validationID)) || found.size !== DBH_CHANGE_VALIDATION_ID_LIST.length) {
     throw new Error('Both fixed DBH validations (1 and 2) must be enabled before re-score');
   }
-}
-
-async function preflightScope(
-  tx: TxExecutor,
-  scope: DbhRescoreScope
-): Promise<{ reason: 'running' | 'upload' | 'pending' | 'background-job'; count: number } | null> {
-  const runningSQL = safeFormatQuery(scope.schema, "SELECT COUNT(*) AS count FROM ??.validation_runs WHERE PlotID = ? AND CensusID = ? AND Status = 'running'");
-  const uploadSQL = safeFormatQuery(
-    scope.schema,
-    `SELECT COUNT(*) AS count FROM ??.upload_sessions
-     WHERE plot_id = ? AND census_id = ? AND state IN (${ACTIVE_UPLOAD_SESSION_STATES.map(() => '?').join(', ')})`
-  );
-  const pendingSQL = safeFormatQuery(
-    scope.schema,
-    'SELECT COUNT(*) AS count FROM ??.coremeasurements WHERE CensusID = ? AND IsActive = TRUE AND StemGUID IS NOT NULL AND IsValidated IS NULL'
-  );
-  for (const [reason, sql, params] of [
-    ['running', runningSQL, [scope.plotID, scope.censusID]],
-    ['upload', uploadSQL, [scope.plotID, scope.censusID, ...ACTIVE_UPLOAD_SESSION_STATES]],
-    ['pending', pendingSQL, [scope.censusID]]
-  ] as const) {
-    const rows = (await tx.query(sql, [...params])) as Array<{ count: number }>;
-    const count = asNumber(rows[0]?.count ?? 0);
-    if (count > 0) return { reason, count };
-  }
-  return null;
 }
 
 async function countEligiblePending(tx: TxExecutor, scope: DbhRescoreScope): Promise<number> {
@@ -386,7 +345,6 @@ export async function rescoreDbhCensus(scope: DbhRescoreScope, deps: DbhRescoreD
   const runDbh = deps.runDbh ?? runSharedDBHChangeValidationsInTransaction;
   const finalize = deps.finalize ?? finalizeValidatedRowsInTransaction;
   const refreshViews = deps.refreshViews ?? refreshMeasurementViewsForScope;
-  const checkBackgroundJobs = deps.checkBackgroundJobs ?? countActiveBackgroundJobs;
 
   let provisionalRunID: number | undefined;
   let preparedResult: Omit<DbhRescoreResult, 'databaseOutcome' | 'outcome' | 'errors'> | undefined;
@@ -443,7 +401,11 @@ export async function rescoreDbhCensus(scope: DbhRescoreScope, deps: DbhRescoreD
         }
         await assertBothDbhRulesEnabled(tx, scope.schema);
         for (const census of [lockedCurrent, ...(lockedPrior ? [lockedPrior] : [])]) {
-          const blocking = await preflightScope(tx, { ...scope, censusID: asNumber(census.CensusID) });
+          const blocking = await preflightDbhScope(
+            tx,
+            { ...scope, censusID: asNumber(census.CensusID) },
+            deps.checkBackgroundJobs ? jobScope => deps.checkBackgroundJobs!(jobScope, tx) : undefined
+          );
           if (blocking) {
             return {
               outcome: 'deferred-pending' as const,
@@ -452,20 +414,6 @@ export async function rescoreDbhCensus(scope: DbhRescoreScope, deps: DbhRescoreD
               blockingScope: { censusID: asNumber(census.CensusID), plotID: scope.plotID, reason: blocking.reason },
               counts: { blockingCount: blocking.count },
               errors: []
-            };
-          }
-        }
-        for (const census of [lockedCurrent, ...(lockedPrior ? [lockedPrior] : [])]) {
-          const jobScope = { ...scope, censusID: asNumber(census.CensusID) };
-          const jobCount = await checkBackgroundJobs(jobScope, tx);
-          if (jobCount > 0) {
-            return {
-              outcome: 'deferred-pending' as const,
-              databaseOutcome: 'not-started' as const,
-              attemptID,
-              blockingScope: { censusID: jobScope.censusID, plotID: scope.plotID, reason: 'background-job' as const },
-              counts: { blockingJobCount: jobCount },
-              errors: ['Catalog background work is active for this DBH re-score scope']
             };
           }
         }
@@ -512,10 +460,13 @@ export async function rescoreDbhCensus(scope: DbhRescoreScope, deps: DbhRescoreD
           provisionalRunID,
           data: { before, after, counts, validToInvalidMeasurementIDs, originalConnectionID }
         });
+        const floorNotice = describeDbhFloorSkips(execution.skipCounts?.skippedBelowDbhFloor ?? 0);
         await completeValidationRunRecordInTransaction(tx, scope.schema, provisionalRunID, {
           completedSteps: DBH_CHANGE_VALIDATION_ID_LIST.length,
           failedSteps: 0,
-          errorMessages: [attemptMarker(attemptID)]
+          rescoreAttemptID: attemptID,
+          errorMessages: [],
+          notices: floorNotice ? [floorNotice] : []
         });
         const prepared: DbhRescoreResult = {
           outcome: 'completed',

@@ -20,9 +20,9 @@ import {
 import { bitToBoolean } from '@/config/macros/bitconversion';
 import { parseSiteValidationSeeds } from './validation-seed-parser';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
-import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
-import { NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
 import { dbhRuleDigest, planDbhSweep, runDbhSweep, type DbhSweepDependencies, type DbhSweepScope } from './dbh-rescore-sweep';
+import { preflightDbhScope, DBH_PREFLIGHT_MESSAGES } from './dbh-rescore-preflight';
+import type { TxExecutor } from '@/lib/db/connectionmanager';
 import { rescoreDbhCensus } from './dbh-rescore';
 
 export interface DbhRescoreCliArgs {
@@ -63,7 +63,6 @@ type ValidationRuleRow = RowDataPacket & {
   IsEnabled: number | boolean | Buffer;
 };
 type CensusRow = RowDataPacket & { CensusID: number | string; PlotCensusNumber: number | string };
-type CountRow = RowDataPacket & { count: number | string };
 
 /** DBH verification must use the process's application-pool target, not TEST_DB_* selector defaults. */
 export function getDbhRuntimeSettings(environment: Record<string, string | undefined> = process.env): {
@@ -281,6 +280,8 @@ export function buildRealSweepDeps(
       const found = new Set(tableRows.map(row => row.TABLE_NAME));
       const missing = requiredTables.filter(table => !found.has(table));
       if (missing.length) throw new Error(`${schema}: required tables missing: ${missing.join(', ')}`);
+      // Verify additive run storage on every target before the sweep mutates any census.
+      await connection.query(`SELECT RescoreAttemptID, Notices FROM ${sqlIdentifier(schema)}.validation_runs LIMIT 0`);
       for (const [name, expected] of Object.entries(manifest.procedures)) {
         const [rows] = await connection.query<ProcedureDefinitionRow[]>(`SHOW CREATE PROCEDURE ${sqlIdentifier(schema)}.${mysql.format('??', [name])}`);
         const actual = rows[0]?.['Create Procedure'];
@@ -328,32 +329,17 @@ export function buildRealSweepDeps(
         );
         if (prior.length === 1) ids.push(Number(prior[0].CensusID));
       }
-      const [running] = await connection.query<CountRow[]>(
-        `SELECT COUNT(*) count FROM ${qualified}.validation_runs WHERE PlotID=? AND CensusID IN (?) AND Status='running'`,
-        [scope.plotID, ids]
-      );
-      const [uploads] = await connection.query<CountRow[]>(
-        `SELECT COUNT(*) count FROM ${qualified}.upload_sessions WHERE plot_id=? AND census_id IN (?) AND state IN (?)`,
-        [scope.plotID, ids, ACTIVE_UPLOAD_SESSION_STATES]
-      );
-      const [pending] = await connection.query<CountRow[]>(
-        `SELECT COUNT(*) count FROM ${qualified}.coremeasurements WHERE CensusID IN (?) AND IsActive=TRUE AND StemGUID IS NOT NULL AND IsValidated IS NULL`,
-        [ids]
-      );
-      const [jobs] = await connection.query<CountRow[]>(
-        `SELECT COUNT(*) count FROM catalog.background_jobs WHERE SchemaName=? AND PlotID=? AND CensusID IN (?)
-         AND Status IN (?)`,
-        [scope.schema, scope.plotID, ids, NON_TERMINAL_BACKGROUND_JOB_STATUSES]
-      );
-      return Number(running[0]?.count ?? 0) > 0
-        ? { deferred: 'running validation record' }
-        : Number(uploads[0]?.count ?? 0) > 0
-          ? { deferred: 'active upload' }
-          : Number(pending[0]?.count ?? 0) > 0
-            ? { deferred: 'eligible pending measurements' }
-            : Number(jobs[0]?.count ?? 0) > 0
-              ? { deferred: 'active background job' }
-              : {};
+      const executor: Pick<TxExecutor, 'query'> = {
+        query: async <T = unknown>(sql: string, params?: unknown[]) => {
+          const [rows] = await connection.query(sql, params);
+          return rows as T;
+        }
+      };
+      for (const censusID of ids) {
+        const blocking = await preflightDbhScope(executor, { ...scope, censusID });
+        if (blocking) return { deferred: DBH_PREFLIGHT_MESSAGES[blocking.reason] };
+      }
+      return {};
     },
     rescore: scope =>
       rescoreDbhCensus(scope, {

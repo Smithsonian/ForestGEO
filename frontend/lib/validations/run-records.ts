@@ -36,6 +36,7 @@ export interface ValidationRunUpdate {
   completedSteps?: number;
   failedSteps?: number;
   errorMessages?: string[];
+  notices?: string[];
   status?: ValidationRunTerminalStatus;
 }
 
@@ -69,7 +70,7 @@ export async function completeValidationRunRecordInTransaction(
   tx: TxExecutor,
   schema: string,
   runID: number,
-  update: Pick<ValidationRunUpdate, 'completedSteps' | 'failedSteps' | 'currentStep' | 'errorMessages'> = {}
+  update: Pick<ValidationRunUpdate, 'completedSteps' | 'failedSteps' | 'currentStep' | 'errorMessages' | 'notices'> & { rescoreAttemptID?: string } = {}
 ): Promise<void> {
   const setClauses = ["Status = 'completed'", 'CompletedAt = NOW()'];
   const params: unknown[] = [];
@@ -89,6 +90,15 @@ export async function completeValidationRunRecordInTransaction(
   if (update.errorMessages !== undefined) {
     setClauses.push('ErrorMessages = ?');
     params.push(JSON.stringify(update.errorMessages));
+  }
+  if (update.notices !== undefined) {
+    setClauses.push('Notices = ?');
+    params.push(JSON.stringify(update.notices));
+  }
+
+  if (update.rescoreAttemptID !== undefined) {
+    setClauses.push('RescoreAttemptID = ?');
+    params.push(update.rescoreAttemptID);
   }
 
   params.push(runID);
@@ -241,6 +251,10 @@ export async function updateValidationRunRecord(
   if (update.errorMessages !== undefined) {
     setClauses.push('ErrorMessages = ?');
     params.push(JSON.stringify(update.errorMessages));
+  }
+  if (update.notices !== undefined) {
+    setClauses.push('Notices = ?');
+    params.push(JSON.stringify(update.notices));
   }
 
   // Set CompletedAt when transitioning to a terminal status
