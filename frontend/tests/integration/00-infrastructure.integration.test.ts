@@ -17,7 +17,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { setupTestDatabase, teardownTestDatabase, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
+import fs from 'fs';
+import path from 'path';
+import { setupTestDatabase, teardownTestDatabase, tableNamesDeclaredIn, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
 import { TEST_DB_DRIVER_TIMEZONE } from '../setup/test-db-connection';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 
@@ -68,6 +70,13 @@ const EXPECTED_TABLES = [
 
 // Expected stored procedures
 const EXPECTED_PROCEDURES = ['bulkingestionprocess'] as const;
+
+// Canonical DDL path; integration tests run with cwd=frontend.
+const CANONICAL_DDL_PATH = path.join(process.cwd(), 'db/sql', 'tablestructures.sql');
+
+// Pins tableNamesDeclaredIn's derivation so the completeness check below can't
+// shrink its own expected set if the derivation regresses.
+const TABLES_A_STALE_SPLITTER_ONCE_DROPPED = ['upload_errors', 'upload_sessions', 'validation_runs'] as const;
 
 // A fixed instant, not new Date(), so the offset a local-zone driver applies,
 // and therefore the delta this test reports, is the same on every run.
@@ -170,6 +179,41 @@ describe('Infrastructure Validation', () => {
 
       expect(tableNames).not.toContain('failedmeasurements');
       expect(tableNames).not.toContain('cmverrors');
+    });
+
+    it('should create every base table declared in the canonical DDL, including the ones a prior splitter bug dropped', async () => {
+      const canonicalDdl = fs.readFileSync(CANONICAL_DDL_PATH, 'utf-8');
+      const declaredTableNames = tableNamesDeclaredIn(canonicalDdl);
+
+      // Pin the derivation itself: if tableNamesDeclaredIn regresses and starts
+      // under-reporting tables, this fails loudly here instead of silently
+      // shrinking the set the completeness check below compares against.
+      for (const formerlyDroppedTable of TABLES_A_STALE_SPLITTER_ONCE_DROPPED) {
+        expect(
+          declaredTableNames.map(name => name.toLowerCase()),
+          `tableNamesDeclaredIn(${CANONICAL_DDL_PATH}) no longer reports "${formerlyDroppedTable}"; ` +
+            'the derivation itself has regressed, independent of loadSchema'
+        ).toContain(formerlyDroppedTable);
+      }
+
+      const [tables] = await connection.query<RowDataPacket[]>(
+        `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'`
+      );
+      const createdTableNames = new Set(tables.map(row => String(row.TABLE_NAME).toLowerCase()));
+
+      const missingTables: string[] = [];
+      for (const declared of declaredTableNames) {
+        if (!createdTableNames.has(declared.toLowerCase())) {
+          missingTables.push(declared);
+        }
+      }
+
+      if (missingTables.length > 0) {
+        throw new Error(
+          `${CANONICAL_DDL_PATH} declares ${missingTables.length} table(s) that loadSchema did not create ` +
+            `in the test database: ${missingTables.join(', ')}`
+        );
+      }
     });
   });
 
