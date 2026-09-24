@@ -100,6 +100,11 @@ describe('schemaStatementsFrom', () => {
     ).toContain('-- Set once, in the same transaction as the census-wide cleanup');
   });
 
+  it('keeps quoted semicolons and escaped quotes inside one statement', () => {
+    const sql = "INSERT INTO widgets VALUES ('one; two', 'it''s; fine');\nSELECT 1;";
+    expect(schemaStatementsFrom(sql)).toEqual(["INSERT INTO widgets VALUES ('one; two', 'it''s; fine')", 'SELECT 1']);
+  });
+
   it('leaves string literal content that happens to contain -- untouched', () => {
     const schemaSql = `insert into ${TABLE_WIDGETS} (label) values ('a -- not a comment');`;
 

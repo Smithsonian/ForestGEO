@@ -1,3 +1,4 @@
+import { splitSqlFile } from '@/lib/provisioning/sql-runner';
 /**
  * Local In-Memory Database Setup for E2E Testing
  *
@@ -262,44 +263,14 @@ export async function createTestDatabase(config: TestDatabaseConfig = DEFAULT_TE
   }
 }
 
-const COMMENT_ONLY_LINE_PATTERN = /^\s*--.*$/;
 const CREATE_TABLE_NAME_PATTERN = /^[ \t]*create\s+table\s+(?:if\s+not\s+exists\s+)?`?([A-Za-z0-9_]+)`?/gim;
 const INFORMATION_SCHEMA_BASE_TABLES_QUERY = `SELECT TABLE_NAME
    FROM information_schema.TABLES
    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'`;
 
-/**
- * Strips only the LEADING run of comment-only (`--...`) and blank lines from
- * one `;`-delimited chunk of the schema file. SQL that follows a banner
- * comment (e.g. a `-- ====` section header) survives; comment lines embedded
- * *inside* a statement body are left untouched, because that's where they
- * were written and MySQL accepts them there.
- */
-function stripLeadingCommentLines(chunk: string): string {
-  const lines = chunk.split(/\r\n|\n/);
-  let firstSqlLineIndex = 0;
-  while (firstSqlLineIndex < lines.length) {
-    const line = lines[firstSqlLineIndex];
-    const isBlankLine = line.trim().length === 0;
-    const isCommentOnlyLine = COMMENT_ONLY_LINE_PATTERN.test(line);
-    if (!isBlankLine && !isCommentOnlyLine) break;
-    firstSqlLineIndex++;
-  }
-  return lines.slice(firstSqlLineIndex).join('\n');
-}
-
-/**
- * Splits raw schema SQL into statements on `;`, stripping only each chunk's
- * leading comment/blank lines so a statement following a banner comment
- * survives while mid-statement comment lines are preserved. Splitting on a
- * bare `;` is safe because the schema file has no semicolons inside string
- * literals (tablestructures.sql:892).
- */
+/** Use the same quote-aware SQL splitter as production provisioning. */
 export function schemaStatementsFrom(schemaSql: string): string[] {
-  return schemaSql
-    .split(';')
-    .map(chunk => stripLeadingCommentLines(chunk).trim())
-    .filter(statement => statement.length > 0);
+  return splitSqlFile(schemaSql).map(statement => statement.sql);
 }
 
 /**

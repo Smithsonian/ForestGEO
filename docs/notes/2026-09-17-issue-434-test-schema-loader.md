@@ -19,8 +19,11 @@ Missing tables cause setup to fail with their names. Foreign-key checks are
 restored even when loading or metadata verification fails.
 
 Declaration matching follows the canonical file's line-start CREATE TABLE
-format. The existing restriction against semicolons within SQL string literals
-still applies; this change does not introduce a general SQL parser.
+format. Statement splitting now reuses `splitSqlFile` from
+`lib/provisioning/sql-runner.ts`, the quote-aware splitter production
+provisioning already uses, so semicolons inside string literals stay within
+one statement. This matches the loader carried by PR #473, so that branch's
+copy of these hunks becomes identical to dev.
 
 Seven duplicate table-creation statements were removed from four integration
 test files. These suites now use the canonical table definitions. Production
