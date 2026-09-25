@@ -1712,7 +1712,7 @@ BEGIN
                 published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
                 core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
                 orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
-                species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
+                species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures, leftover_stems;
 
             SELECT CONCAT('Batch ', vBatchID, ' failed: ', vErrorCode) as message, TRUE as batch_failed;
         END;
@@ -1941,7 +1941,7 @@ BEGIN
         published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
         core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
         orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
-        species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
+        species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures, leftover_stems;
 
     START TRANSACTION;
 
@@ -2702,6 +2702,50 @@ BEGIN
     CREATE INDEX idx_stem_resolution_rows_id ON stem_resolution_rows (id);
     CREATE INDEX idx_stem_resolution_rows_tree ON stem_resolution_rows (TreeID, CensusID, StemTag);
 
+    -- Leftover stems (issue #489): current-census stems no measurement references, named by an incoming
+    -- row's TreeTag + StemTag under any species. Census replacement deletes measurements but keeps stems,
+    -- and reusing one keeps its old tree and quadrat, which blocks a quadrat move and leaves an old-species
+    -- tree for validation 7 to flag. Such a stem is rebuilt from the incoming row instead, carrying the
+    -- StemCrossID/PublishedStemID a first-census stem cannot re-inherit. Inactive stems were deliberately
+    -- retired and still block (STEM_RESOLUTION_FAILED below); stems holding a specimen are kept because
+    -- specimens cascade from stems.
+    CREATE TEMPORARY TABLE leftover_stems AS
+    SELECT s.StemGUID, t.TreeTag, s.StemTag, s.StemCrossID, s.PublishedStemID
+    FROM stems s
+    INNER JOIN trees t
+        ON t.TreeID = s.TreeID
+        AND t.CensusID = s.CensusID
+        AND t.IsActive = 1
+    INNER JOIN (SELECT DISTINCT TreeTag, StemTag FROM stem_resolution_rows) incoming
+        ON incoming.TreeTag = t.TreeTag
+        AND incoming.StemTag <=> s.StemTag
+    WHERE s.CensusID = vCurrentCensusID
+      AND s.IsActive = 1
+      AND NOT EXISTS (SELECT 1 FROM coremeasurements cm WHERE cm.StemGUID = s.StemGUID)
+      AND NOT EXISTS (SELECT 1 FROM specimens sp WHERE sp.StemID = s.StemGUID);
+
+    CREATE INDEX idx_leftover_stems_tags ON leftover_stems (TreeTag, StemTag);
+
+    -- A previous-census match still wins; the leftover only fills what it cannot supply.
+    UPDATE stem_resolution_rows srr
+    INNER JOIN (
+        SELECT TreeTag, StemTag, MIN(StemCrossID) AS StemCrossID, MIN(PublishedStemID) AS PublishedStemID
+        FROM leftover_stems
+        GROUP BY TreeTag, StemTag
+    ) leftover
+        ON leftover.TreeTag = srr.TreeTag
+        AND leftover.StemTag <=> srr.StemTag
+    SET srr.PrevStemCrossID = COALESCE(srr.PrevStemCrossID, leftover.StemCrossID),
+        srr.PrevPublishedStemID = COALESCE(srr.PrevPublishedStemID, leftover.PublishedStemID);
+
+    DELETE FROM stems WHERE StemGUID IN (SELECT StemGUID FROM leftover_stems);
+
+    DELETE FROM trees
+    WHERE CensusID = vCurrentCensusID
+      AND TreeTag IN (SELECT TreeTag FROM leftover_stems)
+      AND TreeID NOT IN (SELECT TreeID FROM stem_resolution_rows)
+      AND NOT EXISTS (SELECT 1 FROM stems s WHERE s.TreeID = trees.TreeID);
+
     CREATE TEMPORARY TABLE unresolved_stem_rows
     (
         SourceRowIndex BIGINT UNSIGNED NOT NULL,
@@ -3444,7 +3488,7 @@ BEGIN
         published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
         core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
         orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
-        species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
+        species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures, leftover_stems;
 
     DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
 
@@ -3505,7 +3549,7 @@ BEGIN
             published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
             core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
             orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
-            species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
+            species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures, leftover_stems;
 
         SET @disable_triggers = 0;
 
