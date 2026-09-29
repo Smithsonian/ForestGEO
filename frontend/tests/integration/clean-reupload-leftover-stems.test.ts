@@ -288,4 +288,41 @@ describe('CLEAN_REUPLOAD leftover stems and trees (#489) — integration', () =>
     expect(Number(specimenRows[0].count)).toBe(1);
     expect(after.SPECIMEN.map(stem => stem.stemGUID)).toContain(specimenStemGUID);
   }, 120000);
+
+  it('does not flag a species mismatch when a stem moved to another tree tag left an unmeasured stem behind', async () => {
+    // Cooks Branch tag 1738: stem 1729 (NYSSYL) sat under tag 1738 next to stem 1738 (PINTAE) until the
+    // PI moved it to tag 1728. The replacement never names 1738/1729, so the old stem survives unmeasured.
+    await ingest(ORIGINAL_FILE, [
+      { ...row('MAIN-TAG', 'PINUST', 'Q01', FIRST_CENSUS_DATE), stemTag: 'MAIN' },
+      { ...row('MAIN-TAG', 'ACERRU', 'Q01', FIRST_CENSUS_DATE), stemTag: 'MOVED' }
+    ]);
+
+    await cleanReupload([
+      { ...row('MAIN-TAG', 'PINUST', 'Q01', FIRST_CENSUS_DATE), stemTag: 'MAIN' },
+      { ...row('NEW-TAG', 'ACERRU', 'Q01', FIRST_CENSUS_DATE), stemTag: 'MOVED' }
+    ]);
+    await runValidationForTest(connection, VALIDATION_DIFFERENT_SPECIES, { censusID, plotID });
+
+    const stems = await stemsByTag(censusID);
+    const speciesFlags = await getValidationErrors(connection, { censusID, validationID: VALIDATION_DIFFERENT_SPECIES });
+    console.log(`[moved stem] stems=${JSON.stringify(stems)} validation7=${JSON.stringify(speciesFlags)}`);
+
+    expect(stems['MAIN-TAG'].map(stem => [stem.species, stem.measurements])).toEqual([
+      ['ACERRU', 0],
+      ['PINUST', 1]
+    ]);
+    expect(speciesFlags).toEqual([]);
+  }, 120000);
+
+  it('still flags a tree tag whose measured stems carry different species', async () => {
+    await ingest(ORIGINAL_FILE, [
+      { ...row('TWO-SPECIES', 'PINUST', 'Q01', FIRST_CENSUS_DATE), stemTag: 'A' },
+      { ...row('TWO-SPECIES', 'ACERRU', 'Q01', FIRST_CENSUS_DATE), stemTag: 'B' }
+    ]);
+    await runValidationForTest(connection, VALIDATION_DIFFERENT_SPECIES, { censusID, plotID });
+
+    const speciesFlags = await getValidationErrors(connection, { censusID, validationID: VALIDATION_DIFFERENT_SPECIES });
+    console.log(`[genuine mismatch] validation7=${JSON.stringify(speciesFlags)}`);
+    expect(speciesFlags).toHaveLength(2);
+  }, 120000);
 });
