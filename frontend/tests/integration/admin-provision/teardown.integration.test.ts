@@ -146,6 +146,11 @@ describe('teardownProvisionedSite / abortRun (integration)', () => {
 
   it('abortRun cleans up usersiterelations and catalog row for a failed run', async () => {
     const runId = await seedRun('failed');
+    await pool.query(
+      `INSERT INTO catalog.provisioning_steps (RunID, StepIndex, StepKey, Status)
+       VALUES (?, 0, 'validate_inputs', 'completed'), (?, 6, 'insert_plot', 'failed')`,
+      [runId, runId]
+    );
     const [site]: any = await pool.query(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ?`, [TEST_SCHEMA]);
     await pool.query(`INSERT INTO catalog.usersiterelations (UserID, SiteID) VALUES (1, ?)`, [site[0].SiteID]);
 

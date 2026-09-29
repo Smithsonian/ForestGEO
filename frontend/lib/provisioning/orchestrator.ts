@@ -9,6 +9,7 @@ import { ProvisioningInputSchema } from './input-schema';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
 import { releaseSchemaOperationLock, tryAcquireSchemaOperationLock } from './schema-operation-lock';
+import { runCreatedSchemaArtifacts } from './abort-scope';
 import ailogger from '@/ailogger';
 
 // Bootstrap DDL inlined so the catalog tables can be created without any
@@ -569,11 +570,22 @@ export async function abortRun(runId: number, catalogPool: Pool, startedBy: stri
       throw new ProvisioningError(`Run ${runId} must be failed before aborting`, 'conflict', { runId });
     }
 
-    await deleteCatalogSiteRowsAndSchema(catalogPool, run.schemaName, {
-      actionLabel: 'abort run',
-      actor: startedBy,
-      ignoreUserRelationsDeleteError: true
-    });
+    const steps = await loadSteps(catalogPool, runId);
+    if (runCreatedSchemaArtifacts(steps)) {
+      await deleteCatalogSiteRowsAndSchema(catalogPool, run.schemaName, {
+        actionLabel: 'abort run',
+        actor: startedBy,
+        ignoreUserRelationsDeleteError: true
+      });
+    } else {
+      ailogger.info(
+        `[provisioning runId=${runId}] abort left ${run.schemaName} untouched: the run failed before validating its inputs, so it created nothing`,
+        {
+          runId,
+          schemaName: run.schemaName
+        }
+      );
+    }
     await setRunStatus(catalogPool, runId, 'aborted');
     auditSuccess({ action: 'abort', user: startedBy, runId, schemaName: run.schemaName });
   } catch (err) {

@@ -12,6 +12,7 @@ import {
   seedCatalogTables,
   clearProvisioningState,
   seedRun,
+  seedSteps,
   makeRequest,
   makeParams,
   GLOBAL_SESSION,
@@ -98,6 +99,11 @@ describe('POST /api/admin/provision/[runId]/abort (integration)', () => {
   it('drops the schema, removes catalog rows, and flips the run to aborted for a failed run', async () => {
     mocks.auth.mockResolvedValue(GLOBAL_SESSION);
     const runId = await seedRun(testPool, TEST_SCHEMA, 'failed', { createSchema: true });
+    await seedSteps(testPool, runId, [
+      { stepIndex: 0, stepKey: 'validate_inputs', status: 'completed' },
+      { stepIndex: 1, stepKey: 'create_schema', status: 'completed' },
+      { stepIndex: 6, stepKey: 'insert_plot', status: 'failed', errorMessage: 'Data too long for column PlotDescription' }
+    ]);
     const [siteRows]: any = await testPool.query(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ?`, [TEST_SCHEMA]);
     await testPool.query(`INSERT INTO catalog.usersiterelations (UserID, SiteID) VALUES (1, ?)`, [siteRows[0].SiteID]);
 
@@ -119,5 +125,24 @@ describe('POST /api/admin/provision/[runId]/abort (integration)', () => {
 
     const [schemas]: any = await testPool.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?`, [TEST_SCHEMA]);
     expect(schemas).toHaveLength(0);
+  });
+
+  it('closes the run but keeps the schema and catalog row when the run failed validate_inputs on a schema it never created', async () => {
+    mocks.auth.mockResolvedValue(GLOBAL_SESSION);
+    const runId = await seedRun(testPool, TEST_SCHEMA, 'failed', { createSchema: true });
+    await seedSteps(testPool, runId, [
+      { stepIndex: 0, stepKey: 'validate_inputs', status: 'failed', errorMessage: `A catalog site already references schema "${TEST_SCHEMA}"` },
+      { stepIndex: 1, stepKey: 'create_schema', status: 'pending' }
+    ]);
+
+    const res = await POST(makeRequest(URL_FOR(String(runId)), { method: 'POST' }), makeParams(runId));
+
+    expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
+    const [runs]: any = await testPool.query(`SELECT Status FROM catalog.provisioning_runs WHERE RunID = ?`, [runId]);
+    expect(runs[0].Status).toBe('aborted');
+    const [sites]: any = await testPool.query(`SELECT * FROM catalog.sites WHERE SchemaName = ?`, [TEST_SCHEMA]);
+    expect(sites, `catalog.sites row for ${TEST_SCHEMA} belongs to another run and must survive`).toHaveLength(1);
+    const [schemas]: any = await testPool.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?`, [TEST_SCHEMA]);
+    expect(schemas, `schema ${TEST_SCHEMA} belongs to another run and must survive`).toHaveLength(1);
   });
 });

@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Alert, Box, Button, CircularProgress, Divider, List, ListItem, Stack, Typography } from '@mui/joy';
 import type { ProvisioningRunRecord, ProvisioningStepRecord, RunStatus as RunStatusType } from '@/lib/provisioning/types';
+import { runCreatedSchemaArtifacts } from '@/lib/provisioning/abort-scope';
 import AbortConfirmDialog from './AbortConfirmDialog';
 
 interface RunStatusProps {
@@ -222,6 +223,8 @@ export default function RunStatus({ runId }: RunStatusProps) {
 
   const { run, steps, stuckStepIndex } = data;
   const isTerminal = TERMINAL_STATUSES.has(run.status);
+  const abortDropsSchema = runCreatedSchemaArtifacts(steps);
+  const abortLabel = abortDropsSchema ? 'Abort & drop schema' : 'Abort run';
 
   return (
     <Stack spacing={3} sx={{ mt: 2 }}>
@@ -373,7 +376,7 @@ export default function RunStatus({ runId }: RunStatusProps) {
                 disabled={actionInFlight !== null}
                 onClick={() => setAbortDialogOpen(true)}
               >
-                Abort &amp; drop schema
+                {abortLabel}
               </Button>
             </>
           )}
@@ -403,11 +406,18 @@ export default function RunStatus({ runId }: RunStatusProps) {
         inFlight={actionInFlight === 'abort'}
         title="Abort run"
         warning={
-          <>
-            This will DROP schema <strong>{run.schemaName}</strong> and delete the catalog row.
-          </>
+          abortDropsSchema ? (
+            <>
+              This will DROP schema <strong>{run.schemaName}</strong> and delete the catalog row.
+            </>
+          ) : (
+            <>
+              This run stopped before creating anything, so aborting only closes the run. Schema <strong>{run.schemaName}</strong> and its catalog row are left
+              untouched.
+            </>
+          )
         }
-        confirmLabel="Abort & drop schema"
+        confirmLabel={abortLabel}
         onCancel={() => setAbortDialogOpen(false)}
         onConfirm={handleAbort}
       />

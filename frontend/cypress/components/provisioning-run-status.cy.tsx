@@ -90,4 +90,28 @@ describe('RunStatus', () => {
     cy.contains('button', 'Retry from failed step').should('be.visible');
     cy.contains('button', 'Delete provisioned site').should('not.exist');
   });
+
+  it('does not offer to drop the schema when the run failed validate_inputs and so created nothing', () => {
+    const stepsFailedAtValidation = buildSteps('failed').map((step, index) => ({
+      ...step,
+      status: index === 0 ? 'failed' : 'pending',
+      errorMessage: index === 0 ? `A catalog site already references schema "${SCHEMA_NAME}"` : null,
+      errorStack: null
+    }));
+    cy.intercept('GET', `/api/admin/provision/${RUN_ID}`, {
+      run: buildRunRecord('failed'),
+      steps: stepsFailedAtValidation,
+      stuckStepIndex: null
+    }).as('pollStatus');
+
+    cy.mount(<RunStatus runId={RUN_ID} />);
+    cy.wait('@pollStatus');
+
+    cy.contains('button', 'Abort & drop schema').should('not.exist');
+    cy.contains('button', 'Abort run').click();
+    cy.get('[role="alertdialog"]').within(() => {
+      cy.contains('left untouched').should('be.visible');
+      cy.contains('DROP').should('not.exist');
+    });
+  });
 });
