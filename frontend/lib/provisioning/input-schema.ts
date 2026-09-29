@@ -19,6 +19,9 @@ export const GLOBAL_COORDINATE_ABS_MAX = 999_999_999.999999;
 
 export { EPSG_CODE_MIN, EPSG_CODE_MAX };
 
+/** plots.PlotDescription is VARCHAR(255); a longer value fails insert_plot after the catalog row already exists. */
+export const PLOT_DESCRIPTION_MAX_LENGTH = 255;
+
 /**
  * The units/EPSG contract: DefaultCoordinateUnits describes the linear unit the
  * arithmetic above consumes, and the EPSG code records which system the numbers came
@@ -61,12 +64,12 @@ const QuadratOverlapAcknowledgmentSchema = z.object({
 });
 
 export const ProvisioningSiteSchema = z.object({
-  siteName: z.string().min(1),
+  siteName: z.string().trim().min(1),
   schemaName: z.string().regex(/^forestgeo_[a-z0-9_]+$/),
   sqDimX: z.number().int().positive(),
   sqDimY: z.number().int().positive(),
-  defaultUOMDBH: z.string().min(1),
-  defaultUOMHOM: z.string().min(1),
+  defaultUOMDBH: DimensionUnitSchema,
+  defaultUOMHOM: DimensionUnitSchema,
   doubleDataEntry: z.boolean(),
   location: z.string().min(1),
   country: z.string().min(1)
@@ -82,7 +85,7 @@ export const ProvisioningPlotSchema = z.object({
   globalZ: globalCoordinateSchema('Z'),
   globalCoordinatesEPSG: EpsgCodeSchema.optional(),
   plotShape: z.enum(['square', 'rectangular', 'irregular']),
-  description: z.string(),
+  description: z.string().max(PLOT_DESCRIPTION_MAX_LENGTH, `Plot description must be ${PLOT_DESCRIPTION_MAX_LENGTH} characters or fewer.`),
   defaultDimensionUnits: DimensionUnitSchema,
   defaultCoordinateUnits: DimensionUnitSchema,
   defaultAreaUnits: AreaUnitSchema,

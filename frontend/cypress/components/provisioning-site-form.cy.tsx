@@ -121,4 +121,23 @@ describe('SiteForm', () => {
     cy.get('[aria-label="Subquadrat Dimension X"]').focus().clear();
     cy.get('[aria-label="Subquadrat Dimension X"]').should('have.value', '');
   });
+
+  it('offers the site HOM and DBH units as dropdowns so a height like 1.3 cannot be typed in', () => {
+    const onChangeSpy = cy.stub().as('onChangeSpy');
+    cy.mount(<StatefulSiteForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
+
+    for (const label of ['Default DBH Unit', 'Default HOM Unit']) {
+      cy.get(`[aria-label="${label}"]`).should('have.prop', 'tagName', 'BUTTON');
+    }
+    cy.contains('not the height itself').should('be.visible');
+
+    // Joy keeps every Select's listbox mounted, so scope the option to the HOM trigger's own listbox.
+    cy.get('[aria-label="Default HOM Unit"]').click();
+    cy.get('[aria-label="Default HOM Unit"]')
+      .invoke('attr', 'aria-controls')
+      .then(listboxId => {
+        cy.get(`#${listboxId}`).find('[role="option"]').contains(/^cm$/).click();
+      });
+    cy.get('@onChangeSpy').should('have.been.calledWithMatch', { defaultUOMHOM: 'cm', defaultUOMDBH: 'mm' });
+  });
 });

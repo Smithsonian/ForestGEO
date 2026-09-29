@@ -219,6 +219,29 @@ const STORED_INPUT_PLOT = {
 const STORED_INPUT_ROW = { quadratName: 'A01', startX: 20, startY: 20, dimensionX: 20, dimensionY: 20 };
 
 describe('parseStoredInput', () => {
+  it('upgrades a legacy free-text site unit spelling so runs from the free-text SiteForm stay retryable', () => {
+    const stored = {
+      site: { ...STORED_INPUT_SITE, defaultUOMDBH: 'Millimeters', defaultUOMHOM: 'meters' },
+      plot: STORED_INPUT_PLOT,
+      quadrats: { mode: 'csv', rows: [STORED_INPUT_ROW] }
+    };
+
+    const result = parseStoredInput(stored);
+
+    expect(result.site.defaultUOMDBH).toBe('mm');
+    expect(result.site.defaultUOMHOM).toBe('m');
+  });
+
+  it("refuses to coerce an unrecognised site unit such as a HOM height ('1.3') into a unit", () => {
+    const stored = {
+      site: { ...STORED_INPUT_SITE, defaultUOMHOM: '1.3' },
+      plot: STORED_INPUT_PLOT,
+      quadrats: { mode: 'csv', rows: [STORED_INPUT_ROW] }
+    };
+
+    expect(() => parseStoredInput(stored)).toThrow(/defaultUOMHOM/);
+  });
+
   it('loads a CSV payload with its rows untouched', () => {
     const stored = {
       site: STORED_INPUT_SITE,

@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { Button, FormControl, FormHelperText, FormLabel, Input, Option, Select, Stack, Textarea, Typography } from '@mui/joy';
 import type { ProvisioningPlotInput } from '@/lib/provisioning/types';
 import type { AreaMode } from '@/lib/provisioning/area';
-import { EPSG_CODE_MAX, EPSG_CODE_MIN, GEOGRAPHIC_EPSG_CODES, GLOBAL_COORDINATE_ABS_MAX } from '@/lib/provisioning/input-schema';
+import { EPSG_CODE_MAX, EPSG_CODE_MIN, GEOGRAPHIC_EPSG_CODES, GLOBAL_COORDINATE_ABS_MAX, PLOT_DESCRIPTION_MAX_LENGTH } from '@/lib/provisioning/input-schema';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
+import UnitSelect from './UnitSelect';
 
 const PLOT_SHAPE_OPTIONS: Array<{ value: ProvisioningPlotInput['plotShape']; label: string }> = [
   { value: 'square', label: 'Square' },
@@ -56,43 +57,9 @@ function isUncommittedNumericDraft(raw: string): boolean {
   return !Number.isFinite(Number(raw));
 }
 
-interface UnitSelectProps<T extends string> {
-  id: string;
-  label: string;
-  ariaLabel: string;
-  value: T;
-  options: readonly T[];
-  onChange: (newValue: T) => void;
-  disabled?: boolean;
-  helperText?: string;
-}
-
-function UnitSelect<T extends string>({ id, label, ariaLabel, value, options, onChange, disabled, helperText }: UnitSelectProps<T>) {
-  return (
-    <FormControl sx={{ flex: 1, minWidth: 160 }}>
-      <FormLabel htmlFor={id}>{label}</FormLabel>
-      <Select
-        id={id}
-        aria-label={ariaLabel}
-        value={value}
-        disabled={disabled}
-        onChange={(_event, newValue) => {
-          if (newValue) onChange(newValue);
-        }}
-      >
-        {options.map(unit => (
-          <Option key={unit} value={unit}>
-            {unit}
-          </Option>
-        ))}
-      </Select>
-      {helperText && <FormHelperText>{helperText}</FormHelperText>}
-    </FormControl>
-  );
-}
-
 export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, showErrors = false }: PlotFormProps) {
   const [touched, setTouched] = useState<Partial<Record<keyof PlotValue, boolean>>>({});
+  const descriptionTooLong = value.description.length > PLOT_DESCRIPTION_MAX_LENGTH;
 
   // Local string-typed mirror of numeric fields so an empty input stays empty
   // instead of being forced to 0 by Number(''). Only valid numeric strings are
@@ -321,7 +288,7 @@ export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, 
         )}
       </FormControl>
 
-      <FormControl>
+      <FormControl error={descriptionTooLong}>
         <FormLabel htmlFor="description-input">Description</FormLabel>
         <Textarea
           id="description-input"
@@ -332,6 +299,9 @@ export default function PlotForm({ value, onChange, areaMode, onAreaModeChange, 
           onChange={e => onChange({ ...value, description: e.target.value })}
           onBlur={() => markTouched('description')}
         />
+        <FormHelperText>
+          {value.description.length} / {PLOT_DESCRIPTION_MAX_LENGTH} characters{descriptionTooLong ? ' — shorten the description to continue.' : ''}
+        </FormHelperText>
       </FormControl>
 
       <Typography level="title-sm">Default Units</Typography>

@@ -158,6 +158,16 @@ function upgradeLegacyUnitValue(value: unknown, validOptions: readonly string[],
   return synonyms[normalized] ?? value;
 }
 
+function upgradeLegacySiteUnits(site: unknown): unknown {
+  if (typeof site !== 'object' || site === null) return site;
+  const candidate = site as Record<string, unknown>;
+  return {
+    ...candidate,
+    defaultUOMDBH: upgradeLegacyUnitValue(candidate.defaultUOMDBH, unitSelectionOptions, LEGACY_DIMENSION_UNIT_SYNONYMS),
+    defaultUOMHOM: upgradeLegacyUnitValue(candidate.defaultUOMHOM, unitSelectionOptions, LEGACY_DIMENSION_UNIT_SYNONYMS)
+  };
+}
+
 function upgradeLegacyPlotUnits(plot: unknown): unknown {
   if (typeof plot !== 'object' || plot === null) return plot;
   const candidate = plot as Record<string, unknown>;
@@ -183,6 +193,7 @@ export function parseStoredInput(raw: unknown): ProvisioningInput {
   const candidate = parsed as Record<string, unknown>;
   const upgraded = {
     ...candidate,
+    site: upgradeLegacySiteUnits(candidate.site),
     plot: upgradeLegacyPlotUnits(candidate.plot)
   };
   return ProvisioningInputSchema.parse(upgraded);
