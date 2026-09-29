@@ -3,6 +3,7 @@ import PlotForm from '@/components/provisioning/PlotForm';
 import type { ProvisioningPlotInput } from '@/lib/provisioning/types';
 import { applyAreaDerivation, resolvePlotAreaChange, type AreaMode } from '@/lib/provisioning/area';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
+import { PLOT_DESCRIPTION_MAX_LENGTH } from '@/lib/provisioning/input-schema';
 
 type PlotValue = ProvisioningPlotInput;
 
@@ -447,5 +448,18 @@ describe('PlotForm', () => {
         expect(lastCall.args[0].area).to.equal(8888);
       });
     });
+  });
+
+  it('flags a description longer than the PlotDescription column before the run can fail on it', () => {
+    const onChangeSpy = cy.stub().as('onChangeSpy');
+    const atLimit = 'x'.repeat(PLOT_DESCRIPTION_MAX_LENGTH);
+    cy.mount(<StatefulPlotForm initial={{ ...DEFAULT_VALUE, description: atLimit }} onChangeSpy={onChangeSpy} />);
+
+    cy.contains(`${PLOT_DESCRIPTION_MAX_LENGTH} / ${PLOT_DESCRIPTION_MAX_LENGTH} characters`).should('be.visible');
+    cy.contains('shorten the description').should('not.exist');
+
+    cy.get('[aria-label="Description"]').type('y');
+    cy.contains(`${PLOT_DESCRIPTION_MAX_LENGTH + 1} / ${PLOT_DESCRIPTION_MAX_LENGTH} characters`).should('be.visible');
+    cy.contains('shorten the description to continue').should('be.visible');
   });
 });

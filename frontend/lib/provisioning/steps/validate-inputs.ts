@@ -1,11 +1,12 @@
 import type { ProvisioningStep, StepContext } from '../types';
 import { ProvisioningError } from '../types';
 import { acknowledgmentCoversLayout, validateQuadratCollectionDetailed } from '../quadrat-collection-validation';
+import { VALIDATE_INPUTS_STEP_KEY } from '../abort-scope';
 
 const SCHEMA_PATTERN = /^forestgeo_[a-z0-9_]+$/;
 
 export const validateInputsStep: ProvisioningStep = {
-  key: 'validate_inputs',
+  key: VALIDATE_INPUTS_STEP_KEY,
   label: 'Validate inputs',
 
   async alreadyDone(): Promise<boolean> {
