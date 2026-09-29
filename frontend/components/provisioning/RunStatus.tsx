@@ -408,12 +408,13 @@ export default function RunStatus({ runId }: RunStatusProps) {
         warning={
           abortDropsSchema ? (
             <>
-              This will DROP schema <strong>{run.schemaName}</strong> and delete the catalog row.
+              This will DROP schema <strong>{run.schemaName}</strong> and delete the catalog row only if this run still owns them. Otherwise, it only closes the
+              run.
             </>
           ) : (
             <>
-              This run stopped before creating anything, so aborting only closes the run. Schema <strong>{run.schemaName}</strong> and its catalog row are left
-              untouched.
+              This run has no confirmed schema creation, so aborting only closes the run. Schema <strong>{run.schemaName}</strong> and its catalog row are left
+              untouched. Any partial creation requires manual investigation.
             </>
           )
         }

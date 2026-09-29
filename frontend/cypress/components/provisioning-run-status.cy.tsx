@@ -77,9 +77,10 @@ describe('RunStatus', () => {
   });
 
   it('keeps failed-run abort separate from completed-run teardown', () => {
+    const steps = buildSteps('completed').map((step, index) => ({ ...step, status: index < 6 ? 'completed' : index === 6 ? 'failed' : 'pending' }));
     cy.intercept('GET', `/api/admin/provision/${RUN_ID}`, {
       run: buildRunRecord('failed'),
-      steps: buildSteps('failed'),
+      steps,
       stuckStepIndex: null
     }).as('pollStatus');
 
@@ -89,6 +90,23 @@ describe('RunStatus', () => {
     cy.contains('button', 'Abort & drop schema').should('be.visible');
     cy.contains('button', 'Retry from failed step').should('be.visible');
     cy.contains('button', 'Delete provisioned site').should('not.exist');
+  });
+
+  it('leaves a schema untouched when validation passed but schema creation failed', () => {
+    cy.intercept('GET', `/api/admin/provision/${RUN_ID}`, {
+      run: buildRunRecord('failed'),
+      steps: buildSteps('failed'),
+      stuckStepIndex: null
+    }).as('pollStatus');
+
+    cy.mount(<RunStatus runId={RUN_ID} />);
+    cy.wait('@pollStatus');
+    cy.contains('button', 'Abort & drop schema').should('not.exist');
+    cy.contains('button', 'Abort run').click();
+    cy.get('[role="alertdialog"]').within(() => {
+      cy.contains('no confirmed schema creation').should('be.visible');
+      cy.contains('left untouched').should('be.visible');
+    });
   });
 
   it('does not offer to drop the schema when the run failed validate_inputs and so created nothing', () => {

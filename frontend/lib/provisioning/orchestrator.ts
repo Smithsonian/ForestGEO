@@ -9,7 +9,7 @@ import { ProvisioningInputSchema } from './input-schema';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
 import { releaseSchemaOperationLock, tryAcquireSchemaOperationLock } from './schema-operation-lock';
-import { runCreatedSchemaArtifacts } from './abort-scope';
+import { CREATE_SCHEMA_STEP_KEY, runCreatedSchemaArtifacts, VALIDATE_INPUTS_STEP_KEY } from './abort-scope';
 import ailogger from '@/ailogger';
 
 // Bootstrap DDL inlined so the catalog tables can be created without any
@@ -212,7 +212,7 @@ export function parseStoredInput(raw: unknown): ProvisioningInput {
  * `retryRun`, which re-dispatches execution) check for `null` themselves and
  * reject explicitly rather than silently running a corrupted payload.
  */
-async function loadRun(catalogPool: Pool, runId: number): Promise<ProvisioningRunRecord | null> {
+async function loadRun(catalogPool: Pool | PoolConnection, runId: number): Promise<ProvisioningRunRecord | null> {
   const [rows]: any = await catalogPool.query(`SELECT * FROM catalog.provisioning_runs WHERE RunID = ?`, [runId]);
   if (rows.length === 0) return null;
   const r = rows[0];
@@ -253,7 +253,7 @@ async function getRunStatus(catalogPool: Pool, runId: number): Promise<RunStatus
   return rows[0].Status ?? rows[0].status;
 }
 
-async function loadSteps(catalogPool: Pool, runId: number): Promise<ProvisioningStepRecord[]> {
+async function loadSteps(catalogPool: Pool | PoolConnection, runId: number): Promise<ProvisioningStepRecord[]> {
   const [rows]: any = await catalogPool.query(`SELECT * FROM catalog.provisioning_steps WHERE RunID = ? ORDER BY StepIndex`, [runId]);
   return rows.map((r: any) => ({
     stepId: r.StepID,
@@ -356,7 +356,7 @@ async function setRunStatusIfOwned(catalogPool: Pool, runId: number, status: Exc
   return affectedRows(result);
 }
 
-export async function setRunStatus(catalogPool: Pool, runId: number, status: RunStatus): Promise<void> {
+export async function setRunStatus(catalogPool: Pool | PoolConnection, runId: number, status: RunStatus): Promise<void> {
   const now = new Date();
   const terminal = status !== 'running';
   if (terminal) {
@@ -384,6 +384,25 @@ async function acquireSchemaLock(conn: PoolConnection, schemaName: string): Prom
 
 async function releaseSchemaLock(conn: PoolConnection, schemaName: string): Promise<void> {
   await releaseSchemaOperationLock(conn, schemaName);
+}
+
+/** Re-read lifecycle state after waiting for the same lock used by start/cleanup. */
+async function withLockedRun<T>(catalogPool: Pool, runId: number, action: (run: ProvisioningRunRecord, conn: PoolConnection) => Promise<T>): Promise<T> {
+  const initialRun = await loadRun(catalogPool, runId);
+  if (!initialRun) throw new ProvisioningError(`Run ${runId} not found`, 'not_found', { runId });
+  const conn = await catalogPool.getConnection();
+  try {
+    await acquireSchemaLock(conn, initialRun.schemaName);
+    const run = await loadRun(conn, runId);
+    if (!run) throw new ProvisioningError(`Run ${runId} not found`, 'not_found', { runId });
+    if (run.schemaName !== initialRun.schemaName) {
+      throw new ProvisioningError(`Run ${runId} changed schema while waiting for its lock`, 'conflict', { runId });
+    }
+    return await action(run, conn);
+  } finally {
+    await releaseSchemaLock(conn, initialRun.schemaName);
+    conn.release();
+  }
 }
 
 export async function startRun(args: StartRunArgs): Promise<{ runId: number }> {
@@ -538,33 +557,32 @@ export async function runProvisioning(runId: number, catalogPool: Pool): Promise
 export async function retryRun(runId: number, catalogPool: Pool, startedBy: string): Promise<void> {
   auditAttempt({ action: 'retry', user: startedBy, runId });
   try {
-    const run = await loadRun(catalogPool, runId);
-    if (!run) throw new ProvisioningError(`Run ${runId} not found`, 'not_found', { runId });
-    if (run.status !== 'failed') {
-      throw new ProvisioningError(`Run ${runId} must be failed before retrying`, 'conflict', { runId });
-    }
-    if (run.input === null) {
-      throw new ProvisioningError(`Run ${runId} has a stored input payload that failed validation and cannot be retried; abort it instead`, 'conflict', {
-        runId
-      });
-    }
+    await withLockedRun(catalogPool, runId, async (run, conn) => {
+      if (run.status !== 'failed') {
+        throw new ProvisioningError(`Run ${runId} must be failed before retrying`, 'conflict', { runId });
+      }
+      if (run.input === null) {
+        throw new ProvisioningError(`Run ${runId} has a stored input payload that failed validation and cannot be retried; abort it instead`, 'conflict', {
+          runId
+        });
+      }
 
-    const [failedStepRows]: any = await catalogPool.query(
-      `SELECT MIN(StepIndex) AS firstFailed FROM catalog.provisioning_steps WHERE RunID = ? AND Status = 'failed'`,
-      [runId]
-    );
-    const firstFailed = failedStepRows[0]?.firstFailed ?? failedStepRows[0]?.firstfailed;
-    if (firstFailed != null) {
-      await catalogPool.query(
-        `UPDATE catalog.provisioning_steps
-         SET Status = 'pending', StartedAt = NULL, FinishedAt = NULL, ErrorMessage = NULL, ErrorStack = NULL
-         WHERE RunID = ? AND StepIndex >= ?`,
-        [runId, firstFailed]
+      const [failedStepRows]: any = await conn.query(
+        `SELECT MIN(StepIndex) AS firstFailed FROM catalog.provisioning_steps WHERE RunID = ? AND Status = 'failed'`,
+        [runId]
       );
-    }
-    await setRunStatus(catalogPool, runId, 'running');
-    auditSuccess({ action: 'retry', user: startedBy, runId, schemaName: run.schemaName });
-
+      const firstFailed = failedStepRows[0]?.firstFailed ?? failedStepRows[0]?.firstfailed;
+      if (firstFailed != null) {
+        await conn.query(
+          `UPDATE catalog.provisioning_steps
+           SET Status = 'pending', StartedAt = NULL, FinishedAt = NULL, ErrorMessage = NULL, ErrorStack = NULL
+           WHERE RunID = ? AND StepIndex >= ?`,
+          [runId, firstFailed]
+        );
+      }
+      await setRunStatus(conn, runId, 'running');
+      auditSuccess({ action: 'retry', user: startedBy, runId, schemaName: run.schemaName });
+    });
     dispatchRun(runId, catalogPool);
   } catch (err) {
     auditFailure({ action: 'retry', user: startedBy, runId, error: toError(err) });
@@ -575,30 +593,46 @@ export async function retryRun(runId: number, catalogPool: Pool, startedBy: stri
 export async function abortRun(runId: number, catalogPool: Pool, startedBy: string): Promise<void> {
   auditAttempt({ action: 'abort', user: startedBy, runId });
   try {
-    const run = await loadRun(catalogPool, runId);
-    if (!run) throw new ProvisioningError(`Run ${runId} not found`, 'not_found', { runId });
-    if (run.status !== 'failed') {
-      throw new ProvisioningError(`Run ${runId} must be failed before aborting`, 'conflict', { runId });
-    }
+    await withLockedRun(catalogPool, runId, async (run, conn) => {
+      if (run.status !== 'failed') {
+        throw new ProvisioningError(`Run ${runId} must be failed before aborting`, 'conflict', { runId });
+      }
 
-    const steps = await loadSteps(catalogPool, runId);
-    if (runCreatedSchemaArtifacts(steps)) {
-      await deleteCatalogSiteRowsAndSchema(catalogPool, run.schemaName, {
-        actionLabel: 'abort run',
-        actor: startedBy,
-        ignoreUserRelationsDeleteError: true
-      });
-    } else {
-      ailogger.info(
-        `[provisioning runId=${runId}] abort left ${run.schemaName} untouched: the run failed before validating its inputs, so it created nothing`,
-        {
-          runId,
-          schemaName: run.schemaName
-        }
+      const steps = await loadSteps(conn, runId);
+      // A later successful validation means the schema name became available
+      // again. It invalidates this run's old creation record, even if the later
+      // run has since failed or been aborted. A running/completed peer, or a
+      // failed peer with its own creation record, also prevents deletion
+      // regardless of run order (older runs can be retried).
+      const [competingRuns]: any = await conn.query(
+        `SELECT r.RunID FROM catalog.provisioning_runs r
+         WHERE r.SchemaName = ? AND r.RunID <> ?
+           AND (r.Status IN ('running', 'completed') OR EXISTS (
+               SELECT 1 FROM catalog.provisioning_steps s
+               WHERE s.RunID = r.RunID AND s.Status = 'completed'
+                 AND ((r.RunID > ? AND s.StepKey = ?) OR (r.Status = 'failed' AND s.StepKey = ?))
+             ))
+         LIMIT 1`,
+        [run.schemaName, runId, runId, VALIDATE_INPUTS_STEP_KEY, CREATE_SCHEMA_STEP_KEY]
       );
-    }
-    await setRunStatus(catalogPool, runId, 'aborted');
-    auditSuccess({ action: 'abort', user: startedBy, runId, schemaName: run.schemaName });
+      if (runCreatedSchemaArtifacts(steps) && competingRuns.length === 0) {
+        await deleteCatalogSiteRowsAndSchema(
+          catalogPool,
+          run.schemaName,
+          { actionLabel: 'abort run', actor: startedBy, ignoreUserRelationsDeleteError: true },
+          conn
+        );
+      } else {
+        ailogger.info(`[provisioning runId=${runId}] abort left ${run.schemaName} untouched: schema ownership is not established`, {
+          runId,
+          schemaName: run.schemaName,
+          recordedCreation: runCreatedSchemaArtifacts(steps),
+          competingRunId: competingRuns[0]?.RunID ?? null
+        });
+      }
+      await setRunStatus(conn, runId, 'aborted');
+      auditSuccess({ action: 'abort', user: startedBy, runId, schemaName: run.schemaName });
+    });
   } catch (err) {
     auditFailure({ action: 'abort', user: startedBy, runId, error: toError(err) });
     throw err;
@@ -725,14 +759,20 @@ async function settleBackgroundJobsForSchema(conn: PoolConnection, schemaName: s
   await conn.query(`DELETE FROM catalog.background_jobs WHERE SchemaName = ?`, [schemaName]);
 }
 
-async function deleteCatalogSiteRowsAndSchema(catalogPool: Pool, schemaName: string, options: DeleteCatalogSiteRowsAndSchemaOptions): Promise<void> {
+async function deleteCatalogSiteRowsAndSchema(
+  catalogPool: Pool,
+  schemaName: string,
+  options: DeleteCatalogSiteRowsAndSchemaOptions,
+  lockedConnection?: PoolConnection
+): Promise<void> {
   if (!SCHEMA_PATTERN.test(schemaName)) {
     throw new ProvisioningError(`Refusing to ${options.actionLabel} with unsafe schema name`, 'unsafe_input', { schemaName });
   }
 
-  const conn = await catalogPool.getConnection();
+  // Abort keeps its ownership check, deletion, and final status under one lock.
+  const conn = lockedConnection ?? (await catalogPool.getConnection());
   try {
-    await acquireSchemaLock(conn, schemaName);
+    if (!lockedConnection) await acquireSchemaLock(conn, schemaName);
     auditAttempt({ action: 'schema_drop', user: options.actor, schemaName });
 
     // Phase 1: catalog cleanup in a transaction. If any DELETE fails the
@@ -764,14 +804,16 @@ async function deleteCatalogSiteRowsAndSchema(catalogPool: Pool, schemaName: str
 
     // Phase 2: DROP DATABASE outside the transaction. DDL can't be rolled back,
     // and we only reach this point if catalog cleanup committed successfully.
-    await catalogPool.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+    await conn.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
     auditSuccess({ action: 'schema_drop', user: options.actor, schemaName });
   } catch (err) {
     auditFailure({ action: 'schema_drop', user: options.actor, schemaName, error: toError(err) });
     throw err;
   } finally {
-    await releaseSchemaLock(conn, schemaName);
-    conn.release();
+    if (!lockedConnection) {
+      await releaseSchemaLock(conn, schemaName);
+      conn.release();
+    }
   }
 }
 

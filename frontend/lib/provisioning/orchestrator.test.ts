@@ -548,6 +548,43 @@ describe('orchestrator', () => {
   });
 
   it(
+    'abort: a run that failed creation cannot delete a later successfully provisioned site',
+    async () => {
+      const schemaName = `forestgeo_orch_abort_successor_${process.pid}`;
+      createdSchemas.push(schemaName);
+      const createStep = STEPS.find(step => step.key === 'create_schema')!;
+      const createSpy = vi.spyOn(createStep, 'run').mockRejectedValueOnce(new Error('Temporary CREATE DATABASE failure'));
+      let failedRunId: number;
+      try {
+        const started = await startRun({ input: makeInput(schemaName), startedBy: 'test@old-run', catalogPool: pool });
+        failedRunId = started.runId;
+        expect(await waitForTerminal(failedRunId, pool)).toBe('failed');
+      } finally {
+        createSpy.mockRestore();
+      }
+      const failed = await getRunWithSteps(failedRunId, pool);
+      expect(failed!.steps.find(step => step.stepKey === 'validate_inputs')?.status).toBe('completed');
+      expect(failed!.steps.find(step => step.stepKey === 'create_schema')?.status).toBe('failed');
+      expect(await schemaExists(pool, schemaName)).toBe(false);
+
+      const { runId: successorId } = await startRun({ input: makeInput(schemaName), startedBy: 'test@new-run', catalogPool: pool });
+      expect(await waitForTerminal(successorId, pool)).toBe('completed');
+      const [before]: any = await pool.query(`SELECT PlotID, PlotName FROM \`${schemaName}\`.plots`);
+      expect(before).toHaveLength(1);
+
+      await abortRun(failedRunId, pool, 'test@abort-old-run');
+
+      expect((await getRunWithSteps(failedRunId, pool))!.run.status).toBe('aborted');
+      expect((await getRunWithSteps(successorId, pool))!.run.status).toBe('completed');
+      expect(await schemaExists(pool, schemaName)).toBe(true);
+      expect(await catalogSiteCount(pool, schemaName)).toBe(1);
+      const [after] = await pool.query(`SELECT PlotID, PlotName FROM \`${schemaName}\`.plots`);
+      expect(after).toEqual(before);
+    },
+    RUN_TIMEOUT_MS * 2 + 5000
+  );
+
+  it(
     'abort: leaves a live site untouched when the run failed validate_inputs because the schema was taken',
     async () => {
       const schemaName = `forestgeo_orch_abort_live_${process.pid}`;

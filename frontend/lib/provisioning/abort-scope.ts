@@ -1,12 +1,14 @@
 import type { ProvisioningStepRecord } from './types';
 
 export const VALIDATE_INPUTS_STEP_KEY = 'validate_inputs';
+export const CREATE_SCHEMA_STEP_KEY = 'create_schema';
 
 /**
- * validate_inputs refuses to start when catalog.sites or MySQL already holds the run's
- * schema, so a run that never completed it created nothing. Whatever sits under that
- * schema name belongs to an earlier run or to a live site, and aborting must not drop it.
+ * Validation only establishes that a name was available. Cleanup also needs a
+ * recorded successful creation; a failed/pending creation is ambiguous and must
+ * leave the schema untouched. The server must additionally check for competing
+ * runs under the schema lock before treating this history as ownership evidence.
  */
 export function runCreatedSchemaArtifacts(steps: readonly Pick<ProvisioningStepRecord, 'stepKey' | 'status'>[]): boolean {
-  return steps.some(step => step.stepKey === VALIDATE_INPUTS_STEP_KEY && step.status === 'completed');
+  return [VALIDATE_INPUTS_STEP_KEY, CREATE_SCHEMA_STEP_KEY].every(key => steps.some(step => step.stepKey === key && step.status === 'completed'));
 }
