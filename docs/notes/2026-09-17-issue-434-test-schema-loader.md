@@ -19,9 +19,11 @@ Missing tables cause setup to fail with their names. Foreign-key checks are
 restored even when loading or metadata verification fails.
 
 Declaration matching follows the canonical file's line-start CREATE TABLE
-format. The September 18 pre-merge follow-up replaces the local splitter with the
-existing provisioning `splitSqlFile` parser. Quoted semicolons and escaped
-quotes use that shared implementation; no second parser is maintained.
+format. Statement splitting now reuses `splitSqlFile` from
+`lib/provisioning/sql-runner.ts`, the quote-aware splitter production
+provisioning already uses, so semicolons inside string literals stay within
+one statement. This matches the loader carried by PR #473, so that branch's
+copy of these hunks becomes identical to dev.
 
 Seven duplicate table-creation statements were removed from four integration
 test files. These suites now use the canonical table definitions. Production
@@ -46,7 +48,5 @@ No production schema, migration, or application code changed.
 
 Implementation and review fixes used Fable orchestration with Sonnet workers;
 actual response metadata confirmed `claude-fable-5` and `claude-sonnet-5`.
-Codex reviewed the original diff and ran validation. September 18: this
-branch is integrated into PR #473 with shared-parser reuse as simplicity fix 4.
-The original verification above predates that integration; current release
-checks are recorded in the annual DBH release notes.
+Codex reviewed the diff and ran validation. Changes remain local; nothing was
+pushed, published, or deployed.

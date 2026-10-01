@@ -335,7 +335,7 @@ describe('IsolatedDataGridCommons', () => {
     let saveSeen = false;
     const editFlowOverride = vi.fn(async (row: any) => {
       saveSeen = true;
-      return row;
+      return { row, changed: true };
     });
     mockFetch.mockImplementation(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       return {
@@ -483,7 +483,7 @@ describe('IsolatedDataGridCommons', () => {
   it('rejects an existing row whose edited ID changes before any mutation', async () => {
     const originalRow = { id: 1, personID: 123, personName: 'Original' };
     const changedRow = { ...originalRow, id: 2, personName: 'Changed' };
-    const editFlowOverride = vi.fn(async (row: any) => row);
+    const editFlowOverride = vi.fn(async (row: any) => ({ row, changed: true }));
     mockGetRowWithUpdatedValues.mockReturnValue(changedRow);
     mockFetch.mockResolvedValue({
       ok: true,
@@ -776,7 +776,7 @@ describe('IsolatedDataGridCommons', () => {
     const editFlowOverride = vi.fn(async () => {
       saveCount += 1;
       if (saveCount === 1) throw new RowSaveFinalizationError('Changes were saved, but reingestion failed', updatedRow);
-      return updatedRow;
+      return { row: updatedRow, changed: true };
     });
     mockFetch.mockImplementation(async () => {
       listCount += 1;
@@ -809,15 +809,18 @@ describe('IsolatedDataGridCommons', () => {
     await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('Updated'));
     expect(screen.getByRole('alert')).toHaveTextContent('Changes were saved, but reingestion failed');
     expect(editFlowOverride).toHaveBeenCalledWith(updatedRow, originalRow);
+    // describeSaveOutcome checks outcome.partialError first, unconditionally - a partial
+    // save must never be reported as (or alongside) a no-op/info outcome.
+    expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'a partial save must outrank any info/no-op phrasing').not.toBeInTheDocument();
   });
 
   it('ignores a duplicate confirmation while the first save is pending', async () => {
     const originalRow = { id: 1, personID: 123, personName: 'Original' };
     const updatedRow = { ...originalRow, personName: 'Updated' };
-    let resolveSave: ((row: typeof updatedRow) => void) | undefined;
+    let resolveSave: ((result: { row: typeof updatedRow; changed: boolean }) => void) | undefined;
     const editFlowOverride = vi.fn(
       () =>
-        new Promise<typeof updatedRow>(resolve => {
+        new Promise<{ row: typeof updatedRow; changed: boolean }>(resolve => {
           resolveSave = resolve;
         })
     );
@@ -851,7 +854,7 @@ describe('IsolatedDataGridCommons', () => {
     fireEvent.click(confirm);
     fireEvent.click(confirm);
     await waitFor(() => expect(editFlowOverride).toHaveBeenCalledTimes(1));
-    resolveSave?.(updatedRow);
+    resolveSave?.({ row: updatedRow, changed: true });
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('successfully updated'));
   });
 
@@ -1593,9 +1596,9 @@ describe('IsolatedDataGridCommons', () => {
     it('shows the ROW_UPDATED_MESSAGE success toast once editFlowOverride resolves, without issuing its own PATCH', async () => {
       // applyEditViaPreviewFlow (isolatedfailedmeasurementsdatagrid.tsx) owns applying the
       // edit; handleConfirmAction now owns the resulting toast (PR #483). editFlowOverride
-      // cannot report a server-side `changed` flag, so performSaveAction/persistRow leave
-      // `changed` undefined and handleConfirmAction's `else if (outcome)` branch reports the
-      // same success message as a plain updateRow save.
+      // reports `changed` explicitly (EditFlowPersistResult) - here it reports changed:true,
+      // so handleConfirmAction's `else if (outcome)` branch reports the same success message
+      // as a plain updateRow save.
       let overrideCalled = false;
       mockFetch.mockImplementation(async (_input: RequestInfo | URL) => {
         return {
@@ -1610,7 +1613,7 @@ describe('IsolatedDataGridCommons', () => {
 
       const editFlowOverride = vi.fn().mockImplementation(async () => {
         overrideCalled = true;
-        return updatedFailedMeasurementRow;
+        return { row: updatedFailedMeasurementRow, changed: true };
       });
       renderEditableGrid('failedmeasurements', originalFailedMeasurementRow, updatedFailedMeasurementRow, { editFlowOverride });
       await driveEditSaveConfirm(ORIGINAL_TEST_SP_CODE);
@@ -1623,10 +1626,7 @@ describe('IsolatedDataGridCommons', () => {
         'editFlowOverride must not also PATCH via updateRow'
       ).toBe(false);
       expect(await screen.findByText(ROW_UPDATED_MESSAGE), 'a resolved editFlowOverride must surface the standard success toast').toBeInTheDocument();
-      expect(
-        screen.queryByText(NO_CHANGES_SAVED_MESSAGE),
-        'an override cannot report changed:false, so it must never show the no-op toast'
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'an override reporting changed:true must never show the no-op toast').not.toBeInTheDocument();
     });
 
     it('shows an error toast with the failure message when editFlowOverride rejects, instead of swallowing it', async () => {
@@ -1646,6 +1646,72 @@ describe('IsolatedDataGridCommons', () => {
       expect(await screen.findByText(`Error: ${failureMessage}`), 'a rejected editFlowOverride must surface its error message in a toast').toBeInTheDocument();
       expect(screen.queryByText(ROW_UPDATED_MESSAGE), 'a failed save must never show the success toast').not.toBeInTheDocument();
       expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'a failed save must never show the no-changes toast').not.toBeInTheDocument();
+    });
+
+    it('shows the override infoMessage (not the generic no-changes text) when editFlowOverride reports changed:false (confirm-dialog path)', async () => {
+      // The failed-measurements grid's applyEditViaPreviewFlow reports changed:false with a
+      // rounding explanation for a pure no-op save; describeSaveOutcome must prefer that
+      // specific infoMessage over the generic NO_CHANGES_SAVED_MESSAGE.
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ output: [originalFailedMeasurementRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+      } as Response);
+
+      const overrideInfoMessage = 'No change saved: DBH rounded to the existing value (server stores at fixed precision).';
+      const editFlowOverride = vi.fn().mockResolvedValue({ row: originalFailedMeasurementRow, changed: false, infoMessage: overrideInfoMessage });
+      renderEditableGrid('failedmeasurements', originalFailedMeasurementRow, updatedFailedMeasurementRow, { editFlowOverride });
+      await driveEditSaveConfirm(ORIGINAL_TEST_SP_CODE);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert, 'an override-reported no-op with an infoMessage must surface that exact message').toHaveTextContent(overrideInfoMessage);
+      expect(alert, 'the no-changes toast must render as an info Alert, not success').toHaveClass('MuiAlert-standardInfo');
+      expect(screen.queryByText(ROW_UPDATED_MESSAGE)).not.toBeInTheDocument();
+      expect(screen.queryByText(NO_CHANGES_SAVED_MESSAGE), 'a specific infoMessage must replace the generic no-changes text').not.toBeInTheDocument();
+    });
+
+    it('shows the override infoMessage on the direct row-edit path (no confirm dialog) when editFlowOverride reports changed:false', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ output: [originalFailedMeasurementRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+      } as Response);
+
+      const overrideInfoMessage = 'No change saved: DBH rounded to the existing value (server stores at fixed precision).';
+      const editFlowOverride = vi.fn().mockResolvedValue({ row: originalFailedMeasurementRow, changed: false, infoMessage: overrideInfoMessage });
+      renderEditableGrid('failedmeasurements', originalFailedMeasurementRow, updatedFailedMeasurementRow, { editFlowOverride });
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Test Process Row' }));
+
+      const alert = await screen.findByRole('alert');
+      expect(alert, 'the direct path must surface the same override infoMessage as the confirm-dialog path').toHaveTextContent(overrideInfoMessage);
+      expect(alert, 'the no-changes toast on the direct path must render as an info Alert, not success').toHaveClass('MuiAlert-standardInfo');
+      expect(screen.queryByText(ROW_UPDATED_MESSAGE)).not.toBeInTheDocument();
+      expect(capturedProcessPromises, 'the mock button must have actually invoked processRowUpdate').toHaveLength(1);
+      await expect(capturedProcessPromises[0], 'a no-op override save must still hand MUI back its row').resolves.toMatchObject(originalFailedMeasurementRow);
+    });
+
+    it('leads with the composite no-changes/refresh-failure text over an override infoMessage when a changed:false override save also fails to refresh', async () => {
+      // Mirrors the PATCH-driven composite-priority tests above (outcome.changed === false
+      // with a followUpError outranks a plain info message), but for an editFlowOverride that
+      // reports its own infoMessage - the composite error text must still win.
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ output: [originalFailedMeasurementRow], totalCount: 1, finishedQuery: 'SELECT 1' })
+      } as Response);
+      const overrideInfoMessage = 'No change saved: DBH rounded to the existing value (server stores at fixed precision).';
+      const refreshFailureMessage = 'onDataUpdate rejected: could not refresh the grid';
+      const editFlowOverride = vi.fn().mockResolvedValue({ row: originalFailedMeasurementRow, changed: false, infoMessage: overrideInfoMessage });
+      renderEditableGrid('failedmeasurements', originalFailedMeasurementRow, updatedFailedMeasurementRow, {
+        editFlowOverride,
+        onDataUpdate: vi.fn().mockRejectedValue(new Error(refreshFailureMessage))
+      });
+      await driveEditSaveConfirm(ORIGINAL_TEST_SP_CODE);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert, 'the composite no-changes+refresh-failure text must win over an override infoMessage').toHaveTextContent(NO_CHANGES_SAVED_MESSAGE);
+      expect(alert).toHaveTextContent(refreshFailureMessage);
+      expect(alert.textContent, 'must never claim the save happened').not.toContain('Changes were saved');
+      expect(alert.textContent, 'the override infoMessage must not appear once the composite error wins').not.toContain(overrideInfoMessage);
     });
 
     it('shows responseErrorMessage’s server-error text on a failed confirmed PATCH, instead of a stringified rejected row', async () => {

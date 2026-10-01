@@ -121,14 +121,18 @@ type PendingSave = {
 type PersistedGridRow = GridRowModel & { creationNeedsRefresh?: boolean };
 
 // `changed` is undefined when the persistence path cannot report whether the server
-// made a change (an editFlowOverride, or an endpoint that omits the flag).
-type PersistResult = { row: GridRowModel; changed?: boolean };
+// made a change (an endpoint that omits the flag, e.g. /api/administrative/fetch).
+// An editFlowOverride reports `changed` explicitly (see EditFlowPersistResult).
+// `infoMessage` carries override-supplied context (e.g. a rounded-no-op explanation)
+// through to describeSaveOutcome.
+type PersistResult = { row: GridRowModel; changed?: boolean; infoMessage?: string };
 
 type SaveOutcome = {
   row: GridRowModel;
   changed?: boolean;
   partialError?: Error;
   followUpError?: Error;
+  infoMessage?: string;
 };
 
 function isExplicitNewRow(row: GridRowModel | null | undefined): boolean {
@@ -210,8 +214,8 @@ const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true
 
 // The Save icon (handleSaveClick, below) reads `getRowWithUpdatedValues` synchronously
 // on click. MUI's own flush of a keystroke into its editing state is a PRIVATE api
-// (`runPendingEditCellValueMutation`, unstable_ prefixed and not exposed by
-// useGridApiRef()) that only otherwise runs on Enter/blur/stopRowEditMode - paths this
+// (`runPendingEditCellValueMutation`, registered with 'private' visibility and not
+// exposed by useGridApiRef()) that only otherwise runs on Enter/blur/stopRowEditMode - paths this
 // grid deliberately suppresses (see handleCellKeyDown/handleRowEditStop) so a fast
 // Save click can land inside GridEditInputCell's 200ms debounce window and read the
 // pre-keystroke value. Passing debounceMs=0 makes MUI write the edited value into its
@@ -254,7 +258,7 @@ function describeSaveOutcome(outcome: SaveOutcome, isNewRow: boolean): Pick<Aler
     return {
       children: outcome.followUpError
         ? `${NO_CHANGES_SAVED_MESSAGE} ${GRID_REFRESH_FAILED_MESSAGE}: ${outcome.followUpError.message}`
-        : NO_CHANGES_SAVED_MESSAGE,
+        : (outcome.infoMessage ?? NO_CHANGES_SAVED_MESSAGE),
       severity: outcome.followUpError ? 'error' : 'info'
     };
   }
@@ -264,7 +268,11 @@ function describeSaveOutcome(outcome: SaveOutcome, isNewRow: boolean): Pick<Aler
       severity: 'error'
     };
   }
-  return { children: isNewRow ? NEW_ROW_ADDED_MESSAGE : ROW_UPDATED_MESSAGE, severity: 'success' };
+  const successMessage = isNewRow ? NEW_ROW_ADDED_MESSAGE : ROW_UPDATED_MESSAGE;
+  return {
+    children: outcome.infoMessage ? `${successMessage} ${outcome.infoMessage}` : successMessage,
+    severity: 'success'
+  };
 }
 
 const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
@@ -979,9 +987,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       const isNewRow = isExplicitNewRow(oldRow);
       if (!isNewRow && editFlowOverride) {
         try {
-          // The override cannot report whether the server made a change, so `changed` is
-          // left undefined rather than guessed.
-          return { row: await editFlowOverride(newRow, oldRow) };
+          const overrideResult = await editFlowOverride(newRow, oldRow);
+          return { row: overrideResult.row, changed: overrideResult.changed, infoMessage: overrideResult.infoMessage };
         } catch (error: unknown) {
           const err = asError(error);
           throw err;
@@ -1054,10 +1061,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         let updatedRow: GridRowModel;
         let changed: boolean | undefined;
         let partialError: Error | undefined;
+        let infoMessage: string | undefined;
         try {
           const persisted = await persistRow(confirmedRow, pending.oldRow);
           updatedRow = persisted.row;
           changed = persisted.changed;
+          infoMessage = persisted.infoMessage;
         } catch (error: unknown) {
           if (!(error instanceof RowSaveFinalizationError)) throw asError(error);
           updatedRow = error.persistedRow as GridRowModel;
@@ -1076,7 +1085,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           pending.resolve(updatedRow);
         }
         const followUpError = await finishPersistedSave(updatedRow, pending.oldRow);
-        return { row: updatedRow, changed, partialError, followUpError };
+        return { row: updatedRow, changed, partialError, followUpError, infoMessage };
       } catch (error: unknown) {
         if (!pending.settled) {
           pending.settled = true;
@@ -1321,7 +1330,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         const persisted = await persistRow(newRow, oldRow);
         const updatedRow = persisted.row;
         const followUpError = await finishPersistedSave(updatedRow, oldRow);
-        const outcome: SaveOutcome = { row: updatedRow, changed: persisted.changed, followUpError };
+        const outcome: SaveOutcome = { row: updatedRow, changed: persisted.changed, followUpError, infoMessage: persisted.infoMessage };
         // The isExplicitNewRow(oldRow) branch above already returns early, so an explicit new
         // row never reaches this point - isNewRow is always false here.
         setSnackbar(describeSaveOutcome(outcome, false));
