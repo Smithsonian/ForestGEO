@@ -21,7 +21,8 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
-import UndoToast from '@/components/editplan/undotoast';
+import UndoToast, { UndoRevertOutcome } from '@/components/editplan/undotoast';
+import { requestEditRevert } from '@/lib/editplan/requestrevert';
 import { buildEditableFieldsDiffWithMetaForSurface } from '@/components/datagrids/measurementscommonsutils';
 import { FIELD_ALIASES_BY_SURFACE, isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
 import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
@@ -552,27 +553,35 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
       {undoToastOperationID !== null && (
         <UndoToast
           editOperationID={undoToastOperationID}
-          onUndo={async () => {
-            try {
-              const response = await fetch(`/api/edits/revert`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  schema: currentSite?.schemaName ?? '',
-                  plotID: currentPlot?.plotID ?? 0,
-                  censusID: activeCensusID ?? 0,
-                  editOperationID: undoToastOperationID
-                })
-              });
-              if (!response.ok) {
-                throw new Error(`revert failed (${response.status})`);
-              }
-              setRefresh(true);
-            } catch (error: unknown) {
-              const err = error instanceof Error ? error : new Error(String(error));
-              ailogger.error('Undo failed:', err);
-              setEditFlowError(`Undo failed: ${err.message}`);
+          onUndo={async (confirmedPlanHash?: string): Promise<UndoRevertOutcome> => {
+            const outcome = await requestEditRevert({
+              schema: currentSite?.schemaName ?? '',
+              plotID: currentPlot?.plotID ?? 0,
+              censusID: activeCensusID ?? 0,
+              editOperationID: undoToastOperationID,
+              confirmedPlanHash
+            });
+
+            if (outcome.status === 'confirmation-required') return outcome;
+
+            if (outcome.status === 'failed') {
+              ailogger.error('Undo failed:', new Error(outcome.message));
+              setEditFlowError(`Undo failed: ${outcome.message}`);
+              return { status: 'failed' };
             }
+
+            if (outcome.status === 'unconfirmed') {
+              // We genuinely do not know whether the write committed — this is
+              // not an error condition (no refresh is owed, nothing is broken),
+              // so it gets a warning-level log and the helper's own message,
+              // never the "Undo failed" wording used for a confirmed failure.
+              ailogger.warn(`Undo unconfirmed: ${outcome.message}`);
+              setEditFlowError(outcome.message);
+              return { status: 'unconfirmed' };
+            }
+
+            setRefresh(true);
+            return { status: 'reverted' };
           }}
           onDismiss={() => setUndoToastOperationID(null)}
         />

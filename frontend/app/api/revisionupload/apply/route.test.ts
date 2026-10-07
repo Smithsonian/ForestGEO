@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
+// Real (unmocked) error classes: route.ts imports these directly from
+// tree-species-correction-writer.ts, which this file never mocks. Using the
+// genuine classes (not stand-ins) is what makes the route's `instanceof`
+// branches actually exercised here.
+import { SpeciesCorrectionTransactionMismatchError, SpeciesCorrectionWriteConflictError } from '@/config/editplan/tree-species-correction-writer';
 
 const MATCHED_PLAN_HASH = 'plan-hash-matched';
 const DRIFTED_PLAN_HASH = 'plan-hash-drifted';
@@ -84,7 +89,14 @@ const mocks = vi.hoisted(() => {
     })),
     assertBulkPlanCanApply: vi.fn(),
     MockBulkPlanUnapplicableError,
-    MockMeasurementResolutionError
+    MockMeasurementResolutionError,
+    // #427 bulk species-correction prepare/apply: mocked here (not the route's
+    // real group-partition/membership logic, which lives in route.ts itself
+    // and is exercised directly) so these tests control exactly what each
+    // group's prepare/apply phase returns or throws, without re-implementing
+    // prepareTreeSpeciesCorrection's real locked-replan machinery.
+    prepareBulkSpeciesCorrections: vi.fn<(...args: any[]) => Promise<any>>(),
+    applyPreparedBulkSpeciesCorrections: vi.fn<(...args: any[]) => Promise<any>>()
   };
 });
 
@@ -135,15 +147,33 @@ vi.mock('@/config/editplan/apply', () => ({
   SessionExpiredError: mocks.MockSessionExpiredError
 }));
 
-vi.mock('@/config/editplan/bulkanalyzer', () => ({
-  analyzeBulk: mocks.analyzeBulk,
-  assertBulkPlanCanApply: mocks.assertBulkPlanCanApply,
-  BulkPlanUnapplicableError: mocks.MockBulkPlanUnapplicableError
-}));
+vi.mock('@/config/editplan/bulkanalyzer', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/config/editplan/bulkanalyzer')>();
+  return {
+    ...actual,
+    analyzeBulk: mocks.analyzeBulk,
+    assertBulkPlanCanApply: mocks.assertBulkPlanCanApply,
+    BulkPlanUnapplicableError: mocks.MockBulkPlanUnapplicableError
+  };
+});
 
 vi.mock('@/config/editplan/writers/resolvers-mutating', () => ({
   MeasurementResolutionError: mocks.MockMeasurementResolutionError
 }));
+
+// Only prepareBulkSpeciesCorrections/applyPreparedBulkSpeciesCorrections are
+// mocked here. Every error class is re-exported from the real module via
+// importOriginal, so the route's own `instanceof` classification (BulkSpecies-
+// CorrectionInputError / ...UnresolvedMeasurementError / ...ApplyScopeMismatchError)
+// keeps working against instances these tests construct directly.
+vi.mock('@/config/editplan/bulk-species-correction-writer', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/config/editplan/bulk-species-correction-writer')>();
+  return {
+    ...actual,
+    prepareBulkSpeciesCorrections: mocks.prepareBulkSpeciesCorrections,
+    applyPreparedBulkSpeciesCorrections: mocks.applyPreparedBulkSpeciesCorrections
+  };
+});
 
 vi.mock('@/config/editplan/analyzer', () => ({
   RoleForbiddenFieldError: mocks.MockRoleForbiddenFieldError
@@ -243,6 +273,88 @@ function buildFreshPlan(planHash: string, overrides: Record<string, unknown> = {
   };
 }
 
+// --- #427 bulk species-correction fixtures -------------------------------
+// The route indexes a group member's rowPlan by `rowPlan.rowIndex` (a Map,
+// not array position) and requires `rowPlan.plan` to be truthy before it
+// will build that member's BulkSpeciesCorrectionMemberInput. Since
+// prepareBulkSpeciesCorrections/applyPreparedBulkSpeciesCorrections are
+// mocked below, these EditPlan stubs only need to be real enough to satisfy
+// that truthiness/targetID check — their field-level content is irrelevant
+// because no real writer ever reads it in these tests.
+function buildGroupMemberPlan(targetID: number): Record<string, unknown> {
+  return {
+    dataType: 'measurementssummary',
+    targetID,
+    fieldChanges: [{ field: 'SpeciesCode', from: 'AAA', to: 'BBB' }],
+    effects: [],
+    maxSeverity: 'info',
+    planHash: `member-plan-${targetID}`,
+    generatedAt: '2026-04-21T00:00:00Z'
+  };
+}
+
+// For a group member whose own diff is empty (rowPlan status 'unchanged'):
+// no fieldChanges and no `speciesCorrection`, matching what the real
+// analyzer actually produces for a zero-change row.
+function buildUnchangedGroupMemberPlan(targetID: number): Record<string, unknown> {
+  return {
+    dataType: 'measurementssummary',
+    targetID,
+    fieldChanges: [],
+    effects: [],
+    maxSeverity: 'info',
+    planHash: `member-plan-unchanged-${targetID}`,
+    generatedAt: '2026-04-21T00:00:00Z'
+  };
+}
+
+const SPECIES_GROUP_TREE_ID = 909;
+const SPECIES_GROUP_CENSUS_ID = 2;
+
+function buildSpeciesCorrectionGroup(members: Array<{ rowIndex: number; coreMeasurementID: number; requestedCorrection: boolean }>): Record<string, unknown> {
+  return {
+    version: 1,
+    treeID: SPECIES_GROUP_TREE_ID,
+    censusID: SPECIES_GROUP_CENSUS_ID,
+    correction: {
+      version: 1,
+      targetTreeID: SPECIES_GROUP_TREE_ID,
+      treeTag: 'T',
+      plotID: 1,
+      censusID: SPECIES_GROUP_CENSUS_ID,
+      oldSpeciesID: 1,
+      oldSpeciesCode: 'AAA',
+      newSpeciesID: 2,
+      newSpeciesCode: 'BBB',
+      activeStemCount: 1,
+      inactiveStemCount: 0,
+      activeMeasurementCount: members.length,
+      inactiveMeasurementCount: 0,
+      stems: [],
+      measurements: []
+    },
+    members,
+    affectedCoreMeasurementIDs: members.map(m => m.coreMeasurementID),
+    affectedStemGUIDs: []
+  };
+}
+
+// Mirrors the two FIXED, unexported `code` constants route.ts attaches to
+// every #427 species-correction error response (F34) — redefined here
+// because the route does not export them, exactly like this file already
+// redefines the route's literal response shapes elsewhere (e.g. 'role
+// forbidden field').
+const SPECIES_CORRECTION_CONFLICT_CODE = 'species-correction-conflict';
+const SPECIES_CORRECTION_SERVER_FAILURE_CODE = 'species-correction-server-failure';
+
+// Sentinel "obviously sensitive" substrings embedded in mocked errors below,
+// to prove the response body never contains raw internals (F34).
+const SENSITIVE_SQL_FRAGMENT = 'UPDATE forestgeo_testing.trees SET SpeciesID';
+const SENSITIVE_REASON_TOKEN = 'ER_DUP_ENTRY-1062-unique-constraint';
+const SENSITIVE_CORE_MEASUREMENT_ID = 918273;
+const SENSITIVE_TRANSACTION_ID_PREPARED = 'txn-secret-prepared-55512';
+const SENSITIVE_TRANSACTION_ID_APPLY = 'txn-secret-apply-99981';
+
 describe('POST /api/revisionupload/apply', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -272,6 +384,24 @@ describe('POST /api/revisionupload/apply', () => {
       applyErrors: [],
       editOperationID: null,
       validationPending: true
+    });
+    // Harmless no-op defaults: every existing (pre-#427) test keeps
+    // speciesCorrectionGroups empty on its fresh plan, so the route's
+    // `speciesCorrectionGroups.length > 0` guard never calls either of these
+    // — only the #427 tests below override them.
+    mocks.prepareBulkSpeciesCorrections.mockResolvedValue({
+      transactionID: 'tx-1',
+      schema: 'forestgeo_testing',
+      plotID: 1,
+      censusID: 2,
+      groups: []
+    });
+    mocks.applyPreparedBulkSpeciesCorrections.mockResolvedValue({
+      correctedTreeIDs: [],
+      updatedMemberCoreMeasurementIDs: [],
+      additionalAffectedCoreMeasurementIDs: [],
+      allAffectedCoreMeasurementIDs: [],
+      groups: []
     });
   });
 
@@ -399,8 +529,8 @@ describe('POST /api/revisionupload/apply', () => {
       2,
       {
         matched: [
-          { rowIndex: 0, targetID: 101, newRow: { MeasuredDBH: 12.5 } },
-          { rowIndex: 1, targetID: 202, newRow: {} }
+          { rowIndex: 0, targetID: 101, newRow: { MeasuredDBH: 12.5 }, explicitSpeciesCode: null },
+          { rowIndex: 1, targetID: 202, newRow: {}, explicitSpeciesCode: null }
         ],
         newRows: [{ rowIndex: 5, newRow: { TreeTag: 'T2', MeasuredDBH: 1.2 } }],
         invalid: [{ rowIndex: 7, reason: 'duplicate stemid' }],
@@ -409,6 +539,44 @@ describe('POST /api/revisionupload/apply', () => {
       'tx-1',
       { role: 'global' }
     );
+  });
+
+  it('carries explicitSpeciesCode into the recomputed bulk input, even when the spcode cell is unchanged and dropped from newRow (#427 batch species-correction grouping needs the sibling signal computeDiff throws away)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101, { SpeciesCode: 'QUEMAR' }), buildDbRow(202, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            // Row 0: spcode retyped with a case-only match against the DB
+            // value — computeDiff reports no change, so newRow carries no
+            // SpeciesCode, but the request still explicitly named 'quemar'.
+            { coreMeasurementID: 101, csvRow: { spcode: 'quemar' } },
+            // Row 1: blank spcode — genuinely unspecified.
+            { coreMeasurementID: 202, csvRow: { spcode: '' } }
+          ]
+        })
+      )
+    );
+
+    expect(mocks.analyzeBulk).toHaveBeenCalledTimes(1);
+    const analyzeArgs = mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>;
+    const bulkInput = analyzeArgs[5] as {
+      matched: Array<{ targetID: number; newRow: Record<string, unknown>; explicitSpeciesCode?: string | null }>;
+    };
+    expect(bulkInput.matched).toHaveLength(2);
+
+    const row0 = bulkInput.matched.find(m => m.targetID === 101)!;
+    expect(row0.newRow).toEqual({});
+    expect(row0.explicitSpeciesCode).toBe('quemar');
+
+    const row1 = bulkInput.matched.find(m => m.targetID === 202)!;
+    expect(row1.explicitSpeciesCode).toBeNull();
   });
 
   it('stages new rows with plot coordinates into temporarymeasurements PlotX/PlotY', async () => {
@@ -627,6 +795,140 @@ describe('POST /api/revisionupload/apply', () => {
     expect(secondBulkInput.duplicateMeasurementIDsToDelete).toEqual([]);
     expect(mocks.applyEditInTransaction).toHaveBeenCalledTimes(1);
     expect((mocks.applyEditInTransaction.mock.calls[0] as unknown as [unknown, Record<string, unknown>])[1]).toMatchObject({ targetID: 202 });
+  });
+
+  const GROUP_CONFLICT_TREE_ID = 42;
+  const GROUP_CONFLICT_ROW_INDEXES = [0, 1];
+  const GROUP_SPECIES_CONFLICT_ERROR = {
+    kind: 'TreeStemResolution',
+    subject: 'species',
+    reason: 'group_species_conflict',
+    field: 'SpeciesCode',
+    message: `Tree T#${GROUP_CONFLICT_TREE_ID} (TreeTag "T") has conflicting species corrections requested in this batch: "BBB", "CCC". Submit one species per tree in a single batch.`,
+    severity: 'destructive',
+    blocking: true,
+    treeID: GROUP_CONFLICT_TREE_ID,
+    rowIndex: GROUP_CONFLICT_ROW_INDEXES[0],
+    rowIndexes: GROUP_CONFLICT_ROW_INDEXES
+  } as const;
+
+  it('skips the demote-and-re-run and surfaces the group blocker via the existing unapplicable-plan path when the fresh plan carries a batch-level group blocker (#427)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101), buildDbRow(202)];
+      }
+      return [];
+    });
+
+    // Row 0 (target 101) individually threw and would normally be demoted;
+    // row 1 (target 202) matched fine. Both also triggered the group conflict.
+    mocks.analyzeBulk.mockResolvedValueOnce(
+      buildFreshPlan('plan-with-group-blocker', {
+        rowCount: 2,
+        rowPlans: [
+          { rowIndex: 0, targetID: 101, status: 'invalid', reason: 'Row 1: species "BBB" was not found' },
+          { rowIndex: 1, targetID: 202, status: 'matched' }
+        ],
+        errors: [GROUP_SPECIES_CONFLICT_ERROR],
+        maxSeverity: 'destructive'
+      })
+    );
+    mocks.assertBulkPlanCanApply.mockImplementation(() => {
+      throw new mocks.MockBulkPlanUnapplicableError([GROUP_SPECIES_CONFLICT_ERROR]);
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            { csvIndex: 10, coreMeasurementID: 101, csvRow: { spcode: 'BBB' } },
+            { csvIndex: 11, coreMeasurementID: 202, csvRow: { spcode: 'CCC' } }
+          ]
+        })
+      )
+    );
+
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body).toEqual({ error: 'plan not applicable', blockingErrors: [GROUP_SPECIES_CONFLICT_ERROR] });
+    expect(
+      mocks.analyzeBulk,
+      'a batch-level group blocker already makes canApply false; re-running on survivors only would drop row 0 explicitSpeciesCode and silently erase the conflict'
+    ).toHaveBeenCalledTimes(1);
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('still demotes and re-runs when the only blocking error is a non-group TreeStemResolution reason (regression: the #427 gate must match only reason values prefixed "group_", not any blocking error)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101), buildDbRow(202)];
+      }
+      return [];
+    });
+    mocks.analyzeBulk
+      .mockResolvedValueOnce(
+        buildFreshPlan('plan-with-non-group-blocker', {
+          rowCount: 2,
+          rowPlans: [
+            { rowIndex: 0, targetID: 101, status: 'invalid', reason: 'Matching stem exists in a different quadrat' },
+            { rowIndex: 1, targetID: 202, status: 'matched' }
+          ],
+          errors: [
+            {
+              kind: 'TreeStemResolution',
+              subject: 'stem',
+              reason: 'different_quadrat',
+              field: 'QuadratName',
+              message: 'Matching stem exists in a different quadrat',
+              severity: 'destructive',
+              blocking: true,
+              rowIndex: 0
+            }
+          ],
+          maxSeverity: 'destructive'
+        })
+      )
+      .mockResolvedValueOnce(
+        buildFreshPlan(MATCHED_PLAN_HASH, {
+          rowCount: 2,
+          rowPlans: [
+            { rowIndex: 0, targetID: 202, status: 'matched' },
+            { rowIndex: 10, status: 'invalid', reason: 'Matching stem exists in a different quadrat' }
+          ]
+        })
+      );
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            { csvIndex: 10, coreMeasurementID: 101, csvRow: { quadrat: '999' } },
+            { csvIndex: 11, coreMeasurementID: 202, csvRow: { dbh: '12.5' } }
+          ]
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      updatedCount: 1,
+      skippedCount: 0,
+      deletedDuplicateCount: 0
+    });
+    expect(
+      mocks.analyzeBulk,
+      'a non-group blocking error must not engage the #427 gate; demotion+re-run is still required so classify and apply hash the same survivor-only input'
+    ).toHaveBeenCalledTimes(2);
+    const secondBulkInput = (mocks.analyzeBulk.mock.calls[1] as unknown as Array<unknown>)[5] as {
+      matched: Array<{ targetID: number }>;
+      invalid: Array<{ rowIndex: number; reason: string }>;
+    };
+    expect(secondBulkInput.matched.map(row => row.targetID)).toEqual([202]);
+    expect(secondBulkInput.invalid).toEqual([{ rowIndex: 10, reason: 'Matching stem exists in a different quadrat' }]);
   });
 
   it('returns 403 when the recomputed bulk plan contains role-forbidden fields', async () => {
@@ -1067,5 +1369,314 @@ describe('POST /api/revisionupload/apply', () => {
     const analyzeArgs = mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>;
     const bulkInput = analyzeArgs[5] as { matched: Array<{ newRow: Record<string, unknown> }> };
     expect(bulkInput.matched[0].newRow).toEqual({});
+  });
+
+  it('routes a species-correction group member through applyPreparedBulkSpeciesCorrections and skips it in the ordinary per-row apply loop, while the non-member row still goes through applyEditInTransaction (#427 group routing)', async () => {
+    const GROUP_MEMBER_CORE_ID = 501;
+    const ORDINARY_ROW_CORE_ID = 601;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(GROUP_MEMBER_CORE_ID, { SpeciesCode: 'AAA' }), buildDbRow(ORDINARY_ROW_CORE_ID)];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 2,
+        rowPlans: [
+          { rowIndex: 0, targetID: GROUP_MEMBER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(GROUP_MEMBER_CORE_ID) },
+          { rowIndex: 1, targetID: ORDINARY_ROW_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(ORDINARY_ROW_CORE_ID) }
+        ],
+        speciesCorrectionGroups: [buildSpeciesCorrectionGroup([{ rowIndex: 0, coreMeasurementID: GROUP_MEMBER_CORE_ID, requestedCorrection: true }])]
+      })
+    );
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            { coreMeasurementID: GROUP_MEMBER_CORE_ID, csvRow: { spcode: 'BBB' } },
+            { coreMeasurementID: ORDINARY_ROW_CORE_ID, csvRow: { dbh: '12.5' } }
+          ]
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.prepareBulkSpeciesCorrections).toHaveBeenCalledTimes(1);
+    expect(mocks.applyPreparedBulkSpeciesCorrections).toHaveBeenCalledTimes(1);
+
+    const applyCalls = mocks.applyEditInTransaction.mock.calls as unknown as Array<[unknown, Record<string, unknown>]>;
+    const memberCall = applyCalls.find(call => call[1].targetID === GROUP_MEMBER_CORE_ID);
+    expect(
+      memberCall,
+      'the group member must never reach the ordinary per-row writer — its write context cannot be threaded through applyEditInTransaction'
+    ).toBeUndefined();
+
+    const ordinaryCall = applyCalls.find(call => call[1].targetID === ORDINARY_ROW_CORE_ID);
+    expect(ordinaryCall, 'the non-member row must still go through the ordinary writer').toBeDefined();
+    expect(mocks.applyEditInTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('includes a submitted sibling row whose own diff is empty (rowPlan status "unchanged") as a species-correction group member instead of 500ing the whole batch (#427 fix F35 regression)', async () => {
+    const REQUESTER_CORE_ID = 501;
+    const UNCHANGED_SIBLING_CORE_ID = 502;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(REQUESTER_CORE_ID, { SpeciesCode: 'AAA' }), buildDbRow(UNCHANGED_SIBLING_CORE_ID, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 2,
+        rowPlans: [
+          { rowIndex: 0, targetID: REQUESTER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(REQUESTER_CORE_ID) },
+          { rowIndex: 1, targetID: UNCHANGED_SIBLING_CORE_ID, status: 'unchanged', plan: buildUnchangedGroupMemberPlan(UNCHANGED_SIBLING_CORE_ID) }
+        ],
+        speciesCorrectionGroups: [
+          buildSpeciesCorrectionGroup([
+            { rowIndex: 0, coreMeasurementID: REQUESTER_CORE_ID, requestedCorrection: true },
+            { rowIndex: 1, coreMeasurementID: UNCHANGED_SIBLING_CORE_ID, requestedCorrection: false }
+          ])
+        ]
+      })
+    );
+
+    const speciesCorrectionsSummary = {
+      correctedTreeIDs: [SPECIES_GROUP_TREE_ID],
+      updatedMemberCoreMeasurementIDs: [REQUESTER_CORE_ID],
+      additionalAffectedCoreMeasurementIDs: [],
+      allAffectedCoreMeasurementIDs: [REQUESTER_CORE_ID],
+      groups: []
+    };
+    mocks.applyPreparedBulkSpeciesCorrections.mockResolvedValueOnce(speciesCorrectionsSummary);
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            { coreMeasurementID: REQUESTER_CORE_ID, csvRow: { spcode: 'BBB' } },
+            // Species omitted entirely: this sibling's own diff is empty,
+            // so it is a legitimate zero-change group member pulled in by
+            // tree membership — not an ordinary skip, and not absent.
+            { coreMeasurementID: UNCHANGED_SIBLING_CORE_ID, csvRow: {} }
+          ]
+        })
+      )
+    );
+
+    expect(response.status, 'removing the "unchanged" half of the rowPlan-status filter trips the assembly guard and 500s the whole batch').toBe(200);
+    const body = await response.json();
+    expect(body.code).toBeUndefined();
+
+    expect(mocks.prepareBulkSpeciesCorrections).toHaveBeenCalledTimes(1);
+    const prepareInput = mocks.prepareBulkSpeciesCorrections.mock.calls[0][1] as { members: Array<{ coreMeasurementID: number }> };
+    expect(prepareInput.members.map(m => m.coreMeasurementID).sort((a, b) => a - b)).toEqual([REQUESTER_CORE_ID, UNCHANGED_SIBLING_CORE_ID]);
+
+    // The requester's own row-local write is accounted for inside
+    // applyPreparedBulkSpeciesCorrections (route.ts ~1058), not the ordinary
+    // per-row loop (route.ts ~1005-1009 `continue`s past every group
+    // member). The zero-change sibling is a submitted member absent from
+    // updatedMemberCoreMeasurementIDs, so it increments skippedCount exactly
+    // once (route.ts ~1064-1068) — never through the ordinary-row
+    // zero-diff branch at ~1012, which group members never reach.
+    expect(body.updatedCount).toBe(1);
+    expect(body.skippedCount).toBe(1);
+  });
+
+  it('completes species-correction preparation but performs zero writes when assertAuthorizationFresh rejects immediately afterward (#427 fix F33: the single fresh-auth call sits right before the first mutation)', async () => {
+    const REQUESTER_CORE_ID = 501;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(REQUESTER_CORE_ID, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: REQUESTER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(REQUESTER_CORE_ID) }],
+        speciesCorrectionGroups: [buildSpeciesCorrectionGroup([{ rowIndex: 0, coreMeasurementID: REQUESTER_CORE_ID, requestedCorrection: true }])]
+      })
+    );
+    mocks.assertAuthorizationFresh.mockRejectedValueOnce(new mocks.MockSessionExpiredError());
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: REQUESTER_CORE_ID, csvRow: { spcode: 'BBB' } }]
+        })
+      )
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: 'session expired' });
+
+    expect(mocks.prepareBulkSpeciesCorrections, 'preparation is read-only and must complete before the fresh-auth gate').toHaveBeenCalledTimes(1);
+    expect(mocks.applyPreparedBulkSpeciesCorrections).not.toHaveBeenCalled();
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+    expect(mocks.writeEditOperation).not.toHaveBeenCalled();
+    expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('DELETE FROM ??.coremeasurements'), expect.anything(), expect.anything());
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('INSERT INTO ??.temporarymeasurements'), expect.anything(), expect.anything());
+  });
+
+  it('surfaces a species-correction write conflict as the FIXED safe 422 message/code, never the raw drift message, SQL fragment, coreMeasurementID, or transaction id it carried (#427 fix F34)', async () => {
+    const REQUESTER_CORE_ID = 501;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(REQUESTER_CORE_ID, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: REQUESTER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(REQUESTER_CORE_ID) }],
+        speciesCorrectionGroups: [buildSpeciesCorrectionGroup([{ rowIndex: 0, coreMeasurementID: REQUESTER_CORE_ID, requestedCorrection: true }])]
+      })
+    );
+
+    const sensitiveDriftMessage = `${SENSITIVE_SQL_FRAGMENT} reason=${SENSITIVE_REASON_TOKEN} coreMeasurementID=${SENSITIVE_CORE_MEASUREMENT_ID} txID=${SENSITIVE_TRANSACTION_ID_PREPARED}`;
+    mocks.applyPreparedBulkSpeciesCorrections.mockRejectedValueOnce(new SpeciesCorrectionWriteConflictError({ kind: 'drift', message: sensitiveDriftMessage }));
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: REQUESTER_CORE_ID, csvRow: { spcode: 'BBB' } }]
+        })
+      )
+    );
+
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.code).toBe(SPECIES_CORRECTION_CONFLICT_CODE);
+    expect(body.freshPlan, '409+freshPlan is reserved exclusively for actual plan-hash drift, never a write-conflict').toBeUndefined();
+
+    const bodyText = JSON.stringify(body);
+    expect(bodyText).not.toContain(SENSITIVE_SQL_FRAGMENT);
+    expect(bodyText).not.toContain(SENSITIVE_REASON_TOKEN);
+    expect(bodyText).not.toContain(String(SENSITIVE_CORE_MEASUREMENT_ID));
+    expect(bodyText).not.toContain(SENSITIVE_TRANSACTION_ID_PREPARED);
+  });
+
+  it('propagates a mid-apply applyPreparedBulkSpeciesCorrections failure with no ledger write and no view refresh, surfacing the FIXED safe 500 server-failure code, never leaking the transaction ids it carried (#427 fix F34)', async () => {
+    const REQUESTER_CORE_ID = 501;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(REQUESTER_CORE_ID, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: REQUESTER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(REQUESTER_CORE_ID) }],
+        speciesCorrectionGroups: [buildSpeciesCorrectionGroup([{ rowIndex: 0, coreMeasurementID: REQUESTER_CORE_ID, requestedCorrection: true }])]
+      })
+    );
+
+    mocks.applyPreparedBulkSpeciesCorrections.mockRejectedValueOnce(
+      new SpeciesCorrectionTransactionMismatchError(SENSITIVE_TRANSACTION_ID_PREPARED, SENSITIVE_TRANSACTION_ID_APPLY)
+    );
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: REQUESTER_CORE_ID, csvRow: { spcode: 'BBB' } }]
+        })
+      )
+    );
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body.code).toBe(SPECIES_CORRECTION_SERVER_FAILURE_CODE);
+    expect(body.freshPlan).toBeUndefined();
+
+    const bodyText = JSON.stringify(body);
+    expect(bodyText).not.toContain(SENSITIVE_TRANSACTION_ID_PREPARED);
+    expect(bodyText).not.toContain(SENSITIVE_TRANSACTION_ID_APPLY);
+
+    // Limitation: this harness's withTransaction mock has no commit/rollback
+    // spies, so it cannot observe actual rollback. Real transactional
+    // atomicity is covered by the DB integration suite.
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+    expect(mocks.writeEditOperation, 'a mid-apply failure must never produce a ledger entry for a partially-applied batch').not.toHaveBeenCalled();
+    expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+  });
+
+  it('reports the full affected species-correction membership (submitted members plus additionally-affected unsubmitted measurements) on a non-revertable ledger entry, without inflating updatedCount for the unsubmitted ones (#427)', async () => {
+    const REQUESTER_CORE_ID = 501;
+    const ADDITIONALLY_AFFECTED_CORE_ID = 777;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(REQUESTER_CORE_ID, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: REQUESTER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(REQUESTER_CORE_ID) }],
+        speciesCorrectionGroups: [buildSpeciesCorrectionGroup([{ rowIndex: 0, coreMeasurementID: REQUESTER_CORE_ID, requestedCorrection: true }])]
+      })
+    );
+
+    const speciesCorrectionsSummary = {
+      correctedTreeIDs: [SPECIES_GROUP_TREE_ID],
+      updatedMemberCoreMeasurementIDs: [REQUESTER_CORE_ID],
+      additionalAffectedCoreMeasurementIDs: [ADDITIONALLY_AFFECTED_CORE_ID],
+      allAffectedCoreMeasurementIDs: [REQUESTER_CORE_ID, ADDITIONALLY_AFFECTED_CORE_ID],
+      groups: []
+    };
+    mocks.applyPreparedBulkSpeciesCorrections.mockResolvedValueOnce(speciesCorrectionsSummary);
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: REQUESTER_CORE_ID, csvRow: { spcode: 'BBB' } }]
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.speciesCorrections).toEqual(speciesCorrectionsSummary);
+    expect(body.updatedCount, 'a not-submitted measurement the correction also touched must never inflate updatedCount').toBe(1);
+
+    expect(mocks.writeEditOperation).toHaveBeenCalledTimes(1);
+    const summaryArgs = mocks.writeEditOperation.mock.calls[0] as unknown as [unknown, string, Record<string, unknown>, string];
+    const summaryRecord = summaryArgs[2];
+    expect(summaryRecord.revertable, 'a species-correction batch ledger entry must be non-revertable').toBe(false);
+
+    const beforeStateRow = (summaryRecord.beforeState as Array<Record<string, unknown>>)[0].row as Record<string, unknown>;
+    const recordedSpeciesCorrections = beforeStateRow.speciesCorrections as typeof speciesCorrectionsSummary;
+    expect(recordedSpeciesCorrections.additionalAffectedCoreMeasurementIDs).toEqual([ADDITIONALLY_AFFECTED_CORE_ID]);
+    expect(recordedSpeciesCorrections.allAffectedCoreMeasurementIDs).toEqual([REQUESTER_CORE_ID, ADDITIONALLY_AFFECTED_CORE_ID]);
   });
 });

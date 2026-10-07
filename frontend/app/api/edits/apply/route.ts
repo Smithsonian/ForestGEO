@@ -17,8 +17,16 @@ import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from 
 import { InvalidClearError, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 import { requireSession } from '@/lib/auth-helpers';
+import { SpeciesCorrectionWriteConflictError } from '@/config/editplan/tree-species-correction-writer';
 
 export const runtime = 'nodejs';
+
+// The writer's conflict reason (`replan` | `drift` | `unique-constraint`)
+// carries SQL/plan internals in its `message` — never surfaced to the
+// client. This fixed message is the only text the caller sees.
+const SPECIES_CORRECTION_CONFLICT_CODE = 'species-correction-conflict';
+const SPECIES_CORRECTION_CONFLICT_MESSAGE =
+  "This tree's species state changed since this edit was previewed. Refresh and preview the edit again before applying.";
 
 const ApplyBody = z.object({
   schema: z.string(),
@@ -99,6 +107,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (err instanceof HashDriftError) {
       return NextResponse.json({ error: 'plan hash mismatch', freshPlan: err.freshPlan }, { status: HTTPResponses.CONFLICT });
+    }
+    if (err instanceof SpeciesCorrectionWriteConflictError) {
+      return NextResponse.json(
+        { error: SPECIES_CORRECTION_CONFLICT_MESSAGE, code: SPECIES_CORRECTION_CONFLICT_CODE },
+        { status: HTTPResponses.UNPROCESSABLE_ENTITY }
+      );
     }
     if (err instanceof ScopeLockHeldError) {
       return NextResponse.json({ error: 'scope locked' }, { status: HTTPResponses.LOCKED });

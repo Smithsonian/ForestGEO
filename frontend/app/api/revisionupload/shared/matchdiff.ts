@@ -207,6 +207,24 @@ export function computeDiff(csvRow: FileRow, dbRow: ExistingMeasurementRow): Rec
 }
 
 /**
+ * `computeDiff` drops a `spcode` cell whenever it is blank/NULL or equal
+ * (case-insensitively) to the stored species code — the cell carries "no
+ * change", so it never reaches `buildAnalyzerRowFromChanges`'s `newRow`. That
+ * makes an explicit-but-unchanged species request on one batch row invisible
+ * to anything comparing it against a sibling row's tree-wide species
+ * correction (#427 batch grouping). This reads the CSV cell directly,
+ * bypassing the diff, so that comparison has something to look at. The
+ * returned spelling is NOT canonicalized (not upper/lowercased): the caller
+ * compares case-insensitively, and the original spelling is what the user
+ * typed.
+ */
+export function readExplicitSpeciesCode(csvRow: FileRow): string | null {
+  const requested = csvRow.spcode;
+  if (isBlankOrNullPlaceholder(requested)) return null;
+  return String(requested).trim();
+}
+
+/**
  * Builds an analyzer-side `newRow` from the diff output rather than the raw
  * CSV row. This keeps revision-upload semantics single-sourced: the analyzer
  * and apply paths only see fields that `computeDiff` flagged as genuine

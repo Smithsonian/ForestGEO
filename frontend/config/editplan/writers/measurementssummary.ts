@@ -20,6 +20,15 @@ import { handleUpsert } from '@/config/utils';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { CMAttributesResult } from '@/lib/db/definitions/core';
 import { parseAttributeCodes } from '../rules/attributes';
+import {
+  prepareTreeSpeciesCorrection,
+  applyPreparedTreeSpeciesCorrection,
+  assertNoEditedFieldDriftForSpeciesCorrection,
+  buildSpeciesCorrectionDomainDiff,
+  buildSpeciesCorrectionMetadataStateRows,
+  PreparedSpeciesCorrection,
+  AppliedSpeciesCorrectionResult
+} from '../tree-species-correction-writer';
 
 export interface WriterResult {
   updatedIDs: Record<string, number>;
@@ -27,6 +36,102 @@ export interface WriterResult {
   afterState: EditOperationStateRow[];
   postValidation?: { newErrors: number; clearedErrors: number };
   validationPending: boolean;
+}
+
+// --- #427 batch-executor group-member write context -----------------------
+// A tree-wide species correction's batch executor writes every group
+// member's row-local fields through this writer FIRST, then applies the
+// correction itself exactly once afterward — because applying the
+// correction ends by refreshing ingestion errors/validation state for every
+// attached member, which must observe the already-edited values. This
+// context flips this writer onto the same sparse correction write policy
+// (see `correctionWritePolicyActive` below) for that row-local write
+// WITHOUT also re-running the tree correction — never constructible from
+// request JSON; the writer instead validates it at the top of
+// `writeMeasurementsSummary`, before any read or write.
+export const SPECIES_CORRECTION_GROUP_MEMBER_WRITE_KIND = 'species-correction-group-member';
+
+export interface SpeciesCorrectionGroupMemberWriteContext {
+  kind: typeof SPECIES_CORRECTION_GROUP_MEMBER_WRITE_KIND;
+  /** Must equal the `txID` this exact call runs under — the executor's own open transaction, never a different one. */
+  transactionID: string;
+  schema: string;
+  plotID: number;
+  censusID: number;
+  /** Must equal `Number(input.targetID)` — the row this specific write is for. */
+  targetCoreMeasurementID: number;
+}
+
+export class SpeciesCorrectionGroupMemberContextError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SpeciesCorrectionGroupMemberContextError';
+  }
+}
+
+/**
+ * Hard validation standing in for "not constructible from request JSON" —
+ * every field the context claims is cross-checked against the caller's own
+ * `input`/`plan`/`txID` before any read or write runs. `writeLedger`/
+ * `refreshViews` must both be exactly `false`: the group path builds no
+ * ledger row (so no `species_correction_metadata` marker either) and no
+ * per-row view refresh (the batch's sibling set is not available here; the
+ * executor runs one scope refresh after every member is written).
+ * `plan.speciesCorrection` must be absent — a group member's row-local write
+ * must never also carry its own correction plan, since the executor applies
+ * that correction exactly once, outside this call.
+ */
+function assertValidSpeciesCorrectionGroupMemberContext(
+  context: SpeciesCorrectionGroupMemberWriteContext,
+  input: ApplyInTransactionInput,
+  plan: EditPlan,
+  txID: string
+): void {
+  if (context.kind !== SPECIES_CORRECTION_GROUP_MEMBER_WRITE_KIND) {
+    throw new SpeciesCorrectionGroupMemberContextError(
+      `species-correction group-member write context has kind "${String(context.kind)}"; expected "${SPECIES_CORRECTION_GROUP_MEMBER_WRITE_KIND}".`
+    );
+  }
+  if (context.transactionID !== txID) {
+    throw new SpeciesCorrectionGroupMemberContextError(
+      `species-correction group-member write context's transactionID ("${context.transactionID}") does not match this call's own transaction ("${txID}"); a group-member write must run inside the executor's own transaction.`
+    );
+  }
+  if (context.schema !== input.schema) {
+    throw new SpeciesCorrectionGroupMemberContextError(
+      `species-correction group-member write context's schema ("${context.schema}") does not match input.schema ("${input.schema}").`
+    );
+  }
+  if (Number(context.plotID) !== Number(input.plotID)) {
+    throw new SpeciesCorrectionGroupMemberContextError(
+      `species-correction group-member write context's plotID (${context.plotID}) does not match input.plotID (${input.plotID}).`
+    );
+  }
+  if (Number(context.censusID) !== Number(input.censusID)) {
+    throw new SpeciesCorrectionGroupMemberContextError(
+      `species-correction group-member write context's censusID (${context.censusID}) does not match input.censusID (${input.censusID}).`
+    );
+  }
+  if (Number(context.targetCoreMeasurementID) !== Number(input.targetID)) {
+    throw new SpeciesCorrectionGroupMemberContextError(
+      `species-correction group-member write context's targetCoreMeasurementID (${context.targetCoreMeasurementID}) does not match input.targetID (${input.targetID}).`
+    );
+  }
+  if (input.writeLedger !== false) {
+    throw new SpeciesCorrectionGroupMemberContextError(
+      'species-correction group-member write requires input.writeLedger === false; the group path builds no ledger row and therefore no species_correction_metadata marker.'
+    );
+  }
+  if (input.refreshViews !== false) {
+    throw new SpeciesCorrectionGroupMemberContextError(
+      'species-correction group-member write requires input.refreshViews === false; the batch executor performs one scope refresh after every member has been written.'
+    );
+  }
+  if (plan.speciesCorrection) {
+    throw new SpeciesCorrectionGroupMemberContextError(
+      'species-correction group-member write context cannot be combined with plan.speciesCorrection; the executor applies the tree-wide correction exactly once itself, outside this row-local write.'
+    );
+  }
 }
 
 const RAW_SYNC_TRIGGER_FIELDS: ReadonlySet<string> = new Set([
@@ -184,12 +289,25 @@ interface LoadedCoreMeasurementRow {
   QuadratID?: number | null;
 }
 
+/**
+ * `forUpdate` must be set on the #427 species-correction path (see
+ * `correctionWritePolicyActive` in `writeMeasurementsSummary`): the caller's own
+ * `analyzeEdit` may have run earlier in this exact transaction before any
+ * lock was taken, fixing a REPEATABLE READ snapshot that a plain `SELECT`
+ * here would still observe even though `tree-species-correction-writer.ts`'s
+ * locked replan has already forced a current read of the overlapping
+ * trees/stems/measurements rows — a lock taken by one statement does not
+ * make a later, unrelated plain `SELECT` current. Non-correction callers
+ * leave this `false` (default), preserving existing behavior exactly.
+ */
 async function loadCurrentJoinedRow(
   cm: ConnectionManager,
   schema: string,
   coreMeasurementID: number,
-  transactionID: string
+  transactionID: string,
+  options: { forUpdate?: boolean } = {}
 ): Promise<LoadedCoreMeasurementRow> {
+  const lockClause = options.forUpdate ? ' FOR UPDATE' : '';
   const rows = await cm.executeQuery(
     safeFormatQuery(
       schema,
@@ -220,7 +338,7 @@ async function loadCurrentJoinedRow(
      LEFT JOIN ??.species sp ON sp.SpeciesID = t.SpeciesID
      LEFT JOIN ??.quadrats q ON q.QuadratID = s.QuadratID
      WHERE cm.CoreMeasurementID = ?
-     LIMIT 1`
+     LIMIT 1${lockClause}`
     ),
     [coreMeasurementID],
     transactionID
@@ -229,40 +347,105 @@ async function loadCurrentJoinedRow(
   return rows[0] as LoadedCoreMeasurementRow;
 }
 
-async function loadCoreMeasurementRow(
+/**
+ * The 12 fields `assertNoEditedFieldDriftForSpeciesCorrection` checks
+ * (`SpeciesCode` excluded — that precondition belongs to the locked replan
+ * comparison in `tree-species-correction-writer.ts`). Single source of
+ * truth for the shape: used directly by the drift guard below AND by
+ * `loadLockedEditedFieldValuesForSpeciesCorrection`, so the batch executor's
+ * pre-write guard can never drift from this writer's own.
+ */
+function buildLockedEditedFieldValuesForSpeciesCorrection(row: LoadedCoreMeasurementRow): Record<string, unknown> {
+  return {
+    TreeTag: row.TreeTag,
+    StemTag: row.StemTag,
+    QuadratName: row.QuadratName,
+    StemLocalX: row.StemLocalX,
+    StemLocalY: row.StemLocalY,
+    StemPlotX: row.StemPlotX,
+    StemPlotY: row.StemPlotY,
+    MeasurementDate: row.MeasurementDate,
+    MeasuredDBH: row.MeasuredDBH,
+    MeasuredHOM: row.MeasuredHOM,
+    Description: row.Description,
+    Attributes: row.Attributes
+  };
+}
+
+/**
+ * Read-only: the exact locked (`FOR UPDATE`) current values the batch
+ * executor must pass to `assertNoEditedFieldDriftForSpeciesCorrection`
+ * (imported from `../tree-species-correction-writer`) before its own first
+ * write for a group member's row-local field changes. Issues NO write.
+ * `loadCurrentJoinedRow` already throws when the row does not exist, so a
+ * missing row never silently returns a half-empty map here.
+ */
+export async function loadLockedEditedFieldValuesForSpeciesCorrection(
   cm: ConnectionManager,
   schema: string,
   coreMeasurementID: number,
   transactionID: string
+): Promise<Record<string, unknown>> {
+  const row = await loadCurrentJoinedRow(cm, schema, coreMeasurementID, transactionID, { forUpdate: true });
+  return buildLockedEditedFieldValuesForSpeciesCorrection(row);
+}
+
+/** `forUpdate`: see `loadCurrentJoinedRow` doc comment above — same correction-path rationale. */
+async function loadCoreMeasurementRow(
+  cm: ConnectionManager,
+  schema: string,
+  coreMeasurementID: number,
+  transactionID: string,
+  options: { forUpdate?: boolean } = {}
 ): Promise<Record<string, unknown> | null> {
+  const lockClause = options.forUpdate ? ' FOR UPDATE' : '';
   const rows = await cm.executeQuery(
-    safeFormatQuery(schema, `SELECT * FROM ??.coremeasurements WHERE CoreMeasurementID = ? LIMIT 1`),
+    safeFormatQuery(schema, `SELECT * FROM ??.coremeasurements WHERE CoreMeasurementID = ? LIMIT 1${lockClause}`),
     [coreMeasurementID],
     transactionID
   );
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
-async function loadStemRow(cm: ConnectionManager, schema: string, stemGUID: number | null, transactionID: string): Promise<Record<string, unknown> | null> {
+/** `forUpdate`: see `loadCurrentJoinedRow` doc comment above — same correction-path rationale. */
+async function loadStemRow(
+  cm: ConnectionManager,
+  schema: string,
+  stemGUID: number | null,
+  transactionID: string,
+  options: { forUpdate?: boolean } = {}
+): Promise<Record<string, unknown> | null> {
   if (stemGUID === null) return null;
-  const rows = await cm.executeQuery(safeFormatQuery(schema, `SELECT * FROM ??.stems WHERE StemGUID = ? LIMIT 1`), [stemGUID], transactionID);
+  const lockClause = options.forUpdate ? ' FOR UPDATE' : '';
+  const rows = await cm.executeQuery(safeFormatQuery(schema, `SELECT * FROM ??.stems WHERE StemGUID = ? LIMIT 1${lockClause}`), [stemGUID], transactionID);
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
-async function loadTreeRow(cm: ConnectionManager, schema: string, treeID: number | null, transactionID: string): Promise<Record<string, unknown> | null> {
+/** `forUpdate`: see `loadCurrentJoinedRow` doc comment above — same correction-path rationale. */
+async function loadTreeRow(
+  cm: ConnectionManager,
+  schema: string,
+  treeID: number | null,
+  transactionID: string,
+  options: { forUpdate?: boolean } = {}
+): Promise<Record<string, unknown> | null> {
   if (treeID === null) return null;
-  const rows = await cm.executeQuery(safeFormatQuery(schema, `SELECT * FROM ??.trees WHERE TreeID = ? LIMIT 1`), [treeID], transactionID);
+  const lockClause = options.forUpdate ? ' FOR UPDATE' : '';
+  const rows = await cm.executeQuery(safeFormatQuery(schema, `SELECT * FROM ??.trees WHERE TreeID = ? LIMIT 1${lockClause}`), [treeID], transactionID);
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
+/** `forUpdate`: see `loadCurrentJoinedRow` doc comment above — same correction-path rationale. */
 async function loadCmAttributeRows(
   cm: ConnectionManager,
   schema: string,
   coreMeasurementID: number,
-  transactionID: string
+  transactionID: string,
+  options: { forUpdate?: boolean } = {}
 ): Promise<Array<Record<string, unknown>>> {
+  const lockClause = options.forUpdate ? ' FOR UPDATE' : '';
   const rows = await cm.executeQuery(
-    safeFormatQuery(schema, `SELECT * FROM ??.cmattributes WHERE CoreMeasurementID = ? ORDER BY CMAID`),
+    safeFormatQuery(schema, `SELECT * FROM ??.cmattributes WHERE CoreMeasurementID = ? ORDER BY CMAID${lockClause}`),
     [coreMeasurementID],
     transactionID
   );
@@ -332,7 +515,18 @@ async function findExactActiveStemGUID(
   return rows.length ? toPositiveNumber(rows[0].StemGUID) : null;
 }
 
-export async function writeMeasurementsSummary(cm: ConnectionManager, input: ApplyInTransactionInput, plan: EditPlan, txID: string): Promise<WriterResult> {
+export async function writeMeasurementsSummary(
+  cm: ConnectionManager,
+  input: ApplyInTransactionInput,
+  plan: EditPlan,
+  txID: string,
+  groupMemberContext?: SpeciesCorrectionGroupMemberWriteContext
+): Promise<WriterResult> {
+  // Must run before ANY read/write below — see `assertValidSpeciesCorrectionGroupMemberContext`'s own doc comment.
+  if (groupMemberContext) {
+    assertValidSpeciesCorrectionGroupMemberContext(groupMemberContext, input, plan, txID);
+  }
+
   const { schema, plotID, censusID, targetID } = input;
   const coreMeasurementID = Number(targetID);
 
@@ -342,14 +536,36 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
     newValues[field] = to;
   }
 
-  // Capture before-state rows for exact-revert support.
-  const beforeCoreRow = await loadCoreMeasurementRow(cm, schema, coreMeasurementID, txID);
+  // True only for the row that itself carries the previewed correction (the
+  // tree-correction target). Drives ONLY the pre-write drift guard below —
+  // never the broader write-policy gates, which also cover a group member's
+  // row-local write (see `correctionWritePolicyActive`).
+  const hasOwnSpeciesCorrectionPlan = Boolean(plan.speciesCorrection);
+
+  // A #427 species correction — whether this row carries its own correction
+  // plan, or is a sibling group member whose row-local field changes the
+  // batch executor is applying via `groupMemberContext` — rewrites the
+  // EXISTING tree's SpeciesID in place (see tree-species-correction-writer.ts)
+  // rather than re-linking this measurement to a different/newly-created
+  // tree, and must never hard-delete this row's error history. Computed from
+  // `plan`/`groupMemberContext` alone (no DB read needed), so every
+  // read/write below this point on the correction path can be made a
+  // current locking read from the start.
+  const correctionWritePolicyActive = hasOwnSpeciesCorrectionPlan || Boolean(groupMemberContext);
+
+  // Capture before-state rows for exact-revert support. On the correction
+  // path these are locking (`FOR UPDATE`) reads: this exact transaction's
+  // earlier `analyzeEdit` pass may have already fixed a REPEATABLE READ
+  // snapshot before any lock was taken, and `tree-species-correction-writer`'s
+  // own locks (taken immediately below) do not retroactively make these
+  // reads current — only `FOR UPDATE` on each read itself does.
+  const beforeCoreRow = await loadCoreMeasurementRow(cm, schema, coreMeasurementID, txID, { forUpdate: correctionWritePolicyActive });
   if (!beforeCoreRow) throw new Error(`measurementssummary writer: coremeasurements ${coreMeasurementID} not found at write time`);
   const beforeStemGUID = beforeCoreRow.StemGUID as number | null;
-  const beforeStemRow = await loadStemRow(cm, schema, beforeStemGUID, txID);
+  const beforeStemRow = await loadStemRow(cm, schema, beforeStemGUID, txID, { forUpdate: correctionWritePolicyActive });
   const beforeTreeID = beforeStemRow ? toPositiveNumber(beforeStemRow.TreeID) : null;
-  const beforeTreeRow = await loadTreeRow(cm, schema, beforeTreeID, txID);
-  const beforeCmAttrRows = await loadCmAttributeRows(cm, schema, coreMeasurementID, txID);
+  const beforeTreeRow = await loadTreeRow(cm, schema, beforeTreeID, txID, { forUpdate: correctionWritePolicyActive });
+  const beforeCmAttrRows = await loadCmAttributeRows(cm, schema, coreMeasurementID, txID, { forUpdate: correctionWritePolicyActive });
 
   const beforeState: EditOperationStateRow[] = [];
   beforeState.push(buildStateRow('coremeasurements', 'CoreMeasurementID', coreMeasurementID, beforeCoreRow));
@@ -365,21 +581,49 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
     }
   }
 
+  // --- #427 preflight: locked replan, complete precondition comparison, and
+  // the sibling "before" snapshot — ALL before this function's first write
+  // (see `prepareTreeSpeciesCorrection`'s doc comment). Retained and
+  // consumed verbatim by `applyPreparedTreeSpeciesCorrection` far below,
+  // after this function's own generic writes — re-planning at that point
+  // would misread this operation's own write as drift against itself.
+  const preparedSpeciesCorrection: PreparedSpeciesCorrection | null =
+    hasOwnSpeciesCorrectionPlan && plan.speciesCorrection
+      ? await prepareTreeSpeciesCorrection(
+          cm,
+          schema,
+          {
+            previewedCorrection: plan.speciesCorrection,
+            editedCoreMeasurementID: coreMeasurementID,
+            editedStemGUID: Number(beforeStemGUID)
+          },
+          txID
+        )
+      : null;
+
   // Start from a freshly-joined current snapshot and overlay the plan's new
   // values so downstream resolvers see the merged shape (the old PATCH code
   // worked on a mapped new-row, we synthesize it here from the DB + plan).
   // `current` is reassigned after stem resolution so unchanged fields reflect
   // the new stem rather than the previous one.
-  let current = await loadCurrentJoinedRow(cm, schema, coreMeasurementID, txID);
+  let current = await loadCurrentJoinedRow(cm, schema, coreMeasurementID, txID, { forUpdate: correctionWritePolicyActive });
   const merged: LoadedCoreMeasurementRow = { ...current };
   for (const field of Object.keys(newValues)) {
     (merged as unknown as Record<string, unknown>)[field] = newValues[field];
   }
 
+  // Own-correction path only — NOT `groupMemberContext`. A group member's
+  // row-local write skips this: the executor already ran this exact guard
+  // pre-batch; re-running it here would misread this same batch's own
+  // just-written value as drift against itself.
+  if (hasOwnSpeciesCorrectionPlan) {
+    assertNoEditedFieldDriftForSpeciesCorrection(plan.fieldChanges, buildLockedEditedFieldValuesForSpeciesCorrection(current));
+  }
+
   const normalizedMeasurementDate = normalizeMeasurementSummaryDate(merged.MeasurementDate ?? current.MeasurementDate ?? null);
 
   const previousTreeID = toPositiveNumber(current.TreeID);
-  const shouldResolveTree = changedFields.has('SpeciesCode') || changedFields.has('TreeTag');
+  const shouldResolveTree = !correctionWritePolicyActive && (changedFields.has('SpeciesCode') || changedFields.has('TreeTag'));
   const needsFullStemResolution = changedFields.has('TreeTag') || changedFields.has('QuadratName') || changedFields.has('StemTag');
 
   let changesFound = false;
@@ -556,14 +800,25 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
   //     (affecting all measurements on that stem).
   if (changedFields.has('StemLocalX') || changedFields.has('StemLocalY')) {
     changesFound = true;
-    const xValue = changedFields.has('StemLocalX') ? toOptionalNumber(newValues.StemLocalX) : toOptionalNumber(merged.StemLocalX);
-    const yValue = changedFields.has('StemLocalY') ? toOptionalNumber(newValues.StemLocalY) : toOptionalNumber(merged.StemLocalY);
-    if (merged.StemGUID !== null && merged.StemGUID !== undefined) {
-      await cm.executeQuery(
-        format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, { LocalX: xValue, LocalY: yValue }, 'StemGUID', merged.StemGUID]),
-        [],
-        txID
-      );
+    if (correctionWritePolicyActive) {
+      // A species correction must not touch the axis the user did not edit
+      // — `stems` is shared with every other measurement on this stem.
+      const stemLocalChanges: Record<string, number | null> = {};
+      if (changedFields.has('StemLocalX')) stemLocalChanges.LocalX = toOptionalNumber(newValues.StemLocalX);
+      if (changedFields.has('StemLocalY')) stemLocalChanges.LocalY = toOptionalNumber(newValues.StemLocalY);
+      if (merged.StemGUID !== null && merged.StemGUID !== undefined && Object.keys(stemLocalChanges).length > 0) {
+        await cm.executeQuery(format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, stemLocalChanges, 'StemGUID', merged.StemGUID]), [], txID);
+      }
+    } else {
+      const xValue = changedFields.has('StemLocalX') ? toOptionalNumber(newValues.StemLocalX) : toOptionalNumber(merged.StemLocalX);
+      const yValue = changedFields.has('StemLocalY') ? toOptionalNumber(newValues.StemLocalY) : toOptionalNumber(merged.StemLocalY);
+      if (merged.StemGUID !== null && merged.StemGUID !== undefined) {
+        await cm.executeQuery(
+          format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, { LocalX: xValue, LocalY: yValue }, 'StemGUID', merged.StemGUID]),
+          [],
+          txID
+        );
+      }
     }
   }
 
@@ -583,20 +838,36 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
   // --- Numeric measurement fields on coremeasurements
   if (changedFields.has('MeasuredDBH') || changedFields.has('MeasuredHOM') || changedFields.has('MeasurementDate')) {
     changesFound = true;
-    await cm.executeQuery(
-      format(`UPDATE ?? SET ? WHERE ?? = ?`, [
-        `${schema}.coremeasurements`,
-        {
-          MeasuredDBH: changedFields.has('MeasuredDBH') ? toOptionalNumber(newValues.MeasuredDBH) : toOptionalNumber(merged.MeasuredDBH),
-          MeasuredHOM: changedFields.has('MeasuredHOM') ? toOptionalNumber(newValues.MeasuredHOM) : toOptionalNumber(merged.MeasuredHOM),
-          MeasurementDate: normalizedMeasurementDate
-        },
-        'CoreMeasurementID',
-        coreMeasurementID
-      ]),
-      [],
-      txID
-    );
+    if (correctionWritePolicyActive) {
+      // Write only the exact field the user edited — the other two
+      // measurement columns must not be rewritten with their own current value.
+      const measurementFieldChanges: Record<string, unknown> = {};
+      if (changedFields.has('MeasuredDBH')) measurementFieldChanges.MeasuredDBH = toOptionalNumber(newValues.MeasuredDBH);
+      if (changedFields.has('MeasuredHOM')) measurementFieldChanges.MeasuredHOM = toOptionalNumber(newValues.MeasuredHOM);
+      if (changedFields.has('MeasurementDate')) measurementFieldChanges.MeasurementDate = normalizedMeasurementDate;
+      if (Object.keys(measurementFieldChanges).length > 0) {
+        await cm.executeQuery(
+          format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.coremeasurements`, measurementFieldChanges, 'CoreMeasurementID', coreMeasurementID]),
+          [],
+          txID
+        );
+      }
+    } else {
+      await cm.executeQuery(
+        format(`UPDATE ?? SET ? WHERE ?? = ?`, [
+          `${schema}.coremeasurements`,
+          {
+            MeasuredDBH: changedFields.has('MeasuredDBH') ? toOptionalNumber(newValues.MeasuredDBH) : toOptionalNumber(merged.MeasuredDBH),
+            MeasuredHOM: changedFields.has('MeasuredHOM') ? toOptionalNumber(newValues.MeasuredHOM) : toOptionalNumber(merged.MeasuredHOM),
+            MeasurementDate: normalizedMeasurementDate
+          },
+          'CoreMeasurementID',
+          coreMeasurementID
+        ]),
+        [],
+        txID
+      );
+    }
   }
 
   // --- Attributes change — rebuild cmattributes rows (DELETE + re-INSERT)
@@ -632,23 +903,47 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
   const effective = <K extends keyof LoadedCoreMeasurementRow>(field: K): LoadedCoreMeasurementRow[K] =>
     changedFields.has(field as string) ? (merged as LoadedCoreMeasurementRow)[field] : (current as LoadedCoreMeasurementRow)[field];
 
+  // Assigns `key` only when `sourceField` is one of this edit's actual
+  // changedFields — used below on the correction path so an unchanged raw
+  // column is never rewritten with its own current (or a fabricated) value.
+  const assignIfChanged = (target: Record<string, unknown>, sourceField: string, key: string, value: unknown): void => {
+    if (changedFields.has(sourceField)) target[key] = value;
+  };
+
   const shouldSyncRaw = Array.from(changedFields).some(f => RAW_SYNC_TRIGGER_FIELDS.has(f));
   if (shouldSyncRaw) {
     changesFound = true;
-    const rawSyncValues: Record<string, unknown> = {
-      RawTreeTag: merged.TreeTag ?? current.TreeTag ?? null,
-      RawStemTag: merged.StemTag ?? current.StemTag ?? null,
-      RawSpCode: merged.SpeciesCode ?? current.SpeciesCode ?? null,
-      RawQuadrat: merged.QuadratName ?? current.QuadratName ?? null,
-      RawX: toOptionalNumber(effective('StemLocalX')),
-      RawY: toOptionalNumber(effective('StemLocalY')),
-      RawCodes: effective('Attributes') ?? null,
-      RawComments: effective('Description') ?? null,
-      Description: effective('Description') ?? null,
-      MeasurementDate: normalizedMeasurementDate,
-      MeasuredDBH: toOptionalNumber(effective('MeasuredDBH')),
-      MeasuredHOM: toOptionalNumber(effective('MeasuredHOM'))
-    };
+    const rawSyncValues: Record<string, unknown> = {};
+    if (correctionWritePolicyActive) {
+      // Sparse sync — only the fields the user actually edited. RawSpCode is
+      // intentionally never written here: applyPreparedTreeSpeciesCorrection
+      // below stamps the canonical species code on every attached member
+      // (including this row).
+      assignIfChanged(rawSyncValues, 'TreeTag', 'RawTreeTag', newValues.TreeTag ?? null);
+      assignIfChanged(rawSyncValues, 'StemTag', 'RawStemTag', newValues.StemTag ?? null);
+      assignIfChanged(rawSyncValues, 'QuadratName', 'RawQuadrat', newValues.QuadratName ?? null);
+      assignIfChanged(rawSyncValues, 'StemLocalX', 'RawX', toOptionalNumber(newValues.StemLocalX));
+      assignIfChanged(rawSyncValues, 'StemLocalY', 'RawY', toOptionalNumber(newValues.StemLocalY));
+      assignIfChanged(rawSyncValues, 'Attributes', 'RawCodes', newValues.Attributes ?? null);
+      assignIfChanged(rawSyncValues, 'Description', 'RawComments', newValues.Description ?? null);
+      assignIfChanged(rawSyncValues, 'Description', 'Description', newValues.Description ?? null);
+      assignIfChanged(rawSyncValues, 'MeasurementDate', 'MeasurementDate', normalizedMeasurementDate);
+      assignIfChanged(rawSyncValues, 'MeasuredDBH', 'MeasuredDBH', toOptionalNumber(newValues.MeasuredDBH));
+      assignIfChanged(rawSyncValues, 'MeasuredHOM', 'MeasuredHOM', toOptionalNumber(newValues.MeasuredHOM));
+    } else {
+      rawSyncValues.RawTreeTag = merged.TreeTag ?? current.TreeTag ?? null;
+      rawSyncValues.RawStemTag = merged.StemTag ?? current.StemTag ?? null;
+      rawSyncValues.RawSpCode = merged.SpeciesCode ?? current.SpeciesCode ?? null;
+      rawSyncValues.RawQuadrat = merged.QuadratName ?? current.QuadratName ?? null;
+      rawSyncValues.RawX = toOptionalNumber(effective('StemLocalX'));
+      rawSyncValues.RawY = toOptionalNumber(effective('StemLocalY'));
+      rawSyncValues.RawCodes = effective('Attributes') ?? null;
+      rawSyncValues.RawComments = effective('Description') ?? null;
+      rawSyncValues.Description = effective('Description') ?? null;
+      rawSyncValues.MeasurementDate = normalizedMeasurementDate;
+      rawSyncValues.MeasuredDBH = toOptionalNumber(effective('MeasuredDBH'));
+      rawSyncValues.MeasuredHOM = toOptionalNumber(effective('MeasuredHOM'));
+    }
     // RawPlotX/RawPlotY sync only on an actual plot-coordinate edit. The
     // loaded StemPlotX is COALESCE(cm.RawPlotX, s.PlotX), so unconditional
     // sync would stamp the stem's canonical value into a NULL raw column,
@@ -656,14 +951,23 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
     // supplied one (and enrolling it in raw-axes-only validation 19).
     if (changedFields.has('StemPlotX')) rawSyncValues.RawPlotX = toOptionalNumber(newValues.StemPlotX);
     if (changedFields.has('StemPlotY')) rawSyncValues.RawPlotY = toOptionalNumber(newValues.StemPlotY);
-    await cm.executeQuery(
-      format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.coremeasurements`, rawSyncValues, 'CoreMeasurementID', coreMeasurementID]),
-      [],
-      txID
-    );
+    if (Object.keys(rawSyncValues).length > 0) {
+      await cm.executeQuery(
+        format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.coremeasurements`, rawSyncValues, 'CoreMeasurementID', coreMeasurementID]),
+        [],
+        txID
+      );
+    }
   }
 
-  if (changesFound) {
+  // On the correction path the edited row's error state is owned by
+  // `refreshCorrectionErrorsAndValidationPending` (called from
+  // `applyPreparedTreeSpeciesCorrection` a few lines below, after all of
+  // this writer's own local writes), which treats the target exactly like
+  // every other attached member, retains history instead of hard-deleting
+  // it, and resolves only occurrences a revalidation pass can genuinely
+  // recompute.
+  if (changesFound && !correctionWritePolicyActive) {
     const effectiveCensusID = Number(merged.CensusID ?? current.CensusID ?? censusID);
 
     if (coreMeasurementID > 0 && effectiveCensusID > 0) {
@@ -708,13 +1012,58 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
     await cm.executeQuery(resetValidationQuery, [], txID);
   }
 
-  // Capture after-state for exact-revert support.
-  const afterCoreRow = await loadCoreMeasurementRow(cm, schema, coreMeasurementID, txID);
+  // Applies the ALREADY-PREPARED (locked, drift-checked) correction result —
+  // never re-plans — after the edited row's own Raw* sync and ingestion-error
+  // refresh above, so the canonical species code (not the user's typed
+  // spelling) ends up in RawSpCode. Sibling StateRows merge into this
+  // writer's own before/afterState; the edited CM's rows are already owned
+  // by the generic capture and are not duplicated. The undo `domainDiff`
+  // below is built from real post-write snapshots — never a predicted
+  // overlay.
+  let siblingBeforeState: EditOperationStateRow[] = [];
+  let siblingAfterState: EditOperationStateRow[] = [];
+  let metadataBeforeState: EditOperationStateRow | null = null;
+  let metadataAfterState: EditOperationStateRow | null = null;
+  // Kept outside the `if` below so the view-refresh step further down can
+  // read the correction's own verified member/error-refresh ids.
+  let correctionResult: AppliedSpeciesCorrectionResult | null = null;
+  if (correctionWritePolicyActive && preparedSpeciesCorrection) {
+    correctionResult = await applyPreparedTreeSpeciesCorrection(cm, schema, preparedSpeciesCorrection, txID);
+    siblingBeforeState = correctionResult.siblingBeforeState;
+    siblingAfterState = correctionResult.siblingAfterState;
+    beforeState.push(...siblingBeforeState);
+  }
+
+  // Capture after-state for exact-revert support. On the correction path
+  // this is the FIRST point at which the edited row's post-write RawSpCode
+  // (stamped by applyPreparedTreeSpeciesCorrection above) can be observed —
+  // reading any earlier would corrupt the undo evidence built below.
+  const afterCoreRow = await loadCoreMeasurementRow(cm, schema, coreMeasurementID, txID, { forUpdate: correctionWritePolicyActive });
   const afterStemGUID = (afterCoreRow?.StemGUID ?? null) as number | null;
-  const afterStemRow = await loadStemRow(cm, schema, afterStemGUID, txID);
+  const afterStemRow = await loadStemRow(cm, schema, afterStemGUID, txID, { forUpdate: correctionWritePolicyActive });
   const afterTreeID = afterStemRow ? toPositiveNumber(afterStemRow.TreeID) : null;
-  const afterTreeRow = await loadTreeRow(cm, schema, afterTreeID, txID);
-  const afterCmAttrRows = await loadCmAttributeRows(cm, schema, coreMeasurementID, txID);
+  const afterTreeRow = await loadTreeRow(cm, schema, afterTreeID, txID, { forUpdate: correctionWritePolicyActive });
+  const afterCmAttrRows = await loadCmAttributeRows(cm, schema, coreMeasurementID, txID, { forUpdate: correctionWritePolicyActive });
+
+  if (correctionWritePolicyActive && correctionResult && preparedSpeciesCorrection) {
+    const domainDiff = buildSpeciesCorrectionDomainDiff({
+      beforeCoreMeasurement: beforeCoreRow,
+      afterCoreMeasurement: afterCoreRow ?? {},
+      beforeStem: beforeStemRow,
+      afterStem: afterStemRow,
+      attributeCodesBefore: beforeCmAttrRows.map(row => String(row.Code)),
+      attributeCodesAfter: afterCmAttrRows.map(row => String(row.Code))
+    });
+    const metadataStateRows = buildSpeciesCorrectionMetadataStateRows(
+      correctionResult.correction,
+      preparedSpeciesCorrection.editedCoreMeasurementID,
+      preparedSpeciesCorrection.editedStemGUID,
+      domainDiff
+    );
+    metadataBeforeState = metadataStateRows.metadataBeforeState;
+    metadataAfterState = metadataStateRows.metadataAfterState;
+    beforeState.push(metadataBeforeState);
+  }
 
   const afterState: EditOperationStateRow[] = [];
   afterState.push(buildStateRow('coremeasurements', 'CoreMeasurementID', coreMeasurementID, afterCoreRow));
@@ -729,12 +1078,13 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
       afterState.push(buildStateRow('cmattributes', 'CMAID', Number(attrRow.CMAID), attrRow));
     }
   }
+  if (correctionWritePolicyActive && metadataAfterState) {
+    afterState.push(...siblingAfterState, metadataAfterState);
+  }
 
-  // Refresh derived views so the UI sees the edit immediately. Batch callers
-  // can suppress this and refresh the plot/census once after the outer batch.
-  // This must run AFTER the post-validation block above: measurementssummary's
-  // validation_errors LEFT JOIN reads measurementerrorlogs, so refreshing
-  // earlier would project pre-validation error counts into the view.
+  // Must run AFTER the error-log mutations above (legacy block, or
+  // `applyPreparedTreeSpeciesCorrection` on the correction path) — the
+  // views' error-count join would otherwise read pre-mutation state.
   if (changesFound && input.refreshViews !== false) {
     const refreshCensusID = Number(merged.CensusID ?? current.CensusID ?? censusID);
     const refreshPlotID = Number(merged.PlotID ?? current.PlotID ?? plotID);
@@ -750,7 +1100,15 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
       });
 
       if (refreshTargets.mode === 'targeted') {
-        await refreshMeasurementViewsForCoreMeasurements(cm, schema, refreshTargets.coreMeasurementIDs, txID);
+        const affectedCoreMeasurementIDs = new Set<number>(refreshTargets.coreMeasurementIDs);
+        if (correctionResult) {
+          // The correction's own verified membership/error-refresh ids are
+          // the complete set of OTHER rows it touched — never re-queried.
+          for (const member of correctionResult.correction.measurements) affectedCoreMeasurementIDs.add(member.coreMeasurementID);
+          for (const id of correctionResult.errorRefresh.ingestionRefreshedMeasurementIDs) affectedCoreMeasurementIDs.add(id);
+          for (const id of correctionResult.errorRefresh.pendingMeasurementIDs) affectedCoreMeasurementIDs.add(id);
+        }
+        await refreshMeasurementViewsForCoreMeasurements(cm, schema, Array.from(affectedCoreMeasurementIDs), txID);
       } else {
         await refreshMeasurementViewsForScope(cm, schema, refreshPlotID, refreshCensusID, txID);
       }

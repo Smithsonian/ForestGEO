@@ -6,6 +6,13 @@ import { MAX_STORED_DECIMAL, parseFiniteBase10Number } from '@/config/editplan/f
 export const INGESTION_ERROR_SOURCE = 'ingestion' as const;
 export const VALIDATION_ERROR_SOURCE = 'validation' as const;
 
+/**
+ * ErrorCodes emitted only by hardcoded bulk-ingestion SQL (Stage 10 soft
+ * validations, storedprocedures.sql:3418/3457) with no corresponding
+ * `sitespecificvalidations` Definition — no revalidation pass can recompute them.
+ */
+export const INGESTION_STAGE_ERROR_CODES = ['20', '21'] as const;
+
 export const FALLBACK_FAILURE_REASON = 'Unknown parse error';
 // coremeasurements.Description is varchar(255); an over-length bind under strict
 // sql_mode would fail the whole audit insert, so truncate rather than throw.

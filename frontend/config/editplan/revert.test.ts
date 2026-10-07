@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { NonRevertableEditOperationError, RevertDriftError, revertEdit } from './revert';
+import {
+  AlreadyRevertedError,
+  EditOperationNotFoundError,
+  NonRevertableEditOperationError,
+  RevertDriftError,
+  RevertRecordChangedError,
+  revertEdit
+} from './revert';
 import { ScopeLockHeldError } from './apply';
+import { ScopeAccessError } from './scopeguard';
 
 const RESTORE_PLAN_HASH = 'r'.repeat(64);
 
@@ -8,15 +16,21 @@ const mocks = vi.hoisted(() => ({
   ensureEditOperationsTable: vi.fn(),
   readEditOperation: vi.fn(),
   markEditOperationReverted: vi.fn(),
+  writeEditOperation: vi.fn(),
   applyEditInTransaction: vi.fn(),
   analyzeEdit: vi.fn(),
-  assertEditPlanCanApply: vi.fn()
+  assertEditPlanCanApply: vi.fn(),
+  parseSpeciesCorrectionUndoMetadata: vi.fn(),
+  preflightSpeciesCorrectionUndo: vi.fn(),
+  buildSpeciesCorrectionUndoPlan: vi.fn(),
+  writeSpeciesCorrectionUndo: vi.fn()
 }));
 
 vi.mock('@/config/editoperations', () => ({
   ensureEditOperationsTable: mocks.ensureEditOperationsTable,
   readEditOperation: mocks.readEditOperation,
-  markEditOperationReverted: mocks.markEditOperationReverted
+  markEditOperationReverted: mocks.markEditOperationReverted,
+  writeEditOperation: mocks.writeEditOperation
 }));
 
 vi.mock('./apply', () => ({
@@ -27,6 +41,21 @@ vi.mock('./apply', () => ({
 vi.mock('./analyzer', () => ({
   analyzeEdit: mocks.analyzeEdit,
   assertEditPlanCanApply: mocks.assertEditPlanCanApply
+}));
+
+// #427 species-correction collaborators — mocked so this suite proves only
+// revertEdit's dispatch wiring; see the real-MySQL integration suite for deep coverage.
+vi.mock('@/config/editplan/species-correction-undo-metadata', () => ({
+  parseSpeciesCorrectionUndoMetadata: mocks.parseSpeciesCorrectionUndoMetadata
+}));
+
+vi.mock('./species-correction-undo', () => ({
+  preflightSpeciesCorrectionUndo: mocks.preflightSpeciesCorrectionUndo,
+  buildSpeciesCorrectionUndoPlan: mocks.buildSpeciesCorrectionUndoPlan
+}));
+
+vi.mock('./species-correction-undo-write', () => ({
+  writeSpeciesCorrectionUndo: mocks.writeSpeciesCorrectionUndo
 }));
 
 function buildRestorePlan(overrides: Partial<Record<string, unknown>> = {}) {
@@ -97,6 +126,9 @@ describe('revertEdit', () => {
     mocks.markEditOperationReverted.mockResolvedValue(undefined);
     mocks.analyzeEdit.mockResolvedValue(buildRestorePlan());
     mocks.assertEditPlanCanApply.mockReturnValue(undefined);
+    // null = "not a species correction" (see revert.ts); the species-correction
+    // describe block below overrides this per-test.
+    mocks.parseSpeciesCorrectionUndoMetadata.mockReturnValue(null);
   });
 
   it('rejects non-revertable bulk revision rows before opening a transaction', async () => {
@@ -272,5 +304,324 @@ describe('revertEdit', () => {
     expect(cm.executeQuery).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM `forestgeo_testing`.stems'), [555, 555], 'tx');
     expect(cm.executeQuery).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM `forestgeo_testing`.trees'), [777, 777], 'tx');
     expect(cm.commitTransaction).toHaveBeenCalledWith('tx');
+  });
+
+  describe('ledger-lock prerequisite: two-read pattern', () => {
+    it('reads once unlocked to discover scope, then re-reads FOR UPDATE only after the scope lock is held', async () => {
+      const cm = makeConnectionManager();
+      const operation = buildOperation();
+      const callOrder: string[] = [];
+
+      cm.acquireApplicationLock = vi.fn(async () => {
+        callOrder.push('lock-acquired');
+        return true;
+      });
+      mocks.readEditOperation.mockImplementation(
+        async (_cm: unknown, _schema: string, _id: number, transactionID?: string, options?: { forUpdate?: boolean }) => {
+          callOrder.push(options?.forUpdate ? 'locked-read' : 'discovery-read');
+          return operation;
+        }
+      );
+      mocks.applyEditInTransaction.mockResolvedValue({
+        updatedIDs: { coremeasurements: 42 },
+        applyErrors: [],
+        editOperationID: 8,
+        validationPending: false
+      });
+
+      await revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' });
+
+      expect(callOrder).toEqual(['discovery-read', 'lock-acquired', 'locked-read']);
+      expect(mocks.readEditOperation).toHaveBeenCalledTimes(2);
+      expect(mocks.readEditOperation).toHaveBeenNthCalledWith(1, cm, 'forestgeo_testing', 7);
+      expect(mocks.readEditOperation).toHaveBeenNthCalledWith(2, cm, 'forestgeo_testing', 7, 'tx', { forUpdate: true });
+    });
+
+    it('rolls back without writing when the locked re-read shows a concurrent revert already claimed the row', async () => {
+      const cm = makeConnectionManager();
+      const discovery = buildOperation();
+      mocks.readEditOperation.mockResolvedValueOnce(discovery).mockResolvedValueOnce({ ...discovery, revertedByEditOperationID: 999 });
+
+      await expect(revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' })).rejects.toBeInstanceOf(
+        AlreadyRevertedError
+      );
+
+      expect(mocks.analyzeEdit).not.toHaveBeenCalled();
+      expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+      expect(mocks.markEditOperationReverted).not.toHaveBeenCalled();
+      expect(cm.commitTransaction).not.toHaveBeenCalled();
+      expect(cm.rollbackTransaction).toHaveBeenCalledWith('tx');
+    });
+
+    it('rolls back without writing when the locked re-read finds the row gone', async () => {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation.mockResolvedValueOnce(buildOperation()).mockResolvedValueOnce(null);
+
+      await expect(revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' })).rejects.toBeInstanceOf(
+        EditOperationNotFoundError
+      );
+
+      expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+      expect(mocks.markEditOperationReverted).not.toHaveBeenCalled();
+      expect(cm.rollbackTransaction).toHaveBeenCalledWith('tx');
+    });
+
+    it('rolls back without writing when the locked re-read shows the row became non-revertable', async () => {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation.mockResolvedValueOnce(buildOperation()).mockResolvedValueOnce(buildOperation({ revertable: false }));
+
+      await expect(revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' })).rejects.toBeInstanceOf(
+        NonRevertableEditOperationError
+      );
+
+      expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+      expect(mocks.markEditOperationReverted).not.toHaveBeenCalled();
+      expect(cm.rollbackTransaction).toHaveBeenCalledWith('tx');
+    });
+
+    it('rolls back without writing when the locked re-read disagrees with discovery on the revert target', async () => {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation.mockResolvedValueOnce(buildOperation()).mockResolvedValueOnce(buildOperation({ targetID: 9999 }));
+
+      await expect(revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' })).rejects.toBeInstanceOf(
+        RevertRecordChangedError
+      );
+
+      expect(mocks.analyzeEdit).not.toHaveBeenCalled();
+      expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+      expect(mocks.markEditOperationReverted).not.toHaveBeenCalled();
+      expect(cm.rollbackTransaction).toHaveBeenCalledWith('tx');
+    });
+
+    it('rolls back without writing when the locked re-read disagrees with discovery on plot/census scope', async () => {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation.mockResolvedValueOnce(buildOperation()).mockResolvedValueOnce(buildOperation({ censusID: 55 }));
+
+      await expect(revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' })).rejects.toBeInstanceOf(
+        RevertRecordChangedError
+      );
+
+      expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+      expect(cm.rollbackTransaction).toHaveBeenCalledWith('tx');
+    });
+
+    it('throws ScopeAccessError before opening a transaction when the discovery read disagrees with the authorized scope', async () => {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation.mockResolvedValue(buildOperation({ plotID: 1, censusID: 2 }));
+
+      await expect(
+        revertEdit(cm, {
+          schema: 'forestgeo_testing',
+          editOperationID: 7,
+          createdBy: 'mason@example.com',
+          expectedScope: { plotID: 1, censusID: 999 }
+        })
+      ).rejects.toBeInstanceOf(ScopeAccessError);
+
+      expect(cm.beginTransaction).not.toHaveBeenCalled();
+      expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+    });
+
+    it('rolls back when the locked re-read scope no longer matches the authorized scope', async () => {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation
+        .mockResolvedValueOnce(buildOperation({ plotID: 1, censusID: 2 }))
+        .mockResolvedValueOnce(buildOperation({ plotID: 1, censusID: 777 }));
+
+      await expect(
+        revertEdit(cm, {
+          schema: 'forestgeo_testing',
+          editOperationID: 7,
+          createdBy: 'mason@example.com',
+          expectedScope: { plotID: 1, censusID: 2 }
+        })
+      ).rejects.toBeInstanceOf(ScopeAccessError);
+
+      expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+      expect(mocks.markEditOperationReverted).not.toHaveBeenCalled();
+      expect(cm.rollbackTransaction).toHaveBeenCalledWith('tx');
+    });
+
+    it('proceeds when the discovery and locked reads both match the caller-authorized scope', async () => {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation.mockResolvedValue(buildOperation({ plotID: 1, censusID: 2 }));
+      mocks.applyEditInTransaction.mockResolvedValue({
+        updatedIDs: { coremeasurements: 42 },
+        applyErrors: [],
+        editOperationID: 8,
+        validationPending: false
+      });
+
+      await revertEdit(cm, {
+        schema: 'forestgeo_testing',
+        editOperationID: 7,
+        createdBy: 'mason@example.com',
+        expectedScope: { plotID: 1, censusID: 2 }
+      });
+
+      expect(cm.commitTransaction).toHaveBeenCalledWith('tx');
+    });
+
+    it('preserves the markEditOperationReverted error over a subsequent rollback failure', async () => {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation.mockResolvedValue(buildOperation());
+      mocks.applyEditInTransaction.mockResolvedValue({
+        updatedIDs: { coremeasurements: 42 },
+        applyErrors: [],
+        editOperationID: 8,
+        validationPending: false
+      });
+      const markError = new Error('markEditOperationReverted: edit operation 7 not found or already reverted');
+      mocks.markEditOperationReverted.mockRejectedValue(markError);
+      cm.rollbackTransaction = vi.fn(async () => {
+        throw new Error('rollback: connection lost');
+      });
+
+      await expect(revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' })).rejects.toBe(markError);
+
+      expect(cm.commitTransaction).not.toHaveBeenCalled();
+      expect(cm.rollbackTransaction).toHaveBeenCalledWith('tx');
+    });
+  });
+
+  describe('#427 species-correction undo dispatch', () => {
+    const SPECIES_CORRECTION_UNDO_PLAN_HASH = 'u'.repeat(64);
+    const EDITED_CORE_MEASUREMENT_ID = 4242;
+    const NEW_UNDO_LEDGER_ID = 909;
+    const MEMBER_CORE_MEASUREMENT_BEFORE_ROW = {
+      table: 'coremeasurements',
+      primaryKey: 'CoreMeasurementID',
+      primaryKeyValue: EDITED_CORE_MEASUREMENT_ID,
+      row: { RawSpCode: 'OLD' }
+    };
+    const MEMBER_CORE_MEASUREMENT_AFTER_ROW = {
+      table: 'coremeasurements',
+      primaryKey: 'CoreMeasurementID',
+      primaryKeyValue: EDITED_CORE_MEASUREMENT_ID,
+      row: { RawSpCode: 'NEW' }
+    };
+    const TREE_BEFORE_ROW = { table: 'trees', primaryKey: 'TreeID', primaryKeyValue: 1, row: { SpeciesID: 1 } };
+    const TREE_AFTER_ROW = { table: 'trees', primaryKey: 'TreeID', primaryKeyValue: 1, row: { SpeciesID: 2 } };
+
+    const speciesCorrectionMetadataPair = { before: {}, after: {} };
+    const undoPreflight = { metadata: { after: { editedCoreMeasurementID: EDITED_CORE_MEASUREMENT_ID } } };
+    const undoPlan = { planHash: SPECIES_CORRECTION_UNDO_PLAN_HASH };
+    const undoWriteResult = {
+      treeBeforeState: TREE_BEFORE_ROW,
+      treeAfterState: TREE_AFTER_ROW,
+      editedStemBeforeState: null,
+      editedStemAfterState: null,
+      memberCoreMeasurementBeforeState: [MEMBER_CORE_MEASUREMENT_BEFORE_ROW],
+      memberCoreMeasurementAfterState: [MEMBER_CORE_MEASUREMENT_AFTER_ROW],
+      attributeBeforeState: [],
+      attributeAfterState: [],
+      errorRefresh: { pendingMeasurementIDs: [], ingestionRefreshedMeasurementIDs: [] }
+    };
+
+    beforeEach(() => {
+      mocks.parseSpeciesCorrectionUndoMetadata.mockReturnValue(speciesCorrectionMetadataPair);
+      mocks.preflightSpeciesCorrectionUndo.mockResolvedValue(undoPreflight);
+      mocks.buildSpeciesCorrectionUndoPlan.mockReturnValue(undoPlan);
+      mocks.writeSpeciesCorrectionUndo.mockResolvedValue(undoWriteResult);
+      mocks.writeEditOperation.mockResolvedValue(NEW_UNDO_LEDGER_ID);
+    });
+
+    it('dispatches a recognized species correction to the undo writer, never the legacy reconstruct/apply/cleanup path', async () => {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation.mockResolvedValue(buildOperation());
+
+      await revertEdit(cm, {
+        schema: 'forestgeo_testing',
+        editOperationID: 7,
+        createdBy: 'mason@example.com',
+        confirmedPlanHash: SPECIES_CORRECTION_UNDO_PLAN_HASH
+      });
+
+      expect(mocks.analyzeEdit).not.toHaveBeenCalled();
+      expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+      // The legacy-only cleanup path issues DELETE queries; the undo path never does.
+      expect(cm.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('DELETE FROM'), expect.anything(), expect.anything());
+      expect(mocks.writeSpeciesCorrectionUndo).toHaveBeenCalledTimes(1);
+      expect(cm.commitTransaction).toHaveBeenCalledWith('tx');
+    });
+
+    it('throws RevertDriftError carrying the freshly built reverse undo plan, with no mutation and no ledger insert, when confirmedPlanHash is missing', async () => {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation.mockResolvedValue(buildOperation());
+
+      let caught: unknown;
+      try {
+        await revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' });
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(RevertDriftError);
+      expect((caught as InstanceType<typeof RevertDriftError>).freshPlan).toBe(undoPlan);
+      expect(mocks.writeSpeciesCorrectionUndo).not.toHaveBeenCalled();
+      expect(mocks.writeEditOperation).not.toHaveBeenCalled();
+      expect(cm.commitTransaction).not.toHaveBeenCalled();
+      expect(cm.rollbackTransaction).toHaveBeenCalledWith('tx');
+    });
+
+    it('forwards the caller-supplied assertAuthorizationFresh callback (same reference, invoked once) into the writer, rolling back and rethrowing its rejection with no ledger row', async () => {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation.mockResolvedValue(buildOperation());
+      const authError = new Error('assertAuthorizationFresh: authorization is no longer fresh');
+      const assertAuthorizationFresh = vi.fn(async () => {
+        throw authError;
+      });
+      mocks.writeSpeciesCorrectionUndo.mockImplementation(async (_cm, _schema, writerInput) => {
+        await writerInput.assertAuthorizationFresh();
+        throw new Error('unreachable: assertAuthorizationFresh should have rejected first');
+      });
+
+      await expect(
+        revertEdit(cm, {
+          schema: 'forestgeo_testing',
+          editOperationID: 7,
+          createdBy: 'mason@example.com',
+          confirmedPlanHash: SPECIES_CORRECTION_UNDO_PLAN_HASH,
+          assertAuthorizationFresh
+        })
+      ).rejects.toBe(authError);
+
+      expect(mocks.writeSpeciesCorrectionUndo).toHaveBeenCalledTimes(1);
+      const forwardedInput = mocks.writeSpeciesCorrectionUndo.mock.calls[0][2];
+      expect(forwardedInput.assertAuthorizationFresh).toBe(assertAuthorizationFresh);
+      expect(assertAuthorizationFresh).toHaveBeenCalledTimes(1);
+      expect(mocks.writeEditOperation).not.toHaveBeenCalled();
+      expect(cm.commitTransaction).not.toHaveBeenCalled();
+      expect(cm.rollbackTransaction).toHaveBeenCalledWith('tx');
+    });
+
+    it('writes one revert ledger row with the writer snapshots and marks the original reverted, all under the single open transaction', async () => {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation.mockResolvedValue(buildOperation());
+
+      await revertEdit(cm, {
+        schema: 'forestgeo_testing',
+        editOperationID: 7,
+        createdBy: 'mason@example.com',
+        confirmedPlanHash: SPECIES_CORRECTION_UNDO_PLAN_HASH
+      });
+
+      expect(mocks.writeEditOperation).toHaveBeenCalledTimes(1);
+      expect(mocks.writeEditOperation).toHaveBeenCalledWith(
+        cm,
+        'forestgeo_testing',
+        expect.objectContaining({
+          operationType: 'revert',
+          revertable: false,
+          beforeState: [TREE_BEFORE_ROW, MEMBER_CORE_MEASUREMENT_BEFORE_ROW],
+          afterState: [TREE_AFTER_ROW, MEMBER_CORE_MEASUREMENT_AFTER_ROW]
+        }),
+        'tx'
+      );
+      expect(mocks.markEditOperationReverted).toHaveBeenCalledWith(cm, 'forestgeo_testing', 7, NEW_UNDO_LEDGER_ID, 'tx');
+      expect(cm.beginTransaction).toHaveBeenCalledTimes(1);
+      expect(cm.commitTransaction).toHaveBeenCalledTimes(1);
+      expect(cm.commitTransaction).toHaveBeenCalledWith('tx');
+    });
   });
 });

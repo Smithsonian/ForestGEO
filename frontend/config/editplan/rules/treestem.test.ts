@@ -46,29 +46,14 @@ describe('applyTreeStemRules', () => {
     expect(resolvers.planStemResolution).not.toHaveBeenCalled();
   });
 
-  // --- Error emission: 7 blocking error cases ---
-
-  it('emits TreeStemResolution species/missing when SpeciesCode is in changedFields and resolves to null', async () => {
-    (resolvers.resolveSpeciesByCode as any).mockResolvedValue({ speciesID: null });
-    const result = await applyTreeStemRules(
-      makeCtx({
-        newRow: { SpeciesCode: 'ZZZZ' },
-        changedFields: new Set(['SpeciesCode'])
-      })
-    );
-    expect(result.errors).toContainEqual(
-      expect.objectContaining({
-        kind: 'TreeStemResolution',
-        subject: 'species',
-        reason: 'missing',
-        field: 'SpeciesCode',
-        blocking: true,
-        severity: 'destructive'
-      })
-    );
-    expect(result.effects).toEqual([]);
-    expect(resolvers.planTreeResolution).not.toHaveBeenCalled();
-  });
+  // --- Error emission: 6 blocking error cases ---
+  //
+  // SpeciesCode-only identity cases moved to rules/species.test.ts: #427
+  // removed SpeciesCode from treeIdentityChanged entirely (an actual species
+  // change on a linked row is a tree-wide correction owned by
+  // rules/species.ts, not a tree-reassignment candidate here). This rule now
+  // always resolves the tree's *current* species from oldRow when TreeTag
+  // changes, regardless of whether SpeciesCode is in changedFields.
 
   it('does NOT emit species error when SpeciesCode is not in changedFields (field unchanged)', async () => {
     (resolvers.resolveSpeciesByCode as any).mockResolvedValue({ speciesID: null });
@@ -440,19 +425,6 @@ describe('applyTreeStemRules', () => {
     expect(effects[0].severity).toBe('warn');
     expect(effects[1].id).toBe('R3');
     expect(effects[1].severity).toBe('warn');
-  });
-
-  it('emits species error (not R2) when SpeciesCode is in changedFields and species code does not resolve', async () => {
-    (resolvers.resolveSpeciesByCode as any).mockResolvedValue({ speciesID: null });
-    const { effects, errors } = await applyTreeStemRules(
-      makeCtx({
-        newRow: { SpeciesCode: 'ZZZZ' },
-        changedFields: new Set(['SpeciesCode'])
-      })
-    );
-    expect(errors).toContainEqual(expect.objectContaining({ subject: 'species', reason: 'missing' }));
-    expect(effects).toEqual([]);
-    expect(resolvers.planTreeResolution).not.toHaveBeenCalled();
   });
 
   it('emits quadrat error (not R3) when quadrat does not resolve', async () => {
