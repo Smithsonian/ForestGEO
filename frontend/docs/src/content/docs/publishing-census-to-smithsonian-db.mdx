@@ -151,6 +151,14 @@ The final tally looks like:
 
 If the artifact completes without an error and reports the expected final tally, the publish succeeded.
 
+### Character set
+
+The downloaded artifact is UTF-8. It saves the session charset settings, runs `SET NAMES utf8mb4;` before creating the load procedure, and restores the saved settings after successful completion. This prevents a client announcing `cp850`, for example, from parsing the file using the wrong encoding. Destination columns must still support the characters being loaded.
+
+Stop when an error occurs; do not use `--force`. A load-validation error triggers the procedure's rollback handler. A lost connection or an error after `COMMIT` does not prove that nothing was loaded: inspect the destination before retrying. Result tallies alone do not prove the transaction committed. If the client stops before the charset restoration statements, reconnect before running unrelated SQL so the client negotiates its normal encoding.
+
+Destination validation checks and dry-run behavior are unchanged. Invalid destination data still fails with `Validation failed`; the charset declaration does not bypass those checks.
+
 ---
 
 ## Reload semantics

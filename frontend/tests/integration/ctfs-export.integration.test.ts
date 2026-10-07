@@ -25,7 +25,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import { splitSqlFile } from '../../lib/provisioning/sql-runner';
-import { checkFinishedCensus, selectMeasurements, renderArtifact, renderRebuildViewFullTableArtifact } from '../../lib/ctfs-export';
+import {
+  checkFinishedCensus,
+  selectMeasurements,
+  renderArtifact,
+  renderRebuildViewFullTableArtifact,
+  ARTIFACT_SET_NAMES_STATEMENT
+} from '../../lib/ctfs-export';
 import { MISSING_PLOT_COORDINATE_SCOPE, DESTINATION_PLOT_COORDINATE_TYPE_SCOPE } from '../../lib/csv-to-sql-v2';
 import { testDbServerOptions } from '../setup/test-db-connection';
 
@@ -81,6 +87,36 @@ const LEGACY_PLOT_COORDINATE_COLUMN_TYPE = 'float';
 const FLOAT_LOSSY_QUADRAT_START_X = 991.09567;
 const FLOAT_ROUNDING_MIN_DRIFT = 1e-6;
 const FLOAT_ROUNDING_MAX_DRIFT = 1e-3;
+
+// ---------------------------------------------------------------------------
+// Charset fix (#475): UTF-8 artifact from a cp850 console into a latin1 destination
+// ---------------------------------------------------------------------------
+
+// A Windows console session announces cp850 (the historical OEM code page)
+// while the artifact file on disk is UTF-8. mysql2 encodes every query it
+// sends as UTF-8 regardless of a later `SET NAMES` call (its own wire
+// encoding only changes at handshake / changeUser), so issuing `SET NAMES
+// cp850` on an already-open connection reproduces exactly that real-world
+// mismatch: the server is told to expect cp850 bytes while the bytes it
+// actually receives (from mysql2, and from a real Windows mysql client
+// reading the UTF-8 file) are UTF-8. Setting `charset: 'cp850'` on the
+// mysql2 connection config instead would transcode correctly and hide the bug.
+const WINDOWS_CONSOLE_CHARACTER_SET = 'cp850';
+// What this test file's own connections otherwise run as (matches the test
+// database's utf8mb4 creation charset) — restored in every test's `finally`.
+const TEST_SESSION_CHARACTER_SET = 'utf8mb4';
+const SMITHSONIAN_DESTINATION_CHARACTER_SET = 'latin1';
+const SMITHSONIAN_DESTINATION_COLLATION = 'latin1_swedish_ci';
+const NON_ASCII_COMMENT = 'Mélèze café';
+const NON_ASCII_COMMENT_LATIN1_HEX = Buffer.from(NON_ASCII_COMMENT, 'latin1').toString('hex').toUpperCase();
+// ER_CANT_AGGREGATE_NCOLLATIONS — "Illegal mix of collations" when more than
+// two differently-collated string expressions are aggregated (e.g. a Stage 5
+// UNION). A procedure CREATEd under the wrong character_set_client bakes in
+// a stray collation that later collides with both the connection's current
+// collation and the destination column's collation — three-way, hence N
+// (not the simpler two-collation ER_CANT_AGGREGATE_2COLLATIONS).
+const ER_CANT_AGGREGATE_NCOLLATIONS = 1271;
+const SEEDED_CORE_MEASUREMENT_ID = 1;
 
 // ---------------------------------------------------------------------------
 // CTFS DDL + app schema helpers
@@ -187,6 +223,105 @@ async function captureCtfsCounts(conn: mysql.Connection): Promise<CtfsCounts> {
     dbh: await countCtfsRows(conn, 'DBH'),
     dbhAttributes: await countCtfsRows(conn, 'DBHAttributes')
   };
+}
+
+interface CtfsRowSnapshot {
+  tree: mysql.RowDataPacket[];
+  stem: mysql.RowDataPacket[];
+  dbh: mysql.RowDataPacket[];
+  dbhAttributes: mysql.RowDataPacket[];
+}
+
+/**
+ * Capture every column of every existing row, ordered by primary key, from
+ * the four tables the publish pipeline writes. Used to prove a failed/dry-run
+ * artifact leaves pre-existing rows byte-for-byte unchanged (#475 F3) — a
+ * count comparison alone cannot distinguish "untouched" from "deleted by a
+ * reload cleanup and then recreated with different values."
+ */
+async function captureCtfsRowSnapshot(conn: mysql.Connection): Promise<CtfsRowSnapshot> {
+  const [tree] = await conn.query<mysql.RowDataPacket[]>('SELECT * FROM Tree ORDER BY TreeID');
+  const [stem] = await conn.query<mysql.RowDataPacket[]>('SELECT * FROM Stem ORDER BY StemID');
+  const [dbh] = await conn.query<mysql.RowDataPacket[]>('SELECT * FROM DBH ORDER BY DBHID');
+  const [dbhAttributes] = await conn.query<mysql.RowDataPacket[]>('SELECT * FROM DBHAttributes ORDER BY DBHAttID');
+  return { tree, stem, dbh, dbhAttributes };
+}
+
+// ---------------------------------------------------------------------------
+// Charset fix (#475) helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Switch the CTFS test database's default character set to the Smithsonian
+ * destination's real default (latin1 / latin1_swedish_ci). canonical-ddl.sql
+ * already declares `DEFAULT CHARSET=latin1` on every one of its CREATE TABLE
+ * statements, so the tables `loadCtfsDdl` just created are latin1 already —
+ * this ALTER DATABASE only matters for anything that falls back to the
+ * schema default instead of naming a charset explicitly (e.g. the artifact's
+ * own stored routine).
+ */
+async function useSmithsonianLatin1Destination(conn: mysql.Connection, database: string): Promise<void> {
+  await conn.query(`ALTER DATABASE \`${database}\` CHARACTER SET ${SMITHSONIAN_DESTINATION_CHARACTER_SET} COLLATE ${SMITHSONIAN_DESTINATION_COLLATION}`);
+}
+
+/** Writes the non-ASCII comment into the app-side row Stage 8 later reads as DBH.Comments. */
+async function setAppMeasurementComment(appConn: mysql.Connection, appSchemaName: string, comment: string): Promise<void> {
+  await appConn.query(`UPDATE \`${appSchemaName}\`.coremeasurements SET Description = ? WHERE CoreMeasurementID = ?`, [comment, SEEDED_CORE_MEASUREMENT_ID]);
+}
+
+interface SessionCharset {
+  characterSetClient: string;
+  characterSetResults: string;
+  collationConnection: string;
+}
+
+interface MysqlQueryError {
+  errno?: number;
+  code?: string;
+  message: string;
+}
+
+async function captureSessionCharset(conn: mysql.Connection): Promise<SessionCharset> {
+  const [rows] = await conn.query<mysql.RowDataPacket[]>(
+    'SELECT @@character_set_client AS characterSetClient, @@character_set_results AS characterSetResults, @@collation_connection AS collationConnection'
+  );
+  return {
+    characterSetClient: rows[0].characterSetClient as string,
+    characterSetResults: rows[0].characterSetResults as string,
+    collationConnection: rows[0].collationConnection as string
+  };
+}
+
+/**
+ * Strip exactly the artifact's own `SET NAMES utf8mb4;` declaration — the
+ * regression control for the charset fix. Fails loudly instead of silently
+ * no-op'ing if the renderer ever changes how/where the statement is emitted.
+ */
+function withoutCharsetDeclaration(sql: string): string {
+  const stripped = sql.replace(`${ARTIFACT_SET_NAMES_STATEMENT}\n`, '');
+  if (stripped === sql) {
+    throw new Error(`Artifact no longer contains "${ARTIFACT_SET_NAMES_STATEMENT}" on its own line; the regression control cannot remove it.`);
+  }
+  return stripped;
+}
+
+/**
+ * Publish census 1 for real, into what must still be an empty destination,
+ * and return an exact row snapshot of the result. The three tests below
+ * reuse this as the "pre-existing rows" a failed/dry-run reload must leave
+ * byte-for-byte unchanged — asserting that against an empty destination
+ * (the pre-F3 shape of these tests) cannot tell "untouched" apart from
+ * "deleted by the reload cleanup and never restored."
+ */
+async function publishBaselineAndSnapshot(appConn: mysql.Connection, appSchema: string, ctfsConn: mysql.Connection): Promise<CtfsRowSnapshot> {
+  const baseline = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
+  await executeCtfsSql(ctfsConn, baseline.sql);
+
+  const counts = await captureCtfsCounts(ctfsConn);
+  expect(counts.dbh, 'the baseline publish must produce at least one DBH row before this test exercises a reload').toBeGreaterThan(0);
+  expect(counts.dbhAttributes, 'the baseline publish must produce at least one DBHAttributes row before this test exercises a reload').toBeGreaterThan(0);
+
+  return captureCtfsRowSnapshot(ctfsConn);
 }
 
 // ---------------------------------------------------------------------------
@@ -771,6 +906,143 @@ describe('ctfs-export E2E: library pipeline → CTFS DB', () => {
     expect(drift, `the rounded PX ${storedPx} must still be the float32 neighbour of ${stagedPx}, not a different value`).toBeLessThan(
       FLOAT_ROUNDING_MAX_DRIFT
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // Charset fix (#475): UTF-8 artifact from a cp850 console into a latin1 destination
+  // -------------------------------------------------------------------------
+
+  describe('artifact sourced from a Windows cp850 console into a latin1 Smithsonian destination', () => {
+    beforeEach(async () => {
+      await useSmithsonianLatin1Destination(ctfsConn, ctfsDbName);
+      await seedCtfsCensus(ctfsConn);
+    });
+
+    it('a real publish succeeds, stores the non-ASCII comment as exact latin1 bytes, and restores the session', async () => {
+      await setAppMeasurementComment(appConn, appSchema, NON_ASCII_COMMENT);
+      const artifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1' });
+
+      await ctfsConn.query(`SET NAMES ${WINDOWS_CONSOLE_CHARACTER_SET}`);
+      try {
+        const sessionBefore = await captureSessionCharset(ctfsConn);
+
+        await executeCtfsSql(ctfsConn, artifact.sql);
+
+        const sessionAfter = await captureSessionCharset(ctfsConn);
+        expect(
+          sessionAfter,
+          'a successful publish must restore character_set_client/results and collation_connection to what they were before the CALL'
+        ).toEqual(sessionBefore);
+
+        const [comments] = await ctfsConn.query<mysql.RowDataPacket[]>('SELECT HEX(Comments) AS hex FROM DBH WHERE CensusID = 1');
+        expect(
+          comments.map(row => row.hex),
+          `DBH.Comments must hold "${NON_ASCII_COMMENT}" as latin1 bytes ${NON_ASCII_COMMENT_LATIN1_HEX}, not the raw UTF-8 bytes misread as cp850`
+        ).toEqual([NON_ASCII_COMMENT_LATIN1_HEX]);
+      } finally {
+        await ctfsConn.query(`SET NAMES ${TEST_SESSION_CHARACTER_SET}`);
+      }
+    });
+
+    it('the same publish without the charset declaration fails with "Illegal mix of collations" (1271) and rolls back its reload cleanup, leaving the prior publish byte-for-byte unchanged — regression control', async () => {
+      // Publish once first so there are real pre-existing rows for the failed
+      // reload below to (not) delete — see publishBaselineAndSnapshot.
+      const before = await publishBaselineAndSnapshot(appConn, appSchema, ctfsConn);
+
+      // allowReload=true: census 1 now has rows from the baseline publish
+      // above, so Stage 0's populated-census guard requires it.
+      const reloadArtifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1', allowReload: true });
+      const strippedSql = withoutCharsetDeclaration(reloadArtifact.sql);
+
+      await ctfsConn.query(`SET NAMES ${WINDOWS_CONSOLE_CHARACTER_SET}`);
+      try {
+        let caught: MysqlQueryError | null = null;
+        try {
+          await executeCtfsSql(ctfsConn, strippedSql);
+        } catch (err) {
+          caught = err as MysqlQueryError;
+        }
+        expect(caught, 'stripping the charset declaration must still make the real publish fail under a cp850 console').not.toBeNull();
+        expect(caught!.errno, `expected errno ${ER_CANT_AGGREGATE_NCOLLATIONS} (ER_CANT_AGGREGATE_NCOLLATIONS), got ${caught!.code} (${caught!.message})`).toBe(
+          ER_CANT_AGGREGATE_NCOLLATIONS
+        );
+      } finally {
+        await ctfsConn.query(`SET NAMES ${TEST_SESSION_CHARACTER_SET}`);
+      }
+
+      expect(
+        await captureCtfsRowSnapshot(ctfsConn),
+        'the regression-control run must roll back its reload DELETEs along with everything else, leaving the baseline publish rows byte-for-byte unchanged'
+      ).toEqual(before);
+    });
+
+    it('a dry run preserves destination rows byte-for-byte and restores the session under a cp850 console', async () => {
+      const before = await publishBaselineAndSnapshot(appConn, appSchema, ctfsConn);
+
+      // Dry-run intentionally skips Stages 1-10 (including Stage 5), so this
+      // does not — and must not — assert anything about Stage 5 validation.
+      // reloadDryRun implies allowReload internally; passing it explicitly
+      // here too just documents that this reload targets a populated census.
+      const dryRunArtifact = await runExportPipeline(appConn, appSchema, { plotCensusNumber: '1', allowReload: true, reloadDryRun: true });
+
+      await ctfsConn.query(`SET NAMES ${WINDOWS_CONSOLE_CHARACTER_SET}`);
+      try {
+        const sessionBefore = await captureSessionCharset(ctfsConn);
+        await executeCtfsSql(ctfsConn, dryRunArtifact.sql);
+        const sessionAfter = await captureSessionCharset(ctfsConn);
+        expect(sessionAfter, 'a dry run must also restore the session after its final DROP PROCEDURE').toEqual(sessionBefore);
+      } finally {
+        await ctfsConn.query(`SET NAMES ${TEST_SESSION_CHARACTER_SET}`);
+      }
+
+      expect(
+        await captureCtfsRowSnapshot(ctfsConn),
+        "a dry run must roll back Stage 0b's SAVEPOINT reload-cleanup preview, leaving the baseline publish rows byte-for-byte unchanged"
+      ).toEqual(before);
+    });
+
+    it('a genuine Stage 5 invalid-data rejection still fails with "Validation failed" and rolls back its reload cleanup, preserving prior rows, after the charset fix', async () => {
+      const before = await publishBaselineAndSnapshot(appConn, appSchema, ctfsConn);
+
+      const { measurementRows, attributeRows } = await selectMeasurements(appConn, {
+        schema: appSchema,
+        plotId: APP_PLOT_ID,
+        censusId: APP_CENSUS_ID
+      });
+      // Unresolvable species mnemonic — a genuine destination-contract failure
+      // (Stage 5 check 2), independent of the charset fix. Mirrors the
+      // existing "rollback on unknown species mnemonic" coverage in
+      // csv-to-sql-v2.integration.test.ts, reusing this file's own fixtures.
+      measurementRows[0].Mnemonic = 'ZZZ';
+
+      const artifact = renderArtifact({
+        schema: appSchema,
+        appPlotId: APP_PLOT_ID,
+        destinationPlotId: DESTINATION_PLOT_ID,
+        appCensusId: APP_CENSUS_ID,
+        plotCensusNumber: '1',
+        // allowReload=true: census 1 is already populated by the baseline
+        // publish above, so Stage 0's populated-census guard requires it —
+        // without it, Stage 0 would reject this run before Stage 5 ever runs.
+        allowReload: true,
+        reloadDryRun: false,
+        generatedAt: new Date(),
+        measurementRows,
+        attributeRows
+      });
+
+      await ctfsConn.query(`SET NAMES ${WINDOWS_CONSOLE_CHARACTER_SET}`);
+      try {
+        await expect(executeCtfsSql(ctfsConn, artifact.sql)).rejects.toThrow(/Validation failed/);
+      } finally {
+        await ctfsConn.query(`SET NAMES ${TEST_SESSION_CHARACTER_SET}`);
+      }
+
+      expect(
+        await captureCtfsRowSnapshot(ctfsConn),
+        'a genuine Stage 5 rejection must roll back its reload DELETEs too, leaving the baseline publish rows byte-for-byte unchanged'
+      ).toEqual(before);
+    });
   });
 });
 

@@ -16,6 +16,12 @@ export {
   type PreconditionFailureKind
 } from './precondition';
 export { selectMeasurements, type SelectResult, type SelectInput } from './select-measurements';
-export { renderArtifact, renderRebuildViewFullTableArtifact, type RenderArtifactInput, type RenderArtifactResult } from './render-procedure';
+export {
+  renderArtifact,
+  renderRebuildViewFullTableArtifact,
+  ARTIFACT_SET_NAMES_STATEMENT,
+  type RenderArtifactInput,
+  type RenderArtifactResult
+} from './render-procedure';
 export { buildProcedureName, buildLockName, deterministicSuffix } from './identifier-safety';
 export { exportableMeasurementBaseWhere, exportableMeasurementSelect } from './exportable-measurement';

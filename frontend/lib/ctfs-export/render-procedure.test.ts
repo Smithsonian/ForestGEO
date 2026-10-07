@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderArtifact, renderRebuildViewFullTableArtifact, type RenderArtifactInput } from './render-procedure';
+import { renderArtifact, renderRebuildViewFullTableArtifact, ARTIFACT_SET_NAMES_STATEMENT, type RenderArtifactInput } from './render-procedure';
 import { MISSING_PLOT_COORDINATE_SCOPE, DESTINATION_PLOT_COORDINATE_TYPE_SCOPE } from '../csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../csv-to-sql-shared';
 
@@ -359,5 +359,63 @@ describe('renderRebuildViewFullTableArtifact', () => {
 
   it('is byte-identical across calls (input-independent)', () => {
     expect(renderRebuildViewFullTableArtifact()).toBe(renderRebuildViewFullTableArtifact());
+  });
+});
+
+describe('renderArtifact connection character set (#475)', () => {
+  // Mirrors render-procedure.ts's own save/restore statements — kept as
+  // explicit literals here (not re-imported) so the assertions actually
+  // prove the rendered SQL text, not just that the same constant was echoed
+  // on both sides.
+  const SAVE_STATEMENTS = [
+    'SET @OLD_CHARACTER_SET_CLIENT = @@character_set_client;',
+    'SET @OLD_CHARACTER_SET_RESULTS = @@character_set_results;',
+    'SET @OLD_COLLATION_CONNECTION = @@collation_connection;'
+  ];
+  const RESTORE_STATEMENTS = [
+    'SET character_set_client = @OLD_CHARACTER_SET_CLIENT;',
+    'SET character_set_results = @OLD_CHARACTER_SET_RESULTS;',
+    'SET collation_connection = @OLD_COLLATION_CONNECTION;'
+  ];
+
+  it('declares the encoding the artifact file is served in', () => {
+    expect(ARTIFACT_SET_NAMES_STATEMENT).toBe('SET NAMES utf8mb4;');
+  });
+
+  it.each([{ reloadDryRun: false }, { reloadDryRun: true }])(
+    'reloadDryRun=$reloadDryRun: saves the session, sets utf8mb4 before CREATE PROCEDURE, and restores the session after the final DROP PROCEDURE',
+    ({ reloadDryRun }) => {
+      const { sql, procedureName } = renderArtifact(baseInput({ reloadDryRun, measurementRows: [sampleMeasurement] }));
+
+      const headerEnd = sql.indexOf('-- END HEADER');
+      const setNames = sql.indexOf(ARTIFACT_SET_NAMES_STATEMENT);
+      const create = sql.indexOf(`CREATE PROCEDURE ${procedureName}()`);
+      // The last DROP PROCEDURE statement is the unconditional one that closes
+      // the envelope (DROP PROCEDURE IF EXISTS ... at the top also contains
+      // the procedure name, but with "IF EXISTS" in between, so it cannot
+      // match this literal substring).
+      const finalDrop = sql.indexOf(`DROP PROCEDURE ${procedureName};`);
+      const saves = SAVE_STATEMENTS.map(statement => sql.indexOf(statement));
+      const restores = RESTORE_STATEMENTS.map(statement => sql.indexOf(statement));
+      const context = `reloadDryRun=${reloadDryRun} positions=${JSON.stringify({ headerEnd, saves, setNames, create, finalDrop, restores })}`;
+
+      expect(headerEnd, context).toBeGreaterThan(-1);
+      expect(create, context).toBeGreaterThan(-1);
+      expect(finalDrop, context).toBeGreaterThan(-1);
+
+      for (const save of saves) {
+        expect(save, context).toBeGreaterThan(headerEnd);
+        expect(save, context).toBeLessThan(setNames);
+      }
+      expect(setNames, context).toBeGreaterThan(-1);
+      expect(setNames, context).toBeLessThan(create);
+      for (const restore of restores) {
+        expect(restore, context).toBeGreaterThan(finalDrop);
+      }
+    }
+  );
+
+  it('leaves the standalone ViewFullTable rebuild artifact alone (ASCII only, calls an already-installed procedure)', () => {
+    expect(renderRebuildViewFullTableArtifact()).not.toContain('SET NAMES');
   });
 });

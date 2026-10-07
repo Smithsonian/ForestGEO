@@ -27,6 +27,43 @@ import { buildProcedureName, buildLockName } from './identifier-safety';
 const MEASUREMENTS_TABLE = 'staging_measurements';
 const ATTRIBUTES_TABLE = 'staging_attributes';
 
+// The artifact file is always UTF-8 (#475). MySQL fixes a stored routine's
+// string literals to the session's character_set_client at CREATE PROCEDURE
+// time, so a client announcing cp850 (e.g. a Windows console) would CREATE
+// the procedure as cp850 — which can later raise "Illegal mix of collations"
+// (errno 1271) against a differently-collated destination column, or simply
+// misread a non-ASCII byte in the file. SET NAMES before CREATE PROCEDURE
+// fixes the charset the body's literals are parsed under, independent of
+// whatever session happens to run the script.
+export const ARTIFACT_CHARACTER_SET = 'utf8mb4';
+export const ARTIFACT_SET_NAMES_STATEMENT = `SET NAMES ${ARTIFACT_CHARACTER_SET};`;
+
+/** Save the caller's session charset/collation, then set the fixed encoding above — must run before CREATE PROCEDURE. */
+function renderConnectionCharsetPrologue(): string {
+  return [
+    'SET @OLD_CHARACTER_SET_CLIENT = @@character_set_client;',
+    'SET @OLD_CHARACTER_SET_RESULTS = @@character_set_results;',
+    'SET @OLD_COLLATION_CONNECTION = @@collation_connection;',
+    ARTIFACT_SET_NAMES_STATEMENT,
+    '',
+    ''
+  ].join('\n');
+}
+
+/**
+ * Restore the caller's session after the final `DROP PROCEDURE` — reached on
+ * success only, since a batch-mode client stops at the first error.
+ */
+function renderConnectionCharsetEpilogue(): string {
+  return [
+    '',
+    'SET character_set_client = @OLD_CHARACTER_SET_CLIENT;',
+    'SET character_set_results = @OLD_CHARACTER_SET_RESULTS;',
+    'SET collation_connection = @OLD_COLLATION_CONNECTION;',
+    ''
+  ].join('\n');
+}
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -166,7 +203,9 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
     body
   });
 
-  const sql = header + envelope;
+  // Wraps the whole envelope, not just the body, so CREATE PROCEDURE itself
+  // always parses under the declared charset in both dry-run and real mode.
+  const sql = header + renderConnectionCharsetPrologue() + envelope + renderConnectionCharsetEpilogue();
 
   return { sql, procedureName, lockName };
 }
