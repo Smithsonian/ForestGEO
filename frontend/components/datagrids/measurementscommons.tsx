@@ -83,7 +83,7 @@ import ValidationOverrideModal from '@/components/client/modals/validationoverri
 import { MeasurementsSummaryResult } from '@/lib/db/definitions/views';
 import MapperFactory from '@/config/datamapper';
 import { AttributesRDS, AttributesResult } from '@/lib/db/definitions/core';
-import ValidationCore from '@/components/client/validationcore';
+import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 import { ArrowRightAlt, CallSplit, Forest, Grass } from '@mui/icons-material';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { EditToolbar } from '../client/datagridelements';
@@ -208,7 +208,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   });
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [pendingDeleteRow, setPendingDeleteRow] = useState<GridRowModel | null>(null);
-  const [isValidationModalOpen, setIsValidationModalOpen] = useState(false);
   const [isValidationOverrideModalOpen, setIsValidationOverrideModalOpen] = useState(false);
   const [isResetValidationModalOpen, setIsResetValidationModalOpen] = useState(false);
   const [isSingleCMVErrorOpen, setIsSingleCMVErrorOpen] = useState(false);
@@ -288,6 +287,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   // use the session
   const { data: session } = useSession();
   const { status: backgroundValidationStatus } = useBackgroundValidationState();
+  const { startValidation, isRunning: isValidationRunnerRunning } = useBackgroundValidation();
   // Track mounted state for safe state updates in deferred callbacks
   const { isMountedRef } = useIsMounted();
 
@@ -336,6 +336,38 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       throw new Error('Measurements Summary View Refresh failure');
     }
   }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName]);
+
+  // Manual "Run Validations" entry point. Reuses the same ValidationRunner
+  // singleton (and ValidationStatusBadge in the sidebar) that upload flows
+  // drive — there is no separate modal-owned run here. ValidationRunner.start
+  // aborts whatever it was already running, so a second click while a run is
+  // active must be rejected here rather than forwarded, or it would cancel
+  // the in-flight run instead of leaving it alone.
+  const handleRunValidations = useCallback(() => {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) {
+      setSnackbar({ children: 'Active site, plot, or census selection is missing.', severity: 'error' });
+      return;
+    }
+
+    if (isValidationRunnerRunning()) {
+      setSnackbar({
+        children: 'A validation run is already in progress. Check the validation status in the sidebar for its progress.',
+        severity: 'info'
+      });
+      return;
+    }
+
+    // This only acknowledges that the request was sent — the request can
+    // still be rejected by the server (e.g. a scope-lock conflict with no
+    // existing run to follow) before any validation actually executes, so
+    // this must not claim success. The validation status badge in the
+    // sidebar is the source of truth for the outcome.
+    startValidation({ schema: currentSite.schemaName, plotID: currentPlot.plotID, censusID: activeCensusID });
+    setSnackbar({
+      children: 'Starting validation run. Track its progress in the validation status badge in the sidebar.',
+      severity: 'info'
+    });
+  }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName, isValidationRunnerRunning, startValidation]);
 
   // Define refreshCounts early so it can be used in other hooks
   const refreshCounts = useCallback(async () => {
@@ -1678,7 +1710,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                     dynamicButtons: dynamicButtons,
                     validationMenu: (
                       <ValidationActionsMenu
-                        onRunValidations={() => setIsValidationModalOpen(true)}
+                        onRunValidations={handleRunValidations}
                         onOverrideValidations={() => setIsValidationOverrideModalOpen(true)}
                         onResetValidations={() => setIsResetValidationModalOpen(true)}
                         onRefreshView={async () => {
@@ -1789,24 +1821,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             title="Confirm Deletion"
             content={`Delete ${describeMeasurementRow(pendingDeleteRow)}? This action cannot be undone.`}
           />
-        )}
-        {isValidationModalOpen && (
-          <Modal open={isValidationModalOpen} onClose={async () => await handleCloseModal(setIsValidationModalOpen, false)}>
-            <ModalDialog
-              sx={{
-                width: '80%',
-                borderRadius: 'md',
-                p: 2,
-                boxShadow: 'lg',
-                display: 'flex',
-                flex: 1,
-                flexDirection: 'column',
-                alignItems: 'center'
-              }}
-            >
-              <ValidationCore onValidationComplete={() => handleCloseModal(setIsValidationModalOpen, true)} />
-            </ModalDialog>
-          </Modal>
         )}
         {isValidationOverrideModalOpen && (
           <ValidationOverrideModal
