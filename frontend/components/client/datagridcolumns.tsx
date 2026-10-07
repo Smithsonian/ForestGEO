@@ -1,8 +1,8 @@
 import { HEADER_ALIGN } from '@/config/macros';
-import { Autocomplete, Box, Chip, IconButton, Stack, Typography } from '@mui/joy';
-import { GridColDef, GridPreProcessEditCellProps, GridRenderEditCellParams } from '@mui/x-data-grid';
+import { Autocomplete, Box, Chip, IconButton, Stack, Tooltip, Typography } from '@mui/joy';
+import { GridColDef, GridPreProcessEditCellProps, GridRenderCellParams, GridRenderEditCellParams } from '@mui/x-data-grid';
 import React, { Dispatch, SetStateAction, useState } from 'react';
-import { AttributeStatusOptions } from '@/lib/db/definitions/core';
+import { ATTRIBUTE_STATUS_UNSPECIFIED_HINT, ATTRIBUTE_STATUS_UNSPECIFIED_LABEL, AttributeStatusOptions } from '@/lib/db/definitions/core';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { customNumericOperators } from '@/components/datagrids/filtrationsystem';
 import CloseIcon from '@mui/icons-material/Close';
@@ -107,6 +107,30 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
   }
 ]);
 
+// MUI v8's singleSelect editor accepts object options ({value, label}); the blank option's
+// `value: null` is a real JS null (not the string 'null'), so selecting it and saving commits
+// SQL NULL. AttributeStatusOptions itself stays a plain string array for its other consumers
+// (Levenshtein matching, .join() in help text) -- this is a separate, editor-only projection.
+const AttributeStatusEditorOptions: { value: string | null; label: string }[] = [
+  { value: null, label: ATTRIBUTE_STATUS_UNSPECIFIED_LABEL },
+  ...AttributeStatusOptions.map(status => ({ value: status, label: status }))
+];
+
+const renderAttributeStatusCell = (params: GridRenderCellParams) => {
+  const value = params.value as string | null | undefined;
+  if (value) {
+    return <Typography level="body-sm">{value}</Typography>;
+  }
+  return (
+    <Tooltip title={ATTRIBUTE_STATUS_UNSPECIFIED_HINT} arrow>
+      {/* params.tabIndex follows the grid's roving tabindex: 0 for the current cell, -1 otherwise. */}
+      <Typography level="body-sm" color="neutral" tabIndex={params.tabIndex} aria-label={ATTRIBUTE_STATUS_UNSPECIFIED_HINT} sx={{ fontStyle: 'italic' }}>
+        Unspecified
+      </Typography>
+    </Tooltip>
+  );
+};
+
 export const AttributeGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
@@ -130,7 +154,11 @@ export const AttributeGridColumns: GridColDef[] = standardizeGridColumns([
     flex: 1,
     editable: true,
     type: 'singleSelect',
-    valueOptions: AttributeStatusOptions
+    valueOptions: AttributeStatusEditorOptions,
+    // Default singleSelect valueFormatter maps value->label for CSV export; override so a
+    // blank/null status exports as blank, never the editor's "Unspecified (blank)" label.
+    valueFormatter: (value: string | null) => value ?? '',
+    renderCell: renderAttributeStatusCell
   }
 ]);
 

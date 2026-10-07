@@ -111,18 +111,27 @@ export interface CMVErrorRDS {
 
 export type CMVErrorResult = ResultType<CMVErrorRDS>;
 const ATTRIBUTES_CODE_LIMIT = 10;
+
+// Canonical set of valid StemCodes statuses. Every consumer (the upload validator, the
+// DataGrid dropdown, the fuzzy-match editor) must derive from this single list -- do not
+// duplicate it elsewhere. NULL/undefined/'' are deliberately NOT members: they mean
+// "unspecified" (see ATTRIBUTE_STATUS_UNSPECIFIED_HINT), not an eighth status value.
+export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing'];
+
+export const ATTRIBUTE_STATUS_UNSPECIFIED_LABEL = 'Unspecified (blank)';
+export const ATTRIBUTE_STATUS_UNSPECIFIED_HINT =
+  'No status is assigned. This code does not provide a status-based validation exemption. Leave it blank if the code applies to multiple stem states.';
+
 export const validateAttributesRow: ValidationFunction = (row: FileRow) => {
   const errors: RowValidationErrors = {};
 
   if (row['code'] && row['code'].length > ATTRIBUTES_CODE_LIMIT) {
     errors['code'] = `Code exceeds ${ATTRIBUTES_CODE_LIMIT} characters.`;
   }
-  // Allowing NULL for status, otherwise checking for valid values
-  if (
-    row['status'] !== null &&
-    row['status'] !== undefined &&
-    !['alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing'].includes(row['status'])
-  ) {
+  // NULL/undefined/'' all mean "unspecified" -- no status-based exemption, just no stated
+  // status. Only a non-blank value outside the canonical list is rejected.
+  const status = row['status'];
+  if (status !== null && status !== undefined && status !== '' && !AttributeStatusOptions.includes(status)) {
     errors['status'] = 'Invalid status value.';
   }
 
@@ -133,11 +142,10 @@ export interface AttributesRDS {
   id?: number;
   code?: string;
   description?: string;
-  status?: string;
+  status?: string | null;
 }
 
 export type AttributesResult = ResultType<AttributesRDS>;
-export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'missing', 'broken below', 'stem dead'];
 
 export interface UnifiedChangelogRDS {
   id?: number;

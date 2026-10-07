@@ -1,5 +1,40 @@
-import { describe, expect, it } from 'vitest';
-import { MeasurementsSummaryViewGridColumns, ViewFullTableGridColumns, VIEW_FULL_TABLE_COLUMN_WIDTHS } from './datagridcolumns';
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import type { ReactElement } from 'react';
+import type { GridColDef, GridRenderCellParams, GridSingleSelectColDef } from '@mui/x-data-grid';
+
+// tests/mocks/platform-mocks.ts globally stubs '@/lib/db/definitions/core' with a stale 6-status
+// array that predates this module's AttributeGridColumns -- override with the real implementation
+// (matching the pattern in datagridelements.test.tsx) so the editor options below reflect the
+// genuine, 7-status canonical list.
+vi.mock('@/lib/db/definitions/core', async importOriginal => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return actual;
+});
+
+import { AttributeGridColumns, MeasurementsSummaryViewGridColumns, ViewFullTableGridColumns, VIEW_FULL_TABLE_COLUMN_WIDTHS } from './datagridcolumns';
+import { AttributesFormGridColumns } from './formcolumns';
+import { ATTRIBUTE_STATUS_UNSPECIFIED_LABEL, ATTRIBUTE_STATUS_UNSPECIFIED_HINT, AttributeStatusOptions } from '@/lib/db/definitions/core';
+
+// GridCellParams is generic over the grid's row/value types, but every field is still required at
+// the type level (GridRenderCellParams in @mui/x-data-grid/models/params/gridCellParams.d.ts);
+// buildBlankStatusCellParams below supplies only the fields renderAttributeStatusCell /
+// renderAttributeStatusFormCell actually read (value, tabIndex), casting the rest of the required-
+// but-unused fields away explicitly rather than reaching for `any`.
+function buildBlankStatusCellParams(tabIndex: 0 | -1): GridRenderCellParams {
+  return {
+    id: 1,
+    field: 'status',
+    value: null,
+    row: { id: 1, status: null },
+    rowNode: {} as GridRenderCellParams['rowNode'],
+    colDef: {} as GridRenderCellParams['colDef'],
+    cellMode: 'view',
+    hasFocus: tabIndex === 0,
+    tabIndex,
+    api: {} as GridRenderCellParams['api']
+  };
+}
 
 // The archive "All Historical Data" grid formerly gave every one of its columns a
 // uniform `flex: 0.3` with no minWidth, which starved headers down to one or two visible
@@ -75,5 +110,74 @@ describe('MeasurementsSummaryViewGridColumns plot coordinates', () => {
     expect(format(undefined)).toBe('');
     expect(format(0)).toBe('0.00');
     expect(format(12.345)).toBe('12.35');
+  });
+});
+
+describe('AttributeGridColumns status column (#425 null-status editing)', () => {
+  // GridColDef is a union (GridBaseColDef | GridActionsColDef | GridSingleSelectColDef); the base
+  // member's `type` is widened to GridColType, so `=== 'singleSelect'` alone does not let TypeScript
+  // narrow the return type. Assert the runtime discriminant, then cast explicitly to the member that
+  // actually carries `valueOptions` -- this is what TS2339 on the old `.valueOptions` access meant.
+  function statusColumn(): GridSingleSelectColDef {
+    const column = AttributeGridColumns.find(candidate => candidate.field === 'status');
+    if (!column) throw new Error('AttributeGridColumns has no "status" column');
+    if (column.type !== 'singleSelect') throw new Error('AttributeGridColumns "status" column is not a singleSelect column');
+    return column as GridSingleSelectColDef;
+  }
+
+  it('offers exactly one blank option, with a real null value (not the string "null")', () => {
+    const options = statusColumn().valueOptions as { value: string | null; label: string }[];
+    const blankOptions = options.filter(option => option.value === null);
+
+    expect(blankOptions).toHaveLength(1);
+    expect(blankOptions[0].label).toBe(ATTRIBUTE_STATUS_UNSPECIFIED_LABEL);
+    expect(blankOptions[0].value).toBeNull();
+  });
+
+  it('exposes every canonical status as its own value/label pair, inventing none', () => {
+    const options = statusColumn().valueOptions as { value: string | null; label: string }[];
+    const nonBlankOptions = options.filter(option => option.value !== null);
+
+    expect(nonBlankOptions.map(option => option.value).sort()).toEqual([...AttributeStatusOptions].sort());
+    for (const option of nonBlankOptions) {
+      expect(option.label).toBe(option.value);
+    }
+  });
+
+  it("renders the blank-status hint as the single reachable tab stop only when it is the grid's current cell", () => {
+    const renderCell = statusColumn().renderCell as (params: GridRenderCellParams) => ReactElement;
+
+    const { unmount: unmountFocused } = render(renderCell(buildBlankStatusCellParams(0)));
+    expect(screen.getByLabelText(ATTRIBUTE_STATUS_UNSPECIFIED_HINT)).toHaveAttribute('tabindex', '0');
+    unmountFocused();
+
+    render(renderCell(buildBlankStatusCellParams(-1)));
+    expect(screen.getByLabelText(ATTRIBUTE_STATUS_UNSPECIFIED_HINT)).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('formats the raw/export value as blank for null, never the "Unspecified (blank)" label', () => {
+    const format = statusColumn().valueFormatter as (value: string | null) => string;
+
+    expect(format(null)).toBe('');
+    expect(format('alive')).toBe('alive');
+  });
+});
+
+describe('AttributesFormGridColumns status column (#425 null-status editing)', () => {
+  function formStatusColumn(): GridColDef {
+    const column = AttributesFormGridColumns.find(candidate => candidate.field === 'status');
+    if (!column) throw new Error('AttributesFormGridColumns has no "status" column');
+    return column;
+  }
+
+  it('renders the same single-tab-stop blank-status hint as the grid column (keyboard access to the explanation)', () => {
+    const renderCell = formStatusColumn().renderCell as (params: GridRenderCellParams) => ReactElement;
+
+    const { unmount: unmountFocused } = render(renderCell(buildBlankStatusCellParams(0)));
+    expect(screen.getByLabelText(ATTRIBUTE_STATUS_UNSPECIFIED_HINT)).toHaveAttribute('tabindex', '0');
+    unmountFocused();
+
+    render(renderCell(buildBlankStatusCellParams(-1)));
+    expect(screen.getByLabelText(ATTRIBUTE_STATUS_UNSPECIFIED_HINT)).toHaveAttribute('tabindex', '-1');
   });
 });

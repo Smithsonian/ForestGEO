@@ -14,7 +14,7 @@ import { getColumnVisibilityModel } from '@/config/datagridhelpers';
 import { getGridTypeLabel } from '@/config/macros/siteconfigs';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { FileRow, FileRowSet, FormType, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
-import { AttributeStatusOptions } from '@/lib/db/definitions/core';
+import { validateAttributesRow } from '@/lib/db/definitions/core';
 
 export interface IsolatedDataGridCommonProps {
   gridType: string;
@@ -220,7 +220,10 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
       Object.keys(row).forEach(header => {
         if (header !== 'id') {
           const value = row[header as keyof typeof row];
-          fileRow[header] = value !== undefined ? String(value) : null;
+          // NULL/undefined must stay NULL -- String(null) is the literal text "null", which would
+          // silently turn an intentionally blank/unspecified field (e.g. attribute status) into a
+          // bogus non-blank value.
+          fileRow[header] = value === null || value === undefined ? null : String(value);
         }
       });
 
@@ -241,7 +244,10 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
 
     switch (gridType) {
       case 'attributes':
-        return AttributeStatusOptions.includes(row.status);
+        // Reuses the canonical check the upload path enforces: NULL/undefined/blank status is
+        // allowed (it means unspecified, not invalid), unknown non-blank values are still
+        // rejected. The required-code check above is retained unconditionally.
+        return validateAttributesRow(row as FileRow) === null;
     }
     return true;
   };

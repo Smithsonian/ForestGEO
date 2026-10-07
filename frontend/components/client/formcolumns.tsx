@@ -1,11 +1,11 @@
 'use client';
 
-import { GridColDef, GridRenderEditCellParams, useGridApiContext } from '@mui/x-data-grid';
+import { GridColDef, GridRenderCellParams, GridRenderEditCellParams, useGridApiContext } from '@mui/x-data-grid';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { Box, Input, Tooltip, Typography } from '@mui/joy';
 import React, { useEffect, useRef, useState } from 'react';
 import useEnhancedEffect from '@mui/utils/useEnhancedEffect';
-import { AttributeStatusOptions } from '@/lib/db/definitions/core';
+import { ATTRIBUTE_STATUS_UNSPECIFIED_HINT, AttributeStatusOptions } from '@/lib/db/definitions/core';
 import { styled } from '@mui/joy/styles';
 import { CheckCircleOutlined } from '@mui/icons-material';
 import { FormType, TableHeadersByFormType } from '@/config/macros/formdetails';
@@ -351,6 +351,21 @@ const _renderCustomHeader = (formType: FormType, field: string) => {
   );
 };
 
+const renderAttributeStatusFormCell = (params: GridRenderCellParams) => {
+  const value = params.value as string | null | undefined;
+  if (value) {
+    return <Typography level="body-sm">{value}</Typography>;
+  }
+  return (
+    <Tooltip title={ATTRIBUTE_STATUS_UNSPECIFIED_HINT} arrow>
+      {/* params.tabIndex follows the grid's roving tabindex: 0 for the current cell, -1 otherwise. */}
+      <Typography level="body-sm" color="neutral" tabIndex={params.tabIndex} aria-label={ATTRIBUTE_STATUS_UNSPECIFIED_HINT} sx={{ fontStyle: 'italic' }}>
+        Unspecified
+      </Typography>
+    </Tooltip>
+  );
+};
+
 export const AttributesFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
@@ -377,7 +392,8 @@ export const AttributesFormGridColumns: GridColDef[] = standardizeGridColumns([
     headerName: 'Status',
     // renderHeader: () => renderCustomHeader(FormType.attributes, 'status'),
     flex: 1,
-    editable: true
+    editable: true,
+    renderCell: renderAttributeStatusFormCell
     // This is temporarily being suspended -- it's a nice to have, not a need to have
     // renderEditCell: params => <EditStatusCell {...params} />
   }
