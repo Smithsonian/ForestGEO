@@ -15,6 +15,7 @@ function buildSharedRows() {
     treeTag: 'TREE101',
     speciesCode: 'RUBI04',
     quadratName: 'Q0101',
+    censusID: 5,
     isValidated: false,
     description: 'Invalid species reference',
     userDefinedFields: 'old tree'
@@ -25,6 +26,7 @@ function buildSharedRows() {
     treeTag: 'TREE101',
     speciesCode: 'RUBI04',
     quadratName: 'Q0101',
+    censusID: 5,
     isValidated: false,
     description: 'Invalid species reference',
     userDefinedFields: 'old tree'
@@ -160,12 +162,166 @@ describe('Cross-Feature Integration', () => {
     cy.contains('[role="alertdialog"]', 'The following validation errors were found in this row:').should('be.visible');
     cy.contains('button', 'Clear Errors').click();
 
-    cy.contains('Validation errors cleared successfully').should('be.visible');
+    cy.wait('@recheckValidation').then(interception => {
+      expect(interception.request.body).to.deep.equal({ schema: 'luquillo', plotID: 1, censusID: 5, coreMeasurementID: 101 });
+      expect(interception.request.body).to.not.have.any.keys('query', 'params', 'format');
+    });
+    cy.get('@recheckValidation.all').should('have.length', 1);
+
+    cy.contains('Validation errors cleared. The row is pending validation.').should('be.visible');
     cy.contains('[role="alertdialog"]', 'The following validation errors were found in this row:').should('not.exist');
     cy.contains('[role="row"]', 'TREE101').should('be.visible');
+    cy.contains('[role="row"]', 'TREE101').find('[data-field="isValidated"] button').should('not.exist');
 
     cy.openCensusHubLink('View Errors');
     cy.wait('@fetchErrorsExplorerRows');
     cy.contains('.MuiDataGrid-row', 'Invalid species reference').should('not.exist');
+  });
+
+  it('clears both validation errors on a mixed-source row while its ingestion error and a sibling validation error persist', () => {
+    // Reset/recheck only resolve ErrorSource='validation' occurrences (see
+    // lib/validations/reset.ts). This row mixes 'validation' and 'ingestion'
+    // sources, so the mock cannot infer which messages survive from the
+    // deduped arrays alone — the exact post-action row must be supplied via
+    // postActionErrorRowsByMeasurementID (see resolveErrorRowAfterValidationClear
+    // in measurement-hub-workflow-helpers.ts).
+    const targetSummaryRow = buildMeasurementsSummaryRow({
+      coreMeasurementID: 102,
+      treeTag: 'TREE102',
+      speciesCode: 'RUBI04',
+      quadratName: 'Q0101',
+      censusID: 5,
+      isValidated: false,
+      description: 'Invalid species reference'
+    });
+
+    const targetFullRow = buildViewFullTableRow({
+      coreMeasurementID: 102,
+      treeTag: 'TREE102',
+      speciesCode: 'RUBI04',
+      quadratName: 'Q0101',
+      censusID: 5,
+      isValidated: false,
+      description: 'Invalid species reference'
+    });
+
+    const targetErrorRow = buildErrorsExplorerRow({
+      id: 2,
+      coreMeasurementID: 102,
+      treeTag: 'TREE102',
+      speciesCode: 'RUBI04',
+      quadratName: 'Q0101',
+      censusID: 5,
+      primaryErrorMessage: 'Invalid species reference',
+      errorMessages: ['Invalid species reference', 'DBH exceeds absolute maximum threshold', 'Stem import failed'],
+      errorSources: ['validation', 'ingestion'],
+      errorFields: ['speciesCode', 'measuredDBH'],
+      errorCodes: ['INVALID_SPECIES', 'DBH_MAX', 'INGESTION_STEM_FAILED'],
+      errorCount: 3,
+      description: 'Invalid species reference'
+    });
+
+    const targetPostActionErrorRow = buildErrorsExplorerRow({
+      id: 2,
+      coreMeasurementID: 102,
+      treeTag: 'TREE102',
+      speciesCode: 'RUBI04',
+      quadratName: 'Q0101',
+      censusID: 5,
+      primaryErrorMessage: 'Stem import failed',
+      errorMessages: ['Stem import failed'],
+      errorSources: ['ingestion'],
+      errorFields: [],
+      errorCodes: ['INGESTION_STEM_FAILED'],
+      errorCount: 1,
+      description: 'Stem import failed'
+    });
+
+    const siblingSummaryRow = buildMeasurementsSummaryRow({
+      coreMeasurementID: 103,
+      treeTag: 'TREE103',
+      speciesCode: 'ANOPKL',
+      quadratName: 'Q0102',
+      censusID: 5,
+      isValidated: false,
+      description: 'Invalid species reference'
+    });
+
+    const siblingFullRow = buildViewFullTableRow({
+      coreMeasurementID: 103,
+      treeTag: 'TREE103',
+      speciesCode: 'ANOPKL',
+      quadratName: 'Q0102',
+      censusID: 5,
+      isValidated: false,
+      description: 'Invalid species reference'
+    });
+
+    const siblingErrorRow = buildErrorsExplorerRow({
+      id: 3,
+      coreMeasurementID: 103,
+      treeTag: 'TREE103',
+      speciesCode: 'ANOPKL',
+      quadratName: 'Q0102',
+      censusID: 5,
+      primaryErrorMessage: 'Invalid species reference',
+      errorMessages: ['Invalid species reference'],
+      errorSources: ['validation'],
+      errorFields: ['speciesCode'],
+      errorCodes: ['INVALID_SPECIES'],
+      errorCount: 1,
+      description: 'Invalid species reference'
+    });
+
+    mockMeasurementHubWorkflowApi({
+      summaryRows: [targetSummaryRow, siblingSummaryRow],
+      viewFullTableRows: [targetFullRow, siblingFullRow],
+      errorRows: [targetErrorRow, siblingErrorRow],
+      validationFailures: [
+        {
+          coreMeasurementID: 102,
+          descriptions: ['Invalid species reference', 'DBH exceeds absolute maximum threshold'],
+          criteria: ['speciesCode', 'measuredDBH']
+        },
+        {
+          coreMeasurementID: 103,
+          descriptions: ['Invalid species reference'],
+          criteria: ['speciesCode']
+        }
+      ],
+      postActionErrorRowsByMeasurementID: { 102: targetPostActionErrorRow }
+    });
+
+    selectDefaultCensusContext();
+    cy.openCensusHubLink('View Data');
+
+    cy.contains('[role="row"]', 'TREE102').find('[data-field="isValidated"] button').click({ force: true });
+    cy.contains('[role="alertdialog"]', 'The following validation errors were found in this row:').should('be.visible');
+    cy.contains('button', 'Clear Errors').click();
+
+    cy.wait('@recheckValidation').then(interception => {
+      expect(interception.request.body).to.deep.equal({ schema: 'luquillo', plotID: 1, censusID: 5, coreMeasurementID: 102 });
+      expect(interception.request.body).to.not.have.any.keys('query', 'params', 'format');
+    });
+    cy.get('@recheckValidation.all').should('have.length', 1);
+
+    cy.contains('Validation errors cleared. The row is pending validation.').should('be.visible');
+    cy.contains('[role="row"]', 'TREE102').find('[data-field="isValidated"] button').should('not.exist');
+    // Unrelated sibling row is untouched by a single-row recheck.
+    cy.contains('[role="row"]', 'TREE103').find('[data-field="isValidated"] button').should('exist');
+
+    cy.contains('[role="row"]', 'TREE102').find('[data-testid="HourglassEmptyIcon"]').should('be.visible');
+    // TREE102's surviving ingestion error plus TREE103's untouched validation error.
+    cy.get('[data-testid="filter-errors"]').should('have.attr', 'aria-label', 'Hide invalid measurements (2)');
+
+    cy.openCensusHubLink('View Errors');
+    cy.wait('@fetchErrorsExplorerRows');
+
+    // The resolved validation messages are gone; the ingestion message survives.
+    cy.contains('.MuiDataGrid-row', 'TREE102').should('contain', 'Stem import failed');
+    cy.contains('.MuiDataGrid-row', 'TREE102').should('not.contain', 'Invalid species reference');
+    cy.contains('.MuiDataGrid-row', 'TREE102').should('not.contain', 'DBH exceeds absolute maximum threshold');
+    // The sibling's validation error is untouched.
+    cy.contains('.MuiDataGrid-row', 'TREE103').should('contain', 'Invalid species reference');
   });
 });

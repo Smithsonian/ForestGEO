@@ -11,6 +11,10 @@ interface MockMeasurementHubWorkflowApiOptions {
   errorRows?: ErrorExplorerRow[];
   validationFailures?: MeasurementValidationFailure[];
   schema?: string;
+  // Required for any error row whose errorSources mix 'validation' and
+  // 'ingestion' and that gets targeted by a reset/recheck in the test — see
+  // resolveErrorRowAfterValidationClear for why this can't be inferred.
+  postActionErrorRowsByMeasurementID?: Record<number, ErrorExplorerRow>;
   queryHandler?: (
     requestBody: any,
     state: {
@@ -106,14 +110,23 @@ function applyRowUpdate<Row extends GenericRow>(rows: Row[], newRow: Partial<Row
   return nextRows;
 }
 
-function buildCounts(rows: GenericRow[], validationFailures: MeasurementValidationFailure[]) {
-  const failedIDs = new Set(validationFailures.map(failure => Number(failure.coreMeasurementID)));
+// CountUnresolvedLogged counts ANY unresolved measurement_error_log entry
+// regardless of source (see config/measurementstatefilters.ts), so it must come
+// from the union of validationFailures AND errorRows — not validationFailures
+// alone. Otherwise an ingestion-only error row reads as "clean" the moment
+// validationFailures is cleared, even though the row still has an unresolved
+// log entry and the real app would still count/show it as invalid.
+function buildCounts(rows: GenericRow[], validationFailures: MeasurementValidationFailure[], errorRows: ErrorExplorerRow[]) {
+  const unresolvedIDs = new Set<number>([
+    ...validationFailures.map(failure => Number(failure.coreMeasurementID)),
+    ...errorRows.map(row => Number(row.coreMeasurementID))
+  ]);
 
   return {
-    CountValid: rows.filter(row => !failedIDs.has(Number(row.coreMeasurementID)) && row.isValidated === true).length,
-    CountUnresolvedLogged: rows.filter(row => failedIDs.has(Number(row.coreMeasurementID))).length,
-    CountFailedNoLog: rows.filter(row => !failedIDs.has(Number(row.coreMeasurementID)) && row.isValidated === false).length,
-    CountPending: rows.filter(row => !failedIDs.has(Number(row.coreMeasurementID)) && row.isValidated == null).length,
+    CountValid: rows.filter(row => !unresolvedIDs.has(Number(row.coreMeasurementID)) && row.isValidated === true).length,
+    CountUnresolvedLogged: rows.filter(row => unresolvedIDs.has(Number(row.coreMeasurementID))).length,
+    CountFailedNoLog: rows.filter(row => !unresolvedIDs.has(Number(row.coreMeasurementID)) && row.isValidated === false).length,
+    CountPending: rows.filter(row => !unresolvedIDs.has(Number(row.coreMeasurementID)) && row.isValidated == null).length,
     // Mirrors the override modal predicate (IsValidated = FALSE OR IS NULL); intentionally not disjoint.
     CountOverridable: rows.filter(row => row.isValidated === false || row.isValidated == null).length,
     CountOldTrees: rows.filter(row => normalizeText(row.userDefinedFields).includes('old tree')).length,
@@ -140,6 +153,52 @@ function buildFacetEntries(values: string[]) {
   return Array.from(counts.entries()).map(([value, count]) => ({ value, count }));
 }
 
+// Determines an error row's state after reset/recheck resolves its unresolved
+// 'validation' occurrences (lib/validations/reset.ts resolves ErrorSource =
+// 'validation' links only) and unconditionally sets the underlying row pending
+// (buildResetIsValidatedStep sets IsValidated = NULL for every targeted row,
+// regardless of which error sources remain).
+//
+// A single-source row is unambiguous: a pure 'validation' row is fully
+// resolved, so it drops out of View Errors entirely (null); a pure
+// 'ingestion' row is untouched by reset/recheck and survives with every
+// message/code/field intact.
+//
+// A row mixing 'validation' and 'ingestion' sources cannot be inferred here.
+// The real API (app/api/errors/explorer/_shared.ts#toDisplayRow) dedupes
+// errorMessages, errorSources, and errorCodes independently — e.g. sources
+// ['validation','validation','ingestion'] dedupes to length 2 while messages
+// stays length 3, so post-dedup arrays are not index-aligned and there's no
+// reliable way to tell which message/code belonged to which source. Guessing
+// here would hide exactly the kind of bug this contract exists to catch, so a
+// mixed-source row that gets targeted must have its exact resulting row
+// supplied via postActionErrorRowsByMeasurementID; omitting it is a fixture
+// bug, not something to paper over with inference.
+//
+// A manager-override marker (config/validationoverride.ts) is recorded already
+// resolved, so it never appears in an unresolved errorRows fixture in the
+// first place — no special-casing needed for it here.
+function resolveErrorRowAfterValidationClear(
+  row: ErrorExplorerRow,
+  postActionErrorRowsByMeasurementID: Record<number, ErrorExplorerRow>
+): ErrorExplorerRow | null {
+  const distinctSources = new Set(row.errorSources);
+
+  if (distinctSources.size <= 1) {
+    return distinctSources.has('validation') ? null : { ...row, isValidated: null };
+  }
+
+  const explicitRow = postActionErrorRowsByMeasurementID[row.coreMeasurementID];
+  if (!explicitRow) {
+    throw new Error(
+      `mockMeasurementHubWorkflowApi: CoreMeasurementID ${row.coreMeasurementID} mixes validation and ingestion error sources. ` +
+        `Supply its exact post-action row via postActionErrorRowsByMeasurementID — the mock cannot infer which messages/codes survive deduping.`
+    );
+  }
+
+  return { ...explicitRow, isValidated: null };
+}
+
 function buildErrorFacets(rows: ErrorExplorerRow[]) {
   return {
     messages: buildFacetEntries(rows.flatMap(row => row.errorMessages)),
@@ -161,6 +220,7 @@ export function mockMeasurementHubWorkflowApi({
   errorRows = [],
   validationFailures = [],
   schema = DEFAULT_SCHEMA,
+  postActionErrorRowsByMeasurementID = {},
   queryHandler,
   refreshSummaryResponse = { statusCode: 200, body: { success: true } }
 }: MockMeasurementHubWorkflowApiOptions) {
@@ -254,7 +314,7 @@ export function mockMeasurementHubWorkflowApi({
       if (body.includes('CountValid') || body.includes('CountUnresolvedLogged') || body.includes('CountPending') || body.includes('CountFailedNoLog')) {
         req.reply({
           statusCode: 200,
-          body: [buildCounts(state.summaryRows, state.validationFailures)]
+          body: [buildCounts(state.summaryRows, state.validationFailures, state.errorRows)]
         });
         return;
       }
@@ -267,32 +327,9 @@ export function mockMeasurementHubWorkflowApi({
     }
 
     if (body?.query && typeof body.query === 'string') {
-      if (body.query.includes('DELETE mel')) {
-        const measurementID = Number(body.params?.[2]);
-        state.validationFailures = state.validationFailures.filter(failure => Number(failure.coreMeasurementID) !== measurementID);
-        state.errorRows = state.errorRows.filter(row => Number(row.coreMeasurementID) !== measurementID);
-      }
-
-      if (body.query.includes('UPDATE ??.coremeasurements SET IsValidated = NULL')) {
-        const measurementID = Number(body.params?.[1]);
-        state.summaryRows = state.summaryRows.map(row =>
-          Number(row.coreMeasurementID) === measurementID
-            ? {
-                ...row,
-                isValidated: null
-              }
-            : row
-        );
-        state.viewFullTableRows = state.viewFullTableRows.map(row =>
-          Number(row.coreMeasurementID) === measurementID
-            ? {
-                ...row,
-                isValidated: null
-              }
-            : row
-        );
-      }
-
+      // Reset/recheck mutations now go through /api/validations/reset and
+      // /api/validations/recheck (intercepted below), not raw SQL via /api/query —
+      // this branch is a generic fallback for any other query-shaped write.
       req.reply({
         statusCode: 200,
         body: { success: true }
@@ -305,6 +342,39 @@ export function mockMeasurementHubWorkflowApi({
       body: []
     });
   }).as('runMeasurementHubQuery');
+
+  // Resets every row in scope back to pending and resolves unresolved validation
+  // occurrences (ingestion occurrences on the same row survive), matching
+  // lib/validations/reset.ts#resetValidationScope. The real route refreshes both
+  // measurement views atomically, so callers must see no follow-up
+  // @refreshMeasurementHubSummary / @refreshMeasurementHubViewFullTable request.
+  cy.intercept('POST', '/api/validations/reset', req => {
+    state.summaryRows = state.summaryRows.map(row => ({ ...row, isValidated: null }));
+    state.viewFullTableRows = state.viewFullTableRows.map(row => ({ ...row, isValidated: null }));
+    const affectedRows = state.summaryRows.length;
+    state.validationFailures = [];
+    state.errorRows = state.errorRows
+      .map(row => resolveErrorRowAfterValidationClear(row, postActionErrorRowsByMeasurementID))
+      .filter((row): row is ErrorExplorerRow => row !== null);
+
+    req.reply({ statusCode: 200, body: { affectedRows } });
+  }).as('resetValidations');
+
+  // Rechecks a single row by coreMeasurementID; every other row is untouched,
+  // matching lib/validations/reset.ts#recheckMeasurementValidation.
+  cy.intercept('POST', '/api/validations/recheck', req => {
+    const body = normalizeRequestBody(req.body);
+    const measurementID = Number(body?.coreMeasurementID);
+
+    state.summaryRows = state.summaryRows.map(row => (Number(row.coreMeasurementID) === measurementID ? { ...row, isValidated: null } : row));
+    state.viewFullTableRows = state.viewFullTableRows.map(row => (Number(row.coreMeasurementID) === measurementID ? { ...row, isValidated: null } : row));
+    state.validationFailures = state.validationFailures.filter(failure => Number(failure.coreMeasurementID) !== measurementID);
+    state.errorRows = state.errorRows
+      .map(row => (Number(row.coreMeasurementID) === measurementID ? resolveErrorRowAfterValidationClear(row, postActionErrorRowsByMeasurementID) : row))
+      .filter((row): row is ErrorExplorerRow => row !== null);
+
+    req.reply({ statusCode: 200, body: { affectedRows: 1 } });
+  }).as('recheckValidation');
 
   cy.intercept('POST', `**/api/refreshviews/measurementssummary/${schema}**`, {
     statusCode: refreshSummaryResponse.statusCode,
