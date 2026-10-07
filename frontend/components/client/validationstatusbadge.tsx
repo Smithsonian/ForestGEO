@@ -21,7 +21,7 @@ const DB_POLL_INTERVAL_MS = 10_000;
  * module-level runner was lost (e.g. full page reload).
  */
 export default function ValidationStatusBadge({ schema, plotID, censusID }: { schema?: string; plotID?: number; censusID?: number }) {
-  const { status, progress, errors, notices, startValidationRun, updateValidationProgress, completeValidationRun } = useBackgroundValidationState();
+  const { status, runID, progress, errors, notices, startValidationRun, updateValidationProgress, completeValidationRun } = useBackgroundValidationState();
   const [detailOpen, setDetailOpen] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hasResumedRef = useRef(false);
@@ -45,10 +45,27 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
     hasResumedRef.current = false;
   }, [plotID, censusID]);
 
-  // Poll DB as a fallback while status is 'running' but the module-level
-  // runner is NOT active (i.e. the page was hard-refreshed and the runner
-  // died).  Writes the fetched state back into Zustand so the badge stays
-  // accurate.
+  // Poll DB as a fallback while status is 'running'. The module-level
+  // runner may be driving this tab's own run (in which case Zustand is
+  // already being updated directly and this fallback should skip its
+  // fetch), or it may not be — e.g. the page was hard-refreshed and the
+  // runner died, or this tab is only *following* another tab/request's
+  // persisted run after a scope-lock conflict (ValidationRunner.start()
+  // clears its own activity flag in a non-reactive .finally(), so "is the
+  // local runner active" can only be read fresh on each tick, never cached
+  // for the lifetime of this effect). The timer is therefore always
+  // installed while running, and `isRunning()` is checked inside each tick
+  // instead of once at mount.
+  //
+  // `runID` is included below so this effect's lifetime — and the
+  // `cancelled` guard it owns — ends whenever the run being followed
+  // changes identity, even while `status` itself never leaves 'running'
+  // (e.g. handing off from one followed run to another). Without that,
+  // a slow response addressed to the previous run could still land after
+  // the handoff and overwrite the new one. `fetchInFlight` additionally
+  // keeps two ticks within the same lifetime from ever having requests in
+  // flight at once, so a slower tick's response can't arrive out of order
+  // after a faster, later tick's already has.
   useEffect(() => {
     if (status !== 'running' || !schema || !plotID || !censusID) {
       if (pollTimerRef.current) {
@@ -58,15 +75,27 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
       return;
     }
 
-    // If the runner is active in this tab, Zustand is already being updated
-    // directly — no need to poll.
-    if (ValidationRunner.isRunning()) return;
+    let cancelled = false;
+    let fetchInFlight = false;
 
     pollTimerRef.current = setInterval(async () => {
+      // Skip this tick's fetch if the local runner is actively driving its
+      // own run — re-checked per tick, not once at mount, since it can
+      // start or stop between ticks without this effect's dependencies
+      // changing.
+      if (ValidationRunner.isRunning()) return;
+      if (fetchInFlight) return;
+
+      fetchInFlight = true;
       try {
         const response = await fetch(`/api/validations/run?schema=${schema}&plotID=${plotID}&censusID=${censusID}`);
         const { run } = await response.json();
-        if (!run) return;
+
+        // Discard a response that resolved after this effect's lifetime
+        // ended (unmount, schema/plotID/censusID/runID changed) or after
+        // the local runner picked up a new run while this fetch was in
+        // flight — writing it into Zustand now would be stale.
+        if (cancelled || !run || ValidationRunner.isRunning()) return;
 
         // Write DB state back into Zustand
         if (run.Status === 'running') {
@@ -85,21 +114,26 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
             notices: run.Notices ?? []
           });
           completeValidationRun(run.Status, run.ErrorMessages ?? [], run.Notices ?? []);
-          clearInterval(pollTimerRef.current!);
-          pollTimerRef.current = null;
+          if (pollTimerRef.current) {
+            clearInterval(pollTimerRef.current);
+            pollTimerRef.current = null;
+          }
         }
       } catch {
         // Swallow polling errors
+      } finally {
+        fetchInFlight = false;
       }
     }, DB_POLL_INTERVAL_MS);
 
     return () => {
+      cancelled = true;
       if (pollTimerRef.current) {
         clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;
       }
     };
-  }, [status, schema, plotID, censusID, startValidationRun, updateValidationProgress, completeValidationRun]);
+  }, [status, schema, plotID, censusID, runID, startValidationRun, updateValidationProgress, completeValidationRun]);
 
   if (status === 'idle') return null;
 
