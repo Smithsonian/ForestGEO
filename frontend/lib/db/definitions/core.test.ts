@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FileRow } from '@/config/macros/formdetails';
 
-// tests/mocks/platform-mocks.ts globally stubs '@/lib/db/definitions/core' with a stale 6-status
-// array that predates AttributeStatusOptions' 7th status -- override with the real implementation
-// (matching the pattern in datagridcolumns.test.tsx) so these tests exercise the genuine validator.
-// This must be a hoisted, static import: it.each(AttributeStatusOptions) below needs the real array
-// at collection time, before any beforeAll/dynamic import would run.
+// platform-mocks.ts stubs this module with only AttributeStatusOptions; these tests need the real exports.
 vi.mock('@/lib/db/definitions/core', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return actual;

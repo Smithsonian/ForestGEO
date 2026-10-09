@@ -220,9 +220,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
       Object.keys(row).forEach(header => {
         if (header !== 'id') {
           const value = row[header as keyof typeof row];
-          // NULL/undefined must stay NULL -- String(null) is the literal text "null", which would
-          // silently turn an intentionally blank/unspecified field (e.g. attribute status) into a
-          // bogus non-blank value.
+          // String(null) would store the text "null" instead of a blank value.
           fileRow[header] = value === null || value === undefined ? null : String(value);
         }
       });
@@ -244,9 +242,6 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
 
     switch (gridType) {
       case 'attributes':
-        // Reuses the canonical check the upload path enforces: NULL/undefined/blank status is
-        // allowed (it means unspecified, not invalid), unknown non-blank values are still
-        // rejected. The required-code check above is retained unconditionally.
         return validateAttributesRow(row as FileRow) === null;
     }
     return true;

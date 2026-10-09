@@ -3,10 +3,7 @@ import { render, screen } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import type { GridColDef, GridRenderCellParams, GridSingleSelectColDef } from '@mui/x-data-grid';
 
-// tests/mocks/platform-mocks.ts globally stubs '@/lib/db/definitions/core' with a stale 6-status
-// array that predates this module's AttributeGridColumns -- override with the real implementation
-// (matching the pattern in datagridelements.test.tsx) so the editor options below reflect the
-// genuine, 7-status canonical list.
+// platform-mocks.ts stubs this module with only AttributeStatusOptions; these tests need the real exports.
 vi.mock('@/lib/db/definitions/core', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return actual;

@@ -112,10 +112,7 @@ export interface CMVErrorRDS {
 export type CMVErrorResult = ResultType<CMVErrorRDS>;
 const ATTRIBUTES_CODE_LIMIT = 10;
 
-// Canonical set of valid StemCodes statuses. Every consumer (the upload validator, the
-// DataGrid dropdown, the fuzzy-match editor) must derive from this single list -- do not
-// duplicate it elsewhere. NULL/undefined/'' are deliberately NOT members: they mean
-// "unspecified" (see ATTRIBUTE_STATUS_UNSPECIFIED_HINT), not an eighth status value.
+// A blank status means unspecified, not an eighth status, so it is not in this list.
 export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing'];
 
 export const ATTRIBUTE_STATUS_UNSPECIFIED_LABEL = 'Unspecified (blank)';
