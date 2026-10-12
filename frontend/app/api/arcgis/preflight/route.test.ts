@@ -383,10 +383,18 @@ describe('POST /api/arcgis/preflight body size and readability', () => {
     expect(mocks.readArcgisWorkbookDetailed).not.toHaveBeenCalled();
   });
 
-  it('lets a workbook exactly at the per-file limit past the size check', async () => {
+  it('accepts and stages a workbook exactly at the per-file limit', async () => {
+    mocks.readArcgisWorkbookDetailed.mockResolvedValue({ ok: true, workbook: { trees: [{}], stems: [{}] } });
+    mocks.transformArcgisWorkbook.mockReturnValue({ rows: [{ tag: '100' }], summary: { totalRows: 1 }, warnings: [] });
+    mocks.createArcgisImportSession.mockResolvedValue({ importSessionId: 'sess-at-limit' });
+
     const res = await POST(formRequest(VALID_SCOPE_FIELDS, true, 'x.xlsx', MAX_UPLOAD_REQUEST_BODY_BYTES, MAX_UPLOAD_FILE_BYTES) as any);
     const body = await res.json();
 
-    expect(res.status, JSON.stringify(body)).not.toBe(HTTPResponses.PAYLOAD_TOO_LARGE);
+    expect(res.status, JSON.stringify(body)).toBe(HTTPResponses.OK);
+    expect(body.importSessionId).toBe('sess-at-limit');
+    expect(body.summary).toEqual({ totalRows: 1 });
+    expect(mocks.readArcgisWorkbookDetailed, 'the at-limit workbook must be read, not rejected').toHaveBeenCalledTimes(1);
+    expect(mocks.createArcgisImportSession).toHaveBeenCalledTimes(1);
   });
 });
