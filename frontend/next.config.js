@@ -75,7 +75,8 @@ const nextConfig = withBundleAnalyzer({
     // Note: optimizeCss requires 'critters' package
     // Install with: npm install critters
     // Then uncomment: optimizeCss: true
-    // Increase body size limit for large measurement file uploads
+    // Server actions only. Route-handler uploads are bounded by lib/uploads/upload-request-limits.ts;
+    // do not raise middlewareClientMaxBodySize for them (see middleware.ts matcher).
     serverActions: {
       bodySizeLimit: '10mb'
     }
