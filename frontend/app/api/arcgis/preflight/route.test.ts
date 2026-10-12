@@ -41,6 +41,16 @@ import { PREFLIGHT_STATUS_MAPPING_REQUIRED } from '@/lib/arcgis/types';
 import { canonicalFieldsFor } from '@/lib/column-mapping/fields';
 import { seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
 import { SourceFormat } from '@/config/macros/formdetails';
+import { HTTPResponses } from '@/config/macros';
+import {
+  ARCGIS_UPLOAD_RECOVERY_ADVICE,
+  MAX_UPLOAD_FILE_BYTES,
+  MAX_UPLOAD_REQUEST_BODY_BYTES,
+  UPLOAD_LENGTH_REQUIRED_MESSAGE,
+  UPLOAD_UNREADABLE_MESSAGE,
+  uploadFileTooLargeMessage,
+  uploadRequestBodyTooLargeMessage
+} from '@/lib/uploads/upload-request-limits';
 
 const DESCRIBED_SHEETS = [
   { name: 'TreesCustom', columns: ['GlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'MyX', 'MyY', 'When'] },
@@ -83,13 +93,28 @@ if (typeof File.prototype.arrayBuffer !== 'function') {
   };
 }
 
-function formRequest(fields: Record<string, string>, withFile = true, fileName = 'x.xlsx') {
+const SMALL_DECLARED_BODY_BYTES = 4096;
+const VALID_SCOPE_FIELDS = { schema: 'forestgeo_testing', plotID: '1', censusID: '1' };
+
+function formRequest(
+  fields: Record<string, string>,
+  withFile = true,
+  fileName = 'x.xlsx',
+  declaredBodyBytes: number | null = SMALL_DECLARED_BODY_BYTES,
+  reportedFileBytes: number | null = null
+) {
   const fd = new FormData();
-  if (withFile) fd.append('file', new File([new Uint8Array([1, 2, 3])], fileName));
+  if (withFile) {
+    const file = new File([new Uint8Array([1, 2, 3])], fileName);
+    if (reportedFileBytes !== null) Object.defineProperty(file, 'size', { value: reportedFileBytes });
+    fd.append('file', file);
+  }
   for (const [k, v] of Object.entries(fields)) fd.append(k, v);
-  const request = new Request('http://t/api/arcgis/preflight', { method: 'POST' });
+  const headers: Record<string, string> = {};
+  if (declaredBodyBytes !== null) headers['content-length'] = String(declaredBodyBytes);
+  const request = new Request('http://t/api/arcgis/preflight', { method: 'POST', headers });
   // jsdom's Request does not round-trip multipart bodies; stub formData() like the other route tests.
-  (request as unknown as { formData: () => Promise<FormData> }).formData = async () => fd;
+  (request as unknown as { formData: () => Promise<FormData> }).formData = vi.fn(async () => fd);
   return request;
 }
 
@@ -287,5 +312,81 @@ describe('POST /api/arcgis/preflight mapping', () => {
     expect(body.summary).toEqual({ totalRows: 1 });
     expect(body.status).toBeUndefined();
     expect(mocks.readArcgisWorkbookDetailed).toHaveBeenCalledWith(expect.anything(), undefined);
+  });
+});
+
+describe('POST /api/arcgis/preflight body size and readability', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireSession.mockReturnValue(null);
+    mocks.getSessionUserId.mockReturnValue('user-1');
+    mocks.isValidSchema.mockReturnValue(true);
+    mocks.auth.mockResolvedValue({ user: { email: 'user@example.com' } });
+    mocks.readArcgisSheetMetadata.mockResolvedValue(DESCRIBED_SHEETS);
+  });
+
+  it('rejects an unauthenticated request before reading the body', async () => {
+    const unauthorized = Response.json({ error: 'unauthorized' }, { status: HTTPResponses.UNAUTHORIZED });
+    mocks.requireSession.mockReturnValue(unauthorized as any);
+    const request = formRequest(VALID_SCOPE_FIELDS, true, 'x.xlsx', null);
+
+    const res = await POST(request as any);
+
+    expect(res.status).toBe(HTTPResponses.UNAUTHORIZED);
+    expect((request as any).formData).not.toHaveBeenCalled();
+  });
+
+  it('answers 411 when Content-Length is missing, without reading the workbook', async () => {
+    const request = formRequest(VALID_SCOPE_FIELDS, true, 'x.xlsx', null);
+
+    const res = await POST(request as any);
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(HTTPResponses.LENGTH_REQUIRED);
+    expect(body.error).toBe(UPLOAD_LENGTH_REQUIRED_MESSAGE);
+    expect((request as any).formData).not.toHaveBeenCalled();
+  });
+
+  it('answers 413 with ArcGIS request-body advice when the declared body exceeds the ceiling', async () => {
+    const request = formRequest(VALID_SCOPE_FIELDS, true, 'x.xlsx', MAX_UPLOAD_REQUEST_BODY_BYTES + 1);
+
+    const res = await POST(request as any);
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(HTTPResponses.PAYLOAD_TOO_LARGE);
+    expect(body.error).toBe(uploadRequestBodyTooLargeMessage(SourceFormat.arcgis_xlsx));
+    expect(body.error).not.toMatch(/select them together/i);
+    expect((request as any).formData).not.toHaveBeenCalled();
+  });
+
+  it('answers 400 "could not be read" when the multipart body cannot be parsed', async () => {
+    const request = formRequest(VALID_SCOPE_FIELDS);
+    (request as any).formData = vi.fn(async () => {
+      throw new TypeError('Failed to parse body as FormData.');
+    });
+
+    const res = await POST(request as any);
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body.error).toBe(UPLOAD_UNREADABLE_MESSAGE);
+  });
+
+  it('rejects a workbook one byte over the per-file limit with single-workbook advice', async () => {
+    const overLimit = MAX_UPLOAD_FILE_BYTES + 1;
+    const res = await POST(formRequest(VALID_SCOPE_FIELDS, true, 'x.xlsx', MAX_UPLOAD_REQUEST_BODY_BYTES, overLimit) as any);
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(HTTPResponses.PAYLOAD_TOO_LARGE);
+    expect(body.error).toBe(uploadFileTooLargeMessage(overLimit, SourceFormat.arcgis_xlsx));
+    expect(body.error).toContain(ARCGIS_UPLOAD_RECOVERY_ADVICE);
+    expect(mocks.readArcgisWorkbookDetailed).not.toHaveBeenCalled();
+  });
+
+  it('lets a workbook exactly at the per-file limit past the size check', async () => {
+    const res = await POST(formRequest(VALID_SCOPE_FIELDS, true, 'x.xlsx', MAX_UPLOAD_REQUEST_BODY_BYTES, MAX_UPLOAD_FILE_BYTES) as any);
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).not.toBe(HTTPResponses.PAYLOAD_TOO_LARGE);
   });
 });
