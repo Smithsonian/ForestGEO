@@ -14,7 +14,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { EditPlan } from '../types';
 import type { ApplyInTransactionInput } from '../apply';
 import type { EditOperationStateRow } from '@/config/editoperations';
-import { refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
+import { normalizeFailureDescription, refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
 import type { WriterResult } from './measurementssummary';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
@@ -106,8 +106,12 @@ export async function writeFailedMeasurements(cm: ConnectionManager, input: Appl
   // once for Description), which made any edit of an unresolved row overwrite
   // the recorded reason with the comment text, or with NULL when there was none.
   // Clear it here and let revalidation below restate why the row is still
-  // unresolved, matching refreshIngestionErrorsForMeasurement, which likewise
-  // resolves the row's existing error links before re-linking what still fails.
+  // unresolved. refreshIngestionErrorsForMeasurement only resolves an error
+  // code it actually re-checked this call AND did not find again; codes it
+  // cannot re-derive (DUPLICATE_ENTRY, SQL_EXCEPTION, INTERRUPTED_UPLOAD,
+  // reference/system/unknown codes, or a supported check skipped because its
+  // field was left empty) stay linked, so the returned set below is the
+  // effective current failures, not just this call's fresh findings.
   const clearedDescription = null;
 
   // UploadFileID / UploadBatchID are intentionally not in the failedmeasurements
@@ -166,7 +170,10 @@ export async function writeFailedMeasurements(cm: ConnectionManager, input: Appl
   );
 
   if (validationErrors.length > 0) {
-    const descriptionText = validationErrors.map(e => e.errorMessage).join('; ');
+    // The effective set can now include retained errors alongside this
+    // call's fresh findings, so bound the join to the Description column's
+    // varchar(255) width the same way bulk ingestion does.
+    const descriptionText = normalizeFailureDescription(validationErrors.map(e => e.errorMessage).join('; '));
     const updateDescQuery = safeFormatQuery(schema, 'UPDATE ??.coremeasurements SET Description = ? WHERE CoreMeasurementID = ?');
     await cm.executeQuery(updateDescQuery, [descriptionText, coreMeasurementID], txID);
   }

@@ -116,6 +116,8 @@ from coremeasurements cm
              join stems s2 on t2.TreeID = s2.TreeID and t2.CensusID = s2.CensusID
              join species sp2 on t2.SpeciesID = sp2.SpeciesID
              where t2.IsActive = true and s2.IsActive = true and sp2.IsActive = true
+               -- Only measured stems count: an unmeasured stem left behind by an earlier upload is not a species claim (#489)
+               and exists (select 1 from coremeasurements cm2 where cm2.StemGUID = s2.StemGUID and cm2.IsActive is true)
              group by t2.TreeTag, t2.CensusID
              having count(distinct sp2.SpeciesCode) > 1
          ) as problematic_tree_data ON t.TreeTag = problematic_tree_data.TreeTag AND t.CensusID = problematic_tree_data.CensusID
