@@ -17,6 +17,11 @@ import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from 
 import { InvalidClearError, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 import { requireSession } from '@/lib/auth-helpers';
+import {
+  SPECIES_CORRECTION_CONFLICT_CODE,
+  SPECIES_CORRECTION_CONFLICT_MESSAGE,
+  SpeciesCorrectionWriteConflictError
+} from '@/config/editplan/tree-species-correction-writer';
 
 export const runtime = 'nodejs';
 
@@ -99,6 +104,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (err instanceof HashDriftError) {
       return NextResponse.json({ error: 'plan hash mismatch', freshPlan: err.freshPlan }, { status: HTTPResponses.CONFLICT });
+    }
+    if (err instanceof SpeciesCorrectionWriteConflictError) {
+      return NextResponse.json(
+        { error: SPECIES_CORRECTION_CONFLICT_MESSAGE, code: SPECIES_CORRECTION_CONFLICT_CODE },
+        { status: HTTPResponses.UNPROCESSABLE_ENTITY }
+      );
     }
     if (err instanceof ScopeLockHeldError) {
       return NextResponse.json({ error: 'scope locked' }, { status: HTTPResponses.LOCKED });

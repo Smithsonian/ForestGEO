@@ -12,8 +12,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 configure({ asyncUtilTimeout: 5000 });
 
 import { formatErrorComparison, formatOptionalMeasurement, getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorsexplorer';
-import type { EditPlan } from '@/config/editplan/types';
+import type { ApplyResult, EditPlan } from '@/config/editplan/types';
 import type { UseEditPreviewFlowReturn } from '@/app/hooks/useEditPreviewFlow';
+import type { UndoRevertOutcome } from '@/components/editplan/undotoast';
+import { UNCONFIRMED_OUTCOME_MESSAGE } from '@/lib/editplan/requestrevert';
+import { EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE } from '@/components/datagrids/measurementscommonsutils';
+import ailogger from '@/ailogger';
+
+// Typed capture for the outcome UndoToast's onUndo callback resolves to,
+// shared with the mocked UndoToast below via vi.hoisted so neither side
+// needs an untyped window/globalThis escape hatch. Reset in beforeEach.
+const undoOutcomeCapture = vi.hoisted(() => ({
+  lastOutcome: undefined as UndoRevertOutcome | undefined
+}));
 
 describe('ErrorsExplorer — Codes column helpers', () => {
   describe('parseCodesString', () => {
@@ -178,6 +189,21 @@ function makePlan(overrides: Partial<EditPlan> = {}): EditPlan {
   };
 }
 
+// requestEditRevert (frontend/lib/editplan/requestrevert.ts) only treats a 2xx
+// /api/edits/revert body as a successful revert when it satisfies isValidApplyResult
+// (a real editOperationID, updatedIDs, applyErrors, validationPending). A bare
+// `{ ok: true }` body is not a valid ApplyResult and now resolves to
+// 'unconfirmed', so every fixture claiming a successful revert must use this.
+function makeApplyResultBody(overrides: Partial<ApplyResult> = {}): ApplyResult {
+  return {
+    updatedIDs: { coreMeasurementID: TEST_CORE_MEASUREMENT_ID },
+    applyErrors: [],
+    editOperationID: TEST_EDIT_OPERATION_ID,
+    validationPending: false,
+    ...overrides
+  };
+}
+
 const mockFetch = vi.fn();
 const mockBeginEdit = vi.fn();
 const mockConfirmDialog = vi.fn();
@@ -284,11 +310,45 @@ vi.mock('@/components/editplan/previewdialog', () => ({
   )
 }));
 
+// onUndo's real signature is (confirmedPlanHash?: string) => Promise<UndoRevertOutcome>
+// (see components/editplan/undotoast.tsx). This mock preserves the original
+// no-argument "Undo" button for the pre-existing tests below, and adds a
+// "Confirm" button that supplies a confirmedPlanHash for the #427 confirmed-retry
+// tests. Both buttons stash the resolved outcome on undoOutcomeCapture so tests
+// can assert exactly what the call site returned to the toast, which a toast
+// that merely fires onUndo() cannot otherwise reveal.
 vi.mock('@/components/editplan/undotoast', () => ({
-  default: ({ editOperationID, onUndo, onDismiss }: { editOperationID: number; onUndo: () => Promise<void>; onDismiss: () => void }) => (
+  default: ({
+    editOperationID,
+    onUndo,
+    onDismiss
+  }: {
+    editOperationID: number;
+    onUndo: (confirmedPlanHash?: string) => Promise<UndoRevertOutcome>;
+    onDismiss: () => void;
+  }) => (
     <div data-testid={`undo-toast-${editOperationID}`}>
-      <button type="button" data-testid="undo-toast-undo" onClick={() => void onUndo()}>
+      <button
+        type="button"
+        data-testid="undo-toast-undo"
+        onClick={() => {
+          void onUndo().then(outcome => {
+            undoOutcomeCapture.lastOutcome = outcome;
+          });
+        }}
+      >
         Undo
+      </button>
+      <button
+        type="button"
+        data-testid="undo-toast-confirm"
+        onClick={() => {
+          void onUndo(TEST_PLAN_HASH_REFRESH).then(outcome => {
+            undoOutcomeCapture.lastOutcome = outcome;
+          });
+        }}
+      >
+        Confirm
       </button>
       <button type="button" data-testid="undo-toast-dismiss" onClick={onDismiss}>
         Dismiss
@@ -361,12 +421,13 @@ vi.mock('@/config/styleddatagrid', async () => {
         <div data-testid="column-editability">{JSON.stringify(Object.fromEntries(columns.map((col: any) => [col.field, Boolean(col.editable)])))}</div>
         {rows.map(row => {
           const actionColumn = columns.find((col: any) => typeof col.getActions === 'function');
-          if (!actionColumn) return null;
           return (
             <div key={String(row.id)}>
-              {actionColumn.getActions({ id: row.id, row }).map((action: React.ReactNode, idx: number) => (
-                <React.Fragment key={idx}>{action}</React.Fragment>
-              ))}
+              <button type="button" data-testid={`select-row-${row.id}`} onClick={() => props.onRowClick?.({ row })}>
+                Select
+              </button>
+              {actionColumn &&
+                actionColumn.getActions({ id: row.id, row }).map((action: React.ReactNode, idx: number) => <React.Fragment key={idx}>{action}</React.Fragment>)}
             </div>
           );
         })}
@@ -437,11 +498,12 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
         return { ok: true, json: async () => ({}) } as Response;
       }
       if (url.includes('/api/edits/revert')) {
-        return { ok: true, json: async () => ({ ok: true }) } as Response;
+        return { ok: true, json: async () => makeApplyResultBody() } as Response;
       }
       return { ok: true, json: async () => ({}) } as Response;
     });
     global.fetch = mockFetch as any;
+    undoOutcomeCapture.lastOutcome = undefined;
   });
 
   afterEach(() => {
@@ -920,5 +982,333 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
         })
       ).toBe(true)
     );
+  });
+
+  // #427 client wiring: the onUndo callback passed to UndoToast must route
+  // through requestEditRevert (frontend/lib/editplan/requestrevert.ts) so a
+  // 409 plan-drift response surfaces as a confirmation request instead of a
+  // generic failure. requestEditRevert itself is not mocked here — the
+  // existing mockFetch above already controls every /api/edits/revert
+  // response for this file, so driving those responses through the real
+  // HTTP-status/body contract (409 + freshPlan, vs. a plain error body)
+  // exercises requestEditRevert's actual parsing instead of assuming it.
+  describe('undo revert outcome handling (#427)', () => {
+    async function mountExplorerWithUndoToast() {
+      mockBeginEdit.mockResolvedValueOnce({
+        updatedIDs: { coreMeasurementID: TEST_CORE_MEASUREMENT_ID },
+        applyErrors: [],
+        editOperationID: TEST_EDIT_OPERATION_ID,
+        validationPending: false
+      });
+
+      await mountExplorer();
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+
+      await act(async () => {
+        await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, { ...GRID_ROW, measuredDBH: 12 });
+      });
+      await waitFor(() => expect(screen.getByTestId(`undo-toast-${TEST_EDIT_OPERATION_ID}`)).toBeInTheDocument());
+    }
+
+    function countExplorerQueryCalls(): number {
+      return mockFetch.mock.calls.filter(([input]) => (typeof input === 'string' ? input : input.toString()).includes('/api/errors/explorer/query')).length;
+    }
+
+    // The regression tests below spy on ailogger.error via vi.spyOn; restore it
+    // so later tests in this file see the real (console-fallback) logger again.
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('does not show success feedback or refresh when the server demands confirmation, and returns the fresh plan to the toast unchanged', async () => {
+      await mountExplorerWithUndoToast();
+
+      mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/edits/revert')) {
+          return {
+            ok: false,
+            status: 409,
+            json: async () => ({
+              error: 'plan drift',
+              freshPlan: { ...makePlan({ planHash: TEST_PLAN_HASH_REFRESH }), fieldChanges: [{ field: 'MeasuredDBH', from: 11, to: 13 }] }
+            })
+          } as Response;
+        }
+        if (url.includes('/api/errors/explorer/query')) {
+          return {
+            ok: true,
+            json: async () => ({
+              rows: [GRID_ROW],
+              totalRows: 1,
+              summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
+            })
+          } as Response;
+        }
+        return { ok: true, json: async () => ({}) } as Response;
+      });
+
+      const queryCallsBeforeUndo = countExplorerQueryCalls();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('undo-toast-undo'));
+      });
+
+      await waitFor(() => expect(undoOutcomeCapture.lastOutcome).toBeDefined());
+      expect(undoOutcomeCapture.lastOutcome).toMatchObject({
+        status: 'confirmation-required',
+        freshPlan: expect.objectContaining({ planHash: TEST_PLAN_HASH_REFRESH })
+      });
+
+      // No refresh: fetchRows (the explorer/query endpoint) must not have run again.
+      expect(countExplorerQueryCalls()).toBe(queryCallsBeforeUndo);
+      // No error banner and no success text — the toast owns the preview, this call site owns nothing yet.
+      expect(screen.queryByText(/Undo failed/i)).not.toBeInTheDocument();
+    });
+
+    it('surfaces the helper-provided failure message via the existing error banner without refreshing', async () => {
+      await mountExplorerWithUndoToast();
+
+      const SERVER_FAILURE_MESSAGE = 'Revert rejected: edit operation changed during revert';
+      mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/edits/revert')) {
+          return { ok: false, status: 500, json: async () => ({ error: SERVER_FAILURE_MESSAGE }) } as Response;
+        }
+        if (url.includes('/api/errors/explorer/query')) {
+          return {
+            ok: true,
+            json: async () => ({
+              rows: [GRID_ROW],
+              totalRows: 1,
+              summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
+            })
+          } as Response;
+        }
+        return { ok: true, json: async () => ({}) } as Response;
+      });
+
+      const queryCallsBeforeUndo = countExplorerQueryCalls();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('undo-toast-undo'));
+      });
+
+      await waitFor(() => expect(screen.getByText(`Undo failed: ${SERVER_FAILURE_MESSAGE}`)).toBeInTheDocument());
+      expect(undoOutcomeCapture.lastOutcome).toEqual({ status: 'failed' });
+      expect(countExplorerQueryCalls()).toBe(queryCallsBeforeUndo);
+    });
+
+    it('runs the full refresh chain exactly once on a successful revert (summary view, view-full-table, and rows)', async () => {
+      await mountExplorerWithUndoToast();
+
+      mockFetch.mockClear();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('undo-toast-undo'));
+      });
+
+      await waitFor(() => expect(undoOutcomeCapture.lastOutcome).toEqual({ status: 'reverted' }));
+
+      const callsTo = (fragment: string) =>
+        mockFetch.mock.calls.filter(([input]) => (typeof input === 'string' ? input : input.toString()).includes(fragment)).length;
+
+      expect(callsTo('/api/refreshviews/measurementssummary/')).toBe(1);
+      expect(callsTo('/api/refreshviews/viewfulltable/')).toBe(1);
+      expect(callsTo('/api/errors/explorer/query')).toBe(1);
+    });
+
+    // The successful edit path (processRowUpdate) refreshes rows, facets, AND the
+    // selected row's details. Before this fix the undo path refreshed only rows —
+    // this proves undo now re-reads the same affected set as a normal edit.
+    it('refreshes facets and the selected row details after undo, not just rows', async () => {
+      await mountExplorerWithUndoToast();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId(`select-row-${TEST_CORE_MEASUREMENT_ID}`));
+      });
+      await waitFor(() =>
+        expect(
+          mockFetch.mock.calls.some(([input]) =>
+            (typeof input === 'string' ? input : input.toString()).includes(`/api/errors/explorer/details/${TEST_CORE_MEASUREMENT_ID}`)
+          )
+        ).toBe(true)
+      );
+
+      mockFetch.mockClear();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('undo-toast-undo'));
+      });
+
+      await waitFor(() => expect(undoOutcomeCapture.lastOutcome).toEqual({ status: 'reverted' }));
+
+      const callsTo = (fragment: string) =>
+        mockFetch.mock.calls.filter(([input]) => (typeof input === 'string' ? input : input.toString()).includes(fragment)).length;
+
+      expect(callsTo('/api/errors/explorer/query')).toBeGreaterThan(0);
+      expect(callsTo('/api/errors/explorer/facets')).toBeGreaterThan(0);
+      expect(callsTo(`/api/errors/explorer/details/${TEST_CORE_MEASUREMENT_ID}`)).toBeGreaterThan(0);
+    });
+
+    // Consumer-boundary regression: a REAL failing fetch from the facets endpoint
+    // (not refreshviews, which the pre-existing refresh-failed test above already
+    // covers) must still surface the reverted-but-refresh-failed warning and must
+    // still report the undo as completed.
+    it('surfaces the reverted-but-refresh-failed message when the post-undo facets fetch fails, not just when refreshviews fails', async () => {
+      await mountExplorerWithUndoToast();
+
+      const FACETS_FAILURE_MESSAGE = 'facets endpoint exploded';
+      const errorLogSpy = vi.spyOn(ailogger, 'error').mockImplementation(() => undefined);
+
+      mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/edits/revert')) {
+          return { ok: true, json: async () => makeApplyResultBody() } as Response;
+        }
+        if (url.includes('/api/refreshviews/')) {
+          return { ok: true, json: async () => ({}) } as Response;
+        }
+        if (url.includes('/api/errors/explorer/facets')) {
+          return { ok: false, status: 500, json: async () => ({ error: FACETS_FAILURE_MESSAGE }) } as Response;
+        }
+        if (url.includes('/api/errors/explorer/query')) {
+          return {
+            ok: true,
+            json: async () => ({
+              rows: [GRID_ROW],
+              totalRows: 1,
+              summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
+            })
+          } as Response;
+        }
+        return { ok: true, json: async () => ({}) } as Response;
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('undo-toast-undo'));
+      });
+
+      await waitFor(() => expect(screen.getByText(EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE)).toBeInTheDocument());
+      expect(undoOutcomeCapture.lastOutcome).toEqual({ status: 'reverted' });
+      expect(screen.queryByText(/Undo failed/i)).not.toBeInTheDocument();
+
+      expect(errorLogSpy).toHaveBeenCalledTimes(1);
+      const [, loggedError] = errorLogSpy.mock.calls[0];
+      expect(loggedError).toBeInstanceOf(Error);
+      expect((loggedError as Error).message).toBe(FACETS_FAILURE_MESSAGE);
+    });
+
+    it('sends the same schema/plotID/censusID/editOperationID plus the supplied confirmedPlanHash on a confirmed retry', async () => {
+      await mountExplorerWithUndoToast();
+
+      mockFetch.mockClear();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('undo-toast-confirm'));
+      });
+
+      await waitFor(() => {
+        const revertCall = mockFetch.mock.calls.find(([input]) => (typeof input === 'string' ? input : input.toString()).includes('/api/edits/revert'));
+        expect(revertCall).toBeTruthy();
+      });
+
+      const revertCall = mockFetch.mock.calls.find(([input]) => (typeof input === 'string' ? input : input.toString()).includes('/api/edits/revert')) as [
+        unknown,
+        { body: string }
+      ];
+      const body = JSON.parse(revertCall[1].body);
+      expect(body).toEqual({
+        schema: TEST_SCHEMA,
+        plotID: TEST_PLOT_ID,
+        censusID: TEST_CENSUS_ID,
+        editOperationID: TEST_EDIT_OPERATION_ID,
+        confirmedPlanHash: TEST_PLAN_HASH_REFRESH
+      });
+    });
+
+    // By the time requestEditRevert resolves 'reverted', the server has already
+    // committed the write. If the explorer's post-revert refresh chain then
+    // throws, the undo must not be reported as failed (that would invite a
+    // double-revert retry) and must not be reported as silently successful
+    // either — the user needs to know the view may be stale.
+    it('shows the reverted-but-refresh-failed message and logs the error when the post-revert refresh chain throws, while still reporting the revert as completed', async () => {
+      await mountExplorerWithUndoToast();
+
+      const REFRESH_FAILURE_MESSAGE = 'refreshviews measurementssummary exploded';
+      const errorLogSpy = vi.spyOn(ailogger, 'error').mockImplementation(() => undefined);
+
+      mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/edits/revert')) {
+          return { ok: true, json: async () => makeApplyResultBody() } as Response;
+        }
+        if (url.includes('/api/refreshviews/measurementssummary/')) {
+          return { ok: false, status: 500, json: async () => ({ error: REFRESH_FAILURE_MESSAGE }) } as Response;
+        }
+        if (url.includes('/api/refreshviews/viewfulltable/')) {
+          return { ok: true, json: async () => ({}) } as Response;
+        }
+        if (url.includes('/api/errors/explorer/query')) {
+          return {
+            ok: true,
+            json: async () => ({
+              rows: [GRID_ROW],
+              totalRows: 1,
+              summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
+            })
+          } as Response;
+        }
+        return { ok: true, json: async () => ({}) } as Response;
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('undo-toast-undo'));
+      });
+
+      await waitFor(() => expect(screen.getByText(EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE)).toBeInTheDocument());
+      expect(undoOutcomeCapture.lastOutcome).toEqual({ status: 'reverted' });
+      expect(screen.queryByText(/Undo failed/i)).not.toBeInTheDocument();
+
+      expect(errorLogSpy).toHaveBeenCalledTimes(1);
+      const [, loggedError] = errorLogSpy.mock.calls[0];
+      expect(loggedError).toBeInstanceOf(Error);
+      expect((loggedError as Error).message).toBe(REFRESH_FAILURE_MESSAGE);
+    });
+
+    // requestEditRevert resolves 'unconfirmed' when /api/edits/revert answers
+    // 2xx with a body that is not a real ApplyResult: the write may or may not
+    // have committed. The call site must say so verbatim, must not refresh
+    // (there is nothing proven to refresh for), and must not use "Undo failed"
+    // wording, which would wrongly tell the user nothing happened.
+    it('surfaces the could-not-confirm message without refreshing or claiming success when the server returns a malformed 2xx body', async () => {
+      await mountExplorerWithUndoToast();
+
+      mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/edits/revert')) {
+          return { ok: true, json: async () => ({ ok: true }) } as Response;
+        }
+        if (url.includes('/api/errors/explorer/query')) {
+          return {
+            ok: true,
+            json: async () => ({
+              rows: [GRID_ROW],
+              totalRows: 1,
+              summary: { total: 1, validation: 1, ingestion: 0, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
+            })
+          } as Response;
+        }
+        return { ok: true, json: async () => ({}) } as Response;
+      });
+
+      const queryCallsBeforeUndo = countExplorerQueryCalls();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('undo-toast-undo'));
+      });
+
+      await waitFor(() => expect(screen.getByText(UNCONFIRMED_OUTCOME_MESSAGE)).toBeInTheDocument());
+      expect(undoOutcomeCapture.lastOutcome).toEqual({ status: 'unconfirmed' });
+      expect(countExplorerQueryCalls()).toBe(queryCallsBeforeUndo);
+      expect(screen.queryByText(/Undo failed/i)).not.toBeInTheDocument();
+    });
   });
 });

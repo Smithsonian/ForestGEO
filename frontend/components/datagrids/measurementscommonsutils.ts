@@ -2,11 +2,11 @@ import { GridFilterModel, GridPaginationModel, GridRowModel, GridSortModel } fro
 import { ExtendedGridFilterModel, TSSFilter, VisibleFilter } from '@/config/datagridhelpers';
 import { EDITABLE_FIELDS_BY_SURFACE, EditSurface, FIELD_ALIASES_BY_SURFACE, PER_COLUMN_DECIMAL_PRECISION } from '@/config/editplan/fieldpolicy';
 import { areArraysEqual, areFilterItemsEqual, isActiveFilterItem, sanitizeQuickFilterValues, toServerFilterItem } from '@/lib/datagrid/filterModel';
+import { EditRevertRequest, requestEditRevert } from '@/lib/editplan/requestrevert';
+import type { UndoRevertOutcome } from '@/components/editplan/undotoast';
 
-// Numeric edits that round to the existing value at server precision are
-// detected here so the client can (a) skip the API roundtrip and (b) tell the
-// user their typing didn't change anything. Without this, typing 1.234 over
-// 1.23 in a DBH cell silently disappears (server normalizes both to 1.23).
+// Detects edits that round to the existing server-precision value, so typing
+// 1.234 over 1.23 in a DBH cell isn't silently dropped as a no-op elsewhere.
 function findRoundedNoOpField(canonicalField: string, newValue: unknown, oldValue: unknown): boolean {
   const precision = PER_COLUMN_DECIMAL_PRECISION[canonicalField];
   if (precision === undefined) return false;
@@ -210,11 +210,8 @@ export function selectMeasurementStateSnackbar(counts: MeasurementStateCounts): 
     return { severity: 'warning', message: UNRESOLVED_ERRORS_SNACKBAR_MESSAGE(counts.unresolvedLogged) };
   }
 
-  // failedNoLog rows count as "not yet validated": IsValidated defaults to FALSE
-  // (tablestructures.sql) and a FALSE row without a log entry can also be a hard
-  // failure whose error-log link was dropped (see migration
-  // 51_backfill_hard_failure_error_log.sql) — re-running validations re-surfaces
-  // either case, so that is the honest prompt.
+  // failedNoLog rows count as "not yet validated": they may be a hard failure
+  // whose error-log link was dropped (see migration 51_backfill_hard_failure_error_log.sql).
   const notYetValidated = counts.pending + counts.failedNoLog;
   if (notYetValidated > 0) {
     // FALSE-without-log rows carry no unresolved validation error, so they are outside
@@ -229,4 +226,89 @@ export function selectMeasurementStateSnackbar(counts: MeasurementStateCounts): 
   }
 
   return null;
+}
+
+// --- Undo (edit revert) orchestration ---------------------------------
+// Once requestEditRevert resolves 'reverted' the write already committed;
+// a refresh failure here must never be reported as a failed undo.
+
+export interface MeasurementEditRevertNotification {
+  message: string;
+  severity: 'success' | 'warning' | 'error';
+}
+
+export interface EditRevertEffects {
+  refreshAfterRevert: () => Promise<void>;
+  notify: (notification: MeasurementEditRevertNotification) => void;
+  logError: (message: string, error: Error) => void;
+}
+
+export interface MeasurementEditRevertEffects {
+  invalidateQueries: () => Promise<void>;
+  refreshPaginated: () => Promise<void>;
+  refreshCounts: () => Promise<void>;
+  // Pass null (or omit) when infinite scroll is not the grid's active mode.
+  refreshInfinite?: (() => Promise<void>) | null;
+  notify: (notification: MeasurementEditRevertNotification) => void;
+  logError: (message: string, error: Error) => void;
+}
+
+export const EDIT_REVERTED_SNACKBAR_MESSAGE = 'Edit reverted';
+export const UNDO_FAILED_SNACKBAR_MESSAGE = (message: string) => `Undo failed: ${message}`;
+export const EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE = 'Edit reverted, but the view could not be refreshed. Reload the page to see current data.';
+const EDIT_REVERT_REFRESH_FAILURE_LOG_MESSAGE = 'revertEdit: refreshing the view after a successful revert failed';
+
+export async function revertEditAndRefresh(scope: EditRevertRequest, effects: EditRevertEffects): Promise<UndoRevertOutcome> {
+  const outcome = await requestEditRevert(scope);
+
+  if (outcome.status === 'confirmation-required') {
+    // No refresh, no snackbar — the toast is about to show the confirmation
+    // preview for the same operation.
+    return outcome;
+  }
+
+  if (outcome.status === 'failed') {
+    effects.notify({ message: UNDO_FAILED_SNACKBAR_MESSAGE(outcome.message), severity: 'error' });
+    return { status: 'failed' };
+  }
+
+  if (outcome.status === 'unconfirmed') {
+    // Write may or may not have committed; never claim success or refresh.
+    effects.notify({ message: outcome.message, severity: 'warning' });
+    return { status: 'unconfirmed' };
+  }
+
+  try {
+    await effects.refreshAfterRevert();
+  } catch (error) {
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    effects.logError(EDIT_REVERT_REFRESH_FAILURE_LOG_MESSAGE, errorObj);
+    // The revert already committed server-side; this must still resolve as
+    // 'reverted' so UndoToast dismisses and the write is never retried.
+    effects.notify({ message: EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE, severity: 'warning' });
+    return { status: 'reverted' };
+  }
+
+  effects.notify({ message: EDIT_REVERTED_SNACKBAR_MESSAGE, severity: 'success' });
+  return { status: 'reverted' };
+}
+
+async function refreshMeasurementGridAfterRevert(effects: MeasurementEditRevertEffects): Promise<void> {
+  await effects.invalidateQueries();
+  const refreshTasks: Promise<void>[] = [effects.refreshPaginated(), effects.refreshCounts()];
+  if (effects.refreshInfinite) refreshTasks.push(effects.refreshInfinite());
+  // allSettled, not all: waiting for every task guarantees the notify()
+  // afterwards always runs last, even if a sibling task's own internal success
+  // notification is still pending when another task rejects.
+  const settled = await Promise.allSettled(refreshTasks);
+  const firstRejection = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (firstRejection) throw firstRejection.reason;
+}
+
+export function revertMeasurementEdit(scope: EditRevertRequest, effects: MeasurementEditRevertEffects): Promise<UndoRevertOutcome> {
+  return revertEditAndRefresh(scope, {
+    refreshAfterRevert: () => refreshMeasurementGridAfterRevert(effects),
+    notify: effects.notify,
+    logError: effects.logError
+  });
 }
