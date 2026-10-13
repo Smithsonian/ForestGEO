@@ -800,25 +800,12 @@ export async function writeMeasurementsSummary(
   //     (affecting all measurements on that stem).
   if (changedFields.has('StemLocalX') || changedFields.has('StemLocalY')) {
     changesFound = true;
-    if (correctionWritePolicyActive) {
-      // A species correction must not touch the axis the user did not edit
-      // — `stems` is shared with every other measurement on this stem.
-      const stemLocalChanges: Record<string, number | null> = {};
-      if (changedFields.has('StemLocalX')) stemLocalChanges.LocalX = toOptionalNumber(newValues.StemLocalX);
-      if (changedFields.has('StemLocalY')) stemLocalChanges.LocalY = toOptionalNumber(newValues.StemLocalY);
-      if (merged.StemGUID !== null && merged.StemGUID !== undefined && Object.keys(stemLocalChanges).length > 0) {
-        await cm.executeQuery(format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, stemLocalChanges, 'StemGUID', merged.StemGUID]), [], txID);
-      }
-    } else {
-      const xValue = changedFields.has('StemLocalX') ? toOptionalNumber(newValues.StemLocalX) : toOptionalNumber(merged.StemLocalX);
-      const yValue = changedFields.has('StemLocalY') ? toOptionalNumber(newValues.StemLocalY) : toOptionalNumber(merged.StemLocalY);
-      if (merged.StemGUID !== null && merged.StemGUID !== undefined) {
-        await cm.executeQuery(
-          format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, { LocalX: xValue, LocalY: yValue }, 'StemGUID', merged.StemGUID]),
-          [],
-          txID
-        );
-      }
+    // Only the edited axis is written — `stems` is shared with every other measurement on this stem.
+    const stemLocalChanges: Record<string, number | null> = {};
+    if (changedFields.has('StemLocalX')) stemLocalChanges.LocalX = toOptionalNumber(newValues.StemLocalX);
+    if (changedFields.has('StemLocalY')) stemLocalChanges.LocalY = toOptionalNumber(newValues.StemLocalY);
+    if (merged.StemGUID !== null && merged.StemGUID !== undefined) {
+      await cm.executeQuery(format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, stemLocalChanges, 'StemGUID', merged.StemGUID]), [], txID);
     }
   }
 
@@ -838,36 +825,15 @@ export async function writeMeasurementsSummary(
   // --- Numeric measurement fields on coremeasurements
   if (changedFields.has('MeasuredDBH') || changedFields.has('MeasuredHOM') || changedFields.has('MeasurementDate')) {
     changesFound = true;
-    if (correctionWritePolicyActive) {
-      // Write only the exact field the user edited — the other two
-      // measurement columns must not be rewritten with their own current value.
-      const measurementFieldChanges: Record<string, unknown> = {};
-      if (changedFields.has('MeasuredDBH')) measurementFieldChanges.MeasuredDBH = toOptionalNumber(newValues.MeasuredDBH);
-      if (changedFields.has('MeasuredHOM')) measurementFieldChanges.MeasuredHOM = toOptionalNumber(newValues.MeasuredHOM);
-      if (changedFields.has('MeasurementDate')) measurementFieldChanges.MeasurementDate = normalizedMeasurementDate;
-      if (Object.keys(measurementFieldChanges).length > 0) {
-        await cm.executeQuery(
-          format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.coremeasurements`, measurementFieldChanges, 'CoreMeasurementID', coreMeasurementID]),
-          [],
-          txID
-        );
-      }
-    } else {
-      await cm.executeQuery(
-        format(`UPDATE ?? SET ? WHERE ?? = ?`, [
-          `${schema}.coremeasurements`,
-          {
-            MeasuredDBH: changedFields.has('MeasuredDBH') ? toOptionalNumber(newValues.MeasuredDBH) : toOptionalNumber(merged.MeasuredDBH),
-            MeasuredHOM: changedFields.has('MeasuredHOM') ? toOptionalNumber(newValues.MeasuredHOM) : toOptionalNumber(merged.MeasuredHOM),
-            MeasurementDate: normalizedMeasurementDate
-          },
-          'CoreMeasurementID',
-          coreMeasurementID
-        ]),
-        [],
-        txID
-      );
-    }
+    const measurementFieldChanges: Record<string, unknown> = {};
+    if (changedFields.has('MeasuredDBH')) measurementFieldChanges.MeasuredDBH = toOptionalNumber(newValues.MeasuredDBH);
+    if (changedFields.has('MeasuredHOM')) measurementFieldChanges.MeasuredHOM = toOptionalNumber(newValues.MeasuredHOM);
+    if (changedFields.has('MeasurementDate')) measurementFieldChanges.MeasurementDate = normalizedMeasurementDate;
+    await cm.executeQuery(
+      format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.coremeasurements`, measurementFieldChanges, 'CoreMeasurementID', coreMeasurementID]),
+      [],
+      txID
+    );
   }
 
   // --- Attributes change — rebuild cmattributes rows (DELETE + re-INSERT)

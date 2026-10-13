@@ -714,7 +714,7 @@ describe('writeMeasurementsSummary — F11 sparse Raw*/stems/coremeasurements sy
       [treeRow()], // 3: before tree
       [], // 4: before cmattributes
       [joinedRow()], // 5: current joined
-      [], // 6: coremeasurements numeric-fields UPDATE (legacy: all 3 fields)
+      [], // 6: coremeasurements numeric-fields UPDATE (MeasuredDBH only)
       [], // 7: coremeasurements Raw* sync UPDATE (legacy: all keys)
       [], // 8: DELETE measurement_error_log
       [], // 9: UPDATE IsValidated = NULL
@@ -765,6 +765,62 @@ describe('writeMeasurementsSummary — F11 sparse Raw*/stems/coremeasurements sy
       refreshIngestionErrorsForMeasurementMock,
       "expected this writer's own refreshIngestionErrorsForMeasurement call to still fire exactly once on the legacy (non-correction) path"
     ).toHaveBeenCalledTimes(1);
+  });
+
+  it('legacy (non-correction) MeasuredDBH-only edit: the measurement-column UPDATE writes MeasuredDBH alone, never rewriting MeasuredHOM or MeasurementDate', async () => {
+    const rows: unknown[][] = [
+      [coreMeasurementRow()],
+      [stemRow()],
+      [treeRow()],
+      [],
+      [joinedRow()],
+      [], // coremeasurements measurement-column UPDATE
+      [], // coremeasurements Raw* sync UPDATE
+      [], // DELETE measurement_error_log
+      [], // UPDATE IsValidated = NULL
+      [coreMeasurementRow()],
+      [stemRow()],
+      [treeRow()],
+      []
+    ];
+    const { cm, calls } = makeRecordingConnectionManager(rows);
+    const plan = buildPlan([makeFieldChange('MeasuredDBH', 100, 160)]);
+
+    await writeMeasurementsSummary(cm, buildInput(), plan, TX_ID);
+
+    const coreUpdates = findUpdateCalls(calls, '`coremeasurements`');
+    const measurementColumnUpdate = coreUpdates.find(call => !call.sql.includes('`RawTreeTag`'));
+    expect(measurementColumnUpdate, `could not find the measurement-column UPDATE among:\n${coreUpdates.map(c => c.sql).join('\n')}`).toBeDefined();
+    expect(measurementColumnUpdate!.sql).toContain('`MeasuredDBH`');
+    expect(measurementColumnUpdate!.sql, measurementColumnUpdate!.sql).not.toContain('`MeasuredHOM`');
+    expect(measurementColumnUpdate!.sql, measurementColumnUpdate!.sql).not.toContain('`MeasurementDate`');
+  });
+
+  it('legacy (non-correction) StemLocalX-only edit: the shared stems UPDATE writes LocalX alone, never rewriting LocalY', async () => {
+    const rows: unknown[][] = [
+      [coreMeasurementRow()],
+      [stemRow()],
+      [treeRow()],
+      [],
+      [joinedRow()],
+      [], // stems UPDATE
+      [], // coremeasurements Raw* sync UPDATE
+      [], // DELETE measurement_error_log
+      [], // UPDATE IsValidated = NULL
+      [coreMeasurementRow()],
+      [stemRow({ LocalX: 99 })],
+      [treeRow()],
+      []
+    ];
+    const { cm, calls } = makeRecordingConnectionManager(rows);
+    const plan = buildPlan([makeFieldChange('StemLocalX', 10, 99)]);
+
+    await writeMeasurementsSummary(cm, buildInput(), plan, TX_ID);
+
+    const stemsUpdates = findUpdateCalls(calls, '`stems`');
+    expect(stemsUpdates, `expected exactly one stems UPDATE; got:\n${stemsUpdates.map(c => c.sql).join('\n')}`).toHaveLength(1);
+    expect(stemsUpdates[0].sql).toContain('`LocalX`');
+    expect(stemsUpdates[0].sql, stemsUpdates[0].sql).not.toContain('`LocalY`');
   });
 
   // =========================================================================
