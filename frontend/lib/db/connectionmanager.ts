@@ -449,6 +449,27 @@ class ConnectionManager {
     this.releaseTransactionSlot();
   }
 
+  /**
+   * Destroy a transaction's connection whose session state can no longer be
+   * trusted, so it never returns to the pool. The server rolls the transaction
+   * back on socket close; bookkeeping settles through
+   * {@link finalizeTransactionAfterConnectionLoss}, so a later commit/rollback
+   * is a no-op. Never throws, so it cannot mask the caller's own error.
+   */
+  public discardTransaction(transactionId: string, reason: string): void {
+    const connection = this.transactionConnections.get(transactionId);
+    if (!connection) return;
+
+    try {
+      connection.destroy();
+    } catch (destroyError: unknown) {
+      const errorObj = destroyError instanceof Error ? destroyError : new Error(getErrorMessage(destroyError));
+      ailogger.error(chalk.red(`Error destroying connection for transaction ${transactionId}: ${getErrorMessage(destroyError)}`), errorObj);
+    } finally {
+      this.finalizeTransactionAfterConnectionLoss(transactionId, reason);
+    }
+  }
+
   // Close connection method (no-op for compatibility)
   public async closeConnection(): Promise<void> {
     // console.warn(chalk.yellow('Warning: closeConnection is deprecated for concurrency. Connections are managed dynamically and do not persist.'));

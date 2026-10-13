@@ -18,6 +18,7 @@ import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros';
+import { CALLER_OWNS_TRANSACTION_SQL, CLEAR_CALLER_TRANSACTION_SQL, FLAG_CLEAR_FAILED_REASON } from '@/lib/ingestion/bulk-ingestion-call';
 
 vi.mock('@/lib/db/connectionmanager', async () => {
   // Pull whatever the environment currently exports
@@ -182,7 +183,9 @@ describe('bulkcrud POST route', () => {
 
     // ✅ Make both DB calls succeed
     execSpy.mockResolvedValueOnce({ affectedRows: 2 }); // INSERT into temporarymeasurements
+    execSpy.mockResolvedValueOnce([]); // helper: SET caller-owns-transaction flag
     execSpy.mockResolvedValueOnce({}); // CALL bulkingestionprocess
+    execSpy.mockResolvedValueOnce([]); // helper: CLEAR caller-owns-transaction flag
 
     const rows = {
       r1: {
@@ -228,7 +231,7 @@ describe('bulkcrud POST route', () => {
     expect(body.message).toMatch(/Insert to SQL successful/i);
 
     expect(beginSpy).toHaveBeenCalledTimes(1);
-    expect(execSpy).toHaveBeenCalledTimes(2);
+    expect(execSpy).toHaveBeenCalledTimes(4);
     expect(commitSpy).toHaveBeenCalledWith('tx-1');
     expect(rollbackSpy).not.toHaveBeenCalled();
     expect(closeSpy).toHaveBeenCalledTimes(1);
@@ -239,9 +242,18 @@ describe('bulkcrud POST route', () => {
     expect(Array.isArray(values)).toBe(true);
     expect(values).toHaveLength(2);
 
-    const [secondSQL, secondParams] = execSpy.mock.calls[1];
-    expect(String(secondSQL)).toMatch(/CALL `forestgeo_testing`\.bulkingestionprocess\(\?, \?\);?/i);
-    expect(secondParams).toEqual(['sample_bulk_insert.csv', 'test-batch-id']);
+    const [setFlagSQL, , setFlagTransactionID] = execSpy.mock.calls[1];
+    expect(setFlagSQL).toBe(CALLER_OWNS_TRANSACTION_SQL);
+    expect(setFlagTransactionID).toBe('tx-1');
+
+    const [procedureSQL, procedureParams, procedureTransactionID] = execSpy.mock.calls[2];
+    expect(String(procedureSQL)).toMatch(/CALL `forestgeo_testing`\.bulkingestionprocess\(\?, \?\);?/i);
+    expect(procedureParams).toEqual(['sample_bulk_insert.csv', 'test-batch-id']);
+    expect(procedureTransactionID).toBe('tx-1');
+
+    const [clearFlagSQL, , clearFlagTransactionID] = execSpy.mock.calls[3];
+    expect(clearFlagSQL).toBe(CLEAR_CALLER_TRANSACTION_SQL);
+    expect(clearFlagTransactionID).toBe('tx-1');
 
     expect(insertOrUpdate).not.toHaveBeenCalled();
   });
@@ -362,5 +374,37 @@ describe('bulkcrud POST route', () => {
     expect(rollbackSpy).toHaveBeenCalledWith('tx-err');
     expect(commitSpy).not.toHaveBeenCalled();
     expect(closeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 500 and rolls back instead of committing when the CALL succeeded but the caller flag could not be cleared', async () => {
+    const instance = (ConnectionManager as any).getInstance();
+    const clearError = new Error('connection lost while clearing the caller flag');
+    vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-flag');
+    const execSpy = vi.spyOn(instance, 'executeQuery');
+    execSpy.mockResolvedValueOnce({ affectedRows: 1 }); // INSERT into temporarymeasurements
+    execSpy.mockResolvedValueOnce([]); // helper: SET caller-owns-transaction flag
+    execSpy.mockResolvedValueOnce({}); // CALL bulkingestionprocess
+    execSpy.mockRejectedValueOnce(clearError); // helper: CLEAR caller-owns-transaction flag
+    const discardSpy = vi.spyOn(instance, 'discardTransaction').mockImplementation(() => undefined);
+    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValueOnce(undefined);
+    const commitSpy = vi.spyOn(instance, 'commitTransaction');
+
+    const res = await POST(
+      makeRequest({
+        gridType: 'measurementssummary',
+        schema: 'forestgeo_testing',
+        plot: { plotID: 1 },
+        census: { dateRanges: [{ censusID: 2 }] },
+        fileRowSet: {
+          r1: { tag: 'T1', stemtag: 'S1', spcode: 'SP', quadrat: 'Q', lx: 0, ly: 0, dbh: 1, hom: 130, date: '2025-08-01', codes: '', description: '' }
+        }
+      })
+    );
+
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe(clearError.message);
+    expect(discardSpy).toHaveBeenCalledWith('tx-flag', FLAG_CLEAR_FAILED_REASON);
+    expect(rollbackSpy).toHaveBeenCalledWith('tx-flag');
+    expect(commitSpy).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,7 @@ import { generateShortBatchID } from '@/config/utils';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { auth } from '@/auth';
 import { assertSchemaAccess } from '@/lib/authz';
+import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -584,8 +585,7 @@ export async function GET(
         }
 
         // Step 2: Run bulkingestionprocess within the same transaction
-        const bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
-        const procedureResult = await tx.query(bulkProcessSQL, [fileID, batchID]);
+        const procedureResult = await callBulkIngestionInCallerTransaction(transactionExecutorFor(connectionManager, tx.id), schema, fileID, batchID);
         const ingestionStatus = parseBulkIngestionStatus(procedureResult);
 
         // Step 3: Reconcile processed rows back onto original CoreMeasurementIDs
