@@ -11,10 +11,13 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { generateShortBatchID } from '@/config/utils';
 import { auth } from '@/auth';
 import { assertSchemaAccess } from '@/lib/authz';
+import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
+
+const BULK_CRUD_FILE_ID = 'sample_bulk_insert.csv';
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -45,14 +48,13 @@ export async function POST(request: NextRequest) {
   if (denied) return denied;
 
   // Validate schema to prevent SQL injection
-  let insertSQL: string, bulkProcessSQL: string;
+  let insertSQL: string;
   try {
     insertSQL = safeFormatQuery(
       schema,
       `INSERT INTO ??.temporarymeasurements (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
       VALUES ?`
     );
-    bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
   } catch (error: any) {
     ailogger.error(`Invalid schema in bulkcrud: ${schema}`);
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
@@ -61,11 +63,12 @@ export async function POST(request: NextRequest) {
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
   try {
-    transactionID = await connectionManager.beginTransaction();
+    const activeTransactionID = await connectionManager.beginTransaction();
+    transactionID = activeTransactionID;
     if (['measurementssummary', 'measurementssummaryview'].includes(dataType)) {
       const batchID = generateShortBatchID();
       const values = Object.values(rows).map(row => [
-        'sample_bulk_insert.csv',
+        BULK_CRUD_FILE_ID,
         batchID,
         plot.plotID,
         census.dateRanges?.[0]?.censusID,
@@ -82,7 +85,7 @@ export async function POST(request: NextRequest) {
         row.description
       ]);
       await connectionManager.executeQuery(insertSQL, [values], transactionID);
-      await connectionManager.executeQuery(bulkProcessSQL, ['sample_bulk_insert.csv', batchID], transactionID);
+      await callBulkIngestionInCallerTransaction(transactionExecutorFor(connectionManager, activeTransactionID), schema, BULK_CRUD_FILE_ID, batchID);
     } else {
       for (const rowID in rows) {
         const rowData = rows[rowID];

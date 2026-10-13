@@ -46,6 +46,7 @@ import {
   readExplicitSpeciesCode
 } from '../shared/matchdiff';
 import { requireSession } from '@/lib/auth-helpers';
+import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
 
 export const runtime = 'nodejs';
 
@@ -684,8 +685,7 @@ async function insertNewRowsThroughPipeline(
     throw new RevisionStagingIntegrityError(`Revision staging inserted ${stagedCount} of ${newRows.length} expected row(s)`);
   }
 
-  const bulkIngestSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
-  await connectionManager.executeQuery(bulkIngestSQL, [REVISION_UPLOAD_FILE_ID, batchID], transactionID);
+  await callBulkIngestionInCallerTransaction(transactionExecutorFor(connectionManager, transactionID), schema, REVISION_UPLOAD_FILE_ID, batchID);
 
   return stagedCount;
 }

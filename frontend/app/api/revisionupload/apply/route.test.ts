@@ -1,4 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { HTTPResponses } from '@/config/macros';
+import {
+  BULK_INGESTION_CALL_TEMPLATE,
+  CALLER_OWNS_TRANSACTION_SQL,
+  CLEAR_CALLER_TRANSACTION_SQL,
+  FLAG_CLEAR_FAILED_REASON
+} from '@/lib/ingestion/bulk-ingestion-call';
 import { POST } from './route';
 // Real (unmocked) error classes: route.ts imports these directly from
 // tree-species-correction-writer.ts, which this file never mocks. Using the
@@ -7,6 +14,7 @@ import { POST } from './route';
 import { SpeciesCorrectionTransactionMismatchError, SpeciesCorrectionWriteConflictError } from '@/config/editplan/tree-species-correction-writer';
 import { SpeciesCorrectionGroupMemberContextError } from '@/config/editplan/writers/measurementssummary';
 
+const REVISION_TRANSACTION_ID = 'tx-1';
 const MATCHED_PLAN_HASH = 'plan-hash-matched';
 const DRIFTED_PLAN_HASH = 'plan-hash-drifted';
 
@@ -56,6 +64,7 @@ const mocks = vi.hoisted(() => {
     acquireApplicationLock: vi.fn(async () => true),
     executeQuery: vi.fn<(...args: any[]) => Promise<any>>(async () => []),
     closeConnection: vi.fn(async () => undefined),
+    discardTransaction: vi.fn(),
     buildMeasurementScopeLockName: vi.fn((schema: string, plotID: number, censusID: number) => `measurement-scope:${schema}:${plotID}:${censusID}`),
     refreshMeasurementViewsForScope: vi.fn(async () => undefined),
     assertCanEditMeasurementScope: vi.fn(async () => undefined),
@@ -133,7 +142,8 @@ vi.mock('@/lib/db/connectionmanager', () => ({
       withTransaction: mocks.withTransaction,
       acquireApplicationLock: mocks.acquireApplicationLock,
       executeQuery: mocks.executeQuery,
-      closeConnection: mocks.closeConnection
+      closeConnection: mocks.closeConnection,
+      discardTransaction: mocks.discardTransaction
     })
   }
 }));
@@ -624,6 +634,41 @@ describe('POST /api/revisionupload/apply', () => {
     expect(rowValues[9]).toBe(4.25);
     expect(rowValues[10]).toBe(-2.531244);
     expect(rowValues[11]).toBe(487.125);
+
+    const statements = mocks.executeQuery.mock.calls.map(([sql]) => String(sql));
+    const procedureIndex = statements.findIndex(sql => sql.includes('bulkingestionprocess'));
+    expect(statements.slice(procedureIndex - 1, procedureIndex + 2)).toEqual([
+      CALLER_OWNS_TRANSACTION_SQL,
+      BULK_INGESTION_CALL_TEMPLATE,
+      CLEAR_CALLER_TRANSACTION_SQL
+    ]);
+    for (const [, , transactionID] of mocks.executeQuery.mock.calls.slice(procedureIndex - 1, procedureIndex + 2)) {
+      expect(transactionID, 'the flag and CALL must run on the revision transaction').toBe(REVISION_TRANSACTION_ID);
+    }
+    expect(mocks.discardTransaction).not.toHaveBeenCalled();
+  });
+
+  it('fails the apply instead of reporting inserted rows when the CALL succeeded but the caller flag could not be cleared', async () => {
+    const clearError = new Error('connection lost while clearing the caller flag');
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('INSERT INTO ??.temporarymeasurements')) return { affectedRows: 1, warningStatus: 0 };
+      if (query === CLEAR_CALLER_TRANSACTION_SQL) throw clearError;
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          newRows: [{ csvIndex: 0, csvRow: { tag: 'T9', stemtag: 'S9', spcode: 'AAA', quadrat: 'Q1', dbh: '10', date: '2026-04-01' } }],
+          confirmNewRows: true
+        })
+      )
+    );
+
+    expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    await expect(response.json()).resolves.toEqual({ error: clearError.message });
+    expect(mocks.discardTransaction).toHaveBeenCalledWith(REVISION_TRANSACTION_ID, FLAG_CLEAR_FAILED_REASON);
+    expect(mocks.refreshMeasurementViewsForScope, 'no derived refresh may follow a discarded transaction').not.toHaveBeenCalled();
   });
 
   it('rejects malformed numeric values in new rows before inserting temporary measurements', async () => {
@@ -676,7 +721,7 @@ describe('POST /api/revisionupload/apply', () => {
     await expect(response.json()).resolves.toEqual({
       error: "Revision staging produced 1 SQL warning(s): Warning 1265 Data truncated for column 'PlotX'"
     });
-    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('CALL ??.bulkingestionprocess'), expect.anything(), expect.anything());
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('bulkingestionprocess'), expect.anything(), expect.anything());
 
     // SHOW WARNINGS must go through the text protocol. runQuery routes to
     // connection.execute() whenever a params array is supplied, and MySQL
@@ -709,7 +754,7 @@ describe('POST /api/revisionupload/apply', () => {
 
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({ error: 'Revision staging inserted 0 of 1 expected row(s)' });
-    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('CALL ??.bulkingestionprocess'), expect.anything(), expect.anything());
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('bulkingestionprocess'), expect.anything(), expect.anything());
   });
 
   it('returns 409 with freshPlan when the bulk plan hash drifts between match and apply', async () => {

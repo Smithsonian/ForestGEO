@@ -25,6 +25,7 @@ import {
   cleanupTestMeasurements,
   DEFAULT_TEST_CONFIG,
   insertTestMeasurements,
+  loadStoredProcedures,
   setupTestDatabase,
   teardownTestDatabase,
   type TestData,
@@ -38,6 +39,7 @@ import {
   type IngestionOutcome,
   type IngestionScope
 } from '../setup/ingestion-outcome';
+import { CALLER_OWNS_TRANSACTION_SQL, callBulkIngestionInCallerTransaction, type BulkIngestionExecutor } from '@/lib/ingestion/bulk-ingestion-call';
 
 const LOCAL_HOSTS = ['127.0.0.1', 'localhost', '::1'] as const;
 if (!LOCAL_HOSTS.includes(DEFAULT_TEST_CONFIG.host as (typeof LOCAL_HOSTS)[number])) {
@@ -47,7 +49,6 @@ if (!LOCAL_HOSTS.includes(DEFAULT_TEST_CONFIG.host as (typeof LOCAL_HOSTS)[numbe
 const CANONICAL_PROCEDURE = 'bulkingestionprocess';
 const DEADLOCK_PROCEDURE = 'bulkingestionprocess_deadlock_probe';
 const LOST_SAVEPOINT_PROCEDURE = 'bulkingestionprocess_lost_savepoint_probe';
-const CALLER_OWNS_TRANSACTION_SQL = 'SET @bulkingestion_caller_owns_transaction = 1';
 const READ_CALLER_FLAG_SQL = 'SELECT @bulkingestion_caller_owns_transaction AS flag';
 
 const MEASUREMENT_DATE = '2024-06-15';
@@ -74,6 +75,7 @@ const LOST_SAVEPOINT_MARKER = 'ATOMICITY_527_LOST_SAVEPOINT';
 const ER_LOCK_DEADLOCK = { code: 'ER_LOCK_DEADLOCK', errno: 1213, sqlState: '40001' } as const;
 const ER_SIGNAL_EXCEPTION_ERRNO = 1644;
 const ER_SP_DOES_NOT_EXIST_ERRNO = 1305;
+const ER_SP_DOES_NOT_EXIST = 'ER_SP_DOES_NOT_EXIST';
 const ER_NO_SUCH_TABLE = 'ER_NO_SUCH_TABLE';
 
 /** Scratch tables that exist when the injected probes fire (STAGE 7); none may outlive the CALL. */
@@ -638,6 +640,53 @@ describe('bulkingestionprocess transaction ownership (#527)', () => {
         await caller.rollback();
         await expectNothingCommitted(batch, sentinelMarker, caller);
         await expectNothingCommitted(batch, sentinelMarker, observer!);
+      },
+      SUITE_TIMEOUT_MS
+    );
+  });
+
+  describe('helper session hygiene', () => {
+    function executorBoundTo(caller: Connection): BulkIngestionExecutor {
+      return {
+        query: async (sql, params) => {
+          const [rows] = await caller.query(sql, params);
+          return rows as never;
+        },
+        discard: reason => {
+          throw new Error(`discard must not run when CLEAR succeeds (reason: ${reason})`);
+        }
+      };
+    }
+
+    it(
+      'clears the flag when the CALL is rejected before the procedure could, so the next unflagged batch commits on its own',
+      async () => {
+        const caller = await openCaller();
+        const rejected = nextCaseIdentity('pe');
+        await connection!.query(`DROP PROCEDURE IF EXISTS ${CANONICAL_PROCEDURE}`);
+        try {
+          await caller.beginTransaction();
+          const batch = await stageBatch(caller, testData, rejected.tagPrefix);
+
+          const outcome = await settle(callBulkIngestionInCallerTransaction(executorBoundTo(caller), config.database, batch.scope.fileID, batch.scope.batchID));
+
+          if (outcome.status === 'resolved') throw new Error(`CALL of a dropped procedure resolved: ${JSON.stringify(outcome.value)}`);
+          expect({ code: outcome.error.code, errno: outcome.error.errno }, describeError(outcome.error)).toEqual({
+            code: ER_SP_DOES_NOT_EXIST,
+            errno: ER_SP_DOES_NOT_EXIST_ERRNO
+          });
+          expect(await readCallerFlag(caller), 'the helper must clear a flag the procedure never consumed').toBeNull();
+        } finally {
+          await caller.rollback();
+          await loadStoredProcedures(connection!);
+        }
+
+        const unflagged = nextCaseIdentity('pu');
+        const batch = await stageBatch(caller, testData, unflagged.tagPrefix);
+        const result = await callProcedure(caller, CANONICAL_PROCEDURE, batch.scope);
+
+        expect(Boolean(result?.batch_failed), `unflagged batch must succeed: ${JSON.stringify(result)}`).toBe(false);
+        assertIngestionOutcome(await readIngestionOutcome(observer!, batch.scope), successfulOutcome());
       },
       SUITE_TIMEOUT_MS
     );

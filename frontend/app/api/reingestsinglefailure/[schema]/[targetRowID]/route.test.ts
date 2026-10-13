@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { CALLER_OWNS_TRANSACTION_SQL, CLEAR_CALLER_TRANSACTION_SQL, FLAG_CLEAR_FAILED_REASON } from '@/lib/ingestion/bulk-ingestion-call';
+
+const ROUTE_TRANSACTION_ID = 'txn-1';
 
 // Route is now wrapped by withRouteAuthz, so auth() runs before the handler.
 // A 'global' admin passes the per-site access gate; 'forestgeo_testing' is a
@@ -15,12 +18,14 @@ vi.mock('@/lib/db/connectionmanager', () => {
   const commitTransaction = vi.fn();
   const rollbackTransaction = vi.fn();
   const closeConnection = vi.fn();
+  const discardTransaction = vi.fn();
   const instance = {
     beginTransaction,
     executeQuery,
     commitTransaction,
     rollbackTransaction,
-    closeConnection
+    closeConnection,
+    discardTransaction
   };
   return {
     default: {
@@ -66,7 +71,7 @@ describe('reingestsinglefailure API route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockConnectionManager = ConnectionManager.getInstance();
-    mockConnectionManager.beginTransaction.mockResolvedValue('txn-1');
+    mockConnectionManager.beginTransaction.mockResolvedValue(ROUTE_TRANSACTION_ID);
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
     mockConnectionManager.closeConnection.mockResolvedValue(undefined);
@@ -85,7 +90,9 @@ describe('reingestsinglefailure API route', () => {
   it('reconciles onto original row without overwriting upload metadata fields', async () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce({ affectedRows: 1, insertId: 501 }) // shift into temporarymeasurements
+      .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
       .mockResolvedValueOnce(undefined) // bulkingestionprocess
+      .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
       .mockResolvedValueOnce([
         {
           CensusID: 1,
@@ -126,6 +133,15 @@ describe('reingestsinglefailure API route', () => {
     expect(body.message).toBe('Success');
 
     const calls = mockConnectionManager.executeQuery.mock.calls;
+    const statements = calls.map((call: any[]) => String(call[0]));
+    const procedureIndex = statements.findIndex((sql: string) => sql.includes('bulkingestionprocess'));
+    expect(statements[procedureIndex - 1]).toBe(CALLER_OWNS_TRANSACTION_SQL);
+    expect(statements[procedureIndex + 1]).toBe(CLEAR_CALLER_TRANSACTION_SQL);
+    for (const index of [procedureIndex - 1, procedureIndex, procedureIndex + 1]) {
+      expect(calls[index][2], `${statements[index]} must run on the route transaction`).toBe(ROUTE_TRANSACTION_ID);
+    }
+    expect(mockConnectionManager.discardTransaction).not.toHaveBeenCalled();
+
     const shiftCall = calls.find((call: any[]) => String(call[0]).includes('INSERT INTO') && String(call[0]).includes('temporarymeasurements'));
     expect(shiftCall).toBeDefined();
     expect(String(shiftCall?.[0])).toContain('EXISTS (');
@@ -145,7 +161,9 @@ describe('reingestsinglefailure API route', () => {
     const TARGET_MEASUREMENT_ID = 123;
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce({ affectedRows: 1, insertId: 501 }) // shift into temporarymeasurements
+      .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
       .mockResolvedValueOnce(undefined) // bulkingestionprocess
+      .mockResolvedValueOnce(undefined) // helper: CLEAR caller-owns-transaction flag
       .mockResolvedValueOnce([
         {
           CensusID: 1,
@@ -220,5 +238,26 @@ describe('reingestsinglefailure API route', () => {
     expect(bindArray[rawPlotXIndex]).toBe(-0.271);
     expect(bindArray[rawPlotYIndex]).toBe(267.5);
     expect(bindArray[bindArray.length - 1]).toBe(TARGET_MEASUREMENT_ID); // WHERE orig.CoreMeasurementID = ? stays last
+  });
+
+  it('returns 500 and rolls back without reconciling when the CALL succeeded but the caller flag could not be cleared', async () => {
+    const clearError = new Error('connection lost while clearing the caller flag');
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce({ affectedRows: 1, insertId: 501 }) // shift into temporarymeasurements
+      .mockResolvedValueOnce(undefined) // helper: SET caller-owns-transaction flag
+      .mockResolvedValueOnce(undefined) // bulkingestionprocess
+      .mockRejectedValueOnce(clearError); // helper: CLEAR caller-owns-transaction flag
+
+    const req = new Request('http://localhost/api/reingestsinglefailure/forestgeo_testing/123') as any;
+    const res = await GET(req, makeParams('forestgeo_testing', '123'));
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe(clearError.message);
+    expect(mockConnectionManager.discardTransaction).toHaveBeenCalledWith(ROUTE_TRANSACTION_ID, FLAG_CLEAR_FAILED_REASON);
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith(ROUTE_TRANSACTION_ID);
+    const statements = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
+    expect(statements.at(-1), 'reconciliation must not continue on a discarded transaction').toBe(CLEAR_CALLER_TRANSACTION_SQL);
   });
 });

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Connection, RowDataPacket } from 'mysql2/promise';
+import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import {
   cleanupTestMeasurements,
   getFailedMeasurements,
@@ -8,7 +8,8 @@ import {
   runBulkIngestion,
   setupTestDatabase,
   teardownTestDatabase,
-  type TestData
+  type TestData,
+  type TestDatabaseConfig
 } from '../setup/local-db-setup';
 import { assertIngestionOutcome, INGESTION_ERROR_CODE, readIngestionOutcome } from '../setup/ingestion-outcome';
 import { buildFailedMeasurementsSelectQuery, INGESTION_ERROR_SOURCE, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
@@ -26,7 +27,9 @@ const COORDINATE_DRIFT_ERROR_CODE = 'COORDINATE_DRIFT';
 
 const sharedState = vi.hoisted(() => ({
   connection: null as Connection | null,
-  batchCounter: 0
+  batchCounter: 0,
+  /** The one transaction the stub has open, so every executeQuery can be checked against it. */
+  activeTransactionID: null as string | null
 }));
 
 // Grant a 'global' role so the route's auth() gate and assertSchemaAccess pass
@@ -44,14 +47,32 @@ vi.mock('@/auth', () => ({
 }));
 
 vi.mock('@/lib/db/connectionmanager', () => {
+  const TRANSACTION_ID = 'test-transaction-id';
+
+  // Production routes a query with no (or another) transaction ID to a different pooled
+  // connection, outside the route's transaction. The stub shares one connection, so it
+  // must reject such a query instead of silently running it inside the transaction.
+  function assertBoundToActiveTransaction(query: string, transactionID: string | undefined) {
+    const active = sharedState.activeTransactionID ?? undefined;
+    if (active !== transactionID) {
+      throw new Error(
+        `executeQuery transaction mismatch: active=${active ?? 'none'} received=${transactionID ?? 'none'} for: ${query.replace(/\s+/g, ' ').slice(0, 120)}`
+      );
+    }
+  }
+
   const manager = {
-    executeQuery: async (query: string, params?: unknown[]) => {
+    executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) {
         throw new Error('Test DB connection not initialized');
       }
+      assertBoundToActiveTransaction(query, transactionID);
 
       const [rows] = await sharedState.connection.query(query, params as any[]);
       return rows;
+    },
+    discardTransaction: (transactionID: string, reason: string) => {
+      throw new Error(`discardTransaction must not run in this suite (transaction ${transactionID}: ${reason})`);
     },
     cleanupStaleTransactions: async () => undefined,
     closeConnection: async () => undefined,
@@ -68,10 +89,11 @@ vi.mock('@/lib/db/connectionmanager', () => {
           const [rows] = await sharedState.connection!.query(sql, params as any[]);
           return rows;
         },
-        id: 'test-transaction-id'
+        id: TRANSACTION_ID
       };
 
       await sharedState.connection.beginTransaction();
+      sharedState.activeTransactionID = TRANSACTION_ID;
       try {
         const result = await fn(tx);
         await sharedState.connection.commit();
@@ -79,6 +101,8 @@ vi.mock('@/lib/db/connectionmanager', () => {
       } catch (error) {
         await sharedState.connection.rollback();
         throw error;
+      } finally {
+        sharedState.activeTransactionID = null;
       }
     },
     beginTransaction: async () => {
@@ -87,7 +111,8 @@ vi.mock('@/lib/db/connectionmanager', () => {
       }
 
       await sharedState.connection.beginTransaction();
-      return 'test-transaction-id';
+      sharedState.activeTransactionID = TRANSACTION_ID;
+      return TRANSACTION_ID;
     },
     commitTransaction: async () => {
       if (!sharedState.connection) {
@@ -95,6 +120,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
       }
 
       await sharedState.connection.commit();
+      sharedState.activeTransactionID = null;
     },
     rollbackTransaction: async () => {
       if (!sharedState.connection) {
@@ -102,6 +128,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
       }
 
       await sharedState.connection.rollback();
+      sharedState.activeTransactionID = null;
     }
   };
 
@@ -152,7 +179,7 @@ interface FailedRowSnapshot {
 describe('Reingest route integration tests', () => {
   let connection: Connection;
   let testData: TestData;
-  let config: { database: string };
+  let config: TestDatabaseConfig;
 
   beforeAll(async () => {
     const setup = await setupTestDatabase();
@@ -169,6 +196,7 @@ describe('Reingest route integration tests', () => {
 
   beforeEach(async () => {
     sharedState.batchCounter = 0;
+    sharedState.activeTransactionID = null;
     await cleanupTestMeasurements(connection, testData, {
       additionalTables: ['uploadintegrityalerts', 'uploadmetrics']
     });
@@ -1016,5 +1044,109 @@ describe('Reingest route integration tests', () => {
       expect(after).toEqual(before);
       expect(after.find(row => row.ErrorCode === 'MISSING_FIELD_TREETAG')).toBeUndefined();
     });
+  });
+
+  it('rolls back the CALL output, original-row updates and error-link changes when reconciliation fails after the CALL', async () => {
+    const REINGEST_FILE_ID = 'reingestion.csv';
+    const REINGEST_BATCH_ID = 'test-batch-id-1';
+    const RESTORE_ATTRIBUTES_MARKER = 'FROM reingestion_attributes';
+    const RESOLVE_EXISTING_MARKER = 'JOIN reingestion_map rm ON rm.OriginalID = mel.MeasurementID';
+    const INJECTED_FAILURE_MESSAGE = 'INJECTED TEST FAILURE: reconciliation failed after the CALL (#527)';
+
+    const { failedRows, validSpeciesCode } = await createInvalidSpeciesFailures(2);
+    const originalIDs = failedRows.map(row => row.FailedMeasurementID);
+    await connection.query('UPDATE coremeasurements SET RawSpCode = ? WHERE CoreMeasurementID IN (?)', [validSpeciesCode, originalIDs]);
+
+    const readOriginalRows = async (reader: Connection) =>
+      (await reader.query<RowDataPacket[]>('SELECT * FROM coremeasurements WHERE CoreMeasurementID IN (?) ORDER BY CoreMeasurementID', [originalIDs]))[0];
+    const readTreeStemCounts = async (reader: Connection) =>
+      (await reader.query<RowDataPacket[]>('SELECT (SELECT COUNT(*) FROM trees) AS trees, (SELECT COUNT(*) FROM stems) AS stems'))[0][0];
+    const readTransientRows = async (reader: Connection) =>
+      Number(
+        (
+          await reader.query<RowDataPacket[]>(
+            'SELECT COUNT(*) AS total FROM coremeasurements WHERE UploadFileID = ? AND UploadBatchID = ? AND StemGUID IS NOT NULL',
+            [REINGEST_FILE_ID, REINGEST_BATCH_ID]
+          )
+        )[0][0].total
+      );
+
+    const originalRowsBefore = await readOriginalRows(connection);
+    const attributesBefore = await getMeasurementAttributes(originalIDs);
+    const errorLinksBefore = await loadErrorLogSnapshot(originalIDs);
+    const treeStemBefore = await readTreeStemCounts(connection);
+    const [stagedBefore] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ?', [REINGEST_FILE_ID]);
+    expect(Number(stagedBefore[0].total), 'reingest staging must start empty').toBe(0);
+    expect(originalRowsBefore.every(row => row.StemGUID === null)).toBe(true);
+
+    const manager = ConnectionManager.getInstance() as unknown as {
+      executeQuery: (query: string, params?: unknown[], transactionID?: string) => Promise<any>;
+    };
+    const originalExecuteQuery = manager.executeQuery.bind(manager);
+    let resolvedTransientRowsAfterCall: number | null = null;
+    let originalRowsDuringTransaction: RowDataPacket[] | null = null;
+    let errorLinksDuringTransaction: ErrorLogSnapshotRow[] | null = null;
+    let restoreHookFired = false;
+
+    // Assertions run outside the route: anything thrown inside the hook would be turned into
+    // the expected 500 and could not fail this test.
+    const spy = vi.spyOn(manager, 'executeQuery').mockImplementation(async (sql: string, params?: unknown[], transactionID?: string) => {
+      if (sql.includes(RESOLVE_EXISTING_MARKER)) {
+        resolvedTransientRowsAfterCall = await readTransientRows(connection);
+      }
+      if (sql.includes(RESTORE_ATTRIBUTES_MARKER)) {
+        restoreHookFired = true;
+        originalRowsDuringTransaction = await readOriginalRows(connection);
+        errorLinksDuringTransaction = await loadErrorLogSnapshot(originalIDs);
+        throw new Error(INJECTED_FAILURE_MESSAGE);
+      }
+      return originalExecuteQuery(sql, params, transactionID);
+    });
+
+    try {
+      const response = await bulkReingestGet(makeBulkRequest('GET'), makeBulkParams());
+      const body = await response.json();
+      expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+      expect(body.error).toContain(INJECTED_FAILURE_MESSAGE);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(resolvedTransientRowsAfterCall, 'the CALL must really have produced resolved transient rows before reconciliation').toBe(originalIDs.length);
+    expect(restoreHookFired, 'the attribute-restore hook never fired; the match marker no longer matches the route query').toBe(true);
+    expect(
+      originalRowsDuringTransaction!.every(row => row.StemGUID !== null),
+      'syncOriginalRowsSQL must have updated the originals inside the transaction before the failure'
+    ).toBe(true);
+    expect(errorLinksDuringTransaction, 'the ingestion error links must have changed inside the transaction before the failure').not.toEqual(errorLinksBefore);
+
+    const independent = await mysql.createConnection({
+      host: config.host,
+      port: config.port,
+      user: config.user,
+      password: config.password,
+      database: config.database,
+      timezone: config.timezone
+    });
+    try {
+      expect(await readOriginalRows(independent), 'original measurement rows must be exactly as before').toEqual(originalRowsBefore);
+      expect(await readTreeStemCounts(independent), 'no trees or stems may survive the rollback').toEqual(treeStemBefore);
+      expect(await readTransientRows(independent), 'no transient CALL output may survive the rollback').toBe(0);
+      assertIngestionOutcome(
+        await readIngestionOutcome(independent, { fileID: REINGEST_FILE_ID, batchID: REINGEST_BATCH_ID, censusID: testData.census[0].censusID }),
+        {
+          sourceRecords: null,
+          successfulRows: 0,
+          failedRows: 0,
+          remainingTemporaryRows: 0,
+          errorCodes: [],
+          alertTypes: []
+        }
+      );
+    } finally {
+      await independent.end();
+    }
+    expect(await getMeasurementAttributes(originalIDs), 'original attributes must be exactly as before').toEqual(attributesBefore);
+    expect(await loadErrorLogSnapshot(originalIDs), 'original error links must be exactly as before').toEqual(errorLinksBefore);
   });
 });
