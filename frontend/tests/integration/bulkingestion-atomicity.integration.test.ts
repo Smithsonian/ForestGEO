@@ -40,6 +40,7 @@ import {
   type IngestionScope
 } from '../setup/ingestion-outcome';
 import { CALLER_OWNS_TRANSACTION_SQL, callBulkIngestionInCallerTransaction, type BulkIngestionExecutor } from '@/lib/ingestion/bulk-ingestion-call';
+import { splitSqlFile } from '@/lib/provisioning/sql-runner';
 
 const LOCAL_HOSTS = ['127.0.0.1', 'localhost', '::1'] as const;
 if (!LOCAL_HOSTS.includes(DEFAULT_TEST_CONFIG.host as (typeof LOCAL_HOSTS)[number])) {
@@ -268,19 +269,11 @@ function parkedBatchOutcome(): Partial<IngestionOutcome> {
 
 function buildProcedureVariant(variantName: string, probeSql: string): string {
   const proceduresPath = join(process.cwd(), 'db/sql', 'storedprocedures.sql');
-  const statements = readFileSync(proceduresPath, 'utf-8')
-    .replace(/DELIMITER\s+\$\$/gi, '')
-    .replace(/DELIMITER\s+;/gi, '')
-    .split('$$');
-  const createChunk = statements.find(statement => statement.includes(`PROCEDURE ${CANONICAL_PROCEDURE}(`));
-  if (!createChunk) throw new Error(`Could not locate the CREATE for ${CANONICAL_PROCEDURE} in ${proceduresPath}`);
-  const procedureIndex = createChunk.indexOf(`PROCEDURE ${CANONICAL_PROCEDURE}(`);
-  const createIndex = createChunk.lastIndexOf('CREATE', procedureIndex);
-  if (createIndex === -1) throw new Error(`Could not find CREATE preceding PROCEDURE ${CANONICAL_PROCEDURE}(`);
+  const statements = splitSqlFile(readFileSync(proceduresPath, 'utf-8'));
+  const createStatement = statements.find(({ sql }) => sql.startsWith('CREATE ') && sql.includes(`PROCEDURE ${CANONICAL_PROCEDURE}(`));
+  if (!createStatement) throw new Error(`Could not locate the CREATE for ${CANONICAL_PROCEDURE} in ${proceduresPath}`);
 
-  const renamed = createChunk
-    .slice(createIndex)
-    .trim()
+  const renamed = createStatement.sql
     .replace(/definer\s*=\s*`?[^`\s]+`?@`?[^`\s]+`?\s*/gi, '')
     .replace(`PROCEDURE ${CANONICAL_PROCEDURE}(`, `PROCEDURE ${variantName}(`);
 

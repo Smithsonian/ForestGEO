@@ -302,8 +302,8 @@ describe('Reingest route integration tests', () => {
     return rows as FailedRowSnapshot[];
   }
 
-  async function getMeasurementAttributes(ids: number[]): Promise<Map<number, string[]>> {
-    const [rows] = await connection.query<RowDataPacket[]>(
+  async function getMeasurementAttributes(ids: number[], reader: Connection = connection): Promise<Map<number, string[]>> {
+    const [rows] = await reader.query<RowDataPacket[]>(
       `SELECT CoreMeasurementID, Code
        FROM cmattributes
        WHERE CoreMeasurementID IN (?)
@@ -1046,16 +1046,20 @@ describe('Reingest route integration tests', () => {
     });
   });
 
-  it('rolls back the CALL output, original-row updates and error-link changes when reconciliation fails after the CALL', async () => {
+  it('rolls back the CALL output, original-row updates, attributes and error-link changes when reconciliation fails after the CALL', async () => {
     const REINGEST_FILE_ID = 'reingestion.csv';
     const REINGEST_BATCH_ID = 'test-batch-id-1';
     const RESTORE_ATTRIBUTES_MARKER = 'FROM reingestion_attributes';
     const RESOLVE_EXISTING_MARKER = 'JOIN reingestion_map rm ON rm.OriginalID = mel.MeasurementID';
     const INJECTED_FAILURE_MESSAGE = 'INJECTED TEST FAILURE: reconciliation failed after the CALL (#527)';
+    const ORIGINAL_ATTRIBUTE_CODE = 'B';
 
     const { failedRows, validSpeciesCode } = await createInvalidSpeciesFailures(2);
     const originalIDs = failedRows.map(row => row.FailedMeasurementID);
     await connection.query('UPDATE coremeasurements SET RawSpCode = ? WHERE CoreMeasurementID IN (?)', [validSpeciesCode, originalIDs]);
+    // Failed ingestion does not materialize attributes. Seed existing ones that differ from
+    // the staged RawCodes ('A') so rollback must restore the original attribute set.
+    await connection.query('INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES ?', [originalIDs.map(id => [id, ORIGINAL_ATTRIBUTE_CODE])]);
 
     const readOriginalRows = async (reader: Connection) =>
       (await reader.query<RowDataPacket[]>('SELECT * FROM coremeasurements WHERE CoreMeasurementID IN (?) ORDER BY CoreMeasurementID', [originalIDs]))[0];
@@ -1078,6 +1082,7 @@ describe('Reingest route integration tests', () => {
     const [stagedBefore] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ?', [REINGEST_FILE_ID]);
     expect(Number(stagedBefore[0].total), 'reingest staging must start empty').toBe(0);
     expect(originalRowsBefore.every(row => row.StemGUID === null)).toBe(true);
+    expect(attributesBefore, 'every original row must have an attribute to restore').toEqual(new Map(originalIDs.map(id => [id, [ORIGINAL_ATTRIBUTE_CODE]])));
 
     const manager = ConnectionManager.getInstance() as unknown as {
       executeQuery: (query: string, params?: unknown[], transactionID?: string) => Promise<any>;
@@ -1085,6 +1090,7 @@ describe('Reingest route integration tests', () => {
     const originalExecuteQuery = manager.executeQuery.bind(manager);
     let resolvedTransientRowsAfterCall: number | null = null;
     let originalRowsDuringTransaction: RowDataPacket[] | null = null;
+    let attributesDuringTransaction: Map<number, string[]> | null = null;
     let errorLinksDuringTransaction: ErrorLogSnapshotRow[] | null = null;
     let restoreHookFired = false;
 
@@ -1097,6 +1103,7 @@ describe('Reingest route integration tests', () => {
       if (sql.includes(RESTORE_ATTRIBUTES_MARKER)) {
         restoreHookFired = true;
         originalRowsDuringTransaction = await readOriginalRows(connection);
+        attributesDuringTransaction = await getMeasurementAttributes(originalIDs);
         errorLinksDuringTransaction = await loadErrorLogSnapshot(originalIDs);
         throw new Error(INJECTED_FAILURE_MESSAGE);
       }
@@ -1118,6 +1125,7 @@ describe('Reingest route integration tests', () => {
       originalRowsDuringTransaction!.every(row => row.StemGUID !== null),
       'syncOriginalRowsSQL must have updated the originals inside the transaction before the failure'
     ).toBe(true);
+    expect(attributesDuringTransaction, 'the existing attributes must have been deleted before the injected restore failure').toEqual(new Map());
     expect(errorLinksDuringTransaction, 'the ingestion error links must have changed inside the transaction before the failure').not.toEqual(errorLinksBefore);
 
     const independent = await mysql.createConnection({
@@ -1130,6 +1138,7 @@ describe('Reingest route integration tests', () => {
     });
     try {
       expect(await readOriginalRows(independent), 'original measurement rows must be exactly as before').toEqual(originalRowsBefore);
+      expect(await getMeasurementAttributes(originalIDs, independent), 'original attributes must be exactly as before').toEqual(attributesBefore);
       expect(await readTreeStemCounts(independent), 'no trees or stems may survive the rollback').toEqual(treeStemBefore);
       expect(await readTransientRows(independent), 'no transient CALL output may survive the rollback').toBe(0);
       assertIngestionOutcome(
@@ -1146,7 +1155,6 @@ describe('Reingest route integration tests', () => {
     } finally {
       await independent.end();
     }
-    expect(await getMeasurementAttributes(originalIDs), 'original attributes must be exactly as before').toEqual(attributesBefore);
     expect(await loadErrorLogSnapshot(originalIDs), 'original error links must be exactly as before').toEqual(errorLinksBefore);
   });
 });
