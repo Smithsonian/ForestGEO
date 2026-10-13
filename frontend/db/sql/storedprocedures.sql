@@ -1961,7 +1961,7 @@ BEGIN
     -- ============================================================
     SET vStageStart = NOW(6);
 
-    CREATE TEMPORARY TABLE validation_failures AS
+    CREATE TEMPORARY TABLE validation_failures (INDEX idx_validation_failures_id (id)) AS
     SELECT tm.id,
            LEFT(CONCAT_WS('; ',
                IF(tm.TreeTag IS NULL OR TRIM(tm.TreeTag) = '',
@@ -1996,8 +1996,6 @@ BEGIN
     FROM temporarymeasurements tm
     WHERE tm.FileID = vFileID AND tm.BatchID = vBatchID AND tm.CensusID = vCurrentCensusID
     HAVING FailureReason IS NOT NULL AND FailureReason != '';
-
-    CREATE INDEX idx_validation_failures_id ON validation_failures (id);
 
     INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
     SELECT vf.id, err.ErrorCode, vf.FailureReason
@@ -2039,7 +2037,11 @@ BEGIN
     -- ============================================================
     SET vStageStart = NOW(6);
 
-    CREATE TEMPORARY TABLE initial_dup_filter AS
+    CREATE TEMPORARY TABLE initial_dup_filter (
+        INDEX idx_dup_filter_id (id),
+        INDEX idx_dup_tree_species (TreeTag, SpeciesCode),
+        INDEX idx_dup_quadrat (QuadratName)
+    ) AS
     SELECT MIN(id) AS id,
            COUNT(*) AS duplicate_count,
            FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode,
@@ -2074,11 +2076,7 @@ BEGIN
     GROUP BY FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode,
              QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate;
 
-    CREATE INDEX idx_dup_filter_id ON initial_dup_filter (id);
-    CREATE INDEX idx_dup_tree_species ON initial_dup_filter (TreeTag, SpeciesCode);
-    CREATE INDEX idx_dup_quadrat ON initial_dup_filter (QuadratName);
-
-    CREATE TEMPORARY TABLE duplicate_failures AS
+    CREATE TEMPORARY TABLE duplicate_failures (INDEX idx_duplicate_failures_id (id)) AS
     SELECT tm.id,
            LEFT(CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id), 255) AS FailureReason
     FROM temporarymeasurements tm
@@ -2094,8 +2092,6 @@ BEGIN
         -- PublishedStemID deliberately omitted here to match the dedup key above; including it would
         -- leave the non-surviving row unmatched and let it slip through as a spurious MEASUREMENT_INSERT_SKIPPED.
     WHERE tm.id != idf.id AND idf.duplicate_count > 1;
-
-    CREATE INDEX idx_duplicate_failures_id ON duplicate_failures (id);
 
     INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
     SELECT id, 'DUPLICATE_ENTRY', FailureReason
@@ -2129,7 +2125,7 @@ BEGIN
     -- group fail (no winner is picked, because non-tag fields differ
     -- and we have no safe basis to choose).
     -- ----------------------------------------------------------------
-    CREATE TEMPORARY TABLE tag_stemtag_collision_groups AS
+    CREATE TEMPORARY TABLE tag_stemtag_collision_groups (INDEX idx_tag_stemtag_collision_groups (CensusID, TreeTag, StemTag)) AS
     SELECT CensusID, TreeTag, StemTag, COUNT(*) AS collision_count
     FROM temporarymeasurements
     WHERE FileID = vFileID AND BatchID = vBatchID AND CensusID = vCurrentCensusID
@@ -2140,10 +2136,7 @@ BEGIN
     GROUP BY CensusID, TreeTag, StemTag
     HAVING COUNT(*) > 1;
 
-    CREATE INDEX idx_tag_stemtag_collision_groups
-        ON tag_stemtag_collision_groups (CensusID, TreeTag, StemTag);
-
-    CREATE TEMPORARY TABLE tag_stemtag_collision_failures AS
+    CREATE TEMPORARY TABLE tag_stemtag_collision_failures (INDEX idx_tag_stemtag_collision_failures_id (id)) AS
     SELECT tm.id,
            LEFT(CONCAT('Duplicate TreeTag/StemTag within upload batch: "',
                        tm.TreeTag, '"/"', tm.StemTag,
@@ -2158,9 +2151,6 @@ BEGIN
     WHERE tm.FileID = vFileID AND tm.BatchID = vBatchID
       AND tm.id NOT IN (SELECT id FROM validation_failures)
       AND tm.id NOT IN (SELECT id FROM duplicate_failures);
-
-    CREATE INDEX idx_tag_stemtag_collision_failures_id
-        ON tag_stemtag_collision_failures (id);
 
     INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
     SELECT id, 'DUPLICATE_TAG_STEMTAG', FailureReason
@@ -2210,7 +2200,7 @@ BEGIN
     -- single source row can never fan out into multiple candidates downstream,
     -- and lets us distinguish "no match" (INVALID_*) from "ambiguous match"
     -- (AMBIGUOUS_*) explicitly instead of silently producing duplicate rows.
-    CREATE TEMPORARY TABLE quadrat_resolution AS
+    CREATE TEMPORARY TABLE quadrat_resolution (INDEX idx_quadrat_resolution_lookup (PlotID, QuadratName)) AS
     SELECT q.PlotID,
            q.QuadratName,
            COUNT(*)        AS MatchCount,
@@ -2222,10 +2212,7 @@ BEGIN
     WHERE q.IsActive = 1
     GROUP BY q.PlotID, q.QuadratName;
 
-    CREATE INDEX idx_quadrat_resolution_lookup
-        ON quadrat_resolution (PlotID, QuadratName);
-
-    CREATE TEMPORARY TABLE species_resolution AS
+    CREATE TEMPORARY TABLE species_resolution (INDEX idx_species_resolution_lookup (SpeciesCode)) AS
     SELECT s.SpeciesCode,
            COUNT(*)        AS MatchCount,
            MIN(s.SpeciesID) AS SpeciesID,
@@ -2236,10 +2223,10 @@ BEGIN
     WHERE s.IsActive = 1
     GROUP BY s.SpeciesCode;
 
-    CREATE INDEX idx_species_resolution_lookup
-        ON species_resolution (SpeciesCode);
-
-    CREATE TEMPORARY TABLE filter_validity AS
+    CREATE TEMPORARY TABLE filter_validity (
+        INDEX idx_validity_valid (Valid),
+        INDEX idx_validity_tree (TreeTag, SpeciesID, CensusID)
+    ) AS
     SELECT i.id, i.FileID, i.BatchID, i.PlotID, i.CensusID, i.TreeTag,
            IFNULL(i.StemTag, '') AS StemTag, i.SpeciesCode, i.QuadratName,
            i.LocalX, i.LocalY, i.PlotX, i.PlotY,
@@ -2274,18 +2261,15 @@ BEGIN
     LEFT JOIN species_resolution ts
         ON ts.SpeciesCode = i.SpeciesCode;
 
-    CREATE INDEX idx_validity_valid ON filter_validity (Valid);
-    CREATE INDEX idx_validity_tree ON filter_validity (TreeTag, SpeciesID, CensusID);
-
-    CREATE TEMPORARY TABLE filtered AS
+    CREATE TEMPORARY TABLE filtered (
+        INDEX idx_filtered_id (id),
+        INDEX idx_filtered_tree_census (TreeTag, CensusID),
+        INDEX idx_filtered_stem_tree (StemTag, TreeTag),
+        INDEX idx_filtered_species (SpeciesID)
+    ) AS
     SELECT *
     FROM filter_validity
     WHERE Valid = TRUE;
-
-    CREATE INDEX idx_filtered_id ON filtered (id);
-    CREATE INDEX idx_filtered_tree_census ON filtered (TreeTag, CensusID);
-    CREATE INDEX idx_filtered_stem_tree ON filtered (StemTag, TreeTag);
-    CREATE INDEX idx_filtered_species ON filtered (SpeciesID);
 
     -- Prefix-anchored matching: order matters because the more-specific
     -- "Ambiguous quadrat name" must be tested before any pattern that would
@@ -2336,19 +2320,15 @@ BEGIN
     SET vStageStart = NOW(6);
 
     IF vPreviousCensusID IS NOT NULL THEN
-        CREATE TEMPORARY TABLE requested_prev_trees AS
+        CREATE TEMPORARY TABLE requested_prev_trees (INDEX idx_requested_prev_trees_tag (TreeTag)) AS
         SELECT DISTINCT TreeTag
         FROM filtered;
 
-        CREATE INDEX idx_requested_prev_trees_tag ON requested_prev_trees (TreeTag);
-
-        CREATE TEMPORARY TABLE requested_prev_stems AS
+        CREATE TEMPORARY TABLE requested_prev_stems (INDEX idx_requested_prev_stems_tags (TreeTag, StemTag)) AS
         SELECT DISTINCT TreeTag, StemTag
         FROM filtered;
 
-        CREATE INDEX idx_requested_prev_stems_tags ON requested_prev_stems (TreeTag, StemTag);
-
-        CREATE TEMPORARY TABLE prev_tree_lookup AS
+        CREATE TEMPORARY TABLE prev_tree_lookup (INDEX idx_prev_tree_lookup_tag (TreeTag)) AS
         SELECT rpt.TreeTag,
                COUNT(*) AS MatchCount,
                MIN(t.SpeciesID) AS PrevSpeciesID
@@ -2358,9 +2338,7 @@ BEGIN
           AND t.CensusID = vPreviousCensusID
         GROUP BY rpt.TreeTag;
 
-        CREATE INDEX idx_prev_tree_lookup_tag ON prev_tree_lookup (TreeTag);
-
-        CREATE TEMPORARY TABLE prev_stem_lookup AS
+        CREATE TEMPORARY TABLE prev_stem_lookup (INDEX idx_prev_stem_lookup_tags (TreeTag, StemTag)) AS
         SELECT rps.TreeTag,
                rps.StemTag,
                COUNT(*) AS MatchCount,
@@ -2384,9 +2362,7 @@ BEGIN
             AND q.IsActive = 1
         GROUP BY rps.TreeTag, rps.StemTag;
 
-        CREATE INDEX idx_prev_stem_lookup_tags ON prev_stem_lookup (TreeTag, StemTag);
-
-        CREATE TEMPORARY TABLE prev_match_ambiguities AS
+        CREATE TEMPORARY TABLE prev_match_ambiguities (INDEX idx_prev_match_ambiguities_id (id)) AS
         SELECT f.id,
                LEFT(CONCAT_WS('; ',
                    CASE
@@ -2405,8 +2381,6 @@ BEGIN
         LEFT JOIN prev_tree_lookup ptl ON ptl.TreeTag = f.TreeTag
         LEFT JOIN prev_stem_lookup psl ON psl.TreeTag = f.TreeTag AND psl.StemTag = f.StemTag
         WHERE COALESCE(ptl.MatchCount, 0) > 1 OR COALESCE(psl.MatchCount, 0) > 1;
-
-        CREATE INDEX idx_prev_match_ambiguities_id ON prev_match_ambiguities (id);
     ELSE
         CREATE TEMPORARY TABLE prev_tree_lookup
         (
@@ -2460,7 +2434,13 @@ BEGIN
         INNER JOIN prev_match_ambiguities pma ON pma.id = f.id;
     END IF;
 
-    CREATE TEMPORARY TABLE classified_filtered AS
+    CREATE TEMPORARY TABLE classified_filtered (
+        INDEX idx_classified_id (id),
+        INDEX idx_classified_tree_census (TreeTag, CensusID),
+        INDEX idx_classified_stem_tree (StemTag, TreeTag),
+        INDEX idx_classified_species (SpeciesID),
+        INDEX idx_classified_resolution (CensusID, TreeTag, SpeciesID, StemTag, QuadratID)
+    ) AS
     SELECT f.*,
            CASE
                WHEN COALESCE(psl.MatchCount, 0) = 1 THEN 'old tree'
@@ -2471,12 +2451,6 @@ BEGIN
     LEFT JOIN prev_tree_lookup ptl ON ptl.TreeTag = f.TreeTag
     LEFT JOIN prev_stem_lookup psl ON psl.TreeTag = f.TreeTag AND psl.StemTag = f.StemTag;
 
-    CREATE INDEX idx_classified_id ON classified_filtered (id);
-    CREATE INDEX idx_classified_tree_census ON classified_filtered (TreeTag, CensusID);
-    CREATE INDEX idx_classified_stem_tree ON classified_filtered (StemTag, TreeTag);
-    CREATE INDEX idx_classified_species ON classified_filtered (SpeciesID);
-    CREATE INDEX idx_classified_resolution ON classified_filtered (CensusID, TreeTag, SpeciesID, StemTag, QuadratID);
-
     SET vPrevLookupMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
 
     -- ================================================================
@@ -2484,7 +2458,7 @@ BEGIN
     -- ================================================================
     SET vStageStart = NOW(6);
 
-    CREATE TEMPORARY TABLE quadrat_mismatch_failures AS
+    CREATE TEMPORARY TABLE quadrat_mismatch_failures (INDEX idx_quadrat_mismatch_failures_id (id)) AS
     SELECT DISTINCT f.id,
            f.QuadratName AS CurrentQuadrat,
            psl.PrevQuadratName AS PrevQuadrat,
@@ -2499,9 +2473,7 @@ BEGIN
     WHERE f.tree_state = 'old tree'
       AND psl.PrevQuadratName != f.QuadratName;
 
-    CREATE INDEX idx_quadrat_mismatch_failures_id ON quadrat_mismatch_failures (id);
-
-    CREATE TEMPORARY TABLE coordinate_drift_failures AS
+    CREATE TEMPORARY TABLE coordinate_drift_failures (INDEX idx_coordinate_drift_failures_id (id)) AS
     SELECT DISTINCT f.id,
            LEFT(CONCAT('Coordinate drift: ',
                        ROUND(SQRT(POW(f.LocalX - psl.PrevX, 2) + POW(f.LocalY - psl.PrevY, 2)), 2),
@@ -2520,8 +2492,6 @@ BEGIN
       AND psl.PrevX IS NOT NULL
       AND psl.PrevY IS NOT NULL
       AND SQRT(POW(f.LocalX - psl.PrevX, 2) + POW(f.LocalY - psl.PrevY, 2)) > 10.0;
-
-    CREATE INDEX idx_coordinate_drift_failures_id ON coordinate_drift_failures (id);
 
     INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
     SELECT id, 'QUADRAT_MISMATCH', FailureReason
@@ -2570,17 +2540,14 @@ BEGIN
     -- =====================================================
     SET vStageStart = NOW(6);
 
-    CREATE TEMPORARY TABLE tree_insert_candidates AS
+    CREATE TEMPORARY TABLE tree_insert_candidates (INDEX idx_tree_insert_candidates_key (TreeTag, SpeciesID, CensusID)) AS
     SELECT DISTINCT cf.TreeTag,
            cf.SpeciesID,
            cf.CensusID
     FROM classified_filtered cf
     WHERE cf.CensusID = vCurrentCensusID;
 
-    CREATE INDEX idx_tree_insert_candidates_key
-        ON tree_insert_candidates (TreeTag, SpeciesID, CensusID);
-
-    CREATE TEMPORARY TABLE tree_insert_failures AS
+    CREATE TEMPORARY TABLE tree_insert_failures (INDEX idx_tree_insert_failures_row (SourceRowIndex)) AS
     SELECT cf.id AS SourceRowIndex,
            CASE
                WHEN c.CensusID IS NULL THEN 'MISSING_CENSUS_FOR_TREE'
@@ -2624,9 +2591,6 @@ BEGIN
           OR (t_any.TreeID IS NOT NULL AND t_active.TreeID IS NULL)
       );
 
-    CREATE INDEX idx_tree_insert_failures_row
-        ON tree_insert_failures (SourceRowIndex);
-
     INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
     SELECT tif.SourceRowIndex, tif.ErrorCode, tif.FailureReason
     FROM tree_insert_failures tif
@@ -2649,7 +2613,10 @@ BEGIN
       AND s.SpeciesID IS NOT NULL
       AND t_any.TreeID IS NULL;
 
-    CREATE TEMPORARY TABLE current_tree_lookup AS
+    CREATE TEMPORARY TABLE current_tree_lookup (
+        INDEX idx_current_tree_lookup_tree (TreeTag, SpeciesID, CensusID),
+        INDEX idx_current_tree_lookup_id (TreeID, CensusID)
+    ) AS
     SELECT DISTINCT t.TreeID,
            t.TreeTag,
            t.SpeciesID,
@@ -2662,10 +2629,10 @@ BEGIN
         AND cf.CensusID = vCurrentCensusID
     WHERE t.IsActive = 1;
 
-    CREATE INDEX idx_current_tree_lookup_tree ON current_tree_lookup (TreeTag, SpeciesID, CensusID);
-    CREATE INDEX idx_current_tree_lookup_id ON current_tree_lookup (TreeID, CensusID);
-
-    CREATE TEMPORARY TABLE stem_resolution_rows AS
+    CREATE TEMPORARY TABLE stem_resolution_rows (
+        INDEX idx_stem_resolution_rows_id (id),
+        INDEX idx_stem_resolution_rows_tree (TreeID, CensusID, StemTag)
+    ) AS
     SELECT cf.id,
            cf.CensusID,
            cf.TreeTag,
@@ -2701,9 +2668,6 @@ BEGIN
         AND psl.StemTag = cf.StemTag
     WHERE cf.CensusID = vCurrentCensusID;
 
-    CREATE INDEX idx_stem_resolution_rows_id ON stem_resolution_rows (id);
-    CREATE INDEX idx_stem_resolution_rows_tree ON stem_resolution_rows (TreeID, CensusID, StemTag);
-
     -- Leftover stems (issue #489): current-census stems no measurement references, named by an incoming
     -- row's TreeTag + StemTag under any species. Census replacement deletes measurements but keeps stems,
     -- and reusing one keeps its old tree and quadrat, which blocks a quadrat move and leaves an old-species
@@ -2711,7 +2675,7 @@ BEGIN
     -- StemCrossID/PublishedStemID a first-census stem cannot re-inherit. Inactive stems were deliberately
     -- retired and still block (STEM_RESOLUTION_FAILED below); stems holding a specimen are kept because
     -- specimens cascade from stems.
-    CREATE TEMPORARY TABLE leftover_stems AS
+    CREATE TEMPORARY TABLE leftover_stems (INDEX idx_leftover_stems_tags (TreeTag, StemTag)) AS
     SELECT s.StemGUID, t.TreeTag, s.StemTag, s.StemCrossID, s.PublishedStemID
     FROM stems s
     INNER JOIN trees t
@@ -2725,8 +2689,6 @@ BEGIN
       AND s.IsActive = 1
       AND NOT EXISTS (SELECT 1 FROM coremeasurements cm WHERE cm.StemGUID = s.StemGUID)
       AND NOT EXISTS (SELECT 1 FROM specimens sp WHERE sp.StemID = s.StemGUID);
-
-    CREATE INDEX idx_leftover_stems_tags ON leftover_stems (TreeTag, StemTag);
 
     -- A previous-census match still wins; the leftover only fills what it cannot supply.
     UPDATE stem_resolution_rows srr
@@ -2773,7 +2735,7 @@ BEGIN
       AND ctl.TreeID IS NULL
       AND tif.SourceRowIndex IS NULL;
 
-    CREATE TEMPORARY TABLE stem_insert_candidates AS
+    CREATE TEMPORARY TABLE stem_insert_candidates (INDEX idx_stem_insert_candidates_key (TreeID, CensusID, StemTag)) AS
     SELECT DISTINCT srr.TreeID,
            srr.QuadratID,
            srr.CensusID,
@@ -2785,9 +2747,6 @@ BEGIN
            END AS StemTag,
            srr.LocalX, srr.LocalY
     FROM stem_resolution_rows srr;
-
-    CREATE INDEX idx_stem_insert_candidates_key
-        ON stem_insert_candidates (TreeID, CensusID, StemTag);
 
     -- Deterministic plot-coordinate pick: the value from the lowest stem_resolution_rows.id
     -- that supplies each axis, chosen independently per axis (a row can supply PlotX and not
@@ -2801,7 +2760,7 @@ BEGIN
     -- to fetch each axis's value" shape needs two such references and does not run. GROUP_CONCAT
     -- skips NULL inputs, so SUBSTRING_INDEX(..., 1) is "the id-lowest contributing row that
     -- actually supplied that axis" — the same technique used for initial_dup_filter above.
-    CREATE TEMPORARY TABLE stem_plotcoord_pick AS
+    CREATE TEMPORARY TABLE stem_plotcoord_pick (INDEX idx_stem_plotcoord_pick_key (TreeID, CensusID, StemTag)) AS
     SELECT TreeID, StemTag, CensusID,
            CAST(NULLIF(SUBSTRING_INDEX(
              GROUP_CONCAT(CASE WHEN PlotX IS NOT NULL THEN CAST(PlotX AS CHAR) END ORDER BY id SEPARATOR ','),
@@ -2811,9 +2770,6 @@ BEGIN
              ',', 1), '') AS DECIMAL(12,6)) AS PlotY
     FROM stem_resolution_rows
     GROUP BY TreeID, StemTag, CensusID;
-
-    CREATE INDEX idx_stem_plotcoord_pick_key
-        ON stem_plotcoord_pick (TreeID, CensusID, StemTag);
 
     -- Inline StemCrossID/PublishedStemID inheritance: set the previous census's values at INSERT time for stems with an unambiguous previous-census match.
     -- PlotX/PlotY are sourced independently from stem_plotcoord_pick rather than
@@ -2858,7 +2814,7 @@ BEGIN
         s.PlotY = COALESCE(s.PlotY, pick.PlotY)
     WHERE s.PlotX IS NULL OR s.PlotY IS NULL;
 
-    CREATE TEMPORARY TABLE current_stem_lookup AS
+    CREATE TEMPORARY TABLE current_stem_lookup (INDEX idx_current_stem_lookup_id (id, StemGUID)) AS
     SELECT DISTINCT srr.id,
            s.StemGUID
     FROM stem_resolution_rows srr
@@ -2868,9 +2824,6 @@ BEGIN
         AND s.StemTag <=> srr.StemTag
         AND s.QuadratID = srr.QuadratID
         AND s.IsActive = 1;
-
-    CREATE INDEX idx_current_stem_lookup_id
-        ON current_stem_lookup (id, StemGUID);
 
     INSERT INTO unresolved_stem_rows (SourceRowIndex, ErrorCode, FailureReason)
     SELECT srr.id,
@@ -2904,7 +2857,11 @@ BEGIN
     SELECT usr.SourceRowIndex, usr.ErrorCode, usr.FailureReason
     FROM unresolved_stem_rows usr;
 
-    CREATE TEMPORARY TABLE resolved_batch_rows AS
+    CREATE TEMPORARY TABLE resolved_batch_rows (
+        INDEX idx_resolved_batch_rows_id (id),
+        INDEX idx_resolved_batch_rows_stem (StemGUID),
+        INDEX idx_resolved_batch_rows_publishedstemid (PublishedStemID)
+    ) AS
     SELECT srr.id,
            srr.CensusID,
            srr.TreeTag,
@@ -2925,10 +2882,6 @@ BEGIN
     FROM stem_resolution_rows srr
     INNER JOIN current_stem_lookup csl
         ON csl.id = srr.id;
-
-    CREATE INDEX idx_resolved_batch_rows_id ON resolved_batch_rows (id);
-    CREATE INDEX idx_resolved_batch_rows_stem ON resolved_batch_rows (StemGUID);
-    CREATE INDEX idx_resolved_batch_rows_publishedstemid ON resolved_batch_rows (PublishedStemID);
 
     SET vTreeStemInsertMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
 
@@ -2970,7 +2923,7 @@ BEGIN
     --   2. One resolved StemCrossID receives more than one distinct uploaded id in this batch.
     --   3. Resolved StemCrossID already has a different PublishedStemID from a prior census.
     --   4. Uploaded id already belongs to a different StemCrossID elsewhere in the plot.
-    CREATE TEMPORARY TABLE published_stemid_batch_id_conflicts AS
+    CREATE TEMPORARY TABLE published_stemid_batch_id_conflicts (INDEX idx_published_stemid_batch_id_conflicts (PublishedStemID)) AS
     SELECT rbr.PublishedStemID
     FROM resolved_batch_rows rbr
     INNER JOIN stems s_current
@@ -2979,9 +2932,6 @@ BEGIN
       AND s_current.StemCrossID IS NOT NULL
     GROUP BY rbr.PublishedStemID
     HAVING COUNT(DISTINCT s_current.StemCrossID) > 1;
-
-    CREATE INDEX idx_published_stemid_batch_id_conflicts
-        ON published_stemid_batch_id_conflicts (PublishedStemID);
 
     INSERT IGNORE INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
     SELECT rbr.id,
@@ -2993,7 +2943,7 @@ BEGIN
         ON conflicted_ids.PublishedStemID = rbr.PublishedStemID
     WHERE rbr.PublishedStemID IS NOT NULL;
 
-    CREATE TEMPORARY TABLE published_stemid_batch_group_conflicts AS
+    CREATE TEMPORARY TABLE published_stemid_batch_group_conflicts (INDEX idx_published_stemid_batch_group_conflicts (StemCrossID)) AS
     SELECT s_current.StemCrossID
     FROM resolved_batch_rows rbr
     INNER JOIN stems s_current
@@ -3002,9 +2952,6 @@ BEGIN
       AND s_current.StemCrossID IS NOT NULL
     GROUP BY s_current.StemCrossID
     HAVING COUNT(DISTINCT rbr.PublishedStemID) > 1;
-
-    CREATE INDEX idx_published_stemid_batch_group_conflicts
-        ON published_stemid_batch_group_conflicts (StemCrossID);
 
     INSERT IGNORE INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
     SELECT rbr.id,
@@ -3204,23 +3151,21 @@ BEGIN
 
     DROP TEMPORARY TABLE IF EXISTS existing_tag_stemtag_collision_failures;
 
-    CREATE TEMPORARY TABLE core_insert_candidates AS
+    CREATE TEMPORARY TABLE core_insert_candidates (
+        INDEX idx_core_insert_candidates_id (id),
+        INDEX idx_core_insert_candidates_stem (StemGUID)
+    ) AS
     SELECT rbr.*
     FROM resolved_batch_rows rbr
     LEFT JOIN core_insert_failures cif
         ON cif.SourceRowIndex = rbr.id
     WHERE cif.SourceRowIndex IS NULL;
 
-    CREATE INDEX idx_core_insert_candidates_id ON core_insert_candidates (id);
-    CREATE INDEX idx_core_insert_candidates_stem ON core_insert_candidates (StemGUID);
-
-    CREATE TEMPORARY TABLE source_row_insert_conflicts AS
+    CREATE TEMPORARY TABLE source_row_insert_conflicts (INDEX idx_source_row_insert_conflicts_id (SourceRowIndex)) AS
     SELECT cic.id AS SourceRowIndex
     FROM core_insert_candidates cic
     GROUP BY cic.id
     HAVING COUNT(*) > 1;
-
-    CREATE INDEX idx_source_row_insert_conflicts_id ON source_row_insert_conflicts (SourceRowIndex);
 
     INSERT IGNORE INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
     SELECT src.SourceRowIndex,
@@ -3230,15 +3175,15 @@ BEGIN
 
     DROP TEMPORARY TABLE core_insert_candidates;
 
-    CREATE TEMPORARY TABLE core_insert_candidates AS
+    CREATE TEMPORARY TABLE core_insert_candidates (
+        INDEX idx_core_insert_candidates_id (id),
+        INDEX idx_core_insert_candidates_stem (StemGUID)
+    ) AS
     SELECT rbr.*
     FROM resolved_batch_rows rbr
     LEFT JOIN core_insert_failures cif
         ON cif.SourceRowIndex = rbr.id
     WHERE cif.SourceRowIndex IS NULL;
-
-    CREATE INDEX idx_core_insert_candidates_id ON core_insert_candidates (id);
-    CREATE INDEX idx_core_insert_candidates_stem ON core_insert_candidates (StemGUID);
 
     INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
                                   Description, UserDefinedFields, UploadFileID, UploadBatchID,
@@ -3268,7 +3213,10 @@ BEGIN
 
     SET vProcessedCount = ROW_COUNT();
 
-    CREATE TEMPORARY TABLE resolved_coremeasurements AS
+    CREATE TEMPORARY TABLE resolved_coremeasurements (
+        INDEX idx_resolved_coremeasurements_id (id),
+        INDEX idx_resolved_coremeasurements_tree (TreeTag, SpeciesID)
+    ) AS
     SELECT cic.id,
            cic.TreeTag,
            cic.SpeciesID,
@@ -3282,13 +3230,11 @@ BEGIN
         AND cm.UploadBatchID = vBatchID
         AND cm.StemGUID IS NOT NULL;
 
-    CREATE INDEX idx_resolved_coremeasurements_id ON resolved_coremeasurements (id);
-    CREATE INDEX idx_resolved_coremeasurements_tree ON resolved_coremeasurements (TreeTag, SpeciesID);
-
     CREATE TEMPORARY TABLE orphaned_rows
     (
         id            BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-        FailureReason VARCHAR(255)    NOT NULL
+        FailureReason VARCHAR(255)    NOT NULL,
+        INDEX idx_orphaned_rows_id (id)
     );
 
     INSERT INTO orphaned_rows (id, FailureReason)
@@ -3297,8 +3243,6 @@ BEGIN
     FROM core_insert_candidates cic
     LEFT JOIN resolved_coremeasurements rcm ON rcm.id = cic.id
     WHERE rcm.CoreMeasurementID IS NULL;
-
-    CREATE INDEX idx_orphaned_rows_id ON orphaned_rows (id);
 
     INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
     SELECT cif.SourceRowIndex, cif.ErrorCode, cif.FailureReason
