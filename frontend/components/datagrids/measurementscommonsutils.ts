@@ -237,6 +237,12 @@ export interface MeasurementEditRevertNotification {
   severity: 'success' | 'warning' | 'error';
 }
 
+export interface EditRevertEffects {
+  refreshAfterRevert: () => Promise<void>;
+  notify: (notification: MeasurementEditRevertNotification) => void;
+  logError: (message: string, error: Error) => void;
+}
+
 export interface MeasurementEditRevertEffects {
   invalidateQueries: () => Promise<void>;
   refreshPaginated: () => Promise<void>;
@@ -250,9 +256,9 @@ export interface MeasurementEditRevertEffects {
 export const EDIT_REVERTED_SNACKBAR_MESSAGE = 'Edit reverted';
 export const UNDO_FAILED_SNACKBAR_MESSAGE = (message: string) => `Undo failed: ${message}`;
 export const EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE = 'Edit reverted, but the view could not be refreshed. Reload the page to see current data.';
-const EDIT_REVERT_REFRESH_FAILURE_LOG_MESSAGE = 'revertMeasurementEdit: refreshing the view after a successful revert failed';
+const EDIT_REVERT_REFRESH_FAILURE_LOG_MESSAGE = 'revertEdit: refreshing the view after a successful revert failed';
 
-export async function revertMeasurementEdit(scope: EditRevertRequest, effects: MeasurementEditRevertEffects): Promise<UndoRevertOutcome> {
+export async function revertEditAndRefresh(scope: EditRevertRequest, effects: EditRevertEffects): Promise<UndoRevertOutcome> {
   const outcome = await requestEditRevert(scope);
 
   if (outcome.status === 'confirmation-required') {
@@ -273,15 +279,7 @@ export async function revertMeasurementEdit(scope: EditRevertRequest, effects: M
   }
 
   try {
-    await effects.invalidateQueries();
-    const refreshTasks: Promise<void>[] = [effects.refreshPaginated(), effects.refreshCounts()];
-    if (effects.refreshInfinite) refreshTasks.push(effects.refreshInfinite());
-    // allSettled, not all: waiting for every task guarantees the notify()
-    // below always runs last, even if a sibling task's own internal success
-    // notification is still pending when another task rejects.
-    const settled = await Promise.allSettled(refreshTasks);
-    const firstRejection = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-    if (firstRejection) throw firstRejection.reason;
+    await effects.refreshAfterRevert();
   } catch (error) {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     effects.logError(EDIT_REVERT_REFRESH_FAILURE_LOG_MESSAGE, errorObj);
@@ -293,4 +291,24 @@ export async function revertMeasurementEdit(scope: EditRevertRequest, effects: M
 
   effects.notify({ message: EDIT_REVERTED_SNACKBAR_MESSAGE, severity: 'success' });
   return { status: 'reverted' };
+}
+
+async function refreshMeasurementGridAfterRevert(effects: MeasurementEditRevertEffects): Promise<void> {
+  await effects.invalidateQueries();
+  const refreshTasks: Promise<void>[] = [effects.refreshPaginated(), effects.refreshCounts()];
+  if (effects.refreshInfinite) refreshTasks.push(effects.refreshInfinite());
+  // allSettled, not all: waiting for every task guarantees the notify()
+  // afterwards always runs last, even if a sibling task's own internal success
+  // notification is still pending when another task rejects.
+  const settled = await Promise.allSettled(refreshTasks);
+  const firstRejection = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (firstRejection) throw firstRejection.reason;
+}
+
+export function revertMeasurementEdit(scope: EditRevertRequest, effects: MeasurementEditRevertEffects): Promise<UndoRevertOutcome> {
+  return revertEditAndRefresh(scope, {
+    refreshAfterRevert: () => refreshMeasurementGridAfterRevert(effects),
+    notify: effects.notify,
+    logError: effects.logError
+  });
 }

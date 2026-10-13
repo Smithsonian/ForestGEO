@@ -63,8 +63,7 @@ import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import { isMuiRowEditCancelled } from '@/lib/muirowedit';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast, { UndoRevertOutcome } from '@/components/editplan/undotoast';
-import { requestEditRevert } from '@/lib/editplan/requestrevert';
-import { buildEditableFieldsDiffWithMetaForSurface, EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE } from '@/components/datagrids/measurementscommonsutils';
+import { buildEditableFieldsDiffWithMetaForSurface, revertEditAndRefresh } from '@/components/datagrids/measurementscommonsutils';
 import { isFieldEditableByRole } from '@/config/editplan/fieldpolicy';
 import ailogger from '@/ailogger';
 
@@ -1654,40 +1653,25 @@ export default function ErrorsExplorer() {
               return { status: 'failed' };
             }
 
-            const outcome = await requestEditRevert({
-              schema: scope.schema,
-              plotID: scope.plotID,
-              censusID: scope.censusID,
-              editOperationID: undoToastOperationID,
-              confirmedPlanHash
-            });
-
-            if (outcome.status === 'confirmation-required') return outcome;
-
-            if (outcome.status === 'failed') {
-              setErrorMessage(`Undo failed: ${outcome.message}`);
-              return { status: 'failed' };
-            }
-
-            if (outcome.status === 'unconfirmed') {
-              // Unknown whether the write committed; never claim success.
-              setErrorMessage(outcome.message);
-              return { status: 'unconfirmed' };
-            }
-
-            try {
-              await Promise.all([refreshMeasurementsSummaryScope(scope), refreshViewFullTableScope(scope)]);
-              await refreshAffectedReads(scope, { strict: true });
-            } catch (error) {
-              // Revert already committed; a refresh failure must not be
-              // reported as a failed undo, or it invites a double-revert.
-              const errorObj = error instanceof Error ? error : new Error(String(error));
-              ailogger.error('ErrorsExplorer: refreshing the explorer after a successful undo failed', errorObj);
-              setErrorMessage(EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE);
-              return { status: 'reverted' };
-            }
-
-            return { status: 'reverted' };
+            return revertEditAndRefresh(
+              {
+                schema: scope.schema,
+                plotID: scope.plotID,
+                censusID: scope.censusID,
+                editOperationID: undoToastOperationID,
+                confirmedPlanHash
+              },
+              {
+                refreshAfterRevert: async () => {
+                  await Promise.all([refreshMeasurementsSummaryScope(scope), refreshViewFullTableScope(scope)]);
+                  await refreshAffectedReads(scope, { strict: true });
+                },
+                notify: ({ message, severity }) => {
+                  if (severity !== 'success') setErrorMessage(message);
+                },
+                logError: (message, error) => ailogger.error(`ErrorsExplorer: ${message}`, error)
+              }
+            );
           }}
           onDismiss={() => setUndoToastOperationID(null)}
         />
