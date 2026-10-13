@@ -21,6 +21,7 @@ import {
   Effect,
   EditPlan,
   RowPlan,
+  SPECIES_CORRECTION_GROUP_VERSION,
   SpeciesCorrectionGroup,
   SpeciesCorrectionGroupMember,
   SpeciesCorrectionMeasurementPrecondition,
@@ -292,7 +293,7 @@ export function buildSpeciesCorrectionGroups(rows: BulkSpeciesGroupRow[]): Speci
     const affectedStemGUIDs = Array.from(new Set(canonicalCorrection.stems.map(stem => stem.stemGUID))).sort((a, b) => a - b);
 
     groups.push({
-      version: 1,
+      version: SPECIES_CORRECTION_GROUP_VERSION,
       treeID: canonicalCorrection.targetTreeID,
       censusID: canonicalCorrection.censusID,
       correction: canonicalCorrection,

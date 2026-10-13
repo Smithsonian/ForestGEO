@@ -36,6 +36,7 @@ import type { EditOperationStateRow } from '@/config/editoperations';
 import { refreshIngestionErrorsForMeasurement, VALIDATION_ERROR_SOURCE, INGESTION_STAGE_ERROR_CODES } from '@/config/measurementerrors';
 import { planSpeciesCorrection, SpeciesCorrectionPlanResult } from './tree-species-correction';
 import { FieldChange, SpeciesCorrectionSummary, SpeciesCorrectionStemPrecondition } from './types';
+import { TARGET_TEXT_COLLATION } from '@/lib/db/schema-contract';
 import { fieldChanged, fieldChangedAtStoredPrecision } from './storedfieldcomparison';
 
 export const SPECIES_CORRECTION_METADATA_TABLE = 'species_correction_metadata';
@@ -662,7 +663,7 @@ async function resolveSupportedValidationOccurrences(cm: ConnectionManager, sche
       `UPDATE ??.measurement_error_log mel
        JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
        JOIN ??.sitespecificvalidations ssv
-         ON me.ErrorCode = CAST(ssv.ValidationID AS CHAR) COLLATE utf8mb4_0900_ai_ci
+         ON me.ErrorCode = CAST(ssv.ValidationID AS CHAR) COLLATE ${TARGET_TEXT_COLLATION}
        SET mel.IsResolved = TRUE, mel.ResolvedAt = NOW()
        WHERE mel.MeasurementID IN (${placeholders})
          AND me.ErrorSource = ?

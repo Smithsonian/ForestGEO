@@ -19,7 +19,7 @@ import {
 import { SPECIES_CORRECTION_STORED_COLUMN_COMPARISON_FIELD, type SpeciesCorrectionDomainDiff } from './tree-species-correction-writer';
 import type { UserAuthRoles } from '@/config/macros';
 import type { EditPlan, Effect, FieldChange, Severity } from './types';
-import { SEVERITY_RANK } from './types';
+import { SEVERITY_RANK, SPECIES_CORRECTION_UNDO_RESTORATION_VERSION } from './types';
 import { hashPlan } from './planhash';
 import { isFieldEditableByRole } from './fieldpolicy';
 import { RoleForbiddenFieldError } from './analyzer';
@@ -675,7 +675,7 @@ export function buildSpeciesCorrectionUndoPlan(preflight: SpeciesCorrectionUndoP
     generatedAt: new Date().toISOString(),
     speciesCorrection: reverseCorrection,
     speciesCorrectionUndo: {
-      version: 1,
+      version: SPECIES_CORRECTION_UNDO_RESTORATION_VERSION,
       targetTreeID: metadata.after.targetTreeID,
       restoredSpeciesID: metadata.before.speciesID,
       restoredSpeciesCode: metadata.before.speciesCode,

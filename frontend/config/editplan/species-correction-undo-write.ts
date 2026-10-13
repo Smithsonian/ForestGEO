@@ -7,7 +7,7 @@ import { handleUpsert } from '@/config/utils';
 import { CMAttributesResult } from '@/lib/db/definitions/core';
 import type { EditOperationStateRow } from '@/config/editoperations';
 import { refreshMeasurementViewsForCoreMeasurements } from '@/lib/measurementviewrefresh';
-import type { SpeciesCorrectionUndoRestoration } from './types';
+import { SPECIES_CORRECTION_UNDO_RESTORATION_VERSION, type SpeciesCorrectionUndoRestoration } from './types';
 import {
   refreshCorrectionErrorsAndValidationPending,
   type CorrectionErrorRefreshResult,
@@ -377,7 +377,7 @@ export async function writeSpeciesCorrectionUndo(
   await refreshMeasurementViewsForCoreMeasurements(cm, schema, Array.from(affectedCoreMeasurementIDs), transactionID);
 
   const restoration: SpeciesCorrectionUndoRestoration = {
-    version: 1,
+    version: SPECIES_CORRECTION_UNDO_RESTORATION_VERSION,
     targetTreeID,
     restoredSpeciesID,
     restoredSpeciesCode,

@@ -8,6 +8,10 @@ export const SEVERITY_RANK: Record<Severity, number> = {
   destructive: 2
 };
 
+export const SPECIES_CORRECTION_SUMMARY_VERSION = 1 as const;
+export const SPECIES_CORRECTION_GROUP_VERSION = 1 as const;
+export const SPECIES_CORRECTION_UNDO_RESTORATION_VERSION = 1 as const;
+
 export type EffectCategory = 'field' | 'cross-row' | 'identity' | 'destructive' | 'validation';
 
 export interface Effect {
@@ -137,7 +141,7 @@ export interface SpeciesCorrectionMeasurementPrecondition {
  * the user previewed without re-deriving it.
  */
 export interface SpeciesCorrectionSummary {
-  version: 1;
+  version: typeof SPECIES_CORRECTION_SUMMARY_VERSION;
   targetTreeID: number;
   treeTag: string;
   plotID: number;
@@ -165,7 +169,7 @@ export interface SpeciesCorrectionGroupMember {
 }
 
 export interface SpeciesCorrectionGroup {
-  version: 1;
+  version: typeof SPECIES_CORRECTION_GROUP_VERSION;
   treeID: number;
   censusID: number;
   /** One canonical correction per (treeID, censusID); consistent duplicate requests collapse into this. */
@@ -211,7 +215,7 @@ export interface AppliedSpeciesCorrectionBatchSummary {
  * `Effect.detail`, which stays human-readable UI copy.
  */
 export interface SpeciesCorrectionUndoRestoration {
-  version: 1;
+  version: typeof SPECIES_CORRECTION_UNDO_RESTORATION_VERSION;
   targetTreeID: number;
   /** SpeciesID/canonical code the undo restores (the pre-correction taxon). */
   restoredSpeciesID: number;

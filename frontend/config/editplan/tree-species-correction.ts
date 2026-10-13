@@ -24,7 +24,12 @@
 // a mismatch is reported as `scope_inconsistent`, never filtered out.
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
-import { SpeciesCorrectionMeasurementPrecondition, SpeciesCorrectionStemPrecondition, SpeciesCorrectionSummary } from './types';
+import {
+  SPECIES_CORRECTION_SUMMARY_VERSION,
+  SpeciesCorrectionMeasurementPrecondition,
+  SpeciesCorrectionStemPrecondition,
+  SpeciesCorrectionSummary
+} from './types';
 
 export interface PlanSpeciesCorrectionInput {
   /** The TreeID currently linked to the edited measurement (ctx.oldRow.TreeID). */
@@ -433,7 +438,7 @@ export async function planSpeciesCorrection(
   const inactiveMeasurementCount = measurements.length - activeMeasurementCount;
 
   const correction: SpeciesCorrectionSummary = {
-    version: 1,
+    version: SPECIES_CORRECTION_SUMMARY_VERSION,
     targetTreeID: Number(source.TreeID),
     treeTag,
     plotID: input.plotID,
