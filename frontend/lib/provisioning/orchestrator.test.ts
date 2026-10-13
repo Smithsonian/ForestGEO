@@ -26,6 +26,7 @@ import {
 } from './orchestrator';
 import ailogger from '@/ailogger';
 import type { ProvisioningInput } from './types';
+import { STEPS } from './steps';
 import { testDbServerOptions } from '@/tests/setup/test-db-connection';
 
 const CATALOG_TABLES_FILE = path.join(process.cwd(), 'db/sql/catalog-provisioning-tables.sql');
@@ -115,6 +116,34 @@ async function createManualRunWithRawPayload(
   return result.insertId;
 }
 
+/** Records the step trail a run leaves when it stops at `failedStepKey`: earlier steps completed, later ones pending. */
+async function insertStepsFailingAt(pool: mysql.Pool, runId: number, failedStepKey: string): Promise<void> {
+  const failedIndex = STEPS.findIndex(step => step.key === failedStepKey);
+  if (failedIndex < 0) throw new Error(`Unknown provisioning step key: ${failedStepKey}`);
+  const stepRows = STEPS.map((step, index) => [runId, index, step.key, index < failedIndex ? 'completed' : index === failedIndex ? 'failed' : 'pending']);
+  await pool.query(`INSERT INTO catalog.provisioning_steps (RunID, StepIndex, StepKey, Status) VALUES ?`, [stepRows]);
+}
+
+async function insertCatalogSite(pool: mysql.Pool, siteName: string, schemaName: string): Promise<number> {
+  const [siteResult]: any = await pool.query(
+    `INSERT INTO catalog.sites
+      (SiteName, SchemaName, SQDimX, SQDimY, DefaultUOMDBH, DefaultUOMHOM, DoubleDataEntry)
+     VALUES (?, ?, 5, 5, 'mm', 'm', 0)`,
+    [siteName, schemaName]
+  );
+  return siteResult.insertId;
+}
+
+async function schemaExists(pool: mysql.Pool, schemaName: string): Promise<boolean> {
+  const [schemaRows]: any = await pool.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?`, [schemaName]);
+  return schemaRows.length > 0;
+}
+
+async function catalogSiteCount(pool: mysql.Pool, schemaName: string): Promise<number> {
+  const [siteRows]: any = await pool.query(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ?`, [schemaName]);
+  return siteRows.length;
+}
+
 async function applyCatalogDdl(pool: mysql.Pool): Promise<void> {
   const ddl = readFileSync(CATALOG_TABLES_FILE, 'utf-8');
   for (const stmt of ddl
@@ -190,6 +219,29 @@ const STORED_INPUT_PLOT = {
 const STORED_INPUT_ROW = { quadratName: 'A01', startX: 20, startY: 20, dimensionX: 20, dimensionY: 20 };
 
 describe('parseStoredInput', () => {
+  it('upgrades a legacy free-text site unit spelling so runs from the free-text SiteForm stay retryable', () => {
+    const stored = {
+      site: { ...STORED_INPUT_SITE, defaultUOMDBH: 'Millimeters', defaultUOMHOM: 'meters' },
+      plot: STORED_INPUT_PLOT,
+      quadrats: { mode: 'csv', rows: [STORED_INPUT_ROW] }
+    };
+
+    const result = parseStoredInput(stored);
+
+    expect(result.site.defaultUOMDBH).toBe('mm');
+    expect(result.site.defaultUOMHOM).toBe('m');
+  });
+
+  it("refuses to coerce an unrecognised site unit such as a HOM height ('1.3') into a unit", () => {
+    const stored = {
+      site: { ...STORED_INPUT_SITE, defaultUOMHOM: '1.3' },
+      plot: STORED_INPUT_PLOT,
+      quadrats: { mode: 'csv', rows: [STORED_INPUT_ROW] }
+    };
+
+    expect(() => parseStoredInput(stored)).toThrow(/defaultUOMHOM/);
+  });
+
   it('loads a CSV payload with its rows untouched', () => {
     const stored = {
       site: STORED_INPUT_SITE,
@@ -477,32 +529,97 @@ describe('orchestrator', () => {
     RUN_TIMEOUT_MS + 5000
   );
 
-  it(
-    'abort: drops schema and deletes catalog row for failed runs',
-    async () => {
-      const schemaName = `forestgeo_orch_abort_${process.pid}`;
-      createdSchemas.push(schemaName);
+  it('abort: drops the schema and catalog row that a run created before it failed', async () => {
+    // The shape Sinharaja run #8 left on 2026-09-18: schema created and catalog row inserted,
+    // then insert_plot failed on a >255-character plot description.
+    const schemaName = `forestgeo_orch_abort_${process.pid}`;
+    createdSchemas.push(schemaName);
+    const runId = await createManualRunWithRawPayload(pool, schemaName, 'failed', makeInput(schemaName));
+    await insertStepsFailingAt(pool, runId, 'insert_plot');
+    await pool.query(`CREATE DATABASE IF NOT EXISTS \`${schemaName}\``);
+    await insertCatalogSite(pool, 'AbortOwnLeftovers', schemaName);
 
-      // Create the schema manually so validate_inputs fails before catalog row insertion.
+    await abortRun(runId, pool, 'test@abort');
+
+    const result = await getRunWithSteps(runId, pool);
+    expect(result!.run.status, `run ${runId} should be aborted`).toBe('aborted');
+    expect(await schemaExists(pool, schemaName), `schema ${schemaName} was created by run ${runId} and should be dropped`).toBe(false);
+    expect(await catalogSiteCount(pool, schemaName), `catalog.sites rows for ${schemaName} were inserted by run ${runId} and should be deleted`).toBe(0);
+  });
+
+  it(
+    'abort: a run that failed creation cannot delete a later successfully provisioned site',
+    async () => {
+      const schemaName = `forestgeo_orch_abort_successor_${process.pid}`;
+      createdSchemas.push(schemaName);
+      const createStep = STEPS.find(step => step.key === 'create_schema')!;
+      const createSpy = vi.spyOn(createStep, 'run').mockRejectedValueOnce(new Error('Temporary CREATE DATABASE failure'));
+      let failedRunId: number;
+      try {
+        const started = await startRun({ input: makeInput(schemaName), startedBy: 'test@old-run', catalogPool: pool });
+        failedRunId = started.runId;
+        expect(await waitForTerminal(failedRunId, pool)).toBe('failed');
+      } finally {
+        createSpy.mockRestore();
+      }
+      const failed = await getRunWithSteps(failedRunId, pool);
+      expect(failed!.steps.find(step => step.stepKey === 'validate_inputs')?.status).toBe('completed');
+      expect(failed!.steps.find(step => step.stepKey === 'create_schema')?.status).toBe('failed');
+      expect(await schemaExists(pool, schemaName)).toBe(false);
+
+      const { runId: successorId } = await startRun({ input: makeInput(schemaName), startedBy: 'test@new-run', catalogPool: pool });
+      expect(await waitForTerminal(successorId, pool)).toBe('completed');
+      const [before]: any = await pool.query(`SELECT PlotID, PlotName FROM \`${schemaName}\`.plots`);
+      expect(before).toHaveLength(1);
+
+      await abortRun(failedRunId, pool, 'test@abort-old-run');
+
+      expect((await getRunWithSteps(failedRunId, pool))!.run.status).toBe('aborted');
+      expect((await getRunWithSteps(successorId, pool))!.run.status).toBe('completed');
+      expect(await schemaExists(pool, schemaName)).toBe(true);
+      expect(await catalogSiteCount(pool, schemaName)).toBe(1);
+      const [after] = await pool.query(`SELECT PlotID, PlotName FROM \`${schemaName}\`.plots`);
+      expect(after).toEqual(before);
+    },
+    RUN_TIMEOUT_MS * 2 + 5000
+  );
+
+  it(
+    'abort: leaves a live site untouched when the run failed validate_inputs because the schema was taken',
+    async () => {
+      const schemaName = `forestgeo_orch_abort_live_${process.pid}`;
+      createdSchemas.push(schemaName);
       await pool.query(`CREATE DATABASE IF NOT EXISTS \`${schemaName}\``);
+      await pool.query(`CREATE TABLE \`${schemaName}\`.live_site_marker (id INT PRIMARY KEY)`);
+      const liveSiteId = await insertCatalogSite(pool, 'LiveSite', schemaName);
+
       const { runId } = await startRun({
         input: makeInput(schemaName),
-        startedBy: 'test@abort',
+        startedBy: 'test@abort-live',
         catalogPool: pool
       });
       const finalStatus = await waitForTerminal(runId, pool);
-      expect(finalStatus).toBe('failed');
+      const afterRun = await getRunWithSteps(runId, pool);
+      expect(finalStatus, `run ${runId} steps: ${JSON.stringify(afterRun!.steps.map(s => [s.stepKey, s.status, s.errorMessage]))}`).toBe('failed');
+      expect(afterRun!.steps[0].stepKey).toBe('validate_inputs');
+      expect(afterRun!.steps[0].status).toBe('failed');
+      expect(afterRun!.steps[0].errorMessage).toMatch(/already references schema/);
 
-      await abortRun(runId, pool, 'test@abort');
+      await abortRun(runId, pool, 'test@abort-live');
 
-      const result = await getRunWithSteps(runId, pool);
-      expect(result!.run.status).toBe('aborted');
-
-      const [schemaRows]: any = await pool.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?`, [schemaName]);
-      expect(schemaRows).toHaveLength(0);
-
+      const afterAbort = await getRunWithSteps(runId, pool);
+      expect(afterAbort!.run.status, `run ${runId} should still close as aborted`).toBe('aborted');
+      expect(await schemaExists(pool, schemaName), `live schema ${schemaName} must survive aborting a run that never created it`).toBe(true);
+      const [markerRows]: any = await pool.query(
+        `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'live_site_marker'`,
+        [schemaName]
+      );
+      expect(markerRows, `live schema ${schemaName} must keep its tables`).toHaveLength(1);
       const [siteRows]: any = await pool.query(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ?`, [schemaName]);
-      expect(siteRows).toHaveLength(0);
+      expect(
+        siteRows.map((row: any) => row.SiteID),
+        `live catalog.sites row ${liveSiteId} must survive`
+      ).toEqual([liveSiteId]);
     },
     RUN_TIMEOUT_MS + 5000
   );
@@ -753,6 +870,7 @@ describe('orchestrator', () => {
       const schemaName = `forestgeo_orch_malformed_abort_${process.pid}`;
       await pool.query(`CREATE DATABASE IF NOT EXISTS \`${schemaName}\``);
       const runId = await createManualRunWithRawPayload(pool, schemaName, 'failed', makeMalformedRunPayload(schemaName));
+      await insertStepsFailingAt(pool, runId, 'insert_plot');
 
       await abortRun(runId, pool, 'test@malformed-abort');
 
