@@ -21,7 +21,12 @@ import {
   BulkSpeciesCorrectionUnresolvedMeasurementError,
   prepareBulkSpeciesCorrections
 } from '@/config/editplan/bulk-species-correction-writer';
-import { SpeciesCorrectionTransactionMismatchError, SpeciesCorrectionWriteConflictError } from '@/config/editplan/tree-species-correction-writer';
+import {
+  SPECIES_CORRECTION_CONFLICT_CODE,
+  SPECIES_CORRECTION_CONFLICT_MESSAGE,
+  SpeciesCorrectionTransactionMismatchError,
+  SpeciesCorrectionWriteConflictError
+} from '@/config/editplan/tree-species-correction-writer';
 import type { AppliedSpeciesCorrectionBatchSummary } from '@/config/editplan/types';
 import { MeasurementResolutionError } from '@/config/editplan/writers/resolvers-mutating';
 import { SpeciesCorrectionGroupMemberContextError } from '@/config/editplan/writers/measurementssummary';
@@ -46,15 +51,8 @@ export const runtime = 'nodejs';
 
 const REVISION_UPLOAD_FILE_ID = 'revision-upload';
 
-// Mirrors `frontend/app/api/edits/apply/route.ts:27-29`, the canonical copy
-// for the single-edit apply path. Duplicated verbatim (not imported) because
-// that route's constants are not exported — both endpoints must give users
-// identical guidance for the same species-correction failure classes, and
-// none of these messages may carry SQL fragments, locked-precondition data,
+// None of these messages may carry SQL fragments, locked-precondition data,
 // internal helper prose, or transaction IDs back to the client.
-const SPECIES_CORRECTION_CONFLICT_CODE = 'species-correction-conflict';
-const SPECIES_CORRECTION_CONFLICT_MESSAGE =
-  "This tree's species state changed since this edit was previewed. Refresh and preview the edit again before applying.";
 const SPECIES_CORRECTION_MEMBER_UNRESOLVED_CODE = 'species-correction-member-unresolved';
 const SPECIES_CORRECTION_MEMBER_UNRESOLVED_MESSAGE =
   'A measurement in this revision is no longer resolvable for a species correction. Refresh the upload and review the matches again before applying.';

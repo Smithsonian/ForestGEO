@@ -61,6 +61,12 @@ export type SpeciesCorrectionWriteConflictReason =
   | { kind: 'drift'; message: string }
   | { kind: 'unique-constraint'; message: string };
 
+// The conflict reason carries SQL/plan internals in its `message`; API routes
+// return only this fixed code and message to the client.
+export const SPECIES_CORRECTION_CONFLICT_CODE = 'species-correction-conflict';
+export const SPECIES_CORRECTION_CONFLICT_MESSAGE =
+  "This tree's species state changed since this edit was previewed. Refresh and preview the edit again before applying.";
+
 export class SpeciesCorrectionWriteConflictError extends Error {
   constructor(public readonly reason: SpeciesCorrectionWriteConflictReason) {
     super(SpeciesCorrectionWriteConflictError.describe(reason));

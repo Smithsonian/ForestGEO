@@ -200,7 +200,8 @@ vi.mock('@/config/editplan/fieldpolicy', () => ({
   InvalidFieldValueError: mocks.MockInvalidFieldValueError
 }));
 
-vi.mock('@/config/editplan/tree-species-correction-writer', () => ({
+vi.mock('@/config/editplan/tree-species-correction-writer', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/config/editplan/tree-species-correction-writer')>()),
   SpeciesCorrectionWriteConflictError: mocks.MockSpeciesCorrectionWriteConflictError
 }));
 
