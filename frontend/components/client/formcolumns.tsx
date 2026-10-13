@@ -6,6 +6,7 @@ import { Box, Input, Tooltip, Typography } from '@mui/joy';
 import React, { useEffect, useRef, useState } from 'react';
 import useEnhancedEffect from '@mui/utils/useEnhancedEffect';
 import { AttributeStatusOptions } from '@/lib/db/definitions/core';
+import { renderAttributeStatusCell } from '@/components/client/attributestatuscell';
 import { styled } from '@mui/joy/styles';
 import { CheckCircleOutlined } from '@mui/icons-material';
 import { FormType, TableHeadersByFormType } from '@/config/macros/formdetails';
@@ -377,7 +378,8 @@ export const AttributesFormGridColumns: GridColDef[] = standardizeGridColumns([
     headerName: 'Status',
     // renderHeader: () => renderCustomHeader(FormType.attributes, 'status'),
     flex: 1,
-    editable: true
+    editable: true,
+    renderCell: renderAttributeStatusCell
     // This is temporarily being suspended -- it's a nice to have, not a need to have
     // renderEditCell: params => <EditStatusCell {...params} />
   }

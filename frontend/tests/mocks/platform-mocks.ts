@@ -62,7 +62,7 @@ vi.mock('next/headers', () => {
  */
 
 const emptyModule = {};
-const coreModule = { AttributeStatusOptions: ['alive', 'dead', 'stem dead', 'broken below', 'omitted', 'missing'] };
+const coreModule = { AttributeStatusOptions: ['alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing'] };
 
 vi.mock('@/lib/db/definitions/taxonomies', () => emptyModule);
 vi.mock('@/lib/db/definitions/zones', () => emptyModule);
