@@ -47,17 +47,19 @@ class SimulatedSession {
     return this;
   }
 
-  readonly executor: BulkIngestionExecutor & { query: ReturnType<typeof vi.fn> } = {
-    query: vi.fn(async (sql: string) => {
-      this.statements.push(sql);
-      const override = this.overrides.get(sql);
-      if (override) return override(this);
-      if (sql === CALLER_OWNS_TRANSACTION_SQL) this.flag = CALLER_FLAG_SET;
-      else if (sql === CLEAR_CALLER_TRANSACTION_SQL) this.flag = null;
-      else if (sql === EXPECTED_CALL_SQL) return this.callResult;
-      else throw new Error(`unexpected statement on the simulated session: ${sql}`);
-      return [];
-    }),
+  readonly query = vi.fn(async (sql: string, _params?: unknown[]): Promise<unknown> => {
+    this.statements.push(sql);
+    const override = this.overrides.get(sql);
+    if (override) return override(this);
+    if (sql === CALLER_OWNS_TRANSACTION_SQL) this.flag = CALLER_FLAG_SET;
+    else if (sql === CLEAR_CALLER_TRANSACTION_SQL) this.flag = null;
+    else if (sql === EXPECTED_CALL_SQL) return this.callResult;
+    else throw new Error(`unexpected statement on the simulated session: ${sql}`);
+    return [];
+  });
+
+  readonly executor: BulkIngestionExecutor = {
+    query: this.query as BulkIngestionExecutor['query'],
     discard: (reason: string) => {
       this.discardReasons.push(reason);
     }
@@ -102,7 +104,7 @@ describe('callBulkIngestionInCallerTransaction', () => {
 
       expect(result, 'the raw CALL result must be returned unchanged').toBe(callResult);
       expect(session.statements).toEqual([CALLER_OWNS_TRANSACTION_SQL, EXPECTED_CALL_SQL, CLEAR_CALLER_TRANSACTION_SQL]);
-      expect(session.executor.query).toHaveBeenNthCalledWith(2, EXPECTED_CALL_SQL, [FILE_ID, BATCH_ID]);
+      expect(session.query).toHaveBeenNthCalledWith(2, EXPECTED_CALL_SQL, [FILE_ID, BATCH_ID]);
       expect(session.flag, 'the flag must be cleared after the CALL').toBeNull();
       expect(session.discardReasons).toEqual([]);
     });

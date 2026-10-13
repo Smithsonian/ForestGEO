@@ -144,7 +144,7 @@ describe('upload procedure regressions', () => {
   it('degrades duplicate coremeasurement candidates to row-level failures', () => {
     const canonicalSql = readSql('db/sql/storedprocedures.sql');
 
-    expect(canonicalSql).toContain('CREATE TEMPORARY TABLE source_row_insert_conflicts AS');
+    expect(canonicalSql).toContain('CREATE TEMPORARY TABLE source_row_insert_conflicts (INDEX idx_source_row_insert_conflicts_id (SourceRowIndex)) AS');
     expect(canonicalSql).toContain("'Measurement insert skipped: source row resolved to multiple candidate measurements'");
     expect(canonicalSql).toContain(
       'INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields, UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawPlotX, RawPlotY, RawCodes, RawPublishedStemID, RawComments, SourceRowIndex, IsActive)'
