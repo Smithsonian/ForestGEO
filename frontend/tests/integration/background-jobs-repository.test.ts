@@ -94,19 +94,30 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (pool) await pool.end();
+  if (!pool) return;
+  try {
+    await deleteBackgroundJobTestRows();
+  } finally {
+    await pool.end();
+  }
 });
 
 // ---------------------------------------------------------------------------
 // Row cleanup between tests
 // ---------------------------------------------------------------------------
 
-beforeEach(async () => {
-  // Delete in FK-safe order: events → files → jobs.
+// Leftover sites rows sort ahead of "E2E Test Site", so the next
+// census-creation e2e run would pick a site whose schema does not exist.
+async function deleteBackgroundJobTestRows(): Promise<void> {
+  // Delete in FK-safe order: events → files → jobs → sites.
   await pool.query(`DELETE FROM catalog.background_job_events`);
   await pool.query(`DELETE FROM catalog.background_job_files`);
   await pool.query(`DELETE FROM catalog.background_jobs`);
   await pool.query(`DELETE FROM catalog.sites WHERE SchemaName IN (?)`, [[...REGISTERED_TEST_SCHEMAS]]);
+}
+
+beforeEach(async () => {
+  await deleteBackgroundJobTestRows();
   for (const schemaName of REGISTERED_TEST_SCHEMAS) {
     await pool.query(
       `INSERT INTO catalog.sites
