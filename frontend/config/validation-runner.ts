@@ -18,14 +18,8 @@ import type { DBHValidationSkipCounts } from '@/lib/validations/dbh-execution';
 const QUADRAT_MISMATCH_PROCEDURE = 'ValidateQuadratMismatchAcrossCensuses';
 const COORDINATE_DRIFT_PROCEDURE = 'ValidateCoordinateDriftAcrossCensuses';
 
-// Named, finite bound on what a validation-list or run-creation failure can
-// put into the sidebar badge — a reverse-proxy error page or an arbitrary
-// JSON object serialized to text must never land on screen verbatim.
 const MAX_STARTUP_ERROR_MESSAGE_LENGTH = 300;
 
-// Server-side wording for a scope lock that has no trackable validation run
-// to follow (e.g. an in-progress upload holding the plot+census). Used only
-// as a fallback when the server's own conflict response omits a reason.
 const SCOPE_LOCK_CONFLICT_FALLBACK_MESSAGE = 'A measurement operation is already in progress for this plot/census';
 
 function looksLikeHtmlDocument(value: string): boolean {
@@ -49,6 +43,11 @@ export interface ValidationRunParams {
   schema: string;
   plotID: number;
   censusID: number;
+}
+
+export interface ValidationRunOptions {
+  /** Fail the run instead of continuing in-memory when no run record can be created. */
+  requirePersistedRun?: boolean;
 }
 
 /** A passed task may carry a notice that is recorded with the run's messages without failing it. */
@@ -215,7 +214,7 @@ function buildValidationTasks(validationMessages: ValidationMessages, schema: st
   return tasks;
 }
 
-async function executeRun(params: ValidationRunParams, abortController: AbortController): Promise<void> {
+async function executeRun(params: ValidationRunParams, options: ValidationRunOptions, abortController: AbortController): Promise<void> {
   const { schema, plotID, censusID } = params;
   const signal = abortController.signal;
   const store = getStore();
@@ -224,12 +223,7 @@ async function executeRun(params: ValidationRunParams, abortController: AbortCon
   ailogger.info('[ValidationRunner] Fetching validation list');
   const listResponse = await fetch(`/api/validations/validationlist?schema=${schema}`, { signal });
   if (!listResponse.ok) {
-    // Throw rather than fall through to the empty-list path below — an HTTP
-    // failure here means "we don't know what validations exist", not "there
-    // are zero validations to run". Letting this propagate to start()'s
-    // catch reuses the existing failed-run status path (completeValidationRun)
-    // instead of a bespoke one, and guarantees no run row is created and no
-    // procedures/finalization execute for a request that never produced data.
+    // An HTTP failure means the validation list is unknown, not empty.
     const body = await readResponsePayload(listResponse);
     throw new Error(normalizeStartupErrorMessage(body?.error, `HTTP ${listResponse.status}`));
   }
@@ -256,20 +250,12 @@ async function executeRun(params: ValidationRunParams, abortController: AbortCon
   if (runPersistence.conflict) {
     if (runPersistence.existingRunID !== null) {
       ailogger.warn('[ValidationRunner] Another run is already executing for this plot+census — following it');
-      // Restore the existing run's progress into Zustand so the badge shows it.
-      // Do NOT call resume() here — it could detect a "running" row with no
-      // active client and call start(), creating a recursive loop.
+      // Not resume(): it would restart a "running" row with no local client, recursing into start().
       store.startValidationRun(runPersistence.existingRunID, 0);
       store.updateValidationProgress({ current: 'Waiting for other run to finish' });
       return;
     }
 
-    // Scope-locked by something other than a trackable validation run (e.g.
-    // an in-progress upload) — there is no run to follow, so this must be a
-    // visible, recoverable failure. Silently returning here would leave
-    // whatever success/progress state the store already had (see the fresh
-    // startValidationRun(null, 0) call in start() for why that state is
-    // "running", not stale — this call turns it into a genuine "failed").
     const conflictMessage = normalizeStartupErrorMessage((createData as Record<string, unknown> | null)?.reason, SCOPE_LOCK_CONFLICT_FALLBACK_MESSAGE);
     ailogger.warn(`[ValidationRunner] Run blocked: ${conflictMessage}`);
     store.completeValidationRun('failed', [conflictMessage]);
@@ -277,15 +263,12 @@ async function executeRun(params: ValidationRunParams, abortController: AbortCon
   }
 
   if (!runPersistence.persistenceEnabled || runPersistence.runID === null) {
-    // Fail closed: a rejected (403/500) or malformed (missing/nonpositive/
-    // non-integer/unsafe runID) run-creation response means there is no
-    // persisted, concurrency-safe record for this run. This is an explicit
-    // conservative policy — continuing into procedures/finalization
-    // in-memory only, as the code used to do, would let a failed
-    // coordination request silently run unprotected work.
     const message = normalizeStartupErrorMessage(runPersistence.reason, `HTTP ${createResponse.status}`);
-    ailogger.error(`[ValidationRunner] Failed to create validation run: ${message}`);
-    throw new Error(message);
+    if (options.requirePersistedRun) {
+      ailogger.error(`[ValidationRunner] Failed to create validation run: ${message}`);
+      throw new Error(message);
+    }
+    ailogger.warn(`[ValidationRunner] Run persistence unavailable, continuing in-memory only: ${message}`);
   }
 
   const runID = runPersistence.runID;
@@ -411,7 +394,7 @@ export const ValidationRunner = {
    * The returned promise resolves when the run finishes (or is aborted), but
    * callers are not expected to await it — fire and forget.
    */
-  start(params: ValidationRunParams): void {
+  start(params: ValidationRunParams, options: ValidationRunOptions = {}): void {
     // Cancel any existing in-flight run
     if (activeAbortController) {
       activeAbortController.abort();
@@ -421,12 +404,10 @@ export const ValidationRunner = {
     activeAbortController = abortController;
     activeParams = params;
 
-    // Synchronously reset to a fresh 'running' state (reusing the existing
-    // reducer) so a stale completed/failed badge from a previous run can
-    // never outlive this call — even if run creation below is rejected.
+    // Reset synchronously so a previous run's completed/failed badge cannot outlive a rejected start.
     getStore().startValidationRun(null, 0);
 
-    executeRun(params, abortController)
+    executeRun(params, options, abortController)
       .catch((err: any) => {
         if (err.name === 'AbortError') {
           ailogger.info('[ValidationRunner] Run aborted');

@@ -115,6 +115,7 @@ function validationState() {
 }
 
 const RUN_PARAMS = { schema: 'test_schema', plotID: 1, censusID: 5 };
+const MANUAL_RERUN_OPTIONS = { requirePersistedRun: true };
 const SPECIES_CODE_VALIDATION = { ValidateSpeciesCode: { id: 11, description: 'Species code check', definition: '' } };
 
 describe('ValidationRunner.start', () => {
@@ -243,7 +244,7 @@ describe('ValidationRunner.start', () => {
     });
   });
 
-  describe('run-creation failures (fail closed — explicit conservative policy)', () => {
+  describe('run-creation failures on a manual rerun (requirePersistedRun: fail closed)', () => {
     it('stops before any procedure call when run creation is rejected (e.g. 403)', async () => {
       fetchMock = buildFetchRouter({
         validationList: () => jsonResponse({ coreValidations: SPECIES_CODE_VALIDATION }),
@@ -251,7 +252,7 @@ describe('ValidationRunner.start', () => {
       });
       vi.stubGlobal('fetch', fetchMock);
 
-      ValidationRunner.start(RUN_PARAMS);
+      ValidationRunner.start(RUN_PARAMS, MANUAL_RERUN_OPTIONS);
       await vi.waitFor(() => expect(ValidationRunner.getActiveParams()).toBeNull());
 
       const state = validationState();
@@ -270,7 +271,7 @@ describe('ValidationRunner.start', () => {
       });
       vi.stubGlobal('fetch', fetchMock);
 
-      ValidationRunner.start(RUN_PARAMS);
+      ValidationRunner.start(RUN_PARAMS, MANUAL_RERUN_OPTIONS);
       await vi.waitFor(() => expect(ValidationRunner.getActiveParams()).toBeNull());
 
       const state = validationState();
@@ -278,6 +279,32 @@ describe('ValidationRunner.start', () => {
       expect(state.errors).toEqual(['Validation run API did not return a runID']);
       expect(state.runID).toBeNull();
       expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('run-creation failures on an upload-triggered run (default: continue in-memory)', () => {
+    it('still runs every procedure and finalizes when run creation is rejected, so freshly ingested rows are not left pending', async () => {
+      fetchMock = buildFetchRouter({
+        validationList: () => jsonResponse({ coreValidations: SPECIES_CODE_VALIDATION }),
+        createRun: () => jsonResponse({ error: 'Internal Server Error' }, { status: 500 }),
+        procedures: { ValidateSpeciesCode: () => ndjsonResponse([{ type: 'result', data: true }]) }
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      ValidationRunner.start(RUN_PARAMS);
+      await vi.waitFor(() => expect(ValidationRunner.getActiveParams()).toBeNull());
+
+      const state = validationState();
+      expect(state.status, `upload validation must complete without a run record; store errors: ${JSON.stringify(state.errors)}`).toBe('completed');
+      expect(state.runID, 'no run record was created, so the in-memory run has no runID').toBeNull();
+      expect(
+        fetchMock.mock.calls.some(([input]) => String(input).includes('/procedures/ValidateSpeciesCode')),
+        'the validation procedure must still execute'
+      ).toBe(true);
+      expect(
+        fetchMock.mock.calls.some(([input]) => String(input) === '/api/validations/updatepassedvalidations'),
+        'finalization must still move passing rows out of pending'
+      ).toBe(true);
     });
   });
 

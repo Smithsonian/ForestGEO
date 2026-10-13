@@ -349,7 +349,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       return;
     }
 
-    startValidation(requestedRun);
+    startValidation(requestedRun, { requirePersistedRun: true });
     setSnackbar({
       children: 'Starting validation run. Track its progress in the validation status badge in the sidebar.',
       severity: 'info'
