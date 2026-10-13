@@ -299,13 +299,13 @@ jobs:
             const { data: created } = await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body, labels: [LABEL, 'automated'] });
             core.warning(`${title} — opened #${created.number}`);
 
-      - name: Deploy validation queries and stored procedures to all schemas
-        env:
-          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
-        run: |
-          cd frontend/
-          npx tsx scripts/deploy-validations-to-all-schemas.ts
-        continue-on-error: false
+      # Validation queries and stored procedures are deliberately NOT deployed from
+      # main. Development and production share one database, and development is
+      # ahead: replaying main's corequeries.sql truncates sitespecificvalidations
+      # and main's storedprocedures.sql reinstalls older DBH procedures, silently
+      # reverting the annual DBH rules and any re-score (PR #473). The next
+      # dev -> main promotion restores a procedures-only deploy in this workflow;
+      # DBH rule text then arrives through a schema migration.
 
       # Views are CREATE OR REPLACE artifacts, not migrations: they are redeployed
       # from tablestructures.sql on every deploy, the same way procedures are. A site
