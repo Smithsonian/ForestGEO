@@ -24,11 +24,6 @@ function normalizeNumericID(value: unknown): number | null {
   return null;
 }
 
-// A runID the caller intends to execute procedures/finalization against
-// must be a genuine, usable database row id — not just "a finite number".
-// Zero, negative, non-integer, or unsafely-large values are rejected here so
-// a malformed /api/validations/run response can never be treated as a valid
-// run to proceed on.
 function normalizePositiveSafeInteger(value: unknown): number | null {
   const normalized = normalizeNumericID(value);
   if (normalized === null) return null;
@@ -45,7 +40,7 @@ export function resolveValidationRunPersistence(responseOK: boolean, payload: un
   if (data.conflict === true) {
     return {
       conflict: true,
-      existingRunID: normalizeNumericID(data.existingRunID),
+      existingRunID: normalizePositiveSafeInteger(data.existingRunID),
       persistenceEnabled: true,
       runID: null
     };

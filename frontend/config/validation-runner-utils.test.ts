@@ -31,6 +31,18 @@ describe('validation-runner-utils', () => {
     });
   });
 
+  it.each([0, -3, 1.5, Number.MAX_SAFE_INTEGER + 1, 'abc', null])(
+    'treats a conflict with malformed existingRunID %s as having no run to follow, instead of following a nonexistent run',
+    existingRunID => {
+      expect(resolveValidationRunPersistence(false, { conflict: true, existingRunID })).toEqual({
+        conflict: true,
+        existingRunID: null,
+        persistenceEnabled: true,
+        runID: null
+      });
+    }
+  );
+
   it('enables persistence when a run id is returned', () => {
     expect(resolveValidationRunPersistence(true, { runID: 17 })).toEqual({
       conflict: false,
