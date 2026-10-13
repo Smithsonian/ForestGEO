@@ -11,6 +11,9 @@ import {
   refreshMeasurementViewsInBatches
 } from '@/lib/validations/scope-transaction';
 
+// Validation only ever finalizes active rows with a resolved stem, so only those may be put back to pending.
+const REVALIDATABLE_ROW_CLAUSE = 'cm.IsActive = TRUE AND cm.StemGUID IS NOT NULL';
+
 export type RecheckMeasurementScope = MeasurementScopeInput & { coreMeasurementID: number };
 
 /**
@@ -44,14 +47,11 @@ function buildResetIsValidatedStep(schema: string, scopeClause: string, scopePar
 }
 
 /**
- * Marks every row in the selected plot+active census pending (IsValidated = NULL)
- * and resolves their unresolved validation occurrences — never deletes them, and
- * never touches ingestion occurrences or the manager-override marker. Returns the
- * number of coremeasurements rows reset (0 for an empty, otherwise-valid census).
- *
- * This does NOT repair parked ingestion failures (coremeasurements rows with
- * StemGUID = NULL): those still need the existing Failed Measurements
- * correction/reingestion flow.
+ * Marks every active, stem-resolved row in the selected plot+active census pending
+ * and resolves their unresolved validation occurrences, leaving ingestion
+ * occurrences and the manager-override marker alone. Parked ingestion failures
+ * (StemGUID = NULL) and inactive rows are skipped: validation never finalizes
+ * them, so resetting them would leave them pending forever.
  */
 export async function resetValidationScope(cm: ConnectionManager, scope: MeasurementScopeInput): Promise<number> {
   assertValidMeasurementScope(scope);
@@ -59,7 +59,7 @@ export async function resetValidationScope(cm: ConnectionManager, scope: Measure
   return cm.withTransaction(async tx => {
     await lockActiveScope(cm, tx, scope);
 
-    const censusScopeClause = 'cm.CensusID = ?';
+    const censusScopeClause = `cm.CensusID = ? AND ${REVALIDATABLE_ROW_CLAUSE}`;
     const targets = await tx.query<Array<{ CoreMeasurementID: number }>>(
       safeFormatQuery(
         scope.schema,
@@ -91,7 +91,7 @@ export async function resetValidationScope(cm: ConnectionManager, scope: Measure
  * unresolved validation error on the row (not a single selected error), and
  * does not run scientific validation synchronously. Rejects with
  * ScopeAccessError if the row is missing, belongs to a different
- * census/plot, or is itself inactive (cm.IsActive = FALSE), before any
+ * census/plot, is inactive, or is a parked ingestion failure, before any
  * mutation.
  */
 export async function recheckMeasurementValidation(cm: ConnectionManager, scope: RecheckMeasurementScope): Promise<number> {
@@ -108,7 +108,7 @@ export async function recheckMeasurementValidation(cm: ConnectionManager, scope:
         scope.schema,
         `SELECT cm.CoreMeasurementID
          FROM ??.coremeasurements cm
-         WHERE cm.CensusID = ? AND cm.CoreMeasurementID = ? AND cm.IsActive = TRUE
+         WHERE cm.CensusID = ? AND cm.CoreMeasurementID = ? AND ${REVALIDATABLE_ROW_CLAUSE}
          FOR UPDATE`
       ),
       [scope.censusID, scope.coreMeasurementID]

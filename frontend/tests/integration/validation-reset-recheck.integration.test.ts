@@ -69,6 +69,15 @@ describe('resetValidationScope / recheckMeasurementValidation transaction bounda
     return coreMeasurementIDs[0];
   }
 
+  async function seedParkedFailure(censusID: number): Promise<number> {
+    const [result] = await connection.query<mysql.ResultSetHeader>(
+      `INSERT INTO coremeasurements (StemGUID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate, IsValidated, IsActive)
+       VALUES (NULL, ?, 100, 1.3, '2025-06-01', FALSE, TRUE)`,
+      [censusID]
+    );
+    return result.insertId;
+  }
+
   async function errorID(source: 'validation' | 'ingestion', code: string, message = `${source} ${code}`): Promise<number> {
     await connection.query('INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage) VALUES (?, ?, ?)', [source, code, message]);
     const [rows] = await connection.query<RowDataPacket[]>('SELECT ErrorID FROM measurement_errors WHERE ErrorSource = ? AND ErrorCode = ?', [source, code]);
@@ -238,6 +247,32 @@ describe('resetValidationScope / recheckMeasurementValidation transaction bounda
       expect(await summaryErrors(row), 'the refreshed summary view still surfaces the still-unresolved ingestion error').toContain(
         'Ingestion failure message for reset mixed row'
       );
+    });
+
+    it('leaves parked ingestion failures and inactive rows untouched and uncounted, because validation never finalizes them back out of pending', async () => {
+      const validationErrorID = await errorID('validation', 'RESET_TEST_UNREVALIDATABLE');
+      const revalidatable = await seedRow('RESETREVALIDATABLE', census2ID);
+      const inactive = await seedRow('RESETINACTIVE', census2ID);
+      const parkedFailure = await seedParkedFailure(census2ID);
+      await connection.query('UPDATE coremeasurements SET IsValidated = FALSE WHERE CoreMeasurementID IN (?, ?)', [revalidatable, inactive]);
+      await connection.query('UPDATE coremeasurements SET IsActive = FALSE WHERE CoreMeasurementID = ?', [inactive]);
+      await logOccurrence(inactive, validationErrorID, false);
+      await logOccurrence(parkedFailure, validationErrorID, false);
+
+      const affectedRows = await resetValidationScope(cm, { schema, plotID, censusID: census2ID });
+
+      expect(affectedRows, 'only the active, stem-resolved row is counted as reset').toBe(1);
+      expect(await validity(revalidatable), 'the active, stem-resolved row is put back to pending').toBeNull();
+      expect(await validity(parkedFailure), 'a parked failure (StemGUID NULL) must keep IsValidated = FALSE, not become a permanent pending row').toBe(false);
+      expect(await validity(inactive), 'an inactive row must keep its prior IsValidated value').toBe(false);
+      expect(await occurrence(parkedFailure, validationErrorID), "the parked failure's occurrence must stay unresolved").toEqual({
+        isResolved: false,
+        resolvedAt: null
+      });
+      expect(await occurrence(inactive, validationErrorID), "the inactive row's occurrence must stay unresolved").toEqual({
+        isResolved: false,
+        resolvedAt: null
+      });
     });
 
     it('reports zero affected rows for an empty, otherwise-valid census', async () => {
@@ -463,6 +498,19 @@ describe('resetValidationScope / recheckMeasurementValidation transaction bounda
 
       expect(await validity(row), 'an active-upload conflict must not mutate the row').toBe(false);
       expect(await occurrence(row, validationErrorID)).toEqual({ isResolved: false, resolvedAt: null });
+    });
+
+    it('rejects recheck for a parked ingestion failure (StemGUID NULL), without writing anything', async () => {
+      const validationErrorID = await errorID('validation', 'RECHECK_TEST_PARKED');
+      const parkedFailure = await seedParkedFailure(census2ID);
+      await logOccurrence(parkedFailure, validationErrorID, false);
+
+      await expect(recheckMeasurementValidation(cm, { schema, plotID, censusID: census2ID, coreMeasurementID: parkedFailure })).rejects.toThrow(
+        ScopeAccessError
+      );
+
+      expect(await validity(parkedFailure), 'a rejected recheck must not move the parked failure to pending').toBe(false);
+      expect(await occurrence(parkedFailure, validationErrorID)).toEqual({ isResolved: false, resolvedAt: null });
     });
 
     it('rejects recheck for a measurement that belongs to a different census, without writing anything', async () => {
