@@ -1,20 +1,17 @@
-import ConnectionManager, { type TxExecutor } from '@/lib/db/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
-import { safeFormatQuery, validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { MANAGER_OVERRIDE_ERROR_CODE } from '@/config/validationoverride';
-import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
-import { assertNoActiveMeasurementScopeConflict, ScopeAccessError, ScopeBusyError, type MeasurementScopeInput } from '@/config/editplan/scopeguard';
+import { ScopeAccessError, type MeasurementScopeInput } from '@/config/editplan/scopeguard';
 import { refreshMeasurementViewsForCoreMeasurements } from '@/lib/measurementviewrefresh';
-
-// Bound SQL parameters for large resets; every batch stays in the same transaction.
-const VALIDATION_RESET_VIEW_REFRESH_BATCH_SIZE = 1000;
+import {
+  assertValidMeasurementScope,
+  type FormattedQueryRequest,
+  lockActiveScope,
+  refreshMeasurementViewsInBatches
+} from '@/lib/validations/scope-transaction';
 
 export type RecheckMeasurementScope = MeasurementScopeInput & { coreMeasurementID: number };
-
-interface FormattedQueryRequest {
-  query: string;
-  params: unknown[];
-}
 
 /**
  * Resolves every unresolved *validation* occurrence in `scopeClause`, excluding
@@ -46,33 +43,6 @@ function buildResetIsValidatedStep(schema: string, scopeClause: string, scopePar
   };
 }
 
-async function assertActiveScope(cm: ConnectionManager, tx: TxExecutor, scope: MeasurementScopeInput): Promise<void> {
-  const census = await tx.query<Array<{ CensusID: number }>>(
-    safeFormatQuery(scope.schema, 'SELECT CensusID FROM ??.census WHERE PlotID = ? AND CensusID = ? AND IsActive = TRUE FOR UPDATE'),
-    [scope.plotID, scope.censusID]
-  );
-  if (census.length !== 1) {
-    throw new ScopeAccessError('The active census does not belong to the selected plot');
-  }
-  await assertNoActiveMeasurementScopeConflict(cm, scope, tx.id);
-}
-
-async function acquireScopeLockOrThrow(cm: ConnectionManager, scope: MeasurementScopeInput, transactionID: string): Promise<void> {
-  const locked = await cm.acquireApplicationLock(
-    buildMeasurementScopeLockName(scope.schema, scope.plotID, scope.censusID),
-    transactionID,
-    MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS
-  );
-  if (!locked) throw new ScopeBusyError('A measurement operation is already in progress for this plot/census');
-}
-
-function assertValidMeasurementScope(scope: MeasurementScopeInput): void {
-  validateSchemaOrThrow(scope.schema);
-  if (!Number.isSafeInteger(scope.plotID) || scope.plotID <= 0 || !Number.isSafeInteger(scope.censusID) || scope.censusID <= 0) {
-    throw new ScopeAccessError('A positive plot and census ID are required');
-  }
-}
-
 /**
  * Marks every row in the selected plot+active census pending (IsValidated = NULL)
  * and resolves their unresolved validation occurrences — never deletes them, and
@@ -87,29 +57,30 @@ export async function resetValidationScope(cm: ConnectionManager, scope: Measure
   assertValidMeasurementScope(scope);
 
   return cm.withTransaction(async tx => {
-    await acquireScopeLockOrThrow(cm, scope, tx.id);
-    await assertActiveScope(cm, tx, scope);
+    await lockActiveScope(cm, tx, scope);
 
+    const censusScopeClause = 'cm.CensusID = ?';
     const targets = await tx.query<Array<{ CoreMeasurementID: number }>>(
-      safeFormatQuery(scope.schema, 'SELECT CoreMeasurementID FROM ??.coremeasurements WHERE CensusID = ? ORDER BY CoreMeasurementID FOR UPDATE'),
+      safeFormatQuery(
+        scope.schema,
+        `SELECT cm.CoreMeasurementID FROM ??.coremeasurements cm WHERE ${censusScopeClause} ORDER BY cm.CoreMeasurementID FOR UPDATE`
+      ),
       [scope.censusID]
     );
     if (targets.length === 0) return 0;
 
-    const resolveStep = buildResolveValidationOccurrencesStep(scope.schema, 'cm.CensusID = ?', [scope.censusID]);
+    const resolveStep = buildResolveValidationOccurrencesStep(scope.schema, censusScopeClause, [scope.censusID]);
     await tx.query(format(resolveStep.query, resolveStep.params));
 
-    const resetStep = buildResetIsValidatedStep(scope.schema, 'cm.CensusID = ?', [scope.censusID]);
+    const resetStep = buildResetIsValidatedStep(scope.schema, censusScopeClause, [scope.censusID]);
     await tx.query(format(resetStep.query, resetStep.params));
 
-    for (let offset = 0; offset < targets.length; offset += VALIDATION_RESET_VIEW_REFRESH_BATCH_SIZE) {
-      await refreshMeasurementViewsForCoreMeasurements(
-        cm,
-        scope.schema,
-        targets.slice(offset, offset + VALIDATION_RESET_VIEW_REFRESH_BATCH_SIZE).map(row => row.CoreMeasurementID),
-        tx.id
-      );
-    }
+    await refreshMeasurementViewsInBatches(
+      cm,
+      scope.schema,
+      targets.map(row => row.CoreMeasurementID),
+      tx.id
+    );
     return targets.length;
   });
 }
@@ -130,15 +101,14 @@ export async function recheckMeasurementValidation(cm: ConnectionManager, scope:
   }
 
   return cm.withTransaction(async tx => {
-    await acquireScopeLockOrThrow(cm, scope, tx.id);
-    await assertActiveScope(cm, tx, scope);
+    await lockActiveScope(cm, tx, scope);
 
     const targets = await tx.query<Array<{ CoreMeasurementID: number }>>(
       safeFormatQuery(
         scope.schema,
-        `SELECT CoreMeasurementID
-         FROM ??.coremeasurements
-         WHERE CensusID = ? AND CoreMeasurementID = ? AND IsActive = TRUE
+        `SELECT cm.CoreMeasurementID
+         FROM ??.coremeasurements cm
+         WHERE cm.CensusID = ? AND cm.CoreMeasurementID = ? AND cm.IsActive = TRUE
          FOR UPDATE`
       ),
       [scope.censusID, scope.coreMeasurementID]

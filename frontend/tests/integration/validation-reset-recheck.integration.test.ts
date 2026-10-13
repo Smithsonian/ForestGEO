@@ -7,6 +7,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { recheckMeasurementValidation, resetValidationScope } from '@/lib/validations/reset';
 import { refreshMeasurementViewsForCoreMeasurements } from '@/lib/measurementviewrefresh';
+import { SCOPE_VIEW_REFRESH_BATCH_SIZE } from '@/lib/validations/scope-transaction';
 import {
   cleanupTestMeasurements,
   insertDirectMeasurements,
@@ -18,10 +19,6 @@ import {
 
 const bool = (value: unknown): boolean | null => (value == null ? null : Buffer.isBuffer(value) ? value[0] === 1 : Number(value) === 1);
 
-// Mirrors the private VALIDATION_RESET_VIEW_REFRESH_BATCH_SIZE constant in lib/validations/reset.ts.
-// That constant is intentionally not exported: this test sizes its own fixture off the known
-// production value instead of importing a test-only escape hatch out of the module.
-const PRODUCTION_VIEW_REFRESH_BATCH_SIZE = 1000;
 // Non-recursive digit generator: MySQL's default cte_max_recursion_depth (1000) would reject a
 // recursive CTE for 1001+ rows, so this builds every 0-9999 value via a plain CROSS JOIN instead.
 const DIGITS_0_9 =
@@ -337,7 +334,7 @@ describe('resetValidationScope / recheckMeasurementValidation transaction bounda
     });
 
     it('refreshes every one of 1001 rows across exactly two batches, including rows that exist only in the second batch', async () => {
-      const totalRows = PRODUCTION_VIEW_REFRESH_BATCH_SIZE + 1;
+      const totalRows = SCOPE_VIEW_REFRESH_BATCH_SIZE + 1;
       const validationErrorID = await errorID('validation', 'RESET_BATCH_BOUNDARY');
       const measurementIDs = await seedBulkRows('RESETBULKBATCH', census2ID, totalRows);
       expect(measurementIDs, 'the bulk fixture must create exactly one measurement per requested row').toHaveLength(totalRows);

@@ -6,36 +6,10 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { recheckMeasurementValidation } from '@/lib/validations/reset';
+import { isPlainObject, parseRecheckScopeBody, SCOPE_REQUEST_NOT_OBJECT_MESSAGE } from '@/lib/validations/scope-request';
 import ailogger from '@/ailogger';
 
 export const runtime = 'nodejs';
-
-interface RecheckValidationRequestBody {
-  schema: string;
-  plotID: number;
-  censusID: number;
-  coreMeasurementID: number;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
-}
-
-function parseRecheckRequestBody(body: Record<string, unknown>): RecheckValidationRequestBody | null {
-  const { schema, plotID, censusID, coreMeasurementID } = body;
-  if (!isNonEmptyString(schema) || !isPositiveSafeInteger(plotID) || !isPositiveSafeInteger(censusID) || !isPositiveSafeInteger(coreMeasurementID)) {
-    return null;
-  }
-  return { schema, plotID, censusID, coreMeasurementID };
-}
 
 async function postHandler(request: NextRequest) {
   // Preserve the former /api/query write restriction in addition to site/quarantine checks.
@@ -49,9 +23,9 @@ async function postHandler(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: HTTPResponses.BAD_REQUEST });
   }
   if (!isPlainObject(body)) {
-    return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: HTTPResponses.BAD_REQUEST });
+    return NextResponse.json({ error: SCOPE_REQUEST_NOT_OBJECT_MESSAGE }, { status: HTTPResponses.BAD_REQUEST });
   }
-  const parsed = parseRecheckRequestBody(body);
+  const parsed = parseRecheckScopeBody(body);
   if (!parsed) {
     return NextResponse.json({ error: 'A positive plot, census, and measurement ID are required' }, { status: HTTPResponses.BAD_REQUEST });
   }
