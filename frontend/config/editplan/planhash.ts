@@ -22,12 +22,7 @@ function normalizeDecimal(value: unknown, precision: number): unknown {
   return Number(value.toFixed(precision));
 }
 
-/**
- * Normalizes a single field's value the same way the hash does — date-first,
- * then per-column decimal precision, then passthrough. Exported so a later
- * batch-grouping stage can compare two rows' requested values using the SAME
- * server-side normalization the hash uses, instead of duplicating this logic.
- */
+/** Applies the hash's own date/decimal normalization so callers compare values exactly as the hash does. */
 export function normalizeFieldValueForComparison(field: string, value: unknown): unknown {
   if (isDateField(field)) return normalizeDate(value);
   const precision = PER_COLUMN_DECIMAL_PRECISION[field];
@@ -74,21 +69,8 @@ function sortEffects(effects: Effect[]): Effect[] {
     .sort((a, b) => (a.id + a.category + a.affectedTable).localeCompare(b.id + b.category + b.affectedTable));
 }
 
-// Membership (stems/measurements) is read from the database in ID order by
-// the planner, but the hash must not trust that: re-sort explicitly so query
-// order is never load-bearing for hash stability, matching
-// sortNumericArray's treatment of Effect.references. Re-sorting (rather than
-// only validating) also means a future caller that constructs a
-// SpeciesCorrectionSummary by hand (e.g. a writer reacting to a
-// uniqueness-conflict retry) cannot accidentally produce two hashes for the
-// same membership just by enumerating it in a different order.
-//
-// Each stem/measurement record's own link/scope/activity fields are part of
-// the canonical shape as-is (not reduced to just an ID): a measurement
-// moving between two already-attached stems (same CoreMeasurementID, new
-// stemGUID) or an activity swap between two equal-count siblings must change
-// the hash, which it does here because the full sorted record is hashed, not
-// merely the sorted ID list.
+// Re-sort so query/enumeration order never affects the hash. Whole records are
+// hashed, not just IDs, so a measurement moving between stems changes the hash.
 function sortCorrectionMembership(correction: SpeciesCorrectionSummary): SpeciesCorrectionSummary {
   return {
     ...correction,
@@ -102,13 +84,7 @@ function normalizeSpeciesCorrection(correction: EditPlan['speciesCorrection']): 
   return sortCorrectionMembership(correction);
 }
 
-// `EditPlan.speciesCorrectionUndo` (#427 undo) carries the exact evidence the
-// writer will restore; its arrays are built from stored JSON evidence, so
-// enumeration order must never be load-bearing here either — re-sort
-// explicitly, the same way `sortCorrectionMembership` does for a
-// correction's own `stems`/`measurements`. Always returns a NEW object (and
-// new arrays); the caller's `restoration` is never mutated. `null` is
-// preserved as `null` (distinct from `[]`) for `restoredAttributeCodes`.
+// `restoredAttributeCodes` keeps `null` distinct from `[]`.
 function normalizeSpeciesCorrectionUndo(restoration: EditPlan['speciesCorrectionUndo']): SpeciesCorrectionUndoRestoration | undefined {
   if (!restoration) return undefined;
   return {
@@ -120,19 +96,6 @@ function normalizeSpeciesCorrectionUndo(restoration: EditPlan['speciesCorrection
   };
 }
 
-// `BulkEditPlan.speciesCorrectionGroups` (#427 batch corrections) carries the
-// SAME producer-enumeration-order risk `normalizeSpeciesCorrection` exists to
-// close for a single-row `EditPlan.speciesCorrection`: `bulkanalyzer.ts`
-// builds `groups` by iterating a `Map`'s values and `bulkspeciesgroups.ts`
-// builds each group's `members`/affected-ID arrays from however the batch's
-// rows and the tree's stems/measurements were enumerated. None of that
-// iteration order is a property of the correction itself, so it must never
-// be load-bearing for hash stability — re-sort explicitly here, the same way
-// `sortNumericArray` already does for `Effect.references` and
-// `sortCorrectionMembership` does for one correction's own `stems`/
-// `measurements`. Always returns a NEW array (and new per-group objects);
-// the caller's `plan.speciesCorrectionGroups` (and its nested arrays) is
-// never mutated.
 function normalizeSpeciesCorrectionGroups(groups: BulkEditPlan['speciesCorrectionGroups']): SpeciesCorrectionGroup[] | undefined {
   if (!groups) return undefined;
   return [...groups]
@@ -140,10 +103,6 @@ function normalizeSpeciesCorrectionGroups(groups: BulkEditPlan['speciesCorrectio
       ...group,
       correction: sortCorrectionMembership(group.correction),
       members: [...group.members].sort((a, b) => a.rowIndex - b.rowIndex),
-      // `affectedCoreMeasurementIDs`/`affectedStemGUIDs` are required (never
-      // undefined) on `SpeciesCorrectionGroup`, so `sortNumericArray`'s
-      // `undefined`-passthrough branch is unreachable here; `?? []` only
-      // satisfies the shared helper's `number[] | undefined` return type.
       affectedCoreMeasurementIDs: sortNumericArray(group.affectedCoreMeasurementIDs) ?? [],
       affectedStemGUIDs: sortNumericArray(group.affectedStemGUIDs) ?? []
     }))
@@ -183,15 +142,7 @@ export function canonicalizePlan(plan: EditPlan | BulkEditPlan): unknown {
         .sort((a, b) => Number((a as { rowIndex: number }).rowIndex) - Number((b as { rowIndex: number }).rowIndex)),
       aggregateEffects: sortEffects(plan.aggregateEffects).map(effect => sortKeys(effect)),
       duplicateDeletions: sortedDuplicates,
-      // `rest` already carries whatever `plan.speciesCorrectionGroups` was
-      // (present+array, or absent entirely), but un-normalized; this
-      // overrides that key with the re-sorted form. When `plan` has no
-      // `speciesCorrectionGroups` at all, `normalizeSpeciesCorrectionGroups`
-      // returns `undefined` and `JSON.stringify` drops an `undefined`-valued
-      // key the same way it drops an entirely-absent key — so a group-free
-      // bulk plan hashes identically to how it did before this field
-      // existed, exactly like `speciesCorrection` already behaves on a
-      // single-row `EditPlan` above.
+      // An `undefined` value is dropped by JSON.stringify, so a group-free bulk plan hashes exactly as one that predates this field.
       speciesCorrectionGroups: normalizeSpeciesCorrectionGroups(plan.speciesCorrectionGroups)
     });
   }

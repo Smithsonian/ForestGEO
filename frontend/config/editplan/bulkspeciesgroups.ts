@@ -1,21 +1,7 @@
-// Batch/bulk ANALYSIS stage for #427 tree-wide species corrections.
-//
-// `analyzeEdit` plans one row at a time: when a revision upload contains
-// several sibling rows that all belong to the same tree (same TreeID +
-// CensusID) and all request a species correction, each row independently
-// produces its own `EditPlan.speciesCorrection` carrying the FULL tree
-// membership (every attached stem/measurement). This module collapses those
-// N identical/near-identical per-row corrections into ONE canonical
-// `SpeciesCorrectionGroup` per (treeID, censusID), without hiding a genuine
-// disagreement between siblings and without ever letting file/query order
-// decide which row "wins" — the lowest `rowIndex` is always canonical, and
-// membership/affected-ID sets are always re-sorted so enumeration order is
-// never load-bearing (the same reasoning `planhash.ts` applies to
-// `SpeciesCorrectionSummary.stems`/`measurements`).
-//
-// Pure, synchronous, in-memory: no DB access, no ConnectionManager, no I/O.
-// A later slice (batch WRITER stage) wires this module's output into
-// `analyzeBulk`'s `BulkEditPlan.speciesCorrectionGroups`.
+// Batch analysis for tree-wide species corrections. Each sibling row of one tree carries the full
+// tree correction, so this collapses them into one SpeciesCorrectionGroup per (treeID, censusID).
+// Genuine disagreements are reported, the lowest rowIndex is canonical, and every membership set is
+// re-sorted so file/query order never decides the outcome. Pure and synchronous: no DB access.
 import {
   DuplicateDeletion,
   Effect,
@@ -60,46 +46,18 @@ function buildGroupKey(treeID: number, censusID: number): string {
 }
 
 /**
- * Canonical fields stored on the `stems` row (not on `coremeasurements`), so
- * two batch rows targeting two DIFFERENT measurements of the SAME stem both
- * write the same physical column. Whichever row is applied last silently
- * wins, which is exactly the order-dependent outcome #427 must refuse.
- *
- * Identity fields (`TreeTag`, `StemTag`, `QuadratName`) are deliberately NOT
- * in this list — a row changing one of those is caught by the stronger
- * `group_identity_overlap` check (another row re-pointing a sibling's
- * identity entirely), not by a same-column-write comparison.
+ * Stored on the shared stems row, so two rows editing different measurements of one stem write the
+ * same column and the last write silently wins. Identity fields are handled by group_identity_overlap.
  */
 const SHARED_STEM_FIELDS = ['StemLocalX', 'StemLocalY', 'StemPlotX', 'StemPlotY'] as const;
 
-/**
- * Identity fields that, when actually changed on a row OTHER than the one
- * requesting the species correction, mean a sibling batch row is re-pointing
- * this tree's identity while the batch is also correcting its species. This
- * is the batch-level counterpart of `rules/species.ts`'s `MIXED_IDENTITY_FIELDS`
- * gate: that one blocks species + identity changed together in the SAME row;
- * this one blocks a DIFFERENT row moving a sibling's identity.
- */
 const GROUP_IDENTITY_OVERLAP_FIELDS = ['TreeTag', 'StemTag', 'QuadratName'] as const;
 
-/**
- * The single ordering rule for every `group_*` `TreeStemResolutionPreviewError`
- * this module produces: by `treeID`, then `reason`, then the lowest involved
- * `rowIndex`. Shared by `buildSpeciesCorrectionGroups`, `detectSpeciesGroupConflicts`,
- * and `analyzeBulkSpeciesCorrections` so there is exactly one sort comparator,
- * not three copies that could silently drift apart.
- */
+/** Shared ordering for every group_* error: treeID, then reason, then lowest rowIndex. */
 export function compareTreeStemResolutionErrors(a: TreeStemResolutionPreviewError, b: TreeStemResolutionPreviewError): number {
   return (a.treeID ?? 0) - (b.treeID ?? 0) || a.reason.localeCompare(b.reason) || (a.rowIndex ?? 0) - (b.rowIndex ?? 0);
 }
 
-/**
- * Re-sorts `stems`/`measurements` ascending the same way `planhash.ts`'s
- * `normalizeSpeciesCorrection` does, and always returns a NEW object/arrays
- * so the caller's correction (and its own `stems`/`measurements` arrays) are
- * never mutated. Every other field is a reference copy of a plain
- * primitive, so no further cloning is needed.
- */
 function normalizeCorrection(correction: SpeciesCorrectionSummary): SpeciesCorrectionSummary {
   return {
     ...correction,
@@ -139,27 +97,8 @@ function measurementsEqual(a: SpeciesCorrectionMeasurementPrecondition[], b: Spe
 }
 
 /**
- * Compares two (already-normalized, i.e. sorted) corrections for the SAME
- * (treeID, censusID) key field by field — never by `JSON.stringify` and
- * never by reaching into `planhash.ts` (that module canonicalizes a whole
- * plan for hashing; this stage needs a classified reason, not a hash).
- *
- * - `destination`: the requested destination disagrees — `newSpeciesID`
- *   differs, or `newSpeciesCode` differs by more than case. A case-only
- *   `newSpeciesCode` spelling difference with the SAME `newSpeciesID` is
- *   tolerated, not reported: species resolution is case-insensitive
- *   (`rules/species.ts`/`resolveSpeciesByCode`) and the planner reads back
- *   the DB-canonical spelling, so two consistent requests should never
- *   actually disagree on casing — but if they did, blocking a no-op
- *   destination would be worse than tolerating it.
- * - `membership`: everything else that describes tree state/membership
- *   disagrees — `version`, `treeTag`, `plotID`, `oldSpeciesID`,
- *   `oldSpeciesCode`, any of the four counts, or the sorted
- *   `stems`/`measurements` records themselves (every field of every
- *   record, not just ID lists/lengths, so an equal-count activity swap or a
- *   measurement moved between two already-attached sibling stems is
- *   detected — the same drift `planhash.ts` is built to catch).
- * - `none`: the two corrections agree in every field that matters.
+ * A case-only newSpeciesCode difference with the same newSpeciesID is tolerated because species
+ * resolution is case-insensitive. Every stem/measurement field is compared, not just IDs.
  */
 function classifyDisagreement(canonical: SpeciesCorrectionSummary, other: SpeciesCorrectionSummary): DisagreementKind {
   const sameSpeciesCode = canonical.newSpeciesCode === other.newSpeciesCode || canonical.newSpeciesCode.toLowerCase() === other.newSpeciesCode.toLowerCase();
@@ -246,19 +185,11 @@ export function buildSpeciesCorrectionGroups(rows: BulkSpeciesGroupRow[]): Speci
       if (kind === 'destination') hasDestinationConflict = true;
       else if (kind === 'membership') hasMembershipConflict = true;
 
-      // Defensive, honest check (do not silently hide a violation): the
-      // planner guarantees a requesting row's own targetID (CoreMeasurementID)
-      // is among its correction's measurements. If the CANONICAL correction's
-      // measurements for this key do not include it, membership disagrees
-      // for this key — report it rather than accepting the row anyway.
       const targetIDIsInCanonicalMeasurements = canonicalCorrection.measurements.some(measurement => measurement.coreMeasurementID === requesting.targetID);
       if (!targetIDIsInCanonicalMeasurements) hasMembershipConflict = true;
     }
 
-    // Destination disagreement takes priority: if the destinations
-    // genuinely differ, the corrections' state fields are not comparable in
-    // a meaningful way (they describe correcting to two different species),
-    // so one error per key is reported, not two.
+    // One error per key: corrections to two different species have no comparable membership.
     if (hasDestinationConflict) {
       errors.push(
         buildConflictError(canonicalCorrection.targetTreeID, canonicalCorrection.treeTag, 'destination', requestingRows, destinationCodesInRowIndexOrder)
@@ -278,8 +209,7 @@ export function buildSpeciesCorrectionGroups(rows: BulkSpeciesGroupRow[]): Speci
 
     for (const row of rows) {
       if (requestingRowIndexes.has(row.rowIndex)) continue;
-      // `members` is hashed and describes rows the correction will actually
-      // cover; a row that can never apply must not change the plan hash (B2).
+      // Invalid rows never apply, so they must not change the hashed members list.
       if (row.status === 'invalid') continue;
       const isAttachedMeasurement = canonicalCorrection.measurements.some(measurement => measurement.coreMeasurementID === row.targetID);
       if (!isAttachedMeasurement) continue;
@@ -310,19 +240,8 @@ export function buildSpeciesCorrectionGroups(rows: BulkSpeciesGroupRow[]): Speci
 }
 
 /**
- * Identifies the single per-row species-correction `Effect` that
- * `rules/species.ts#applySpeciesRules` attaches to a row's `EditPlan`, so a
- * later batch-aggregation stage can keep ONE copy per group instead of
- * summing one per sibling row (which would over-report the downstream row
- * count in the aggregated effect).
- *
- * Matched by the effect's SHAPE — `category`, `affectedTable`, and
- * `references` — not by the rule ID literal (`'R1a'`), which lives in
- * `rules/species.ts` and this stage does not own. A false negative here
- * (e.g. the rule ID or shape changes upstream) only costs a duplicate-
- * counted downstream row in the aggregate; it cannot corrupt data, so
- * coupling to a string this module does not control is not worth the
- * fragility.
+ * Matched by shape rather than rule ID ('R1a'), which this module does not own. A false negative
+ * only double-counts a downstream row in the aggregate; it cannot corrupt data.
  */
 export function isSpeciesCorrectionEffect(effect: Effect, correction: SpeciesCorrectionSummary): boolean {
   if (effect.category !== 'identity' || effect.affectedTable !== 'trees') return false;
@@ -331,14 +250,8 @@ export function isSpeciesCorrectionEffect(effect: Effect, correction: SpeciesCor
   return effect.references?.speciesID === correction.newSpeciesID;
 }
 
-// --- Batch-level integrity checks (detectSpeciesGroupConflicts, below) ----
-//
-// `buildSpeciesCorrectionGroups` only compares requesting rows' OWN
-// corrections against each other. The checks below additionally look at
-// every other batch row touching a group's membership (any status,
-// including a row that produced no `speciesCorrection` at all) and at the
-// batch's `duplicateDeletions`, to catch contradictions that never show up
-// inside a `SpeciesCorrectionSummary`.
+// --- Batch-level integrity checks: compare against every row touching a group's membership
+// (any status) and against duplicateDeletions, not just the requesting rows' own corrections.
 
 function buildRequestedValue(rowIndex: number, field: string, to: unknown): RequestedValue {
   return { rowIndex, raw: to, normalized: normalizeFieldValueForComparison(field, to) };
@@ -350,24 +263,13 @@ interface RequestedValue {
   normalized: unknown;
 }
 
-/**
- * Equal if strictly equal, or both sides are null/undefined (a cleared
- * value), or their string renderings match (tolerates a value requested as a
- * `number` on one row and the equivalent `string` on another — the two are
- * the same request, not a conflict).
- */
+/** String comparison treats a number and its equivalent string as the same request. */
 function requestedValuesAreEquivalent(left: unknown, right: unknown): boolean {
   if (left === right) return true;
   if ((left === null || left === undefined) && (right === null || right === undefined)) return true;
   return String(left) === String(right);
 }
 
-/**
- * Collapses a list of (rowIndex, requested value) pairs for the SAME field
- * into one entry per distinct value, each keeping the first rowIndex/raw
- * spelling that supplied it. Consistent duplicate requests (every value
- * equivalent) collapse to a single entry, so they never read as a conflict.
- */
 function collectDistinctRequestedValues(values: RequestedValue[]): RequestedValue[] {
   const distinct: RequestedValue[] = [];
   for (const value of values) {
@@ -380,20 +282,11 @@ function collectDistinctRequestedValues(values: RequestedValue[]): RequestedValu
 
 interface FieldConflict {
   field: string;
-  /** Every distinct requested value, in first-seen (lowest-rowIndex) order. */
+  /** In first-seen (lowest-rowIndex) order. */
   values: RequestedValue[];
-  /** Every row that contributed any of the requests above. */
   rowIndexes: number[];
 }
 
-/**
- * Check D1 (defensive): two in-group rows sharing the same `targetID`
- * (CoreMeasurementID) requesting different values for the same canonical
- * field. Duplicate `targetID`s are rejected upstream of this module today,
- * so in practice `sameTargetRows.length` is never >1 — but if that upstream
- * guarantee ever broke, this must actually fire rather than silently trust
- * it, so it is implemented honestly rather than treated as unreachable.
- */
 function collectSameMeasurementConflicts(inGroupRows: BulkSpeciesGroupRow[]): FieldConflict[] {
   const rowsByTargetID = new Map<number, BulkSpeciesGroupRow[]>();
   for (const row of inGroupRows) {
@@ -405,10 +298,7 @@ function collectSameMeasurementConflicts(inGroupRows: BulkSpeciesGroupRow[]): Fi
   const conflicts: FieldConflict[] = [];
   for (const sameTargetRows of rowsByTargetID.values()) {
     if (sameTargetRows.length < 2) continue;
-    // Sorted ascending by rowIndex BEFORE any value is collected: `values`
-    // (and therefore `collectDistinctRequestedValues`' first-seen entry and
-    // the rendered message) must be identical regardless of which order the
-    // conflicting rows arrive in `inGroupRows`.
+    // Sort before collecting so the first-seen value and the message do not depend on input order.
     sameTargetRows.sort((a, b) => a.rowIndex - b.rowIndex);
 
     const valuesByField = new Map<string, RequestedValue[]>();
@@ -430,13 +320,7 @@ function collectSameMeasurementConflicts(inGroupRows: BulkSpeciesGroupRow[]): Fi
   return conflicts;
 }
 
-/**
- * Check D2: two in-group rows whose `targetID`s resolve (via
- * `group.correction.measurements`) to the SAME `stemGUID` requesting
- * different values for a `SHARED_STEM_FIELDS` column — the two measurements
- * are different rows, but the column they write is the same `stems` row, so
- * whichever request is applied last would silently overwrite the other.
- */
+/** Different measurements on the same stem write the same stems row, so the last write would silently win. */
 function collectSharedStemConflicts(group: SpeciesCorrectionGroup, inGroupRows: BulkSpeciesGroupRow[]): FieldConflict[] {
   const stemGUIDByTargetID = new Map<number, number>();
   for (const measurement of group.correction.measurements) {
@@ -455,9 +339,6 @@ function collectSharedStemConflicts(group: SpeciesCorrectionGroup, inGroupRows: 
   const conflicts: FieldConflict[] = [];
   for (const sameStemRows of rowsByStemGUID.values()) {
     if (sameStemRows.length < 2) continue;
-    // Same ordering guarantee as `collectSameMeasurementConflicts`: sort by
-    // rowIndex BEFORE collecting values so the result never depends on the
-    // order the sharing rows happen to appear in `inGroupRows`.
     sameStemRows.sort((a, b) => a.rowIndex - b.rowIndex);
 
     for (const field of SHARED_STEM_FIELDS) {
@@ -478,14 +359,7 @@ function collectSharedStemConflicts(group: SpeciesCorrectionGroup, inGroupRows: 
   return conflicts;
 }
 
-/**
- * Check A: a row with a non-null `explicitSpeciesCode` that disagrees
- * (case-insensitively, after trimming) with the group's canonical
- * destination — even when that row's own `status` is `'unchanged'` and it
- * produced no `fieldChange`, because the row still explicitly asked for a
- * species the group's destination contradicts. A null/absent
- * `explicitSpeciesCode` is "unspecified" and never manufactures a request.
- */
+/** Fires even for an 'unchanged' row; a null explicitSpeciesCode is unspecified and never counts as a request. */
 function detectSpeciesDisagreement(group: SpeciesCorrectionGroup, inGroupRows: BulkSpeciesGroupRow[]): TreeStemResolutionPreviewError | null {
   const destinationKey = group.correction.newSpeciesCode.trim().toLowerCase();
   const contradictionsByKey = new Map<string, { displayCode: string; minRowIndex: number; rowIndexes: number[] }>();
@@ -532,14 +406,7 @@ function detectSpeciesDisagreement(group: SpeciesCorrectionGroup, inGroupRows: B
   };
 }
 
-/**
- * Check B: another batch row (any status) whose `plan.fieldChanges` actually
- * changes `TreeTag`, `StemTag`, or `QuadratName` — re-pointing identity on a
- * tree this group is also correcting. This is the batch-level counterpart of
- * the per-row `mixed_identity` gate in `rules/species.ts`: that one catches
- * species+identity changed together in the SAME row; this one catches a
- * DIFFERENT row moving a sibling's identity.
- */
+/** Batch-level counterpart of rules/species.ts's per-row mixed_identity gate: a different row moving a sibling's identity. */
 function detectIdentityOverlap(group: SpeciesCorrectionGroup, inGroupRows: BulkSpeciesGroupRow[]): TreeStemResolutionPreviewError | null {
   const identityFields: ReadonlySet<string> = new Set(GROUP_IDENTITY_OVERLAP_FIELDS);
   const rowIndexes = new Set<number>();
@@ -575,16 +442,7 @@ function detectIdentityOverlap(group: SpeciesCorrectionGroup, inGroupRows: BulkS
   };
 }
 
-/**
- * Check C: the batch's `duplicateDeletions` also delete a measurement this
- * group's correction affects — the correction's membership (and its undo
- * contract) was computed over measurements the same batch would destroy.
- * A `DuplicateDeletion` has no `rowIndex` of its own; `rowIndexes` is derived
- * by mapping each offending deletion's `survivorCoreMeasurementID` back to a
- * row's `targetID`. When no row matches a survivor, that deletion's
- * `rowIndex` is simply omitted — the error still fires rather than being
- * dropped for lack of a row to blame.
- */
+/** A deletion with no matching survivor row still fires the error, just without a rowIndex. */
 function detectMemberDeletion(
   group: SpeciesCorrectionGroup,
   rows: BulkSpeciesGroupRow[],
@@ -622,26 +480,9 @@ function detectMemberDeletion(
   };
 }
 
-/**
- * Check D: two in-group rows requesting contradictory values for the same
- * stored column — either the same measurement (D1, defensive) or the same
- * shared `stems` column via `SHARED_STEM_FIELDS` (D2). The `field` union has
- * no member for an arbitrary coordinate column, so this reuses
- * `subject: 'stem'` / `field: 'StemTag'` — the same precedent
- * `rules/species.ts`'s edited-stem/edited-measurement failures already
- * establish (distinguished by `reason` and message text, not by adding a new
- * union member per column). Consistent duplicate requests (every row wants
- * the same value) never reach here: `collectDistinctRequestedValues`
- * collapses them before a conflict is recorded.
- */
+/** Reuses subject 'stem' / field 'StemTag' because the field union has no member per coordinate column. */
 function detectFieldConflicts(group: SpeciesCorrectionGroup, inGroupRows: BulkSpeciesGroupRow[]): TreeStemResolutionPreviewError | null {
-  // Sorted by field name (not left as insertion order): `collectSameMeasurementConflicts`
-  // and `collectSharedStemConflicts` each group rows by a Map keyed off
-  // whichever distinct targetID/stemGUID is FIRST seen in `inGroupRows`, so
-  // without this sort the merged list — and the message text built from it
-  // below — could vary with input row order whenever a group has more than
-  // one conflicting field. Alphabetical by field name is itself
-  // order-independent, unlike "whichever conflict's row happened first".
+  // Sort by field so the message text does not depend on input row order.
   const conflicts = [...collectSameMeasurementConflicts(inGroupRows), ...collectSharedStemConflicts(group, inGroupRows)].sort((a, b) =>
     a.field.localeCompare(b.field)
   );
@@ -667,14 +508,8 @@ function detectFieldConflicts(group: SpeciesCorrectionGroup, inGroupRows: BulkSp
 }
 
 /**
- * Runs checks A–D for every group, aggregating ALL involved rows into AT
- * MOST ONE error per (group, check) — a 50-row batch cannot produce 50
- * copies of the same blocker. Considers every row in `rows` regardless of
- * `status` (including `'unchanged'`/`'invalid'`) whose `targetID` is among
- * `group.affectedCoreMeasurementIDs`, since a sibling that produced no
- * `EditPlan.fieldChanges` at all can still carry a disqualifying
- * `explicitSpeciesCode` (check A) or be the deletion survivor named in a
- * `DuplicateDeletion` (check C).
+ * At most one error per (group, check). Rows of any status are considered, since an unchanged sibling
+ * can still carry a contradicting explicitSpeciesCode or be a duplicate-deletion survivor.
  */
 export function detectSpeciesGroupConflicts(
   rows: BulkSpeciesGroupRow[],
@@ -703,11 +538,6 @@ export function detectSpeciesGroupConflicts(
   return errors.sort(compareTreeStemResolutionErrors);
 }
 
-/**
- * The one function `analyzeBulk` calls: group the batch's per-row species
- * corrections, then run every batch-level integrity check over the same rows,
- * merging both error sets into one deterministically ordered list.
- */
 export function analyzeBulkSpeciesCorrections(rows: BulkSpeciesGroupRow[], duplicateDeletions: DuplicateDeletion[]): SpeciesCorrectionGroupingResult {
   const grouping = buildSpeciesCorrectionGroups(rows);
   const conflictErrors = detectSpeciesGroupConflicts(rows, grouping.groups, duplicateDeletions);

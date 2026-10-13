@@ -1,19 +1,7 @@
-// Batch-executor PREPARE and APPLY phases for #427 tree-wide species
-// corrections spanning several rows of a revision batch. The batch route
-// must not re-run `analyzeEdit` per group member — that would reapply the
-// correction once per sibling, misread the batch's own writes as drift,
-// and route siblings through the single-row writer's legacy path, which
-// hard-deletes validation history a correction must retain. This module
-// holds both halves of that strict prepare-everything-then-execute split.
-//
-// `prepareBulkSpeciesCorrections` performs ONLY: input-assembly validation,
-// the locked representative read, the per-group `prepareTreeSpeciesCorrection`
-// replan/drift check (from `tree-species-correction-writer.ts`), and the
-// per-member pre-write field-drift guard every row-local write needs before
-// the batch's first mutation. It issues NO UPDATE/INSERT/DELETE and calls no
-// writer. `applyPreparedBulkSpeciesCorrections` is the mutating half: it
-// writes every member's row-local fields first, then applies each prepared
-// tree correction once (see the order note in `writers/measurementssummary.ts`).
+// Prepare/apply phases for tree-wide species corrections spanning several rows of a revision batch.
+// The batch route must not re-run `analyzeEdit` per member: that would reapply the correction per
+// sibling, misread the batch's own writes as drift, and hard-delete validation history via the
+// single-row legacy path. Prepare issues no writes; apply writes member rows, then each correction once.
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import type { UserAuthRoles } from '@/config/macros';
@@ -43,12 +31,12 @@ import {
 const SPECIES_CODE_FIELD = 'SpeciesCode';
 
 export interface BulkSpeciesCorrectionMemberInput {
-  /** `BulkInput.matched[]` index — the frozen bulk rowIndex contract, NOT a CSV line number. */
+  /** `BulkInput.matched[]` index, not a CSV line number. */
   rowIndex: number;
   coreMeasurementID: number;
-  /** The authorized, hash-verified row plan from the re-analyzed BulkEditPlan. */
+  /** Authorized, hash-verified row plan. */
   plan: EditPlan;
-  /** The server-computed canonical new row the route derived from computeDiff. */
+  /** Server-computed from computeDiff. */
   newRow: Record<string, unknown>;
 }
 
@@ -56,15 +44,14 @@ export interface BulkSpeciesCorrectionInput {
   schema: string;
   plotID: number;
   censusID: number;
-  /** `BulkEditPlan.speciesCorrectionGroups` from the authorized, hash-verified plan. */
+  /** From the authorized, hash-verified BulkEditPlan. */
   groups: readonly SpeciesCorrectionGroup[];
-  /** Every submitted matched row belonging to any of those groups. */
   members: readonly BulkSpeciesCorrectionMemberInput[];
   createdBy: string;
   role?: UserAuthRoles | null;
 }
 
-/** Why `prepareBulkSpeciesCorrections` refused to assemble the batch — always a caller/assembly bug, never a DB-state conflict. */
+/** Always a caller assembly bug, never a DB-state conflict. */
 export type BulkSpeciesCorrectionInputErrorReason =
   | { kind: 'group-member-not-submitted'; treeID: number; censusID: number; coreMeasurementID: number }
   | { kind: 'member-not-in-exactly-one-group'; coreMeasurementID: number; groupCount: number }
@@ -93,7 +80,7 @@ export class BulkSpeciesCorrectionInputError extends Error {
 
 export type BulkSpeciesCorrectionUnresolvedMeasurementReason = 'not-found' | 'missing-stem-guid';
 
-/** The representative row chosen to anchor a group's correction could not itself be locked and read — a failed/unresolved measurement cannot anchor a correction. */
+/** A failed/unresolved measurement cannot anchor a group's correction. */
 export class BulkSpeciesCorrectionUnresolvedMeasurementError extends Error {
   constructor(
     public readonly coreMeasurementID: number,
@@ -108,7 +95,6 @@ export class BulkSpeciesCorrectionUnresolvedMeasurementError extends Error {
   }
 }
 
-/** One group member's row-local write, built from exactly what the apply phase hands to `writeMeasurementsSummary`. */
 export interface PreparedBulkSpeciesCorrectionMemberWrite {
   readonly rowIndex: number;
   readonly coreMeasurementID: number;
@@ -117,13 +103,11 @@ export interface PreparedBulkSpeciesCorrectionMemberWrite {
   readonly groupMemberContext: SpeciesCorrectionGroupMemberWriteContext;
 }
 
-/** One group's prepared correction plus every member write it needs, ordered ascending by rowIndex. */
 export interface PreparedBulkSpeciesCorrectionGroup {
   readonly group: SpeciesCorrectionGroup;
   readonly prepared: PreparedSpeciesCorrection;
   readonly representativeCoreMeasurementID: number;
   readonly representativeEditedStemGUID: number;
-  /** Every member's coreMeasurementID this group actually submitted, in `group.members` order. */
   readonly submittedMemberCoreMeasurementIDs: readonly number[];
   readonly memberWrites: readonly PreparedBulkSpeciesCorrectionMemberWrite[];
 }
@@ -157,7 +141,6 @@ function countGroupMembershipsByCoreMeasurementID(groups: readonly SpeciesCorrec
   return counts;
 }
 
-/** Runs all four input-assembly checks before any DB access; throws `BulkSpeciesCorrectionInputError` on the first violation found. Returns the submitted-member index for reuse by the main loop. */
 function validateBulkSpeciesCorrectionInput(input: BulkSpeciesCorrectionInput): Map<number, BulkSpeciesCorrectionMemberInput> {
   const submittedByID = indexSubmittedMembers(input.members);
 
@@ -188,7 +171,7 @@ function validateBulkSpeciesCorrectionInput(input: BulkSpeciesCorrectionInput): 
   return submittedByID;
 }
 
-/** The requesting member with the lowest rowIndex — deterministic, independent of input.members order. Callers must have already verified at least one requester exists. */
+/** Lowest rowIndex, so the choice is independent of input.members order. */
 function selectGroupRepresentative(group: SpeciesCorrectionGroup): SpeciesCorrectionGroupMember {
   const requesters = group.members.filter(member => member.requestedCorrection);
   return requesters.reduce((lowest, candidate) => (candidate.rowIndex < lowest.rowIndex ? candidate : lowest));
@@ -198,7 +181,6 @@ interface LockedStemGUIDRow {
   StemGUID: number | null;
 }
 
-/** Locks and reads the representative's current StemGUID — a failed/unresolved measurement (missing row or NULL StemGUID) cannot anchor a correction. */
 async function lockRepresentativeStemGUID(cm: ConnectionManager, schema: string, coreMeasurementID: number, transactionID: string): Promise<number> {
   const rows = (await cm.executeQuery(
     safeFormatQuery(schema, `SELECT StemGUID FROM ??.coremeasurements WHERE CoreMeasurementID = ? LIMIT 1 FOR UPDATE`),
@@ -251,11 +233,7 @@ function buildApplyInput(input: BulkSpeciesCorrectionInput, transactionID: strin
   };
 }
 
-/**
- * Builds one member's row-local write, or `null` when the member's only
- * authorized field change was `SpeciesCode` (owned exclusively by the group
- * correction) and it therefore needs no row-local write at all.
- */
+/** Returns null when SpeciesCode was the member's only change, since the group correction owns it. */
 async function prepareGroupMemberWrite(
   cm: ConnectionManager,
   input: BulkSpeciesCorrectionInput,
@@ -280,13 +258,7 @@ async function prepareGroupMemberWrite(
   };
 }
 
-/**
- * Prepares one group: locks and re-verifies its representative, runs the
- * locked replan/drift check via `prepareTreeSpeciesCorrection`, then builds
- * every member's row-local write. `group.members` is already sorted
- * ascending by rowIndex (the analyzer's own contract — not re-sorted here),
- * so member writes are produced, and therefore stored, in that same order.
- */
+/** Member writes inherit `group.members`' ascending-rowIndex order, which the analyzer guarantees. */
 async function prepareGroup(
   cm: ConnectionManager,
   input: BulkSpeciesCorrectionInput,
@@ -310,7 +282,6 @@ async function prepareGroup(
 
   const memberWrites: PreparedBulkSpeciesCorrectionMemberWrite[] = [];
   for (const groupMember of group.members) {
-    // Presence guaranteed by `validateBulkSpeciesCorrectionInput`'s first check.
     const memberInput = submittedByID.get(groupMember.coreMeasurementID);
     if (!memberInput) continue;
     const write = await prepareGroupMemberWrite(cm, input, transactionID, memberInput);
@@ -328,17 +299,8 @@ async function prepareGroup(
 }
 
 /**
- * Read-only PREPARE phase for a batch of #427 tree-wide species corrections.
- * Issues NO UPDATE/INSERT/DELETE and calls no writer — the only SQL run
- * directly here is the locked representative read; every other read runs
- * inside `prepareTreeSpeciesCorrection`/`loadLockedEditedFieldValuesForSpeciesCorrection`.
- * Iterates `input.groups` in the given order (already sorted by treeID then
- * censusID by the analyzer) without re-sorting or mutating it.
- *
- * Duplicate requests from two members for the same shared-stem column or CM
- * field are NOT re-detected here: the analyzer's `group_field_conflict`
- * batch-level blocker already refuses a genuine contradiction before apply
- * is reachable, and its contract is frozen.
+ * Read-only. Same-field conflicts between members are not re-checked here: the analyzer's
+ * `group_field_conflict` blocker refuses them before apply is reachable.
  */
 export async function prepareBulkSpeciesCorrections(
   cm: ConnectionManager,
@@ -361,20 +323,14 @@ export async function prepareBulkSpeciesCorrections(
   };
 }
 
-// ---------------------------------------------------------------------------
-// APPLY phase (slice 3b): consumes ONLY a `PreparedBulkSpeciesCorrections`.
-// Never re-plans, never re-reads a guard, never calls `analyzeEdit` /
-// `applyEditInTransaction` / `prepareTreeSpeciesCorrection` / `prepareBulkSpeciesCorrections`.
-// ---------------------------------------------------------------------------
+// --- APPLY phase: consumes only the prepared result; never re-plans or re-reads a guard.
 
-/** The scope the caller is applying under — checked against `prepared`'s own captured scope before any mutation. */
 export interface BulkSpeciesCorrectionApplyScope {
   readonly schema: string;
   readonly plotID: number;
   readonly censusID: number;
 }
 
-/** Why `applyPreparedBulkSpeciesCorrections` refused to run — always a caller bug: a `prepared` result captured under one transaction/scope was handed to apply() under another. */
 export type BulkSpeciesCorrectionApplyScopeMismatchReason =
   | { kind: 'transaction'; preparedTransactionID: string; applyTransactionID: string }
   | { kind: 'schema'; preparedSchema: string; expectedSchema: string }
@@ -401,7 +357,6 @@ export class BulkSpeciesCorrectionApplyScopeMismatchError extends Error {
   }
 }
 
-/** Throws before any mutation when `prepared` was not captured for exactly this transaction/scope. */
 function assertAppliedScopeMatchesPrepared(prepared: PreparedBulkSpeciesCorrections, scope: BulkSpeciesCorrectionApplyScope, txID: string): void {
   if (prepared.transactionID !== txID) {
     throw new BulkSpeciesCorrectionApplyScopeMismatchError({ kind: 'transaction', preparedTransactionID: prepared.transactionID, applyTransactionID: txID });
@@ -421,23 +376,15 @@ function assertAppliedScopeMatchesPrepared(prepared: PreparedBulkSpeciesCorrecti
   }
 }
 
-/** One group's reported outcome, derived from the APPLIED correction (`AppliedSpeciesCorrectionResult`) — never from the previewed `group` object, which is what the user saw rather than what actually happened. */
+/** Derived from the applied correction, never the previewed group. */
 export type BulkSpeciesCorrectionGroupResult = AppliedSpeciesCorrectionGroupSummary;
 
-/** `applyPreparedBulkSpeciesCorrections`'s return value. `groups` is in the same order as `prepared.groups`. */
 export type BulkSpeciesCorrectionResult = AppliedSpeciesCorrectionBatchSummary;
 
-/** Shared "dedupe + sort ascending" idiom for every id collection below — never a general-purpose set utility. */
 function dedupeSortedAscending(ids: Iterable<number>): number[] {
   return Array.from(new Set(ids)).sort((a, b) => a - b);
 }
 
-/**
- * A submitted group member counts as UPDATED exactly once if it either
- * requested the correction (`group.members[].requestedCorrection`) or
- * received a row-local write (appears in `memberWrites`) — never both,
- * never per-group duplicated (the `Set` collapses either overlap).
- */
 function collectGroupUpdatedMemberCoreMeasurementIDs(preparedGroup: PreparedBulkSpeciesCorrectionGroup): number[] {
   const memberWriteIDs = new Set(preparedGroup.memberWrites.map(write => write.coreMeasurementID));
   const updated = new Set<number>();
@@ -477,16 +424,7 @@ function buildGroupResult(preparedGroup: PreparedBulkSpeciesCorrectionGroup, app
   };
 }
 
-/**
- * Mutating APPLY phase for a batch of #427 tree-wide species corrections,
- * consuming ONLY `prepared` (the read-only output of `prepareBulkSpeciesCorrections`).
- * Guards the scope/transaction before any write (see
- * `assertAppliedScopeMatchesPrepared`), then iterates `prepared.groups` in
- * its stored order, applying each group's correction exactly once. Any
- * error from a member write or a correction apply propagates unchanged —
- * the caller's outer transaction rolls the whole batch back; nothing here
- * catches, wraps, or downgrades it.
- */
+/** Errors propagate unchanged so the caller's outer transaction rolls back the whole batch. */
 export async function applyPreparedBulkSpeciesCorrections(
   cm: ConnectionManager,
   prepared: PreparedBulkSpeciesCorrections,
@@ -496,18 +434,13 @@ export async function applyPreparedBulkSpeciesCorrections(
   assertAppliedScopeMatchesPrepared(prepared, scope, txID);
 
   const groups: BulkSpeciesCorrectionGroupResult[] = [];
-  // Every entry here is exactly one group, pushed once per processed group —
-  // deliberately NOT deduplicated: a correction is counted per group, never
-  // collapsed across groups even if two groups happened to share a treeID.
+  // Deliberately not deduplicated: corrections are counted per group, even for a shared treeID.
   const correctedTreeIDs: number[] = [];
   const updatedMemberIDsAcrossGroups: number[] = [];
   const submittedMemberIDsAcrossGroups: number[] = [];
 
   for (const preparedGroup of prepared.groups) {
-    // Member writes run FIRST, in their stored ascending-rowIndex order; the
-    // group's correction is applied SECOND. Its closing step revalidates
-    // every attached member against post-write values, so writing members
-    // first is what lets that single refresh observe each row's final state.
+    // Members first: the correction's closing revalidation must observe each row's final values.
     for (const write of preparedGroup.memberWrites) {
       await writeMeasurementsSummary(cm, write.applyInput, write.plan, txID, write.groupMemberContext);
     }

@@ -38,27 +38,18 @@ export interface WriterResult {
   validationPending: boolean;
 }
 
-// --- #427 batch-executor group-member write context -----------------------
-// A tree-wide species correction's batch executor writes every group
-// member's row-local fields through this writer FIRST, then applies the
-// correction itself exactly once afterward — because applying the
-// correction ends by refreshing ingestion errors/validation state for every
-// attached member, which must observe the already-edited values. This
-// context flips this writer onto the same sparse correction write policy
-// (see `correctionWritePolicyActive` below) for that row-local write
-// WITHOUT also re-running the tree correction — never constructible from
-// request JSON; the writer instead validates it at the top of
-// `writeMeasurementsSummary`, before any read or write.
+// The batch executor writes each group member's row-local fields first and applies the
+// correction once afterward, so the correction's error refresh sees the edited values.
+// This context enables the sparse correction write policy without re-running the correction.
 export const SPECIES_CORRECTION_GROUP_MEMBER_WRITE_KIND = 'species-correction-group-member';
 
 export interface SpeciesCorrectionGroupMemberWriteContext {
   kind: typeof SPECIES_CORRECTION_GROUP_MEMBER_WRITE_KIND;
-  /** Must equal the `txID` this exact call runs under — the executor's own open transaction, never a different one. */
+  /** Must equal the `txID` this call runs under (the executor's open transaction). */
   transactionID: string;
   schema: string;
   plotID: number;
   censusID: number;
-  /** Must equal `Number(input.targetID)` — the row this specific write is for. */
   targetCoreMeasurementID: number;
 }
 
@@ -69,18 +60,7 @@ export class SpeciesCorrectionGroupMemberContextError extends Error {
   }
 }
 
-/**
- * Hard validation standing in for "not constructible from request JSON" —
- * every field the context claims is cross-checked against the caller's own
- * `input`/`plan`/`txID` before any read or write runs. `writeLedger`/
- * `refreshViews` must both be exactly `false`: the group path builds no
- * ledger row (so no `species_correction_metadata` marker either) and no
- * per-row view refresh (the batch's sibling set is not available here; the
- * executor runs one scope refresh after every member is written).
- * `plan.speciesCorrection` must be absent — a group member's row-local write
- * must never also carry its own correction plan, since the executor applies
- * that correction exactly once, outside this call.
- */
+/** Cross-checks every context field against the caller's own input/plan/txID, since the context is never built from request JSON. */
 function assertValidSpeciesCorrectionGroupMemberContext(
   context: SpeciesCorrectionGroupMemberWriteContext,
   input: ApplyInTransactionInput,
@@ -290,15 +270,8 @@ interface LoadedCoreMeasurementRow {
 }
 
 /**
- * `forUpdate` must be set on the #427 species-correction path (see
- * `correctionWritePolicyActive` in `writeMeasurementsSummary`): the caller's own
- * `analyzeEdit` may have run earlier in this exact transaction before any
- * lock was taken, fixing a REPEATABLE READ snapshot that a plain `SELECT`
- * here would still observe even though `tree-species-correction-writer.ts`'s
- * locked replan has already forced a current read of the overlapping
- * trees/stems/measurements rows — a lock taken by one statement does not
- * make a later, unrelated plain `SELECT` current. Non-correction callers
- * leave this `false` (default), preserving existing behavior exactly.
+ * `forUpdate` is required on the species-correction path: an earlier `analyzeEdit` in this
+ * transaction may have fixed a REPEATABLE READ snapshot, and only a locking read sees current rows.
  */
 async function loadCurrentJoinedRow(
   cm: ConnectionManager,
@@ -347,14 +320,7 @@ async function loadCurrentJoinedRow(
   return rows[0] as LoadedCoreMeasurementRow;
 }
 
-/**
- * The 12 fields `assertNoEditedFieldDriftForSpeciesCorrection` checks
- * (`SpeciesCode` excluded — that precondition belongs to the locked replan
- * comparison in `tree-species-correction-writer.ts`). Single source of
- * truth for the shape: used directly by the drift guard below AND by
- * `loadLockedEditedFieldValuesForSpeciesCorrection`, so the batch executor's
- * pre-write guard can never drift from this writer's own.
- */
+// SpeciesCode is excluded: the locked replan in tree-species-correction-writer.ts owns that precondition.
 function buildLockedEditedFieldValuesForSpeciesCorrection(row: LoadedCoreMeasurementRow): Record<string, unknown> {
   return {
     TreeTag: row.TreeTag,
@@ -372,14 +338,6 @@ function buildLockedEditedFieldValuesForSpeciesCorrection(row: LoadedCoreMeasure
   };
 }
 
-/**
- * Read-only: the exact locked (`FOR UPDATE`) current values the batch
- * executor must pass to `assertNoEditedFieldDriftForSpeciesCorrection`
- * (imported from `../tree-species-correction-writer`) before its own first
- * write for a group member's row-local field changes. Issues NO write.
- * `loadCurrentJoinedRow` already throws when the row does not exist, so a
- * missing row never silently returns a half-empty map here.
- */
 export async function loadLockedEditedFieldValuesForSpeciesCorrection(
   cm: ConnectionManager,
   schema: string,
@@ -390,7 +348,6 @@ export async function loadLockedEditedFieldValuesForSpeciesCorrection(
   return buildLockedEditedFieldValuesForSpeciesCorrection(row);
 }
 
-/** `forUpdate`: see `loadCurrentJoinedRow` doc comment above — same correction-path rationale. */
 async function loadCoreMeasurementRow(
   cm: ConnectionManager,
   schema: string,
@@ -407,7 +364,6 @@ async function loadCoreMeasurementRow(
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
-/** `forUpdate`: see `loadCurrentJoinedRow` doc comment above — same correction-path rationale. */
 async function loadStemRow(
   cm: ConnectionManager,
   schema: string,
@@ -421,7 +377,6 @@ async function loadStemRow(
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
-/** `forUpdate`: see `loadCurrentJoinedRow` doc comment above — same correction-path rationale. */
 async function loadTreeRow(
   cm: ConnectionManager,
   schema: string,
@@ -435,7 +390,6 @@ async function loadTreeRow(
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
-/** `forUpdate`: see `loadCurrentJoinedRow` doc comment above — same correction-path rationale. */
 async function loadCmAttributeRows(
   cm: ConnectionManager,
   schema: string,
@@ -522,7 +476,6 @@ export async function writeMeasurementsSummary(
   txID: string,
   groupMemberContext?: SpeciesCorrectionGroupMemberWriteContext
 ): Promise<WriterResult> {
-  // Must run before ANY read/write below — see `assertValidSpeciesCorrectionGroupMemberContext`'s own doc comment.
   if (groupMemberContext) {
     assertValidSpeciesCorrectionGroupMemberContext(groupMemberContext, input, plan, txID);
   }
@@ -536,29 +489,13 @@ export async function writeMeasurementsSummary(
     newValues[field] = to;
   }
 
-  // True only for the row that itself carries the previewed correction (the
-  // tree-correction target). Drives ONLY the pre-write drift guard below —
-  // never the broader write-policy gates, which also cover a group member's
-  // row-local write (see `correctionWritePolicyActive`).
   const hasOwnSpeciesCorrectionPlan = Boolean(plan.speciesCorrection);
 
-  // A #427 species correction — whether this row carries its own correction
-  // plan, or is a sibling group member whose row-local field changes the
-  // batch executor is applying via `groupMemberContext` — rewrites the
-  // EXISTING tree's SpeciesID in place (see tree-species-correction-writer.ts)
-  // rather than re-linking this measurement to a different/newly-created
-  // tree, and must never hard-delete this row's error history. Computed from
-  // `plan`/`groupMemberContext` alone (no DB read needed), so every
-  // read/write below this point on the correction path can be made a
-  // current locking read from the start.
+  // A species correction rewrites the existing tree's SpeciesID in place instead of
+  // re-linking to another tree, and must never hard-delete this row's error history.
   const correctionWritePolicyActive = hasOwnSpeciesCorrectionPlan || Boolean(groupMemberContext);
 
-  // Capture before-state rows for exact-revert support. On the correction
-  // path these are locking (`FOR UPDATE`) reads: this exact transaction's
-  // earlier `analyzeEdit` pass may have already fixed a REPEATABLE READ
-  // snapshot before any lock was taken, and `tree-species-correction-writer`'s
-  // own locks (taken immediately below) do not retroactively make these
-  // reads current — only `FOR UPDATE` on each read itself does.
+  // Capture before-state rows for exact-revert support.
   const beforeCoreRow = await loadCoreMeasurementRow(cm, schema, coreMeasurementID, txID, { forUpdate: correctionWritePolicyActive });
   if (!beforeCoreRow) throw new Error(`measurementssummary writer: coremeasurements ${coreMeasurementID} not found at write time`);
   const beforeStemGUID = beforeCoreRow.StemGUID as number | null;
@@ -581,12 +518,8 @@ export async function writeMeasurementsSummary(
     }
   }
 
-  // --- #427 preflight: locked replan, complete precondition comparison, and
-  // the sibling "before" snapshot — ALL before this function's first write
-  // (see `prepareTreeSpeciesCorrection`'s doc comment). Retained and
-  // consumed verbatim by `applyPreparedTreeSpeciesCorrection` far below,
-  // after this function's own generic writes — re-planning at that point
-  // would misread this operation's own write as drift against itself.
+  // Must be prepared before this function's first write: re-planning after the
+  // generic writes below would misread this operation's own writes as drift.
   const preparedSpeciesCorrection: PreparedSpeciesCorrection | null =
     hasOwnSpeciesCorrectionPlan && plan.speciesCorrection
       ? await prepareTreeSpeciesCorrection(
@@ -612,10 +545,8 @@ export async function writeMeasurementsSummary(
     (merged as unknown as Record<string, unknown>)[field] = newValues[field];
   }
 
-  // Own-correction path only — NOT `groupMemberContext`. A group member's
-  // row-local write skips this: the executor already ran this exact guard
-  // pre-batch; re-running it here would misread this same batch's own
-  // just-written value as drift against itself.
+  // Group members skip this: the executor already ran the guard pre-batch, and re-running
+  // it would misread this batch's own just-written values as drift.
   if (hasOwnSpeciesCorrectionPlan) {
     assertNoEditedFieldDriftForSpeciesCorrection(plan.fieldChanges, buildLockedEditedFieldValuesForSpeciesCorrection(current));
   }
@@ -869,9 +800,6 @@ export async function writeMeasurementsSummary(
   const effective = <K extends keyof LoadedCoreMeasurementRow>(field: K): LoadedCoreMeasurementRow[K] =>
     changedFields.has(field as string) ? (merged as LoadedCoreMeasurementRow)[field] : (current as LoadedCoreMeasurementRow)[field];
 
-  // Assigns `key` only when `sourceField` is one of this edit's actual
-  // changedFields — used below on the correction path so an unchanged raw
-  // column is never rewritten with its own current (or a fabricated) value.
   const assignIfChanged = (target: Record<string, unknown>, sourceField: string, key: string, value: unknown): void => {
     if (changedFields.has(sourceField)) target[key] = value;
   };
@@ -881,10 +809,7 @@ export async function writeMeasurementsSummary(
     changesFound = true;
     const rawSyncValues: Record<string, unknown> = {};
     if (correctionWritePolicyActive) {
-      // Sparse sync — only the fields the user actually edited. RawSpCode is
-      // intentionally never written here: applyPreparedTreeSpeciesCorrection
-      // below stamps the canonical species code on every attached member
-      // (including this row).
+      // RawSpCode is omitted: applyPreparedTreeSpeciesCorrection stamps the canonical code on every member.
       assignIfChanged(rawSyncValues, 'TreeTag', 'RawTreeTag', newValues.TreeTag ?? null);
       assignIfChanged(rawSyncValues, 'StemTag', 'RawStemTag', newValues.StemTag ?? null);
       assignIfChanged(rawSyncValues, 'QuadratName', 'RawQuadrat', newValues.QuadratName ?? null);
@@ -926,13 +851,7 @@ export async function writeMeasurementsSummary(
     }
   }
 
-  // On the correction path the edited row's error state is owned by
-  // `refreshCorrectionErrorsAndValidationPending` (called from
-  // `applyPreparedTreeSpeciesCorrection` a few lines below, after all of
-  // this writer's own local writes), which treats the target exactly like
-  // every other attached member, retains history instead of hard-deleting
-  // it, and resolves only occurrences a revalidation pass can genuinely
-  // recompute.
+  // On the correction path, applyPreparedTreeSpeciesCorrection owns error state and retains history.
   if (changesFound && !correctionWritePolicyActive) {
     const effectiveCensusID = Number(merged.CensusID ?? current.CensusID ?? censusID);
 
@@ -978,20 +897,11 @@ export async function writeMeasurementsSummary(
     await cm.executeQuery(resetValidationQuery, [], txID);
   }
 
-  // Applies the ALREADY-PREPARED (locked, drift-checked) correction result —
-  // never re-plans — after the edited row's own Raw* sync and ingestion-error
-  // refresh above, so the canonical species code (not the user's typed
-  // spelling) ends up in RawSpCode. Sibling StateRows merge into this
-  // writer's own before/afterState; the edited CM's rows are already owned
-  // by the generic capture and are not duplicated. The undo `domainDiff`
-  // below is built from real post-write snapshots — never a predicted
-  // overlay.
+  // Runs after the Raw* sync above so the canonical species code, not the typed spelling, ends up in RawSpCode.
   let siblingBeforeState: EditOperationStateRow[] = [];
   let siblingAfterState: EditOperationStateRow[] = [];
   let metadataBeforeState: EditOperationStateRow | null = null;
   let metadataAfterState: EditOperationStateRow | null = null;
-  // Kept outside the `if` below so the view-refresh step further down can
-  // read the correction's own verified member/error-refresh ids.
   let correctionResult: AppliedSpeciesCorrectionResult | null = null;
   if (correctionWritePolicyActive && preparedSpeciesCorrection) {
     correctionResult = await applyPreparedTreeSpeciesCorrection(cm, schema, preparedSpeciesCorrection, txID);
@@ -1000,10 +910,8 @@ export async function writeMeasurementsSummary(
     beforeState.push(...siblingBeforeState);
   }
 
-  // Capture after-state for exact-revert support. On the correction path
-  // this is the FIRST point at which the edited row's post-write RawSpCode
-  // (stamped by applyPreparedTreeSpeciesCorrection above) can be observed —
-  // reading any earlier would corrupt the undo evidence built below.
+  // Capture after-state for exact-revert support. Must follow the correction apply so
+  // the undo evidence sees the stamped RawSpCode.
   const afterCoreRow = await loadCoreMeasurementRow(cm, schema, coreMeasurementID, txID, { forUpdate: correctionWritePolicyActive });
   const afterStemGUID = (afterCoreRow?.StemGUID ?? null) as number | null;
   const afterStemRow = await loadStemRow(cm, schema, afterStemGUID, txID, { forUpdate: correctionWritePolicyActive });
@@ -1068,8 +976,6 @@ export async function writeMeasurementsSummary(
       if (refreshTargets.mode === 'targeted') {
         const affectedCoreMeasurementIDs = new Set<number>(refreshTargets.coreMeasurementIDs);
         if (correctionResult) {
-          // The correction's own verified membership/error-refresh ids are
-          // the complete set of OTHER rows it touched — never re-queried.
           for (const member of correctionResult.correction.measurements) affectedCoreMeasurementIDs.add(member.coreMeasurementID);
           for (const id of correctionResult.errorRefresh.ingestionRefreshedMeasurementIDs) affectedCoreMeasurementIDs.add(id);
           for (const id of correctionResult.errorRefresh.pendingMeasurementIDs) affectedCoreMeasurementIDs.add(id);

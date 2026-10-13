@@ -1,35 +1,10 @@
-// Transactional writer for a previewed tree-wide species correction (see
-// tree-species-correction.ts for the preview/plan). Called only from
-// writers/measurementssummary.ts when `plan.speciesCorrection` is present —
-// never for an ordinary single-row edit.
+// Applies a previewed tree-wide species correction inside the caller's transaction and scope lock;
+// it never manages the transaction and never creates a tree or stem.
 //
-// Runs INSIDE the caller's existing transaction and measurement-scope lock.
-// Never begins, commits, or rolls back a transaction, never acquires the
-// scope lock, and never creates a tree/stem — a correction only rewrites the
-// existing tree's SpeciesID in its exact census.
-//
-// Locked-replan/drift precondition: the caller's earlier preview may be
-// stale (a REPEATABLE READ snapshot fixed before any lock was taken, or a
-// genuine race since review). Before any write, `planSpeciesCorrection` is
-// re-run with `forUpdate: true` — locking every row it reads and forcing a
-// current-committed read — and the result is compared field-by-field
-// (including each member's `priorRawSpCode`, since a concurrently changed
-// RawSpCode invalidates the undo "before" value, not merely a fresh value to
-// capture) against the previewed correction. Any mismatch — including one
-// that still independently resolves to `status: 'ok'` — is refused as a
-// structured conflict rather than applied against an unreviewed scope.
-//
-// Two-phase API: `prepareTreeSpeciesCorrection` performs only the locked
-// replan, drift check, and sibling "before" snapshot (itself a locking read
-// — an earlier `FOR UPDATE` does not make a later plain `SELECT` current) —
-// no write. The caller runs this before its own first write, so the
-// captured state (including the edited row's own RawSpCode) predates the
-// generic writer's Raw* sync. `applyPreparedTreeSpeciesCorrection` then
-// mutates using exactly that prepared result — it never re-plans, so a write
-// this module itself just made cannot be misread as drift against itself —
-// and throws if run under a different transaction than the one that
-// produced the prepared result. `writeTreeSpeciesCorrection` is prepare+apply
-// in one call, for standalone callers with no reason to split the phases.
+// The preview may be stale (a REPEATABLE READ snapshot taken before any lock, or a real race), so the
+// plan is re-run with `forUpdate: true` and any difference from the preview is refused as a conflict.
+// Prepare and apply are split so the caller can prepare before its own first write and apply after it
+// without the apply step misreading that write as drift.
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import type { EditOperationStateRow } from '@/config/editoperations';
@@ -43,19 +18,8 @@ export const SPECIES_CORRECTION_METADATA_TABLE = 'species_correction_metadata';
 export const SPECIES_CORRECTION_METADATA_VERSION = 1 as const;
 
 /**
- * Why a write was refused. Exactly one of three causes:
- *  - `replan`: the locked re-read of planSpeciesCorrection did not return
- *    `status: 'ok'` (missing/inactive/moved source, changed species/active
- *    state, a destination collision, or any other non-'ok' outcome —
- *    including `no_correction`, which here means the correction this write
- *    was asked to apply has already vanished since it was reviewed).
- *  - `drift`: the locked re-read *did* return 'ok', but its membership/scope
- *    (stem or measurement count, link, census, active flag) no longer
- *    matches what was previewed.
- *  - `unique-constraint`: the `trees` UPDATE itself raced the table's
- *    `(TreeTag, SpeciesID, CensusID)` unique constraint (ER_DUP_ENTRY /
- *    errno 1062) — translated here because it is the one known, expected
- *    race on this exact write; no other SQL error is reinterpreted.
+ * `unique-constraint` is the one expected race on the trees UPDATE (ER_DUP_ENTRY); no other SQL error
+ * is reinterpreted. A `replan` of `no_correction` means the reviewed correction has since vanished.
  */
 export type SpeciesCorrectionWriteConflictReason =
   | { kind: 'replan'; result: Exclude<SpeciesCorrectionPlanResult, { status: 'ok' }> }
@@ -87,18 +51,11 @@ export interface SpeciesCorrectionMetadataMeasurement {
   stemGUID: number;
   censusID: number;
   isActive: boolean;
-  /** The RawSpCode this measurement carried in this metadata's species state (NULL and differing spellings preserved — never fabricated). */
+  /** NULL and differing spellings are preserved, never fabricated. */
   rawSpCode: string | null;
 }
 
-/**
- * Fixed undo-restore allowlist. No derived/bookkeeping column (IsValidated,
- * any validation/error status, any timestamp) ever belongs here, and the
- * full `coremeasurements`/`stems` rows are never duplicated — the ledger's
- * own before/after `EditOperationStateRow`s already carry those in full.
- * `SpeciesID`/`RawSpCode` are excluded too: already explicit elsewhere on
- * `SpeciesCorrectionMetadata`.
- */
+/** Undo-restore allowlist. Derived/bookkeeping columns (IsValidated, timestamps) must never be added. */
 export const SPECIES_CORRECTION_DIFF_COREMEASUREMENTS_COLUMNS = [
   'MeasuredDBH',
   'MeasuredHOM',
@@ -116,14 +73,7 @@ export const SPECIES_CORRECTION_DIFF_STEMS_COLUMNS = ['LocalX', 'LocalY', 'PlotX
 export type SpeciesCorrectionDiffCoreMeasurementColumn = (typeof SPECIES_CORRECTION_DIFF_COREMEASUREMENTS_COLUMNS)[number];
 export type SpeciesCorrectionDiffStemColumn = (typeof SPECIES_CORRECTION_DIFF_STEMS_COLUMNS)[number];
 
-/**
- * `fieldChanged` is keyed on PLAN field names (`StemLocalX`, `MeasuredDBH`,
- * ...) for decimal/date normalization, but the allowlists above are STORED
- * column names (`RawX`, `LocalX`, `RawPlotX`, `PlotX`, ...). This maps each
- * stored column to the plan field whose comparison semantics apply; an
- * unmapped column (e.g. `Description`, `RawCodes`) is plain text and needs
- * none, so it compares under its own name.
- */
+/** Maps stored column names to the plan field whose decimal/date comparison applies; unmapped columns compare as text. */
 export const SPECIES_CORRECTION_STORED_COLUMN_COMPARISON_FIELD: Readonly<Record<string, string>> = {
   RawX: 'StemLocalX',
   LocalX: 'StemLocalX',
@@ -138,21 +88,15 @@ export const SPECIES_CORRECTION_STORED_COLUMN_COMPARISON_FIELD: Readonly<Record<
   MeasurementDate: 'MeasurementDate'
 };
 
-/** Both sides of one changed column. NULL is preserved verbatim on either side — never coerced to '' or 0 — so a later undo can restore a raw NULL exactly. */
+/** NULL is preserved verbatim so an undo can restore a raw NULL exactly. */
 export interface SpeciesCorrectionColumnChange {
   before: unknown;
   after: unknown;
 }
 
 /**
- * Changed-only domain diff, embedded identically on both the before- and
- * after-state metadata rows (symmetric evidence, not two half-records).
- * `coremeasurements`/`stems` carry an entry ONLY for an allowlisted column
- * whose stored value actually differs — an untouched column is omitted
- * entirely, never present with `before === after`. `attributeCodes` is
- * ALWAYS present, even when both sides are empty: an empty array means a
- * provably empty association set; a missing/non-array value is malformed
- * evidence, never "no attributes".
+ * Lists only allowlisted columns whose stored value changed. `attributeCodes` is always present:
+ * an empty array means no attributes, while a missing value is malformed evidence.
  */
 export interface SpeciesCorrectionDomainDiff {
   coremeasurements: Partial<Record<SpeciesCorrectionDiffCoreMeasurementColumn, SpeciesCorrectionColumnChange>>;
@@ -169,21 +113,13 @@ export const EMPTY_SPECIES_CORRECTION_DOMAIN_DIFF: SpeciesCorrectionDomainDiff =
 export interface SpeciesCorrectionDomainDiffInput {
   beforeCoreMeasurement: Record<string, unknown>;
   afterCoreMeasurement: Record<string, unknown>;
-  /** Null only when the edited row has no stem — no LocalX/Y/PlotX/Y diff is possible without one. */
   beforeStem: Record<string, unknown> | null;
   afterStem: Record<string, unknown> | null;
   attributeCodesBefore: readonly string[];
   attributeCodesAfter: readonly string[];
 }
 
-/**
- * Pure, DB-free: compares the allowlisted columns above using the exact
- * stored-value comparison the analyzer itself uses (`fieldChanged`, via
- * `SPECIES_CORRECTION_STORED_COLUMN_COMPARISON_FIELD` for decimal/date
- * columns), and copies the attribute-code arrays verbatim. Callers MUST
- * pass real locked before/after DB snapshots — never requested write
- * parameters — so a MySQL-rounded persisted value is what this reports.
- */
+/** Callers must pass real locked DB snapshots, not requested write values, so MySQL-rounded values are reported. */
 export function buildSpeciesCorrectionDomainDiff(input: SpeciesCorrectionDomainDiffInput): SpeciesCorrectionDomainDiff {
   const coremeasurements: SpeciesCorrectionDomainDiff['coremeasurements'] = {};
   for (const column of SPECIES_CORRECTION_DIFF_COREMEASUREMENTS_COLUMNS) {
@@ -214,20 +150,7 @@ export function buildSpeciesCorrectionDomainDiff(input: SpeciesCorrectionDomainD
   };
 }
 
-/**
- * Versioned, self-describing correction record carried as an
- * `EditOperationStateRow` on both `beforeState` (old species / prior
- * RawSpCode per member) and `afterState` (new canonical species / canonical
- * RawSpCode on every member). `primaryKeyValue` is the corrected TreeID
- * explicitly, so a later undo stage can locate it without relying on state
- * array order. `stems`/`measurements` are the exact locked-read membership
- * the write was verified against — the precondition set a future drift
- * guard must re-check (never unrelated later DBH/comments edits).
- * `editedCoreMeasurementID`/`editedStemGUID` name the exact row the user
- * edited, by PK, so undo never has to infer it from array position.
- * `domainDiff` is identical on this metadata's before and after row (see
- * `buildSpeciesCorrectionMetadata`).
- */
+/** Versioned correction record stored on both before- and after-state, keyed by the corrected TreeID. */
 export interface SpeciesCorrectionMetadata {
   version: typeof SPECIES_CORRECTION_METADATA_VERSION;
   operation: 'tree-species-correction';
@@ -244,67 +167,41 @@ export interface SpeciesCorrectionMetadata {
   domainDiff: SpeciesCorrectionDomainDiff;
 }
 
-/**
- * The subset `prepareTreeSpeciesCorrection` itself needs — the locked
- * replan/drift precondition plus the edited row's own PK. `domainDiff` is
- * deliberately absent: the caller does not yet know it at prepare() time
- * (see `measurementssummary.ts`, which computes it only after its own
- * write-site overrides accumulate, immediately before apply()).
- */
 export interface SpeciesCorrectionPrepareInput {
-  /** The correction the user reviewed (EditPlan.speciesCorrection from the pre-write analyzer pass). Used only for the drift comparison below — every actual write uses the freshly re-verified locked values. */
+  /** Used only for the drift comparison; every write uses the locked, re-verified values. */
   previewedCorrection: SpeciesCorrectionSummary;
   editedCoreMeasurementID: number;
   editedStemGUID: number;
 }
 
 export interface WriteTreeSpeciesCorrectionInput extends SpeciesCorrectionPrepareInput {
-  /** The allowlisted-column + attribute-code diff this edit produced outside the species correction itself, built by the caller via `buildSpeciesCorrectionDomainDiff`. A caller with no accompanying field edit passes `EMPTY_SPECIES_CORRECTION_DOMAIN_DIFF` explicitly rather than omitting it. */
+  /** Pass EMPTY_SPECIES_CORRECTION_DOMAIN_DIFF when there is no accompanying field edit. */
   domainDiff: SpeciesCorrectionDomainDiff;
 }
 
 /**
- * `applyPreparedTreeSpeciesCorrection`'s return value. No metadata state
- * rows here: this function mutates `RawSpCode` before the caller's own
- * post-write snapshots exist, so building `species_correction_metadata`'s
- * `domainDiff` at this point could only ever predict the after-side rather
- * than observe it. The caller builds both metadata rows itself, once it has
- * real after-snapshots, via `buildSpeciesCorrectionMetadataStateRows(result.correction, ...)`.
+ * Carries no metadata rows: the caller builds them from real post-write snapshots so the
+ * domainDiff observes, rather than predicts, the after-state.
  */
 export interface AppliedSpeciesCorrectionResult {
-  /** The locked, re-verified correction actually applied (canonical DB code, current membership). */
   correction: SpeciesCorrectionSummary;
-  /** Full before/after `coremeasurements` rows for every OTHER member of the tree (not the edited CM — the generic writer already owns that row's before/after StateRow). Empty when the tree has no other attached measurements. */
+  /** Every OTHER member's coremeasurements rows; the edited row's state is captured by the generic writer. */
   siblingBeforeState: EditOperationStateRow[];
   siblingAfterState: EditOperationStateRow[];
-  /** Result of `refreshCorrectionErrorsAndValidationPending` — which members' ingestion errors were re-derived, how many stale validation-source occurrences were resolved, and which active members were re-queued for validation. */
   errorRefresh: CorrectionErrorRefreshResult;
 }
 
-/** `writeTreeSpeciesCorrection`'s return value: `AppliedSpeciesCorrectionResult` plus the metadata state rows it builds itself, via `buildSpeciesCorrectionMetadataStateRows`, from the caller-supplied `domainDiff` once `correction` is known. */
 export type WriteTreeSpeciesCorrectionResult = AppliedSpeciesCorrectionResult & {
   metadataBeforeState: EditOperationStateRow;
   metadataAfterState: EditOperationStateRow;
 };
 
-/**
- * The read-only result of `prepareTreeSpeciesCorrection`: the locked,
- * drift-checked correction plus the sibling "before" snapshot, both captured
- * before any mutation. Internal only — this is produced exclusively by
- * `prepareTreeSpeciesCorrection` inside an already-open transaction and
- * consumed exclusively by `applyPreparedTreeSpeciesCorrection` in that same
- * transaction; no request/route/serialized input may construct or carry one.
- * `transactionID` records which transaction it was captured under, so
- * `applyPreparedTreeSpeciesCorrection` can refuse to apply a prepared result
- * under a different transaction than the one that locked and verified it.
- */
+/** Produced by prepare and consumed by apply in the same transaction; never built from request input. */
 export interface PreparedSpeciesCorrection {
   readonly transactionID: string;
   readonly editedCoreMeasurementID: number;
   readonly editedStemGUID: number;
-  /** The locked, drift-checked correction `applyPreparedTreeSpeciesCorrection` must act on verbatim — never re-planned. */
   readonly correction: SpeciesCorrectionSummary;
-  /** Every OTHER attached `coremeasurements` row, read under lock before any mutation. */
   readonly siblingBeforeState: EditOperationStateRow[];
 }
 
@@ -329,18 +226,8 @@ function isUniqueConstraintViolation(error: unknown): boolean {
 }
 
 /**
- * Compares the previewed correction's entire precondition contract against
- * the locked re-read, field-by-field (no JSON.stringify — a reordered-but-
- * equal array must not be reported as drift, and this project's planner
- * always returns `stems`/`measurements` pre-sorted ascending, so position-
- * wise comparison is exact). Every measurement's `priorRawSpCode` IS part of
- * this comparison: if another transaction changed a member's RawSpCode
- * between preview and this locked re-read, the undo "before" value the
- * caller reviewed no longer matches reality, and applying anyway would bake
- * a wrong restore value into `species_correction_metadata`. This check runs
- * from `prepareTreeSpeciesCorrection`, before the main writer's own first
- * write, so it is comparing against the row's genuinely pre-mutation state —
- * never against a value this same operation just wrote.
+ * Position-wise comparison is exact because the planner returns stems/measurements sorted by ID.
+ * priorRawSpCode is compared too: a concurrent change would bake a wrong undo value into the metadata.
  */
 function findSpeciesCorrectionDrift(previewed: SpeciesCorrectionSummary, verified: SpeciesCorrectionSummary): string | null {
   const scalarFields: Array<keyof SpeciesCorrectionSummary> = [
@@ -399,39 +286,12 @@ function findSpeciesCorrectionDrift(previewed: SpeciesCorrectionSummary, verifie
   return null;
 }
 
-/**
- * `findSpeciesCorrectionDrift` above verifies only the species/membership
- * preconditions `planSpeciesCorrection` itself returns — it never looks at
- * any OTHER field (`MeasuredDBH`, `StemLocalX`, `Description`, `Attributes`,
- * ...) the user may have edited in the same submit, so a stale `from` for
- * one of those would silently overwrite another user's committed change.
- * `assertNoEditedFieldDriftForSpeciesCorrection` below closes that gap by
- * checking every actually-edited field (`plan.fieldChanges` entries only)
- * against the locked current row. It is a raw-column precondition: every
- * field, `Attributes` included, is compared as the exact stored
- * representation the analyzer itself diffed from (`cm.RawCodes` for
- * `Attributes`), never a derived/materialized shape. `SpeciesCode` is
- * excluded here — that precondition already belongs to the locked replan
- * comparison above.
- */
+// SpeciesCode drift is already covered by the locked replan comparison.
 export const SPECIES_CORRECTION_FIELD_DRIFT_EXCLUDED_FIELDS: ReadonlySet<string> = new Set(['SpeciesCode']);
 
 /**
- * Throws `SpeciesCorrectionWriteConflictError({ kind: 'drift' })` on the
- * first actually-edited field (`SpeciesCode` excluded) whose previewed
- * `from` no longer matches its locked, current, pre-mutation RAW value.
- * Issues NO write and NO DB read itself — `lockedCurrentFieldValues` must
- * already have been loaded, under lock, by the caller. Uses
- * `fieldChangedAtStoredPrecision` from `storedfieldcomparison.ts`: numeric
- * fields compare at the full stored DECIMAL(12,6) scale, not the analyzer's
- * coarser UI-rounding precision, so a sub-UI-precision concurrent write
- * (e.g. 10.000000 -> 10.000001) is never missed here. Deliberately does NOT
- * route through the input-oriented
- * `normalizeFieldValue`/clear-policy machinery in `fieldpolicy.ts`: that
- * machinery exists to interpret a user's freshly typed input (e.g. collapsing
- * `''`/whitespace/the literal string `'NULL'` to a clear), which is the wrong
- * question here — a concurrent change from `'NULL'` to `'null'`, or a
- * whitespace-only edit, is a genuine stored-value difference and must drift.
+ * Compares at full stored DECIMAL scale and deliberately bypasses fieldpolicy's input normalization
+ * (e.g. 'NULL' -> clear): any stored-value difference, however small, is drift.
  */
 export function assertNoEditedFieldDriftForSpeciesCorrection(fieldChanges: readonly FieldChange[], lockedCurrentFieldValues: Record<string, unknown>): void {
   for (const change of fieldChanges) {
@@ -447,19 +307,8 @@ export function assertNoEditedFieldDriftForSpeciesCorrection(fieldChanges: reado
 }
 
 /**
- * `forUpdate` is required for the sibling "before" snapshot (taken from
- * `prepareTreeSpeciesCorrection`, before any mutation): without it, this
- * plain `SELECT` would still observe whatever REPEATABLE READ snapshot an
- * earlier read in this same transaction established, not necessarily the
- * current committed row — the same staleness `planSpeciesCorrection`'s own
- * `forUpdate` option exists to defeat. The sibling "after" snapshot (taken
- * post-mutation) is read with `forUpdate` for the same reason: a sibling
- * already carrying the destination canonical RawSpCode makes that RawSpCode
- * UPDATE a matched-but-0-rows no-op, and an inactive sibling receives no
- * validation-state UPDATE — so neither advances this transaction's
- * REPEATABLE READ view, and a plain read there could still return a
- * pre-correction value that contradicts both the stored row and the before
- * ledger.
+ * Both sibling snapshots need `forUpdate`: an earlier read fixed a REPEATABLE READ snapshot, and a
+ * matched-but-0-rows RawSpCode UPDATE does not advance it, so a plain read can return stale values.
  */
 async function selectCoreMeasurementRows(
   cm: ConnectionManager,
@@ -482,7 +331,7 @@ function buildCoreMeasurementStateRow(row: Record<string, unknown>): EditOperati
   return { table: 'coremeasurements', primaryKey: 'CoreMeasurementID', primaryKeyValue: Number(row.CoreMeasurementID), row };
 }
 
-/** Updates ONLY trees.SpeciesID for this exact (TreeID, CensusID) — no tree/stem creation, no other column. Translates the one known uniqueness race; every other error propagates unchanged. */
+/** Translates only the known (TreeTag, SpeciesID, CensusID) uniqueness race; every other error propagates. */
 async function updateTreeSpeciesWithConflictTranslation(
   cm: ConnectionManager,
   schema: string,
@@ -506,7 +355,7 @@ async function updateTreeSpeciesWithConflictTranslation(
   }
 }
 
-/** Single flat UPDATE stamping the canonical species code onto every attached CM's RawSpCode — edited row included, active and inactive members alike. Must run after the generic writer's own Raw* sync so the canonical code wins over the user's typed spelling. No other column is touched. */
+/** Must run after the generic writer's Raw* sync so the canonical code wins over the typed spelling. */
 async function syncCanonicalRawSpCode(
   cm: ConnectionManager,
   schema: string,
@@ -537,7 +386,7 @@ interface EffectiveMeasurementFieldsRow {
   Comments: string | null;
 }
 
-/** Locked (FOR UPDATE) single joined read of every given member's current effective fields for #307's checker, guaranteeing a current read instead of this transaction's REPEATABLE READ snapshot. */
+/** Locking read so the checker sees current values, not this transaction's REPEATABLE READ snapshot. */
 async function selectEffectiveFieldsForMeasurements(
   cm: ConnectionManager,
   schema: string,
@@ -622,7 +471,6 @@ async function refreshIngestionErrorsForAllMembers(
   return rows.map(row => Number(row.CoreMeasurementID));
 }
 
-/** Sets affected active members pending re-validation (IsValidated = NULL). No member — including the edited row — ever gets a hard DELETE on this path: history is retained for every affected member, nothing is reactivated, and no science validation runs synchronously. */
 async function resetValidationPending(cm: ConnectionManager, schema: string, coreMeasurementIDs: number[], transactionID: string): Promise<void> {
   const placeholders = buildInPlaceholders(coreMeasurementIDs.length);
   await cm.executeQuery(
@@ -633,13 +481,8 @@ async function resetValidationPending(cm: ConnectionManager, schema: string, cor
 }
 
 /**
- * Resolves only the validation-source `measurement_error_log` occurrences a
- * later revalidation pass can genuinely recompute: the ErrorCode must join
- * to an enabled, non-blank-Definition `sitespecificvalidations` row, and
- * `INGESTION_STAGE_ERROR_CODES` are excluded explicitly by code — not by an
- * assumed-missing join row — since those codes have no runnable Definition.
- * Already-resolved rows are never rewritten; nothing is ever deleted or
- * reactivated; no validation SQL is executed here.
+ * Resolves only occurrences a revalidation pass can recompute (enabled rule with a Definition).
+ * Ingestion-stage codes are excluded by code because they have no runnable Definition.
  */
 async function resolveSupportedValidationOccurrences(cm: ConnectionManager, schema: string, measurementIDs: number[], transactionID: string): Promise<number> {
   const placeholders = buildInPlaceholders(measurementIDs.length);
@@ -672,21 +515,8 @@ export interface CorrectionErrorRefreshResult {
 }
 
 /**
- * Owns the error-state half of a species correction, inside the caller's
- * already-open transaction/lock. The member-class policy:
- *  - Ingestion-error refresh runs over `allMemberIDs` — every attached
- *    member, active or inactive, edited target included — each re-checked
- *    against its own current effective values.
- *  - The supported-validation-occurrence resolution and the
- *    pending-revalidation reset (`IsValidated = NULL`) run over
- *    `activeMemberIDs` only. An inactive member's validation state is
- *    deliberately left exactly as it was — it belongs to the census
- *    snapshot the member was measured in, not to a correction reached only
- *    through tree membership — while an active member is re-queued for
- *    validation rather than having any override inferred for it.
- *
- * Each statement is skipped (no `IN ()`) when its own id list is empty.
- * Returned id arrays list exactly the members actually processed.
+ * Ingestion errors are re-derived for every member; validation resolution and the pending reset touch
+ * active members only, because an inactive member's validation state belongs to its own census snapshot.
  */
 export async function refreshCorrectionErrorsAndValidationPending(
   cm: ConnectionManager,
@@ -751,18 +581,7 @@ function buildMetadataStateRow(metadata: SpeciesCorrectionMetadata): EditOperati
   };
 }
 
-/**
- * Phase 1 (read-only): locked re-read, complete precondition comparison
- * (including `priorRawSpCode` — see `findSpeciesCorrectionDrift`), and the
- * sibling "before" snapshot — also a locking read, for the same reason the
- * replan itself needs `forUpdate: true` (see module doc comment above).
- * Issues NO write. Must be called before the caller's (main writer's) own
- * first write, so the prepared `correction`/`siblingBeforeState` — and in
- * particular every member's `priorRawSpCode`, including the edited
- * measurement's own prior value used for `species_correction_metadata`'s
- * before-state — reflect genuinely pre-mutation data, not a value the
- * caller's generic Raw* sync already overwrote.
- */
+/** Read-only. Must run before the caller's first write so every member's priorRawSpCode is genuinely pre-mutation. */
 export async function prepareTreeSpeciesCorrection(
   cm: ConnectionManager,
   schema: string,
@@ -771,8 +590,6 @@ export async function prepareTreeSpeciesCorrection(
 ): Promise<PreparedSpeciesCorrection> {
   const { previewedCorrection } = input;
 
-  // --- Locked re-read; compare the ENTIRE previewed precondition contract
-  // before any write. -------------------------------------------------
   const replanResult = await planSpeciesCorrection(
     cm,
     schema,
@@ -801,9 +618,6 @@ export async function prepareTreeSpeciesCorrection(
   const allMemberIDs = verified.measurements.map(m => m.coreMeasurementID);
   const siblingMemberIDs = allMemberIDs.filter(id => id !== input.editedCoreMeasurementID);
 
-  // --- Sibling "before" snapshot, prior to any mutation — locking read,
-  // same deterministic (ascending CoreMeasurementID) order as the planner's
-  // own measurements read. ------------------------------------------------
   const siblingBeforeRows =
     siblingMemberIDs.length > 0 ? await selectCoreMeasurementRows(cm, schema, siblingMemberIDs, transactionID, { forUpdate: true }) : [];
   const siblingBeforeState = siblingBeforeRows.map(buildCoreMeasurementStateRow);
@@ -818,18 +632,8 @@ export async function prepareTreeSpeciesCorrection(
 }
 
 /**
- * Phase 2 (mutating): applies exactly the prepared, locked, drift-checked
- * correction — never re-plans. Re-planning here would be unsafe: by the time
- * the caller reaches this call, its own generic Raw* sync has already
- * overwritten the edited row's RawSpCode with the user's typed spelling, so
- * a fresh replan would observe that write and (once `priorRawSpCode` is part
- * of the drift comparison) misreport the operation's own prior write as
- * "drift" against itself. Throws `SpeciesCorrectionTransactionMismatchError`
- * if `prepared` was not captured under this exact `transactionID` — a
- * prepared result from one transaction must never be applied in another.
- * Builds no metadata state rows: see `AppliedSpeciesCorrectionResult`'s doc
- * comment. The caller builds them via `buildSpeciesCorrectionMetadataStateRows`
- * once it has its own real post-write snapshots.
+ * Never re-plans: the caller's Raw* sync has already overwritten the edited row's RawSpCode,
+ * so a fresh replan would report this operation's own write as drift.
  */
 export async function applyPreparedTreeSpeciesCorrection(
   cm: ConnectionManager,
@@ -846,28 +650,16 @@ export async function applyPreparedTreeSpeciesCorrection(
   const allMemberIDs = verified.measurements.map(m => m.coreMeasurementID);
   const siblingMemberIDs = allMemberIDs.filter(id => id !== editedCoreMeasurementID);
 
-  // --- The actual correction: ONLY trees.SpeciesID, in its exact census.
-  // No tree/stem creation, no other column, no other tree touched. --------
   await updateTreeSpeciesWithConflictTranslation(cm, schema, verified, transactionID);
 
-  // --- Canonical RawSpCode on every attached CM, active or inactive,
-  // including the edited row (overriding its generic Raw* sync, which
-  // stamped the user's typed — possibly non-canonical — spelling). No
-  // other column changes for any sibling. ----------------------------------
+  // Includes the edited row, overriding the typed spelling its generic Raw* sync wrote.
   await syncCanonicalRawSpCode(cm, schema, allMemberIDs, verified.newSpeciesCode, transactionID);
 
-  // --- Error-state refresh; see `refreshCorrectionErrorsAndValidationPending`'s
-  // own doc comment for the full member-class policy. ----------------------
   const activeMemberIDs = verified.measurements.filter(m => m.isActive).map(m => m.coreMeasurementID);
   const errorRefresh = await refreshCorrectionErrorsAndValidationPending(cm, schema, verified.censusID, allMemberIDs, activeMemberIDs, transactionID);
 
-  // --- Sibling "after" snapshot, reflecting the RawSpCode sync and
-  // pending-revalidation reset above. Locking read: a sibling already
-  // carrying the destination canonical RawSpCode makes that RawSpCode
-  // UPDATE a matched-but-0-rows no-op, and an inactive sibling receives no
-  // validation-state UPDATE — neither advances this transaction's
-  // REPEATABLE READ view, so a plain read here could still return the
-  // pre-correction value. -----------
+  // Locking read: a no-op RawSpCode UPDATE, or an inactive sibling with no validation UPDATE, does not
+  // advance this transaction's REPEATABLE READ view, so a plain read could return pre-correction values.
   const siblingAfterRows = siblingMemberIDs.length > 0 ? await selectCoreMeasurementRows(cm, schema, siblingMemberIDs, transactionID, { forUpdate: true }) : [];
   const siblingAfterState = siblingAfterRows.map(buildCoreMeasurementStateRow);
 
@@ -879,14 +671,6 @@ export async function applyPreparedTreeSpeciesCorrection(
   };
 }
 
-/**
- * Pure: builds both `species_correction_metadata` state rows from an
- * already-applied `correction` and a caller-supplied `domainDiff` — no DB
- * I/O. Called by `writeTreeSpeciesCorrection` immediately after apply (its
- * `domainDiff` is known upfront), and by `writers/measurementssummary.ts`
- * only once it has loaded its own real post-write snapshots to build that
- * `domainDiff` from (see `buildSpeciesCorrectionDomainDiff`).
- */
 export function buildSpeciesCorrectionMetadataStateRows(
   correction: SpeciesCorrectionSummary,
   editedCoreMeasurementID: number,
@@ -918,14 +702,7 @@ export function buildSpeciesCorrectionMetadataStateRows(
   };
 }
 
-/**
- * Single-call convenience wrapper over `prepareTreeSpeciesCorrection` +
- * `applyPreparedTreeSpeciesCorrection`, for standalone callers/tests that
- * have no reason to hold the prepared result across an intervening write
- * (unlike `writers/measurementssummary.ts`, which must — see module doc
- * comment above). Since `input.domainDiff` is known upfront here, this
- * wrapper also builds the metadata state rows itself, right after apply.
- */
+/** Prepare + apply in one call, for callers with no intervening write of their own. */
 export async function writeTreeSpeciesCorrection(
   cm: ConnectionManager,
   schema: string,
