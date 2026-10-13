@@ -295,12 +295,47 @@ describe('useInfiniteGridRows', () => {
     expect(result.current.error?.message).toBe('strict refresh exploded');
   });
 
-  // A strict read superseded by a LATER fetchPage must reject — its own
-  // result was discarded, so an awaiting caller must learn the read never
-  // completed — but the cancellation must stay invisible to the grid's
-  // user-facing `error` state (it is not a real fetch failure).
-  it('refresh({ strict: true }) superseded by a later refresh() rejects with GridRefreshCancelledError and does not set error state', async () => {
+  // A strict read superseded by a LATER fetchPage follows that newer read: the
+  // view is refreshed once the newer read lands, so the caller must not be told
+  // the refresh failed. Its own discarded payload must still never reach rows.
+  it('refresh({ strict: true }) superseded by a later refresh() resolves once the superseding read succeeds, without applying its own stale payload', async () => {
     const { fetcher, resolveCall } = createControllableFetcher<R>();
+    const { result } = renderHook(() => useInfiniteGridRows<R>({ fetcher, initialPageSize: 10, resetKey: 'k', rowIdKey: 'id', paginated: PAGINATED_EMPTY }));
+
+    act(() => result.current.setMode('infinite'));
+    resolveCall(0, { rows: buildRows(0, 1), totalRows: 1 });
+    await waitFor(() => expect(result.current.rows).toEqual(buildRows(0, 1)));
+
+    let strictPromise!: Promise<void>;
+    let strictSettled: 'pending' | 'resolved' | 'rejected' = 'pending';
+    act(() => {
+      strictPromise = result.current.refresh({ strict: true });
+      strictPromise.then(
+        () => (strictSettled = 'resolved'),
+        () => (strictSettled = 'rejected')
+      );
+    });
+    act(() => {
+      void result.current.refresh();
+    });
+
+    await act(async () => {
+      resolveCall(1, { rows: [{ id: 999, name: 'stale-superseded' }], totalRows: 1 });
+    });
+    expect(strictSettled, 'the strict call must wait for the superseding read instead of settling on its own discarded one').toBe('pending');
+    expect(result.current.rows, 'superseded success must not overwrite rows with its stale payload').not.toEqual([{ id: 999, name: 'stale-superseded' }]);
+
+    await act(async () => {
+      resolveCall(2, { rows: [{ id: 1000, name: 'current' }], totalRows: 1 });
+    });
+
+    await expect(strictPromise, 'strict promise must resolve with the outcome of the read that actually refreshed the view').resolves.toBeUndefined();
+    expect(result.current.rows).toEqual([{ id: 1000, name: 'current' }]);
+    expect(result.current.error, 'no read failed, so error must stay clear').toBeNull();
+  });
+
+  it("refresh({ strict: true }) superseded by a later refresh() rejects with the superseding read's own failure", async () => {
+    const { fetcher, resolveCall, rejectCall } = createControllableFetcher<R>();
     const { result } = renderHook(() => useInfiniteGridRows<R>({ fetcher, initialPageSize: 10, resetKey: 'k', rowIdKey: 'id', paginated: PAGINATED_EMPTY }));
 
     act(() => result.current.setMode('infinite'));
@@ -315,17 +350,16 @@ describe('useInfiniteGridRows', () => {
       void result.current.refresh();
     });
 
-    resolveCall(1, { rows: [{ id: 999, name: 'stale-superseded' }], totalRows: 1 });
-
-    await expect(strictPromise, 'strict promise from the superseded call must reject, not resolve').rejects.toBeInstanceOf(GridRefreshCancelledError);
-    expect(result.current.error, 'cancellation must never surface as the visible grid error').toBeNull();
-    expect(result.current.rows, 'superseded success must not overwrite rows with its stale payload').not.toEqual([{ id: 999, name: 'stale-superseded' }]);
-
+    const supersedingFailure = new Error('superseding read failed');
     await act(async () => {
-      resolveCall(2, { rows: [{ id: 1000, name: 'current' }], totalRows: 1 });
+      resolveCall(1, { rows: [{ id: 999, name: 'stale-superseded' }], totalRows: 1 });
+      rejectCall(2, supersedingFailure);
+      await strictPromise.catch(() => {});
     });
-    await waitFor(() => expect(result.current.rows).toEqual([{ id: 1000, name: 'current' }]));
-    expect(result.current.error, 'the superseding call that actually completed must leave error clear').toBeNull();
+
+    await expect(strictPromise, 'the view was never refreshed, so the strict caller must learn of the failure').rejects.toBe(supersedingFailure);
+    expect(result.current.error).toBe(supersedingFailure);
+    expect(result.current.rows, 'neither the stale nor the failed read may change rows').toEqual(buildRows(0, 1));
   });
 
   // A strict read whose own request was aborted (not superseded by a

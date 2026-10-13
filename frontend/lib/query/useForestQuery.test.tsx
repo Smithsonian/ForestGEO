@@ -268,7 +268,7 @@ describe('useForestQuery', () => {
     expect(result.current.data).toEqual({ v: 1 });
   });
 
-  it('refetch({ strict: true }) fails closed when SWR discards its revalidation because a later request on the same key is still pending', async () => {
+  it('refetch({ strict: true }) revalidates again when SWR discards its first attempt for a still-pending later request, and resolves with the retried data', async () => {
     let resolveFirstStrictFetch: (v: unknown) => void = () => {};
     const firstStrictFetch = new Promise(resolve => {
       resolveFirstStrictFetch = resolve;
@@ -281,37 +281,72 @@ describe('useForestQuery', () => {
       .fn()
       .mockResolvedValueOnce({ v: 1 })
       .mockImplementationOnce(() => firstStrictFetch)
-      .mockImplementationOnce(() => laterPendingFetch);
+      .mockImplementationOnce(() => laterPendingFetch)
+      .mockResolvedValueOnce({ v: 'retried-strict' });
 
-    const { result } = renderHook(() => useForestQuery<{ v: number }>(queryKey('grid:measurements', { siteSchema: 'discarded-strict' }), '/api/x'), {
+    const { result } = renderHook(() => useForestQuery<{ v: number | string }>(queryKey('grid:measurements', { siteSchema: 'discarded-strict' }), '/api/x'), {
       wrapper: wrapperFor(fetcher)
     });
     await waitFor(() => expect(result.current.data).toEqual({ v: 1 }));
 
-    // Started first, as a strict refetch.
     const firstStrictRefetch = result.current.refetch({ strict: true });
-    // Started second and stays pending; SWR tracks this as the current
-    // request for the key, so the first strict refetch gets discarded.
     const laterLenientRefetch = result.current.refetch();
     await waitFor(() => expect(result.current.isValidating).toBe(true));
 
     resolveFirstStrictFetch({ v: 'discarded-by-later-request' });
-    await expect(firstStrictRefetch).rejects.toBeInstanceOf(StrictRefetchIncompleteError);
 
-    // A discarded revalidation must not look like a completed success: the
-    // cache is exactly as it was before the strict call, and a later
-    // request is still pending.
-    expect(result.current.data).toEqual({ v: 1 });
+    await expect(firstStrictRefetch, 'the retried attempt is the newest request, so its result is what the cache keeps').resolves.toEqual({
+      v: 'retried-strict'
+    });
+    expect(fetcher, 'initial load + discarded strict attempt + later lenient request + strict retry').toHaveBeenCalledTimes(4);
     expect(result.current.error).toBeUndefined();
-    expect(result.current.isValidating).toBe(true);
+    await waitFor(() => expect(result.current.data).toEqual({ v: 'retried-strict' }));
 
     await act(async () => {
-      resolveLaterPendingFetch({ v: 2 });
+      resolveLaterPendingFetch({ v: 'older-than-strict-retry' });
       await laterLenientRefetch;
     });
+    expect(result.current.data, 'the older pending request must not overwrite the newer strict retry').toEqual({ v: 'retried-strict' });
+  });
 
-    await waitFor(() => expect(result.current.data).toEqual({ v: 2 }));
-    expect(result.current.isValidating).toBe(false);
-    expect(fetcher).toHaveBeenCalledTimes(3);
+  it('refetch({ strict: true }) fails closed with StrictRefetchIncompleteError when every attempt is superseded by a still-pending later request', async () => {
+    const neverSettles = new Promise(() => {});
+    let hookResult: { current: ReturnType<typeof useForestQuery<{ v: number | string }>> } | null = null;
+    let initialLoadDone = false;
+    let supersedingRequestPending = false;
+    const callRoles: string[] = [];
+    const fetcher = vi.fn(async () => {
+      if (!initialLoadDone) {
+        initialLoadDone = true;
+        callRoles.push('initial');
+        return { v: 1 };
+      }
+      if (supersedingRequestPending) {
+        supersedingRequestPending = false;
+        callRoles.push('superseding');
+        return neverSettles;
+      }
+      callRoles.push('strict');
+      supersedingRequestPending = true;
+      // SWR records this request only after the fetcher returns its promise, so
+      // the superseding refetch must start a tick later to be the newer one.
+      queueMicrotask(() => void hookResult?.current.refetch());
+      await new Promise(resolve => setTimeout(resolve, 0));
+      return { v: `discarded-strict-attempt-${callRoles.length}` };
+    });
+
+    const { result } = renderHook(() => useForestQuery<{ v: number | string }>(queryKey('grid:measurements', { siteSchema: 'always-superseded' }), '/api/x'), {
+      wrapper: wrapperFor(fetcher)
+    });
+    hookResult = result;
+    await waitFor(() => expect(result.current.data).toEqual({ v: 1 }));
+
+    await expect(result.current.refetch({ strict: true })).rejects.toBeInstanceOf(StrictRefetchIncompleteError);
+    expect(
+      callRoles.filter(role => role === 'strict'),
+      `fetcher call roles: ${callRoles.join(', ')}`
+    ).toHaveLength(3);
+    expect(result.current.data, 'no discarded attempt may reach the cache').toEqual({ v: 1 });
+    expect(result.current.error).toBeUndefined();
   });
 });

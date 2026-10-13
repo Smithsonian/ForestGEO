@@ -14,15 +14,20 @@ export type RefreshOptions = { strict?: boolean };
 
 const GRID_REFRESH_CANCELLED_MESSAGE = 'Grid refresh was cancelled before its read completed.';
 
-// Thrown only to a strict caller whose own read was aborted or superseded by
-// a later fetchPage call. Never written to the visible `error` state: the
-// read simply never happened, it is not a user-facing grid failure.
+// Thrown only to a strict caller whose read was aborted with no newer read to
+// follow. Never written to the visible `error` state: the read simply never
+// happened, it is not a user-facing grid failure.
 export class GridRefreshCancelledError extends Error {
   constructor() {
     super(GRID_REFRESH_CANCELLED_MESSAGE);
     this.name = 'GridRefreshCancelledError';
   }
 }
+
+type GridReadOutcome = { status: 'completed' } | { status: 'cancelled' } | { status: 'failed'; error: unknown };
+
+const GRID_READ_COMPLETED: GridReadOutcome = { status: 'completed' };
+const GRID_READ_CANCELLED: GridReadOutcome = { status: 'cancelled' };
 
 export type UseInfiniteGridRowsOptions<R> = {
   fetcher: (args: InfiniteFetcherArgs) => Promise<InfiniteFetcherResult<R>>;
@@ -88,6 +93,7 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
   const inflightRef = useRef<boolean>(false);
   const lastResetKey = useRef<unknown>(resetKey);
   const lastMode = useRef<GridMode>(mode);
+  const latestReadRef = useRef<{ token: number; outcome: Promise<GridReadOutcome> } | null>(null);
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
@@ -96,6 +102,46 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
       abortRef.current.abort();
       abortRef.current = null;
     }
+  }, []);
+
+  const readPage = useCallback(
+    async (targetPage: number, token: number, ctrl: AbortController): Promise<GridReadOutcome> => {
+      const isSuperseded = () => token !== tokenRef.current || ctrl.signal.aborted;
+      try {
+        const res = await fetcherRef.current({ page: targetPage, pageSize: infiniteChunkSize, signal: ctrl.signal });
+        if (isSuperseded()) return GRID_READ_CANCELLED;
+        setAccumulator(prev => (targetPage === 0 ? res.rows : appendUniqueRows(prev, res.rows, rowIdKey)));
+        setInfiniteTotal(res.totalRows);
+        setPage(targetPage);
+        setFailedPage(null);
+        return GRID_READ_COMPLETED;
+      } catch (e) {
+        if (isSuperseded() || (e as { name?: string } | null)?.name === 'AbortError') return GRID_READ_CANCELLED;
+        setError(e as Error);
+        setFailedPage(targetPage);
+        return { status: 'failed', error: e };
+      } finally {
+        if (token === tokenRef.current) {
+          inflightRef.current = false;
+          setIsLoadingMore(false);
+        }
+      }
+    },
+    [infiniteChunkSize, rowIdKey]
+  );
+
+  // A strict caller whose read was superseded follows the newer read and
+  // reports its outcome; it rejects as cancelled only when no newer read exists.
+  const confirmStrictRead = useCallback(async (token: number, outcome: GridReadOutcome) => {
+    let followedToken = token;
+    let followedOutcome = outcome;
+    while (followedOutcome.status === 'cancelled') {
+      const latest = latestReadRef.current;
+      if (!latest || latest.token <= followedToken) throw new GridRefreshCancelledError();
+      followedToken = latest.token;
+      followedOutcome = await latest.outcome;
+    }
+    if (followedOutcome.status === 'failed') throw followedOutcome.error;
   }, []);
 
   const fetchPage = useCallback(
@@ -107,38 +153,12 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
       inflightRef.current = true;
       setIsLoadingMore(true);
       setError(null);
-      try {
-        const res = await fetcherRef.current({ page: targetPage, pageSize: infiniteChunkSize, signal: ctrl.signal });
-        if (token !== tokenRef.current || ctrl.signal.aborted) {
-          if (options?.strict) throw new GridRefreshCancelledError();
-          return;
-        }
-        setAccumulator(prev => (targetPage === 0 ? res.rows : appendUniqueRows(prev, res.rows, rowIdKey)));
-        setInfiniteTotal(res.totalRows);
-        setPage(targetPage);
-        setFailedPage(null);
-      } catch (e) {
-        if (e instanceof GridRefreshCancelledError) throw e;
-        if (token !== tokenRef.current || ctrl.signal.aborted) {
-          if (options?.strict) throw new GridRefreshCancelledError();
-          return;
-        }
-        const err = e as { name?: string };
-        if (err && err.name === 'AbortError') {
-          if (options?.strict) throw new GridRefreshCancelledError();
-          return;
-        }
-        setError(e as Error);
-        setFailedPage(targetPage);
-        if (options?.strict) throw e;
-      } finally {
-        if (token === tokenRef.current) {
-          inflightRef.current = false;
-          setIsLoadingMore(false);
-        }
-      }
+      const outcome = readPage(targetPage, token, ctrl);
+      latestReadRef.current = { token, outcome };
+      const settledOutcome = await outcome;
+      if (options?.strict) await confirmStrictRead(token, settledOutcome);
     },
-    [abortInFlight, infiniteChunkSize, rowIdKey]
+    [abortInFlight, confirmStrictRead, readPage]
   );
 
   const resetInfiniteState = useCallback(() => {

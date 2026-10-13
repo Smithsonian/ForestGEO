@@ -7,10 +7,12 @@ export interface RefetchOptions {
   strict?: boolean;
 }
 
-/** Thrown by a strict refetch when SWR discarded its revalidation because a later request on the same key is still pending. */
+const MAX_STRICT_REFETCH_ATTEMPTS = 3;
+
+/** Thrown by a strict refetch when every attempt was discarded by SWR because a later request on the same key was still pending. */
 export class StrictRefetchIncompleteError extends Error {
   constructor(swrKey: string) {
-    super(`refetch({ strict: true }) could not confirm success for key "${swrKey}": a newer request is still in flight and discarded this one's result`);
+    super(`refetch({ strict: true }) could not confirm success for key "${swrKey}": every attempt was superseded by a newer request that is still in flight`);
     this.name = 'StrictRefetchIncompleteError';
   }
 }
@@ -46,18 +48,20 @@ export function useForestQuery<T>(key: QueryKey | null, url: string | null, opts
 
   const refetch = async (options?: RefetchOptions): Promise<T | undefined> => {
     if (!options?.strict || !swrKey) return swr.mutate();
-    await swr.mutate();
-    // swr.mutate() never rejects on a revalidation failure, and the fetcher that
-    // actually runs may belong to a different subscriber on this same key. SWR's
-    // keyed cache entry is the authoritative state every subscriber shares.
     const serializedKey = unstable_serialize(swrKey);
-    const keyedState = cache.get(serializedKey);
-    if (keyedState?.error) throw keyedState.error as QueryError;
-    // SWR discards a revalidation superseded by a later request on the same
-    // key: it returns `false` without updating data/error, so a still-pending
-    // later request (isValidating: true) leaves stale data looking successful.
-    if (keyedState?.isValidating) throw new StrictRefetchIncompleteError(serializedKey);
-    return keyedState?.data as T | undefined;
+    for (let attempt = 1; attempt <= MAX_STRICT_REFETCH_ATTEMPTS; attempt++) {
+      await swr.mutate();
+      // swr.mutate() never rejects on a revalidation failure, and the fetcher that
+      // actually runs may belong to a different subscriber on this same key. SWR's
+      // keyed cache entry is the authoritative state every subscriber shares.
+      const keyedState = cache.get(serializedKey);
+      if (keyedState?.error) throw keyedState.error as QueryError;
+      // SWR discards a revalidation superseded by a later request on the same key,
+      // leaving that request pending (isValidating). Revalidating again makes this
+      // call the newest request, so its result is the one the cache keeps.
+      if (!keyedState?.isValidating) return keyedState?.data as T | undefined;
+    }
+    throw new StrictRefetchIncompleteError(serializedKey);
   };
 
   return {
