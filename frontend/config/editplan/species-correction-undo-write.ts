@@ -2,7 +2,7 @@
 // inside the caller's (`revert.ts`) already-open transaction; never
 // begins/commits/rolls back, never acquires the scope lock, issues no DDL.
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { handleUpsert } from '@/config/utils';
 import { CMAttributesResult } from '@/lib/db/definitions/core';
 import type { EditOperationStateRow } from '@/config/editoperations';
@@ -89,10 +89,6 @@ export interface SpeciesCorrectionUndoWriteResult {
   readonly restoration: SpeciesCorrectionUndoRestoration;
 }
 
-function buildPlaceholders(count: number): string {
-  return Array.from({ length: count }, () => '?').join(', ');
-}
-
 function buildStateRow(table: string, primaryKey: string, primaryKeyValue: number, row: Record<string, unknown> | null): EditOperationStateRow {
   return { table, primaryKey, primaryKeyValue, row };
 }
@@ -149,7 +145,7 @@ async function selectCoreMeasurementRowsByIDs(
   const rows = await cm.executeQuery(
     safeFormatQuery(
       schema,
-      `SELECT * FROM ??.${COREMEASUREMENTS_TABLE} WHERE CoreMeasurementID IN (${buildPlaceholders(coreMeasurementIDs.length)}) ORDER BY CoreMeasurementID FOR UPDATE`
+      `SELECT * FROM ??.${COREMEASUREMENTS_TABLE} WHERE CoreMeasurementID IN (${buildInPlaceholders(coreMeasurementIDs.length)}) ORDER BY CoreMeasurementID FOR UPDATE`
     ),
     [...coreMeasurementIDs],
     transactionID

@@ -1,5 +1,5 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import {
   BulkEditPlan,
   DuplicateDeletion,
@@ -243,7 +243,7 @@ function buildBatchIdentityOverlapQuery(
 ): { sql: string; params: unknown[] } {
   const chunk = candidates.slice(chunkStart, chunkEnd);
   const candidateUnion = chunk.map(() => 'SELECT ? AS Tag, ? AS CandidateKey').join(' UNION ALL ');
-  const treeIDPlaceholders = treeIDs.map(() => '?').join(', ');
+  const treeIDPlaceholders = buildInPlaceholders(treeIDs.length);
 
   const sql = safeFormatQuery(
     schema,

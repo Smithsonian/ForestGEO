@@ -3,7 +3,7 @@
 // and never writes a row; `parseSpeciesCorrectionUndoMetadata` has already
 // validated the stored marker's shape and before/after agreement.
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import type { EditOperationRecord } from '@/config/editoperations';
 import { planSpeciesCorrection, SpeciesCorrectionPlanResult } from './tree-species-correction';
 import type { SpeciesCorrectionMeasurementPrecondition, SpeciesCorrectionStemPrecondition, SpeciesCorrectionSummary } from './types';
@@ -458,7 +458,7 @@ export async function preflightSpeciesCorrectionUndo(
 
     const codesToRestore = domainDiff.attributeCodes.before;
     if (codesToRestore.length > 0) {
-      const placeholders = codesToRestore.map(() => '?').join(', ');
+      const placeholders = buildInPlaceholders(codesToRestore.length);
       const activeAttributeQueryResult = await cm.executeQuery(
         safeFormatQuery(schema, `SELECT Code FROM ??.${ATTRIBUTES_TABLE} WHERE Code IN (${placeholders}) AND IsActive = 1 FOR UPDATE`),
         [...codesToRestore],

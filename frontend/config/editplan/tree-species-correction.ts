@@ -23,7 +23,7 @@
 // row's own CensusID/quadrat link is read back and validated explicitly —
 // a mismatch is reported as `scope_inconsistent`, never filtered out.
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import {
   SPECIES_CORRECTION_SUMMARY_VERSION,
   SpeciesCorrectionMeasurementPrecondition,
@@ -372,7 +372,7 @@ export async function planSpeciesCorrection(
   // edited-stem check above guarantees stems.length >= 1, so this IN clause
   // is never empty. --------------------------------------------------------
   const stemGUIDs = stems.map(stem => stem.stemGUID);
-  const placeholders = stemGUIDs.map(() => '?').join(', ');
+  const placeholders = buildInPlaceholders(stemGUIDs.length);
   const measurementRows = (await cm.executeQuery(
     safeFormatQuery(
       schema,

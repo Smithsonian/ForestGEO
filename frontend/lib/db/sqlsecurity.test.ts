@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isValidSchema, validateSchemaOrThrow, validatedSchema, safeFormatQuery } from './sqlsecurity';
+import { buildInPlaceholders, EmptyInListError, isValidSchema, validateSchemaOrThrow, validatedSchema, safeFormatQuery } from './sqlsecurity';
 
 describe('isValidSchema', () => {
   it('accepts known static schemas', () => {
@@ -89,5 +89,16 @@ describe('safeFormatQuery (regression)', () => {
     const branded = validatedSchema('forestgeo_testing');
     const result = safeFormatQuery(branded, 'SELECT * FROM ??.foo');
     expect(result).toBe('SELECT * FROM `forestgeo_testing`.foo');
+  });
+});
+
+describe('buildInPlaceholders', () => {
+  it('builds one comma-separated placeholder per value', () => {
+    expect(buildInPlaceholders(1)).toBe('?');
+    expect(buildInPlaceholders(3)).toBe('?, ?, ?');
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])('refuses a count of %s rather than producing an empty or malformed IN () list', count => {
+    expect(() => buildInPlaceholders(count)).toThrow(EmptyInListError);
   });
 });

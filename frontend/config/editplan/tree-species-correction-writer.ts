@@ -31,7 +31,7 @@
 // produced the prepared result. `writeTreeSpeciesCorrection` is prepare+apply
 // in one call, for standalone callers with no reason to split the phases.
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import type { EditOperationStateRow } from '@/config/editoperations';
 import { refreshIngestionErrorsForMeasurement, VALIDATION_ERROR_SOURCE, INGESTION_STAGE_ERROR_CODES } from '@/config/measurementerrors';
 import { planSpeciesCorrection, SpeciesCorrectionPlanResult } from './tree-species-correction';
@@ -318,10 +318,6 @@ export class SpeciesCorrectionTransactionMismatchError extends Error {
     );
     this.name = 'SpeciesCorrectionTransactionMismatchError';
   }
-}
-
-function buildInPlaceholders(count: number): string {
-  return Array.from({ length: count }, () => '?').join(', ');
 }
 
 const ER_DUP_ENTRY_ERRNO = 1062;
