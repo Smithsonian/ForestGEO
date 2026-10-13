@@ -6,6 +6,7 @@ import type { ColumnMapping } from '@/lib/column-mapping/types';
 import { UploadMode } from '@/config/uploadmodes';
 import { FileWithStream, MAX_SINGLE_REQUEST_FILE_SIZE_BYTES, MAX_SINGLE_REQUEST_FILE_SIZE_MB } from '@/config/macros/uploadsystemmacros';
 import { DelimiterIssueCode, type DelimiterIssue } from '@/components/uploadsystemhelpers/delimiterdetection';
+import { MAX_UPLOAD_FILE_BYTES, uploadFileSizeSelectionIssue } from '@/lib/uploads/upload-request-limits';
 import UploadParseFiles from './uploadparsefiles';
 
 // Per-test validation events: map from file name to the status the mock should report.
@@ -98,12 +99,17 @@ function buildFile(name: string): FileWithStream {
   return new FileWithStream(raw, false);
 }
 
-function renderUploadParseFiles(files: FileWithStream[], setColumnMappingForFile: ReturnType<typeof vi.fn>, uploadForm: FormType = FormType.measurements) {
+function renderUploadParseFiles(
+  files: FileWithStream[],
+  setColumnMappingForFile: ReturnType<typeof vi.fn>,
+  uploadForm: FormType = FormType.measurements,
+  sourceFormat: SourceFormat = SourceFormat.csv
+) {
   render(
     <UploadParseFiles
       uploadForm={uploadForm}
       uploadMode={UploadMode.NEW}
-      sourceFormat={SourceFormat.csv}
+      sourceFormat={sourceFormat}
       acceptedFiles={files}
       dataViewActive={0}
       setDataViewActive={() => {}}
@@ -385,5 +391,55 @@ describe('single-request upload size guard', () => {
 
     expect(screen.queryByText(/exceeds the .* limit/)).toBeNull();
     expect(screen.getByRole('button', { name: /continue upload/i })).not.toBeDisabled();
+  });
+});
+
+// Measurement uploads are bounded at MAX_UPLOAD_FILE_BYTES by the server (413). Block at selection
+// so the uploader never waits for a doomed upload. The file reports its size through File.size,
+// which is all the gate reads, so the fixture doesn't allocate 100 MB per test.
+describe('measurement upload size gate', () => {
+  function fileReportingSize(name: string, byteCount: number, type: string): FileWithStream {
+    // FileWithStream re-wraps the raw File's bytes, so the size override must sit on the wrapper.
+    const file = new FileWithStream(new File(['x'], name, { type }), false);
+    Object.defineProperty(file, 'size', { value: byteCount });
+    expect(file.size, 'the component reads size from the FileWithStream it receives').toBe(byteCount);
+    return file;
+  }
+
+  function renderMeasurements(files: FileWithStream[], sourceFormat: SourceFormat) {
+    fileValidationEvents.clear();
+    files.forEach(file => fileValidationEvents.set(file.name, { isValid: true, issues: [], headers: CANONICAL_HEADERS }));
+    act(() => {
+      renderUploadParseFiles(files, vi.fn(), FormType.measurements, sourceFormat);
+    });
+  }
+
+  it.each([
+    [SourceFormat.csv, 'census2.csv', 'text/csv'],
+    [SourceFormat.arcgis_xlsx, 'census2.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+  ])('blocks a %s measurement file one byte over the limit with format-specific advice', (sourceFormat, name, type) => {
+    const overLimit = MAX_UPLOAD_FILE_BYTES + 1;
+    renderMeasurements([fileReportingSize(name, overLimit, type)], sourceFormat);
+
+    // Issues render as `• {issue}` inside one Typography (uploadparsefiles.tsx, File Validation Issues).
+    const expectedIssue = uploadFileSizeSelectionIssue(overLimit, sourceFormat);
+    expect(screen.getByText(`• ${expectedIssue}`)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /fix validation errors to continue/i })).toBeDisabled();
+  });
+
+  it.each([
+    [SourceFormat.csv, 'census2.csv', 'text/csv'],
+    [SourceFormat.arcgis_xlsx, 'census2.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+  ])('does not flag a %s measurement file exactly at the limit', (sourceFormat, name, type) => {
+    renderMeasurements([fileReportingSize(name, MAX_UPLOAD_FILE_BYTES, type)], sourceFormat);
+
+    expect(screen.queryByText(/exceeds the \d+ MB upload limit/)).toBeNull();
+  });
+
+  it('still rejects two ArcGIS workbooks, so size advice never implies multi-workbook selection', () => {
+    const workbookType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    renderMeasurements([fileReportingSize('a.xlsx', 10, workbookType), fileReportingSize('b.xlsx', 10, workbookType)], SourceFormat.arcgis_xlsx);
+
+    expect(screen.getByText(/accepts exactly one \.xlsx workbook/i)).toBeTruthy();
   });
 });

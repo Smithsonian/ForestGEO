@@ -19,6 +19,7 @@ import { isPrivilegedSession, MAX_UPLOAD_JOB_REQUEST_BYTES, parseOptionalPositiv
 import { runJobIfClaimable } from '@/lib/background-jobs/worker';
 import { fromBody, fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { attemptScopedBlobName, isValidUploadAttemptID, measurementFileIDValidationError, sanitizeUploadFileName } from '@/lib/uploads/file-names';
+import { MAX_UPLOAD_FILE_BYTES } from '@/lib/uploads/upload-request-limits';
 import { getContainerClient } from '@/config/macros/azurestorage';
 import { getContainerName, SchemaContainerNameError } from '@/config/macros/containernames';
 import ailogger from '@/ailogger';
@@ -28,7 +29,6 @@ export const runtime = 'nodejs';
 const ASYNC_UPLOADS_DISABLED_MESSAGE = 'Async uploads are not enabled for this form/site/user';
 const MAX_UPLOAD_JOB_FILES = 100;
 const MAX_UPLOAD_JOB_PAYLOAD_BYTES = 1024 * 1024;
-const MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024;
 const MYSQL_SIGNED_INT_MAX = 2_147_483_647;
 
 const SUPPORTED_DELIMITER_SET = new Set<string>(SUPPORTED_DELIMITERS);

@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import type { NextRequest } from 'next/server';
+import { createRequire } from 'node:module';
+import { unstable_doesMiddlewareMatch } from 'next/experimental/testing/server';
 
 // Mock NextAuth before importing middleware so the wrapper can be intercepted.
 vi.mock('next-auth', () => {
@@ -167,5 +169,46 @@ describe('middleware /api/* gating', () => {
       const res = await mod.default(req as any);
       expect(res?.status).toBe(401);
     });
+  });
+});
+
+// Next clones and buffers every middleware-matched request body against the global 10 MiB
+// middlewareClientMaxBodySize, even when middleware rejects (verified 2026-10-12). Upload routes
+// authenticate in the handler and bound their own bodies, so they must be excluded from the
+// matcher. Look-alike paths must stay matched.
+describe('upload routes bypass middleware body buffering', () => {
+  const PATHS_EXCLUDED_FROM_MIDDLEWARE = ['/api/files/upload?schema=forestgeo_rabi&fileName=census2.csv', '/api/arcgis/preflight'];
+  const PATHS_STILL_MATCHED = [
+    '/api/files/uploadx',
+    '/api/files/upload/extra',
+    '/api/files/download',
+    '/api/files/list',
+    '/api/arcgis/preflightx',
+    '/api/uploadjobs',
+    '/api/cleanup',
+    '/dashboard'
+  ];
+
+  async function middlewareConfig() {
+    const { config } = await import('./middleware');
+    return config;
+  }
+
+  it.each(PATHS_EXCLUDED_FROM_MIDDLEWARE)('does not run middleware for %s', async url => {
+    const config = await middlewareConfig();
+    expect(unstable_doesMiddlewareMatch({ config, url }), `matcher=${JSON.stringify(config.matcher)}`).toBe(false);
+  });
+
+  it.each(PATHS_STILL_MATCHED)('still runs middleware for %s', async url => {
+    const config = await middlewareConfig();
+    expect(unstable_doesMiddlewareMatch({ config, url }), `matcher=${JSON.stringify(config.matcher)}`).toBe(true);
+  });
+
+  it('does not raise the global pre-authentication body buffer in next.config.js', () => {
+    const nextConfig = createRequire(import.meta.url)('./next.config.js');
+    expect(
+      nextConfig.experimental?.middlewareClientMaxBodySize,
+      'raising this buffers larger bodies for every matched route before auth; exclude upload routes from the matcher instead'
+    ).toBeUndefined();
   });
 });
