@@ -8,6 +8,7 @@ import {
   buildEditableFieldsDiffWithMetaForSurface,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
+  describeActiveValidationRunConflict,
   mergeMeasurementFilterModel,
   PENDING_VALIDATION_SNACKBAR_MESSAGE,
   RESET_THEN_VALIDATE_SNACKBAR_MESSAGE,
@@ -15,7 +16,9 @@ import {
   shouldRefreshMeasurementsAfterValidationTransition,
   shouldUseAutoMeasurementRowHeight,
   toServerMeasurementFilterModel,
-  UNRESOLVED_ERRORS_SNACKBAR_MESSAGE
+  UNRESOLVED_ERRORS_SNACKBAR_MESSAGE,
+  VALIDATION_ALREADY_RUNNING_HERE_MESSAGE,
+  VALIDATION_RUNNING_ELSEWHERE_MESSAGE
 } from './measurementscommonsutils';
 
 describe('MeasurementsCommons - Bug Fix Tests', () => {
@@ -410,6 +413,26 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
       // MultilineModal calls onSubmitComplete when changesSubmitted is true
       // See multilinemodal.tsx:61-63
       expect(true).toBe(true);
+    });
+  });
+
+  describe('describeActiveValidationRunConflict: manual rerun guard is scope-aware', () => {
+    const requested = { schema: 'forestgeo_testing', plotID: 1, censusID: 2 };
+
+    it('allows a run when this tab has no active validation run', () => {
+      expect(describeActiveValidationRunConflict(null, requested)).toBeNull();
+    });
+
+    it('reports an already-running run for the exact same schema, plot and census', () => {
+      expect(describeActiveValidationRunConflict({ ...requested }, requested)).toBe(VALIDATION_ALREADY_RUNNING_HERE_MESSAGE);
+    });
+
+    it.each([
+      ['plot', { ...requested, plotID: 9 }],
+      ['census', { ...requested, censusID: 9 }],
+      ['schema', { ...requested, schema: 'forestgeo_other' }]
+    ])('names the other scope instead of claiming this one is running when only the %s differs', (_dimension, activeRun) => {
+      expect(describeActiveValidationRunConflict(activeRun, requested)).toBe(VALIDATION_RUNNING_ELSEWHERE_MESSAGE);
     });
   });
 });

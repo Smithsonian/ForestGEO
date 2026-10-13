@@ -1,6 +1,7 @@
 import { GridFilterModel, GridPaginationModel, GridRowModel, GridSortModel } from '@mui/x-data-grid';
 import { ExtendedGridFilterModel, TSSFilter, VisibleFilter } from '@/config/datagridhelpers';
 import { EDITABLE_FIELDS_BY_SURFACE, EditSurface, FIELD_ALIASES_BY_SURFACE, PER_COLUMN_DECIMAL_PRECISION } from '@/config/editplan/fieldpolicy';
+import type { ValidationRunParams } from '@/config/validation-runner';
 import { areArraysEqual, areFilterItemsEqual, isActiveFilterItem, sanitizeQuickFilterValues, toServerFilterItem } from '@/lib/datagrid/filterModel';
 
 // Numeric edits that round to the existing value at server precision are
@@ -198,4 +199,14 @@ export function selectMeasurementStateSnackbar(counts: MeasurementStateCounts): 
   }
 
   return null;
+}
+
+export const VALIDATION_ALREADY_RUNNING_HERE_MESSAGE = 'A validation run is already in progress. Check the validation status in the sidebar for its progress.';
+export const VALIDATION_RUNNING_ELSEWHERE_MESSAGE =
+  'Validations are still running for another plot or census. Wait for that run to finish before validating this one.';
+
+export function describeActiveValidationRunConflict(activeRun: ValidationRunParams | null, requested: ValidationRunParams): string | null {
+  if (!activeRun) return null;
+  const isSameScope = activeRun.schema === requested.schema && activeRun.plotID === requested.plotID && activeRun.censusID === requested.censusID;
+  return isSameScope ? VALIDATION_ALREADY_RUNNING_HERE_MESSAGE : VALIDATION_RUNNING_ELSEWHERE_MESSAGE;
 }

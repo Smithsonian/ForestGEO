@@ -17,6 +17,7 @@ export function useBackgroundValidation() {
   return {
     startValidation: (params: ValidationRunParams) => ValidationRunner.start(params),
     resumeValidation: (params: ValidationRunParams) => ValidationRunner.resume(params),
-    isRunning: () => ValidationRunner.isRunning()
+    isRunning: () => ValidationRunner.isRunning(),
+    getActiveParams: () => ValidationRunner.getActiveParams()
   };
 }

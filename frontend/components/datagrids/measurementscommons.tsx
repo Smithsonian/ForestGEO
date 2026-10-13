@@ -106,6 +106,7 @@ import {
   buildEditableFieldsDiffWithMetaForSurface,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
+  describeActiveValidationRunConflict,
   RECHECK_VALIDATION_SUCCESS_MESSAGE,
   RESET_VALIDATION_SUCCESS_MESSAGE,
   selectMeasurementStateSnackbar,
@@ -284,7 +285,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   // use the session
   const { data: session } = useSession();
   const { status: backgroundValidationStatus } = useBackgroundValidationState();
-  const { startValidation, isRunning: isValidationRunnerRunning } = useBackgroundValidation();
+  const { startValidation, getActiveParams: getActiveValidationRunParams } = useBackgroundValidation();
   // Track mounted state for safe state updates in deferred callbacks
   const { isMountedRef } = useIsMounted();
 
@@ -334,37 +335,26 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
   }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName]);
 
-  // Manual "Run Validations" entry point. Reuses the same ValidationRunner
-  // singleton (and ValidationStatusBadge in the sidebar) that upload flows
-  // drive — there is no separate modal-owned run here. ValidationRunner.start
-  // aborts whatever it was already running, so a second click while a run is
-  // active must be rejected here rather than forwarded, or it would cancel
-  // the in-flight run instead of leaving it alone.
+  // ValidationRunner.start aborts whatever run is active, so any active run — on this scope or another — blocks a new one.
   const handleRunValidations = useCallback(() => {
     if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) {
       setSnackbar({ children: 'Active site, plot, or census selection is missing.', severity: 'error' });
       return;
     }
 
-    if (isValidationRunnerRunning()) {
-      setSnackbar({
-        children: 'A validation run is already in progress. Check the validation status in the sidebar for its progress.',
-        severity: 'info'
-      });
+    const requestedRun = { schema: currentSite.schemaName, plotID: currentPlot.plotID, censusID: activeCensusID };
+    const activeRunConflict = describeActiveValidationRunConflict(getActiveValidationRunParams(), requestedRun);
+    if (activeRunConflict) {
+      setSnackbar({ children: activeRunConflict, severity: 'info' });
       return;
     }
 
-    // This only acknowledges that the request was sent — the request can
-    // still be rejected by the server (e.g. a scope-lock conflict with no
-    // existing run to follow) before any validation actually executes, so
-    // this must not claim success. The validation status badge in the
-    // sidebar is the source of truth for the outcome.
-    startValidation({ schema: currentSite.schemaName, plotID: currentPlot.plotID, censusID: activeCensusID });
+    startValidation(requestedRun);
     setSnackbar({
       children: 'Starting validation run. Track its progress in the validation status badge in the sidebar.',
       severity: 'info'
     });
-  }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName, isValidationRunnerRunning, startValidation]);
+  }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName, getActiveValidationRunParams, startValidation]);
 
   // Define refreshCounts early so it can be used in other hooks
   const refreshCounts = useCallback(async () => {
