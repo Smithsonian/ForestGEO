@@ -1611,6 +1611,9 @@ BEGIN
     DECLARE vCoreInsertMs INT DEFAULT 0;
     DECLARE vAttributesMs INT DEFAULT 0;
     DECLARE vSoftValidationMs INT DEFAULT 0;
+    DECLARE vCallerOwnsTransaction BOOLEAN DEFAULT FALSE;
+    DECLARE vCallerSavepointCreated BOOLEAN DEFAULT FALSE;
+    DECLARE vFailureRecoveryUnsafe BOOLEAN DEFAULT FALSE;
 
     -- Error handler with proper logging
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
@@ -1634,7 +1637,44 @@ BEGIN
                 ),
                 40
             );
-            ROLLBACK;
+
+            -- A caller-owned transaction only loses the procedure's work. A deadlock or a missing
+            -- savepoint means the caller's transaction is already gone, so nothing below may run.
+            IF vCallerOwnsTransaction THEN
+                IF vErrorCode = '1213' OR NOT vCallerSavepointCreated THEN
+                    SET vFailureRecoveryUnsafe = TRUE;
+                ELSE
+                    BEGIN
+                        DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
+                            SET vFailureRecoveryUnsafe = TRUE;
+                        ROLLBACK TO SAVEPOINT bulkingestion_batch;
+                    END;
+                END IF;
+            ELSE
+                ROLLBACK;
+            END IF;
+
+            BEGIN
+                DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
+                    SET vFailureRecoveryUnsafe = TRUE;
+                DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
+                    prior_core_insert_failure_rows, existing_tag_stemtag_collision_failures,
+                    quadrat_resolution, species_resolution,
+                    filter_validity, filtered,
+                    classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
+                    requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
+                    prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
+                    current_tree_lookup, stem_resolution_rows, stem_insert_candidates, stem_plotcoord_pick,
+                    unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
+                    published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
+                    core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
+                    orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
+                    species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures, leftover_stems;
+            END;
+
+            IF vFailureRecoveryUnsafe THEN
+                RESIGNAL;
+            END IF;
 
             -- Log to uploadmetrics
             INSERT IGNORE INTO uploadmetrics (
@@ -1702,22 +1742,15 @@ BEGIN
 
             DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
 
-            DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
-                prior_core_insert_failure_rows, existing_tag_stemtag_collision_failures,
-                quadrat_resolution, species_resolution,
-                filter_validity, filtered,
-                classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
-                requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
-                prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
-                current_tree_lookup, stem_resolution_rows, stem_insert_candidates, stem_plotcoord_pick,
-                unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
-                published_stemid_batch_id_conflicts, published_stemid_batch_group_conflicts,
-                core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
-                orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
-                species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures, leftover_stems;
-
             SELECT CONCAT('Batch ', vBatchID, ' failed: ', vErrorCode) as message, TRUE as batch_failed;
         END;
+
+    SET vCallerOwnsTransaction = COALESCE(@bulkingestion_caller_owns_transaction, 0) = 1;
+    SET @bulkingestion_caller_owns_transaction = NULL;
+    IF vCallerOwnsTransaction THEN
+        SAVEPOINT bulkingestion_batch;
+        SET vCallerSavepointCreated = TRUE;
+    END IF;
 
     SET @disable_triggers = 0;
 
@@ -1945,7 +1978,9 @@ BEGIN
         orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
         species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures, leftover_stems;
 
-    START TRANSACTION;
+    IF NOT vCallerOwnsTransaction THEN
+        START TRANSACTION;
+    END IF;
 
     CREATE TEMPORARY TABLE hard_failure_rows
     (
@@ -3466,7 +3501,9 @@ BEGIN
         -- Log the mismatch as an integrity alert but COMMIT the successfully processed data.
         -- Rolling back would destroy all valid trees/stems/measurements for the entire batch
         -- due to a potentially benign counting discrepancy.
-        COMMIT;
+        IF NOT vCallerOwnsTransaction THEN
+            COMMIT;
+        END IF;
 
         INSERT IGNORE INTO uploadintegrityalerts (
             uploadId, fileID, batchID, plotID, censusID,
@@ -3529,7 +3566,9 @@ BEGIN
         endTime = NOW(6)
     WHERE uploadId = vUploadId;
 
-    COMMIT;
+    IF NOT vCallerOwnsTransaction THEN
+        COMMIT;
+    END IF;
 
     SET @disable_triggers = 0;
 

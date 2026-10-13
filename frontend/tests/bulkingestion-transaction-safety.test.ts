@@ -35,4 +35,18 @@ describe('bulkingestionprocess transaction safety (#527)', () => {
       `statements that implicitly commit inside the procedure:\n${offenders.map(o => `  ${STORED_PROCEDURES_FILE}:${o.line}  ${o.text}`).join('\n')}`
     ).toEqual([]);
   });
+
+  it('runs START TRANSACTION and COMMIT only when the procedure owns the transaction', () => {
+    const { body, firstLine } = bulkIngestionBody();
+    const meaningful = body
+      .split('\n')
+      .map((text, offset) => ({ line: firstLine + offset, text: text.trim() }))
+      .filter(({ text }) => text !== '');
+    const unguarded = meaningful.filter(({ text }, index) => {
+      if (text !== 'START TRANSACTION;' && text !== 'COMMIT;') return false;
+      return meaningful[index - 1]?.text !== 'IF NOT vCallerOwnsTransaction THEN';
+    });
+
+    expect(unguarded, `unguarded transaction control:\n${unguarded.map(o => `  ${STORED_PROCEDURES_FILE}:${o.line}  ${o.text}`).join('\n')}`).toEqual([]);
+  });
 });
