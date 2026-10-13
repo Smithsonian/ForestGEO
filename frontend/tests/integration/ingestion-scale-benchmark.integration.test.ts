@@ -18,6 +18,14 @@
  * CI noise. If a future optimizer change reintroduces the flip, the third batch
  * blows past the bound (or the test times out, which is the same signal).
  *
+ * Every scenario runs twice. 'auto' leaves InnoDB's statistics recalculation on.
+ * 'frozen' pins every table's persistent statistics at their empty, post-setup
+ * values. That is what the optimizer sees whenever the background recalculation
+ * lags the data, which happens when sub-batches arrive back-to-back while the
+ * server's recalc queue is busy (seen 2026-10-05: the stems insert and the core
+ * insert each flipped to a (batch x existing) plan and batch 2 never finished).
+ * A plan that is only safe on fresh statistics is not safe.
+ *
  * CRITICAL SAFETY: the beforeAll REFUSING TO RUN guard hard-fails before any
  * write if the host is not local, so this can never touch a real database.
  */
@@ -60,6 +68,21 @@ class BenchmarkCallTimeoutError extends Error {
     super(`bulkingestionprocess timed out after ${CALL_TIMEOUT_MS}ms for ${batchID}`);
     this.name = 'BenchmarkCallTimeoutError';
   }
+}
+
+const STATISTICS_MODES = ['auto', 'frozen'] as const;
+type StatisticsMode = (typeof STATISTICS_MODES)[number];
+
+/** Pins every base table's persistent statistics at their current (empty) values. */
+async function freezeTableStatistics(): Promise<void> {
+  const [tables] = await connection.query<RowDataPacket[]>(
+    `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' AND ENGINE = 'InnoDB'`
+  );
+  for (const { TABLE_NAME: tableName } of tables) {
+    await connection.query(`ALTER TABLE ?? STATS_AUTO_RECALC = 0`, [tableName]);
+    await connection.query(`ANALYZE TABLE ??`, [tableName]);
+  }
+  console.log(`[scale-benchmark] froze persistent statistics on ${tables.length} tables`);
 }
 
 function assertLocalHostOrRefuse(): void {
@@ -177,38 +200,39 @@ async function runBulkIngestionWithTimeout(fileID: string, batchID: string): Pro
   }
 }
 
-beforeAll(async () => {
-  assertLocalHostOrRefuse();
-  const setup = await setupTestDatabase();
-  connection = setup.connection;
-  testData = setup.testData;
-  config = setup.config;
-  const [environmentRows] = await connection.query<RowDataPacket[]>(
-    `SELECT @@version AS mysql_version,
-            @@version_comment AS mysql_version_comment,
-            @@global.innodb_buffer_pool_size AS innodb_buffer_pool_size,
-            @@session.time_zone AS session_time_zone,
-            @@system_time_zone AS system_time_zone,
-            NOW(6) AS database_now,
-            UTC_TIMESTAMP(6) AS utc_now`
-  );
-  console.log(
-    `[scale-benchmark] environment ${JSON.stringify({
-      host: config.host,
-      port: config.port,
-      database: config.database,
-      runtime_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      runtime_offset_minutes: new Date().getTimezoneOffset(),
-      ...environmentRows[0]
-    })}`
-  );
-}, 90000);
+describe.each(STATISTICS_MODES)('Ingestion scale benchmark (0 / 10k / 20k existing measurements), %s table statistics', (statisticsMode: StatisticsMode) => {
+  beforeAll(async () => {
+    assertLocalHostOrRefuse();
+    const setup = await setupTestDatabase();
+    connection = setup.connection;
+    testData = setup.testData;
+    config = setup.config;
+    const [environmentRows] = await connection.query<RowDataPacket[]>(
+      `SELECT @@version AS mysql_version,
+              @@version_comment AS mysql_version_comment,
+              @@global.innodb_buffer_pool_size AS innodb_buffer_pool_size,
+              @@session.time_zone AS session_time_zone,
+              @@system_time_zone AS system_time_zone,
+              NOW(6) AS database_now,
+              UTC_TIMESTAMP(6) AS utc_now`
+    );
+    console.log(
+      `[scale-benchmark] environment ${JSON.stringify({
+        host: config.host,
+        port: config.port,
+        database: config.database,
+        runtime_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        runtime_offset_minutes: new Date().getTimezoneOffset(),
+        ...environmentRows[0]
+      })}`
+    );
+    if (statisticsMode === 'frozen') await freezeTableStatistics();
+  }, 90000);
 
-afterAll(async () => {
-  await teardownTestDatabase(connection, config);
-});
+  afterAll(async () => {
+    await teardownTestDatabase(connection, config);
+  });
 
-describe('Ingestion scale benchmark (0 / 10k / 20k existing measurements)', () => {
   it(
     'keeps sub-batch ingestion time flat as prior sub-batches fill the census',
     async () => {
@@ -227,6 +251,7 @@ describe('Ingestion scale benchmark (0 / 10k / 20k existing measurements)', () =
         expect(resultRow?.batch_failed, `batch ${batchID}: ${resultRow?.message}`).toBeFalsy();
         console.log(
           `[scale-benchmark] phases ${JSON.stringify({
+            statisticsMode,
             batchID,
             ...Object.fromEntries(PHASE_TIMING_COLUMNS.map(column => [column, resultRow?.[column]]))
           })}`
@@ -238,7 +263,9 @@ describe('Ingestion scale benchmark (0 / 10k / 20k existing measurements)', () =
         expect(succeeded, `batch ${batchID} fully ingested`).toBe(BATCH_SIZE);
         expect(elapsedMs, `batch ${batchID} exceeded the ${MAX_BATCH_DURATION_MS}ms absolute latency ceiling`).toBeLessThan(MAX_BATCH_DURATION_MS);
 
-        console.log(`[scale-benchmark] batch ${batchIndex + 1}/${BATCH_COUNT} (${existingBefore} existing): ${elapsedMs}ms, ${succeeded} rows ingested`);
+        console.log(
+          `[scale-benchmark] ${statisticsMode} batch ${batchIndex + 1}/${BATCH_COUNT} (${existingBefore} existing): ${elapsedMs}ms, ${succeeded} rows ingested`
+        );
       }
 
       const [firstBatchMs, ...laterBatchesMs] = durationsMs;

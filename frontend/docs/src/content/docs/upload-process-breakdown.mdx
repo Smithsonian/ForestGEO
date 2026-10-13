@@ -39,7 +39,7 @@ upload anything into a census that already holds data.
 
 2. **Don't navigate away**: The upload cycle triggers system updates. **Do not** navigate away, reload the page, or close the browser while an upload is in progress! (Sites enabled for background uploads are the exception — see [Background uploads](#background-uploads) below.)
 
-3. **Large files**: A single file may be up to 500 MB, and one upload may total up to 1 GB across all selected files. Large files take several minutes — monitor the progress bar.
+3. **Large files**: A single file may be up to 100 MB, and one upload may total up to 1 GB across all selected files. Large files take several minutes — monitor the progress bar.
 
 4. **File format**: CSV, TSV, and TXT files are accepted, and the delimiter is detected automatically (comma, tab, semicolon, or pipe). Save your file as UTF-8. ArcGIS Field Maps workbooks (`.xlsx`) use a separate import path with its own preflight check.
 
@@ -529,7 +529,7 @@ an administrator to run it. The other five are editable by anyone with upload ac
 
 ### File Too Large
 
-The limits are 500 MB for a single file and 1 GB across all files in one upload.
+The limits are 100 MB for a single file and 1 GB across all files in one upload. CSV files over the limit can be split into smaller files and selected together; an ArcGIS import takes one .xlsx workbook, so export a smaller workbook instead.
 
 - Split the data into several smaller files and upload them in batches
 - Remove columns the app does not read before exporting from your spreadsheet

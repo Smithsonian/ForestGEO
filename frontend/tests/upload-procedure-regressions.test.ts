@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { REQUIRED_INDEXES_BY_TABLE } from '@/lib/db/schema-contract';
 
 function readSql(relativePath: string): string {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf-8').replace(/\s+/g, ' ');
@@ -98,6 +99,28 @@ describe('upload procedure regressions', () => {
     expect(tableStructuresSql).toContain('create index idx_trees_tag_census_active on trees (TreeTag, CensusID, IsActive)');
     expect(tableStructuresSql).toContain('constraint ux_stems_treeid_stemtag_census unique (TreeID, StemTag, CensusID)');
     expect(tableStructuresSql).toContain('constraint ux_measure_unique unique (StemGUID, CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM)');
+  });
+
+  it('names only schema-contract indexes in JOIN_INDEX hints', () => {
+    // MySQL ignores a JOIN_INDEX hint whose index is missing (a warning, not an
+    // error), so a hint naming an index outside the contract would leave that
+    // schema on the stale-statistics plan the hint exists to prevent.
+    const canonicalSql = readSql('db/sql/storedprocedures.sql');
+    const hintedIndexes = [...canonicalSql.matchAll(/JOIN_INDEX\((\w+) (\w+)\)/g)].map(match => {
+      const [, alias, indexName] = match;
+      const statement = canonicalSql.slice(match.index, canonicalSql.indexOf(';', match.index));
+      const table = new RegExp(`JOIN (\\w+) ${alias}\\b`).exec(statement)?.[1];
+      return { alias, indexName, table };
+    });
+
+    expect(hintedIndexes.length, 'expected the stale-statistics JOIN_INDEX hints in bulkingestionprocess').toBeGreaterThanOrEqual(3);
+    for (const { alias, indexName, table } of hintedIndexes) {
+      expect(table, `JOIN_INDEX(${alias} ${indexName}): no "JOIN <table> ${alias}" in the hinted statement`).toBeDefined();
+      expect(
+        REQUIRED_INDEXES_BY_TABLE[table!] ?? [],
+        `JOIN_INDEX(${alias} ${indexName}) names an index on ${table} that REQUIRED_INDEXES_BY_TABLE does not guarantee`
+      ).toContain(indexName);
+    }
   });
 
   it('cleans up stale failed sub-batches before retrying the same batch id', () => {

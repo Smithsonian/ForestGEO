@@ -2899,8 +2899,13 @@ BEGIN
     -- Inline StemCrossID/PublishedStemID inheritance: set the previous census's values at INSERT time for stems with an unambiguous previous-census match.
     -- PlotX/PlotY are sourced independently from stem_plotcoord_pick rather than
     -- from the DISTINCT stem candidate projection.
+    -- JOIN_INDEX keeps the existing-stem probe on an indexed lookup when the optimizer's
+    -- statistics still describe stems as empty (background recalculation lags back-to-back
+    -- sub-batches); left to choose, it scans stems once per candidate row. Hints name only
+    -- schema-contract indexes: a missing index makes MySQL ignore the hint, not fail.
     INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, PublishedStemID, StemTag, LocalX, LocalY, PlotX, PlotY, Moved, StemDescription, IsActive)
-    SELECT sic.TreeID, sic.QuadratID, sic.CensusID, sic.StemCrossID, sic.PublishedStemID,
+    SELECT /*+ JOIN_INDEX(s_existing ux_stems_treeid_stemtag_census) */
+           sic.TreeID, sic.QuadratID, sic.CensusID, sic.StemCrossID, sic.PublishedStemID,
            sic.StemTag, sic.LocalX, sic.LocalY, pick.PlotX, pick.PlotY, 0, NULL, 1
     FROM stem_insert_candidates sic
     LEFT JOIN stems s_existing
@@ -3151,8 +3156,10 @@ BEGIN
       AND s_source.StemCrossID IS NOT NULL
       AND cif.SourceRowIndex IS NULL;
 
+    -- Same stale-statistics guard as the stem insert: both coremeasurements probes stay indexed.
     INSERT IGNORE INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
-    SELECT rbr.id,
+    SELECT /*+ JOIN_INDEX(cm_existing_row ux_cm_uploadbatch_rowindex) JOIN_INDEX(cm_existing_measure ux_measure_unique) */
+           rbr.id,
            'MEASUREMENT_INSERT_SKIPPED',
            LEFT(
                CASE

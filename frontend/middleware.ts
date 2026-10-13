@@ -72,5 +72,9 @@ export const config = {
   // _next/static and _next/image: build output. favicon.ico and image
   // extensions: static assets. Public allowlisting and unauthenticated
   // 401 handling for /api/* routes lives in the middleware body above.
-  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:png|jpg|jpeg|svg|gif|webp|ico)$).*)']
+  // api/files/upload and api/arcgis/preflight are excluded: Next buffers every matched request
+  // body against middlewareClientMaxBodySize (10 MiB) before the route runs, which truncated
+  // measurement uploads. Both routes authenticate in the handler and bound their own bodies
+  // (lib/uploads/upload-request-body.ts). The $ anchors keep look-alike paths matched.
+  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|api/files/upload$|api/arcgis/preflight$|.*\\.(?:png|jpg|jpeg|svg|gif|webp|ico)$).*)']
 };

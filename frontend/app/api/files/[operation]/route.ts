@@ -18,6 +18,8 @@ import path from 'path';
 import type { Session } from 'next-auth';
 import { FormType, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
 import { z } from 'zod';
+import { readUploadFormData } from '@/lib/uploads/upload-request-body';
+import { MAX_UPLOAD_FILE_BYTES, uploadFileTooLargeMessage } from '@/lib/uploads/upload-request-limits';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -26,7 +28,6 @@ export const runtime = 'nodejs';
 // Security: Allowed file extensions and MIME types
 const ALLOWED_FILE_EXTENSIONS = ['.csv', '.txt', '.xlsx'] as const;
 const ALLOWED_MIME_TYPES = ['text/csv', 'text/plain', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'] as const;
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB limit
 
 function isValidFileExtension(fileName: string): boolean {
   const ext = path.extname(fileName).toLowerCase();
@@ -36,6 +37,8 @@ function isValidFileExtension(fileName: string): boolean {
 function isValidMimeType(mimeType: string): boolean {
   return ALLOWED_MIME_TYPES.includes(mimeType as any);
 }
+
+const FILES_UPLOAD_ROUTE = '/api/files/upload';
 
 const READ_ONLY_CONTAINER_OPTIONS = { createIfMissing: false } as const;
 
@@ -190,13 +193,14 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
   const scope = authorizeFileScope(session!, params);
   if (scope instanceof NextResponse) return scope;
 
-  let formData: FormData;
-  try {
-    formData = await request.formData();
-    if (formData === null || formData === undefined || formData.entries().next().done) {
-      throw new Error('No form data provided');
-    }
-  } catch {
+  const { formData, rejection } = await readUploadFormData(request, {
+    route: FILES_UPLOAD_ROUTE,
+    schema: params.schema ?? null,
+    fileName: params.fileName ?? null,
+    sourceFormat: normalizeSourceFormat(params.sourceFormat ?? SourceFormat.csv)
+  });
+  if (rejection) return rejection;
+  if (formData.entries().next().done) {
     return new NextResponse(JSON.stringify({ error: 'File is required' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
@@ -240,9 +244,9 @@ async function handleUpload(request: NextRequest, context: RouteContext) {
 
   // Security validations
   // 1. File size check
-  if (file.size > MAX_FILE_SIZE) {
-    ailogger.warn(`File too large: ${file.size} bytes (max: ${MAX_FILE_SIZE})`);
-    return new NextResponse(JSON.stringify({ error: `File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB` }), {
+  if (file.size > MAX_UPLOAD_FILE_BYTES) {
+    ailogger.warn(`File too large: ${file.size} bytes (max: ${MAX_UPLOAD_FILE_BYTES})`);
+    return new NextResponse(JSON.stringify({ error: uploadFileTooLargeMessage(file.size, normalizedSourceFormat) }), {
       status: HTTPResponses.PAYLOAD_TOO_LARGE
     });
   }
