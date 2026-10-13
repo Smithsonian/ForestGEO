@@ -117,6 +117,15 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class MockSpeciesCorrectionWriteConflictError extends Error {
+    reason: unknown;
+    constructor(reason: unknown = { kind: 'drift', message: 'internal drift detail: locked re-read mismatch, errno 1062' }) {
+      super(`writeTreeSpeciesCorrection: internal detail that must never reach the client (${JSON.stringify(reason)})`);
+      this.name = 'SpeciesCorrectionWriteConflictError';
+      this.reason = reason;
+    }
+  }
+
   return {
     auth: vi.fn(),
     isValidSchema: vi.fn(() => true),
@@ -136,7 +145,8 @@ const mocks = vi.hoisted(() => {
     MockInvalidClearError,
     MockInvalidFieldValueError,
     MockEditPlanUnapplicableError,
-    MockMeasurementResolutionError
+    MockMeasurementResolutionError,
+    MockSpeciesCorrectionWriteConflictError
   };
 });
 
@@ -188,6 +198,11 @@ vi.mock('@/config/editplan/scopeguard', () => ({
 vi.mock('@/config/editplan/fieldpolicy', () => ({
   InvalidClearError: mocks.MockInvalidClearError,
   InvalidFieldValueError: mocks.MockInvalidFieldValueError
+}));
+
+vi.mock('@/config/editplan/tree-species-correction-writer', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/config/editplan/tree-species-correction-writer')>()),
+  SpeciesCorrectionWriteConflictError: mocks.MockSpeciesCorrectionWriteConflictError
 }));
 
 function buildRequest(body: unknown) {
@@ -269,6 +284,31 @@ describe('POST /api/edits/apply', () => {
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: 'plan hash mismatch', freshPlan });
+  });
+
+  it("returns 422 with the safe constant message and discriminator when applyEdit throws SpeciesCorrectionWriteConflictError, never leaking the writer's internal message text", async () => {
+    const internalReason = {
+      kind: 'unique-constraint',
+      message: 'Tree 42 (TreeTag "T-1") could not be corrected to species 7 in census 3: errno 1062 ER_DUP_ENTRY on (TreeTag, SpeciesID, CensusID)'
+    };
+    mocks.applyEdit.mockRejectedValue(new mocks.MockSpeciesCorrectionWriteConflictError(internalReason));
+
+    const response = await POST(buildRequest(VALID_BODY));
+    const bodyText = await response.clone().text();
+    const body = JSON.parse(bodyText);
+
+    expect(response.status).toBe(422);
+    expect(body).toEqual({
+      error: "This tree's species state changed since this edit was previewed. Refresh and preview the edit again before applying.",
+      code: 'species-correction-conflict'
+    });
+    // Internal writer detail (SQL errno, table/column names, plan internals)
+    // must never appear in the serialized response body.
+    expect(bodyText).not.toContain('errno');
+    expect(bodyText).not.toContain('ER_DUP_ENTRY');
+    expect(bodyText).not.toContain('TreeTag');
+    expect(bodyText).not.toContain('unique-constraint');
+    expect(bodyText).not.toContain('writeTreeSpeciesCorrection');
   });
 
   it('returns 423 when applyEdit throws ScopeLockHeldError', async () => {

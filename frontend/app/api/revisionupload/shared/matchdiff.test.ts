@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeDiff, ExistingMeasurementRow } from './matchdiff';
+import { computeDiff, ExistingMeasurementRow, readExplicitSpeciesCode } from './matchdiff';
 import type { FileRow } from '@/config/macros/formdetails';
 import { InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 
@@ -110,5 +110,76 @@ describe('computeDiff plot coordinates', () => {
     const csvRow = { dbh: '13.5' } as unknown as FileRow;
 
     expect(computeDiff(csvRow, dbRow).dbh).toEqual({ from: '12.345', to: '13.5' });
+  });
+});
+
+describe('readExplicitSpeciesCode', () => {
+  it('returns the trimmed original spelling, not canonicalized to the DB casing', () => {
+    const csvRow = { spcode: 'quemar' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBe('quemar');
+  });
+
+  it('trims surrounding whitespace without altering internal casing', () => {
+    const csvRow = { spcode: '  QuemAR  ' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBe('QuemAR');
+  });
+
+  it('returns null when spcode is missing from the row', () => {
+    const csvRow = {} as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('returns null when spcode is undefined', () => {
+    const csvRow = { spcode: undefined } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('returns null when spcode is an empty string', () => {
+    const csvRow = { spcode: '' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('returns null when spcode is whitespace-only', () => {
+    const csvRow = { spcode: '   ' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('returns null for the literal "NULL" placeholder in upper case', () => {
+    const csvRow = { spcode: 'NULL' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('returns null for the literal "NULL" placeholder in lower case', () => {
+    const csvRow = { spcode: 'null' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('returns null for the "NULL" placeholder surrounded by whitespace and mixed case', () => {
+    const csvRow = { spcode: '  Null  ' } as unknown as FileRow;
+
+    expect(readExplicitSpeciesCode(csvRow)).toBeNull();
+  });
+
+  it('is still returned when computeDiff drops the same cell as an unchanged case-only match (the whole reason this function exists)', () => {
+    // DB stores the species code upper-case; the CSV author retyped it
+    // lower-case without actually changing species. computeDiff's spcode
+    // comparison is case-insensitive, so it reports no change — but a
+    // sibling batch row correcting this tree's species still needs to know
+    // this row explicitly asked for 'quemar', not merely that it is unset.
+    const dbRow = makeDbRow({ SpeciesCode: 'QUEMAR' });
+    const csvRow = { spcode: 'quemar' } as unknown as FileRow;
+
+    const changes = computeDiff(csvRow, dbRow);
+    expect(changes.spcode).toBeUndefined();
+
+    expect(readExplicitSpeciesCode(csvRow)).toBe('quemar');
   });
 });

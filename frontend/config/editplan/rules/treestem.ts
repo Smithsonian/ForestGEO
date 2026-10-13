@@ -20,21 +20,27 @@ export async function applyTreeStemRules(ctx: RuleContext): Promise<{ effects: E
   const effects: Effect[] = [];
   const errors: PreviewError[] = [];
 
-  const treeIdentityChanged = ctx.changedFields.has('TreeTag') || ctx.changedFields.has('SpeciesCode');
+  // SpeciesCode is deliberately excluded here: an actual species change on a
+  // linked row is handled entirely by rules/species.ts as a tree-wide
+  // correction (#427), not as "re-point this measurement at a different
+  // tree". applySpeciesRules runs before this rule and blocks (mixed_identity)
+  // any edit that changes both SpeciesCode and TreeTag/StemTag/QuadratName,
+  // so by the time this rule sees TreeTag changed, SpeciesCode is guaranteed
+  // unchanged — always resolve the tree's *current* species from oldRow.
+  const treeIdentityChanged = ctx.changedFields.has('TreeTag');
   const stemIdentityChanged = ctx.changedFields.has('StemTag') || ctx.changedFields.has('QuadratName');
 
   let destinationTreeID: number | null = Number(ctx.oldRow.TreeID) || null;
 
   if (treeIdentityChanged) {
-    const newCode = String(ctx.newRow.SpeciesCode ?? ctx.oldRow.SpeciesCode ?? '').trim();
-    const { speciesID } = await resolveSpeciesByCode(ctx.cm, ctx.schema, newCode, ctx.transactionID);
+    const currentCode = String(ctx.oldRow.SpeciesCode ?? '').trim();
+    const { speciesID } = await resolveSpeciesByCode(ctx.cm, ctx.schema, currentCode, ctx.transactionID);
 
     if (speciesID === null) {
-      if (ctx.changedFields.has('SpeciesCode')) {
-        errors.push(buildError('species', 'missing', 'SpeciesCode', `Species code "${newCode}" not found in this schema`));
-      }
-      // When speciesID is null but SpeciesCode was not edited, skip tree resolution silently —
-      // the broken code is not a consequence of this edit.
+      // The tree's current species code no longer resolves (e.g. the species
+      // was deactivated since this row was loaded). SpeciesCode was not part
+      // of this edit, so the broken code is not a consequence of it — skip
+      // tree resolution silently rather than block an unrelated TreeTag move.
     } else {
       const planned = await planTreeResolution(
         ctx.cm,

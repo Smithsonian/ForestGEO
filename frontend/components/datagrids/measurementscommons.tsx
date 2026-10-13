@@ -95,7 +95,7 @@ import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
 import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
-import UndoToast from '@/components/editplan/undotoast';
+import UndoToast, { UndoRevertOutcome } from '@/components/editplan/undotoast';
 import { isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
 import ValidationActionsMenu from '@/components/client/validationactionsmenu';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
@@ -108,6 +108,7 @@ import {
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
+  revertMeasurementEdit,
   selectMeasurementStateSnackbar,
   shouldRefreshMeasurementsAfterValidationTransition,
   shouldUseAutoMeasurementRowHeight,
@@ -333,13 +334,15 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
   }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName]);
 
-  // Define refreshCounts early so it can be used in other hooks
-  const refreshCounts = useCallback(async () => {
-    if (!currentSite?.schemaName || !currentPlot || !currentCensus) return;
+  // Defined early so it can be used in other hooks. `strict` rethrows instead
+  // of only logging, so the awaited undo refresh chain learns of a failure.
+  const refreshCounts = useCallback(
+    async (options?: { strict?: boolean }) => {
+      if (!currentSite?.schemaName || !currentPlot || !currentCensus) return;
 
-    try {
-      const stateCountsProjection = buildMeasurementStateCountsSql(currentSite.schemaName, 'vft');
-      const query = `SELECT ${stateCountsProjection},
+      try {
+        const stateCountsProjection = buildMeasurementStateCountsSql(currentSite.schemaName, 'vft');
+        const query = `SELECT ${stateCountsProjection},
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('old tree'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountOldTrees,
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('new recruit'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountNewRecruits,
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('multi stem'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountMultiStems
@@ -348,54 +351,57 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                      WHERE vft.PlotID = ${currentPlot.plotID}
                        AND c.PlotID = ${currentPlot.plotID}
                        AND c.PlotCensusNumber = ${currentCensus.plotCensusNumber}`;
-      const response = await fetch(`/api/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(query)
-      });
-      if (!response.ok) throw new Error('measurementscommons failure. runquery execution for errorRowCount failed.');
-      const data = await response.json();
-      const countsData = data[0];
+        const response = await fetch(`/api/query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(query)
+        });
+        if (!response.ok) throw new Error('measurementscommons failure. runquery execution for errorRowCount failed.');
+        const data = await response.json();
+        const countsData = data[0];
 
-      const unresolvedLoggedCount = Number(countsData.CountUnresolvedLogged) || 0;
-      const failedNoLogCount = Number(countsData.CountFailedNoLog) || 0;
-      const pendingValidationCount = Number(countsData.CountPending) || 0;
-      const validMeasurementCount = Number(countsData.CountValid) || 0;
-      const overridableCount = Number(countsData.CountOverridable) || 0;
+        const unresolvedLoggedCount = Number(countsData.CountUnresolvedLogged) || 0;
+        const failedNoLogCount = Number(countsData.CountFailedNoLog) || 0;
+        const pendingValidationCount = Number(countsData.CountPending) || 0;
+        const validMeasurementCount = Number(countsData.CountValid) || 0;
+        const overridableCount = Number(countsData.CountOverridable) || 0;
 
-      setValidCount(validMeasurementCount);
-      // The errors toggle filters on (IsValidated = FALSE OR unresolved log entry), which is exactly
-      // CountUnresolvedLogged + CountFailedNoLog — the badge must equal the rows the toggle shows.
-      setInvalidCount(unresolvedLoggedCount + failedNoLogCount);
-      setInvalidBreakdown({ unresolvedLogged: unresolvedLoggedCount, failedNoLog: failedNoLogCount });
-      // Feeds the override menu item — CountOverridable mirrors the override modal's
-      // UPDATE predicate (IsValidated = FALSE OR IS NULL) exactly, and the menu copy
-      // describes it as "failed or not-yet-validated" (never just "failed").
-      setValidationErrorCount(overridableCount);
-      // Feeds the Run Validations menu item — CountRevalidatable mirrors
-      // prepareValidationRun's reset predicate, so the action stays disabled when
-      // the only failures are ingestion failures a rerun cannot clear.
-      setRevalidatableErrorCount(Number(countsData.CountRevalidatable) || 0);
-      setPendingCount(pendingValidationCount);
-      setOTCount(Number(countsData.CountOldTrees) || 0);
-      setMSCount(Number(countsData.CountMultiStems) || 0);
-      setNRCount(Number(countsData.CountNewRecruits) || 0);
+        setValidCount(validMeasurementCount);
+        // The errors toggle filters on (IsValidated = FALSE OR unresolved log entry), which is exactly
+        // CountUnresolvedLogged + CountFailedNoLog — the badge must equal the rows the toggle shows.
+        setInvalidCount(unresolvedLoggedCount + failedNoLogCount);
+        setInvalidBreakdown({ unresolvedLogged: unresolvedLoggedCount, failedNoLog: failedNoLogCount });
+        // Feeds the override menu item — CountOverridable mirrors the override modal's
+        // UPDATE predicate (IsValidated = FALSE OR IS NULL) exactly, and the menu copy
+        // describes it as "failed or not-yet-validated" (never just "failed").
+        setValidationErrorCount(overridableCount);
+        // Feeds the Run Validations menu item — CountRevalidatable mirrors
+        // prepareValidationRun's reset predicate, so the action stays disabled when
+        // the only failures are ingestion failures a rerun cannot clear.
+        setRevalidatableErrorCount(Number(countsData.CountRevalidatable) || 0);
+        setPendingCount(pendingValidationCount);
+        setOTCount(Number(countsData.CountOldTrees) || 0);
+        setMSCount(Number(countsData.CountMultiStems) || 0);
+        setNRCount(Number(countsData.CountNewRecruits) || 0);
 
-      const snackbarByState = selectMeasurementStateSnackbar({
-        unresolvedLogged: unresolvedLoggedCount,
-        failedNoLog: failedNoLogCount,
-        pending: pendingValidationCount,
-        valid: validMeasurementCount
-      });
-      if (snackbarByState) {
-        setSnackbar({ children: snackbarByState.message, severity: snackbarByState.severity });
+        const snackbarByState = selectMeasurementStateSnackbar({
+          unresolvedLogged: unresolvedLoggedCount,
+          failedNoLog: failedNoLogCount,
+          pending: pendingValidationCount,
+          valid: validMeasurementCount
+        });
+        if (snackbarByState) {
+          setSnackbar({ children: snackbarByState.message, severity: snackbarByState.severity });
+        }
+      } catch (error: unknown) {
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        ailogger.error('Error refreshing counts:', errorObj);
+        if (options?.strict) throw errorObj;
       }
-    } catch (error: unknown) {
-      const errorObj = error instanceof Error ? error : new Error(String(error));
-      ailogger.error('Error refreshing counts:', errorObj);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSite, currentPlot, currentCensus, gridType]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [currentSite, currentPlot, currentCensus, gridType]
+  );
 
   const handleAddNewRow = useCallback(async () => {
     if (locked) {
@@ -572,60 +578,78 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
   }, [gridError, setSnackbar]);
 
-  const fetchValidationErrors = useCallback(async () => {
-    try {
-      const response = await fetch(
-        `/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}&plotIDParam=${currentPlot?.plotID ?? ''}&censusPCNParam=${currentCensus?.plotCensusNumber ?? ''}`
-      );
-      if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(`Failed to fetch validation errors (${response.status}): ${errorBody}`);
+  // strict rethrows on failure instead of only logging, so runFetchPaginated's
+  // strict call (used only by the awaited undo refresh chain) can propagate it.
+  const fetchValidationErrors = useCallback(
+    async (options?: { strict?: boolean }) => {
+      try {
+        const response = await fetch(
+          `/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}&plotIDParam=${currentPlot?.plotID ?? ''}&censusPCNParam=${currentCensus?.plotCensusNumber ?? ''}`
+        );
+        if (!response.ok) {
+          const errorBody = await response.text();
+          throw new Error(`Failed to fetch validation errors (${response.status}): ${errorBody}`);
+        }
+        const data = await response.json();
+        const errorMap: ErrorMap = Array.isArray(data?.failed as CMError[])
+          ? (data.failed as CMError[]).reduce<Record<number, CoreMeasurementError>>((acc, error) => {
+              if (error.coreMeasurementID) {
+                const errorDetailsMap = new Map<number, ValidationPair[]>();
+
+                (error.validationErrorIDs || []).forEach((id, index) => {
+                  const descriptions = error.descriptions?.[index]?.split(';') || [];
+                  const criteria = error.criteria?.[index]?.split(';') || [];
+
+                  // Ensure descriptions and criteria are paired correctly
+                  const validationPairs = descriptions.map((description, i) => ({
+                    description,
+                    criterion: criteria[i] ?? '' // Default to empty if criteria is missing
+                  }));
+
+                  if (!errorDetailsMap.has(id)) {
+                    errorDetailsMap.set(id, []);
+                  }
+
+                  // Append validation pairs to the corresponding ID
+                  errorDetailsMap.get(id)!.push(...validationPairs);
+                });
+
+                acc[error.coreMeasurementID] = {
+                  coreMeasurementID: error.coreMeasurementID,
+                  errors: Array.from(errorDetailsMap.entries()).map(([id, validationPairs]) => ({
+                    id,
+                    validationPairs
+                  }))
+                };
+              }
+              return acc;
+            }, {})
+          : {};
+        setValidationErrors(errorMap);
+      } catch (error: unknown) {
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        ailogger.error('Error fetching validation errors:', errorObj);
+        if (options?.strict) throw errorObj;
       }
-      const data = await response.json();
-      const errorMap: ErrorMap = Array.isArray(data?.failed as CMError[])
-        ? (data.failed as CMError[]).reduce<Record<number, CoreMeasurementError>>((acc, error) => {
-            if (error.coreMeasurementID) {
-              const errorDetailsMap = new Map<number, ValidationPair[]>();
+    },
+    [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]
+  );
 
-              (error.validationErrorIDs || []).forEach((id, index) => {
-                const descriptions = error.descriptions?.[index]?.split(';') || [];
-                const criteria = error.criteria?.[index]?.split(';') || [];
-
-                // Ensure descriptions and criteria are paired correctly
-                const validationPairs = descriptions.map((description, i) => ({
-                  description,
-                  criterion: criteria[i] ?? '' // Default to empty if criteria is missing
-                }));
-
-                if (!errorDetailsMap.has(id)) {
-                  errorDetailsMap.set(id, []);
-                }
-
-                // Append validation pairs to the corresponding ID
-                errorDetailsMap.get(id)!.push(...validationPairs);
-              });
-
-              acc[error.coreMeasurementID] = {
-                coreMeasurementID: error.coreMeasurementID,
-                errors: Array.from(errorDetailsMap.entries()).map(([id, validationPairs]) => ({
-                  id,
-                  validationPairs
-                }))
-              };
-            }
-            return acc;
-          }, {})
-        : {};
-      setValidationErrors(errorMap);
-    } catch (error: unknown) {
-      const errorObj = error instanceof Error ? error : new Error(String(error));
-      ailogger.error('Error fetching validation errors:', errorObj);
-    }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
-
-  const runFetchPaginated = useCallback(async () => {
-    await Promise.all([refetch(), fetchValidationErrors()]);
-  }, [refetch, fetchValidationErrors]);
+  // Promise.all settles as soon as either read rejects, leaving the other
+  // still running unawaited. A strict caller must await both before
+  // surfacing the first failure, so refetch and fetchValidationErrors both get `strict`.
+  const runFetchPaginated = useCallback(
+    async (options?: { strict?: boolean }) => {
+      if (!options?.strict) {
+        await Promise.all([refetch(), fetchValidationErrors(options)]);
+        return;
+      }
+      const results = await Promise.allSettled([refetch(options), fetchValidationErrors(options)]);
+      const firstRejection = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (firstRejection) throw firstRejection.reason;
+    },
+    [refetch, fetchValidationErrors]
+  );
 
   useEffect(() => {
     if (!currentPlot || !currentCensus || paginationModel.page < 0) return;
@@ -952,11 +976,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const performSaveAction = async (id: GridRowId) => {
     if (locked || !promiseArguments) return;
-    // The new-row path is a single network call → blocking overlay is appropriate.
-    // The edit path goes through useEditPreviewFlow, which surfaces a Modal whose
-    // own busy state is the user feedback during apply; raising the global overlay
-    // here would block the dialog from receiving its own Apply/Cancel clicks until
-    // the loading provider's 30s default timeout fires.
+    // New-row path uses the blocking overlay; the edit path's own Modal busy
+    // state would otherwise be blocked from its Apply/Cancel clicks by it.
     const isLegacyCreate = promiseArguments.oldRow.isNew;
     if (isLegacyCreate) {
       setLoading(true, editPreviewLoadingMessage);
@@ -1719,10 +1740,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 rowHeight={useAutoMeasurementRowHeight ? undefined : FIREFOX_FIXED_ROW_HEIGHT}
                 isCellEditable={params => {
                   if (locked) return false;
-                  // Server allowlist is authoritative — fieldpolicy.isFieldEditableOnSurface
-                  // resolves the grid's column field (camelCase) through FIELD_ALIASES_BY_SURFACE
-                  // and checks against EDITABLE_FIELDS_BY_SURFACE. This keeps the grid in
-                  // lockstep with the server's rejectDisallowedFields check.
+                  // Server allowlist is authoritative; keeps the grid in lockstep
+                  // with the server's rejectDisallowedFields check.
                   return isFieldEditableOnSurface('measurementssummary', params.field);
                 }}
               />
@@ -1755,26 +1774,25 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         {undoToastOperationID !== null && (
           <UndoToast
             editOperationID={undoToastOperationID}
-            onUndo={async () => {
-              try {
-                const response = await fetch(`/api/edits/revert`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    schema: currentSite?.schemaName ?? '',
-                    plotID: currentPlot?.plotID ?? 0,
-                    censusID: activeCensusID ?? 0,
-                    editOperationID: undoToastOperationID
-                  })
-                });
-                if (!response.ok) throw new Error(`revert failed (${response.status})`);
-                setSnackbar({ children: 'Edit reverted', severity: 'success' });
-                await runFetchPaginated();
-              } catch (error: unknown) {
-                const message = error instanceof Error ? error.message : String(error);
-                setSnackbar({ children: `Undo failed: ${message}`, severity: 'error' });
-              }
-            }}
+            onUndo={(confirmedPlanHash?: string): Promise<UndoRevertOutcome> =>
+              revertMeasurementEdit(
+                {
+                  schema: currentSite?.schemaName ?? '',
+                  plotID: currentPlot?.plotID ?? 0,
+                  censusID: activeCensusID ?? 0,
+                  editOperationID: undoToastOperationID,
+                  confirmedPlanHash
+                },
+                {
+                  invalidateQueries: () => invalidateAfter('save-edit-plan', queryScope),
+                  refreshPaginated: () => runFetchPaginated({ strict: true }),
+                  refreshCounts: () => refreshCounts({ strict: true }),
+                  refreshInfinite: isInfiniteOn ? () => infinite.refresh({ strict: true }) : null,
+                  notify: ({ message, severity }) => setSnackbar({ children: message, severity }),
+                  logError: (message, error) => ailogger.error(message, error)
+                }
+              )
+            }
             onDismiss={() => setUndoToastOperationID(null)}
           />
         )}

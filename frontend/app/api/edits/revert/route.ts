@@ -19,17 +19,33 @@ import {
   EditOperationNotFoundError,
   NonRevertableEditOperationError,
   RevertDriftError,
+  RevertRecordChangedError,
   revertEdit
 } from '@/config/editplan/revert';
 import { assertCanEditMeasurementScope, assertNoActiveMeasurementScopeConflict, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
-import { ensureEditOperationsTable, readEditOperation } from '@/config/editoperations';
+import { ensureEditOperationsTable, EditOperationStateIntegrityError, readEditOperation } from '@/config/editoperations';
 import { InvalidClearError, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 import { requireSession } from '@/lib/auth-helpers';
+import { SpeciesCorrectionUndoMetadataError } from '@/config/editplan/species-correction-undo-metadata';
+import {
+  SPECIES_CORRECTION_UNDO_CONFLICT_GUIDANCE,
+  SpeciesCorrectionUndoCurrentStateConflictError,
+  SpeciesCorrectionUndoUnapplicableError
+} from '@/config/editplan/species-correction-undo';
+import { SpeciesCorrectionWriteConflictError } from '@/config/editplan/tree-species-correction-writer';
 
 export const runtime = 'nodejs';
 
 const PLAN_HASH_LENGTH = 64;
+
+// The writer's conflict reason carries SQL/plan internals in its `message`
+// — never surfaced to the client. This fixed message/code mirrors
+// apply/route.ts's own SPECIES_CORRECTION_CONFLICT_* handling for the same
+// underlying "tree species state moved" situation, reached here via undo.
+const SPECIES_CORRECTION_REVERT_CONFLICT_CODE = 'species-correction-revert-conflict';
+const SPECIES_CORRECTION_REVERT_CONFLICT_MESSAGE = "This tree's species state changed since this revert was previewed. Refresh and retry the revert.";
+const SPECIES_CORRECTION_UNDO_CONFLICT_CODE = 'species-correction-undo-conflict';
 
 const RevertBody = z.object({
   schema: z.string(),
@@ -103,7 +119,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         schema: body.schema,
         plotID: body.plotID,
         censusID: body.censusID
-      })
+      }),
+      // Rechecked inside revertEdit against both the discovery read and the
+      // post-lock FOR UPDATE recheck — the "scope mismatch" check above only
+      // covers the moment before the transaction opens.
+      expectedScope: { plotID: body.plotID, censusID: body.censusID }
     });
     return NextResponse.json(result, { status: HTTPResponses.OK });
   } catch (err) {
@@ -131,6 +151,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (err instanceof RevertDriftError) {
       return NextResponse.json({ error: 'revert drift', freshPlan: err.freshPlan }, { status: HTTPResponses.CONFLICT });
     }
+    if (err instanceof RevertRecordChangedError) {
+      return NextResponse.json({ error: 'edit operation changed during revert, please retry' }, { status: HTTPResponses.CONFLICT });
+    }
     if (err instanceof HashDriftError) {
       return NextResponse.json({ error: 'plan hash mismatch', freshPlan: err.freshPlan }, { status: HTTPResponses.CONFLICT });
     }
@@ -154,6 +177,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (err instanceof TargetNotFoundError) {
       return NextResponse.json({ error: 'target not found' }, { status: HTTPResponses.NOT_FOUND });
+    }
+    if (err instanceof SpeciesCorrectionUndoMetadataError) {
+      return NextResponse.json({ error: 'species correction metadata is invalid' }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
+    if (err instanceof EditOperationStateIntegrityError) {
+      return NextResponse.json({ error: 'edit operation state is invalid' }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
+    if (err instanceof SpeciesCorrectionUndoUnapplicableError) {
+      return NextResponse.json({ error: 'species correction undo is not applicable' }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
+    if (err instanceof SpeciesCorrectionUndoCurrentStateConflictError) {
+      return NextResponse.json(
+        {
+          error: SPECIES_CORRECTION_UNDO_CONFLICT_GUIDANCE,
+          code: SPECIES_CORRECTION_UNDO_CONFLICT_CODE,
+          conflictKinds: err.conflicts.map(conflict => conflict.kind)
+        },
+        { status: HTTPResponses.UNPROCESSABLE_ENTITY }
+      );
+    }
+    if (err instanceof SpeciesCorrectionWriteConflictError) {
+      return NextResponse.json(
+        { error: SPECIES_CORRECTION_REVERT_CONFLICT_MESSAGE, code: SPECIES_CORRECTION_REVERT_CONFLICT_CODE },
+        { status: HTTPResponses.UNPROCESSABLE_ENTITY }
+      );
     }
     throw err;
   } finally {

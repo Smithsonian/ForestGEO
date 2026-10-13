@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { FileRow } from '@/config/macros/formdetails';
 import { RevisionInvalidRow, RevisionMatchedRow, RevisionNewRowCandidate, RevisionUploadResponse } from '@/config/revisionuploadtypes';
-import { analyzeBulk, BulkInput } from '@/config/editplan/bulkanalyzer';
+import { analyzeBulk, BulkInput, isGroupBlockingPreviewError } from '@/config/editplan/bulkanalyzer';
 import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/editplan/revisionrolepolicy';
@@ -22,7 +22,8 @@ import {
   loadMeasurementsByStemID,
   loadMeasurementsByTagStemTag,
   MatchStrategy,
-  normalizeDateToString
+  normalizeDateToString,
+  readExplicitSpeciesCode
 } from './shared/matchdiff';
 import { requireSession } from '@/lib/auth-helpers';
 
@@ -244,36 +245,6 @@ function getMissingRequiredInsertFields(csvRow: FileRow): string[] {
   return REQUIRED_INSERT_FIELDS.filter(field => normalizeNullableString(csvRow[field]) === null);
 }
 
-/**
- * Look up which of the supplied species codes resolve to an active species
- * row. Done in a single IN query rather than per-row so the round-trip cost
- * stays bounded regardless of batch size. Comparison is case-insensitive to
- * match resolveSpeciesByCode and fieldValuesAreEquivalent('string-ci').
- *
- * Returns the lowercased set of codes that DO resolve. The classify pass
- * uses this to demote rows whose spcode change targets an unknown species
- * into the invalid-rows tab instead of letting analyzeBulk throw
- * SpeciesNotFoundError and 500 the whole batch.
- */
-async function loadKnownSpeciesCodes(connectionManager: ConnectionManager, schema: string, codes: string[]): Promise<Set<string>> {
-  const known = new Set<string>();
-  if (codes.length === 0) return known;
-
-  const placeholders = codes.map(() => 'LOWER(?)').join(', ');
-  const query = safeFormatQuery(
-    schema,
-    `SELECT LOWER(SpeciesCode) AS Code
-     FROM ??.species
-     WHERE LOWER(SpeciesCode) IN (${placeholders})
-       AND IsActive = 1`
-  );
-  const rows = (await connectionManager.executeQuery(query, codes)) as Array<{ Code: string }>;
-  for (const row of rows) {
-    if (row.Code) known.add(row.Code);
-  }
-  return known;
-}
-
 function buildBulkInput(matchedRows: RevisionMatchedRow[], newRows: RevisionNewRowCandidate[], invalidRows: RevisionInvalidRow[]): BulkInput {
   const duplicateDeletions: DuplicateDeletion[] = [];
   for (const row of matchedRows) {
@@ -295,7 +266,8 @@ function buildBulkInput(matchedRows: RevisionMatchedRow[], newRows: RevisionNewR
       // before they reach `canonicalizeEditPayload`, which would otherwise
       // reject them as `invalid clear` (identity fields) or surface them
       // as fake bulk-plan fieldChanges.
-      newRow: buildAnalyzerRowFromChanges(row.changes, 'revision-update')
+      newRow: buildAnalyzerRowFromChanges(row.changes, 'revision-update'),
+      explicitSpeciesCode: readExplicitSpeciesCode(row.csvRow)
     })),
     newRows: newRows.map(row => ({
       rowIndex: row.csvIndex,
@@ -437,45 +409,13 @@ async function classifyFileRows(
     });
   }
 
-  // Pre-validate species codes for any matched row whose `spcode` is in the
-  // diff. The downstream analyzer (applySpeciesRules) throws SpeciesNotFoundError
-  // for unknown codes, which would otherwise abort the entire batch with a 500.
-  // Demoting those rows to invalidRows lets the rest of the batch proceed and
-  // surfaces the offender in the upload review's "Invalid" tab.
-  //
-  // New-row inserts intentionally skip this check: they route through
-  // bulkingestionprocess, which writes a failed-measurement record when the
-  // species code is unknown rather than throwing. Pre-validating here would
-  // also strip them out of the "matched as new" preview before the user sees
-  // it, which is the wrong UX.
-  const speciesCodesToCheck = new Set<string>();
-  for (const row of matchedRows) {
-    if (row.changes.spcode) {
-      speciesCodesToCheck.add(String(row.changes.spcode.to).trim().toLowerCase());
-    }
-  }
-  if (speciesCodesToCheck.size > 0) {
-    const knownCodes = await loadKnownSpeciesCodes(connectionManager, schema, [...speciesCodesToCheck]);
-
-    const survivingMatched: RevisionMatchedRow[] = [];
-    for (const row of matchedRows) {
-      if (row.changes.spcode) {
-        const targetCode = String(row.changes.spcode.to).trim();
-        if (!knownCodes.has(targetCode.toLowerCase())) {
-          invalidRows.push({
-            csvRow: row.csvRow,
-            csvIndex: row.csvIndex,
-            reason: `Species not found: ${targetCode}`
-          });
-          continue;
-        }
-      }
-      survivingMatched.push(row);
-    }
-    matchedRows.length = 0;
-    matchedRows.push(...survivingMatched);
-  }
-
+  // Species codes are intentionally NOT pre-validated here. A matched row
+  // whose spcode targets an unknown species is left in matchedRows and goes
+  // into the batch-wide analyzeBulk call below, where SpeciesNotFoundError
+  // becomes an invalid rowPlan (bulkanalyzer.ts) that still carries the
+  // row's explicitSpeciesCode into #427 batch grouping. Stripping it out
+  // per-file here, before grouping ever sees it, would hide a sibling row's
+  // contradicting correction request (#427).
   return { matchedRows, newRows, invalidRows };
 }
 
@@ -572,18 +512,33 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { role: session!.user.userStatus }
     );
 
-    // analyzeBulk may demote individual matched rows to status:'invalid'
-    // when their plan has a per-row data blocker (TreeStemResolution:
-    // missing quadrat, inactive tree, ...) that we don't want to sink the
-    // whole batch over. Surface those into invalidRows here so the upload
-    // review's Invalid tab renders them with a proper reason, then re-run
-    // analyzeBulk on the survivors so the returned plan hash matches what
-    // /apply will compute on the user's submission. Without the re-run,
-    // classify's hash includes demoted rowPlans but apply's hash doesn't,
-    // and every apply 409s as a phantom drift.
+    // analyzeBulk may demote individual matched rows to status:'invalid' —
+    // a per-row data blocker (TreeStemResolution: missing quadrat, inactive
+    // tree, ...) or an unresolved species code (SpeciesNotFoundError) — that
+    // we don't want to sink the whole batch over. Surface those into
+    // invalidRows here so the upload review's Invalid tab renders them with
+    // a proper reason, then re-run analyzeBulk on the survivors so the
+    // returned plan hash — and every rowIndex inside it, including a #427
+    // group error's rowIndexes — stays aligned with the matchedRows array
+    // actually being returned. Skipping the re-run would leave stale
+    // indices pointing at the wrong row once matchedRows shifts.
+    //
+    // A row NAMED by a batch-level group blocker (#427, `rowIndexes` on a
+    // `group_*` error) is excluded from demotion below: its
+    // explicitSpeciesCode is what created the conflict, so dropping it from
+    // the re-run input would make that conflict silently disappear. Only
+    // genuinely unrelated invalid rows are ever removed, which is why the
+    // re-run can never erase a group conflict it didn't touch.
+    const groupImplicatedRowIndexes = new Set<number>();
+    for (const groupError of baseBulkPlan.errors ?? []) {
+      if (!isGroupBlockingPreviewError(groupError)) continue;
+      for (const rowIndex of groupError.rowIndexes ?? []) groupImplicatedRowIndexes.add(rowIndex);
+    }
+
     const demotedMatchedIndices = new Set<number>();
     baseBulkPlan.rowPlans.forEach(rowPlan => {
       if (rowPlan.status !== 'invalid' || rowPlan.targetID === undefined) return;
+      if (groupImplicatedRowIndexes.has(rowPlan.rowIndex)) return;
       const matchedRow = matchedRows[rowPlan.rowIndex];
       if (matchedRow && matchedRow.coreMeasurementID === rowPlan.targetID) {
         invalidRows.push({

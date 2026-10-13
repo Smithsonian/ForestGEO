@@ -21,8 +21,8 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { useEditPreviewFlow } from '@/app/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
-import UndoToast from '@/components/editplan/undotoast';
-import { buildEditableFieldsDiffWithMetaForSurface } from '@/components/datagrids/measurementscommonsutils';
+import UndoToast, { UndoRevertOutcome } from '@/components/editplan/undotoast';
+import { buildEditableFieldsDiffWithMetaForSurface, revertEditAndRefresh } from '@/components/datagrids/measurementscommonsutils';
 import { FIELD_ALIASES_BY_SURFACE, isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
 import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
 import { EditFlowPersistResult } from '@/config/datagridhelpers';
@@ -552,28 +552,24 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
       {undoToastOperationID !== null && (
         <UndoToast
           editOperationID={undoToastOperationID}
-          onUndo={async () => {
-            try {
-              const response = await fetch(`/api/edits/revert`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  schema: currentSite?.schemaName ?? '',
-                  plotID: currentPlot?.plotID ?? 0,
-                  censusID: activeCensusID ?? 0,
-                  editOperationID: undoToastOperationID
-                })
-              });
-              if (!response.ok) {
-                throw new Error(`revert failed (${response.status})`);
+          onUndo={(confirmedPlanHash?: string): Promise<UndoRevertOutcome> =>
+            revertEditAndRefresh(
+              {
+                schema: currentSite?.schemaName ?? '',
+                plotID: currentPlot?.plotID ?? 0,
+                censusID: activeCensusID ?? 0,
+                editOperationID: undoToastOperationID,
+                confirmedPlanHash
+              },
+              {
+                refreshAfterRevert: async () => setRefresh(true),
+                notify: ({ message, severity }) => {
+                  if (severity !== 'success') setEditFlowError(message);
+                },
+                logError: (message, error) => ailogger.error(message, error)
               }
-              setRefresh(true);
-            } catch (error: unknown) {
-              const err = error instanceof Error ? error : new Error(String(error));
-              ailogger.error('Undo failed:', err);
-              setEditFlowError(`Undo failed: ${err.message}`);
-            }
-          }}
+            )
+          }
           onDismiss={() => setUndoToastOperationID(null)}
         />
       )}

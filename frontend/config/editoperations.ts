@@ -30,6 +30,41 @@ export interface EditOperationRecord {
   revertedByEditOperationID: number | null;
 }
 
+export class ReadEditOperationLockRequiresTransactionError extends Error {
+  constructor(public editOperationID: number) {
+    super(`readEditOperation: forUpdate lock requires an active transaction (EditOperationID=${editOperationID})`);
+    this.name = 'ReadEditOperationLockRequiresTransactionError';
+  }
+}
+
+export class MarkEditOperationRevertedConflictError extends Error {
+  constructor(public originalEditOperationID: number) {
+    super(`markEditOperationReverted: edit operation ${originalEditOperationID} not found or already reverted`);
+    this.name = 'MarkEditOperationRevertedConflictError';
+  }
+}
+
+export type EditOperationStateColumn = 'BeforeState' | 'AfterState';
+
+export class EditOperationStateIntegrityError extends Error {
+  constructor(
+    public readonly editOperationID: number,
+    public readonly column: EditOperationStateColumn,
+    reason: string,
+    options?: { cause?: unknown }
+  ) {
+    super(`EditOperationID=${editOperationID} ${column}: ${reason}`, options);
+    this.name = 'EditOperationStateIntegrityError';
+  }
+}
+
+export interface ReadEditOperationOptions {
+  // Appends `FOR UPDATE` and requires an in-flight transactionID. Callers use
+  // this for the post-lock recheck in revertEdit — the row must be pinned
+  // against concurrent reverts/writes for the remainder of the transaction.
+  forUpdate?: boolean;
+}
+
 export interface EditOperationWriteInput {
   operationType: EditOperationType;
   revertable?: boolean;
@@ -193,8 +228,14 @@ export async function readEditOperation(
   connectionManager: ConnectionManager,
   schema: string,
   editOperationID: number,
-  transactionID?: string
+  transactionID?: string,
+  options: ReadEditOperationOptions = {}
 ): Promise<EditOperationRecord | null> {
+  if (options.forUpdate && !transactionID) {
+    throw new ReadEditOperationLockRequiresTransactionError(editOperationID);
+  }
+
+  const lockClause = options.forUpdate ? '\n     FOR UPDATE' : '';
   const sql = safeFormatQuery(
     schema,
     `SELECT
@@ -213,7 +254,7 @@ export async function readEditOperation(
        RevertedByEditOperationID
      FROM ??.edit_operations
      WHERE EditOperationID = ?
-     LIMIT 1`
+     LIMIT 1${lockClause}`
   );
 
   const rows = await connectionManager.executeQuery(sql, [editOperationID], transactionID);
@@ -240,38 +281,51 @@ export async function markEditOperationReverted(
     schema,
     `UPDATE ??.edit_operations
      SET RevertedByEditOperationID = ?
-     WHERE EditOperationID = ?`
+     WHERE EditOperationID = ?
+       AND RevertedByEditOperationID IS NULL`
   );
 
   const result = await connectionManager.executeQuery(sql, [revertingEditOperationID, originalEditOperationID], transactionID);
   const affectedRows = (result as { affectedRows?: number })?.affectedRows ?? 0;
-  if (affectedRows === 0) {
-    throw new Error(`markEditOperationReverted: no edit_operations row found with EditOperationID=${originalEditOperationID}`);
+  // Exactly one row must flip from un-reverted to reverted. Zero means the
+  // row is missing or another transaction already claimed the revert slot
+  // (racing double-mark); more than one would mean the predicate above
+  // stopped being unique, which should never happen against a PRIMARY KEY.
+  if (affectedRows !== 1) {
+    throw new MarkEditOperationRevertedConflictError(originalEditOperationID);
   }
 }
 
-function parseStateColumn(value: unknown): EditOperationStateRow[] {
-  if (value === null || value === undefined) {
-    return [];
-  }
-
+function parseStateColumn(editOperationID: number, column: EditOperationStateColumn, value: unknown): EditOperationStateRow[] {
   if (Array.isArray(value)) {
     return value as EditOperationStateRow[];
   }
 
   if (typeof value === 'string') {
     if (value.length === 0) {
-      return [];
+      throw new EditOperationStateIntegrityError(editOperationID, column, 'stored value is an empty string, not a JSON array');
     }
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? (parsed as EditOperationStateRow[]) : [];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch (parseError) {
+      throw new EditOperationStateIntegrityError(editOperationID, column, 'stored string is not valid JSON', { cause: parseError });
+    }
+    if (!Array.isArray(parsed)) {
+      throw new EditOperationStateIntegrityError(editOperationID, column, `parsed JSON is a ${typeOfParsedValue(parsed)}, not an array`);
+    }
+    return parsed as EditOperationStateRow[];
   }
 
-  if (typeof value === 'object') {
-    return value as unknown as EditOperationStateRow[];
-  }
+  throw new EditOperationStateIntegrityError(
+    editOperationID,
+    column,
+    `stored value is a ${value === null ? 'null' : typeof value}, not a JSON array or array-encoded string`
+  );
+}
 
-  return [];
+function typeOfParsedValue(value: unknown): string {
+  return value === null ? 'null' : typeof value;
 }
 
 function toIsoString(value: unknown): string {
@@ -307,8 +361,10 @@ function mapRowToEditOperationRecord(row: Record<string, unknown>): EditOperatio
   const targetIDRaw = row.TargetID;
   const targetID = targetIDRaw === null || targetIDRaw === undefined ? null : Number(targetIDRaw);
 
+  const editOperationID = Number(row.EditOperationID);
+
   return {
-    editOperationID: Number(row.EditOperationID),
+    editOperationID,
     operationType: row.OperationType as EditOperationType,
     revertable: toBoolean(row.Revertable, true),
     dataType: row.DataType as EditOperationDataType,
@@ -316,8 +372,8 @@ function mapRowToEditOperationRecord(row: Record<string, unknown>): EditOperatio
     plotID: Number(row.PlotID),
     censusID: Number(row.CensusID),
     planHash: String(row.PlanHash),
-    beforeState: parseStateColumn(row.BeforeState),
-    afterState: parseStateColumn(row.AfterState),
+    beforeState: parseStateColumn(editOperationID, 'BeforeState', row.BeforeState),
+    afterState: parseStateColumn(editOperationID, 'AfterState', row.AfterState),
     createdBy: String(row.CreatedBy),
     createdAt: toIsoString(row.CreatedAt),
     revertedByEditOperationID: revertedBy

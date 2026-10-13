@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GridLogicOperator } from '@mui/x-data-grid';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
@@ -10,15 +10,24 @@ import {
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
+  EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE,
+  EDIT_REVERTED_SNACKBAR_MESSAGE,
   mergeMeasurementFilterModel,
   PENDING_VALIDATION_SNACKBAR_MESSAGE,
   RESET_THEN_VALIDATE_SNACKBAR_MESSAGE,
+  revertMeasurementEdit,
   selectMeasurementStateSnackbar,
   shouldRefreshMeasurementsAfterValidationTransition,
   shouldUseAutoMeasurementRowHeight,
   toServerMeasurementFilterModel,
-  UNRESOLVED_ERRORS_SNACKBAR_MESSAGE
+  UNDO_FAILED_SNACKBAR_MESSAGE,
+  UNRESOLVED_ERRORS_SNACKBAR_MESSAGE,
+  type MeasurementEditRevertEffects,
+  type MeasurementEditRevertNotification
 } from './measurementscommonsutils';
+import { UNCONFIRMED_OUTCOME_MESSAGE, type EditRevertRequest } from '@/lib/editplan/requestrevert';
+import type { ApplyResult, EditPlan } from '@/config/editplan/types';
+import { HTTPResponses } from '@/config/macros';
 
 describe('MeasurementsCommons - Bug Fix Tests', () => {
   beforeEach(() => {
@@ -431,5 +440,260 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
       // See multilinemodal.tsx:61-63
       expect(true).toBe(true);
     });
+  });
+});
+
+describe('revertMeasurementEdit: undo refresh orchestration (U3)', () => {
+  const REVERT_SCOPE: EditRevertRequest = { schema: 'testschema', plotID: 1, censusID: 1, editOperationID: 55 };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function jsonResponse(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  }
+
+  // Mirrors the real ApplyResult contract (frontend/config/editplan/types.ts)
+  // produced by revertEdit and returned by POST /api/edits/revert — every
+  // field present and typed exactly as the server emits it, matching what
+  // requestEditRevert's 200-body validation requires (a positive integer
+  // editOperationID). A `{ ok: true }` body is NOT this contract — it is the
+  // 'unconfirmed' fixture below.
+  function makeApplyResult(overrides: Partial<ApplyResult> = {}): ApplyResult {
+    return {
+      updatedIDs: { CoreMeasurementID: 909 },
+      applyErrors: [],
+      editOperationID: REVERT_SCOPE.editOperationID,
+      validationPending: false,
+      ...overrides
+    };
+  }
+
+  function makeFreshPlan(overrides: Partial<EditPlan> = {}): EditPlan {
+    return {
+      dataType: 'measurementssummary',
+      targetID: 909,
+      fieldChanges: [],
+      effects: [],
+      maxSeverity: 'warn',
+      planHash: 'f'.repeat(64),
+      generatedAt: '2026-04-20T12:00:00Z',
+      ...overrides
+    };
+  }
+
+  // Builds a typed MeasurementEditRevertEffects whose members record their
+  // call order into a shared array, so tests can assert both "was this
+  // called" and "did the success/warning snackbar come after the refresh
+  // work it claims to have done" in one assertion. `failingStep` makes one
+  // refresh step reject (after recording its call) to exercise the
+  // reverted-but-refresh-failed path.
+  function makeRecordedEffects(options: { includeInfinite?: boolean; failingStep?: 'paginated' | 'counts' | 'infinite' } = {}) {
+    const calls: string[] = [];
+    const notifyMock = vi.fn((notification: MeasurementEditRevertNotification) => {
+      calls.push(`notify:${notification.severity}`);
+    });
+    const logErrorMock = vi.fn();
+
+    const invalidateQueries = vi.fn(async () => {
+      calls.push('invalidate');
+    });
+    const refreshPaginated = vi.fn(async () => {
+      calls.push('paginated');
+      if (options.failingStep === 'paginated') throw new Error('paginated refresh exploded');
+    });
+    const refreshCounts = vi.fn(async () => {
+      calls.push('counts');
+      if (options.failingStep === 'counts') throw new Error('counts refresh exploded');
+    });
+    const refreshInfinite = options.includeInfinite
+      ? vi.fn(async () => {
+          calls.push('infinite');
+          if (options.failingStep === 'infinite') throw new Error('infinite refresh exploded');
+        })
+      : undefined;
+
+    const effects: MeasurementEditRevertEffects = {
+      invalidateQueries,
+      refreshPaginated,
+      refreshCounts,
+      refreshInfinite: refreshInfinite ?? null,
+      notify: notifyMock,
+      logError: logErrorMock
+    };
+
+    return { effects, calls, notifyMock, logErrorMock, invalidateQueries, refreshPaginated, refreshCounts, refreshInfinite };
+  }
+
+  it('runs invalidate -> paginated+counts+infinite refresh -> success snackbar, in that order, on a real reverted ApplyResult', async () => {
+    const applyResult = makeApplyResult();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(HTTPResponses.OK, applyResult));
+    const { effects, calls, notifyMock, logErrorMock, invalidateQueries, refreshPaginated, refreshCounts, refreshInfinite } = makeRecordedEffects({
+      includeInfinite: true
+    });
+
+    const outcome = await revertMeasurementEdit(REVERT_SCOPE, effects);
+
+    expect(outcome).toEqual({ status: 'reverted' });
+    expect(invalidateQueries).toHaveBeenCalledTimes(1);
+    expect(refreshPaginated).toHaveBeenCalledTimes(1);
+    expect(refreshCounts).toHaveBeenCalledTimes(1);
+    expect(refreshInfinite).toHaveBeenCalledTimes(1);
+    // The success snackbar must be the LAST thing that happens — it must
+    // never be shown before the refresh work it claims to have done.
+    expect(calls).toEqual(['invalidate', 'paginated', 'counts', 'infinite', 'notify:success']);
+    expect(notifyMock).toHaveBeenCalledWith({ message: EDIT_REVERTED_SNACKBAR_MESSAGE, severity: 'success' });
+    expect(logErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('never calls refreshInfinite in paginated mode (refreshInfinite omitted), but still runs invalidate/paginated/counts and shows success', async () => {
+    const applyResult = makeApplyResult();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(HTTPResponses.OK, applyResult));
+    const { effects, calls, notifyMock, invalidateQueries, refreshPaginated, refreshCounts } = makeRecordedEffects({ includeInfinite: false });
+
+    const outcome = await revertMeasurementEdit(REVERT_SCOPE, effects);
+
+    expect(outcome).toEqual({ status: 'reverted' });
+    expect(effects.refreshInfinite).toBeNull();
+    expect(invalidateQueries).toHaveBeenCalledTimes(1);
+    expect(refreshPaginated).toHaveBeenCalledTimes(1);
+    expect(refreshCounts).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(['invalidate', 'paginated', 'counts', 'notify:success']);
+    expect(notifyMock).toHaveBeenCalledWith({ message: EDIT_REVERTED_SNACKBAR_MESSAGE, severity: 'success' });
+  });
+
+  it('returns confirmation-required unchanged on a 409 with a usable fresh plan, performing zero refresh calls and zero snackbars', async () => {
+    const freshPlan = makeFreshPlan();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(HTTPResponses.CONFLICT, { freshPlan }));
+    const { effects, calls, notifyMock, logErrorMock } = makeRecordedEffects({ includeInfinite: true });
+
+    const outcome = await revertMeasurementEdit(REVERT_SCOPE, effects);
+
+    expect(outcome).toEqual({ status: 'confirmation-required', freshPlan });
+    expect(calls).toEqual([]);
+    expect(notifyMock).not.toHaveBeenCalled();
+    expect(logErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('shows an error snackbar carrying the server message on a 500 failure, performing zero refresh calls and zero success wording', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(HTTPResponses.INTERNAL_SERVER_ERROR, { error: 'revert rule exploded' }));
+    const { effects, calls, notifyMock } = makeRecordedEffects({ includeInfinite: true });
+
+    const outcome = await revertMeasurementEdit(REVERT_SCOPE, effects);
+
+    expect(outcome).toEqual({ status: 'failed' });
+    expect(calls).toEqual(['notify:error']);
+    expect(notifyMock).toHaveBeenCalledWith({ message: UNDO_FAILED_SNACKBAR_MESSAGE('revert rule exploded'), severity: 'error' });
+  });
+
+  it('surfaces the could-not-confirm warning on a malformed 200 body, with no success wording and zero refresh calls', async () => {
+    // { ok: true } is not a real ApplyResult (no editOperationID) — this is
+    // the genuine 'unconfirmed' contract, not a stand-in for success.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(HTTPResponses.OK, { ok: true }));
+    const { effects, calls, notifyMock } = makeRecordedEffects({ includeInfinite: true });
+
+    const outcome = await revertMeasurementEdit(REVERT_SCOPE, effects);
+
+    expect(outcome).toEqual({ status: 'unconfirmed' });
+    expect(calls).toEqual(['notify:warning']);
+    expect(notifyMock).toHaveBeenCalledWith({ message: UNCONFIRMED_OUTCOME_MESSAGE, severity: 'warning' });
+    expect(UNCONFIRMED_OUTCOME_MESSAGE.toLowerCase()).not.toContain('reverted');
+  });
+
+  it('reports "reverted, but refresh failed" and still resolves reverted when a refresh step throws after the write already committed', async () => {
+    const applyResult = makeApplyResult();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(HTTPResponses.OK, applyResult));
+    const { effects, calls, notifyMock, logErrorMock, refreshPaginated, refreshCounts, refreshInfinite } = makeRecordedEffects({
+      includeInfinite: true,
+      failingStep: 'counts'
+    });
+
+    const outcome = await revertMeasurementEdit(REVERT_SCOPE, effects);
+
+    // The server already committed the revert (a real ApplyResult was
+    // returned) — a refresh failure must never be reported as a failed undo,
+    // or the toast would let the user retry and double-revert the same edit.
+    expect(outcome).toEqual({ status: 'reverted' });
+    expect(refreshPaginated).toHaveBeenCalledTimes(1);
+    expect(refreshCounts).toHaveBeenCalledTimes(1);
+    expect(refreshInfinite).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(['invalidate', 'paginated', 'counts', 'infinite', 'notify:warning']);
+    expect(notifyMock).toHaveBeenCalledWith({ message: EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE, severity: 'warning' });
+    expect(logErrorMock).toHaveBeenCalledTimes(1);
+    const [, loggedError] = logErrorMock.mock.calls[0];
+    expect(loggedError).toBeInstanceOf(Error);
+    expect((loggedError as Error).message).toBe('counts refresh exploded');
+  });
+
+  // U10 regression: refreshCounts' own internal "success"-style snackbar
+  // (selectMeasurementStateSnackbar) runs on the SAME setSnackbar state as
+  // the warning this function notifies on failure. With a plain Promise.all,
+  // the warning fired as soon as refreshInfinite rejected — before a slower
+  // refreshCounts resolved and overwrote it with success. Promise.allSettled
+  // must make the warning the final call regardless of that race.
+  it('keeps the refresh-failed warning as the final notification when a slower refresh step succeeds after an earlier step rejects', async () => {
+    const applyResult = makeApplyResult();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(HTTPResponses.OK, applyResult));
+
+    const calls: string[] = [];
+    const notifyMock = vi.fn((notification: MeasurementEditRevertNotification) => calls.push(`notify:${notification.severity}`));
+    const logErrorMock = vi.fn();
+    const invalidateQueries = vi.fn(async () => {
+      calls.push('invalidate');
+    });
+    const refreshPaginated = vi.fn(async () => {
+      calls.push('paginated');
+    });
+    const refreshInfinite = vi.fn(async () => {
+      calls.push('infinite:reject');
+      throw new Error('infinite refresh exploded');
+    });
+
+    let resolveCounts!: () => void;
+    const refreshCounts = vi.fn(() => {
+      calls.push('counts:start');
+      return new Promise<void>(resolve => {
+        resolveCounts = () => {
+          // Simulates refreshCounts' own setSnackbar success call, which
+          // writes to the same visible state as effects.notify.
+          calls.push('counts:internal-success');
+          notifyMock({ message: 'All rows passed validation.', severity: 'success' });
+          resolve();
+        };
+      });
+    });
+
+    const effects: MeasurementEditRevertEffects = {
+      invalidateQueries,
+      refreshPaginated,
+      refreshCounts,
+      refreshInfinite,
+      notify: notifyMock,
+      logError: logErrorMock
+    };
+
+    const outcomePromise = revertMeasurementEdit(REVERT_SCOPE, effects);
+
+    // Flush pending microtasks/macrotasks: invalidateQueries resolves, all
+    // three refresh tasks are kicked off, and refreshInfinite rejects — but
+    // refreshCounts stays pending until resolveCounts() is called below.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // The fix must still be waiting for refreshCounts to settle here — the
+    // buggy Promise.all would have already called notify:warning by now.
+    expect(notifyMock).not.toHaveBeenCalled();
+    expect(calls).toEqual(['invalidate', 'paginated', 'counts:start', 'infinite:reject']);
+
+    resolveCounts();
+    const outcome = await outcomePromise;
+
+    expect(outcome).toEqual({ status: 'reverted' });
+    // counts:internal-success' own notifyMock call records 'notify:success'
+    // before the function's warning fires - that success must never be last.
+    expect(calls).toEqual(['invalidate', 'paginated', 'counts:start', 'infinite:reject', 'counts:internal-success', 'notify:success', 'notify:warning']);
+    expect(notifyMock.mock.calls.map(([notification]) => notification.severity)).toEqual(['success', 'warning']);
+    expect(notifyMock).toHaveBeenLastCalledWith({ message: EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE, severity: 'warning' });
   });
 });
