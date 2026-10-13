@@ -5,6 +5,7 @@ import { POST } from './route';
 // genuine classes (not stand-ins) is what makes the route's `instanceof`
 // branches actually exercised here.
 import { SpeciesCorrectionTransactionMismatchError, SpeciesCorrectionWriteConflictError } from '@/config/editplan/tree-species-correction-writer';
+import { SpeciesCorrectionGroupMemberContextError } from '@/config/editplan/writers/measurementssummary';
 
 const MATCHED_PLAN_HASH = 'plan-hash-matched';
 const DRIFTED_PLAN_HASH = 'plan-hash-drifted';
@@ -1624,6 +1625,46 @@ describe('POST /api/revisionupload/apply', () => {
     expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
     expect(mocks.writeEditOperation, 'a mid-apply failure must never produce a ledger entry for a partially-applied batch').not.toHaveBeenCalled();
     expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+  });
+
+  it('maps a group-member write-context rejection raised mid-apply to the FIXED safe 500 server-failure code, never echoing the transaction ids in its message (#427)', async () => {
+    const REQUESTER_CORE_ID = 501;
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(REQUESTER_CORE_ID, { SpeciesCode: 'AAA' })];
+      }
+      return [];
+    });
+
+    mocks.analyzeBulk.mockResolvedValue(
+      buildFreshPlan(MATCHED_PLAN_HASH, {
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, targetID: REQUESTER_CORE_ID, status: 'matched', plan: buildGroupMemberPlan(REQUESTER_CORE_ID) }],
+        speciesCorrectionGroups: [buildSpeciesCorrectionGroup([{ rowIndex: 0, coreMeasurementID: REQUESTER_CORE_ID, requestedCorrection: true }])]
+      })
+    );
+
+    const sensitiveContextMessage = `group-member write context transactionID ("${SENSITIVE_TRANSACTION_ID_PREPARED}") does not match this call's own transaction ("${SENSITIVE_TRANSACTION_ID_APPLY}")`;
+    mocks.applyPreparedBulkSpeciesCorrections.mockRejectedValueOnce(new SpeciesCorrectionGroupMemberContextError(sensitiveContextMessage));
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: REQUESTER_CORE_ID, csvRow: { spcode: 'BBB' } }]
+        })
+      )
+    );
+
+    const body = await response.json();
+    const bodyText = JSON.stringify(body);
+    expect(response.status, `response body: ${bodyText}`).toBe(500);
+    expect(body.code).toBe(SPECIES_CORRECTION_SERVER_FAILURE_CODE);
+    expect(bodyText).not.toContain(SENSITIVE_TRANSACTION_ID_PREPARED);
+    expect(bodyText).not.toContain(SENSITIVE_TRANSACTION_ID_APPLY);
+    expect(mocks.writeEditOperation, 'a mid-apply failure must never produce a ledger entry').not.toHaveBeenCalled();
   });
 
   it('reports the full affected species-correction membership (submitted members plus additionally-affected unsubmitted measurements) on a non-revertable ledger entry, without inflating updatedCount for the unsubmitted ones (#427)', async () => {

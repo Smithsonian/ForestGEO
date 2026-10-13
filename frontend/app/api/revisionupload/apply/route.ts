@@ -24,6 +24,7 @@ import {
 import { SpeciesCorrectionTransactionMismatchError, SpeciesCorrectionWriteConflictError } from '@/config/editplan/tree-species-correction-writer';
 import type { AppliedSpeciesCorrectionBatchSummary } from '@/config/editplan/types';
 import { MeasurementResolutionError } from '@/config/editplan/writers/resolvers-mutating';
+import { SpeciesCorrectionGroupMemberContextError } from '@/config/editplan/writers/measurementssummary';
 import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { RoleForbiddenFieldError } from '@/config/editplan/analyzer';
 import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
@@ -1237,6 +1238,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (errorObj instanceof RevisionSpeciesCorrectionAssemblyError) {
       ailogger.error(`${logPrefix} species-correction batch assembly failure`, errorObj);
+      return NextResponse.json(
+        { error: SPECIES_CORRECTION_SERVER_FAILURE_MESSAGE, code: SPECIES_CORRECTION_SERVER_FAILURE_CODE },
+        { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+      );
+    }
+    if (errorObj instanceof SpeciesCorrectionGroupMemberContextError) {
+      ailogger.error(`${logPrefix} species-correction group-member write context rejected`, errorObj);
       return NextResponse.json(
         { error: SPECIES_CORRECTION_SERVER_FAILURE_MESSAGE, code: SPECIES_CORRECTION_SERVER_FAILURE_CODE },
         { status: HTTPResponses.INTERNAL_SERVER_ERROR }
