@@ -169,6 +169,56 @@ describe('revertEdit', () => {
     expect(cm.commitTransaction).toHaveBeenCalledWith('tx');
   });
 
+  describe('legacy measurementssummary restore row and SpeciesCode', () => {
+    function buildMeasurementsSummaryOperation(beforeRawSpCode: string, afterRawSpCode: string | undefined) {
+      const coreRow = (rawSpCode: string, measuredDBH: number) => ({
+        RawTreeTag: '011375',
+        RawStemTag: '5',
+        RawSpCode: rawSpCode,
+        RawQuadrat: '0101',
+        MeasuredDBH: measuredDBH,
+        MeasuredHOM: 1.3,
+        MeasurementDate: '1994-12-05',
+        RawCodes: 'M',
+        Description: null
+      });
+      const beforeCore = { table: 'coremeasurements', primaryKey: 'CoreMeasurementID', primaryKeyValue: 42, row: coreRow(beforeRawSpCode, 12) };
+      const afterState =
+        afterRawSpCode === undefined
+          ? []
+          : [{ table: 'coremeasurements', primaryKey: 'CoreMeasurementID', primaryKeyValue: 42, row: coreRow(afterRawSpCode, 15) }];
+      return buildOperation({ dataType: 'measurementssummary', beforeState: [beforeCore], afterState });
+    }
+
+    async function revertAndCaptureRestoreRow(operation: ReturnType<typeof buildOperation>): Promise<Record<string, unknown>> {
+      const cm = makeConnectionManager();
+      mocks.readEditOperation.mockResolvedValue(operation);
+      mocks.applyEditInTransaction.mockResolvedValue({ updatedIDs: {}, applyErrors: [], editOperationID: 8, validationPending: false });
+      await revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' });
+      expect(mocks.analyzeEdit).toHaveBeenCalledTimes(1);
+      return mocks.analyzeEdit.mock.calls[0][6] as Record<string, unknown>;
+    }
+
+    it('omits SpeciesCode when the original edit left RawSpCode unchanged, so undoing a DBH edit cannot plan a tree-wide species correction', async () => {
+      const restoreRow = await revertAndCaptureRestoreRow(buildMeasurementsSummaryOperation('AAA', 'AAA'));
+
+      expect(restoreRow, `restore row sent to analyzeEdit: ${JSON.stringify(restoreRow)}`).not.toHaveProperty('SpeciesCode');
+      expect(restoreRow.MeasuredDBH).toBe(12);
+    });
+
+    it('restores SpeciesCode when the original edit changed RawSpCode', async () => {
+      const restoreRow = await revertAndCaptureRestoreRow(buildMeasurementsSummaryOperation('AAA', 'BBB'));
+
+      expect(restoreRow.SpeciesCode, `restore row sent to analyzeEdit: ${JSON.stringify(restoreRow)}`).toBe('AAA');
+    });
+
+    it('restores SpeciesCode when the ledger row has no coremeasurements afterState to prove the species was untouched', async () => {
+      const restoreRow = await revertAndCaptureRestoreRow(buildMeasurementsSummaryOperation('AAA', undefined));
+
+      expect(restoreRow.SpeciesCode, `restore row sent to analyzeEdit: ${JSON.stringify(restoreRow)}`).toBe('AAA');
+    });
+  });
+
   it('throws RevertDriftError when the restore plan has warn severity and no confirmation is supplied', async () => {
     const cm = makeConnectionManager();
     mocks.readEditOperation.mockResolvedValue(buildOperation());

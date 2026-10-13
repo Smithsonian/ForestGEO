@@ -418,6 +418,14 @@ function toStringOrNull(value: unknown): string | null {
   return String(value);
 }
 
+// A SpeciesCode in the restore row is planned as a tree-wide correction, so an
+// undo may only carry one when the original edit itself changed the species.
+function originalEditChangedSpeciesCode(record: EditOperationRecord, beforeCore: Record<string, unknown>): boolean {
+  const afterCore = findStateRow(record.afterState, 'coremeasurements')?.row;
+  if (!afterCore) return true;
+  return toStringOrNull(beforeCore.RawSpCode) !== toStringOrNull(afterCore.RawSpCode);
+}
+
 function reconstructMeasurementsSummaryRow(record: EditOperationRecord): Record<string, unknown> {
   const coreState = findStateRow(record.beforeState, 'coremeasurements');
   if (!coreState || !coreState.row) {
@@ -433,13 +441,16 @@ function reconstructMeasurementsSummaryRow(record: EditOperationRecord): Record<
   const newRow: Record<string, unknown> = {
     TreeTag: toStringOrNull(core.RawTreeTag),
     StemTag: toStringOrNull(core.RawStemTag),
-    SpeciesCode: toStringOrNull(core.RawSpCode),
     QuadratName: toStringOrNull(core.RawQuadrat),
     MeasurementDate: normalizeMeasurementDate(core.MeasurementDate),
     MeasuredDBH: toNumberOrNull(core.MeasuredDBH),
     MeasuredHOM: toNumberOrNull(core.MeasuredHOM),
     Description: toStringOrNull(core.Description)
   };
+
+  if (originalEditChangedSpeciesCode(record, core)) {
+    newRow.SpeciesCode = toStringOrNull(core.RawSpCode);
+  }
 
   if (stem) {
     newRow.StemLocalX = toNumberOrNull(stem.LocalX);
