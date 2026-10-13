@@ -12,7 +12,8 @@ const state = vi.hoisted(() => ({
   notices: [] as string[],
   startValidationRun: vi.fn(),
   updateValidationProgress: vi.fn(),
-  completeValidationRun: vi.fn()
+  completeValidationRun: vi.fn(),
+  clearValidationRun: vi.fn()
 }));
 
 // Mutable (not a static () => false) so tests can move the local runner
@@ -247,5 +248,53 @@ describe('ValidationStatusBadge fallback DB poll (R2.1 regression)', () => {
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
     });
     expect(fetchCount).toBe(2);
+  });
+});
+
+describe('ValidationStatusBadge scope switch while following another run', () => {
+  const FOLLOWED_RUN_ID = 41;
+
+  beforeEach(() => {
+    state.status = 'running';
+    state.runID = FOLLOWED_RUN_ID;
+    state.progress = { completed: 0, total: 2, current: 'Waiting for other run to finish' };
+    runnerState.isRunning = false;
+    runnerState.resume.mockResolvedValue(false);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ run: null }) }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps the followed run on first mount, then clears it and resumes the new scope when the plot changes', async () => {
+    const { rerender } = render(<ValidationStatusBadge schema="test_schema" plotID={1} censusID={2} />);
+
+    expect(state.clearValidationRun, 'first mount must not wipe a run the tab is already following').not.toHaveBeenCalled();
+    expect(runnerState.resume, 'first mount resumes the current scope').toHaveBeenCalledExactlyOnceWith({ schema: 'test_schema', plotID: 1, censusID: 2 });
+
+    await act(async () => {
+      rerender(<ValidationStatusBadge schema="test_schema" plotID={3} censusID={2} />);
+    });
+
+    expect(state.clearValidationRun, "switching plot must drop plot 1's run from the unscoped store").toHaveBeenCalledTimes(1);
+    expect(runnerState.resume, 'the new plot must be resumed, not skipped by a stale resumed flag').toHaveBeenLastCalledWith({
+      schema: 'test_schema',
+      plotID: 3,
+      censusID: 2
+    });
+    expect(runnerState.resume).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not clear or resume while this tab is driving its own run', async () => {
+    const { rerender } = render(<ValidationStatusBadge schema="test_schema" plotID={1} censusID={2} />);
+    runnerState.isRunning = true;
+
+    await act(async () => {
+      rerender(<ValidationStatusBadge schema="test_schema" plotID={3} censusID={2} />);
+    });
+
+    expect(state.clearValidationRun, "the active local run's progress must not be wiped").not.toHaveBeenCalled();
+    expect(runnerState.resume).toHaveBeenCalledTimes(1);
   });
 });

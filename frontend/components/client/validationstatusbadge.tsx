@@ -11,6 +11,12 @@ import ailogger from '@/ailogger';
 
 const DB_POLL_INTERVAL_MS = 10_000;
 
+async function fetchPersistedRun(schema: string, plotID: number, censusID: number) {
+  const response = await fetch(`/api/validations/run?schema=${schema}&plotID=${plotID}&censusID=${censusID}`);
+  const { run } = await response.json();
+  return run;
+}
+
 /**
  * Persistent badge that shows background validation progress.
  *
@@ -21,51 +27,28 @@ const DB_POLL_INTERVAL_MS = 10_000;
  * module-level runner was lost (e.g. full page reload).
  */
 export default function ValidationStatusBadge({ schema, plotID, censusID }: { schema?: string; plotID?: number; censusID?: number }) {
-  const { status, runID, progress, errors, notices, startValidationRun, updateValidationProgress, completeValidationRun } = useBackgroundValidationState();
+  const { status, runID, progress, errors, notices, startValidationRun, updateValidationProgress, completeValidationRun, clearValidationRun } =
+    useBackgroundValidationState();
   const [detailOpen, setDetailOpen] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const hasResumedRef = useRef(false);
+  const resumedScopeKeyRef = useRef<string | null>(null);
 
-  // On mount (or when context changes), check DB for an existing run and
-  // restore its state into Zustand.  This handles hard-refresh recovery.
+  // The store is not keyed by scope, so a switch must drop the previous scope's run before resuming the new one.
   useEffect(() => {
     if (!schema || !plotID || !censusID) return;
-    if (hasResumedRef.current) return;
-    // Don't resume if the module-level runner is already active
+    const scopeKey = `${schema}:${plotID}:${censusID}`;
+    if (resumedScopeKeyRef.current === scopeKey) return;
     if (ValidationRunner.isRunning()) return;
 
-    hasResumedRef.current = true;
+    const isScopeSwitch = resumedScopeKeyRef.current !== null;
+    resumedScopeKeyRef.current = scopeKey;
+    if (isScopeSwitch) clearValidationRun();
     ValidationRunner.resume({ schema, plotID, censusID }).catch((err: any) => {
       ailogger.error('[ValidationStatusBadge] Resume check failed:', err);
     });
-  }, [schema, plotID, censusID]);
+  }, [schema, plotID, censusID, clearValidationRun]);
 
-  // Reset resume flag when plot/census changes
-  useEffect(() => {
-    hasResumedRef.current = false;
-  }, [plotID, censusID]);
-
-  // Poll DB as a fallback while status is 'running'. The module-level
-  // runner may be driving this tab's own run (in which case Zustand is
-  // already being updated directly and this fallback should skip its
-  // fetch), or it may not be — e.g. the page was hard-refreshed and the
-  // runner died, or this tab is only *following* another tab/request's
-  // persisted run after a scope-lock conflict (ValidationRunner.start()
-  // clears its own activity flag in a non-reactive .finally(), so "is the
-  // local runner active" can only be read fresh on each tick, never cached
-  // for the lifetime of this effect). The timer is therefore always
-  // installed while running, and `isRunning()` is checked inside each tick
-  // instead of once at mount.
-  //
-  // `runID` is included below so this effect's lifetime — and the
-  // `cancelled` guard it owns — ends whenever the run being followed
-  // changes identity, even while `status` itself never leaves 'running'
-  // (e.g. handing off from one followed run to another). Without that,
-  // a slow response addressed to the previous run could still land after
-  // the handoff and overwrite the new one. `fetchInFlight` additionally
-  // keeps two ticks within the same lifetime from ever having requests in
-  // flight at once, so a slower tick's response can't arrive out of order
-  // after a faster, later tick's already has.
+  // isRunning() is read per tick because the runner clears it outside React; runID ends the lifetime on a run handoff.
   useEffect(() => {
     if (status !== 'running' || !schema || !plotID || !censusID) {
       if (pollTimerRef.current) {
@@ -79,25 +62,13 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
     let fetchInFlight = false;
 
     pollTimerRef.current = setInterval(async () => {
-      // Skip this tick's fetch if the local runner is actively driving its
-      // own run — re-checked per tick, not once at mount, since it can
-      // start or stop between ticks without this effect's dependencies
-      // changing.
-      if (ValidationRunner.isRunning()) return;
-      if (fetchInFlight) return;
+      if (ValidationRunner.isRunning() || fetchInFlight) return;
 
       fetchInFlight = true;
       try {
-        const response = await fetch(`/api/validations/run?schema=${schema}&plotID=${plotID}&censusID=${censusID}`);
-        const { run } = await response.json();
-
-        // Discard a response that resolved after this effect's lifetime
-        // ended (unmount, schema/plotID/censusID/runID changed) or after
-        // the local runner picked up a new run while this fetch was in
-        // flight — writing it into Zustand now would be stale.
+        const run = await fetchPersistedRun(schema, plotID, censusID);
         if (cancelled || !run || ValidationRunner.isRunning()) return;
 
-        // Write DB state back into Zustand
         if (run.Status === 'running') {
           updateValidationProgress({
             completed: run.CompletedSteps,
