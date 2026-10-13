@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MeasurementsSummaryViewDataGrid from './msvdatagrid';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
+import { FIX_FAILED_ROWS_BUTTON_LABEL } from '@/config/failedrowrecovery';
 
 const { routerReplaceMock, sessionState } = vi.hoisted(() => ({
   routerReplaceMock: vi.fn(),
@@ -118,10 +119,10 @@ describe('MeasurementsSummaryViewDataGrid', () => {
 
     await waitFor(() => {
       const buttons = latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>;
-      expect(buttons.some(button => button.label === 'Fix Failed Rows')).toBe(true);
+      expect(buttons.some(button => button.label === FIX_FAILED_ROWS_BUTTON_LABEL)).toBe(true);
     });
 
-    const fixButton = (latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>).find(button => button.label === 'Fix Failed Rows');
+    const fixButton = (latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>).find(button => button.label === FIX_FAILED_ROWS_BUTTON_LABEL);
     expect(fixButton?.badgeCount).toBe(3);
     expect(fixButton?.prominentWarning).toBe(true);
     expect(latestModalProps()?.open).toBe(false);
@@ -141,7 +142,7 @@ describe('MeasurementsSummaryViewDataGrid', () => {
       expect(vi.mocked(global.fetch)).toHaveBeenCalled();
     });
     const buttons = latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>;
-    expect(buttons.some(button => button.label === 'Fix Failed Rows')).toBe(false);
+    expect(buttons.some(button => button.label === FIX_FAILED_ROWS_BUTTON_LABEL)).toBe(false);
   });
 
   it('does not offer failed-row recovery to pending users', async () => {
@@ -150,7 +151,7 @@ describe('MeasurementsSummaryViewDataGrid', () => {
     render(<MeasurementsSummaryViewDataGrid />);
 
     const buttons = latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>;
-    expect(buttons.some(button => button.label === 'Fix Failed Rows')).toBe(false);
+    expect(buttons.some(button => button.label === FIX_FAILED_ROWS_BUTTON_LABEL)).toBe(false);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -183,6 +184,6 @@ describe('MeasurementsSummaryViewDataGrid', () => {
 
     await waitFor(() => expect(screen.getByText(/unable to load the failed-measurement count/i)).toBeInTheDocument());
     const buttons = latestCommonsProps()?.dynamicButtons as Array<Record<string, any>>;
-    expect(buttons.some(button => button.label === 'Fix Failed Rows')).toBe(false);
+    expect(buttons.some(button => button.label === FIX_FAILED_ROWS_BUTTON_LABEL)).toBe(false);
   });
 });

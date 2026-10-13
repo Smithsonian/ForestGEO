@@ -19,6 +19,7 @@ import { AssignmentOutlined, BuildCircleOutlined, CachedOutlined, UploadFileOutl
 import ailogger from '@/ailogger';
 import { useRouter } from 'next/navigation';
 import { VisibleFilter } from '@/config/datagridhelpers';
+import { FIX_FAILED_ROWS_BUTTON_LABEL } from '@/config/failedrowrecovery';
 import { getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
 import { useSession } from 'next-auth/react';
 
@@ -331,7 +332,7 @@ export default function MeasurementsSummaryViewDataGrid({
           ...(canRecoverFailedRows && failedRowCount > 0
             ? [
                 {
-                  label: 'Fix Failed Rows',
+                  label: FIX_FAILED_ROWS_BUTTON_LABEL,
                   onClick: () => setOpenFSM(true),
                   tooltip: 'Review rows that failed upload, correct them, and reingest',
                   icon: <BuildCircleOutlined />,

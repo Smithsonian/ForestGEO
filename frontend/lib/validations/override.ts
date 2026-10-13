@@ -1,18 +1,14 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { format } from 'mysql2/promise';
-import { safeFormatQuery, validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { MANAGER_OVERRIDE_ERROR_CODE, MANAGER_OVERRIDE_ERROR_MESSAGE } from '@/config/validationoverride';
-import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
-import { assertNoActiveMeasurementScopeConflict, ScopeAccessError, ScopeBusyError, type MeasurementScopeInput } from '@/config/editplan/scopeguard';
-import { refreshMeasurementViewsForCoreMeasurements } from '@/lib/measurementviewrefresh';
-
-// Bound SQL parameters for large overrides; every batch stays in the same transaction.
-const OVERRIDE_VIEW_REFRESH_BATCH_SIZE = 1000;
-
-interface FormattedQueryRequest {
-  query: string;
-  params: unknown[];
-}
+import { type MeasurementScopeInput } from '@/config/editplan/scopeguard';
+import {
+  assertValidMeasurementScope,
+  type FormattedQueryRequest,
+  lockActiveScope,
+  refreshMeasurementViewsInBatches
+} from '@/lib/validations/scope-transaction';
 
 /**
  * Ordered statements for overriding every failed or pending row in one plot census.
@@ -60,23 +56,9 @@ function createValidationOverrideQueries(schema: string, plotID: number, censusI
 
 /** The override marker, resolved occurrences, validity, and views commit together. */
 export async function overrideValidationScope(cm: ConnectionManager, scope: MeasurementScopeInput): Promise<number> {
-  validateSchemaOrThrow(scope.schema);
-  if (!Number.isSafeInteger(scope.plotID) || scope.plotID <= 0 || !Number.isSafeInteger(scope.censusID) || scope.censusID <= 0) {
-    throw new ScopeAccessError('A positive plot and census ID are required');
-  }
+  assertValidMeasurementScope(scope);
   return cm.withTransaction(async tx => {
-    const locked = await cm.acquireApplicationLock(
-      buildMeasurementScopeLockName(scope.schema, scope.plotID, scope.censusID),
-      tx.id,
-      MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS
-    );
-    if (!locked) throw new ScopeBusyError('A measurement operation is already in progress for this plot/census');
-    const census = await tx.query<Array<{ CensusID: number }>>(
-      safeFormatQuery(scope.schema, 'SELECT CensusID FROM ??.census WHERE PlotID = ? AND CensusID = ? AND IsActive = TRUE FOR UPDATE'),
-      [scope.plotID, scope.censusID]
-    );
-    if (census.length !== 1) throw new ScopeAccessError('The active census does not belong to the selected plot');
-    await assertNoActiveMeasurementScopeConflict(cm, scope, tx.id);
+    await lockActiveScope(cm, tx, scope);
     const targets = await tx.query<Array<{ CoreMeasurementID: number }>>(
       safeFormatQuery(
         scope.schema,
@@ -90,14 +72,12 @@ export async function overrideValidationScope(cm: ConnectionManager, scope: Meas
       const result = await tx.query<{ affectedRows: number }>(format(step.query, step.params));
       affectedRows = result.affectedRows;
     }
-    for (let offset = 0; offset < targets.length; offset += OVERRIDE_VIEW_REFRESH_BATCH_SIZE) {
-      await refreshMeasurementViewsForCoreMeasurements(
-        cm,
-        scope.schema,
-        targets.slice(offset, offset + OVERRIDE_VIEW_REFRESH_BATCH_SIZE).map(row => row.CoreMeasurementID),
-        tx.id
-      );
-    }
+    await refreshMeasurementViewsInBatches(
+      cm,
+      scope.schema,
+      targets.map(row => row.CoreMeasurementID),
+      tx.id
+    );
     return affectedRows;
   });
 }

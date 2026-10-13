@@ -7,6 +7,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { recheckMeasurementValidation, resetValidationScope } from '@/lib/validations/reset';
 import { refreshMeasurementViewsForCoreMeasurements } from '@/lib/measurementviewrefresh';
+import { SCOPE_VIEW_REFRESH_BATCH_SIZE } from '@/lib/validations/scope-transaction';
 import {
   cleanupTestMeasurements,
   insertDirectMeasurements,
@@ -18,10 +19,6 @@ import {
 
 const bool = (value: unknown): boolean | null => (value == null ? null : Buffer.isBuffer(value) ? value[0] === 1 : Number(value) === 1);
 
-// Mirrors the private VALIDATION_RESET_VIEW_REFRESH_BATCH_SIZE constant in lib/validations/reset.ts.
-// That constant is intentionally not exported: this test sizes its own fixture off the known
-// production value instead of importing a test-only escape hatch out of the module.
-const PRODUCTION_VIEW_REFRESH_BATCH_SIZE = 1000;
 // Non-recursive digit generator: MySQL's default cte_max_recursion_depth (1000) would reject a
 // recursive CTE for 1001+ rows, so this builds every 0-9999 value via a plain CROSS JOIN instead.
 const DIGITS_0_9 =
@@ -70,6 +67,15 @@ describe('resetValidationScope / recheckMeasurementValidation transaction bounda
       { treeTag: `${tag}${serial}`, stemTag: `S${serial}`, speciesCode, quadratName, x: serial, y: serial, dbh: 100, hom: 1.3, date: '2025-06-01' }
     ]);
     return coreMeasurementIDs[0];
+  }
+
+  async function seedParkedFailure(censusID: number): Promise<number> {
+    const [result] = await connection.query<mysql.ResultSetHeader>(
+      `INSERT INTO coremeasurements (StemGUID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate, IsValidated, IsActive)
+       VALUES (NULL, ?, 100, 1.3, '2025-06-01', FALSE, TRUE)`,
+      [censusID]
+    );
+    return result.insertId;
   }
 
   async function errorID(source: 'validation' | 'ingestion', code: string, message = `${source} ${code}`): Promise<number> {
@@ -243,6 +249,32 @@ describe('resetValidationScope / recheckMeasurementValidation transaction bounda
       );
     });
 
+    it('leaves parked ingestion failures and inactive rows untouched and uncounted, because validation never finalizes them back out of pending', async () => {
+      const validationErrorID = await errorID('validation', 'RESET_TEST_UNREVALIDATABLE');
+      const revalidatable = await seedRow('RESETREVALIDATABLE', census2ID);
+      const inactive = await seedRow('RESETINACTIVE', census2ID);
+      const parkedFailure = await seedParkedFailure(census2ID);
+      await connection.query('UPDATE coremeasurements SET IsValidated = FALSE WHERE CoreMeasurementID IN (?, ?)', [revalidatable, inactive]);
+      await connection.query('UPDATE coremeasurements SET IsActive = FALSE WHERE CoreMeasurementID = ?', [inactive]);
+      await logOccurrence(inactive, validationErrorID, false);
+      await logOccurrence(parkedFailure, validationErrorID, false);
+
+      const affectedRows = await resetValidationScope(cm, { schema, plotID, censusID: census2ID });
+
+      expect(affectedRows, 'only the active, stem-resolved row is counted as reset').toBe(1);
+      expect(await validity(revalidatable), 'the active, stem-resolved row is put back to pending').toBeNull();
+      expect(await validity(parkedFailure), 'a parked failure (StemGUID NULL) must keep IsValidated = FALSE, not become a permanent pending row').toBe(false);
+      expect(await validity(inactive), 'an inactive row must keep its prior IsValidated value').toBe(false);
+      expect(await occurrence(parkedFailure, validationErrorID), "the parked failure's occurrence must stay unresolved").toEqual({
+        isResolved: false,
+        resolvedAt: null
+      });
+      expect(await occurrence(inactive, validationErrorID), "the inactive row's occurrence must stay unresolved").toEqual({
+        isResolved: false,
+        resolvedAt: null
+      });
+    });
+
     it('reports zero affected rows for an empty, otherwise-valid census', async () => {
       expect(await resetValidationScope(cm, { schema, plotID, censusID: census2ID })).toBe(0);
     });
@@ -337,7 +369,7 @@ describe('resetValidationScope / recheckMeasurementValidation transaction bounda
     });
 
     it('refreshes every one of 1001 rows across exactly two batches, including rows that exist only in the second batch', async () => {
-      const totalRows = PRODUCTION_VIEW_REFRESH_BATCH_SIZE + 1;
+      const totalRows = SCOPE_VIEW_REFRESH_BATCH_SIZE + 1;
       const validationErrorID = await errorID('validation', 'RESET_BATCH_BOUNDARY');
       const measurementIDs = await seedBulkRows('RESETBULKBATCH', census2ID, totalRows);
       expect(measurementIDs, 'the bulk fixture must create exactly one measurement per requested row').toHaveLength(totalRows);
@@ -466,6 +498,19 @@ describe('resetValidationScope / recheckMeasurementValidation transaction bounda
 
       expect(await validity(row), 'an active-upload conflict must not mutate the row').toBe(false);
       expect(await occurrence(row, validationErrorID)).toEqual({ isResolved: false, resolvedAt: null });
+    });
+
+    it('rejects recheck for a parked ingestion failure (StemGUID NULL), without writing anything', async () => {
+      const validationErrorID = await errorID('validation', 'RECHECK_TEST_PARKED');
+      const parkedFailure = await seedParkedFailure(census2ID);
+      await logOccurrence(parkedFailure, validationErrorID, false);
+
+      await expect(recheckMeasurementValidation(cm, { schema, plotID, censusID: census2ID, coreMeasurementID: parkedFailure })).rejects.toThrow(
+        ScopeAccessError
+      );
+
+      expect(await validity(parkedFailure), 'a rejected recheck must not move the parked failure to pending').toBe(false);
+      expect(await occurrence(parkedFailure, validationErrorID)).toEqual({ isResolved: false, resolvedAt: null });
     });
 
     it('rejects recheck for a measurement that belongs to a different census, without writing anything', async () => {

@@ -114,16 +114,13 @@ import {
   toServerMeasurementFilterModel
 } from './measurementscommonsutils';
 import { buildMeasurementStateCountsSql } from '@/config/measurementstatefilters';
+import { FIX_FAILED_ROWS_BUTTON_LABEL } from '@/config/failedrowrecovery';
 
 // Stable reference to prevent infinite resize observer loop in MUI DataGrid
 const AUTO_ROW_HEIGHT = () => 'auto' as const;
 const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
 const FIREFOX_FIXED_ROW_HEIGHT = 112;
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
-// Matches the dynamic-button label msvdatagrid.tsx supplies for its existing
-// FailedMeasurementsModal entry — reused here rather than inventing a new
-// recovery surface for parked ingestion failures.
-const FIX_FAILED_ROWS_BUTTON_LABEL = 'Fix Failed Rows';
 
 function describeMeasurementRow(row: GridRowModel | null): string {
   if (!row) return 'this measurement';
@@ -1619,9 +1616,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   } else {
     const showInitialGridSkeleton = isLoading && !hasLoadedGrid;
     const showGridLoading = hasLoadedGrid && (isLoading || isValidating);
-    // Reuses msvdatagrid.tsx's existing Failed Measurements recovery entry instead
-    // of inventing a second surface for parked (StemGUID = NULL) ingestion failures.
     const fixFailedRowsButton = dynamicButtons?.find(button => button.label === FIX_FAILED_ROWS_BUTTON_LABEL);
+    const selectedRowValidation = cmvSelected > 0 ? validationErrors[cmvSelected] : undefined;
     return (
       <Box
         sx={{
@@ -1848,7 +1844,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                   re-check them.
                 </Typography>
                 <Typography sx={{ mt: 1 }}>
-                  Failed Measurements still need correction and reingestion{fixFailedRowsButton ? ' — use Fix Failed Rows for those.' : '.'}
+                  Failed Measurements still need correction and reingestion{fixFailedRowsButton ? ` — use ${FIX_FAILED_ROWS_BUTTON_LABEL} for those.` : '.'}
                 </Typography>
               </DialogContent>
               <DialogActions>
@@ -1861,7 +1857,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                       await fixFailedRowsButton.onClick();
                     }}
                   >
-                    Fix Failed Rows
+                    {FIX_FAILED_ROWS_BUTTON_LABEL}
                   </Button>
                 )}
                 <Button
@@ -1894,14 +1890,14 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             </ModalDialog>
           </Modal>
         )}
-        {isSingleCMVErrorOpen && cmvSelected > 0 && (
+        {isSingleCMVErrorOpen && selectedRowValidation && (
           <Modal open={isSingleCMVErrorOpen} onClose={() => {}}>
             <ModalDialog role={'alertdialog'}>
               <DialogTitle>Details</DialogTitle>
               <DialogContent>
                 The following validation errors were found in this row:
                 <Stack direction={'column'} gap={1.5} sx={{ display: 'flex', flex: 1 }}>
-                  {validationErrors[cmvSelected].errors.map((err, index) => (
+                  {selectedRowValidation.errors.map((err, index) => (
                     <Stack key={index} direction={'column'} spacing={2} alignItems={'center'}>
                       {err.validationPairs.map((vp, index) => (
                         <Stack key={`${index}-stack`} direction={'row'}>
@@ -1948,11 +1944,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
                       await handleCloseModal(setIsSingleCMVErrorOpen, false);
                       setCMVSelected(-1);
-                      // The atomic recheck already refreshed both views for the changed row.
-                      // Close the modal and clear the selection before this refresh runs: runFetchPaginated
-                      // replaces validationErrors, and validationErrors[cmvSelected] is read unguarded while
-                      // the modal is open (see isSingleCMVErrorOpen block above) — an index-out-of-range
-                      // render hazard if the refreshed map no longer has that entry.
                       await Promise.all([runFetchPaginated(), refreshCounts()]);
 
                       setSnackbar({
