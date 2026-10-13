@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type ConnectionManager from '@/lib/db/connectionmanager';
 import { SpeciesCorrectionSummary } from './types';
 
-const refreshIngestionErrorsForMeasurementMock = vi.fn(async (...args: unknown[]) => []);
+const reconcileIngestionErrorsForMeasurementMock = vi.fn(async (...args: unknown[]) => []);
 vi.mock('@/config/measurementerrors', () => ({
-  refreshIngestionErrorsForMeasurement: (...args: unknown[]) => refreshIngestionErrorsForMeasurementMock(...args),
+  reconcileIngestionErrorsForMeasurement: (...args: unknown[]) => reconcileIngestionErrorsForMeasurementMock(...args),
   // The SUT (tree-species-correction-writer.ts) also imports this constant
   // directly from this module, to bind the validation-occurrence UPDATE's
   // `ErrorSource = ?` parameter. `vi.mock` replaces the ENTIRE
@@ -116,7 +116,7 @@ function replanRows(overrides: { stems?: unknown[]; measurements?: unknown[] } =
 
 // The row shape `selectEffectiveFieldsForMeasurements` returns — the
 // single locked read `refreshIngestionErrorsForAllMembers` fans out to
-// `refreshIngestionErrorsForMeasurement` for every attached member. Default
+// `reconcileIngestionErrorsForMeasurement` for every attached member. Default
 // values describe the edited measurement (42); sibling-scoped tests
 // override `CoreMeasurementID` and give each member its OWN distinct
 // values, so a test can tell "the right row's values were forwarded to the
@@ -139,7 +139,7 @@ function effectiveFieldsRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** The `effectiveFieldsRow` fields `refreshIngestionErrorsForMeasurement` actually receives, with `X`/`Y`/`DBH`/`HOM` coerced to number|null and `Date` coerced to a date-only string — see `toOptionalNumber`/`toDateOnlyString` in tree-species-correction-writer.ts. Every value used by the row builders above is already a bare number or a date-only string, so this is an identity mapping that drops only `CoreMeasurementID` (passed separately) — kept distinct from `effectiveFieldsRow` anyway so each test's intent (DB row shape vs. forwarded-call shape) stays self-documenting at the call site. */
+/** The `effectiveFieldsRow` fields `reconcileIngestionErrorsForMeasurement` actually receives, with `X`/`Y`/`DBH`/`HOM` coerced to number|null and `Date` coerced to a date-only string — see `toOptionalNumber`/`toDateOnlyString` in tree-species-correction-writer.ts. Every value used by the row builders above is already a bare number or a date-only string, so this is an identity mapping that drops only `CoreMeasurementID` (passed separately) — kept distinct from `effectiveFieldsRow` anyway so each test's intent (DB row shape vs. forwarded-call shape) stays self-documenting at the call site. */
 function expectedForwardedFields(row: ReturnType<typeof effectiveFieldsRow>) {
   const { CoreMeasurementID, ...rest } = row;
   return rest;
@@ -156,7 +156,7 @@ function findPendingResetCall(calls: Array<{ sql: string; params: unknown[] }>) 
 }
 
 beforeEach(() => {
-  refreshIngestionErrorsForMeasurementMock.mockClear();
+  reconcileIngestionErrorsForMeasurementMock.mockClear();
 });
 
 describe('writeTreeSpeciesCorrection', () => {
@@ -368,9 +368,9 @@ describe('writeTreeSpeciesCorrection', () => {
     // regression that forwards the wrong row to the wrong member (e.g. 43's
     // values under 42's id) would fail this, not just a weaker "was it
     // called" check.
-    expect(refreshIngestionErrorsForMeasurementMock).toHaveBeenCalledTimes(2);
-    expect(refreshIngestionErrorsForMeasurementMock).toHaveBeenNthCalledWith(1, cm, TEST_SCHEMA, 42, 7, expectedForwardedFields(editedFields), TX_ID);
-    expect(refreshIngestionErrorsForMeasurementMock).toHaveBeenNthCalledWith(2, cm, TEST_SCHEMA, 43, 7, expectedForwardedFields(siblingFields), TX_ID);
+    expect(reconcileIngestionErrorsForMeasurementMock).toHaveBeenCalledTimes(2);
+    expect(reconcileIngestionErrorsForMeasurementMock).toHaveBeenNthCalledWith(1, cm, TEST_SCHEMA, 42, 7, expectedForwardedFields(editedFields), TX_ID);
+    expect(reconcileIngestionErrorsForMeasurementMock).toHaveBeenNthCalledWith(2, cm, TEST_SCHEMA, 43, 7, expectedForwardedFields(siblingFields), TX_ID);
 
     expect(calls.some(c => /^DELETE\b/i.test(c.sql))).toBe(false);
     const pendingResetCall = findPendingResetCall(calls);
@@ -424,9 +424,17 @@ describe('writeTreeSpeciesCorrection', () => {
     // Ingestion-error refresh covers EVERY attached member: an inactive
     // measurement's SpCode-derived findings are just as stale against the
     // new species as an active one's.
-    expect(refreshIngestionErrorsForMeasurementMock).toHaveBeenCalledTimes(2);
-    expect(refreshIngestionErrorsForMeasurementMock).toHaveBeenNthCalledWith(1, cm, TEST_SCHEMA, 42, 7, expectedForwardedFields(editedFields), TX_ID);
-    expect(refreshIngestionErrorsForMeasurementMock).toHaveBeenNthCalledWith(2, cm, TEST_SCHEMA, 44, 7, expectedForwardedFields(inactiveSiblingFields), TX_ID);
+    expect(reconcileIngestionErrorsForMeasurementMock).toHaveBeenCalledTimes(2);
+    expect(reconcileIngestionErrorsForMeasurementMock).toHaveBeenNthCalledWith(1, cm, TEST_SCHEMA, 42, 7, expectedForwardedFields(editedFields), TX_ID);
+    expect(reconcileIngestionErrorsForMeasurementMock).toHaveBeenNthCalledWith(
+      2,
+      cm,
+      TEST_SCHEMA,
+      44,
+      7,
+      expectedForwardedFields(inactiveSiblingFields),
+      TX_ID
+    );
 
     // ...but the validation-occurrence resolution and the pending reset
     // remain active-only: the inactive id (44) is absent from both
@@ -449,7 +457,7 @@ describe('writeTreeSpeciesCorrection', () => {
     // full affected-set finalization still runs over the lone edited
     // measurement itself.
     expect(calls).toHaveLength(10);
-    expect(refreshIngestionErrorsForMeasurementMock).toHaveBeenCalledTimes(1);
+    expect(reconcileIngestionErrorsForMeasurementMock).toHaveBeenCalledTimes(1);
   });
 
   // --- Requirement 5: complete, versioned before/after metadata ----------
@@ -721,12 +729,12 @@ describe('refreshCorrectionErrorsAndValidationPending (direct unit tests)', () =
     expect(calls.some(c => /IN\s*\(\s*\)/.test(c.sql))).toBe(false);
   });
 
-  it('issues no effective-fields read and calls refreshIngestionErrorsForMeasurement zero times when allMemberIDs is empty', async () => {
+  it('issues no effective-fields read and calls reconcileIngestionErrorsForMeasurement zero times when allMemberIDs is empty', async () => {
     const { cm, calls } = makeConnectionManager([]);
     const result = await refreshCorrectionErrorsAndValidationPending(cm, TEST_SCHEMA, 7, [], [], TX_ID);
     expect(result.ingestionRefreshedMeasurementIDs).toEqual([]);
     expect(calls).toHaveLength(0);
-    expect(refreshIngestionErrorsForMeasurementMock).not.toHaveBeenCalled();
+    expect(reconcileIngestionErrorsForMeasurementMock).not.toHaveBeenCalled();
   });
 
   it("counts/ids reflect actual values, not invented ones: ingestionRefreshedMeasurementIDs from the effective-fields read, resolvedValidationOccurrenceCount from the UPDATE's own affectedRows, pendingMeasurementIDs exactly activeMemberIDs", async () => {
@@ -739,7 +747,7 @@ describe('refreshCorrectionErrorsAndValidationPending (direct unit tests)', () =
     expect(result.ingestionRefreshedMeasurementIDs).toEqual([42, 43]);
     expect(result.resolvedValidationOccurrenceCount).toBe(2);
     expect(result.pendingMeasurementIDs).toEqual([42, 43]);
-    expect(refreshIngestionErrorsForMeasurementMock).toHaveBeenCalledTimes(2);
+    expect(reconcileIngestionErrorsForMeasurementMock).toHaveBeenCalledTimes(2);
   });
 
   it('propagates a thrown SQL error from the validation-occurrence UPDATE unchanged — never swallowed, never translated', async () => {

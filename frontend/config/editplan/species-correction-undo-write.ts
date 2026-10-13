@@ -223,22 +223,30 @@ async function restoreDeclaredColumns<TColumn extends SpeciesCorrectionDiffCoreM
   }
 }
 
-// One UPDATE per member: each restores a different exact RawSpCode (NULL
-// included verbatim), so a shared affected-rows check would misfire for any
-// member whose restored value happens to equal its current one.
+// Each member restores its own exact RawSpCode (NULL included verbatim), so the
+// statement carries no shared affected-rows check: a member whose restored value
+// equals its current one legitimately reports zero changed rows.
 async function restoreMemberRawSpCodes(
   cm: ConnectionManager,
   schema: string,
   members: readonly SpeciesCorrectionMetadataMeasurement[],
   transactionID: string
 ): Promise<void> {
-  for (const member of members) {
-    await cm.executeQuery(
-      safeFormatQuery(schema, `UPDATE ??.${COREMEASUREMENTS_TABLE} SET RawSpCode = ? WHERE CoreMeasurementID = ?`),
-      [member.rawSpCode, member.coreMeasurementID],
-      transactionID
-    );
-  }
+  if (members.length === 0) return;
+  const caseBranches = members.map(() => 'WHEN ? THEN ?').join(' ');
+  const params: unknown[] = [];
+  for (const member of members) params.push(member.coreMeasurementID, member.rawSpCode);
+  params.push(...members.map(member => member.coreMeasurementID));
+  await cm.executeQuery(
+    safeFormatQuery(
+      schema,
+      `UPDATE ??.${COREMEASUREMENTS_TABLE}
+       SET RawSpCode = CASE CoreMeasurementID ${caseBranches} END
+       WHERE CoreMeasurementID IN (${buildInPlaceholders(members.length)})`
+    ),
+    params,
+    transactionID
+  );
 }
 
 async function restoreAttributeAssociations(

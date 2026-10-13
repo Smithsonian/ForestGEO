@@ -33,7 +33,7 @@
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import type { EditOperationStateRow } from '@/config/editoperations';
-import { refreshIngestionErrorsForMeasurement, VALIDATION_ERROR_SOURCE, INGESTION_STAGE_ERROR_CODES } from '@/config/measurementerrors';
+import { reconcileIngestionErrorsForMeasurement, VALIDATION_ERROR_SOURCE, INGESTION_STAGE_ERROR_CODES } from '@/config/measurementerrors';
 import { planSpeciesCorrection, SpeciesCorrectionPlanResult } from './tree-species-correction';
 import { FieldChange, SpeciesCorrectionSummary, SpeciesCorrectionStemPrecondition } from './types';
 import { TARGET_TEXT_COLLATION } from '@/lib/db/schema-contract';
@@ -588,16 +588,7 @@ function toDateOnlyString(value: string | Date | null): string | null {
   return null;
 }
 
-/**
- * Re-derives #307's ingestion-error state for every attached member — active,
- * inactive, and the edited target row alike — each against that member's own
- * current, post-write effective values. A tree-wide RawSpCode/species change
- * can flip the ingestion verdict for any attached row (e.g. an inactive
- * measurement's SpCode-derived finding is just as stale as an active one's),
- * so scope is never limited to active siblings. Reuses #307's
- * `refreshIngestionErrorsForMeasurement` verbatim; resolution policy is
- * entirely that helper's own decision.
- */
+// Inactive members are included: a tree-wide species change can flip any member's ingestion verdict.
 async function refreshIngestionErrorsForAllMembers(
   cm: ConnectionManager,
   schema: string,
@@ -607,7 +598,7 @@ async function refreshIngestionErrorsForAllMembers(
 ): Promise<number[]> {
   const rows = await selectEffectiveFieldsForMeasurements(cm, schema, memberIDs, transactionID);
   for (const row of rows) {
-    await refreshIngestionErrorsForMeasurement(
+    await reconcileIngestionErrorsForMeasurement(
       cm,
       schema,
       Number(row.CoreMeasurementID),

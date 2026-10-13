@@ -1027,6 +1027,19 @@ export async function refreshIngestionErrorsForMeasurement(
   fields: FailedRowFields,
   transactionID?: string
 ): Promise<RevalidationResult[]> {
+  await reconcileIngestionErrorsForMeasurement(connectionManager, schema, measurementID, censusID, fields, transactionID);
+  return fetchUnresolvedMeasurementErrors(connectionManager, schema, measurementID, INGESTION_ERROR_SOURCE, transactionID);
+}
+
+/** The write half of `refreshIngestionErrorsForMeasurement`, for callers that do not read the unresolved errors back. */
+export async function reconcileIngestionErrorsForMeasurement(
+  connectionManager: ConnectionManager,
+  schema: string,
+  measurementID: number,
+  censusID: number,
+  fields: FailedRowFields,
+  transactionID?: string
+): Promise<void> {
   const { errors: freshErrors, checkedCodes } = await revalidateEditedFailedRow(connectionManager, schema, censusID, fields, transactionID);
 
   const freshCodes = new Set(freshErrors.map(error => error.errorCode));
@@ -1034,8 +1047,6 @@ export async function refreshIngestionErrorsForMeasurement(
 
   await resolveCheckedMeasurementErrors(connectionManager, schema, measurementID, INGESTION_ERROR_SOURCE, codesToResolve, transactionID);
   await upsertMeasurementErrors(connectionManager, schema, measurementID, INGESTION_ERROR_SOURCE, freshErrors, transactionID);
-
-  return fetchUnresolvedMeasurementErrors(connectionManager, schema, measurementID, INGESTION_ERROR_SOURCE, transactionID);
 }
 
 export function buildFailedMeasurementsBaseQuery(schema: string): string {
