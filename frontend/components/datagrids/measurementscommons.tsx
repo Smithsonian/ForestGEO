@@ -106,8 +106,8 @@ import {
   buildEditableFieldsDiffWithMetaForSurface,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
-  createResetValidationErrorsQuery,
-  createResetValidationStatesQuery,
+  RECHECK_VALIDATION_SUCCESS_MESSAGE,
+  RESET_VALIDATION_SUCCESS_MESSAGE,
   selectMeasurementStateSnackbar,
   shouldRefreshMeasurementsAfterValidationTransition,
   shouldUseAutoMeasurementRowHeight,
@@ -120,6 +120,10 @@ const AUTO_ROW_HEIGHT = () => 'auto' as const;
 const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
 const FIREFOX_FIXED_ROW_HEIGHT = 112;
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
+// Matches the dynamic-button label msvdatagrid.tsx supplies for its existing
+// FailedMeasurementsModal entry — reused here rather than inventing a new
+// recovery surface for parked ingestion failures.
+const FIX_FAILED_ROWS_BUTTON_LABEL = 'Fix Failed Rows';
 
 function describeMeasurementRow(row: GridRowModel | null): string {
   if (!row) return 'this measurement';
@@ -1548,32 +1552,19 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       // destructive mutation — global overlay blocks UI for the duration of the API call
       setLoading(true, 'Resetting validation states...');
 
-      const resolveErrorsRequest = createResetValidationErrorsQuery(currentSite.schemaName, currentPlot.plotID, activeCensusID);
-      const resetStateRequest = createResetValidationStatesQuery(currentSite.schemaName, currentPlot.plotID, activeCensusID);
-
-      const clearCMVResponse = await fetch(`/api/query`, {
+      const response = await fetch('/api/validations/reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(resolveErrorsRequest)
-      });
-      if (!clearCMVResponse.ok) {
-        const errorData = await clearCMVResponse.json().catch(() => ({ error: 'Unknown error', details: '' }));
-        ailogger.error('Resolve validation errors query failed:', errorData);
-        throw new Error(errorData.details || errorData.error || 'Failed to resolve validation errors');
-      }
-      const response = await fetch(`/api/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(resetStateRequest)
+        body: JSON.stringify({ schema: currentSite.schemaName, plotID: currentPlot.plotID, censusID: activeCensusID })
       });
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error', details: '' }));
-        ailogger.error('Validation reset query failed:', errorData);
-        throw new Error(errorData.details || errorData.error || 'Failed to reset validation states');
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        ailogger.error('Validation reset failed:', errorData);
+        throw new Error(errorData.error || 'Failed to reset validation states');
       }
 
       setSnackbar({
-        children: 'Validation states reset. Rows are pending validation.',
+        children: RESET_VALIDATION_SUCCESS_MESSAGE,
         severity: 'success'
       });
     } catch (error: unknown) {
@@ -1596,6 +1587,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   } else {
     const showInitialGridSkeleton = isLoading && !hasLoadedGrid;
     const showGridLoading = hasLoadedGrid && (isLoading || isValidating);
+    // Reuses msvdatagrid.tsx's existing Failed Measurements recovery entry instead
+    // of inventing a second surface for parked (StemGUID = NULL) ingestion failures.
+    const fixFailedRowsButton = dynamicButtons?.find(button => button.label === FIX_FAILED_ROWS_BUTTON_LABEL);
     return (
       <Box
         sx={{
@@ -1834,14 +1828,36 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           >
             <ModalDialog role={'alertdialog'}>
               <DialogTitle>Reset Validation States?</DialogTitle>
-              <DialogContent>Are you sure you want to clear current validation failures and set all rows in this census back to pending?</DialogContent>
+              <DialogContent>
+                <Typography>
+                  This clears current validation failures for every row in this census and sets them back to pending. Validations will need to run again to
+                  re-check them.
+                </Typography>
+                <Typography sx={{ mt: 1 }}>
+                  Failed Measurements still need correction and reingestion{fixFailedRowsButton ? ' — use Fix Failed Rows for those.' : '.'}
+                </Typography>
+              </DialogContent>
               <DialogActions>
+                {fixFailedRowsButton && (
+                  <Button
+                    variant="outlined"
+                    disabled={isResettingValidations}
+                    onClick={async () => {
+                      await handleCloseModal(setIsResetValidationModalOpen, false);
+                      await fixFailedRowsButton.onClick();
+                    }}
+                  >
+                    Fix Failed Rows
+                  </Button>
+                )}
                 <Button
                   onClick={async () => {
                     setIsResettingValidations(true);
                     try {
                       await handleResetValidations();
-                      await handleCloseModal(setIsResetValidationModalOpen, true);
+                      await handleCloseModal(setIsResetValidationModalOpen, false);
+                      // The atomic reset already refreshed both views for the changed rows.
+                      await Promise.all([runFetchPaginated(), refreshCounts()]);
                     } catch (error: unknown) {
                       const errorObj = error instanceof Error ? error : new Error(String(error));
                       setSnackbar({
@@ -1895,52 +1911,45 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 </Button>
                 <Button
                   onClick={async () => {
+                    if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) {
+                      setSnackbar({ children: 'Active site, plot, or census selection is missing.', severity: 'error' });
+                      return;
+                    }
                     setIsClearingErrors(true);
                     try {
-                      const deleteResponse = await fetch(`/api/query`, {
+                      const response = await fetch('/api/validations/recheck', {
                         method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                          query: `DELETE mel
-                                  FROM ??.measurement_error_log mel
-                                         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
-                                  WHERE mel.MeasurementID = ?
-                                    AND me.ErrorSource = ?`,
-                          params: [currentSite?.schemaName, currentSite?.schemaName, cmvSelected, 'validation'],
-                          format: true
+                          schema: currentSite.schemaName,
+                          plotID: currentPlot.plotID,
+                          censusID: activeCensusID,
+                          coreMeasurementID: cmvSelected
                         })
                       });
-
-                      if (!deleteResponse.ok) {
-                        throw new Error('Failed to delete validation errors');
+                      if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                        throw new Error(errorData.error || 'Failed to clear validation errors');
                       }
 
-                      const updateResponse = await fetch(`/api/query`, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                          query: `UPDATE ??.coremeasurements SET IsValidated = NULL WHERE CoreMeasurementID = ?`,
-                          params: [currentSite?.schemaName, cmvSelected],
-                          format: true
-                        })
-                      });
-
-                      if (!updateResponse.ok) {
-                        throw new Error('Failed to update validation status');
-                      }
-
-                      await fetchValidationErrors();
                       await handleCloseModal(setIsSingleCMVErrorOpen, false);
                       setCMVSelected(-1);
+                      // The atomic recheck already refreshed both views for the changed row.
+                      // Close the modal and clear the selection before this refresh runs: runFetchPaginated
+                      // replaces validationErrors, and validationErrors[cmvSelected] is read unguarded while
+                      // the modal is open (see isSingleCMVErrorOpen block above) — an index-out-of-range
+                      // render hazard if the refreshed map no longer has that entry.
+                      await Promise.all([runFetchPaginated(), refreshCounts()]);
 
                       setSnackbar({
-                        children: 'Validation errors cleared successfully',
+                        children: RECHECK_VALIDATION_SUCCESS_MESSAGE,
                         severity: 'success'
                       });
                     } catch (error: unknown) {
                       const errorObj = error instanceof Error ? error : new Error(String(error));
-                      const message = errorObj.message || 'Unknown error';
                       ailogger.error('Clear errors failed:', errorObj);
                       setSnackbar({
-                        children: `Failed to clear errors: ${message}`,
+                        children: `Failed to clear errors: ${errorObj.message}`,
                         severity: 'error'
                       });
                     } finally {

@@ -9,7 +9,6 @@ import { runCensusValidations } from '@/lib/uploads/validation-orchestrator';
 import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
 import { BACKGROUND_JOB_TYPES, NON_TERMINAL_BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
 import { buildRealSweepDeps, type DbhExpectedManifest } from '@/lib/validations/dbh-rescore-cli';
-import { createResetValidationStatesQuery } from '@/components/datagrids/measurementscommonsutils';
 import { overrideValidationScope } from '@/lib/validations/override';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
@@ -266,10 +265,6 @@ describe('rescoreDbhCensus transaction boundary', () => {
     );
     return Number(rows[0].count);
   }
-  async function runFormatted(requests: Array<{ query: string; params: Array<string | number> }>) {
-    for (const request of requests) await connection.query(mysql.format(request.query, request.params));
-  }
-
   it('records DBH floor skips on the validation run as a notice without failing the run', async () => {
     const belowFloor = await pair('FLOORNOTICE', 100, 9);
     await pair('FLOORCLEAN', 100, 105);
@@ -391,7 +386,12 @@ describe('rescoreDbhCensus transaction boundary', () => {
     await overrideValidationScope(ConnectionManager.getInstance(), { schema, plotID, censusID: census2ID });
     expect(await overrideMarkerCount(overridden.present)).toBe(1);
 
-    await runFormatted([createResetValidationStatesQuery(schema, plotID, census2ID)]);
+    // Fixture setup: mirrors the production reset's IsValidated=NULL scope directly,
+    // independent of the lib/validations/reset module under test elsewhere.
+    await connection.query(
+      'UPDATE coremeasurements cm JOIN census c ON c.CensusID = cm.CensusID SET cm.IsValidated = NULL WHERE c.CensusID = ? AND c.PlotID = ?',
+      [census2ID, plotID]
+    );
     await managerFor(connection).withTransaction(async tx => {
       await runSharedDBHChangeValidationsInTransaction({ schema, tx, params: { p_CensusID: census2ID, p_PlotID: plotID } });
       await finalizeValidatedRowsInTransaction({ schema, tx, params: { p_CensusID: census2ID, p_PlotID: plotID } });

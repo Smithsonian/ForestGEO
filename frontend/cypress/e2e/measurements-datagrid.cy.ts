@@ -168,8 +168,11 @@ describe('Measurements Summary Grid', () => {
     cy.contains('Reset All Validation States').should('be.visible').click();
 
     cy.contains('[role="alertdialog"]', 'Reset Validation States?').should('be.visible');
-    cy.contains('[role="alertdialog"]', 'set all rows in this census back to pending').should('be.visible');
+    cy.contains('[role="alertdialog"]', 'clears current validation failures for every row in this census').should('be.visible');
+    cy.contains('[role="alertdialog"]', 'Failed Measurements still need correction and reingestion').should('be.visible');
     cy.contains('button', 'No').click();
     cy.contains('[role="alertdialog"]', 'Reset Validation States?').should('not.exist');
+
+    cy.get('@resetValidations.all').should('have.length', 0);
   });
 });

@@ -538,16 +538,9 @@ export function mockMeasurementsSummaryApi<Row extends GenericRow>({
     }
 
     if (body?.query && typeof body.query === 'string') {
-      if (body.query.includes('DELETE mel')) {
-        const measurementID = Number(body.params?.[2]);
-        state.validationFailures = state.validationFailures.filter(failure => Number(failure.coreMeasurementID) !== measurementID);
-      }
-
-      if (body.query.includes('UPDATE ??.coremeasurements SET IsValidated = NULL')) {
-        const measurementID = Number(body.params?.[1]);
-        state.rows = state.rows.map(row => (Number(row.coreMeasurementID) === measurementID ? { ...row, isValidated: null } : row));
-      }
-
+      // Reset/recheck mutations now go through /api/validations/reset and
+      // /api/validations/recheck (intercepted below), not raw SQL via /api/query —
+      // this branch is a generic fallback for any other query-shaped write.
       req.reply({
         statusCode: 200,
         body: { success: true }
@@ -560,6 +553,30 @@ export function mockMeasurementsSummaryApi<Row extends GenericRow>({
       body: []
     });
   });
+
+  // Resets every row in scope back to pending and resolves unresolved validation
+  // occurrences, matching lib/validations/reset.ts#resetValidationScope. The real
+  // route refreshes both measurement views atomically, so callers must see no
+  // follow-up measurementssummary refresh request after a successful reset.
+  cy.intercept('POST', '/api/validations/reset', req => {
+    state.rows = state.rows.map(row => ({ ...row, isValidated: null }));
+    const affectedRows = state.rows.length;
+    state.validationFailures = [];
+
+    req.reply({ statusCode: 200, body: { affectedRows } });
+  }).as('resetValidations');
+
+  // Rechecks a single row by coreMeasurementID; every other row is untouched,
+  // matching lib/validations/reset.ts#recheckMeasurementValidation.
+  cy.intercept('POST', '/api/validations/recheck', req => {
+    const body = normalizeRequestBody(req.body);
+    const measurementID = Number(body?.coreMeasurementID);
+
+    state.rows = state.rows.map(row => (Number(row.coreMeasurementID) === measurementID ? { ...row, isValidated: null } : row));
+    state.validationFailures = state.validationFailures.filter(failure => Number(failure.coreMeasurementID) !== measurementID);
+
+    req.reply({ statusCode: 200, body: { affectedRows: 1 } });
+  }).as('recheckValidation');
 
   cy.intercept('POST', `**/api/refreshviews/measurementssummary/${schema}**`, {
     statusCode: 200,
