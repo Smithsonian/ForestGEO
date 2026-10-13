@@ -1,5 +1,5 @@
 import { FileRow } from '@/config/macros/formdetails';
-import { BulkEditPlan } from '@/config/editplan/types';
+import { AppliedSpeciesCorrectionBatchSummary, BulkEditPlan } from '@/config/editplan/types';
 
 export interface RevisionMatchedRow {
   /**
@@ -111,6 +111,8 @@ export interface RevisionApplyResponse {
   deletedDuplicateCount: number;
   applyErrors: RevisionApplyError[];
   validationPending: boolean;
+  /** Present only when this batch applied #427 tree-wide species corrections. Not revertable. */
+  speciesCorrections?: AppliedSpeciesCorrectionBatchSummary;
 }
 
 export const EMPTY_REVISION_MATCH_COUNTS: RevisionMatchCounts = {

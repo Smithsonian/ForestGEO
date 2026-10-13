@@ -73,8 +73,8 @@ export interface ProvisioningSiteInput {
   schemaName: string;
   sqDimX: number;
   sqDimY: number;
-  defaultUOMDBH: string;
-  defaultUOMHOM: string;
+  defaultUOMDBH: DimensionUnit;
+  defaultUOMHOM: DimensionUnit;
   doubleDataEntry: boolean;
   location: string;
   country: string;

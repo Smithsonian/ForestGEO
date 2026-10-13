@@ -29,7 +29,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
-import { cleanupTestMeasurements, DEFAULT_TEST_CONFIG, setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
+import { cleanupTestMeasurements, setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 
 const TEST_DB_HOST = process.env.TEST_DB_HOST || 'localhost';
 if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
@@ -129,6 +129,7 @@ vi.mock('@/ailogger', () => ({
 
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { ingestBatch } from '@/lib/uploads/ingest-batch';
+import { testDbServerOptions } from '../setup/test-db-connection';
 
 const FILE_NAME = 'kill-boundary-fixture.csv';
 const BATCH_ID = 'kill-boundary-0001';
@@ -160,10 +161,7 @@ describe('ingestBatch — a really-KILLed procedure call is never replayed', () 
 
   function procedureConnectionConfig() {
     return {
-      host: DEFAULT_TEST_CONFIG.host,
-      port: DEFAULT_TEST_CONFIG.port,
-      user: DEFAULT_TEST_CONFIG.user,
-      password: DEFAULT_TEST_CONFIG.password,
+      ...testDbServerOptions(),
       database: schema
     };
   }

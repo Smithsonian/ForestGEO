@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET, POST } from './route';
 import { MAX_UPLOAD_JOB_REQUEST_BYTES } from '@/lib/background-jobs/route-helpers';
+import { HTTPResponses } from '@/config/macros';
+import { MAX_UPLOAD_FILE_BYTES } from '@/lib/uploads/upload-request-limits';
 
 // GET/POST are wrapped by withRouteAuthz, whose Handler type requires a
 // RouteContext second argument even though this route never reads
@@ -229,6 +231,33 @@ describe('POST /api/uploadjobs', () => {
       'mason@example.com'
     );
     expect(mocks.runJobIfClaimable).toHaveBeenCalledWith(42);
+  });
+
+  // Same payload as the 'creates a job ... returns 202' test, so byteSize is the only variable.
+  function createBodyWithByteSize(byteSize: number) {
+    const base = makeCreateBody();
+    return makeCreateBody({
+      files: [{ ...base.files[0], byteSize }],
+      payload: {
+        selectedDelimiters: { 'measurements.csv': ',' },
+        columnMappings: { 'measurements.csv': VALID_COLUMN_MAPPING }
+      }
+    });
+  }
+
+  it('accepts a file whose byteSize is exactly the shared per-file limit', async () => {
+    const response = await callPost(makeCreateRequest(createBodyWithByteSize(MAX_UPLOAD_FILE_BYTES)));
+    const body = await response.json();
+
+    expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.ACCEPTED);
+  });
+
+  it('rejects a file whose byteSize is one byte over the shared per-file limit, naming byteSize', async () => {
+    const response = await callPost(makeCreateRequest(createBodyWithByteSize(MAX_UPLOAD_FILE_BYTES + 1)));
+    const body = await response.json();
+
+    expect(response.status, JSON.stringify(body)).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(JSON.stringify(body), 'the issue must point at byteSize').toContain('byteSize');
   });
 
   it('returns 503 and logs when the catalog pool cannot self-heal', async () => {

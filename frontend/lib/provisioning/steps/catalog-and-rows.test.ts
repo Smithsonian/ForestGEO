@@ -3,6 +3,7 @@ import mysql from 'mysql2/promise';
 import { insertCatalogRowStep, insertPlotStep, insertCensusStep } from './catalog-and-rows';
 import { createSchemaStep, initTablesStep } from './sql-steps';
 import type { StepContext, ProvisioningInput } from '../types';
+import { testDbServerOptions } from '@/tests/setup/test-db-connection';
 
 function makeInput(): ProvisioningInput {
   return {
@@ -44,10 +45,7 @@ describe('catalog + plot + census steps', () => {
 
   beforeAll(async () => {
     catalogPool = mysql.createPool({
-      host: process.env.TEST_DB_HOST || 'localhost',
-      port: Number(process.env.TEST_DB_PORT || 3306),
-      user: process.env.TEST_DB_USER || 'root',
-      password: process.env.TEST_DB_PASSWORD || 'testpassword',
+      ...testDbServerOptions(),
       multipleStatements: false,
       connectionLimit: 5
     });

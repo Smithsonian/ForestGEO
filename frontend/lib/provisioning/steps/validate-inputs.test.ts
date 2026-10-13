@@ -7,6 +7,7 @@ import {
   QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
   validateQuadratCollectionDetailed
 } from '../quadrat-collection-validation';
+import { testDbServerOptions } from '@/tests/setup/test-db-connection';
 
 const CATALOG_SCHEMA = 'catalog';
 
@@ -61,10 +62,7 @@ describe('validateInputsStep', () => {
 
   beforeAll(async () => {
     pool = mysql.createPool({
-      host: process.env.TEST_DB_HOST || 'localhost',
-      port: Number(process.env.TEST_DB_PORT || 3306),
-      user: process.env.TEST_DB_USER || 'root',
-      password: process.env.TEST_DB_PASSWORD || 'testpassword',
+      ...testDbServerOptions(),
       multipleStatements: false,
       connectionLimit: 5
     });

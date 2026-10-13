@@ -81,6 +81,10 @@ jobs:
         image: mysql:8.0.36
         env:
           MYSQL_ROOT_PASSWORD: testpassword
+          # mysqld derives system_time_zone from TZ at startup; the harness and
+          # the app both require a UTC server, and the runtime TZ below must not
+          # be mistaken for this one.
+          TZ: UTC
         ports:
           - 3306:3306
         options: >-
@@ -109,6 +113,11 @@ jobs:
           TEST_DB_PORT: "3306"
           TEST_DB_USER: root
           TEST_DB_PASSWORD: testpassword
+          # A non-UTC runtime is the only one in which a mysql2 pool missing
+          # timezone 'Z', or a Date pushed through toISOString(), yields the
+          # wrong instant or day; under UTC every such bug is invisible.
+          # Prod runs UTC, but developer machines do not; this is where the bug class is visible.
+          TZ: Europe/Bratislava
 
   # Until 2026-08-26 no workflow but the nightly ran the Cypress component suite, so 14
   # specs had zero coverage on any branch and accumulated a production defect, a spec

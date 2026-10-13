@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import mysql from 'mysql2/promise';
 import type { Connection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 
-import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type TestData } from '../setup/local-db-setup';
+import { setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 
 // ---------------------------------------------------------------------------
 // Shared state bridge — same hoisted pattern used by every editplan
@@ -133,6 +133,7 @@ import { writeMeasurementsSummary } from '@/config/editplan/writers/measurements
 import { applyEditInTransaction } from '@/config/editplan/apply';
 import { SessionExpiredError } from '@/config/editplan/authorization';
 import type { EditPlan } from '@/config/editplan/types';
+import { testDbServerOptions } from '../setup/test-db-connection';
 
 // ---------------------------------------------------------------------------
 // Fixture constants — matched to seedSampleData defaults + short identifiers
@@ -382,10 +383,7 @@ describe('editplan drift + lock (integration)', () => {
 
     async function createLockHolder() {
       return mysql.createConnection({
-        host: DEFAULT_TEST_CONFIG.host,
-        user: DEFAULT_TEST_CONFIG.user,
-        password: DEFAULT_TEST_CONFIG.password,
-        port: DEFAULT_TEST_CONFIG.port,
+        ...testDbServerOptions(),
         database: config.database,
         multipleStatements: false
       });

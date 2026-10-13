@@ -24,7 +24,8 @@
  * Usage:
  *   npx tsx scripts/apply-schema-migrations.ts --all-sites --check
  *   npx tsx scripts/apply-schema-migrations.ts --all-sites --apply
- *   npx tsx scripts/apply-schema-migrations.ts --schema forestgeo_test_default --apply
+ *   (run the integration suite with TEST_DB_NAMESPACE=local first; singleFork makes the pool id 1, so the harness schema is forestgeo_test_local_1)
+ *   npx tsx scripts/apply-schema-migrations.ts --schema forestgeo_test_local_1 --apply
  */
 
 import crypto from 'crypto';

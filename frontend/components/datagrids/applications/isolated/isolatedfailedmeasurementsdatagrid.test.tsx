@@ -1,10 +1,39 @@
+import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import IsolatedFailedMeasurementsDataGrid, {
   formatDetailedFailureDescription,
   hasStoredCurrentIngestionFailures,
   isReadyForReingestion
 } from './isolatedfailedmeasurementsdatagrid';
+import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
+import type { ApplyResult } from '@/config/editplan/types';
+import type { UndoRevertOutcome } from '@/components/editplan/undotoast';
+import { UNCONFIRMED_OUTCOME_MESSAGE } from '@/lib/editplan/requestrevert';
+
+// Typed capture shared between the mocked UndoToast and the mocked
+// isolateddatagridcommons below via vi.hoisted, so neither needs an untyped
+// window/globalThis escape hatch. Reset in beforeEach.
+const gridHarness = vi.hoisted(() => ({
+  lastUndoOutcome: undefined as UndoRevertOutcome | undefined,
+  refreshRequests: 0
+}));
+
+// requestEditRevert (frontend/lib/editplan/requestrevert.ts) only treats a 2xx
+// /api/edits/revert body as a successful revert when it satisfies
+// isValidApplyResult (a real editOperationID, updatedIDs, applyErrors,
+// validationPending). A bare `{ ok: true }` body is not a valid ApplyResult
+// and now resolves to 'unconfirmed', so every fixture claiming a successful
+// revert must use this.
+function makeApplyResultBody(overrides: Partial<ApplyResult> = {}): ApplyResult {
+  return {
+    updatedIDs: { failedmeasurements: 123 },
+    applyErrors: [],
+    editOperationID: 777,
+    validationPending: false,
+    ...overrides
+  };
+}
 
 // Mock MUI DataGrid to avoid CSS import issues
 vi.mock('@mui/x-data-grid', () => ({
@@ -60,14 +89,25 @@ vi.mock('@/lib/db/definitions/unifiedchangelog', async importOriginal => {
   return actual;
 });
 
-vi.mock('@/app/contexts/userselectionprovider', () => ({
-  usePlotContext: () => ({ plotID: 1, plotName: 'Test Plot' }),
-  useOrgCensusContext: () => ({ dateRanges: [{ censusID: 1, startDate: '2024-01-01', endDate: '2024-12-31' }], plotCensusNumber: 1 }),
-  useSiteContext: () => ({ schemaName: 'testschema', siteName: 'Test Site' })
+// These context objects must keep stable references across renders so the
+// component's loadSelectableOptions effect, which depends on them, is not
+// retriggered on every render.
+const TEST_PLOT_CONTEXT = vi.hoisted(() => ({ plotID: 1, plotName: 'Test Plot' }));
+const TEST_CENSUS_CONTEXT = vi.hoisted(() => ({
+  dateRanges: [{ censusID: 1, startDate: '2024-01-01', endDate: '2024-12-31' }],
+  plotCensusNumber: 1
+}));
+const TEST_SITE_CONTEXT = vi.hoisted(() => ({ schemaName: 'testschema', siteName: 'Test Site' }));
+
+vi.mock('@/app/contexts/compat-hooks', () => ({
+  usePlotContext: () => TEST_PLOT_CONTEXT,
+  useOrgCensusContext: () => TEST_CENSUS_CONTEXT,
+  useSiteContext: () => TEST_SITE_CONTEXT,
+  useQuadratContext: () => undefined
 }));
 
-vi.mock('@/components/datagrids/isolateddatagridcommons', () => ({
-  default: ({ onDataUpdate, onDataLoaded, editFlowOverride }: any) => {
+vi.mock('@/components/datagrids/isolateddatagridcommons', () => {
+  function MockIsolatedDataGridCommons({ onDataUpdate, onDataLoaded, editFlowOverride, gridColumns, refresh, setRefresh }: any) {
     // Expose onDataUpdate / editFlowOverride for testing
     if (onDataUpdate) {
       (window as any).testOnDataUpdate = onDataUpdate;
@@ -82,9 +122,28 @@ vi.mock('@/components/datagrids/isolateddatagridcommons', () => ({
     } else {
       delete (window as any).testOnDataLoaded;
     }
+    (window as any).testGridColumns = gridColumns;
+
+    // Mirrors the real isolateddatagridcommons' refresh-edge effect
+    // (components/datagrids/isolateddatagridcommons.tsx:647-655): only a
+    // false->true transition of `refresh` is a refresh request, and the real
+    // component resets it back to false once handled. A mock that just
+    // mirrored the raw boolean could not distinguish "the save already set
+    // refresh=true" from "undo set it again" - the save's true would still be
+    // sitting there when the undo assertions ran, making them vacuous.
+    const previousRefresh = React.useRef(refresh);
+    React.useEffect(() => {
+      if (refresh && !previousRefresh.current) {
+        gridHarness.refreshRequests += 1;
+        setRefresh(false);
+      }
+      previousRefresh.current = refresh;
+    }, [refresh, setRefresh]);
+
     return <div data-testid="datagrid-commons">Mock DataGrid</div>;
   }
-}));
+  return { default: MockIsolatedDataGridCommons };
+});
 
 vi.mock('@/components/client/clientmacros', () => ({
   loadSelectableOptions: vi.fn().mockResolvedValue(undefined),
@@ -119,9 +178,46 @@ vi.mock('@/components/editplan/previewdialog', () => ({
   default: () => <div data-testid="preview-dialog" />
 }));
 
+// onUndo's real signature is (confirmedPlanHash?: string) => Promise<UndoRevertOutcome>
+// (see components/editplan/undotoast.tsx). The "Confirm" button supplies a
+// confirmedPlanHash for the #427 confirmed-retry test; "Undo" preserves the
+// original no-argument call so pre-existing assertions are unaffected. Both
+// stash the resolved outcome on gridHarness so tests can assert exactly what
+// the call site returned to the toast.
+const UNDO_TEST_CONFIRMED_PLAN_HASH = 'f'.repeat(64);
 vi.mock('@/components/editplan/undotoast', () => ({
-  default: ({ editOperationID, onDismiss }: any) => (
+  default: ({
+    editOperationID,
+    onUndo,
+    onDismiss
+  }: {
+    editOperationID: number;
+    onUndo: (confirmedPlanHash?: string) => Promise<UndoRevertOutcome>;
+    onDismiss: () => void;
+  }) => (
     <div data-testid={`undo-toast-${editOperationID}`}>
+      <button
+        type="button"
+        data-testid="undo-toast-undo"
+        onClick={() => {
+          void onUndo().then(outcome => {
+            gridHarness.lastUndoOutcome = outcome;
+          });
+        }}
+      >
+        Undo
+      </button>
+      <button
+        type="button"
+        data-testid="undo-toast-confirm"
+        onClick={() => {
+          void onUndo(UNDO_TEST_CONFIRMED_PLAN_HASH).then(outcome => {
+            gridHarness.lastUndoOutcome = outcome;
+          });
+        }}
+      >
+        Confirm
+      </button>
       <button type="button" onClick={onDismiss} data-testid="undo-toast-dismiss">
         Dismiss
       </button>
@@ -135,7 +231,10 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
     global.fetch = vi.fn();
     delete (window as any).testOnDataUpdate;
     delete (window as any).testOnDataLoaded;
+    delete (window as any).testGridColumns;
     delete (window as any).testEditFlowOverride;
+    gridHarness.lastUndoOutcome = undefined;
+    gridHarness.refreshRequests = 0;
     mockBeginEdit.mockReset();
     mockConfirmDialog.mockReset();
     mockCancelDialog.mockReset();
@@ -205,185 +304,6 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
     });
   });
 
-  describe('Bug Fix: Edits should persist to database even with validation errors', () => {
-    // TODO: These integration tests require complex component rendering and context setup
-    // The actual bug fixes have been verified through code review and modal tests
-    // Consider refactoring to test isolated functions or moving to E2E tests
-    it.skip('should call PATCH endpoint to save edits before checking validation', async () => {
-      const mockNewRow = {
-        id: 1,
-        failedMeasurementID: 123,
-        tag: '011375',
-        stemTag: '5',
-        spCode: 'newspecies', // User changed this
-        quadrat: '0904',
-        x: 18.4,
-        y: 9.9,
-        dbh: 12.0,
-        hom: 1.3,
-        date: '1994-12-05',
-        codes: '',
-        failureReasons: 'SpCode invalid' // Still has errors
-      };
-
-      const mockOldRow = {
-        id: 1,
-        failedMeasurementID: 123,
-        tag: '011375',
-        stemTag: '5',
-        spCode: 'oldspecies', // Original value
-        quadrat: '0904',
-        x: 18.4,
-        y: 9.9,
-        dbh: 12.0,
-        hom: 1.3,
-        date: '1994-12-05',
-        codes: '',
-        failureReasons: 'SpCode invalid'
-      };
-
-      // Mock successful PATCH
-      (global.fetch as any).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ message: 'Update successful', updatedIDs: { failedmeasurements: 123 } })
-      });
-
-      // Mock loadSelectableOptions
-      const { loadSelectableOptions } = await import('@/components/client/clientmacros');
-      (loadSelectableOptions as any).mockResolvedValue(undefined);
-
-      render(<IsolatedFailedMeasurementsDataGrid />);
-
-      await waitFor(() => {
-        expect((window as any).testOnDataUpdate).toBeDefined();
-      });
-
-      // Call the onDataUpdate callback
-      await (window as any).testOnDataUpdate(mockNewRow, mockOldRow);
-
-      // Verify PATCH was called to save edits
-      await waitFor(() => {
-        const fetchCalls = (global.fetch as any).mock.calls;
-
-        // First call should be PATCH to save edits
-        expect(fetchCalls[0][0]).toContain('/api/fixeddata/failedmeasurements/testschema/123');
-        expect(fetchCalls[0][1].method).toBe('PATCH');
-        expect(fetchCalls[0][1].body).toContain('newspecies'); // New value is being saved
-      });
-    });
-
-    it.skip('should save edits and reingest when validation passes', async () => {
-      const mockNewRow = {
-        id: 1,
-        failedMeasurementID: 123,
-        tag: '011375',
-        stemTag: '5',
-        spCode: 'validcode',
-        quadrat: '0904',
-        x: 18.4,
-        y: 9.9,
-        dbh: 12.0,
-        hom: 1.3,
-        date: '1994-12-05',
-        codes: 'M',
-        failureReasons: '' // No validation errors
-      };
-
-      const mockOldRow = {
-        id: 1,
-        failedMeasurementID: 123,
-        tag: '011375',
-        stemTag: '5',
-        spCode: 'oldcode',
-        quadrat: '0904',
-        x: 18.4,
-        y: 9.9,
-        dbh: 0,
-        hom: 0,
-        date: '1994-12-05',
-        codes: '',
-        failureReasons: 'Missing Codes and DBH'
-      };
-
-      // Mock successful PATCH
-      (global.fetch as any).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ message: 'Update successful' })
-      });
-
-      // Mock successful reingest
-      (global.fetch as any).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ message: 'Success' })
-      });
-
-      const { loadSelectableOptions } = await import('@/components/client/clientmacros');
-      (loadSelectableOptions as any).mockResolvedValue(undefined);
-
-      render(<IsolatedFailedMeasurementsDataGrid />);
-
-      await waitFor(() => {
-        expect((window as any).testOnDataUpdate).toBeDefined();
-      });
-
-      await (window as any).testOnDataUpdate(mockNewRow, mockOldRow);
-
-      await waitFor(() => {
-        const fetchCalls = (global.fetch as any).mock.calls;
-
-        // First: PATCH to save edits
-        expect(fetchCalls[0][0]).toContain('/api/fixeddata/failedmeasurements');
-        expect(fetchCalls[0][1].method).toBe('PATCH');
-
-        // Second: Reingest the row
-        expect(fetchCalls[1][0]).toContain('/api/reingestsinglefailure/testschema/123');
-
-        // Third: Reload selectable options to pick up new codes
-        expect(loadSelectableOptions).toHaveBeenCalled();
-      });
-    });
-
-    it.skip('should handle PATCH failure gracefully', async () => {
-      const mockNewRow = {
-        id: 1,
-        failedMeasurementID: 123,
-        tag: '011375',
-        stemTag: '5',
-        spCode: 'newcode',
-        quadrat: '0904',
-        x: 18.4,
-        y: 9.9,
-        dbh: 12.0,
-        hom: 1.3,
-        date: '1994-12-05',
-        codes: '',
-        failureReasons: 'SpCode invalid'
-      };
-
-      const mockOldRow = { ...mockNewRow, spCode: 'oldcode' };
-
-      // Mock failed PATCH
-      (global.fetch as any).mockResolvedValueOnce({
-        ok: false,
-        status: 500
-      });
-
-      render(<IsolatedFailedMeasurementsDataGrid />);
-
-      await waitFor(() => {
-        expect((window as any).testOnDataUpdate).toBeDefined();
-      });
-
-      // Should not throw error, but log it
-      await expect((window as any).testOnDataUpdate(mockNewRow, mockOldRow)).resolves.not.toThrow();
-
-      const ailogger = await import('@/ailogger');
-      await waitFor(() => {
-        expect(ailogger.default.error).toHaveBeenCalledWith('Failed to save row:', expect.any(Error));
-      });
-    });
-  });
-
   describe('Bug Fix: Validation error message deduplication', () => {
     it('should deduplicate failure reasons for the same column', () => {
       // This is tested via the displayFailureReason function
@@ -432,6 +352,53 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
       expect(mockEditFlowArgs).toHaveProperty('schema');
       expect(mockEditFlowArgs).toHaveProperty('plotID');
       expect(mockEditFlowArgs).toHaveProperty('censusID');
+    });
+
+    it('keeps identity and validation metadata columns read-only while allowing correction fields', async () => {
+      await mountGridWithOptions();
+
+      const columns = (window as any).testGridColumns as Array<{ field: string; editable?: boolean }>;
+      const editableByField = Object.fromEntries(columns.map(column => [column.field, column.editable]));
+
+      expect(editableByField).toMatchObject({
+        id: false,
+        failedMeasurementID: false,
+        plotID: false,
+        censusID: false,
+        currentFailureReasons: false,
+        description: false,
+        originalFailureReasons: false,
+        lastValidatedAt: false,
+        tag: true,
+        stemTag: true,
+        spCode: true,
+        quadrat: true,
+        x: true,
+        y: true,
+        dbh: true,
+        hom: true,
+        date: true,
+        codes: true
+      });
+    });
+
+    it('returns unchanged nonnumeric edit props and preserves numeric validation metadata', async () => {
+      await mountGridWithOptions();
+
+      const columns = (window as any).testGridColumns as Array<{
+        field: string;
+        preProcessEditCellProps?: (params: any) => any;
+      }>;
+      const speciesColumn = columns.find(column => column.field === 'spCode');
+      const dbhColumn = columns.find(column => column.field === 'dbh');
+      const speciesProps = { value: 'CRATSN', error: true, isProcessingProps: false, customMetadata: 'retained' };
+      const numericProps = { value: '12.345', error: true, isProcessingProps: true, customMetadata: 'retained' };
+
+      expect(speciesColumn?.preProcessEditCellProps?.({ props: speciesProps })).toBe(speciesProps);
+      expect(dbhColumn?.preProcessEditCellProps?.({ props: numericProps })).toEqual({
+        ...numericProps,
+        value: 12.35
+      });
     });
 
     it('invokes editFlow.beginEdit with the failed measurement ID and the canonical diff only', async () => {
@@ -512,13 +479,14 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
         date: '1994-12-05',
         codes: 'M'
       };
-      const newRow = { ...oldRow, dbh: 14.0 };
+      const newRow = { ...oldRow, dbh: 14.0, spCode: 'INVALID' };
 
       await (window as any).testEditFlowOverride(newRow, oldRow);
 
       await waitFor(() => {
         expect(screen.getByTestId('undo-toast-777')).toBeInTheDocument();
       });
+      expect(global.fetch).not.toHaveBeenCalled();
     });
 
     it('does not show UndoToast when the same save automatically reingests the row', async () => {
@@ -629,35 +597,227 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
       const urls = fetchCalls.map(([url]: any[]) => url);
       expect(urls.some((u: string) => u.includes('/api/fixeddata/failedmeasurements/'))).toBe(false);
     });
-  });
 
-  describe('Valid codes only selection', () => {
-    // TODO: This integration test requires full component rendering
-    // The autocomplete logic has been verified through code review
-    // Consider moving to E2E tests or refactoring to test the autocomplete logic in isolation
-    it.skip('should only show valid codes in autocomplete', async () => {
-      const { loadSelectableOptions } = await import('@/components/client/clientmacros');
+    it('propagates apply rejection without attempting reingestion or showing success state', async () => {
+      await mountGridWithOptions();
 
-      // Mock API response with valid codes
+      mockBeginEdit.mockRejectedValue(new Error('apply failed (503)'));
+      const oldRow = {
+        id: 1,
+        failedMeasurementID: 123,
+        spCode: 'old',
+        quadrat: '0101',
+        tag: '011375',
+        stemTag: '5',
+        x: 1,
+        y: 2,
+        dbh: 3,
+        hom: 4,
+        codes: '',
+        date: '1994-12-05'
+      };
+
+      await expect((window as any).testEditFlowOverride({ ...oldRow, spCode: 'new' }, oldRow)).rejects.toThrow('apply failed (503)');
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(screen.queryByTestId(/undo-toast-/)).not.toBeInTheDocument();
+    });
+
+    it('reports a partial-success error when reingestion fails after apply succeeds', async () => {
+      await mountGridWithOptions();
+
+      mockBeginEdit.mockResolvedValue({ editOperationID: 999 });
       (global.fetch as any).mockResolvedValue({
-        ok: true,
-        json: async () => [
-          { Code: 'M', Description: 'Multiple stems' },
-          { Code: 'D', Description: 'Dead' },
-          { Code: 'P', Description: 'Prior' }
-        ]
+        ok: false,
+        status: 503,
+        json: async () => ({ message: 'reingestion unavailable' })
+      });
+      const oldRow = {
+        id: 1,
+        failedMeasurementID: 123,
+        spCode: 'CRATSN',
+        quadrat: '0101',
+        tag: '011375',
+        stemTag: '5',
+        x: 1,
+        y: 2,
+        dbh: 3,
+        hom: 4,
+        codes: 'M',
+        date: '1994-12-05'
+      };
+
+      const saveError = await (window as any).testEditFlowOverride({ ...oldRow, dbh: 4 }, oldRow).catch((error: unknown) => error);
+      expect(saveError).toBeInstanceOf(RowSaveFinalizationError);
+      expect(saveError).toHaveProperty('message', 'Changes were saved, but reingestion unavailable');
+      expect(saveError).toHaveProperty('persistedRow.dbh', 4);
+      expect(mockBeginEdit).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId('undo-toast-999')).not.toBeInTheDocument();
+    });
+
+    // #427 client wiring: the onUndo callback passed to UndoToast must route
+    // through requestEditRevert (frontend/lib/editplan/requestrevert.ts) so a
+    // 409 plan-drift response surfaces as a confirmation request instead of a
+    // generic failure. requestEditRevert is not mocked here — global.fetch
+    // (already mocked per-test throughout this file) is requestEditRevert's
+    // only dependency, so driving its HTTP-status/body contract directly
+    // exercises the real helper's parsing instead of assuming it.
+    describe('Undo revert outcome handling (#427)', () => {
+      async function mountGridWithUndoToast(editOperationID = 777) {
+        await mountGridWithOptions();
+
+        mockBeginEdit.mockResolvedValue({
+          updatedIDs: { failedmeasurements: 123 },
+          applyErrors: [],
+          editOperationID,
+          validationPending: false
+        });
+        (global.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ message: 'ok' }) });
+
+        const oldRow = {
+          id: 1,
+          failedMeasurementID: 123,
+          tag: '011375',
+          stemTag: '5',
+          spCode: 'oldspecies',
+          quadrat: '0101',
+          x: 18.4,
+          y: 9.9,
+          dbh: 12.0,
+          hom: 1.3,
+          date: '1994-12-05',
+          codes: 'M'
+        };
+        // dbh=14 + spCode=INVALID keeps the row failing (no auto-reingest), matching
+        // the existing "shows the UndoToast..." test's setup for an undo-eligible edit.
+        const newRow = { ...oldRow, dbh: 14.0, spCode: 'INVALID' };
+        await (window as any).testEditFlowOverride(newRow, oldRow);
+
+        await waitFor(() => expect(screen.getByTestId(`undo-toast-${editOperationID}`)).toBeInTheDocument());
+
+        // The save itself calls setRefresh(true) (isolatedfailedmeasurementsdatagrid.tsx:302)
+        // regardless of whether the undo toast is shown. Wait for the mock
+        // grid's refresh-edge effect to record and clear that transition,
+        // then reset the counter so the undo tests below observe only the
+        // undo button's own effect (0 for conflict/failure/unconfirmed, 1 for
+        // a successful revert) instead of the save's leftover refresh.
+        await waitFor(() => expect(gridHarness.refreshRequests).toBeGreaterThanOrEqual(1));
+        gridHarness.refreshRequests = 0;
+        (global.fetch as any).mockReset();
+      }
+
+      it('does not refresh or show success when the server requires confirmation, and returns the fresh plan to the toast unchanged', async () => {
+        await mountGridWithUndoToast();
+
+        (global.fetch as any).mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({
+            error: 'plan drift',
+            freshPlan: {
+              dataType: 'failedmeasurements',
+              targetID: 123,
+              fieldChanges: [{ field: 'SpCode', from: 'INVALID', to: 'CRATSN' }],
+              effects: [],
+              maxSeverity: 'warn',
+              planHash: UNDO_TEST_CONFIRMED_PLAN_HASH,
+              generatedAt: '2026-04-20T12:00:00Z'
+            }
+          })
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('undo-toast-undo'));
+        });
+
+        await waitFor(() => expect(gridHarness.lastUndoOutcome).toBeDefined());
+        expect(gridHarness.lastUndoOutcome).toMatchObject({
+          status: 'confirmation-required',
+          freshPlan: expect.objectContaining({ planHash: UNDO_TEST_CONFIRMED_PLAN_HASH })
+        });
+        expect(gridHarness.refreshRequests).toBe(0);
+        expect(screen.queryByText(/Undo failed/i)).not.toBeInTheDocument();
+
+        // The plain "Undo" click must post the real plot/census scope wired
+        // through useSiteContext/usePlotContext/useOrgCensusContext above, not
+        // a currentSite/currentPlot-missing fallback of '' / 0 that would
+        // silently target the wrong plot or census.
+        const [url, init] = (global.fetch as any).mock.calls[0];
+        expect(url).toBe('/api/edits/revert');
+        expect(JSON.parse(init.body)).toMatchObject({
+          schema: 'testschema',
+          plotID: 1,
+          censusID: 1,
+          editOperationID: 777
+        });
       });
 
-      const mockSetSelectableOpts = vi.fn();
-      const mockSite = { schemaName: 'testschema' };
-      const mockPlot = { plotID: 1 };
-      const mockCensus = { plotCensusNumber: 1 };
+      it('surfaces the helper-provided failure message via setEditFlowError without refreshing', async () => {
+        await mountGridWithUndoToast();
 
-      await loadSelectableOptions(mockSite as any, mockPlot as any, mockCensus as any, mockSetSelectableOpts);
+        const SERVER_FAILURE_MESSAGE = 'Revert rejected: edit operation changed during revert';
+        (global.fetch as any).mockResolvedValue({ ok: false, status: 500, json: async () => ({ error: SERVER_FAILURE_MESSAGE }) });
 
-      // Verify only valid codes are set
-      await waitFor(() => {
-        expect(mockSetSelectableOpts).toHaveBeenCalledWith(expect.any(Function));
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('undo-toast-undo'));
+        });
+
+        await waitFor(() => expect(screen.getByText(`Undo failed: ${SERVER_FAILURE_MESSAGE}`)).toBeInTheDocument());
+        expect(gridHarness.lastUndoOutcome).toEqual({ status: 'failed' });
+        expect(gridHarness.refreshRequests).toBe(0);
+      });
+
+      it('surfaces the could-not-confirm message via setEditFlowError without refreshing or claiming success when the server returns a malformed 2xx body', async () => {
+        await mountGridWithUndoToast();
+
+        // A 2xx body that is not a real ApplyResult (requestEditRevert's
+        // isValidApplyResult check) - the write may or may not have
+        // committed, so this must not use "Undo failed" wording and must not
+        // refresh a view that was never proven stale.
+        (global.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('undo-toast-undo'));
+        });
+
+        await waitFor(() => expect(screen.getByText(UNCONFIRMED_OUTCOME_MESSAGE)).toBeInTheDocument());
+        expect(gridHarness.lastUndoOutcome).toEqual({ status: 'unconfirmed' });
+        expect(gridHarness.refreshRequests).toBe(0);
+        expect(screen.queryByText(/Undo failed/i)).not.toBeInTheDocument();
+      });
+
+      it('refreshes exactly once and resolves the toast as reverted on a successful revert', async () => {
+        await mountGridWithUndoToast();
+
+        (global.fetch as any).mockResolvedValue({ ok: true, json: async () => makeApplyResultBody({ editOperationID: 777 }) });
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('undo-toast-undo'));
+        });
+
+        await waitFor(() => expect(gridHarness.lastUndoOutcome).toEqual({ status: 'reverted' }));
+        await waitFor(() => expect(gridHarness.refreshRequests).toBe(1));
+        expect((global.fetch as any).mock.calls).toHaveLength(1);
+      });
+
+      it('sends the same schema/plotID/censusID/editOperationID plus the supplied confirmedPlanHash on a confirmed retry', async () => {
+        await mountGridWithUndoToast(42);
+
+        (global.fetch as any).mockResolvedValue({ ok: true, json: async () => makeApplyResultBody({ editOperationID: 42 }) });
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('undo-toast-confirm'));
+        });
+
+        await waitFor(() => expect((global.fetch as any).mock.calls.length).toBeGreaterThan(0));
+        const [url, init] = (global.fetch as any).mock.calls[0];
+        expect(url).toBe('/api/edits/revert');
+        expect(JSON.parse(init.body)).toEqual({
+          schema: 'testschema',
+          plotID: 1,
+          censusID: 1,
+          editOperationID: 42,
+          confirmedPlanHash: UNDO_TEST_CONFIRMED_PLAN_HASH
+        });
       });
     });
   });

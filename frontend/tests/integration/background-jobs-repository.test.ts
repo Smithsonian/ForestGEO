@@ -10,7 +10,7 @@
  *   npx vitest run --config vitest.integration.config.mts tests/integration/background-jobs-repository.test.ts
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import mysql, { type Pool } from 'mysql2/promise';
+import mysql, { type Pool, type RowDataPacket } from 'mysql2/promise';
 import { applyCatalogMigrationsForTests } from '../setup/catalog-migrations';
 import { BackgroundJobScopeUnavailableError, IdempotencyKeyConflictError, JobFileNotFoundError, WorkerLeaseLostError } from '@/lib/background-jobs/errors';
 import {
@@ -31,6 +31,7 @@ import type { CreateUploadJobInput } from '@/lib/background-jobs/types';
 import { UPLOAD_JOB_MAX_RETRIES } from '@/lib/background-jobs/types';
 import { releaseSchemaOperationLock, tryAcquireSchemaOperationLock } from '@/lib/provisioning/schema-operation-lock';
 import { seedCatalogTables } from './admin-provision/_shared';
+import { testDbServerOptions } from '../setup/test-db-connection';
 
 // ---------------------------------------------------------------------------
 // Safety guard — this suite DELETEs from the shared `catalog` schema and must
@@ -50,10 +51,6 @@ if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
 // Constants
 // ---------------------------------------------------------------------------
 
-const TEST_DB_PORT = Number(process.env.TEST_DB_PORT || 3306);
-const TEST_DB_USER = process.env.TEST_DB_USER || 'root';
-const TEST_DB_PASSWORD = process.env.TEST_DB_PASSWORD || 'testpassword';
-
 const TEST_USER_A = 'user-a@forestgeo.test';
 const TEST_USER_B = 'user-b@forestgeo.test';
 
@@ -70,6 +67,13 @@ const BLOB_CONTAINER = 'forestgeo-testing-storage';
 const WORKER_A = 'worker-alpha-001';
 const WORKER_B = 'worker-beta-002';
 
+// The repository computes NextAttemptAt in JS (Date.now() + retryDelay) and
+// binds it, so reading it back against the server clock fails if mysql2
+// serializes the bind in the runtime's local zone instead of UTC. The slack
+// covers the client/server round trip and MySQL rounding the bound
+// fractional second into the DATETIME(0) column.
+const RETRY_SCHEDULING_SLACK_SECONDS = 5;
+
 // ---------------------------------------------------------------------------
 // Pool lifecycle
 // ---------------------------------------------------------------------------
@@ -78,10 +82,7 @@ let pool: Pool;
 
 beforeAll(async () => {
   pool = mysql.createPool({
-    host: TEST_DB_HOST,
-    port: TEST_DB_PORT,
-    user: TEST_DB_USER,
-    password: TEST_DB_PASSWORD,
+    ...testDbServerOptions(),
     connectionLimit: 5
   });
 
@@ -544,6 +545,23 @@ describe('markBackgroundJobWaitingRetryAsWorker — fenced retry transitions', (
     expect(result!.nextAttemptAt).toBeInstanceOf(Date);
     expect(result!.workerID).toBeNull();
     expect(result!.finishedAt).toBeNull();
+
+    const [skewRows] = await pool.query<RowDataPacket[]>('SELECT TIMESTAMPDIFF(SECOND, ?, NOW()) AS clockSkewSeconds', [new Date()]);
+    const [timingRows] = await pool.query<RowDataPacket[]>(
+      'SELECT TIMESTAMPDIFF(SECOND, NOW(), NextAttemptAt) AS secondsUntilRetry FROM catalog.background_jobs WHERE JobID = ?',
+      [job.jobID]
+    );
+    const secondsUntilRetry = Number(timingRows[0].secondsUntilRetry);
+    console.log(
+      `[retry-budget] jobID=${job.jobID} server clock: retry is ${secondsUntilRetry}s away (requested ${retryDelay}s, host-vs-server skew ${skewRows[0].clockSkewSeconds}s, runtime offset ${new Date().getTimezoneOffset()} min)`
+    );
+    expect(
+      secondsUntilRetry,
+      'NextAttemptAt must be bound as UTC so the sweeper predicate NextAttemptAt <= NOW() reopens the job after retryDelay, not hours later'
+    ).toBeGreaterThan(retryDelay - RETRY_SCHEDULING_SLACK_SECONDS);
+    expect(secondsUntilRetry, 'NextAttemptAt must not be scheduled more than RETRY_SCHEDULING_SLACK_SECONDS beyond NOW() + retryDelay').toBeLessThanOrEqual(
+      retryDelay + RETRY_SCHEDULING_SLACK_SECONDS
+    );
 
     const details = await getBackgroundJobWithDetails(pool, job.jobID);
     const retryEvent = details!.events.find(e => e.eventType === 'waiting_retry');

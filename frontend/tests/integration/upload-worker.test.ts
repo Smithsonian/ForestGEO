@@ -56,10 +56,6 @@ if (!['localhost', '127.0.0.1', '::1'].includes(TEST_DB_HOST)) {
   );
 }
 
-const TEST_DB_PORT = Number(process.env.TEST_DB_PORT || 3306);
-const TEST_DB_USER = process.env.TEST_DB_USER || 'root';
-const TEST_DB_PASSWORD = process.env.TEST_DB_PASSWORD || 'testpassword';
-
 // ---------------------------------------------------------------------------
 // Shared state bridge — hoisted so the mock closures can read live handles
 // after beforeAll wires them up.
@@ -183,6 +179,7 @@ import { FormType, SourceFormat, type FileRow } from '@/config/macros/formdetail
 import { UploadMode } from '@/config/uploadmodes';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
+import { testDbServerOptions } from '../setup/test-db-connection';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -256,10 +253,7 @@ describe('runJobIfClaimable — integration', () => {
     sharedState.connection = connection;
 
     catalogPool = mysql.createPool({
-      host: TEST_DB_HOST,
-      port: TEST_DB_PORT,
-      user: TEST_DB_USER,
-      password: TEST_DB_PASSWORD,
+      ...testDbServerOptions(),
       connectionLimit: 5
     });
     sharedState.catalogPool = catalogPool;
@@ -273,28 +267,8 @@ describe('runJobIfClaimable — integration', () => {
       [schema]
     );
 
-    // validation_runs is defined in tablestructures.sql but loadSchema's
-    // semicolon-split filter silently skips it (the statement chunk begins
-    // with a '--' comment block). Same workaround as validation-orchestrator.
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`${schema}\`.validation_runs (
-        RunID          INT AUTO_INCREMENT PRIMARY KEY,
-        PlotID         INT NOT NULL,
-        CensusID       INT NOT NULL,
-        Status         ENUM ('running', 'completed', 'failed', 'cancelled') NOT NULL DEFAULT 'running',
-        TotalSteps     INT NOT NULL DEFAULT 0,
-        CompletedSteps INT NOT NULL DEFAULT 0,
-        FailedSteps    INT NOT NULL DEFAULT 0,
-        CurrentStep    VARCHAR(100) NULL,
-        ErrorMessages  JSON NULL,
-        StartedAt      DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        CompletedAt    DATETIME NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
-
-    // upload_sessions suffers the same loadSchema filter skip; create it via
-    // the production bootstrap (the worker also calls this, but beforeEach's
-    // cleanup needs the table to exist before the first run).
+    // upload_sessions must exist before beforeEach's cleanup runs; create it
+    // via the production bootstrap (the worker also calls this itself).
     await ensureUploadSessionsTable(schema);
 
     console.log(`[setup] schema=${schema} plotID=${plotID} censusID=${censusID}`);

@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { Connection } from 'mysql2/promise';
+import { createConnection, type Connection, type RowDataPacket } from 'mysql2/promise';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +32,9 @@ const SEED_PATH = path.resolve(__dirname, '../../tests/fixtures/ctfs-export/app-
 
 const CENSUS_ID = 1;
 const PLOT_ID = 1;
+
+// The seed's only valid measurement (CoreMeasurementID=1) carries this date.
+const SEED_MEASUREMENT_DATE = '2024-06-01';
 
 // Unique DB name per test process to avoid cross-run collisions.
 const DB_NAME = `forestgeo_selectmeas_${process.pid}_${Date.now()}`;
@@ -141,7 +144,7 @@ describe('selectMeasurements', () => {
     // Measurement values
     expect(row.DBH, 'DBH maps from coremeasurements.MeasuredDBH').toBeCloseTo(12.3, 3);
     expect(row.HOM, 'HOM is serialized as a string (lexical form preserved)').toBe('1.300000');
-    expect(row.ExactDate, 'ExactDate is a YYYY-MM-DD string').toBe('2024-06-01');
+    expect(row.ExactDate, 'ExactDate is a YYYY-MM-DD string').toBe(SEED_MEASUREMENT_DATE);
     expect(row.Comments, 'Comments maps from coremeasurements.Description; seed value is NULL').toBeNull();
     expect(row.LX, 'LX maps from stems.LocalX').toBeCloseTo(LOCAL_X, 5);
     expect(row.LY, 'LY maps from stems.LocalY').toBeCloseTo(LOCAL_Y, 5);
@@ -161,6 +164,42 @@ describe('selectMeasurements', () => {
     expect(attributeRows).toHaveLength(1);
     expect(attributeRows[0].TSMCode, 'TSMCode from cmattributes.Code').toBe('LI');
     expect(attributeRows[0].CoreMeasurementID, 'attribute references parent measurement').toBe(1);
+  });
+
+  it.each([
+    ['+02:00', false],
+    ['-07:00', false],
+    ['+02:00', true]
+  ] as const)('preserves the stored calendar day with mysql2 timezone=%s dateStrings=%s', async (timezone, dateStrings) => {
+    const explicitConn = await createConnection({ ...DEFAULT_TEST_CONFIG, database: DB_NAME, timezone, dateStrings });
+    try {
+      const [storedRows] = await explicitConn.query<RowDataPacket[]>(
+        "SELECT DATE_FORMAT(MeasurementDate, '%Y-%m-%d') AS StoredDate FROM coremeasurements WHERE CoreMeasurementID = ?",
+        [1]
+      );
+      const { measurementRows } = await selectMeasurements(explicitConn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+      expect(storedRows[0].StoredDate, 'SQL DATE_FORMAT establishes the persisted calendar day').toBe(SEED_MEASUREMENT_DATE);
+      expect(measurementRows[0].ExactDate, `export must preserve the day for timezone=${timezone}, dateStrings=${dateStrings}`).toBe(SEED_MEASUREMENT_DATE);
+    } finally {
+      await explicitConn.end();
+    }
+  });
+
+  it('preserves a NULL MeasurementDate as SQL NULL instead of the string "null"', async () => {
+    await conn.query('UPDATE coremeasurements SET MeasurementDate = NULL WHERE CoreMeasurementID = 1');
+
+    const { measurementRows } = await selectMeasurements(conn, {
+      schema: DB_NAME,
+      plotId: PLOT_ID,
+      censusId: CENSUS_ID
+    });
+
+    expect(measurementRows).toHaveLength(1);
+    expect(
+      measurementRows[0].ExactDate,
+      'Stage 5 must see SQL NULL so it SIGNALs "Missing required field"; the text null becomes an invalid DATE that aborts the publish under strict sql_mode'
+    ).toBeNull();
   });
 
   it('preserves missing descriptive taxonomy as SQL NULL instead of the string "null"', async () => {

@@ -29,6 +29,7 @@ vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: v
 import { createSchemaStep, initTablesStep, deployProceduresStep } from '@/lib/provisioning/steps/sql-steps';
 import { insertPlotStep, insertCensusStep } from '@/lib/provisioning/steps/catalog-and-rows';
 import type { StepContext, ProvisioningInput } from '@/lib/provisioning/types';
+import { testDbServerOptions } from '../../setup/test-db-connection';
 
 const MIGRATION_SCHEMA = TEST_SCHEMA_PREFIX + 'coordwiden';
 const PROVISION_SCHEMA = TEST_SCHEMA_PREFIX + 'utmcoords';
@@ -98,10 +99,7 @@ describe('widen-plot-global-coordinates migration on a legacy narrow schema', ()
 
   beforeAll(async () => {
     connection = await mysql.createConnection({
-      host: process.env.TEST_DB_HOST || 'localhost',
-      port: Number(process.env.TEST_DB_PORT || 3306),
-      user: process.env.TEST_DB_USER || 'root',
-      password: process.env.TEST_DB_PASSWORD || 'testpassword',
+      ...testDbServerOptions(),
       // apply-schema-migrations runs each migration file whole; mirror that.
       multipleStatements: true
     });

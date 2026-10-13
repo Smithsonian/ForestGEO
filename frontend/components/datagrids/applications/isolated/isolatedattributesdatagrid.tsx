@@ -14,7 +14,7 @@ export default function IsolatedAttributesDataGrid() {
     id: 0,
     code: '',
     description: '',
-    status: ''
+    status: null
   };
   const [refresh, setRefresh] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);

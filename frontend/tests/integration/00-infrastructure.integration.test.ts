@@ -17,7 +17,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
+import fs from 'fs';
+import path from 'path';
+import { setupTestDatabase, teardownTestDatabase, tableNamesDeclaredIn, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
+import { TEST_DB_DRIVER_TIMEZONE } from '../setup/test-db-connection';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 
 function toBool(value: unknown): boolean {
@@ -68,10 +71,21 @@ const EXPECTED_TABLES = [
 // Expected stored procedures
 const EXPECTED_PROCEDURES = ['bulkingestionprocess'] as const;
 
+// Canonical DDL path; integration tests run with cwd=frontend.
+const CANONICAL_DDL_PATH = path.join(process.cwd(), 'db/sql', 'tablestructures.sql');
+
+// Pins tableNamesDeclaredIn's derivation so the completeness check below can't
+// shrink its own expected set if the derivation regresses.
+const TABLES_A_STALE_SPLITTER_ONCE_DROPPED = ['upload_errors', 'upload_sessions', 'validation_runs'] as const;
+
+// A fixed instant, not new Date(), so the offset a local-zone driver applies,
+// and therefore the delta this test reports, is the same on every run.
+const DATE_BINDING_PROBE_ISO = '2024-01-02T03:04:05.000Z';
+
 describe('Infrastructure Validation', () => {
   let connection: Connection;
   let testData: TestData;
-  let config: { database: string };
+  let config: TestDatabaseConfig;
 
   beforeAll(async () => {
     const setup = await setupTestDatabase();
@@ -93,6 +107,46 @@ describe('Infrastructure Validation', () => {
     it('should be using the correct test database', async () => {
       const [result] = await connection.query<RowDataPacket[]>('SELECT DATABASE() as db');
       expect(result[0].db).toMatch(/^forestgeo_test_/);
+    });
+
+    it('runs against a MySQL server whose session clock is UTC', async () => {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT @@session.time_zone AS sessionTimeZone,
+                @@system_time_zone AS systemTimeZone,
+                TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) AS serverOffsetSeconds`
+      );
+      const { sessionTimeZone, systemTimeZone, serverOffsetSeconds } = rows[0];
+      const serverOffset = Number(serverOffsetSeconds);
+      expect(
+        serverOffset,
+        `MySQL at ${config.host}:${config.port} runs NOW() ${serverOffset}s from UTC ` +
+          `(session time_zone=${sessionTimeZone}, system_time_zone=${systemTimeZone}). ` +
+          'The app and this harness both require a UTC server. Run `lsof -nP -iTCP:3306 -sTCP:LISTEN`: ' +
+          'only the Docker proxy should own the port; a Homebrew or scratch mysqld runs in the host zone.'
+      ).toBe(0);
+    });
+
+    it('binds and decodes timestamps as UTC on the harness connection', async () => {
+      const [serverClock] = await connection.query<RowDataPacket[]>('SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) AS serverOffsetSeconds');
+      const serverOffsetSeconds = Number(serverClock[0].serverOffsetSeconds);
+
+      const fixedInstant = new Date(DATE_BINDING_PROBE_ISO);
+      const [bound] = await connection.query<RowDataPacket[]>('SELECT UNIX_TIMESTAMP(?) * 1000 AS boundEpochMs', [fixedInstant]);
+      const boundEpochMs = Number(bound[0].boundEpochMs);
+      expect(
+        boundEpochMs,
+        `mysql2 encoded ${DATE_BINDING_PROBE_ISO} ${boundEpochMs - fixedInstant.getTime()}ms off the instant ` +
+          `(runtime offset ${new Date().getTimezoneOffset()} min, server offset ${serverOffsetSeconds}s). ` +
+          `DEFAULT_TEST_CONFIG.timezone must be '${TEST_DB_DRIVER_TIMEZONE}'; ` +
+          'a non-zero server offset means the server-clock test above is the real failure, not the driver.'
+      ).toBe(fixedInstant.getTime());
+
+      const [clock] = await connection.query<RowDataPacket[]>('SELECT NOW() AS nowValue, UNIX_TIMESTAMP(NOW()) * 1000 AS nowEpochMs');
+      const decodedNowMs = new Date(clock[0].nowValue).getTime();
+      expect(
+        decodedNowMs,
+        `mysql2 decoded NOW() ${decodedNowMs - Number(clock[0].nowEpochMs)}ms off the server epoch; the harness connection is not decoding DATETIME as UTC`
+      ).toBe(Number(clock[0].nowEpochMs));
     });
   });
 
@@ -125,6 +179,41 @@ describe('Infrastructure Validation', () => {
 
       expect(tableNames).not.toContain('failedmeasurements');
       expect(tableNames).not.toContain('cmverrors');
+    });
+
+    it('should create every base table declared in the canonical DDL, including the ones a prior splitter bug dropped', async () => {
+      const canonicalDdl = fs.readFileSync(CANONICAL_DDL_PATH, 'utf-8');
+      const declaredTableNames = tableNamesDeclaredIn(canonicalDdl);
+
+      // Pin the derivation itself: if tableNamesDeclaredIn regresses and starts
+      // under-reporting tables, this fails loudly here instead of silently
+      // shrinking the set the completeness check below compares against.
+      for (const formerlyDroppedTable of TABLES_A_STALE_SPLITTER_ONCE_DROPPED) {
+        expect(
+          declaredTableNames.map(name => name.toLowerCase()),
+          `tableNamesDeclaredIn(${CANONICAL_DDL_PATH}) no longer reports "${formerlyDroppedTable}"; ` +
+            'the derivation itself has regressed, independent of loadSchema'
+        ).toContain(formerlyDroppedTable);
+      }
+
+      const [tables] = await connection.query<RowDataPacket[]>(
+        `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'`
+      );
+      const createdTableNames = new Set(tables.map(row => String(row.TABLE_NAME).toLowerCase()));
+
+      const missingTables: string[] = [];
+      for (const declared of declaredTableNames) {
+        if (!createdTableNames.has(declared.toLowerCase())) {
+          missingTables.push(declared);
+        }
+      }
+
+      if (missingTables.length > 0) {
+        throw new Error(
+          `${CANONICAL_DDL_PATH} declares ${missingTables.length} table(s) that loadSchema did not create ` +
+            `in the test database: ${missingTables.join(', ')}`
+        );
+      }
     });
   });
 

@@ -10,6 +10,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import mysql, { type Pool } from 'mysql2/promise';
 import { vi } from 'vitest';
+import { testDbServerOptions } from '../../setup/test-db-connection';
 
 export const TEST_SCHEMA_PREFIX = 'forestgeo_routetest_';
 
@@ -51,10 +52,7 @@ export function suppressBackgroundDispatch() {
 
 export function createTestPool(): Pool {
   return mysql.createPool({
-    host: process.env.TEST_DB_HOST || 'localhost',
-    port: Number(process.env.TEST_DB_PORT || 3306),
-    user: process.env.TEST_DB_USER || 'root',
-    password: process.env.TEST_DB_PASSWORD || 'testpassword',
+    ...testDbServerOptions(),
     multipleStatements: true,
     connectionLimit: 5
   });

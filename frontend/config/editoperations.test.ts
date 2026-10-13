@@ -1,10 +1,51 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ensureEditOperationsTable, readEditOperation, writeEditOperation, type EditOperationWriteInput } from './editoperations';
+import {
+  EditOperationStateIntegrityError,
+  ensureEditOperationsTable,
+  markEditOperationReverted,
+  MarkEditOperationRevertedConflictError,
+  readEditOperation,
+  ReadEditOperationLockRequiresTransactionError,
+  writeEditOperation,
+  type EditOperationStateColumn,
+  type EditOperationWriteInput
+} from './editoperations';
+
+const ORIGINAL_EDIT_OPERATION_ID = 7;
+const REVERTING_EDIT_OPERATION_ID = 8;
+const TRANSACTION_ID = 'tx-1';
 
 function makeConnectionManager() {
   return {
     executeQuery: vi.fn()
   } as any;
+}
+
+const STATE_INTEGRITY_EDIT_OPERATION_ID = 123;
+const DISTINCTIVE_ROW_PAYLOAD_MARKER = 'SECRET_ROW_PAYLOAD_MARKER_67890';
+// V8's JSON.parse SyntaxError truncates the quoted input snippet to a short
+// prefix (e.g. `"[SECRET_R"...`) rather than echoing the full offending
+// string, so only this leading slice of the marker is actually observable
+// in the native error message.
+const VISIBLE_PAYLOAD_PREFIX_LENGTH = 8;
+
+function buildLedgerRow(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+  return {
+    EditOperationID: STATE_INTEGRITY_EDIT_OPERATION_ID,
+    OperationType: 'single-row-edit',
+    Revertable: 1,
+    DataType: 'measurementssummary',
+    TargetID: 42,
+    PlotID: 1,
+    CensusID: 2,
+    PlanHash: 'a'.repeat(64),
+    BeforeState: '[]',
+    AfterState: '[]',
+    CreatedBy: 'mason@example.com',
+    CreatedAt: '2026-04-22T00:00:00.000Z',
+    RevertedByEditOperationID: null,
+    ...overrides
+  };
 }
 
 function buildInput(overrides: Partial<EditOperationWriteInput> = {}): EditOperationWriteInput {
@@ -146,5 +187,163 @@ describe('editoperations', () => {
     expect(record!.operationType).toBe('bulk-revision-row');
     expect(record!.revertable).toBe(false);
     expect(record!.afterState[0].row).toEqual({ MeasuredDBH: 12 });
+  });
+
+  it('readEditOperation without forUpdate omits FOR UPDATE and stays callable with no transactionID', async () => {
+    const cm = makeConnectionManager();
+    cm.executeQuery.mockResolvedValue([]);
+
+    const record = await readEditOperation(cm, 'forestgeo_testing', ORIGINAL_EDIT_OPERATION_ID);
+
+    expect(record).toBeNull();
+    expect(cm.executeQuery.mock.calls[0][0]).not.toContain('FOR UPDATE');
+    expect(cm.executeQuery.mock.calls[0][2]).toBeUndefined();
+  });
+
+  it('readEditOperation with forUpdate but no transactionID throws instead of silently reading unlocked', async () => {
+    const cm = makeConnectionManager();
+
+    await expect(readEditOperation(cm, 'forestgeo_testing', ORIGINAL_EDIT_OPERATION_ID, undefined, { forUpdate: true })).rejects.toBeInstanceOf(
+      ReadEditOperationLockRequiresTransactionError
+    );
+    expect(cm.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('readEditOperation with forUpdate and a transactionID appends FOR UPDATE and forwards the transactionID', async () => {
+    const cm = makeConnectionManager();
+    cm.executeQuery.mockResolvedValue([]);
+
+    await readEditOperation(cm, 'forestgeo_testing', ORIGINAL_EDIT_OPERATION_ID, TRANSACTION_ID, { forUpdate: true });
+
+    expect(cm.executeQuery.mock.calls[0][0]).toContain('FOR UPDATE');
+    expect(cm.executeQuery.mock.calls[0][1]).toEqual([ORIGINAL_EDIT_OPERATION_ID]);
+    expect(cm.executeQuery.mock.calls[0][2]).toBe(TRANSACTION_ID);
+  });
+
+  it('markEditOperationReverted scopes the UPDATE to un-reverted rows and succeeds on exactly one affected row', async () => {
+    const cm = makeConnectionManager();
+    cm.executeQuery.mockResolvedValue({ affectedRows: 1 });
+
+    await markEditOperationReverted(cm, 'forestgeo_testing', ORIGINAL_EDIT_OPERATION_ID, REVERTING_EDIT_OPERATION_ID, TRANSACTION_ID);
+
+    expect(cm.executeQuery.mock.calls[0][0]).toContain('RevertedByEditOperationID IS NULL');
+    expect(cm.executeQuery.mock.calls[0][1]).toEqual([REVERTING_EDIT_OPERATION_ID, ORIGINAL_EDIT_OPERATION_ID]);
+    expect(cm.executeQuery.mock.calls[0][2]).toBe(TRANSACTION_ID);
+  });
+
+  it('markEditOperationReverted refuses a double-mark when the row is missing or already reverted', async () => {
+    const cm = makeConnectionManager();
+    cm.executeQuery.mockResolvedValue({ affectedRows: 0 });
+
+    await expect(
+      markEditOperationReverted(cm, 'forestgeo_testing', ORIGINAL_EDIT_OPERATION_ID, REVERTING_EDIT_OPERATION_ID, TRANSACTION_ID)
+    ).rejects.toBeInstanceOf(MarkEditOperationRevertedConflictError);
+  });
+
+  describe('BeforeState/AfterState integrity via readEditOperation', () => {
+    it('parses a legitimate JSON string array of marker and snapshot rows into the same array', async () => {
+      const cm = makeConnectionManager();
+      const beforeStateRows = [{ table: 'coremeasurements', primaryKey: 'CoreMeasurementID', primaryKeyValue: 42, row: { MeasuredDBH: 10 } }];
+      const afterStateRows = [{ table: 'coremeasurements', primaryKey: 'CoreMeasurementID', primaryKeyValue: 42, row: { MeasuredDBH: 12 } }];
+      cm.executeQuery.mockResolvedValue([buildLedgerRow({ BeforeState: JSON.stringify(beforeStateRows), AfterState: JSON.stringify(afterStateRows) })]);
+
+      const record = await readEditOperation(cm, 'forestgeo_testing', STATE_INTEGRITY_EDIT_OPERATION_ID);
+
+      expect(record?.beforeState).toEqual(beforeStateRows);
+      expect(record?.afterState).toEqual(afterStateRows);
+    });
+
+    it('parses a genuinely empty "[]" string to [] without throwing', async () => {
+      const cm = makeConnectionManager();
+      cm.executeQuery.mockResolvedValue([buildLedgerRow({ BeforeState: '[]', AfterState: '[]' })]);
+
+      const record = await readEditOperation(cm, 'forestgeo_testing', STATE_INTEGRITY_EDIT_OPERATION_ID);
+
+      expect(record?.beforeState).toEqual([]);
+      expect(record?.afterState).toEqual([]);
+    });
+
+    it('passes through a stored value that is already a JS array by content', async () => {
+      const cm = makeConnectionManager();
+      const alreadyArrayRows = [{ table: 'coremeasurements', primaryKey: 'CoreMeasurementID', primaryKeyValue: 1, row: { MeasuredDBH: 5 } }];
+      cm.executeQuery.mockResolvedValue([buildLedgerRow({ BeforeState: alreadyArrayRows, AfterState: alreadyArrayRows })]);
+
+      const record = await readEditOperation(cm, 'forestgeo_testing', STATE_INTEGRITY_EDIT_OPERATION_ID);
+
+      expect(record?.beforeState).toEqual(alreadyArrayRows);
+      expect(record?.afterState).toEqual(alreadyArrayRows);
+    });
+
+    it('rejects with EditOperationStateIntegrityError naming the row and column when BeforeState is unparseable JSON', async () => {
+      const cm = makeConnectionManager();
+      cm.executeQuery.mockResolvedValue([buildLedgerRow({ BeforeState: `{not valid json ${DISTINCTIVE_ROW_PAYLOAD_MARKER}` })]);
+
+      const error: EditOperationStateIntegrityError = await readEditOperation(cm, 'forestgeo_testing', STATE_INTEGRITY_EDIT_OPERATION_ID).catch(e => e);
+
+      expect(error).toBeInstanceOf(EditOperationStateIntegrityError);
+      expect(error.editOperationID).toBe(STATE_INTEGRITY_EDIT_OPERATION_ID);
+      expect(error.column).toBe('BeforeState' satisfies EditOperationStateColumn);
+    });
+
+    it.each([
+      ['{"a":1}', 'JSON object'],
+      ['5', 'JSON number scalar'],
+      ['"x"', 'JSON string scalar'],
+      ['null', 'JSON null scalar']
+    ])('rejects with EditOperationStateIntegrityError (not []) when AfterState parses to a non-array: %s (%s)', async rawValue => {
+      const cm = makeConnectionManager();
+      cm.executeQuery.mockResolvedValue([buildLedgerRow({ AfterState: rawValue })]);
+
+      const result = await readEditOperation(cm, 'forestgeo_testing', STATE_INTEGRITY_EDIT_OPERATION_ID).catch(e => e);
+
+      expect(result).toBeInstanceOf(EditOperationStateIntegrityError);
+      expect(result).not.toEqual([]);
+      expect((result as EditOperationStateIntegrityError).column).toBe('AfterState');
+    });
+
+    it.each([
+      ['BeforeState', null],
+      ['BeforeState', undefined],
+      ['BeforeState', ''],
+      ['AfterState', null],
+      ['AfterState', undefined],
+      ['AfterState', '']
+    ] as const)('rejects with EditOperationStateIntegrityError naming %s for raw value %p', async (column, rawValue) => {
+      const cm = makeConnectionManager();
+      cm.executeQuery.mockResolvedValue([buildLedgerRow({ [column]: rawValue })]);
+
+      const error: EditOperationStateIntegrityError = await readEditOperation(cm, 'forestgeo_testing', STATE_INTEGRITY_EDIT_OPERATION_ID).catch(e => e);
+
+      expect(error).toBeInstanceOf(EditOperationStateIntegrityError);
+      expect(error.column).toBe(column);
+      expect(error.editOperationID).toBe(STATE_INTEGRITY_EDIT_OPERATION_ID);
+    });
+
+    it('does not embed the stored payload contents in the error message even though V8 echoes a prefix of them in the raw SyntaxError', async () => {
+      // V8's JSON.parse SyntaxError quotes only a short, truncated snippet of
+      // the input (e.g. `"[SECRET_R"...`), not the full marker. Placing the
+      // marker right after the unterminated `[` puts its visible prefix
+      // directly in that snippet, proving the raw error does leak stored
+      // content and that our wrapped error strips even that prefix.
+      const cm = makeConnectionManager();
+      const corruptBeforeState = `[${DISTINCTIVE_ROW_PAYLOAD_MARKER}`;
+      const visiblePayloadPrefix = DISTINCTIVE_ROW_PAYLOAD_MARKER.slice(0, VISIBLE_PAYLOAD_PREFIX_LENGTH);
+      cm.executeQuery.mockResolvedValue([buildLedgerRow({ BeforeState: corruptBeforeState })]);
+
+      let rawParseError: unknown;
+      try {
+        JSON.parse(corruptBeforeState);
+      } catch (e) {
+        rawParseError = e;
+      }
+      expect((rawParseError as Error).message).toContain(visiblePayloadPrefix);
+
+      const error: EditOperationStateIntegrityError = await readEditOperation(cm, 'forestgeo_testing', STATE_INTEGRITY_EDIT_OPERATION_ID).catch(e => e);
+
+      expect(error).toBeInstanceOf(EditOperationStateIntegrityError);
+      expect(error.message).not.toContain(DISTINCTIVE_ROW_PAYLOAD_MARKER);
+      expect(error.message).not.toContain(visiblePayloadPrefix);
+      expect(error.cause).toBeInstanceOf(SyntaxError);
+    });
   });
 });

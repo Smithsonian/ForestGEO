@@ -1,6 +1,22 @@
 /// <reference types="cypress" />
 
 import { buildAttributeRow, buildQuadratRow, buildTaxonomyRow, mockIsolatedGridApi } from '../support/grid-api-helpers';
+import { ATTRIBUTE_STATUS_UNSPECIFIED_HINT } from '@/lib/db/definitions/core';
+
+function openStatusEditor() {
+  // MUI Material's Select (SelectInput.js) opens the menu on mousedown and closes it in its
+  // mouseup handler by checking paperRef.current.contains(target). A synthetic .click() fires
+  // mousedown+mouseup back-to-back in the same tick, before React has mounted the listbox, so
+  // paperRef.current is still null and the handler throws. Split the click into its two real
+  // events with an explicit mount boundary in between: mousedown opens the menu, we wait for the
+  // listbox to actually be in the DOM and visible, then mouseup (still on the combobox, matching
+  // a real click) completes the gesture against an already-mounted paper.
+  cy.get('.MuiDataGrid-row').first().find('[data-field="status"] [role="combobox"]').as('statusCombobox');
+  cy.get('@statusCombobox').trigger('mousedown', 'center', { button: 0 });
+  cy.get('[role="listbox"]:visible').should('be.visible');
+  cy.get('@statusCombobox').trigger('mouseup', 'center', { button: 0, force: true });
+  return cy.get('[role="listbox"]:visible');
+}
 
 function selectDefaultCensusContext() {
   cy.visitAuthenticatedPage('/dashboard');
@@ -24,16 +40,16 @@ describe('Fixed Data Management', () => {
     mockIsolatedGridApi({
       gridType: 'attributes',
       rows: [
-        buildAttributeRow({ id: 1, code: 'ATTR001', description: 'Canopy emergent', status: 'active' }),
-        buildAttributeRow({ id: 2, code: 'ATTR002', description: 'Gap specialist', status: 'active' }),
-        buildAttributeRow({ id: 3, code: 'ATTR003', description: 'Liana damage', status: 'inactive' })
+        buildAttributeRow({ id: 1, code: 'ATTR001', description: 'Canopy emergent', status: 'alive' }),
+        buildAttributeRow({ id: 2, code: 'ATTR002', description: 'Gap specialist', status: 'alive' }),
+        buildAttributeRow({ id: 3, code: 'ATTR003', description: 'Liana damage', status: 'dead' })
       ]
     });
 
     openFixedDataGrid('Stem Codes');
 
     cy.contains('[role="row"]', 'ATTR001').should('contain', 'Canopy emergent');
-    cy.contains('[role="row"]', 'ATTR003').should('contain', 'inactive');
+    cy.contains('[role="row"]', 'ATTR003').should('contain', 'dead');
     cy.get('input[placeholder="Search All Fields..."]').should('be.visible');
     cy.get('[aria-label="Export as CSV"]').should('exist');
     cy.contains('button', /^Add record$/).should('be.visible');
@@ -43,7 +59,7 @@ describe('Fixed Data Management', () => {
   it('enters and cancels Stem Code row edit mode through the current action buttons', () => {
     mockIsolatedGridApi({
       gridType: 'attributes',
-      rows: [buildAttributeRow({ id: 1, code: 'ATTR001', description: 'Original attribute', status: 'active' })]
+      rows: [buildAttributeRow({ id: 1, code: 'ATTR001', description: 'Original attribute', status: 'alive' })]
     });
 
     openFixedDataGrid('Stem Codes');
@@ -61,6 +77,174 @@ describe('Fixed Data Management', () => {
 
     cy.get('.MuiDataGrid-row').first().find('button').eq(1).click({ force: true });
     cy.contains('.MuiDataGrid-row', 'ATTR001').should('contain', 'Original attribute');
+  });
+
+  it('clears a Stem Code status to Unspecified via the editor and saves SQL NULL (#425)', () => {
+    mockIsolatedGridApi({
+      gridType: 'attributes',
+      rows: [buildAttributeRow({ id: 1, code: 'ATTR001', description: 'Canopy emergent', status: 'alive' })]
+    });
+
+    openFixedDataGrid('Stem Codes');
+    // Consume the page-load GET now, by itself, so the later post-reload cy.wait on this same
+    // alias deterministically resolves to the reload's fresh request instead of this stale one.
+    cy.wait('@fetchIsolatedGridRows');
+
+    cy.contains('.MuiDataGrid-row', 'ATTR001').find('button').eq(0).click({ force: true });
+
+    openStatusEditor().within(() => {
+      cy.contains('[role="option"]', 'Unspecified (blank)').click();
+    });
+
+    cy.get('.MuiDataGrid-row').first().find('button').eq(0).click({ force: true });
+    cy.contains('[role="dialog"]', 'Confirm Changes').should('be.visible');
+    cy.contains('button', 'Save Changes').click();
+
+    cy.wait('@saveIsolatedGridRow').then(interception => {
+      expect(interception.request.body.newRow.status).to.equal(null);
+    });
+
+    // finishPersistedSave commits the saved row into local grid state before any background
+    // refetch -- the view-mode cell (and its blank-status hint) already reflects the save here.
+    cy.contains('.MuiDataGrid-row', 'ATTR001').within(() => {
+      cy.contains('Unspecified').should('be.visible');
+      cy.get(`[aria-label="${ATTRIBUTE_STATUS_UNSPECIFIED_HINT}"]`).should('exist');
+    });
+
+    // Prove the NULL actually persisted server-side, not just in optimistic local state: reload
+    // (site/plot/census survive via the persisted zustand store, matching selection-persistence.cy.ts)
+    // and re-read the row from a fresh GET against the mock's own mutated state -- mockIsolatedGridApi's
+    // PATCH handler writes the accepted row into its own `state.rows`, which is exactly what this
+    // reload's GET now serves back.
+    cy.reload();
+    cy.get('[role="grid"]').should('be.visible');
+    cy.wait('@fetchIsolatedGridRows');
+    cy.contains('.MuiDataGrid-row', 'ATTR001').within(() => {
+      cy.contains('Unspecified').should('be.visible');
+      cy.get(`[aria-label="${ATTRIBUTE_STATUS_UNSPECIFIED_HINT}"]`).should('exist');
+    });
+  });
+
+  it('restores a Stem Code status from Unspecified back to an explicit value and saves it (#425)', () => {
+    mockIsolatedGridApi({
+      gridType: 'attributes',
+      rows: [buildAttributeRow({ id: 2, code: 'ATTR002', description: 'Gap specialist', status: null })]
+    });
+
+    openFixedDataGrid('Stem Codes');
+    // Consume the page-load GET now, by itself, so the later post-reload cy.wait on this same
+    // alias deterministically resolves to the reload's fresh request instead of this stale one.
+    cy.wait('@fetchIsolatedGridRows');
+
+    cy.contains('.MuiDataGrid-row', 'ATTR002').within(() => {
+      cy.contains('Unspecified').should('be.visible');
+    });
+
+    cy.contains('.MuiDataGrid-row', 'ATTR002').find('button').eq(0).click({ force: true });
+
+    openStatusEditor().within(() => {
+      cy.contains('[role="option"]', /^alive$/).click();
+    });
+
+    cy.get('.MuiDataGrid-row').first().find('button').eq(0).click({ force: true });
+    cy.contains('[role="dialog"]', 'Confirm Changes').should('be.visible');
+    cy.contains('button', 'Save Changes').click();
+
+    cy.wait('@saveIsolatedGridRow').then(interception => {
+      expect(interception.request.body.newRow.status).to.equal('alive');
+    });
+
+    cy.contains('.MuiDataGrid-row', 'ATTR002').within(() => {
+      cy.contains('alive').should('be.visible');
+      cy.get(`[aria-label="${ATTRIBUTE_STATUS_UNSPECIFIED_HINT}"]`).should('not.exist');
+    });
+
+    // Prove the explicit status actually persisted server-side (mockIsolatedGridApi's PATCH
+    // handler writes the accepted row into its own `state.rows`): reload, re-read from a fresh
+    // GET, and confirm the blank-status hint stays gone now that the row has a real status again.
+    cy.reload();
+    cy.get('[role="grid"]').should('be.visible');
+    cy.wait('@fetchIsolatedGridRows');
+    cy.contains('.MuiDataGrid-row', 'ATTR002').within(() => {
+      cy.contains('alive').should('be.visible');
+      cy.get(`[aria-label="${ATTRIBUTE_STATUS_UNSPECIFIED_HINT}"]`).should('not.exist');
+    });
+  });
+
+  it('discards a Stem Code status edit when Cancel is clicked, sending no save request (#425)', () => {
+    mockIsolatedGridApi({
+      gridType: 'attributes',
+      rows: [buildAttributeRow({ id: 3, code: 'ATTR003', description: 'Liana damage', status: 'dead' })]
+    });
+
+    openFixedDataGrid('Stem Codes');
+
+    cy.contains('.MuiDataGrid-row', 'ATTR003').find('button').eq(0).click({ force: true });
+
+    openStatusEditor().within(() => {
+      cy.contains('[role="option"]', 'Unspecified (blank)').click();
+    });
+
+    cy.get('.MuiDataGrid-row').first().find('button').eq(1).click({ force: true });
+
+    cy.contains('.MuiDataGrid-row', 'ATTR003').should('contain', 'dead');
+    cy.get('@saveIsolatedGridRow.all').should('have.length', 0);
+  });
+
+  it('keeps a failed Stem Code status save recoverable in edit mode with no success message (#425)', () => {
+    mockIsolatedGridApi({
+      gridType: 'attributes',
+      rows: [buildAttributeRow({ id: 4, code: 'ATTR004', description: 'Buttress root', status: 'alive' })],
+      onPatch: () => ({ statusCode: 500, body: { message: 'Row update failed' } })
+    });
+
+    openFixedDataGrid('Stem Codes');
+
+    cy.contains('.MuiDataGrid-row', 'ATTR004').find('button').eq(0).click({ force: true });
+
+    openStatusEditor().within(() => {
+      cy.contains('[role="option"]', 'Unspecified (blank)').click();
+    });
+
+    cy.get('.MuiDataGrid-row').first().find('button').eq(0).click({ force: true });
+    cy.contains('[role="dialog"]', 'Confirm Changes').should('be.visible');
+    cy.contains('button', 'Save Changes').click();
+    cy.wait('@saveIsolatedGridRow');
+
+    cy.contains('Error: Row update failed').should('be.visible');
+    cy.contains('Row successfully updated').should('not.exist');
+
+    // The row never left edit mode: the status editor is still showing, recoverable for retry.
+    cy.get('.MuiDataGrid-row').first().find('[data-field="status"] [role="combobox"]').should('exist');
+  });
+
+  it('finalizes a blank-status manual Stem Code entry, sending SQL NULL (never the string "null") (#425)', () => {
+    mockIsolatedGridApi({ gridType: 'attributes', rows: [] });
+
+    cy.intercept('POST', '**/api/bulkcrud', req => {
+      const fileRows = Object.values(req.body.fileRowSet as Record<string, { code?: string; status?: unknown }>);
+      expect(fileRows).to.have.length(1);
+      expect(fileRows[0].code).to.equal('ATTR100');
+      expect(fileRows[0].status).to.not.equal('null');
+      expect([null, '']).to.include(fileRows[0].status);
+      req.reply({ statusCode: 200, body: { success: true } });
+    }).as('finalizeAttributeRows');
+
+    openFixedDataGrid('Stem Codes');
+
+    cy.contains('button', /^Add record$/).click();
+    cy.contains('[role="alertdialog"]', 'Manual Input Form - Attributes').should('be.visible');
+
+    cy.get('[role="alertdialog"]').within(() => {
+      cy.contains('button', 'New Row').click();
+      cy.get('[data-field="code"] input', { timeout: 4000 }).should('be.focused').type('ATTR100{enter}');
+      cy.contains('button', 'Save').click();
+      cy.contains('Rows saved and ready to finalize.').should('be.visible');
+      cy.contains('button', 'Finalize Changes').should('not.be.disabled').click();
+    });
+
+    cy.wait('@finalizeAttributeRows');
+    cy.contains('[role="alertdialog"]', 'Manual Input Form - Attributes').should('not.exist');
   });
 
   it('opens the Species List manual entry form and species-limits dialog from the current grid', () => {

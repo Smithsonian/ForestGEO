@@ -31,7 +31,7 @@ Integration tests verify that the backend API calls work correctly with the SQL 
 
 ### 3. Isolated Test Databases
 
-**Decision:** Each test run creates its own database (`forestgeo_test_{pool_id}`).
+**Decision:** Each checkout creates its own database, `forestgeo_test_<namespace>_<pool_id>`. The namespace is `TEST_DB_NAMESPACE` when set, otherwise the first 8 hex characters of a SHA-256 of the directory the suite is started from. Always launch it from `frontend/` so that key is stable: two worktrees running the suite at once then never share a schema, and a rerun in the same worktree drops and recreates its own, though two concurrent runs in the same checkout still share one schema.
 
 **Rationale:**
 - Tests don't interfere with each other
@@ -263,7 +263,8 @@ it('should reject record with NULL TreeTag', async () => {
 | `TEST_DB_PORT` | `3306` | MySQL port |
 | `TEST_DB_USER` | `root` | MySQL user |
 | `TEST_DB_PASSWORD` | `testpassword` | MySQL password |
-| `VITEST_POOL_ID` | `default` | Used for unique DB naming |
+| `TEST_DB_NAMESPACE` | hash of the checkout path | Namespace segment of the test database name; set it to a short identifier when another process needs to predict the name |
+| `VITEST_POOL_ID` | `default` | Pool segment of the test database name (always `1` under `singleFork`) |
 
 ## Validation IDs Reference
 
@@ -890,9 +891,7 @@ Edge case missed: What if the record failed for a *different* reason but also ha
 
 ### 7. NO CLEANUP OF ORPHAN TEST DATABASES
 
-If tests crash before `afterAll()`, the database `forestgeo_test_xxx` persists forever. After failed test runs, orphan databases accumulate.
-
-Consider: naming convention with timestamps + cleanup script for databases older than 1 hour.
+If tests crash before `afterAll()`, the database persists until the next run in the same checkout, which drops and recreates it. Suites that build their own schema name from `process.pid` or `Date.now()` (for example `select-measurements.test.ts` and `quadrat-origin-equivalence.integration.test.ts`) still leak on a crash, and because their names do not start with `forestgeo_test_` no cleanup tooling can find them. `tests/setup/cleanup-test-databases.ts` drops every schema whose name starts with `forestgeo_test_`, including a live run in another worktree, so run it only when no suite is running anywhere on the machine.
 
 ---
 
@@ -1116,7 +1115,7 @@ Comprehensive verification of integration test reliability completed:
 - Tests now fail explicitly if validation definitions are missing
 
 **4. Database State Verified**
-- Test databases correctly isolated (`forestgeo_test_{pool_id}` pattern)
+- Test databases correctly isolated (`forestgeo_test_<namespace>_<pool_id>` pattern)
 - All required tables created (28 tables)
 - Data flows correctly: temporarymeasurements → trees/stems/coremeasurements
 - Validation errors correctly written to cmverrors

@@ -2,7 +2,8 @@ import { HEADER_ALIGN } from '@/config/macros';
 import { Autocomplete, Box, Chip, IconButton, Stack, Typography } from '@mui/joy';
 import { GridColDef, GridPreProcessEditCellProps, GridRenderEditCellParams } from '@mui/x-data-grid';
 import React, { Dispatch, SetStateAction, useState } from 'react';
-import { AttributeStatusOptions } from '@/lib/db/definitions/core';
+import { ATTRIBUTE_STATUS_UNSPECIFIED_LABEL, AttributeStatusOptions } from '@/lib/db/definitions/core';
+import { renderAttributeStatusCell } from '@/components/client/attributestatuscell';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { customNumericOperators } from '@/components/datagrids/filtrationsystem';
 import CloseIcon from '@mui/icons-material/Close';
@@ -107,6 +108,12 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
   }
 ]);
 
+// A null option value (not the string 'null') makes the singleSelect editor commit SQL NULL.
+const AttributeStatusEditorOptions: { value: string | null; label: string }[] = [
+  { value: null, label: ATTRIBUTE_STATUS_UNSPECIFIED_LABEL },
+  ...AttributeStatusOptions.map(status => ({ value: status, label: status }))
+];
+
 export const AttributeGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
@@ -130,7 +137,10 @@ export const AttributeGridColumns: GridColDef[] = standardizeGridColumns([
     flex: 1,
     editable: true,
     type: 'singleSelect',
-    valueOptions: AttributeStatusOptions
+    valueOptions: AttributeStatusEditorOptions,
+    // Export a blank status as blank, not the editor's label.
+    valueFormatter: (value: string | null) => value ?? '',
+    renderCell: renderAttributeStatusCell
   }
 ]);
 

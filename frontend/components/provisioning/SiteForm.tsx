@@ -3,6 +3,8 @@
 import React, { useState } from 'react';
 import { FormControl, FormHelperText, FormLabel, Input, Stack, Switch, Typography } from '@mui/joy';
 import type { ProvisioningSiteInput } from '@/lib/provisioning/types';
+import { unitSelectionOptions } from '@/config/macros';
+import UnitSelect from './UnitSelect';
 
 const SCHEMA_NAME_REGEX = /^forestgeo_[a-z0-9_]+$/;
 
@@ -57,8 +59,6 @@ export default function SiteForm({ value, onChange, showErrors = false }: SiteFo
   const countryMissing = value.country.trim() === '';
   const sqDimXInvalid = !isPositiveInteger(value.sqDimX);
   const sqDimYInvalid = !isPositiveInteger(value.sqDimY);
-  const defaultUOMDBHMissing = value.defaultUOMDBH.trim() === '';
-  const defaultUOMHOMMissing = value.defaultUOMHOM.trim() === '';
 
   return (
     <Stack spacing={2}>
@@ -125,31 +125,23 @@ export default function SiteForm({ value, onChange, showErrors = false }: SiteFo
       </Stack>
 
       <Stack direction="row" spacing={2}>
-        <FormControl sx={{ flex: 1 }} error={shouldShowError('defaultUOMDBH') && defaultUOMDBHMissing}>
-          <FormLabel htmlFor="default-uom-dbh-input">Default DBH Unit</FormLabel>
-          <Input
-            id="default-uom-dbh-input"
-            aria-label="Default DBH Unit"
-            value={value.defaultUOMDBH}
-            placeholder="mm"
-            onChange={e => onChange({ ...value, defaultUOMDBH: e.target.value })}
-            onBlur={() => markTouched('defaultUOMDBH')}
-          />
-          {shouldShowError('defaultUOMDBH') && defaultUOMDBHMissing && <FormHelperText>DBH unit is required.</FormHelperText>}
-        </FormControl>
-
-        <FormControl sx={{ flex: 1 }} error={shouldShowError('defaultUOMHOM') && defaultUOMHOMMissing}>
-          <FormLabel htmlFor="default-uom-hom-input">Default HOM Unit</FormLabel>
-          <Input
-            id="default-uom-hom-input"
-            aria-label="Default HOM Unit"
-            value={value.defaultUOMHOM}
-            placeholder="m"
-            onChange={e => onChange({ ...value, defaultUOMHOM: e.target.value })}
-            onBlur={() => markTouched('defaultUOMHOM')}
-          />
-          {shouldShowError('defaultUOMHOM') && defaultUOMHOMMissing && <FormHelperText>HOM unit is required.</FormHelperText>}
-        </FormControl>
+        <UnitSelect
+          id="default-uom-dbh-input"
+          label="Default DBH Unit"
+          ariaLabel="Default DBH Unit"
+          value={value.defaultUOMDBH}
+          options={unitSelectionOptions}
+          onChange={defaultUOMDBH => onChange({ ...value, defaultUOMDBH })}
+        />
+        <UnitSelect
+          id="default-uom-hom-input"
+          label="Default HOM Unit"
+          ariaLabel="Default HOM Unit"
+          value={value.defaultUOMHOM}
+          options={unitSelectionOptions}
+          onChange={defaultUOMHOM => onChange({ ...value, defaultUOMHOM })}
+          helperText="The unit HOM is recorded in, not the height itself (e.g. m, not 1.3)."
+        />
       </Stack>
 
       <Stack direction="row" spacing={2}>
