@@ -10,6 +10,7 @@ drop procedure if exists refresh_failedmeasurements_current;
 -- procedures that operated on the now-removed failedmeasurements table.
 -- They are dropped above but NOT recreated below.
 drop procedure if exists RunSharedDBHChangeValidations;
+drop procedure if exists BuildDBHChangePairs;
 drop procedure if exists RunSharedCrossCensusLocationValidations;
 drop procedure if exists reinsertdefaultvalidations;
 drop procedure if exists reinsertdefaultpostvalidations;
@@ -783,9 +784,135 @@ begin
             'dead stems by species, organized to determine which species (if any) are struggling', true);
 end $$
 
+-- Build comparison facts once for both DBH validators and the read-only diagnostic.
+-- Pair predicates do not depend on a present row's processing state: bulk callers
+-- pass NULL and materialize pending rows only, while diagnostics pass a measurement
+-- ID and can inspect the same facts for pending, failed, and validated rows.
+-- This deliberately contains no transaction control or implicit-commit DDL.  Callers own
+-- the session temporary table and must drop it after reading it.
+create procedure BuildDBHChangePairs(
+    IN p_CensusID int,
+    IN p_PlotID int,
+    IN p_CoreMeasurementID int
+)
+SQL SECURITY DEFINER
+BEGIN
+    DECLARE cGrowthMaxMmPerYear DECIMAL(10, 4) DEFAULT 65;
+    DECLARE cShrinkMaxRelativePerYear DECIMAL(10, 6) DEFAULT -0.05;
+    DECLARE cMinDbhMm DECIMAL(10, 4) DEFAULT 10;
+    DECLARE cDaysPerYear DECIMAL(8, 3) DEFAULT 365.25;
+    -- Shorter or undated comparisons use the absolute thresholds: annualising a
+    -- short interval turns measurement precision into an implausible yearly rate.
+    DECLARE cMinAnnualisedIntervalDays INT DEFAULT 365;
+    -- Longer intervals are almost always a mistyped year and would hide real change.
+    DECLARE cMaxPlausibleIntervalDays INT DEFAULT 7305;
+    DECLARE cAbsoluteGrowthMaxMm DECIMAL(10, 4) DEFAULT 65;
+    DECLARE cAbsoluteShrinkMinRatio DECIMAL(10, 6) DEFAULT 0.95;
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        DROP TEMPORARY TABLE IF EXISTS dbh_change_pairs;
+        RESIGNAL;
+    END;
+
+    DROP TEMPORARY TABLE IF EXISTS dbh_change_pairs;
+    CREATE TEMPORARY TABLE dbh_change_pairs (
+        PresentCoreMeasurementID INT NOT NULL,
+        PriorCoreMeasurementID INT NOT NULL,
+        PresentCensusID INT NOT NULL,
+        PriorCensusID INT NOT NULL,
+        PresentIsValidated TINYINT NULL,
+        PresentDBH DECIMAL(12, 6) NULL,
+        PriorDBH DECIMAL(12, 6) NULL,
+        PresentHOM DECIMAL(12, 6) NULL,
+        PriorHOM DECIMAL(12, 6) NULL,
+        PresentMeasurementDate DATE NULL,
+        PriorMeasurementDate DATE NULL,
+        UnitToMm DECIMAL(12, 4) NOT NULL,
+        IntervalDays INT NULL,
+        IntervalYears DECIMAL(20, 10) NULL,
+        StatusExempt TINYINT NOT NULL DEFAULT 0,
+        DbhsMeetFloor TINYINT NOT NULL DEFAULT 0,
+        HomEligible TINYINT NOT NULL DEFAULT 0,
+        IntervalSkipReason VARCHAR(32) NULL,
+        ComparisonBasis VARCHAR(16) NULL,
+        IsEligible TINYINT NOT NULL DEFAULT 0,
+        GrowthViolates TINYINT NOT NULL DEFAULT 0,
+        ShrinkageViolates TINYINT NOT NULL DEFAULT 0,
+        PRIMARY KEY (PresentCoreMeasurementID, PriorCoreMeasurementID),
+        KEY dbh_change_pairs_present_pending (PresentIsValidated, PresentCoreMeasurementID),
+        KEY dbh_change_pairs_verdicts (GrowthViolates, ShrinkageViolates)
+    ) ENGINE=InnoDB;
+
+    INSERT INTO dbh_change_pairs (
+        PresentCoreMeasurementID, PriorCoreMeasurementID, PresentCensusID, PriorCensusID,
+        PresentIsValidated, PresentDBH, PriorDBH, PresentHOM, PriorHOM,
+        PresentMeasurementDate, PriorMeasurementDate, UnitToMm, StatusExempt
+    )
+    SELECT cm_present.CoreMeasurementID, cm_past.CoreMeasurementID,
+           cm_present.CensusID, cm_past.CensusID, cm_present.IsValidated,
+           cm_present.MeasuredDBH, cm_past.MeasuredDBH, cm_present.MeasuredHOM, cm_past.MeasuredHOM,
+           cm_present.MeasurementDate, cm_past.MeasurementDate,
+           CASE p.DefaultDBHUnits
+               WHEN 'km' THEN 1000000 WHEN 'hm' THEN 100000 WHEN 'dam' THEN 10000
+               WHEN 'm' THEN 1000 WHEN 'dm' THEN 100 WHEN 'cm' THEN 10 WHEN 'mm' THEN 1 ELSE 1 END,
+           CASE WHEN EXISTS (
+                    SELECT 1 FROM cmattributes cma_present JOIN attributes a_present
+                      ON a_present.Code = cma_present.Code AND a_present.IsActive = 1
+                    WHERE cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
+                      AND a_present.Status IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted')
+                ) OR EXISTS (
+                    SELECT 1 FROM cmattributes cma_past JOIN attributes a_past
+                      ON a_past.Code = cma_past.Code AND a_past.IsActive = 1
+                    WHERE cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
+                      AND a_past.Status IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted')
+                ) THEN 1 ELSE 0 END
+    FROM coremeasurements cm_present
+      JOIN census c_present ON cm_present.CensusID = c_present.CensusID AND c_present.IsActive = 1
+      JOIN stems s_present ON s_present.StemGUID = cm_present.StemGUID AND s_present.CensusID = cm_present.CensusID AND s_present.IsActive = 1
+      JOIN trees t_present ON t_present.TreeID = s_present.TreeID AND t_present.CensusID = s_present.CensusID AND t_present.IsActive = 1
+      JOIN plots p ON c_present.PlotID = p.PlotID
+      JOIN census c_past ON c_past.PlotID = c_present.PlotID AND c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1 AND c_past.IsActive = 1
+      JOIN trees t_past ON t_past.CensusID = c_past.CensusID AND t_past.TreeTag = t_present.TreeTag AND t_past.IsActive = 1
+      JOIN stems s_past ON s_past.TreeID = t_past.TreeID AND s_past.CensusID = c_past.CensusID AND s_past.StemTag = s_present.StemTag AND s_past.IsActive = 1
+      JOIN coremeasurements cm_past ON cm_past.StemGUID = s_past.StemGUID AND cm_past.CensusID = c_past.CensusID AND cm_past.IsActive = 1 AND cm_past.IsValidated = 1
+    WHERE cm_present.IsActive = 1
+      -- Normal validation only needs pending rows.  A diagnostic passes a concrete
+      -- measurement ID and intentionally retains every present validation state.
+      AND (p_CoreMeasurementID IS NOT NULL OR cm_present.IsValidated IS NULL)
+      AND (p_CensusID IS NULL OR cm_present.CensusID = p_CensusID)
+      AND (p_PlotID IS NULL OR c_present.PlotID = p_PlotID)
+      AND (p_CoreMeasurementID IS NULL OR cm_present.CoreMeasurementID = p_CoreMeasurementID);
+
+    UPDATE dbh_change_pairs
+    SET IntervalDays = CASE WHEN PresentMeasurementDate IS NULL OR PriorMeasurementDate IS NULL THEN NULL ELSE DATEDIFF(PresentMeasurementDate, PriorMeasurementDate) END,
+        DbhsMeetFloor = CASE WHEN PresentDBH * UnitToMm >= cMinDbhMm AND PriorDBH * UnitToMm >= cMinDbhMm THEN 1 ELSE 0 END,
+        HomEligible = CASE WHEN PresentHOM IS NULL OR PriorHOM IS NULL OR PresentHOM = PriorHOM THEN 1 ELSE 0 END;
+
+    UPDATE dbh_change_pairs
+    SET IntervalYears = CASE WHEN IntervalDays IS NULL THEN NULL ELSE CAST(IntervalDays AS DECIMAL(20, 10)) / cDaysPerYear END,
+        IntervalSkipReason = CASE WHEN IntervalDays < 0 THEN 'negative-interval' WHEN IntervalDays > cMaxPlausibleIntervalDays THEN 'implausible-interval' ELSE NULL END;
+
+    UPDATE dbh_change_pairs
+    SET ComparisonBasis = CASE WHEN IntervalSkipReason IS NOT NULL THEN NULL
+                               WHEN IntervalDays IS NULL OR IntervalDays < cMinAnnualisedIntervalDays THEN 'absolute'
+                               ELSE 'annualised' END;
+
+    UPDATE dbh_change_pairs
+    SET IsEligible = CASE WHEN StatusExempt = 0 AND DbhsMeetFloor = 1 AND HomEligible = 1 AND IntervalSkipReason IS NULL THEN 1 ELSE 0 END;
+
+    -- Compare with interval days directly so the exact boundary is not affected by rounded years.
+    UPDATE dbh_change_pairs
+    SET GrowthViolates = CASE WHEN IsEligible = 1 AND (
+                     (ComparisonBasis = 'annualised' AND (PresentDBH - PriorDBH) * UnitToMm * cDaysPerYear > cGrowthMaxMmPerYear * IntervalDays)
+                  OR (ComparisonBasis = 'absolute' AND (PresentDBH - PriorDBH) * UnitToMm > cAbsoluteGrowthMaxMm)
+                 ) THEN 1 ELSE 0 END,
+        ShrinkageViolates = CASE WHEN IsEligible = 1 AND PriorDBH IS NOT NULL AND PriorDBH <> 0 AND (
+                     (ComparisonBasis = 'annualised' AND (PresentDBH - PriorDBH) * cDaysPerYear <= cShrinkMaxRelativePerYear * PriorDBH * IntervalDays)
+                  OR (ComparisonBasis = 'absolute' AND PresentDBH < PriorDBH * cAbsoluteShrinkMinRatio)
+                 ) THEN 1 ELSE 0 END;
+END $$
+
 -- Single source of truth for the shared DBH change candidate logic used by ValidationIDs 1 and 2.
--- Keep both validation definitions as CALLs to this helper. Do not duplicate or inline this SQL
--- in future enhancements, or the growth/shrinkage semantics and dead-status handling will drift.
 create procedure RunSharedDBHChangeValidations(
     IN p_CensusID int,
     IN p_PlotID int,
@@ -799,6 +926,12 @@ BEGIN
     DECLARE vRunShrinkage tinyint DEFAULT 0;
     DECLARE vGrowthErrorID int DEFAULT NULL;
     DECLARE vShrinkageErrorID int DEFAULT NULL;
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        DROP TEMPORARY TABLE IF EXISTS dbh_change_candidates;
+        DROP TEMPORARY TABLE IF EXISTS dbh_change_pairs;
+        RESIGNAL;
+    END;
 
     SELECT CASE
                WHEN p_RunGrowth = 1
@@ -815,6 +948,10 @@ BEGIN
     INTO vRunGrowth, vRunShrinkage;
 
     IF vRunGrowth = 0 AND vRunShrinkage = 0 THEN
+        SELECT 0 AS SkippedNoInterval,
+               0 AS SkippedNegativeInterval,
+               0 AS SkippedImplausibleInterval,
+               0 AS SkippedBelowDbhFloor;
         LEAVE shared_dbh;
     END IF;
 
@@ -846,6 +983,7 @@ BEGIN
         END IF;
     END IF;
 
+    CALL BuildDBHChangePairs(p_CensusID, p_PlotID, NULL);
     DROP TEMPORARY TABLE IF EXISTS dbh_change_candidates;
     CREATE TEMPORARY TABLE dbh_change_candidates
     (
@@ -855,7 +993,7 @@ BEGIN
         PriorDBH          decimal(12, 6) NULL,
         PriorHOM          decimal(12, 6) NULL,
         PRIMARY KEY (CoreMeasurementID, ErrorID)
-    );
+    ) ENGINE=InnoDB;
 
     -- One row per (measurement, error kind): the single prior comparison recorded as
     -- this occurrence's provenance. Ties from malformed historical data (several
@@ -872,83 +1010,17 @@ BEGIN
                ROW_NUMBER() OVER (PARTITION BY pair.CoreMeasurementID, pair.ErrorID
                                   ORDER BY pair.PriorCoreMeasurementID DESC) AS rn
         FROM (
-            SELECT cm_present.CoreMeasurementID,
+            SELECT pairs.PresentCoreMeasurementID AS CoreMeasurementID,
                    err.ErrorID,
-                   cm_past.CensusID          AS PriorCensusID,
-                   cm_past.MeasuredDBH       AS PriorDBH,
-                   cm_past.MeasuredHOM       AS PriorHOM,
-                   cm_past.CoreMeasurementID AS PriorCoreMeasurementID
-            FROM coremeasurements cm_present
-                     JOIN census c_present
-                          ON cm_present.CensusID = c_present.CensusID
-                              AND c_present.IsActive = 1
-                     JOIN stems s_present
-                          ON s_present.StemGUID = cm_present.StemGUID
-                              AND s_present.CensusID = cm_present.CensusID
-                              AND s_present.IsActive = 1
-                     JOIN trees t_present
-                          ON t_present.TreeID = s_present.TreeID
-                              AND t_present.CensusID = s_present.CensusID
-                              AND t_present.IsActive = 1
-                     JOIN plots p
-                          ON c_present.PlotID = p.PlotID
-                     JOIN census c_past
-                          ON c_past.PlotID = c_present.PlotID
-                              AND c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
-                              AND c_past.IsActive = 1
-                     JOIN trees t_past
-                          ON t_past.CensusID = c_past.CensusID
-                              AND t_past.TreeTag = t_present.TreeTag
-                              AND t_past.IsActive = 1
-                     JOIN stems s_past
-                          ON s_past.TreeID = t_past.TreeID
-                              AND s_past.CensusID = c_past.CensusID
-                              AND s_past.StemTag = s_present.StemTag
-                              AND s_past.IsActive = 1
-                     JOIN coremeasurements cm_past
-                          ON cm_past.StemGUID = s_past.StemGUID
-                              AND cm_past.CensusID = c_past.CensusID
-                              AND cm_past.IsActive = 1
-                              AND cm_past.IsValidated = 1
-                     JOIN (SELECT vGrowthErrorID AS ErrorID, 'growth' AS Kind FROM DUAL WHERE vRunGrowth = 1
+                   pairs.PriorCensusID, pairs.PriorDBH, pairs.PriorHOM,
+                   pairs.PriorCoreMeasurementID
+            FROM dbh_change_pairs pairs
+                     CROSS JOIN (SELECT vGrowthErrorID AS ErrorID, 'growth' AS Kind FROM DUAL WHERE vRunGrowth = 1
                            UNION ALL
                            SELECT vShrinkageErrorID, 'shrinkage' FROM DUAL WHERE vRunShrinkage = 1) err
-            WHERE cm_present.IsActive = 1
-              AND cm_present.IsValidated IS NULL
-              AND (p_CensusID IS NULL OR cm_present.CensusID = p_CensusID)
-              AND (p_PlotID IS NULL OR c_present.PlotID = p_PlotID)
-              AND cm_past.MeasuredDBH > 0
-              AND NOT EXISTS (
-                SELECT 1
-                FROM cmattributes cma_present
-                         JOIN attributes a_present
-                              ON a_present.Code = cma_present.Code
-                                  AND a_present.IsActive = 1
-                WHERE cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
-                  AND a_present.Status IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted')
-            )
-              AND NOT EXISTS (
-                SELECT 1
-                FROM cmattributes cma_past
-                         JOIN attributes a_past
-                              ON a_past.Code = cma_past.Code
-                                  AND a_past.IsActive = 1
-                WHERE cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
-                  AND a_past.Status IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted')
-            )
-              AND (
-                    (err.Kind = 'growth' AND
-                     (cm_present.MeasuredDBH - cm_past.MeasuredDBH) * (CASE p.DefaultDBHUnits
-                                                                           WHEN 'km' THEN 1000000
-                                                                           WHEN 'hm' THEN 100000
-                                                                           WHEN 'dam' THEN 10000
-                                                                           WHEN 'm' THEN 1000
-                                                                           WHEN 'dm' THEN 100
-                                                                           WHEN 'cm' THEN 10
-                                                                           WHEN 'mm' THEN 1
-                                                                           ELSE 1 END) > 65)
-                 OR (err.Kind = 'shrinkage' AND cm_present.MeasuredDBH < (cm_past.MeasuredDBH * 0.95))
-                  )
+            WHERE pairs.PresentIsValidated IS NULL
+              AND ((err.Kind = 'growth' AND pairs.GrowthViolates = 1)
+                OR (err.Kind = 'shrinkage' AND pairs.ShrinkageViolates = 1))
         ) pair
     ) ranked
     WHERE ranked.rn = 1;
@@ -979,7 +1051,16 @@ BEGIN
             PriorHOM      = VALUES(PriorHOM);
     END IF;
 
+    SELECT COALESCE(SUM(IntervalSkipReason IS NOT NULL), 0) AS SkippedNoInterval,
+           COALESCE(SUM(IntervalSkipReason = 'negative-interval'), 0) AS SkippedNegativeInterval,
+           COALESCE(SUM(IntervalSkipReason = 'implausible-interval'), 0) AS SkippedImplausibleInterval
+    FROM dbh_change_pairs
+    WHERE PresentIsValidated IS NULL AND StatusExempt = 0 AND DbhsMeetFloor = 1 AND HomEligible = 1;
+    SELECT COALESCE(SUM(DbhsMeetFloor = 0), 0) AS SkippedBelowDbhFloor
+    FROM dbh_change_pairs
+    WHERE PresentIsValidated IS NULL AND StatusExempt = 0;
     DROP TEMPORARY TABLE IF EXISTS dbh_change_candidates;
+    DROP TEMPORARY TABLE IF EXISTS dbh_change_pairs;
 END $$
 
 -- Single source of truth for the shared cross-census location candidate logic used by ValidationIDs 17 and 18.
@@ -1233,11 +1314,11 @@ begin
     -- Keep the shared candidate SQL in that helper only; do not duplicate it here.
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
-    VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds maximum rate of 65 mm', 'measuredDBH',
+    VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds 65 mm per year against the prior census, or 65 mm in total when under a year apart or undated (both DBH >= 10 mm, HOM unchanged)', 'measuredDBH',
             'CALL RunSharedDBHChangeValidations(@p_CensusID, @p_PlotID, 1, 0);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
-    VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage exceeds maximum rate of 5 percent', 'measuredDBH',
+    VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage is at least 5 percent per year against the prior census, or over 5 percent in total when under a year apart or undated (both DBH >= 10 mm, HOM unchanged)', 'measuredDBH',
             'CALL RunSharedDBHChangeValidations(@p_CensusID, @p_PlotID, 0, 1);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)

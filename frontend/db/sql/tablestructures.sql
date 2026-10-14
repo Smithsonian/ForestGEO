@@ -1311,6 +1311,8 @@ create table if not exists validation_runs
     FailedSteps    int                                                      not null default 0,
     CurrentStep    varchar(100)                                             null,
     ErrorMessages  json                                                     null,
+    Notices        json                                                     null,
+    RescoreAttemptID varchar(64)                                             null,
     StartedAt      datetime                                                 default CURRENT_TIMESTAMP not null,
     CompletedAt    datetime                                                 null
 );

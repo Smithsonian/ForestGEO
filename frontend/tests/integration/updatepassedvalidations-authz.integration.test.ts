@@ -123,7 +123,11 @@ describe('/api/validations/updatepassedvalidations authz', () => {
 
       expect(res.status).toBe(HTTP_OK);
       expect(dbSpies.beginTransaction).toHaveBeenCalledTimes(1);
-      expect(dbSpies.executeQuery).toHaveBeenCalledTimes(1);
+      const statements = dbSpies.executeQuery.mock.calls.map(([sql]) => String(sql));
+      expect(statements, 'finalization drops stale manager-override markers, then sets validity, in the authorized schema').toEqual([
+        expect.stringMatching(new RegExp(`^DELETE mel FROM \`${MEMBER_SCHEMA}\`\\.measurement_error_log`)),
+        expect.stringMatching(new RegExp(`^UPDATE \`${MEMBER_SCHEMA}\`\\.coremeasurements`))
+      ]);
       expect(dbSpies.commitTransaction).toHaveBeenCalledTimes(1);
     });
   });

@@ -21,7 +21,7 @@ const DB_POLL_INTERVAL_MS = 10_000;
  * module-level runner was lost (e.g. full page reload).
  */
 export default function ValidationStatusBadge({ schema, plotID, censusID }: { schema?: string; plotID?: number; censusID?: number }) {
-  const { status, progress, errors, startValidationRun, updateValidationProgress, completeValidationRun } = useBackgroundValidationState();
+  const { status, progress, errors, notices, startValidationRun, updateValidationProgress, completeValidationRun } = useBackgroundValidationState();
   const [detailOpen, setDetailOpen] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hasResumedRef = useRef(false);
@@ -74,15 +74,17 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
             completed: run.CompletedSteps,
             total: run.TotalSteps,
             current: run.CurrentStep,
-            errors: run.ErrorMessages ?? undefined
+            errors: run.ErrorMessages ?? [],
+            notices: run.Notices ?? []
           });
         } else if (run.Status === 'completed' || run.Status === 'failed') {
           startValidationRun(run.RunID, run.TotalSteps);
           updateValidationProgress({
             completed: run.CompletedSteps,
-            errors: run.ErrorMessages ?? undefined
+            errors: run.ErrorMessages ?? [],
+            notices: run.Notices ?? []
           });
-          completeValidationRun(run.Status, run.ErrorMessages ?? undefined);
+          completeValidationRun(run.Status, run.ErrorMessages ?? [], run.Notices ?? []);
           clearInterval(pollTimerRef.current!);
           pollTimerRef.current = null;
         }
@@ -101,6 +103,8 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
 
   if (status === 'idle') return null;
 
+  const hasNotices = notices.length > 0;
+
   return (
     <>
       <IconButton size="sm" variant="plain" onClick={() => setDetailOpen(true)} aria-label="Validation status" sx={{ position: 'relative' }}>
@@ -109,7 +113,7 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
             <CircularProgress size="sm" />
           </Badge>
         )}
-        {status === 'completed' && <CheckCircleOutlined color="success" />}
+        {status === 'completed' && (hasNotices ? <ErrorOutline color="warning" /> : <CheckCircleOutlined color="success" />)}
         {status === 'failed' && <ErrorOutline color="warning" />}
       </IconButton>
 
@@ -149,9 +153,21 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
             )}
 
             {status === 'completed' && (
-              <Chip variant="soft" color="success" size="sm">
-                All {progress.total} validations passed
-              </Chip>
+              <>
+                <Chip variant="soft" color={hasNotices ? 'warning' : 'success'} size="sm">
+                  {hasNotices ? 'Validation completed with notices' : `All ${progress.total} validations passed`}
+                </Chip>
+              </>
+            )}
+
+            {hasNotices && (
+              <Stack spacing={1} role="status">
+                {notices.map((notice, index) => (
+                  <Typography key={index} level="body-xs" color="warning">
+                    {notice}
+                  </Typography>
+                ))}
+              </Stack>
             )}
 
             {status === 'failed' && (

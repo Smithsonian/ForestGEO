@@ -53,6 +53,7 @@ export const REQUIRED_PROCEDURES = [
   'clearcensusmsmts',
   'RefreshMeasurementsSummary',
   'RefreshViewFullTable',
+  'BuildDBHChangePairs',
   'RunSharedDBHChangeValidations',
   'RunSharedCrossCensusLocationValidations',
   'RunPlotCoordinateConsistencyValidation',

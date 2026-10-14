@@ -43,8 +43,8 @@ const VALIDATION_IDS = {
   ABNORMALLY_HIGH_DBH: 15
 } as const;
 
-const DBH_GROWTH_THRESHOLD_MM = 65;
-const DBH_SHRINKAGE_THRESHOLD_PERCENT = 5;
+const DBH_GROWTH_THRESHOLD_MM_PER_YEAR = 65;
+const DBH_SHRINKAGE_THRESHOLD_PERCENT_PER_YEAR = 5;
 const ABSOLUTE_MAX_DBH_MM = 3500;
 
 describe('Post-Ingestion Validation Tests', () => {
@@ -159,7 +159,9 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX);
 
-      log.debug(`ValidationID ${VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX}: Detected ${expectedGrowth}mm growth (threshold: ${DBH_GROWTH_THRESHOLD_MM}mm)`);
+      log.debug(
+        `ValidationID ${VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX}: Detected ${expectedGrowth}mm growth (threshold: ${DBH_GROWTH_THRESHOLD_MM_PER_YEAR}mm/year)`
+      );
     });
 
     it('should NOT flag normal DBH growth under 65mm', async () => {
@@ -202,19 +204,15 @@ describe('Post-Ingestion Validation Tests', () => {
     });
 
     /**
-     * BOUNDARY TEST: Exactly 65mm growth
-     * This tests the threshold boundary to verify > vs >= behavior.
-     * Expected: Exactly 65mm should NOT trigger (validation is for >65mm)
+     * 1,461 days is exactly four 365.25-day formula years.
      */
-    it('should NOT flag DBH growth of exactly 65mm (boundary test)', async () => {
+    it('does not flag exactly 65 mm/year growth over four formula years', async () => {
       const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
       const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
 
       if (!speciesCode || !quadratName) {
         throw new Error('Test setup failed: missing species or quadrat data');
       }
-
-      const exactThresholdGrowth = DBH_GROWTH_THRESHOLD_MM; // Exactly 65mm
 
       await insertCrossCensusMeasurements(connection, testData, census1.censusID, census2.censusID, [
         {
@@ -224,11 +222,11 @@ describe('Post-Ingestion Validation Tests', () => {
           quadratName,
           x: 3.0,
           y: 3.0,
-          census1DBH: 100,
-          census2DBH: 100 + exactThresholdGrowth,
+          census1DBH: 200,
+          census2DBH: 460,
           hom: 1.3,
-          census1Date: '2024-06-15',
-          census2Date: '2025-06-15',
+          census1Date: '2020-01-01',
+          census2Date: '2024-01-01',
           codes: 'A'
         }
       ]);
@@ -243,23 +241,19 @@ describe('Post-Ingestion Validation Tests', () => {
         treeTag: 'EXACT65MM'
       });
 
-      // Exactly 65mm should NOT trigger - validation is for EXCEEDS (>65mm)
       expect(errors.length).toBe(0);
     });
 
     /**
-     * BOUNDARY TEST: 65.1mm growth (just over threshold)
-     * This confirms the validation triggers at the boundary.
+     * Four-year annual boundary: 460.01 mm exceeds 65 mm/year.
      */
-    it('should flag DBH growth of 65.1mm (just over boundary)', async () => {
+    it('flags growth just above 65 mm/year over four formula years', async () => {
       const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
       const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
 
       if (!speciesCode || !quadratName) {
         throw new Error('Test setup failed: missing species or quadrat data');
       }
-
-      const justOverThreshold = 65.1;
 
       await insertCrossCensusMeasurements(connection, testData, census1.censusID, census2.censusID, [
         {
@@ -269,11 +263,11 @@ describe('Post-Ingestion Validation Tests', () => {
           quadratName,
           x: 4.0,
           y: 4.0,
-          census1DBH: 100,
-          census2DBH: 100 + justOverThreshold,
+          census1DBH: 200,
+          census2DBH: 460.01,
           hom: 1.3,
-          census1Date: '2024-06-15',
-          census2Date: '2025-06-15',
+          census1Date: '2020-01-01',
+          census2Date: '2024-01-01',
           codes: 'A'
         }
       ]);
@@ -288,7 +282,6 @@ describe('Post-Ingestion Validation Tests', () => {
         treeTag: 'OVER65MM'
       });
 
-      // 65.1mm SHOULD trigger - just over threshold
       expect(errors.length).toBeGreaterThan(0);
     });
 
@@ -375,7 +368,7 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX);
 
       log.debug(
-        `ValidationID ${VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX}: Detected ${shrinkagePercent}% shrinkage (threshold: ${DBH_SHRINKAGE_THRESHOLD_PERCENT}%)`
+        `ValidationID ${VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX}: Detected ${shrinkagePercent}% shrinkage (threshold: ${DBH_SHRINKAGE_THRESHOLD_PERCENT_PER_YEAR}%/year)`
       );
     });
 
@@ -420,11 +413,9 @@ describe('Post-Ingestion Validation Tests', () => {
     });
 
     /**
-     * BOUNDARY TEST: Exactly 5% shrinkage
-     * This tests the threshold boundary to verify > vs >= behavior.
-     * Expected: Exactly 5% should NOT trigger (validation is for >5%)
+     * The shrinkage threshold is inclusive at -5 percent/year.
      */
-    it('should NOT flag DBH shrinkage of exactly 5% (boundary test)', async () => {
+    it('flags exactly 5 percent/year shrinkage over four formula years', async () => {
       const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
       const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
 
@@ -432,9 +423,8 @@ describe('Post-Ingestion Validation Tests', () => {
         throw new Error('Test setup failed: missing species or quadrat data');
       }
 
-      // Exactly 5% shrinkage: 100 -> 95
       const census1DBH = 100;
-      const census2DBH = 95; // Exactly 5% shrinkage
+      const census2DBH = 80;
 
       await insertCrossCensusMeasurements(connection, testData, census1.censusID, census2.censusID, [
         {
@@ -447,8 +437,8 @@ describe('Post-Ingestion Validation Tests', () => {
           census1DBH,
           census2DBH,
           hom: 1.3,
-          census1Date: '2024-06-15',
-          census2Date: '2025-06-15',
+          census1Date: '2020-01-01',
+          census2Date: '2024-01-01',
           codes: 'A'
         }
       ]);
@@ -463,15 +453,13 @@ describe('Post-Ingestion Validation Tests', () => {
         treeTag: 'EXACT5PCT'
       });
 
-      // Exactly 5% should NOT trigger - validation is for EXCEEDS (>5%)
-      expect(errors.length).toBe(0);
+      expect(errors.length).toBe(1);
     });
 
     /**
-     * BOUNDARY TEST: 5.1% shrinkage (just over threshold)
-     * This confirms the validation triggers at the boundary.
+     * Just above -5 percent/year must not flag.
      */
-    it('should flag DBH shrinkage of 5.1% (just over boundary)', async () => {
+    it('does not flag shrinkage just below the annual boundary', async () => {
       const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
       const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
 
@@ -479,9 +467,8 @@ describe('Post-Ingestion Validation Tests', () => {
         throw new Error('Test setup failed: missing species or quadrat data');
       }
 
-      // 5.1% shrinkage: 100 -> 94.9
       const census1DBH = 100;
-      const census2DBH = 94.9; // 5.1% shrinkage
+      const census2DBH = 80.01;
 
       await insertCrossCensusMeasurements(connection, testData, census1.censusID, census2.censusID, [
         {
@@ -494,8 +481,8 @@ describe('Post-Ingestion Validation Tests', () => {
           census1DBH,
           census2DBH,
           hom: 1.3,
-          census1Date: '2024-06-15',
-          census2Date: '2025-06-15',
+          census1Date: '2020-01-01',
+          census2Date: '2024-01-01',
           codes: 'A'
         }
       ]);
@@ -510,8 +497,7 @@ describe('Post-Ingestion Validation Tests', () => {
         treeTag: 'OVER5PCT'
       });
 
-      // 5.1% SHOULD trigger - just over threshold
-      expect(errors.length).toBeGreaterThan(0);
+      expect(errors.length).toBe(0);
     });
 
     it('should NOT flag shrinkage when the previous-census measurement has a dead status code', async () => {

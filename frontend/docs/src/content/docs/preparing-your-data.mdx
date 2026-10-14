@@ -170,10 +170,16 @@ moved further than expected, and similar. They never block a row; they flag it f
 Errors alongside the measurement. The full list is in
 [Validations & Statistics](/ForestGEO/validations-statistics/).
 
-A growth or shrinkage check is skipped, not flagged either way, when the DBH it would need from
-either census is missing — there's nothing to compare. Sites that want every live stem to carry a
-DBH can ask their administrator to enable the "live stem missing DBH" check, which exists but is
-off by default.
+DBH growth is flagged when it exceeds 65 mm/year. Shrinkage is flagged when the annual relative
+change is −0.05 or below (at least 5% per year). Elapsed years are the difference between the
+measurement dates in days divided by 365.25. Both DBHs must be at least 10 mm (1 cm).
+
+A growth or shrinkage comparison is skipped when either DBH or date is missing, the interval
+is zero or negative, the non-missing HOM values differ, or either measurement has an exempt
+status. Either HOM may be missing, and short positive intervals are still checked. The prior
+measurement must be valid and in the immediately preceding census number. A skipped comparison
+does not establish that growth passed. Sites that want every live stem to carry a DBH can ask
+their administrator to enable the "live stem missing DBH" check, which is off by default.
 
 For DBH growth and shrinkage findings specifically, View Errors shows the prior census's DBH and
 HOM next to the current measurement, flags whether HOM changed between the two, and offers an

@@ -48,6 +48,7 @@ interface AppState {
   validationStatus: 'idle' | 'running' | 'completed' | 'failed';
   validationProgress: { completed: number; total: number; current: string | null };
   validationErrors: string[];
+  validationNotices: string[];
 
   // ===== UI State =====
   isPulsing: boolean;
@@ -82,8 +83,8 @@ interface AppState {
 
   // ===== Background Validation Actions =====
   startValidationRun: (runID: number | null, totalSteps: number) => void;
-  updateValidationProgress: (update: { completed?: number; total?: number; current?: string | null; errors?: string[] }) => void;
-  completeValidationRun: (status: 'completed' | 'failed', errors?: string[]) => void;
+  updateValidationProgress: (update: { completed?: number; total?: number; current?: string | null; errors?: string[]; notices?: string[] }) => void;
+  completeValidationRun: (status: 'completed' | 'failed', errors?: string[], notices?: string[]) => void;
   clearValidationRun: () => void;
 
   // ===== UI Actions =====
@@ -134,6 +135,7 @@ const initialState = {
   validationRunID: null,
   validationStatus: 'idle' as const,
   validationProgress: { completed: 0, total: 0, current: null },
+  validationNotices: [],
   validationErrors: [] as string[],
 
   // UI State
@@ -375,6 +377,7 @@ export const useAppStore = create<AppState>()(
               validationRunID: runID,
               validationStatus: 'running',
               validationProgress: { completed: 0, total: totalSteps, current: null },
+              validationNotices: [],
               validationErrors: []
             },
             false,
@@ -389,17 +392,19 @@ export const useAppStore = create<AppState>()(
                 total: update.total ?? state.validationProgress.total,
                 current: update.current !== undefined ? update.current : state.validationProgress.current
               },
+              validationNotices: update.notices ?? state.validationNotices,
               validationErrors: update.errors ?? state.validationErrors
             }),
             false,
             'updateValidationProgress'
           ),
 
-        completeValidationRun: (status, errors) =>
+        completeValidationRun: (status, errors, notices) =>
           set(
             state => ({
               validationStatus: status,
               validationProgress: { ...state.validationProgress, current: null },
+              validationNotices: notices ?? state.validationNotices,
               validationErrors: errors ?? state.validationErrors
             }),
             false,
@@ -412,6 +417,7 @@ export const useAppStore = create<AppState>()(
               validationRunID: null,
               validationStatus: 'idle',
               validationProgress: { completed: 0, total: 0, current: null },
+              validationNotices: [],
               validationErrors: []
             },
             false,
@@ -584,6 +590,7 @@ export const useBackgroundValidationState = () =>
       status: state.validationStatus,
       progress: state.validationProgress,
       errors: state.validationErrors,
+      notices: state.validationNotices,
       startValidationRun: state.startValidationRun,
       updateValidationProgress: state.updateValidationProgress,
       completeValidationRun: state.completeValidationRun,

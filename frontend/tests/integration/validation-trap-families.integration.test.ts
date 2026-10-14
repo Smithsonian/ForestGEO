@@ -303,4 +303,142 @@ describe('Validation rerun clears stale errors across trap families', () => {
     expect(state.unresolvedValidationErrorCodes).toEqual([]);
     expect(state.isValidated).toBe(true);
   });
+
+  it('V1 resolves clean reruns in place, preserves CreatedAt/Prior snapshots, then reopens with refreshed Prior values', async () => {
+    await seedQuadrat('TRAP_V1_REOPEN', 0);
+    const { census1MeasurementIDs, census2MeasurementIDs } = await insertCrossCensusMeasurements(connection, testData, census1.censusID, census2.censusID, [
+      {
+        treeTag: 'TG_REOPEN',
+        stemTag: 'G_REOPEN',
+        speciesCode: SPECIES_CODE,
+        quadratName: 'TRAP_V1_REOPEN',
+        x: 1,
+        y: 1,
+        hom: 1.3,
+        census1DBH: 100,
+        census2DBH: 200,
+        census1Date: '2024-01-01',
+        census2Date: '2025-01-01'
+      }
+    ]);
+    const priorID = census1MeasurementIDs[0];
+    const presentID = census2MeasurementIDs[0];
+    const run = async () => {
+      expect((await runCombinedDBHValidations(config.database, { p_CensusID: census2.censusID, p_PlotID: plotID })).success).toBe(true);
+      await updateValidatedRows(config.database, { p_CensusID: census2.censusID, p_PlotID: plotID });
+    };
+    const occurrence = async () =>
+      (
+        await connection.query<RowDataPacket[]>(
+          `SELECT mel.CreatedAt, mel.ResolvedAt, mel.IsResolved, mel.PriorDBH
+       FROM measurement_error_log mel JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+       WHERE mel.MeasurementID = ? AND me.ErrorSource = 'validation' AND me.ErrorCode = '1'`,
+          [presentID]
+        )
+      )[0][0];
+
+    await run();
+    const first = await occurrence();
+    expect(first.IsResolved).toBe(0);
+    await run();
+    const repeated = await occurrence();
+    expect(repeated.CreatedAt.getTime()).toBe(first.CreatedAt.getTime());
+    expect(repeated.IsResolved).toBe(0);
+
+    await connection.query('UPDATE coremeasurements SET MeasuredDBH = 150 WHERE CoreMeasurementID = ?', [priorID]);
+    await run();
+    const resolved = await occurrence();
+    expect(resolved.IsResolved).toBe(1);
+    expect(resolved.ResolvedAt).not.toBeNull();
+    expect(resolved.CreatedAt.getTime()).toBe(first.CreatedAt.getTime());
+    expect(Number(resolved.PriorDBH)).toBe(100);
+    const resolvedAt = resolved.ResolvedAt.getTime();
+    await run();
+    expect((await occurrence()).ResolvedAt.getTime()).toBe(resolvedAt);
+
+    await connection.query('UPDATE coremeasurements SET MeasuredDBH = 90 WHERE CoreMeasurementID = ?', [priorID]);
+    await connection.query('UPDATE coremeasurements SET IsValidated = NULL WHERE CoreMeasurementID = ?', [presentID]);
+    await run();
+    const reopened = await occurrence();
+    expect(reopened.IsResolved).toBe(0);
+    expect(reopened.ResolvedAt).toBeNull();
+    expect(reopened.CreatedAt.getTime()).toBe(first.CreatedAt.getTime());
+    expect(Number(reopened.PriorDBH)).toBe(90);
+  });
+
+  it('rolls back reset/retirement and upsert when the shared procedure fails after building pairs or after upsert', async () => {
+    await seedQuadrat('TRAP_DBH_ROLLBACK', 0);
+    const { census1MeasurementIDs, census2MeasurementIDs } = await insertCrossCensusMeasurements(connection, testData, census1.censusID, census2.censusID, [
+      {
+        treeTag: 'TG_ROLLBACK',
+        stemTag: 'G_ROLLBACK',
+        speciesCode: SPECIES_CODE,
+        quadratName: 'TRAP_DBH_ROLLBACK',
+        x: 1,
+        y: 1,
+        hom: 1.3,
+        census1DBH: 100,
+        census2DBH: 200,
+        census1Date: '2024-01-01',
+        census2Date: '2025-01-01'
+      }
+    ]);
+    const priorID = census1MeasurementIDs[0];
+    const presentID = census2MeasurementIDs[0];
+    const normalRun = async () => {
+      expect((await runCombinedDBHValidations(config.database, { p_CensusID: census2.censusID, p_PlotID: plotID })).success).toBe(true);
+      await updateValidatedRows(config.database, { p_CensusID: census2.censusID, p_PlotID: plotID });
+    };
+    await normalRun();
+    const [savedRows] = await connection.query<RowDataPacket[]>('SHOW CREATE PROCEDURE RunSharedDBHChangeValidations');
+    const savedDefinition = String(savedRows[0]['Create Procedure']);
+    const install = async (body: string) => {
+      await connection.query('DROP PROCEDURE RunSharedDBHChangeValidations');
+      await connection.query(
+        `CREATE PROCEDURE RunSharedDBHChangeValidations(IN p_CensusID int, IN p_PlotID int, IN p_RunGrowth tinyint, IN p_RunShrinkage tinyint) ${body}`
+      );
+    };
+    const restore = async () => {
+      await connection.query('DROP PROCEDURE IF EXISTS RunSharedDBHChangeValidations');
+      await connection.query(savedDefinition);
+    };
+    const snapshot = async () =>
+      (
+        await connection.query<RowDataPacket[]>(
+          `SELECT cm.IsValidated, mel.IsResolved, mel.ResolvedAt, mel.PriorDBH FROM coremeasurements cm
+       JOIN measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+       JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+       WHERE cm.CoreMeasurementID = ? AND me.ErrorSource = 'validation' AND me.ErrorCode = '1'`,
+          [presentID]
+        )
+      )[0][0];
+    try {
+      const beforeBuildFailure = await snapshot();
+      await install(
+        `BEGIN CALL BuildDBHChangePairs(p_CensusID, p_PlotID, NULL); SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'test failure after pair construction'; END`
+      );
+      const afterBuildFailure = await runCombinedDBHValidations(config.database, { p_CensusID: census2.censusID, p_PlotID: plotID });
+      expect(afterBuildFailure.success).toBe(false);
+      expect(await snapshot()).toMatchObject(beforeBuildFailure);
+
+      await restore();
+      await connection.query('UPDATE coremeasurements SET MeasuredDBH = 90 WHERE CoreMeasurementID = ?', [priorID]);
+      const beforeUpsertFailure = await snapshot();
+      await install(`BEGIN
+        DECLARE v_error_id INT; DECLARE v_measurement_id INT;
+        CALL BuildDBHChangePairs(p_CensusID, p_PlotID, NULL);
+        SELECT ErrorID INTO v_error_id FROM measurement_errors WHERE ErrorSource = 'validation' AND ErrorCode = '1' LIMIT 1;
+        SELECT PresentCoreMeasurementID INTO v_measurement_id FROM dbh_change_pairs LIMIT 1;
+        INSERT INTO measurement_error_log (MeasurementID, ErrorID, PriorCensusID, PriorDBH, PriorHOM)
+        VALUES (v_measurement_id, v_error_id, 999, 999, 9)
+        ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL, PriorCensusID = 999, PriorDBH = 999, PriorHOM = 9;
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'test failure after upsert';
+      END`);
+      const afterUpsertFailure = await runCombinedDBHValidations(config.database, { p_CensusID: census2.censusID, p_PlotID: plotID });
+      expect(afterUpsertFailure.success).toBe(false);
+      expect(await snapshot()).toMatchObject(beforeUpsertFailure);
+    } finally {
+      await restore();
+    }
+  });
 });

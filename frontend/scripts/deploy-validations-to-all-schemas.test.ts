@@ -10,7 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { describe, expect, it, vi } from 'vitest';
 import type { Connection } from 'mysql2/promise';
-import { main, parseMode, parseStoredProceduresSQL, withSchemaConnection, type DeployCliDeps } from './deploy-validations-to-all-schemas';
+import { main, parseMode, withSchemaConnection, type DeployCliDeps } from './deploy-validations-to-all-schemas';
 
 const STORED_PROCEDURES_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'sql', 'storedprocedures.sql');
 
@@ -49,25 +49,6 @@ describe('parseMode', () => {
 
   it.each([[['--procedures-only', '--activate-validation-19']], [['--unknown-mode']]])('rejects invalid CLI mode combinations synchronously: %j', args => {
     expect(() => parseMode(args)).toThrow(/mode|argument/i);
-  });
-});
-
-describe('parseStoredProceduresSQL', () => {
-  it('returns each leading DROP as a separate statement for multipleStatements=false connections', () => {
-    const statements = parseStoredProceduresSQL(fs.readFileSync(STORED_PROCEDURES_PATH, 'utf8'));
-    const firstCreate = statements.findIndex(statement => /^create\s+procedure/i.test(statement));
-    const leadingDrops = statements.slice(0, firstCreate);
-
-    expect(firstCreate).toBeGreaterThan(0);
-    expect(leadingDrops).toHaveLength(12);
-    for (const statement of leadingDrops) {
-      const executableSql = statement
-        .split('\n')
-        .filter(line => !line.trimStart().startsWith('--'))
-        .join('\n')
-        .trim();
-      expect(executableSql).toMatch(/^drop\s+procedure\s+if\s+exists\s+[^;]+$/i);
-    }
   });
 });
 

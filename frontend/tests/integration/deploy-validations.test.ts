@@ -30,7 +30,8 @@ import mysql from 'mysql2/promise';
 import path from 'path';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { setupTestDatabase, teardownTestDatabase, type TestDatabaseConfig } from '../setup/local-db-setup';
-import { activateValidation19, deployProceduresOnly, parseStoredProceduresSQL, VALIDATION_19_CONTRACT } from '../../scripts/deploy-validations-to-all-schemas';
+import { activateValidation19, deployProceduresOnly, VALIDATION_19_CONTRACT } from '../../scripts/deploy-validations-to-all-schemas';
+import { parseStoredProceduresSQL } from '@/lib/db/stored-procedure-sql';
 
 // ---------------------------------------------------------------------------
 // Safety guard — setupTestDatabase DROPs/CREATEs its schema; never run remote.

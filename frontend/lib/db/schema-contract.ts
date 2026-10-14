@@ -67,7 +67,8 @@ export const CRITICAL_TABLES = [
  * per file, so the second file erases what the first one wrote (#472).
  */
 export const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
-  upload_sessions: ['census_replacement_completed_at', 'reference_replacement_completed_at']
+  upload_sessions: ['census_replacement_completed_at', 'reference_replacement_completed_at'],
+  validation_runs: ['Notices', 'RescoreAttemptID']
 };
 
 /**

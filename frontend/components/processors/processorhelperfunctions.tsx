@@ -2,11 +2,21 @@ import MapperFactory from '@/config/datamapper';
 import { handleUpsert } from '@/config/utils';
 import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/lib/db/definitions/views';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import type { TxExecutor } from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
+import {
+  finalizeValidatedRowsInTransaction,
+  parseDbhValidationSkipCounts,
+  prepareDBHValidationDefinitions,
+  prepareDBHValidationRunInTransaction,
+  runSharedDBHChangeValidationsInTransaction
+} from '@/lib/validations/dbh-execution';
+import type { CombinedDBHValidationResult, DBHValidationSkipCounts, ValidationExecutionParams } from '@/lib/validations/dbh-execution';
 import type { UpsertOperation } from '@/config/utils';
+import { describeDbhFloorSkips, isDbhChangeValidationID } from '@/config/dbhchangevalidations';
 
 // need to try integrating this into validation system:
 
@@ -313,18 +323,6 @@ function isRetryableValidationExecutionError(error: any) {
   return isRetryableValidationLockError(error) || isRetryableValidationConnectionError(error);
 }
 
-type ValidationExecutionParams = {
-  p_CensusID?: number | null;
-  p_PlotID?: number | null;
-};
-
-type CombinedDBHValidationResult = {
-  success: boolean;
-  ranGrowth: boolean;
-  ranShrinkage: boolean;
-  error?: string;
-};
-
 type CombinedCrossCensusLocationValidationResult = {
   success: boolean;
   ranQuadratMismatch: boolean;
@@ -363,6 +361,25 @@ async function prepareValidationRun(
     `Validation ${validationProcedureName}`
   );
 
+  const tx: TxExecutor = {
+    id: transactionID,
+    query: (query, values) => connectionManager.executeQuery(query, values, transactionID)
+  };
+  if (isDbhChangeValidationID(validationProcedureID)) {
+    await prepareDBHValidationRunInTransaction({ schema, tx, validationID: validationProcedureID, params });
+    return;
+  }
+  await prepareNonDbhValidationRunInTransaction(tx, schema, validationProcedureID, validationProcedureName, params);
+}
+
+/** Reset stale failed rows then delete stale occurrences for non-DBH validations. */
+async function prepareNonDbhValidationRunInTransaction(
+  tx: TxExecutor,
+  schema: string,
+  validationProcedureID: number,
+  validationProcedureName: string,
+  params: ValidationExecutionParams
+): Promise<void> {
   const censusID = params.p_CensusID ?? null;
   const plotID = params.p_PlotID ?? null;
 
@@ -388,29 +405,30 @@ async function prepareValidationRun(
       AND (? IS NULL OR cm.CensusID = ?)
       AND (? IS NULL OR c.PlotID = ?)
   `;
-  const resetResult: any = await connectionManager.executeQuery(
-    resetStaleFailuresQuery,
-    [VALIDATION_ERROR_SOURCE, String(validationProcedureID), censusID, censusID, plotID, plotID],
-    transactionID
-  );
+  const resetResult: any = await tx.query(resetStaleFailuresQuery, [
+    VALIDATION_ERROR_SOURCE,
+    String(validationProcedureID),
+    censusID,
+    censusID,
+    plotID,
+    plotID
+  ]);
   const resetRowCount = Number(resetResult?.affectedRows ?? 0);
 
-  const cleanupQuery = `
-    DELETE cme FROM ${schema}.measurement_error_log cme
-    JOIN ${schema}.measurement_errors me ON me.ErrorID = cme.ErrorID
-    JOIN ${schema}.coremeasurements cm ON cme.MeasurementID = cm.CoreMeasurementID
-    JOIN ${schema}.census c ON cm.CensusID = c.CensusID
-    WHERE me.ErrorSource = ?
-      AND me.ErrorCode = ?
-      AND cm.IsValidated IS NULL
-      AND cm.IsActive = TRUE
-      AND (? IS NULL OR cm.CensusID = ?)
-      AND (? IS NULL OR c.PlotID = ?)
-  `;
-  await connectionManager.executeQuery(
-    cleanupQuery,
-    [VALIDATION_ERROR_SOURCE, String(validationProcedureID), censusID, censusID, plotID, plotID],
-    transactionID
+  await tx.query(
+    `
+      DELETE cme FROM ${schema}.measurement_error_log cme
+      JOIN ${schema}.measurement_errors me ON me.ErrorID = cme.ErrorID
+      JOIN ${schema}.coremeasurements cm ON cme.MeasurementID = cm.CoreMeasurementID
+      JOIN ${schema}.census c ON cm.CensusID = c.CensusID
+      WHERE me.ErrorSource = ?
+        AND me.ErrorCode = ?
+        AND cm.IsValidated IS NULL
+        AND cm.IsActive = TRUE
+        AND (? IS NULL OR cm.CensusID = ?)
+        AND (? IS NULL OR c.PlotID = ?)
+    `,
+    [VALIDATION_ERROR_SOURCE, String(validationProcedureID), censusID, censusID, plotID, plotID]
   );
 
   ailogger.info(`[${validationProcedureName}] Reset ${resetRowCount} previously-failed row(s) and cleared stale errors before re-validation`);
@@ -457,6 +475,12 @@ export async function loadValidationDefinition(schema: string, validationProcedu
   return rows.length > 0 ? { procedureName: rows[0].ProcedureName, definition: rows[0].Definition } : null;
 }
 
+function reportDbhFloorSkips(schema: string, params: ValidationExecutionParams, skipCounts?: DBHValidationSkipCounts): void {
+  const notice = describeDbhFloorSkips(skipCounts?.skippedBelowDbhFloor ?? 0);
+  if (!notice) return;
+  ailogger.warn(notice, { schema, censusID: params.p_CensusID ?? null, plotID: params.p_PlotID ?? null, ...skipCounts });
+}
+
 // Generalized runValidation function
 export async function runValidation(
   validationProcedureID: number,
@@ -488,8 +512,11 @@ export async function runValidation(
           ? formattedCursorQuery.replace(/;?\s*$/, ' ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;')
           : formattedCursorQuery;
 
-      await connectionManager.executeQuery(finalCursorQuery, [], transactionID);
+      const executionResult = await connectionManager.executeQuery(finalCursorQuery, [], transactionID);
       await connectionManager.commitTransaction(transactionID ?? '');
+      if (isDbhChangeValidationID(validationProcedureID)) {
+        reportDbhFloorSkips(schema, params, parseDbhValidationSkipCounts(executionResult));
+      }
       return true;
     } catch (e: any) {
       if (isRetryableValidationExecutionError(e)) {
@@ -541,42 +568,21 @@ export async function runCombinedDBHValidations(schema: string, params: Validati
 
     try {
       attempt++;
+      // Catalog inserts are deliberately not part of the long-running
+      // measurement transaction. Keeping preparation inside this public
+      // wrapper's try preserves its established failure result contract.
+      await prepareDBHValidationDefinitions(connectionManager, schema);
       transactionID = await connectionManager.beginTransaction();
 
-      const validationRows = await connectionManager.executeQuery(
-        `
-          SELECT ValidationID, ProcedureName, IsEnabled
-          FROM ${schema}.sitespecificvalidations
-          WHERE ValidationID IN (1, 2)
-        `,
-        [],
-        transactionID
-      );
-
-      const growthValidation = validationRows.find((row: any) => Number(row.ValidationID) === 1);
-      const shrinkageValidation = validationRows.find((row: any) => Number(row.ValidationID) === 2);
-
-      const ranGrowth = mysqlBoolToBoolean(growthValidation?.IsEnabled);
-      const ranShrinkage = mysqlBoolToBoolean(shrinkageValidation?.IsEnabled);
-
-      if (ranGrowth) {
-        await prepareValidationRun(connectionManager, schema, 1, growthValidation?.ProcedureName ?? 'ValidateDBHGrowthExceedsMax', transactionID, params);
-      }
-
-      if (ranShrinkage) {
-        await prepareValidationRun(connectionManager, schema, 2, shrinkageValidation?.ProcedureName ?? 'ValidateDBHShrinkageExceedsMax', transactionID, params);
-      }
-
-      if (ranGrowth || ranShrinkage) {
-        await connectionManager.executeQuery(
-          `CALL ${schema}.RunSharedDBHChangeValidations(?, ?, ?, ?)`,
-          [params.p_CensusID ?? null, params.p_PlotID ?? null, ranGrowth ? 1 : 0, ranShrinkage ? 1 : 0],
-          transactionID
-        );
-      }
+      const tx: TxExecutor = {
+        id: transactionID,
+        query: (query, values) => connectionManager.executeQuery(query, values, transactionID)
+      };
+      const result = await runSharedDBHChangeValidationsInTransaction({ schema, tx, params });
 
       await connectionManager.commitTransaction(transactionID);
-      return { success: true, ranGrowth, ranShrinkage };
+      reportDbhFloorSkips(schema, params, result.skipCounts);
+      return { success: true, ...result };
     } catch (e: any) {
       if (isRetryableValidationExecutionError(e)) {
         const retryReason = isRetryableValidationConnectionError(e) ? 'retryable connection error' : 'retryable lock error';
@@ -761,44 +767,19 @@ export async function runCombinedCrossCensusLocationValidations(
   };
 }
 
-export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }) {
+export async function updateValidatedRows(schema: string, params: ValidationExecutionParams) {
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
 
-  // Use parameterized query to prevent SQL injection
-  const censusID = params.p_CensusID ?? null;
-  const plotID = params.p_PlotID ?? null;
-
-  const updateQuery = `
-  UPDATE ${schema}.coremeasurements cm
-  JOIN ${schema}.census c ON cm.CensusID = c.CensusID
-  SET cm.IsValidated = CASE
-    WHEN NOT EXISTS (
-      SELECT 1
-      FROM ${schema}.measurement_error_log cme
-      JOIN ${schema}.measurement_errors me ON me.ErrorID = cme.ErrorID
-      WHERE cme.MeasurementID = cm.CoreMeasurementID
-        AND cme.IsResolved = FALSE
-        AND me.ErrorSource = 'validation'
-    ) THEN TRUE
-    ELSE FALSE
-  END
-  WHERE cm.IsValidated IS NULL
-    AND cm.IsActive = TRUE
-    AND cm.StemGUID IS NOT NULL
-    AND (? IS NULL OR c.CensusID = ?)
-    AND (? IS NULL OR c.PlotID = ?);
-    `;
-
   try {
-    // Begin transaction
     transactionID = await connectionManager.beginTransaction();
-
-    await connectionManager.executeQuery(updateQuery, [censusID, censusID, plotID, plotID]);
-
+    const tx: TxExecutor = {
+      id: transactionID,
+      query: (query, values) => connectionManager.executeQuery(query, values, transactionID)
+    };
+    await finalizeValidatedRowsInTransaction({ schema, tx, params, requireActiveStemGUID: true });
     await connectionManager.commitTransaction(transactionID ?? '');
   } catch (error: any) {
-    // Roll back on error
     await connectionManager.rollbackTransaction(transactionID ?? '');
     ailogger.error(`Error during updateValidatedRows:`, error.message);
     throw new Error(`updateValidatedRows failed for validation: Please check the logs for more details.`);

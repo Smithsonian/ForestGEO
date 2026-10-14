@@ -161,7 +161,7 @@ describe('Prior-Census Snapshot on DBH Change Validations', () => {
     await cleanupTestMeasurements(connection, testData);
   });
 
-  it('records the prior census DBH and HOM when shrinkage fires across an HOM change', async () => {
+  it('suppresses DBH change findings when non-NULL HOM values differ', async () => {
     const { census2MeasurementIDs } = await insertCrossCensusMeasurements(connection, testData, census1ID, census2ID, [
       {
         treeTag: 'SNAP_HOM_CHANGE',
@@ -181,8 +181,6 @@ describe('Prior-Census Snapshot on DBH Change Validations', () => {
     const presentID = census2MeasurementIDs[0];
 
     // The measurer moved the point of measurement up the stem: HOM 1.3 -> 2.6.
-    // Shrinkage still fires (40 < 50 * 0.95), and the snapshot must expose the
-    // prior HOM so a scientist can dismiss this as an HOM-change false positive.
     await connection.query('UPDATE coremeasurements SET MeasuredHOM = 2.6 WHERE CoreMeasurementID = ?', [presentID]);
 
     await callSharedDBHValidations(connection, census2ID, plotID);
@@ -192,11 +190,7 @@ describe('Prior-Census Snapshot on DBH Change Validations', () => {
     console.log('[HOM-change] shrinkage rows:', JSON.stringify(shrinkageRows));
     console.log('[HOM-change] growth rows:', JSON.stringify(growthRows));
 
-    expect(shrinkageRows.length).toBe(1);
-    expect(shrinkageRows[0].PriorCensusID).toBe(census1ID);
-    expect(shrinkageRows[0].PriorDBH).toBe(50);
-    expect(shrinkageRows[0].PriorHOM).toBe(1.3);
-    expect(shrinkageRows[0].IsResolved).toBe(0);
+    expect(shrinkageRows.length).toBe(0);
     expect(growthRows.length).toBe(0);
   });
 
@@ -287,9 +281,9 @@ describe('Prior-Census Snapshot on DBH Change Validations', () => {
     const presentID = census2MeasurementIDs[0];
     const priorStemGUID = stemGUIDs[0];
 
-    // Both prior rows violate shrinkage (40 < 50*0.95 and 40 < 55*0.95); the
+    // Both prior rows violate shrinkage; the
     // later insert has the greater CoreMeasurementID and must win the tie.
-    const laterViolatingPriorID = await insertAdditionalPriorMeasurement(connection, priorStemGUID, census1ID, 55, 1.4, PRIOR_SIBLING_MEASUREMENT_DATE);
+    const laterViolatingPriorID = await insertAdditionalPriorMeasurement(connection, priorStemGUID, census1ID, 55, 1.3, PRIOR_SIBLING_MEASUREMENT_DATE);
     console.log('[multi-match both-violating] later violating prior CoreMeasurementID:', laterViolatingPriorID);
 
     await callSharedDBHValidations(connection, census2ID, plotID);
@@ -300,7 +294,7 @@ describe('Prior-Census Snapshot on DBH Change Validations', () => {
     expect(shrinkageRows.length).toBe(1);
     expect(shrinkageRows[0].PriorCensusID).toBe(census1ID);
     expect(shrinkageRows[0].PriorDBH).toBe(55);
-    expect(shrinkageRows[0].PriorHOM).toBe(1.4);
+    expect(shrinkageRows[0].PriorHOM).toBe(1.3);
   });
 
   it('lets growth and shrinkage snapshot different prior rows for the same measurement', async () => {
@@ -323,8 +317,9 @@ describe('Prior-Census Snapshot on DBH Change Validations', () => {
     const presentID = census2MeasurementIDs[0];
     const priorStemGUID = stemGUIDs[0];
 
-    // Second prior row: DBH 300 violates shrinkage (200 < 285) but not growth.
-    await insertAdditionalPriorMeasurement(connection, priorStemGUID, census1ID, 300, 1.5, PRIOR_SIBLING_MEASUREMENT_DATE);
+    // Second prior row: DBH 300 violates shrinkage but not growth. Keep HOM equal
+    // so the pair is eligible under the annualized rule.
+    await insertAdditionalPriorMeasurement(connection, priorStemGUID, census1ID, 300, 1.3, PRIOR_SIBLING_MEASUREMENT_DATE);
 
     await callSharedDBHValidations(connection, census2ID, plotID);
 
@@ -339,7 +334,7 @@ describe('Prior-Census Snapshot on DBH Change Validations', () => {
 
     expect(shrinkageRows.length).toBe(1);
     expect(shrinkageRows[0].PriorDBH).toBe(300);
-    expect(shrinkageRows[0].PriorHOM).toBe(1.5);
+    expect(shrinkageRows[0].PriorHOM).toBe(1.3);
   });
 
   it('refreshes the snapshot and reopens a resolved error on re-validation', async () => {

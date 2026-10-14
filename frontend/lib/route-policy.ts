@@ -133,6 +133,7 @@ export const ROUTE_POLICIES = {
   'validations/procedures/shared-cross-census-location': 'site-scoped',
   'validations/procedures/shared-dbh': 'site-scoped',
   'validations/run': 'site-scoped',
+  'validations/override': 'site-scoped',
   'validations/updatepassedvalidations': 'site-scoped',
   'validations/validate-query': 'site-scoped',
   'validations/validationerrordisplay': 'site-scoped',

@@ -223,6 +223,19 @@ export default [
     }
   },
 
+  // Architectural boundary: app code must not depend on operator scripts. Shared
+  // logic belongs in lib/, which scripts import.
+  {
+    files: ['lib/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.ts', '**/*.test.tsx'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [{ group: ['@/scripts', '@/scripts/*', '@/scripts/**'], message: 'lib must not import operator scripts; move shared logic into lib/.' }] }
+      ]
+    }
+  },
+
   // Architectural boundary: config/lib must not depend on UI components.
   {
     files: ['config/**/*.{ts,tsx}'],

@@ -84,7 +84,7 @@ Technical errors related to database and server issues.
 | "Invalid quadrat name"            | Quadrat not defined         | Add it under Stem & Plot Details → Quadrats |
 | "Duplicate tree/stem combination" | Same tags recorded twice    | Remove duplicate from file   |
 | "Missing required field"          | Empty required column       | Fill in the missing data     |
-| "DBH growth exceeds maximum"      | Growth > 65mm               | Verify both measurements     |
+| "DBH growth exceeds maximum"      | Growth > 65 mm/year               | Verify both measurements     |
 | "Request timeout"                 | Network or server issue     | Wait and retry               |
 | "Missing required context"        | No plot/census selected     | Select plot and census       |
 | "Session expired"                 | Login timed out             | Log in again                 |
@@ -92,6 +92,13 @@ Technical errors related to database and server issues.
 | "Foreign key constraint"          | Referenced data missing     | Add referenced data first    |
 
 ---
+
+DBH shrinkage is flagged at an annual relative change of −0.05 or below (at least 5% per year).
+Elapsed years are measurement-date days divided by 365.25, for measurements at least 365 days
+apart. Measurements less than a year apart, or with a missing date, are judged on total change:
+growth above 65 mm or a drop of more than 5%. Both DBHs must be at least 10 mm (1 cm); HOM must be
+equal unless either value is missing. Missing DBH, reversed dates, intervals longer than 20 years,
+and exempt statuses on either measurement skip the check.
 
 ## Error Severity Levels
 

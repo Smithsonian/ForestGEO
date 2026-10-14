@@ -119,3 +119,19 @@ describe('guarded selection persistence (F7)', () => {
     expect(traceSpy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('validation notices and failures', () => {
+  it('keeps notices separate through progress, completion and a fresh run', () => {
+    const store = useAppStore.getState();
+    store.startValidationRun(1, 2);
+    store.updateValidationProgress({ notices: ['Below floor'], errors: ['Refresh failed'] });
+    store.completeValidationRun('failed');
+    expect(useAppStore.getState()).toMatchObject({ validationNotices: ['Below floor'], validationErrors: ['Refresh failed'] });
+    store.startValidationRun(2, 2);
+    expect(useAppStore.getState()).toMatchObject({ validationNotices: [], validationErrors: [] });
+    store.completeValidationRun('completed', [], ['Skipped comparison']);
+    expect(useAppStore.getState()).toMatchObject({ validationNotices: ['Skipped comparison'], validationErrors: [] });
+    store.clearValidationRun();
+    expect(useAppStore.getState()).toMatchObject({ validationNotices: [], validationErrors: [], validationStatus: 'idle' });
+  });
+});
