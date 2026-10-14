@@ -1,7 +1,18 @@
 'use client';
 
 import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DataGridProps, GridActionsCellItem, gridClasses, GridColDef, GridRowId, GridRowsProp, GridValidRowModel, useGridApiRef } from '@mui/x-data-grid';
+import {
+  DataGridProps,
+  GridActionsCellItem,
+  GridCellModes,
+  GridCellModesModel,
+  gridClasses,
+  GridColDef,
+  GridRowId,
+  GridRowsProp,
+  GridValidRowModel,
+  useGridApiRef
+} from '@mui/x-data-grid';
 import { Alert, Box, Button, Stack, Typography } from '@mui/joy';
 import SaveIcon from '@mui/icons-material/Save';
 import RestoreIcon from '@mui/icons-material/Restore';
@@ -36,6 +47,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
   const [hasUnsavedRows, setHasUnsavedRows] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formMessage, setFormMessage] = useState('');
+  const [cellModesModel, setCellModesModel] = useState<GridCellModesModel>({});
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
@@ -189,11 +201,13 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
         apiRef.current?.scrollToIndexes({ rowIndex, colIndex: firstEditableField ? 1 : 0 });
         if (firstEditableField) {
           apiRef.current?.setCellFocus(newId, firstEditableField);
-          apiRef.current?.startCellEditMode({ id: newId, field: firstEditableField });
         }
       });
       return [...prevRows, newRow];
     });
+    if (firstEditableField) {
+      setCellModesModel(previousModel => ({ ...previousModel, [newId]: { [firstEditableField]: { mode: GridCellModes.Edit } } }));
+    }
     setFormMessage('New row added. Enter data in the highlighted first cell, then use Save before finalizing.');
   }, [apiRef, gridColumns, initialRow]);
 
@@ -324,6 +338,8 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
           apiRef={apiRef}
           disableRowSelectionOnClick
           processRowUpdate={processRowUpdate}
+          cellModesModel={cellModesModel}
+          onCellModesModelChange={setCellModesModel}
           ignoreValueFormatterDuringExport
           initialState={{
             columns: {
