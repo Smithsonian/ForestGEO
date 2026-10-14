@@ -21,7 +21,7 @@ import { requireSession } from '@/lib/auth-helpers';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { assertSchemaAccess } from '@/lib/authz';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
-import { MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
+import { EmptyMeasurementUploadError, MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
 import {
   type FixedDataProcessingResult,
   ReferenceUploadValidationError,
@@ -542,6 +542,21 @@ export async function POST(request: NextRequest) {
           return new NextResponse(JSON.stringify({ responseMessage: 'Header plan misalignment for the uploaded file', fileName, batchID }), {
             status: HTTPResponses.UNPROCESSABLE_ENTITY
           });
+        }
+
+        if (e instanceof EmptyMeasurementUploadError) {
+          // Server-side backstop for the client's per-chunk short-circuit: a blank
+          // chunk is a client input problem (422), not a retryable 500 (issue #504).
+          ailogger.warn(`Rejected empty measurement upload for ${fileName}-${batchID}: ${e.message}`);
+          return NextResponse.json(
+            {
+              error: e.message,
+              code: 'EMPTY_MEASUREMENT_UPLOAD',
+              fileName,
+              batchID
+            },
+            { status: HTTPResponses.UNPROCESSABLE_ENTITY }
+          );
         }
 
         retryCount++;

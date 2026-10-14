@@ -980,7 +980,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         Papa.parse<FileRow>(file, {
           delimiter: delimiter,
           header: true,
-          skipEmptyLines: true,
+          // 'greedy' also drops rows that are blank only after trimming -- delimiter-only
+          // padding (",,,"), whitespace-only lines, or quoted-empty cells ('""',"") -- which
+          // Papa's boolean `true` mode does not. Measurement padding must be skipped here, before
+          // staging, so a blank chunk never trips the staging guard (issue #504). Other form types
+          // keep the original boolean behavior, unchanged.
+          skipEmptyLines: uploadForm === FormType.measurements ? 'greedy' : true,
           // Reference files commit together, including duplicate-code validation and quadrat
           // overlap acknowledgment. Session-scoped replacement preserves earlier files.
           // A chunk size past the file size makes Papa emit exactly one chunk.

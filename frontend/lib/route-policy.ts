@@ -168,7 +168,11 @@ export const ROUTE_POLICIES = {
   // membership up front; the handler then verifies the loaded job's
   // SchemaName matches the authorized query schema (404 on mismatch) before
   // the existing per-user ownership check (requireJobAccess) runs.
-  'uploadjobs/[jobId]': 'site-scoped'
+  'uploadjobs/[jobId]': 'site-scoped',
+  // Read-only "how many rows would a Clean Re-Upload replace" preview
+  // (issue #504): withRouteAuthz + fromQuery('schema'), plus the handler's own
+  // assertCanEditMeasurementScope plot/census check.
+  'uploads/replacement-preview': 'site-scoped'
 } satisfies Record<string, RoutePolicy>;
 
 /** Compile-time union of every declared route key. Adoption sites use this so a

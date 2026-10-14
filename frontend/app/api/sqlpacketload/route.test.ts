@@ -328,6 +328,53 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
   });
 
+  // ---------------------------------------------------------------------
+  // Issue #504 — a header-only / entirely-blank chunk must never reach the
+  // destructive CLEAN_REUPLOAD census-replacement cleanup or staging INSERT,
+  // and must never surface as a retryable 500.
+  // ---------------------------------------------------------------------
+
+  it('rejects an empty fileRowSet (legacy pre-keyed path) with 422 before any staging write or cleanup', async () => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest({ fileRowSet: {} })))!;
+
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.code).toBe('EMPTY_MEASUREMENT_UPLOAD');
+    expect(body.error).toMatch(/no data rows/i);
+    expect(body.fileName).toBe(TEST_FILE_NAME);
+    expect(body.batchID).toBe(TEST_BATCH_ID);
+
+    const executedSQL = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
+    expect(executedSQL.some((sql: string) => sql.includes('temporarymeasurements') && sql.trimStart().toUpperCase().startsWith('INSERT'))).toBe(false);
+    expect(executedSQL.some((sql: string) => sql.trimStart().toUpperCase().startsWith('DELETE'))).toBe(false);
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalled();
+  });
+
+  it('rejects an empty rawRows chunk (server-resolution path) with 422 before any staging write or cleanup', async () => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(
+      makeMeasurementRequest({
+        rawRows: [],
+        csvHeaders: ['tag', 'stemtag', 'spcode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes'],
+        fileRowSet: {}
+      })
+    ))!;
+
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.code).toBe('EMPTY_MEASUREMENT_UPLOAD');
+
+    const executedSQL = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
+    expect(executedSQL.some((sql: string) => sql.includes('temporarymeasurements') && sql.trimStart().toUpperCase().startsWith('INSERT'))).toBe(false);
+    expect(executedSQL.some((sql: string) => sql.trimStart().toUpperCase().startsWith('DELETE'))).toBe(false);
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalled();
+  });
+
   it('rejects measurement filenames longer than 50 characters before querying or staging', async () => {
     const res = (await POST(makeMeasurementRequest({ fileName: `${'a'.repeat(47)}.csv` })))!;
 
