@@ -191,6 +191,7 @@ const SCHEMA_NAME = 'forestgeo_lifecycle_test';
 const SITE_NAME = 'Lifecycle Test Site';
 const PLOT_NAME = 'Lifecycle Plot';
 const STARTED_BY = 'lifecycle-test@forestgeo';
+const TEST_CHANGED_BY = 'integration-test-user';
 
 /**
  * 40x40 m plot on a 20x20 m grid => 2x2 = 4 quadrats.
@@ -489,8 +490,24 @@ describe('provisioned-site lifecycle', () => {
     const connectionManager = ConnectionManager.getInstance();
     const transactionID = await connectionManager.beginTransaction();
     try {
-      const attributeResult = await upsertAttributeRows(connectionManager, SCHEMA_NAME, ATTRIBUTE_SEED_ROWS, UploadMode.REVISIONS, null, transactionID);
-      const speciesResult = await upsertSpeciesRows(connectionManager, SCHEMA_NAME, SPECIES_SEED_ROWS, UploadMode.REVISIONS, null, transactionID);
+      const attributeResult = await upsertAttributeRows(
+        connectionManager,
+        SCHEMA_NAME,
+        ATTRIBUTE_SEED_ROWS,
+        UploadMode.REVISIONS,
+        null,
+        transactionID,
+        TEST_CHANGED_BY
+      );
+      const speciesResult = await upsertSpeciesRows(
+        connectionManager,
+        SCHEMA_NAME,
+        SPECIES_SEED_ROWS,
+        UploadMode.REVISIONS,
+        null,
+        transactionID,
+        TEST_CHANGED_BY
+      );
       await connectionManager.commitTransaction(transactionID);
       console.log(
         `[seed] attributes inserted=${attributeResult.insertedCount} skipped=${attributeResult.skippedCount}; ` +

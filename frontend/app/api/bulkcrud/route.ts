@@ -12,6 +12,8 @@ import { generateShortBatchID } from '@/config/utils';
 import { auth } from '@/auth';
 import { assertSchemaAccess } from '@/lib/authz';
 import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import { recordCommittedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -33,6 +35,19 @@ export async function POST(request: NextRequest) {
     return new NextResponse('No rows provided', { status: 400 });
   }
 
+  // Scope required by recordCommittedCoreMeasurementsAudit (#507) — validated here, BEFORE
+  // beginTransaction, so a missing plotID/censusID returns 400 without ever opening a
+  // transaction that this early return would then leave uncommitted and un-rolled-back.
+  const isMeasurementSummaryUpload = ['measurementssummary', 'measurementssummaryview'].includes(dataType);
+  const measurementPlotID = plot.plotID;
+  const measurementCensusID = census.dateRanges?.[0]?.censusID;
+  if (isMeasurementSummaryUpload && (measurementPlotID === undefined || measurementCensusID === undefined)) {
+    return NextResponse.json(
+      { error: 'plot.plotID and census.dateRanges[0].censusID are required for measurement bulk inserts', code: 'MEASUREMENT_SCOPE_REQUIRED' },
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
+
   // Per-site authorization enforced INLINE rather than via `withRouteAuthz` +
   // `fromBody('schema')`. This route accepts a potentially large `fileRowSet`
   // bulk payload; `fromBody` clones and fully re-parses the whole body to read
@@ -46,6 +61,12 @@ export async function POST(request: NextRequest) {
   }
   const denied = assertSchemaAccess(session, schema);
   if (denied) return denied;
+
+  // Server-resolved identity for every audit row this request writes (#507).
+  // MUST come from the authenticated session, never from a client-supplied
+  // field — this route accepts no `user` field precisely so there is nothing
+  // to forge.
+  const changedBy = authenticatedSessionIdentity(session.user);
 
   // Validate schema to prevent SQL injection
   let insertSQL: string;
@@ -65,13 +86,16 @@ export async function POST(request: NextRequest) {
   try {
     const activeTransactionID = await connectionManager.beginTransaction();
     transactionID = activeTransactionID;
-    if (['measurementssummary', 'measurementssummaryview'].includes(dataType)) {
+    if (isMeasurementSummaryUpload) {
       const batchID = generateShortBatchID();
+      // Narrowed by the isMeasurementSummaryUpload guard above, which ran before beginTransaction.
+      const plotID = measurementPlotID as number;
+      const censusID = measurementCensusID as number;
       const values = Object.values(rows).map(row => [
         BULK_CRUD_FILE_ID,
         batchID,
-        plot.plotID,
-        census.dateRanges?.[0]?.censusID,
+        plotID,
+        censusID,
         row.tag,
         row.stemtag,
         row.spcode,
@@ -85,7 +109,22 @@ export async function POST(request: NextRequest) {
         row.description
       ]);
       await connectionManager.executeQuery(insertSQL, [values], transactionID);
-      await callBulkIngestionInCallerTransaction(transactionExecutorFor(connectionManager, activeTransactionID), schema, BULK_CRUD_FILE_ID, batchID);
+      const tx = transactionExecutorFor(connectionManager, activeTransactionID);
+      await callBulkIngestionInCallerTransaction(tx, schema, BULK_CRUD_FILE_ID, batchID);
+      // Audits every coremeasurements row the CALL just committed, in the SAME
+      // transaction (#507) — a thrown error here (e.g. the audit INSERT itself
+      // fails) rolls this request's rows AND the audit back together via the
+      // outer catch's rollbackTransaction, exactly like ingest-batch.ts's
+      // caller-owned-transaction sub-batches.
+      await recordCommittedCoreMeasurementsAudit({
+        tx,
+        schema,
+        fileID: BULK_CRUD_FILE_ID,
+        batchID,
+        changedBy,
+        plotID,
+        censusID
+      });
     } else {
       for (const rowID in rows) {
         const rowData = rows[rowID];
@@ -97,7 +136,8 @@ export async function POST(request: NextRequest) {
           plot: plot,
           census: census,
           quadratID: undefined,
-          fullName: undefined
+          transactionID,
+          fullName: changedBy
         };
         await insertOrUpdate(props);
       }

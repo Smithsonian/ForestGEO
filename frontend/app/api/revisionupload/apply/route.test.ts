@@ -1,3 +1,4 @@
+import { ChangelogOperation, ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 import {
@@ -115,7 +116,19 @@ const mocks = vi.hoisted(() => {
     // group's prepare/apply phase returns or throws, without re-implementing
     // prepareTreeSpeciesCorrection's real locked-replan machinery.
     prepareBulkSpeciesCorrections: vi.fn<(...args: any[]) => Promise<any>>(),
-    applyPreparedBulkSpeciesCorrections: vi.fn<(...args: any[]) => Promise<any>>()
+    applyPreparedBulkSpeciesCorrections: vi.fn<(...args: any[]) => Promise<any>>(),
+    // recordAuditedIngestionFailureRows is mocked wholesale (not exercised
+    // through the real SQL it issues) — the real before/after audit diff
+    // behavior is covered by lib/changelog/ingestion-failure-audit.test.ts and
+    // the revision-apply-invalid-persistence integration suite. Default
+    // behavior here treats every row as a fresh INSERT, matching what
+    // insertIngestionFailureRows did before #507 wrapped it in an audit.
+    recordAuditedIngestionFailureRows: vi.fn<(...args: any[]) => Promise<any>>(async ({ rows }: { rows: unknown[] }) => ({
+      measurementIDs: rows.map((_, index) => 9000 + index),
+      insertedCount: rows.length,
+      updatedCount: 0,
+      unchangedCount: 0
+    }))
   };
 });
 
@@ -124,6 +137,7 @@ vi.mock('@/auth', () => ({
 }));
 
 vi.mock('@/lib/db/sqlsecurity', () => ({
+  buildInPlaceholders: (count: number) => Array(count).fill('?').join(', '),
   isValidSchema: mocks.isValidSchema,
   safeFormatQuery: mocks.safeFormatQuery
 }));
@@ -214,6 +228,10 @@ vi.mock('@/config/editplan/scopeguard', () => ({
 vi.mock('@/config/editoperations', () => ({
   writeEditOperation: mocks.writeEditOperation,
   ensureEditOperationsTable: mocks.ensureEditOperationsTable
+}));
+
+vi.mock('@/lib/changelog/ingestion-failure-audit', () => ({
+  recordAuditedIngestionFailureRows: mocks.recordAuditedIngestionFailureRows
 }));
 
 vi.mock('@/ailogger', () => ({
@@ -418,6 +436,12 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.assertAuthorizationFresh.mockResolvedValue(undefined);
     mocks.assertBulkPlanCanApply.mockReturnValue(undefined);
     mocks.analyzeBulk.mockResolvedValue(buildFreshPlan(MATCHED_PLAN_HASH));
+    mocks.recordAuditedIngestionFailureRows.mockImplementation(async ({ rows }: { rows: unknown[] }) => ({
+      measurementIDs: rows.map((_, index) => 9000 + index),
+      insertedCount: rows.length,
+      updatedCount: 0,
+      unchangedCount: 0
+    }));
     mocks.applyEditInTransaction.mockResolvedValue({
       updatedIDs: { CoreMeasurementID: 0 },
       applyErrors: [],
@@ -876,12 +900,6 @@ describe('POST /api/revisionupload/apply', () => {
       if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
         return [buildDbRow(101), buildDbRow(202)];
       }
-      // insertIngestionFailureRows (shared/measurementerrors.ts) resolves a
-      // measurement_errors.ErrorID via INSERT ... ON DUPLICATE KEY UPDATE
-      // ErrorID = LAST_INSERT_ID(ErrorID) before it will persist the demoted
-      // row; without an insertId here it falls through to a SELECT this mock
-      // answers with [], which throws instead of persisting the failure row.
-      if (query.includes('INSERT INTO ??.measurement_errors')) return { insertId: 501 };
       return [];
     });
     mocks.analyzeBulk
@@ -922,6 +940,17 @@ describe('POST /api/revisionupload/apply', () => {
       deletedDuplicateCount: 0,
       failedRowCount: 1
     });
+    expect(mocks.recordAuditedIngestionFailureRows).toHaveBeenCalledTimes(1);
+    expect(mocks.recordAuditedIngestionFailureRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schema: 'forestgeo_testing',
+        transactionID: 'tx-1',
+        changedBy: 'mason@example.com',
+        plotID: 1,
+        censusID: 2,
+        rows: expect.arrayContaining([expect.objectContaining({ sourceRowIndex: 10, failureReason: 'Quadrat 999 was not found in this plot/census' })])
+      })
+    );
     expect(mocks.analyzeBulk).toHaveBeenCalledTimes(2);
     const secondBulkInput = (mocks.analyzeBulk.mock.calls[1] as unknown as Array<unknown>)[5] as {
       matched: Array<{ targetID: number }>;
@@ -1005,10 +1034,6 @@ describe('POST /api/revisionupload/apply', () => {
       if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
         return [buildDbRow(101), buildDbRow(202)];
       }
-      // See the identical comment in the sibling demotion test above: without
-      // an insertId here, resolving the demoted row's measurement_errors
-      // definition throws instead of persisting the failure row.
-      if (query.includes('INSERT INTO ??.measurement_errors')) return { insertId: 501 };
       return [];
     });
     mocks.analyzeBulk
@@ -1268,7 +1293,7 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
-      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+      if (query.trimStart().startsWith('SELECT') && query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
         return [buildDbRow(101)];
       }
       if (query.includes('SELECT cm.CoreMeasurementID, cm.StemGUID')) {
@@ -1276,6 +1301,14 @@ describe('POST /api/revisionupload/apply', () => {
           { CoreMeasurementID: 55, StemGUID: 777 },
           { CoreMeasurementID: 101, StemGUID: 777 }
         ];
+      }
+      // recordDeletedCoreMeasurementsAudit's own INSERT ... SELECT (OldRowState
+      // identifies it uniquely from the committed-rows INSERT audit, which
+      // selects into NewRowState instead) — must report exactly 1 audited row
+      // to match the 1 row the DELETE below actually removes, or
+      // verifyAndDeleteDuplicate's audited-vs-deleted equality check throws.
+      if (query.includes('OldRowState')) {
+        return { affectedRows: 1 };
       }
       if (query.includes('DELETE FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND CensusID = ? AND IsActive = 1')) {
         return { affectedRows: 1 };
@@ -1307,6 +1340,14 @@ describe('POST /api/revisionupload/apply', () => {
     expect(mocks.executeQuery).toHaveBeenCalledWith('DELETE FROM ??.measurementssummary WHERE CoreMeasurementID = ?', [55], 'tx-1');
     expect(mocks.executeQuery).toHaveBeenCalledWith('DELETE FROM ??.viewfulltable WHERE CoreMeasurementID = ?', [55], 'tx-1');
     expect(mocks.refreshMeasurementViewsForScope).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing', 1, 2, 'tx-1');
+
+    // #507: the duplicate/survivor verify SELECT must lock every row it reads
+    // (cm, the joined stems row, and the joined quadrats row) for the rest of
+    // the transaction, closing the TOCTOU window between this read and the
+    // audit+DELETE that follow it.
+    const verifyCall = mocks.executeQuery.mock.calls.find(([sql]) => typeof sql === 'string' && sql.includes('SELECT cm.CoreMeasurementID, cm.StemGUID\n'));
+    expect(verifyCall, 'the duplicate/survivor verify query must have run').toBeDefined();
+    expect(verifyCall![0]).toContain('FOR UPDATE');
   });
 
   it('refreshes derived measurement views when matched rows are updated', async () => {
@@ -1865,5 +1906,141 @@ describe('POST /api/revisionupload/apply', () => {
     const recordedSpeciesCorrections = beforeStateRow.speciesCorrections as typeof speciesCorrectionsSummary;
     expect(recordedSpeciesCorrections.additionalAffectedCoreMeasurementIDs).toEqual([ADDITIONALLY_AFFECTED_CORE_ID]);
     expect(recordedSpeciesCorrections.allAffectedCoreMeasurementIDs).toEqual([REQUESTER_CORE_ID, ADDITIONALLY_AFFECTED_CORE_ID]);
+  });
+
+  describe('#507 ingestion-failure audit integration', () => {
+    it('returns safe retry guidance when the audit fails without exposing its SQL cause', async () => {
+      const secretDetail = 'INSERT INTO private_schema.unifiedchangelog transaction secret';
+      mocks.recordAuditedIngestionFailureRows.mockRejectedValueOnce(
+        new ChangelogWriteError(ChangelogOperation.INSERT, 'coremeasurements', '123', new Error(secretDetail))
+      );
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+      expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+      expect(await response.json()).toEqual({ error: 'Unable to record revision history. Please retry.' });
+      expect(mocks.writeEditOperation).not.toHaveBeenCalled();
+    });
+
+    it('writes a ledger summary with failedRowCount for an invalid-only batch (previously silent: the write guard only checked updatedCount/deletedDuplicateCount/speciesCorrections)', async () => {
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const body = await response.json();
+      expect(body.failedRowCount).toBe(1);
+      expect(body.updatedCount).toBe(0);
+
+      expect(mocks.writeEditOperation, 'an invalid-only apply must still get a ledger summary').toHaveBeenCalledTimes(1);
+      const summaryArgs = mocks.writeEditOperation.mock.calls[0] as unknown as [unknown, string, Record<string, unknown>, string];
+      const summaryRow = (summaryArgs[2].beforeState as Array<Record<string, unknown>>)[0].row as Record<string, unknown>;
+      expect(summaryRow.failedRowCount).toBe(1);
+      expect(summaryRow.insertedCount).toBe(0);
+    });
+
+    it('writes a ledger summary for an insert-only batch (regression: #507 extends the write guard to insertedCount, previously silent)', async () => {
+      mocks.executeQuery.mockImplementation(async (query: string) => {
+        if (query.includes('INSERT INTO ??.temporarymeasurements')) return { affectedRows: 1, warningStatus: 0 };
+        return [];
+      });
+
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            newRows: [{ csvIndex: 0, csvRow: { tag: 'T9', stemtag: 'S9', spcode: 'AAA', quadrat: 'Q1', dbh: '10', date: '2026-04-01' } }],
+            confirmNewRows: true
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const body = await response.json();
+      expect(body.insertedCount).toBe(1);
+
+      expect(mocks.writeEditOperation, 'an insert-only apply must still get a ledger summary').toHaveBeenCalledTimes(1);
+      const summaryArgs = mocks.writeEditOperation.mock.calls[0] as unknown as [unknown, string, Record<string, unknown>, string];
+      const summaryRow = (summaryArgs[2].beforeState as Array<Record<string, unknown>>)[0].row as Record<string, unknown>;
+      expect(summaryRow.insertedCount).toBe(1);
+      expect(summaryRow.failedRowCount).toBe(0);
+    });
+
+    it('omits the ledger summary entirely when every rejected row is an unchanged same-attempt retry and nothing else mutated', async () => {
+      mocks.recordAuditedIngestionFailureRows.mockImplementation(async ({ rows }: { rows: unknown[] }) => ({
+        measurementIDs: rows.map((_, index) => 9000 + index),
+        insertedCount: 0,
+        updatedCount: 0,
+        unchangedCount: rows.length
+      }));
+
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const body = await response.json();
+      expect(body.failedRowCount, 'the response must still report the retried row as rejected').toBe(1);
+      expect(mocks.writeEditOperation, 'an unchanged-retry apply must not produce a new ledger entry').not.toHaveBeenCalled();
+      expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+    });
+
+    it('rolls back the whole apply when recordAuditedIngestionFailureRows persists fewer rows than were rejected (data/audit disagreement must abort, never silently under-report)', async () => {
+      mocks.recordAuditedIngestionFailureRows.mockResolvedValueOnce({
+        measurementIDs: [],
+        insertedCount: 0,
+        updatedCount: 0,
+        unchangedCount: 0
+      });
+
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.UNPROCESSABLE_ENTITY);
+      const body = await response.json();
+      expect(body.error).toBe('Revision failure-row persistence recorded 0 of 1 expected rejected row(s)');
+      expect(mocks.writeEditOperation, 'a count-mismatch must abort before any ledger write').not.toHaveBeenCalled();
+      expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+    });
+
+    it('passes the trusted server-side actor, the caller transaction, and the correct plot/census scope to recordAuditedIngestionFailureRows, never a client-supplied changedBy', async () => {
+      mocks.auth.mockResolvedValue({ user: { name: 'Jess Researcher', email: 'jess@example.com', userStatus: 'global', sites: [] } });
+
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      expect(mocks.recordAuditedIngestionFailureRows).toHaveBeenCalledTimes(1);
+      expect(mocks.recordAuditedIngestionFailureRows).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schema: 'forestgeo_testing',
+          transactionID: 'tx-1',
+          changedBy: 'jess@example.com',
+          plotID: 1,
+          censusID: 2
+        })
+      );
+    });
   });
 });

@@ -11,11 +11,12 @@
  *   npx vitest run --config vitest.integration.config.mts tests/integration/stage-measurements.test.ts
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Connection, RowDataPacket } from 'mysql2/promise';
-import { setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
+import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
+import { setupTestDatabase, teardownTestDatabase, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildFileUploadChangelogRecordID } from '@/lib/uploads/file-names';
 
 // ---------------------------------------------------------------------------
 // Safety guard — setupTestDatabase DROPs/CREATEs its schema; never run remote.
@@ -75,6 +76,17 @@ vi.mock('@/lib/db/connectionmanager', () => {
       if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: rollback transactionID mismatch');
       await sharedState.connection.rollback();
       sharedState.activeTransactionID = null;
+    },
+    // Real MySQL GET_LOCK/RELEASE_LOCK (#507) — recordAuditedIngestionFailureRows
+    // serializes its bounded before-snapshot per (schema, batchID) with this.
+    acquireApplicationLock: async (lockName: string, transactionID: string, timeoutMs: number) => {
+      if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      const [rows] = await sharedState.connection.query('SELECT GET_LOCK(?, ?) as acquired', [lockName, Math.ceil(timeoutMs / 1000)]);
+      return (rows as { acquired: number }[])[0]?.acquired === 1;
+    },
+    releaseApplicationLock: async (lockName: string) => {
+      if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      await sharedState.connection.query('SELECT RELEASE_LOCK(?) as released', [lockName]);
     },
     cleanupStaleTransactions: async () => undefined,
     closeConnection: async () => undefined
@@ -195,7 +207,7 @@ const EXPECTED_STAGED_TREETAGS = ['T0001', 'T0002', 'T0003', 'T0004'] as const;
 describe('stageMeasurementChunk — integration', () => {
   let connection: Connection;
   let testData: TestData;
-  let config: { database: string };
+  let config: TestDatabaseConfig;
   let schema: string;
   let plotID: number;
   let censusID: number;
@@ -232,6 +244,10 @@ describe('stageMeasurementChunk — integration', () => {
       await connection.rollback();
       sharedState.activeTransactionID = null;
     }
+    // This suite's shared connection accumulates GET_LOCKs across tests (MySQL
+    // ties them to the session, not the transaction) — release them all so one
+    // test's lock state can never bleed into the next.
+    await connection.query('SELECT RELEASE_ALL_LOCKS()');
     await connection.query('DELETE FROM temporarymeasurements');
     await connection.query('DELETE FROM unifiedchangelog');
     await connection.query('DELETE FROM coremeasurements');
@@ -387,7 +403,10 @@ describe('stageMeasurementChunk — integration', () => {
     );
     console.log(`[changelog] ${JSON.stringify(changelog)}`);
     expect(changelog).toHaveLength(1);
-    expect(changelog[0].RecordID).toBe(FILE_NAME);
+    // RecordID is keyed by upload ATTEMPT, not the raw filename (#507) — see
+    // buildFileUploadChangelogRecordID's doc comment: uploadSessionID is the
+    // attempt identity here.
+    expect(changelog[0].RecordID).toBe(buildFileUploadChangelogRecordID(FILE_NAME, UPLOAD_SESSION_ID));
     expect(changelog[0].Operation).toBe('INSERT');
     expect(changelog[0].ChangedBy).toBe(CHANGED_BY);
     const metadata = typeof changelog[0].NewRowState === 'string' ? JSON.parse(changelog[0].NewRowState) : changelog[0].NewRowState;
@@ -489,7 +508,7 @@ describe('stageMeasurementChunk — integration', () => {
       expect(result.droppedCount, 'the spy must have forced exactly one row to be dropped').toBe(1);
 
       const [failedRows] = await connection.query<RowDataPacket[]>(
-        `SELECT RawTreeTag, CAST(RawX AS CHAR) AS RawXText, CAST(RawY AS CHAR) AS RawYText,
+        `SELECT CoreMeasurementID, RawTreeTag, CAST(RawX AS CHAR) AS RawXText, CAST(RawY AS CHAR) AS RawYText,
                 CAST(RawPlotX AS CHAR) AS RawPlotXText, CAST(RawPlotY AS CHAR) AS RawPlotYText
          FROM coremeasurements
          WHERE StemGUID IS NULL AND RawTreeTag = ?`,
@@ -499,8 +518,239 @@ describe('stageMeasurementChunk — integration', () => {
       expect(failedRows, 'the dropped row must be recorded as an unresolved ingestion error').toHaveLength(1);
       expect(Number(failedRows[0].RawPlotXText)).toBeCloseTo(Number(DROPPED_PLOT_X), 6);
       expect(Number(failedRows[0].RawPlotYText)).toBeCloseTo(Number(DROPPED_PLOT_Y), 6);
+
+      // #507: the dropped row stageMeasurementChunk just persisted into
+      // coremeasurements is itself a committed write and must be audited in
+      // Recent Changes exactly like a real ingestion row — not just silently
+      // written.
+      const [auditRows] = await connection.query<RowDataPacket[]>(
+        `SELECT Operation, NewRowState FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND RecordID = ?`,
+        [failedRows[0].CoreMeasurementID]
+      );
+      console.log(`[drop-fixture] audit rows for dropped CoreMeasurementID=${failedRows[0].CoreMeasurementID}: ${JSON.stringify(auditRows)}`);
+      expect(auditRows, 'the dropped row must have exactly one audit entry, not zero and not duplicated').toHaveLength(1);
+      expect(auditRows[0].Operation).toBe('INSERT');
+      const auditedState = typeof auditRows[0].NewRowState === 'string' ? JSON.parse(auditRows[0].NewRowState) : auditRows[0].NewRowState;
+      expect(auditedState.RawTreeTag).toBe(DROPPED_TREETAG);
+      expect(auditedState.StemGUID).toBeNull();
     } finally {
       executeQuerySpy.mockRestore();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // #507: insertIngestionFailureRows UPSERTs dropped rows on the real unique
+  // key ux_cm_uploadbatch_rowindex (UploadBatchID, SourceRowIndex) — a SECOND
+  // stageMeasurementChunk call for the SAME (fileName, batchID) whose dropped
+  // row lands at the SAME sourceRowIndex collides for real and triggers
+  // MySQL's own ON DUPLICATE KEY UPDATE, not a simulated one. These three
+  // tests drive that real collision via the SAME drop-forcing spy as the test
+  // above, reused via buildTreeTagDropSpy, to prove the audit honestly
+  // distinguishes changed-content (UPDATE), unchanged-content (no new audit
+  // row), and a failed late audit (full rollback).
+  // -------------------------------------------------------------------------
+
+  function buildTreeTagDropSpy(droppedTreeTag: string, onQuery?: (query: string, params: unknown[] | undefined) => void) {
+    const columnCount = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.length;
+    const treeTagColumnIndex = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.indexOf('TreeTag');
+    const originalExecuteQuery = ConnectionManager.getInstance().executeQuery.bind(connectionManager);
+    return vi.spyOn(connectionManager, 'executeQuery').mockImplementation(async (query: string, params?: unknown[], transactionID?: string) => {
+      if (typeof query === 'string') onQuery?.(query, params);
+      if (typeof query === 'string' && query.includes('INSERT IGNORE INTO') && query.includes('.temporarymeasurements') && Array.isArray(params)) {
+        const rowCount = params.length / columnCount;
+        let dropRowIndex = -1;
+        for (let i = 0; i < rowCount; i++) {
+          if (params[i * columnCount + treeTagColumnIndex] === droppedTreeTag) {
+            dropRowIndex = i;
+            break;
+          }
+        }
+        if (dropRowIndex !== -1) {
+          const [beforeValues, afterValues] = query.split(' VALUES ');
+          const tuples = afterValues.match(/\([^()]*\)/g) ?? [];
+          tuples.splice(dropRowIndex, 1);
+          const newQuery = `${beforeValues} VALUES ${tuples.join(', ')}`;
+          const newParams = [...params.slice(0, dropRowIndex * columnCount), ...params.slice((dropRowIndex + 1) * columnCount)];
+          return originalExecuteQuery(newQuery, newParams, transactionID);
+        }
+      }
+      return originalExecuteQuery(query, params, transactionID);
+    });
+  }
+
+  function buildTwoRowDropFixture(droppedTreeTag: string, droppedPlotX: string, droppedPlotY: string) {
+    return {
+      csvHeaders: ['treetag', 'stemtag', 'speciescode', 'quadrat', 'lx', 'ly', 'px', 'py', 'dbh', 'hom', 'date', 'codes'],
+      rawRows: [
+        {
+          treetag: 'T9001',
+          stemtag: '1',
+          speciescode: 'ACERRU',
+          quadrat: 'Q01',
+          lx: '1.5',
+          ly: '2.5',
+          px: '10',
+          py: '20',
+          dbh: '10.55',
+          hom: '1.3',
+          date: VALID_DATE,
+          codes: 'A'
+        },
+        {
+          treetag: droppedTreeTag,
+          stemtag: '1',
+          speciescode: 'ACERRU',
+          quadrat: 'Q01',
+          lx: '3.5',
+          ly: '4.5',
+          px: droppedPlotX,
+          py: droppedPlotY,
+          dbh: '12.0',
+          hom: '1.3',
+          date: VALID_DATE,
+          codes: 'A'
+        }
+      ]
+    };
+  }
+
+  it('a changed-content retry of the same dropped row produces exactly one UPDATE audit with the correct Old/NewRowState (#507)', async () => {
+    const DROPPED_TREETAG = 'T9010';
+    const fileName = 'stage-measurements-drop-retry-changed.csv';
+    const batchID = 'stage-drop-retry-changed-0001';
+
+    const firstFixture = buildTwoRowDropFixture(DROPPED_TREETAG, '-0.271', '267.5');
+    const firstSpy = buildTreeTagDropSpy(DROPPED_TREETAG);
+    try {
+      const tx1 = await connectionManager.beginTransaction();
+      await stageMeasurementChunk(connectionManager, baseParams(tx1, { fileName, batchID, ...firstFixture }));
+      await connectionManager.commitTransaction(tx1);
+    } finally {
+      firstSpy.mockRestore();
+    }
+
+    const [firstRows] = await connection.query<RowDataPacket[]>(
+      `SELECT CoreMeasurementID FROM coremeasurements WHERE StemGUID IS NULL AND RawTreeTag = ? AND UploadFileID = ?`,
+      [DROPPED_TREETAG, fileName]
+    );
+    expect(firstRows, 'setup: the first call must have recorded exactly one dropped row').toHaveLength(1);
+    const coreMeasurementID = firstRows[0].CoreMeasurementID;
+
+    // Second call: SAME fileName/batchID, SAME row position (sourceRowIndex),
+    // DIFFERENT RawPlotX/RawPlotY — a real retry with changed content.
+    const secondFixture = buildTwoRowDropFixture(DROPPED_TREETAG, '-0.512', '301.25');
+    const secondSpy = buildTreeTagDropSpy(DROPPED_TREETAG);
+    try {
+      const tx2 = await connectionManager.beginTransaction();
+      await stageMeasurementChunk(connectionManager, baseParams(tx2, { fileName, batchID, ...secondFixture }));
+      await connectionManager.commitTransaction(tx2);
+    } finally {
+      secondSpy.mockRestore();
+    }
+
+    // Still the SAME physical row (the unique key collided, not a new insert).
+    const [secondRows] = await connection.query<RowDataPacket[]>(
+      `SELECT CoreMeasurementID, CAST(RawPlotX AS CHAR) AS RawPlotXText, CAST(RawPlotY AS CHAR) AS RawPlotYText
+       FROM coremeasurements WHERE StemGUID IS NULL AND RawTreeTag = ? AND UploadFileID = ?`,
+      [DROPPED_TREETAG, fileName]
+    );
+    expect(secondRows, 'the retry must UPSERT the SAME row via ux_cm_uploadbatch_rowindex, not insert a second one').toHaveLength(1);
+    expect(secondRows[0].CoreMeasurementID).toBe(coreMeasurementID);
+    expect(Number(secondRows[0].RawPlotXText)).toBeCloseTo(-0.512, 6);
+    expect(Number(secondRows[0].RawPlotYText)).toBeCloseTo(301.25, 6);
+
+    const [auditRows] = await connection.query<RowDataPacket[]>(
+      `SELECT Operation, OldRowState, NewRowState FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND RecordID = ? ORDER BY ChangeID`,
+      [coreMeasurementID]
+    );
+    console.log(`[drop-retry-changed] audit rows: ${JSON.stringify(auditRows)}`);
+    expect(auditRows, 'exactly one INSERT (first call) and one UPDATE (changed retry), nothing more').toHaveLength(2);
+    expect(auditRows[0].Operation).toBe('INSERT');
+    expect(auditRows[1].Operation).toBe('UPDATE');
+    const oldState = typeof auditRows[1].OldRowState === 'string' ? JSON.parse(auditRows[1].OldRowState) : auditRows[1].OldRowState;
+    const newState = typeof auditRows[1].NewRowState === 'string' ? JSON.parse(auditRows[1].NewRowState) : auditRows[1].NewRowState;
+    expect(Number(oldState.RawPlotX)).toBeCloseTo(-0.271, 6);
+    expect(Number(oldState.RawPlotY)).toBeCloseTo(267.5, 6);
+    expect(Number(newState.RawPlotX)).toBeCloseTo(-0.512, 6);
+    expect(Number(newState.RawPlotY)).toBeCloseTo(301.25, 6);
+  });
+
+  it('an unchanged-content retry of the same dropped row produces zero new audit rows (#507)', async () => {
+    const DROPPED_TREETAG = 'T9011';
+    const fileName = 'stage-measurements-drop-retry-unchanged.csv';
+    const batchID = 'stage-drop-retry-unchanged-0001';
+    const fixture = buildTwoRowDropFixture(DROPPED_TREETAG, '-0.271', '267.5');
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const spy = buildTreeTagDropSpy(DROPPED_TREETAG);
+      try {
+        const tx = await connectionManager.beginTransaction();
+        await stageMeasurementChunk(connectionManager, baseParams(tx, { fileName, batchID, ...fixture }));
+        await connectionManager.commitTransaction(tx);
+      } finally {
+        spy.mockRestore();
+      }
+    }
+
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT CoreMeasurementID FROM coremeasurements WHERE StemGUID IS NULL AND RawTreeTag = ? AND UploadFileID = ?`,
+      [DROPPED_TREETAG, fileName]
+    );
+    expect(rows).toHaveLength(1);
+
+    const [auditRows] = await connection.query<RowDataPacket[]>(
+      `SELECT Operation FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND RecordID = ?`,
+      [rows[0].CoreMeasurementID]
+    );
+    console.log(`[drop-retry-unchanged] audit rows: ${JSON.stringify(auditRows)}`);
+    expect(auditRows, 'an identical-content retry must not add a second (UPDATE) audit row — only the original INSERT').toHaveLength(1);
+    expect(auditRows[0].Operation).toBe('INSERT');
+  });
+
+  it('a failed late audit of a dropped row rolls back the staging insert AND the dropped-row persistence (#507)', async () => {
+    const DROPPED_TREETAG = 'T9012';
+    const fileName = 'stage-measurements-drop-audit-fail.csv';
+    const batchID = 'stage-drop-audit-fail-0001';
+    const fixture = buildTwoRowDropFixture(DROPPED_TREETAG, '-0.271', '267.5');
+    const AUDIT_FAILURE_MESSAGE = 'Simulated unifiedchangelog write failure for a dropped row';
+
+    const spy = buildTreeTagDropSpy(DROPPED_TREETAG, query => {
+      // recordAuditedIngestionFailureRows' keyed diff writes its INSERT audit
+      // row via recordSnapshotRowsAudit (lib/changelog/ingestion-audit.ts),
+      // which serializes caller-supplied before/after snapshots directly
+      // rather than the old whole-scope `INSERT ... SELECT ... NOT EXISTS`
+      // shape — match THAT statement's distinctive column list (both
+      // OldRowState and NewRowState together is unique to it among every
+      // other unifiedchangelog write this chunk issues).
+      if (query.includes('.unifiedchangelog') && query.includes('OldRowState') && query.includes('NewRowState')) {
+        throw new Error(AUDIT_FAILURE_MESSAGE);
+      }
+    });
+
+    try {
+      const transactionID = await connectionManager.beginTransaction();
+      // finally-bounded: if the `rejects` assertion itself throws (e.g. the
+      // call unexpectedly resolves), the transaction must still be rolled
+      // back, or it dangles open and every later test's beginTransaction in
+      // this suite fails with "transaction already active".
+      try {
+        await expect(stageMeasurementChunk(connectionManager, baseParams(transactionID, { fileName, batchID, ...fixture }))).rejects.toThrow(
+          AUDIT_FAILURE_MESSAGE
+        );
+      } finally {
+        await connectionManager.rollbackTransaction(transactionID);
+      }
+
+      expect(await countStagedRows(connectionManager, schema, fileName, batchID, plotID, censusID), 'the staging insert must have rolled back too').toBe(0);
+      const [coreRows] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM coremeasurements WHERE UploadFileID = ?', [fileName]);
+      expect(Number(coreRows[0].count), 'the dropped-row persistence must have rolled back together with its failed audit').toBe(0);
+      const [auditRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS count FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND PlotID = ? AND CensusID = ?`,
+        [plotID, censusID]
+      );
+      expect(Number(auditRows[0].count), 'no audit rows may survive a rolled-back transaction').toBe(0);
+    } finally {
+      spy.mockRestore();
     }
   });
 
@@ -559,13 +809,289 @@ describe('stageMeasurementChunk — integration', () => {
       expect(tagCounts[tag]).toBe(2);
     }
 
-    // Changelog accumulates instead of duplicating: still one row, two batches.
+    // Changelog is keyed by chunkIdentity, defaulting to batchID when a
+    // caller does not pass one (#507): re-staging the SAME batchID with no
+    // explicit chunkIdentity REPLACES that identity's own contribution rather
+    // than adding to it, so the row count does NOT double even though
+    // temporarymeasurements itself now holds two physical copies of the data
+    // (asserted above). See the genuinely-new-chunk tests below for the case
+    // where accumulation IS expected.
     const [changelog] = await connection.query<RowDataPacket[]>(`SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload'`);
     expect(changelog).toHaveLength(1);
     const metadata = typeof changelog[0].NewRowState === 'string' ? JSON.parse(changelog[0].NewRowState) : changelog[0].NewRowState;
     console.log(`[re-stage] changelog metadata: ${JSON.stringify(metadata)}`);
+    expect(metadata.rowCount, 'a retry of the SAME batchID must not inflate the running total').toBe(EXPECTED_STAGED_ROW_COUNT);
+    expect(metadata.batchCount, 'a retry of the SAME batchID must not count as a second batch').toBe(1);
+  });
+
+  it('staging a genuinely NEW batchID for the same attempt accumulates into the running total (#507)', async () => {
+    const NEW_CHUNK_BATCH_ID = 'stage-batch-0001-chunk2';
+
+    const firstTransactionID = await connectionManager.beginTransaction();
+    const firstResult = await stageMeasurementChunk(connectionManager, baseParams(firstTransactionID));
+    await connectionManager.commitTransaction(firstTransactionID);
+
+    const secondTransactionID = await connectionManager.beginTransaction();
+    const secondResult = await stageMeasurementChunk(connectionManager, baseParams(secondTransactionID, { batchID: NEW_CHUNK_BATCH_ID }));
+    await connectionManager.commitTransaction(secondTransactionID);
+
+    console.log(`[new-chunk] first.insertedCount=${firstResult.insertedCount} second.insertedCount=${secondResult.insertedCount}`);
+    expect(firstResult.insertedCount).toBe(EXPECTED_STAGED_ROW_COUNT);
+    expect(secondResult.insertedCount).toBe(EXPECTED_STAGED_ROW_COUNT);
+
+    // A batchID never seen before for this attempt (uploadSessionID is shared
+    // via baseParams) DOES accumulate — unlike the same-batchID-retry case
+    // above, this is two real chunks of the same file, not one chunk counted
+    // twice.
+    const [changelog] = await connection.query<RowDataPacket[]>(`SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload'`);
+    expect(changelog).toHaveLength(1);
+    const metadata = typeof changelog[0].NewRowState === 'string' ? JSON.parse(changelog[0].NewRowState) : changelog[0].NewRowState;
+    console.log(`[new-chunk] changelog metadata: ${JSON.stringify(metadata)}`);
+    expect(metadata.rowCount, 'two distinct chunks must sum').toBe(EXPECTED_STAGED_ROW_COUNT * 2);
+    expect(metadata.batchCount, 'two distinct batchIDs must count as two batches').toBe(2);
+  });
+
+  // -------------------------------------------------------------------------
+  // The REAL worker.ts shape (#507): lib/background-jobs/worker.ts stages
+  // every chunk of one file under the SAME batchID (only chunkIndex differs),
+  // passing `chunkIdentity: \`${batchID}:chunk${chunkIndex}\`` — the batchID
+  // tests above never exercise this, since worker chunks never get distinct
+  // batchIDs. This proves the actual bug Codex found: two distinct chunk
+  // identities under ONE batchID must both accumulate (not collapse into
+  // whichever ran last), and a retry of one of those same identities must
+  // not then double it.
+  // -------------------------------------------------------------------------
+
+  it('accumulates two distinct logical chunks sharing one batchID (the real worker.ts shape), and a retry of one does not inflate (#507)', async () => {
+    const CHUNK_0_IDENTITY = `${BATCH_ID}:chunk0`;
+    const CHUNK_1_IDENTITY = `${BATCH_ID}:chunk1`;
+
+    const chunk0TransactionID = await connectionManager.beginTransaction();
+    const chunk0Result = await stageMeasurementChunk(connectionManager, baseParams(chunk0TransactionID, { chunkIdentity: CHUNK_0_IDENTITY }));
+    await connectionManager.commitTransaction(chunk0TransactionID);
+
+    const chunk1TransactionID = await connectionManager.beginTransaction();
+    const chunk1Result = await stageMeasurementChunk(connectionManager, baseParams(chunk1TransactionID, { chunkIdentity: CHUNK_1_IDENTITY }));
+    await connectionManager.commitTransaction(chunk1TransactionID);
+
+    console.log(`[same-batch-chunks] chunk0.insertedCount=${chunk0Result.insertedCount} chunk1.insertedCount=${chunk1Result.insertedCount}`);
+    expect(chunk0Result.insertedCount).toBe(EXPECTED_STAGED_ROW_COUNT);
+    expect(chunk1Result.insertedCount).toBe(EXPECTED_STAGED_ROW_COUNT);
+
+    const afterTwoChunks = await connection.query<RowDataPacket[]>(`SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload'`);
+    const metadataAfterTwoChunks = (() => {
+      const row = afterTwoChunks[0][0];
+      return typeof row.NewRowState === 'string' ? JSON.parse(row.NewRowState) : row.NewRowState;
+    })();
+    console.log(`[same-batch-chunks] after 2 distinct chunks: ${JSON.stringify(metadataAfterTwoChunks)}`);
+    expect(metadataAfterTwoChunks.rowCount, 'two distinct chunk identities under ONE batchID must both accumulate').toBe(EXPECTED_STAGED_ROW_COUNT * 2);
+    expect(metadataAfterTwoChunks.batchCount).toBe(2);
+
+    // A worker retry of chunk 0 (same batchID, same chunkIdentity — the
+    // worker reprocesses the file from chunkIndex 0 again after a transient
+    // failure further down the file).
+    const chunk0RetryTransactionID = await connectionManager.beginTransaction();
+    const chunk0RetryResult = await stageMeasurementChunk(connectionManager, baseParams(chunk0RetryTransactionID, { chunkIdentity: CHUNK_0_IDENTITY }));
+    await connectionManager.commitTransaction(chunk0RetryTransactionID);
+    expect(chunk0RetryResult.insertedCount).toBe(EXPECTED_STAGED_ROW_COUNT);
+
+    const afterRetry = await connection.query<RowDataPacket[]>(`SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload'`);
+    const metadataAfterRetry = (() => {
+      const row = afterRetry[0][0];
+      return typeof row.NewRowState === 'string' ? JSON.parse(row.NewRowState) : row.NewRowState;
+    })();
+    console.log(`[same-batch-chunks] after chunk0 retry: ${JSON.stringify(metadataAfterRetry)}`);
+    expect(metadataAfterRetry.rowCount, 'retrying the SAME logical chunk must not inflate the total — only chunk1 is still counted once').toBe(
+      EXPECTED_STAGED_ROW_COUNT * 2
+    );
+    expect(metadataAfterRetry.batchCount, 'retrying chunk0 must not be counted as a third chunk').toBe(2);
+  });
+
+  it('two differently-sized chunks (100 + 50) of one batch accumulate to exactly 150, and a retry of the first leaves the total unchanged (#507)', async () => {
+    const CHUNK_A_IDENTITY = `${BATCH_ID}:chunk-a-100`;
+    const CHUNK_B_IDENTITY = `${BATCH_ID}:chunk-b-50`;
+    const rowsA = Array.from({ length: 100 }, (_, index) => fixtureRow({ treetag: `SIZEDA${index}`, quadrat: 'Q01', speciescode: 'ACERRU' }));
+    const rowsB = Array.from({ length: 50 }, (_, index) => fixtureRow({ treetag: `SIZEDB${index}`, quadrat: 'Q01', speciescode: 'ACERRU' }));
+
+    const txA = await connectionManager.beginTransaction();
+    const resultA = await stageMeasurementChunk(connectionManager, baseParams(txA, { chunkIdentity: CHUNK_A_IDENTITY, rawRows: rowsA }));
+    await connectionManager.commitTransaction(txA);
+    expect(resultA.insertedCount).toBe(100);
+
+    const txB = await connectionManager.beginTransaction();
+    const resultB = await stageMeasurementChunk(connectionManager, baseParams(txB, { chunkIdentity: CHUNK_B_IDENTITY, rawRows: rowsB }));
+    await connectionManager.commitTransaction(txB);
+    expect(resultB.insertedCount).toBe(50);
+
+    const [afterBothRows] = await connection.query<RowDataPacket[]>(`SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload'`);
+    const metadataAfterBoth = typeof afterBothRows[0].NewRowState === 'string' ? JSON.parse(afterBothRows[0].NewRowState) : afterBothRows[0].NewRowState;
+    expect(metadataAfterBoth.rowCount, '100 + 50 must accumulate to exactly 150').toBe(150);
+    expect(metadataAfterBoth.batchCount).toBe(2);
+
+    // A retry of chunk A (same chunkIdentity) must REPLACE its own
+    // contribution, not add a third 100 on top of the existing 150.
+    const txARetry = await connectionManager.beginTransaction();
+    const resultARetry = await stageMeasurementChunk(connectionManager, baseParams(txARetry, { chunkIdentity: CHUNK_A_IDENTITY, rawRows: rowsA }));
+    await connectionManager.commitTransaction(txARetry);
+    expect(resultARetry.insertedCount).toBe(100);
+
+    const [afterRetryRows] = await connection.query<RowDataPacket[]>(`SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload'`);
+    const metadataAfterRetry = typeof afterRetryRows[0].NewRowState === 'string' ? JSON.parse(afterRetryRows[0].NewRowState) : afterRetryRows[0].NewRowState;
+    expect(metadataAfterRetry.rowCount, 'a retry of chunk A must REPLACE its own contribution, leaving the total at 150, not inflate it to 250').toBe(150);
+    expect(metadataAfterRetry.batchCount).toBe(2);
+  });
+
+  it('identical-content chunks staged at DIFFERENT chunkIdentity positions remain distinct, never collapsing into one', async () => {
+    const sharedRows = buildFixtureChunk();
+    const POSITION_1_IDENTITY = `${BATCH_ID}:chunk1`;
+    const POSITION_2_IDENTITY = `${BATCH_ID}:chunk2`;
+
+    const tx1 = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(connectionManager, baseParams(tx1, { chunkIdentity: POSITION_1_IDENTITY, rawRows: sharedRows }));
+    await connectionManager.commitTransaction(tx1);
+
+    const tx2 = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(connectionManager, baseParams(tx2, { chunkIdentity: POSITION_2_IDENTITY, rawRows: sharedRows }));
+    await connectionManager.commitTransaction(tx2);
+
+    const [rows] = await connection.query<RowDataPacket[]>(`SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload'`);
+    const metadata = typeof rows[0].NewRowState === 'string' ? JSON.parse(rows[0].NewRowState) : rows[0].NewRowState;
+    expect(metadata.batchCount, 'two positions with byte-identical row content must still be tracked as two distinct chunks, not collapsed into one').toBe(2);
     expect(metadata.rowCount).toBe(EXPECTED_STAGED_ROW_COUNT * 2);
-    expect(metadata.batchCount).toBe(2);
+  });
+
+  it('two independent upload attempts for the SAME filename get separate changelog rows with independent counts (#507)', async () => {
+    const SECOND_ATTEMPT_SESSION_ID = 'stage-int-test-session-second-attempt';
+    await seedUploadSession(UPLOAD_SESSION_ID);
+
+    const firstAttemptTransactionID = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(connectionManager, baseParams(firstAttemptTransactionID, { uploadSessionID: UPLOAD_SESSION_ID }));
+    await connectionManager.commitTransaction(firstAttemptTransactionID);
+
+    // upload_sessions.active_scope_key (tablestructures.sql) is a generated
+    // column that is non-NULL only while state is one of the "in-flight"
+    // values, and uq_upload_sessions_active_scope enforces at most ONE such
+    // row per (schema, plot, census). The first attempt's session must be
+    // moved OUT of that active set before a second session for the SAME
+    // scope is seeded, or the second seedUploadSession below violates that
+    // unique index — two simultaneously "active" sessions in one scope was
+    // exactly the bug this fixture used to have.
+    await connection.query(`UPDATE upload_sessions SET state = 'completed' WHERE session_id = ?`, [UPLOAD_SESSION_ID]);
+    await seedUploadSession(SECOND_ATTEMPT_SESSION_ID);
+
+    // A SECOND, independent attempt — different uploadSessionID AND batchID
+    // (a fresh batchID is what production actually mints per attempt), SAME
+    // fileName (a brand-new upload of the same file after the first
+    // attempt's session ended). This must never be merged into the first
+    // attempt's running totals: buildFileUploadChangelogRecordID keys the
+    // changelog row by attempt, not by filename alone.
+    const secondAttemptTransactionID = await connectionManager.beginTransaction();
+    await stageMeasurementChunk(
+      connectionManager,
+      baseParams(secondAttemptTransactionID, { uploadSessionID: SECOND_ATTEMPT_SESSION_ID, batchID: 'stage-batch-0001-second-attempt' })
+    );
+    await connectionManager.commitTransaction(secondAttemptTransactionID);
+
+    const [changelogRows] = await connection.query<RowDataPacket[]>(
+      `SELECT RecordID, NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload' ORDER BY RecordID`
+    );
+    console.log(`[independent-attempts] changelog rows: ${JSON.stringify(changelogRows)}`);
+    expect(changelogRows, 'two independent attempts must produce two separate file_upload rows, never merged').toHaveLength(2);
+
+    const recordIDs = changelogRows.map(row => String(row.RecordID));
+    expect(recordIDs).toContain(buildFileUploadChangelogRecordID(FILE_NAME, UPLOAD_SESSION_ID));
+    expect(recordIDs).toContain(buildFileUploadChangelogRecordID(FILE_NAME, SECOND_ATTEMPT_SESSION_ID));
+
+    for (const row of changelogRows) {
+      const metadata = typeof row.NewRowState === 'string' ? JSON.parse(row.NewRowState) : row.NewRowState;
+      expect(metadata.rowCount, `attempt ${row.RecordID} must report its OWN count, not the other attempt's`).toBe(EXPECTED_STAGED_ROW_COUNT);
+      expect(metadata.batchCount).toBe(1);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Cross-connection serialization of the file_upload summary row (#507) — a
+  // genuinely separate physical MySQL session, not an emulation, so the
+  // GET_LOCK contention between it and the suite's shared connection is real.
+  // ---------------------------------------------------------------------------
+
+  it('serializes overlapping first chunks before counting rows, producing one exact summary through real ConnectionManager', async () => {
+    if (!['localhost', '127.0.0.1'].includes(process.env.AZURE_SQL_SERVER ?? '')) throw new Error('Local DB required');
+    const { default: RealConnectionManager } = await vi.importActual<typeof import('@/lib/db/connectionmanager')>('@/lib/db/connectionmanager');
+    const manager = RealConnectionManager.getInstance();
+    const txA = await manager.beginTransaction();
+    const txB = await manager.beginTransaction();
+    const rowsA = Array.from({ length: 100 }, (_, index) => fixtureRow({ treetag: `RACEA${index}` }));
+    const rowsB = Array.from({ length: 50 }, (_, index) => fixtureRow({ treetag: `RACEB${index}` }));
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>(resolve => {
+      releaseFirst = resolve;
+    });
+    let sawFirstCount!: () => void;
+    const firstCount = new Promise<void>(resolve => {
+      sawFirstCount = resolve;
+    });
+    let sawSecondLock!: () => void;
+    const secondLock = new Promise<void>(resolve => {
+      sawSecondLock = resolve;
+    });
+    const execute = manager.executeQuery.bind(manager);
+    const acquire = manager.acquireApplicationLock.bind(manager);
+    let paused = false;
+    const querySpy = vi.spyOn(manager, 'executeQuery').mockImplementation(async (sql, params, tx) => {
+      const result = await execute(sql, params, tx);
+      if (tx === txA && !paused && sql.includes('COUNT(*)') && sql.includes('temporarymeasurements')) {
+        paused = true;
+        sawFirstCount();
+        await firstGate;
+      }
+      return result;
+    });
+    const lockSpy = vi.spyOn(manager, 'acquireApplicationLock').mockImplementation((name, tx, timeout) => {
+      if (tx === txB) sawSecondLock();
+      return acquire(name, tx, timeout);
+    });
+    const run = async (tx: string, rows: ReturnType<typeof fixtureRow>[], chunkIdentity: string) => {
+      try {
+        const result = await stageMeasurementChunk(
+          manager,
+          baseParams(tx, {
+            rawRows: rows,
+            chunkIdentity,
+            uploadSessionID: null,
+            uploadMode: UploadMode.REVISIONS
+          })
+        );
+        await manager.commitTransaction(tx);
+        return result;
+      } catch (error) {
+        await manager.rollbackTransaction(tx);
+        throw error;
+      }
+    };
+    const runA = run(txA, rowsA, 'chunk-a');
+    let runB: ReturnType<typeof run> | undefined;
+    try {
+      await firstCount;
+      runB = run(txB, rowsB, 'chunk-b');
+      await secondLock;
+      releaseFirst();
+      const [resultA, resultB] = await Promise.all([runA, runB]);
+      expect([resultA.insertedCount, resultB.insertedCount]).toEqual([100, 50]);
+      const [summaries] = await connection.query<RowDataPacket[]>("SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload'");
+      expect(summaries).toHaveLength(1);
+      const metadata = typeof summaries[0].NewRowState === 'string' ? JSON.parse(summaries[0].NewRowState) : summaries[0].NewRowState;
+      expect(metadata.rowCount).toBe(150);
+      expect(metadata.batchCount).toBe(2);
+    } finally {
+      releaseFirst();
+      await Promise.allSettled([runA, ...(runB ? [runB] : [])]);
+      querySpy.mockRestore();
+      lockSpy.mockRestore();
+      await manager.rollbackTransaction(txA);
+      await manager.rollbackTransaction(txB);
+      await manager.closeConnection();
+    }
   });
 
   // -------------------------------------------------------------------------
@@ -899,5 +1425,67 @@ describe('stageMeasurementChunk — integration', () => {
     const counted = await countStagedRows(connectionManager, schema, FILE_NAME, BATCH_ID, plotID, censusID);
     console.log(`[rollback] staged rows after rollback=${counted}`);
     expect(counted).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #507: the `file_upload` unifiedchangelog write is the ONLY durable
+  // record that an upload attempt happened at all — distinct from the
+  // per-row coremeasurements audit that ingestBatch writes later. A prior
+  // version of stageMeasurementChunk caught this write's failure and logged
+  // it, letting the staged temporarymeasurements rows commit anyway: Recent
+  // Changes would then show no trace that the upload ever occurred, with no
+  // way to tell from the data alone that anything was missing. This test
+  // forces that INSERT to fail and proves the error now propagates far
+  // enough that the caller's transaction rollback undoes the staging too,
+  // instead of leaving an unlogged chunk committed.
+  // -------------------------------------------------------------------------
+  it('propagates a file_upload changelog write failure so the caller rolls back the whole chunk, including the just-staged rows (issue #507)', async () => {
+    const originalExecuteQuery = ConnectionManager.getInstance().executeQuery.bind(connectionManager);
+    const SIMULATED_CHANGELOG_FAILURE = 'Simulated unifiedchangelog file_upload write failure';
+    const executeQuerySpy = vi
+      .spyOn(connectionManager, 'executeQuery')
+      .mockImplementation(async (query: string, params?: unknown[], transactionID?: string) => {
+        if (
+          typeof query === 'string' &&
+          query.includes('INSERT INTO') &&
+          query.includes('.unifiedchangelog') &&
+          Array.isArray(params) &&
+          params[0] === 'file_upload'
+        ) {
+          throw new Error(SIMULATED_CHANGELOG_FAILURE);
+        }
+        return originalExecuteQuery(query, params, transactionID);
+      });
+
+    try {
+      const transactionID = await connectionManager.beginTransaction();
+      await expect(stageMeasurementChunk(connectionManager, baseParams(transactionID))).rejects.toThrow(SIMULATED_CHANGELOG_FAILURE);
+
+      // The temporarymeasurements INSERT ran earlier in the same statement
+      // sequence and is still visible INSIDE this uncommitted transaction —
+      // proving the failure happened downstream of staging, not before it,
+      // so this test is actually exercising the propagation path and not a
+      // no-op where staging never ran.
+      const stagedBeforeRollback = await connectionManager.executeQuery(
+        safeFormatQuery(schema, `SELECT COUNT(*) AS count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`),
+        [FILE_NAME, BATCH_ID],
+        transactionID
+      );
+      console.log(`[changelog-failure] staged rows still visible pre-rollback (inside txn)=${stagedBeforeRollback[0]?.count}`);
+      expect(Number(stagedBeforeRollback[0]?.count ?? 0)).toBe(EXPECTED_STAGED_ROW_COUNT);
+
+      // The caller (ingest-batch / the upload route) owns the transaction and
+      // rolls it back on any propagated staging error.
+      await connectionManager.rollbackTransaction(transactionID);
+
+      const stagedAfterRollback = await countStagedRows(connectionManager, schema, FILE_NAME, BATCH_ID, plotID, censusID);
+      console.log(`[changelog-failure] staged rows after rollback=${stagedAfterRollback}`);
+      expect(stagedAfterRollback, 'the rollback must undo the staging that happened before the changelog write failed').toBe(0);
+
+      const [changelog] = await connection.query<RowDataPacket[]>(`SELECT * FROM unifiedchangelog WHERE TableName = 'file_upload'`);
+      expect(changelog, 'no file_upload changelog row may survive either — the failed write never committed').toHaveLength(0);
+    } finally {
+      executeQuerySpy.mockRestore();
+    }
   });
 });

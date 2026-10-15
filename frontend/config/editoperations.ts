@@ -1,16 +1,18 @@
-import ConnectionManager from '@/lib/db/connectionmanager';
+import ConnectionManager, { type TxExecutor } from '@/lib/db/connectionmanager';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
+import { recordMutation, ChangelogOperation } from '@/lib/changelog/record-mutation';
+import { projectEditOperationToChangelogRows } from '@/lib/changelog/edit-operation-projection';
+import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
+import type { EditOperationStateRow, EditOperationType } from '@/config/editoperationtypes';
 
-export type EditOperationType = 'single-row-edit' | 'bulk-revision-row' | 'revert';
+// Re-exported so every existing `import { EditOperationType, EditOperationStateRow } from '@/config/editoperations'` stays valid.
+export type { EditOperationStateRow, EditOperationType };
+
+// unifiedchangelog.ChangedBy is varchar(64) vs edit_operations.CreatedBy's
+// varchar(255): truncate only the changelog write; the ledger keeps the full value.
+
 export type EditOperationDataType = 'measurementssummary' | 'failedmeasurements';
-
-export interface EditOperationStateRow {
-  table: string;
-  primaryKey: string;
-  primaryKeyValue: string | number;
-  row: Record<string, unknown> | null;
-}
 
 export interface EditOperationRecord {
   editOperationID: number;
@@ -221,6 +223,67 @@ export async function writeEditOperation(
   if (typeof insertId !== 'number' || insertId <= 0) {
     throw new Error('writeEditOperation: INSERT did not return a valid EditOperationID');
   }
+
+  // Dual-write, same transactionID as the INSERT above: a changelog write
+  // failure (ChangelogWriteError, left uncaught) rolls back the ledger row too.
+  const tx: TxExecutor = {
+    query: (queryText, queryParams) => connectionManager.executeQuery(queryText, queryParams, transactionID),
+    id: transactionID
+  };
+  const projectedRows = projectEditOperationToChangelogRows(record.operationType, insertId, record.beforeState ?? [], record.afterState ?? []);
+  const changedBy = record.createdBy.slice(0, CHANGED_BY_MAX_LENGTH);
+  for (const projectedRow of projectedRows) {
+    // Branch on the projection's actual operation, not a hardcoded UPDATE —
+    // recordMutation's options type requires it (no oldRowState on INSERT, no newRowState on DELETE).
+    if (projectedRow.operation === ChangelogOperation.INSERT) {
+      if (!projectedRow.newRowState) {
+        throw new Error(`writeEditOperation: projected INSERT row for ${projectedRow.tableName}/${projectedRow.recordID} has no newRowState`);
+      }
+      await recordMutation({
+        tx,
+        schema,
+        tableName: projectedRow.tableName,
+        recordID: projectedRow.recordID,
+        operation: ChangelogOperation.INSERT,
+        newRowState: projectedRow.newRowState,
+        changedBy,
+        plotID: record.plotID,
+        censusID: record.censusID
+      });
+    } else if (projectedRow.operation === ChangelogOperation.DELETE) {
+      if (!projectedRow.oldRowState) {
+        throw new Error(`writeEditOperation: projected DELETE row for ${projectedRow.tableName}/${projectedRow.recordID} has no oldRowState`);
+      }
+      await recordMutation({
+        tx,
+        schema,
+        tableName: projectedRow.tableName,
+        recordID: projectedRow.recordID,
+        operation: ChangelogOperation.DELETE,
+        oldRowState: projectedRow.oldRowState,
+        changedBy,
+        plotID: record.plotID,
+        censusID: record.censusID
+      });
+    } else {
+      if (!projectedRow.newRowState) {
+        throw new Error(`writeEditOperation: projected UPDATE row for ${projectedRow.tableName}/${projectedRow.recordID} has no newRowState`);
+      }
+      await recordMutation({
+        tx,
+        schema,
+        tableName: projectedRow.tableName,
+        recordID: projectedRow.recordID,
+        operation: ChangelogOperation.UPDATE,
+        oldRowState: projectedRow.oldRowState,
+        newRowState: projectedRow.newRowState,
+        changedBy,
+        plotID: record.plotID,
+        censusID: record.censusID
+      });
+    }
+  }
+
   return insertId;
 }
 

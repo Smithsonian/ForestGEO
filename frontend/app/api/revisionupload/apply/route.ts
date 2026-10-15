@@ -1,3 +1,4 @@
+import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import ConnectionManager from '@/lib/db/connectionmanager';
@@ -47,7 +48,10 @@ import {
 } from '../shared/matchdiff';
 import { requireSession } from '@/lib/auth-helpers';
 import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
-import { insertIngestionFailureRows, IngestionFailureRowInput } from '@/config/measurementerrors';
+import { snapshotCoreMeasurementsScope, auditCoreMeasurementsScopeDiff, recordDeletedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
+import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
+import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-failure-audit';
+import { IngestionFailureRowInput } from '@/config/measurementerrors';
 import {
   buildIngestionFailureRowContent,
   computeInvalidRowsIntegrityHash,
@@ -91,6 +95,14 @@ class RevisionStagingIntegrityError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RevisionStagingIntegrityError';
+  }
+}
+
+/** recordAuditedIngestionFailureRows persisted a different number of rows than this apply rejected — a server-side invariant failure, never user-correctable. */
+class RevisionFailureRowPersistenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RevisionFailureRowPersistenceError';
   }
 }
 
@@ -554,6 +566,11 @@ function validateDuplicateRequests(duplicates: DuplicateToDelete[], matchedRows:
  * Checks: active, same census, same plot, non-null StemGUID, same StemGUID as survivor.
  * Explicitly deletes cmattributes before the measurement row.
  *
+ * Audits the row's last state via recordDeletedCoreMeasurementsAudit BEFORE
+ * the DELETE below removes it, in the SAME transaction (#507) — a rollback of
+ * the outer transaction (e.g. a later duplicate in this loop fails) discards
+ * the DELETE and this audit row together; a commit keeps both together.
+ *
  * Returns the number of actual coremeasurements rows deleted (0 or 1).
  */
 async function verifyAndDeleteDuplicate(
@@ -562,9 +579,14 @@ async function verifyAndDeleteDuplicate(
   duplicate: DuplicateToDelete,
   censusID: number,
   plotID: number,
-  transactionID: string
+  transactionID: string,
+  changedBy: string
 ): Promise<{ deleted: number; applyError?: ApplyError }> {
   // Load both the duplicate and its survivor in one query to verify stem-group membership
+  // FOR UPDATE locks every row this query reads — cm, st, and q — for the
+  // rest of the transaction, closing the TOCTOU window between this read and
+  // the audit+DELETE below (a concurrent apply touching the same duplicate
+  // or survivor must wait, not race it).
   const verifyQuery = safeFormatQuery(
     schema,
     `SELECT cm.CoreMeasurementID, cm.StemGUID
@@ -575,7 +597,8 @@ async function verifyAndDeleteDuplicate(
        AND cm.CensusID = ?
        AND cm.IsActive = 1
        AND cm.StemGUID IS NOT NULL
-       AND q.PlotID = ?`
+       AND q.PlotID = ?
+     FOR UPDATE`
   );
   const verifiedRows = await connectionManager.executeQuery(
     verifyQuery,
@@ -616,6 +639,20 @@ async function verifyAndDeleteDuplicate(
     };
   }
 
+  // Audit the row's live state BEFORE the DELETE below removes it (#507) —
+  // reads OldRowState while the row still exists, exactly like
+  // cleanupPreviousFileUploads' use of this same function. Must run before
+  // either delete so a rollback discards the data and the audit together.
+  const tx = transactionExecutorFor(connectionManager, transactionID);
+  const auditedRowCount = await recordDeletedCoreMeasurementsAudit({
+    tx,
+    schema,
+    coreMeasurementIDs: [duplicate.coreMeasurementID],
+    changedBy: changedBy.slice(0, CHANGED_BY_MAX_LENGTH),
+    plotID,
+    censusID
+  });
+
   // Explicitly delete cmattributes — don't rely on CASCADE
   const deleteAttrsSQL = safeFormatQuery(schema, 'DELETE FROM ??.cmattributes WHERE CoreMeasurementID = ?');
   await connectionManager.executeQuery(deleteAttrsSQL, [duplicate.coreMeasurementID], transactionID);
@@ -626,6 +663,15 @@ async function verifyAndDeleteDuplicate(
 
   // Count actual rows deleted from the DB, not what the client requested
   const rowsDeleted = getAffectedRowCount(deleteResult);
+  const EXPECTED_DUPLICATE_DELETE_COUNT = 1;
+
+  if (auditedRowCount !== EXPECTED_DUPLICATE_DELETE_COUNT || rowsDeleted !== EXPECTED_DUPLICATE_DELETE_COUNT) {
+    throw new Error(
+      `Duplicate-deletion audit mismatch for CoreMeasurementID ${duplicate.coreMeasurementID}: expected to audit and delete exactly ` +
+        `${EXPECTED_DUPLICATE_DELETE_COUNT} row but audited ${auditedRowCount} and deleted ${rowsDeleted}. Refusing to commit — the audit trail and the data would disagree.`
+    );
+  }
+
   if (rowsDeleted > 0) {
     // These are denormalized materialized tables, not FK-backed views.
     const deleteMeasurementsSummarySQL = safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE CoreMeasurementID = ?');
@@ -707,6 +753,11 @@ async function assertNoConflictingApplyActivity(
  * Stages confirmed new rows into temporarymeasurements, then calls
  * bulkingestionprocess to ingest them through the standard pipeline.
  *
+ * Audits the committed coremeasurements rows in the SAME transaction as the
+ * CALL (#507): a rollback of the caller's transaction (e.g. a later step in
+ * this request throws) discards the ingested rows and their audit trail
+ * together, and a commit keeps both together.
+ *
  * Returns the number of rows inserted into temporarymeasurements.
  * The bulkingestionprocess handles its own error logging internally.
  */
@@ -716,7 +767,8 @@ async function insertNewRowsThroughPipeline(
   plotID: number,
   censusID: number,
   newRows: FileRow[],
-  transactionID: string
+  transactionID: string,
+  changedBy: string
 ): Promise<number> {
   const batchID = generateShortBatchID();
 
@@ -779,7 +831,23 @@ async function insertNewRowsThroughPipeline(
     throw new RevisionStagingIntegrityError(`Revision staging inserted ${stagedCount} of ${newRows.length} expected row(s)`);
   }
 
-  await callBulkIngestionInCallerTransaction(transactionExecutorFor(connectionManager, transactionID), schema, REVISION_UPLOAD_FILE_ID, batchID);
+  const tx = transactionExecutorFor(connectionManager, transactionID);
+  const before = await snapshotCoreMeasurementsScope(tx, schema, REVISION_UPLOAD_FILE_ID, batchID);
+  await callBulkIngestionInCallerTransaction(tx, schema, REVISION_UPLOAD_FILE_ID, batchID);
+
+  // Same transaction as the CALL above: rollback discards the ingested rows
+  // and this audit trail together (#507). ChangedBy is varchar(64) — a
+  // deliberate truncation, not a bug (see identity.ts CHANGED_BY_MAX_LENGTH).
+  await auditCoreMeasurementsScopeDiff({
+    before,
+    tx,
+    schema,
+    fileID: REVISION_UPLOAD_FILE_ID,
+    batchID,
+    changedBy: changedBy.slice(0, CHANGED_BY_MAX_LENGTH),
+    plotID,
+    censusID
+  });
 
   return stagedCount;
 }
@@ -1166,6 +1234,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // client-visible invalidRows count must always be backed by a
       // persisted row, not just an HTTP response field.
       let failedRowCount = 0;
+      // True only when recordAuditedIngestionFailureRows actually inserted or
+      // updated a physical row this call — NOT when every rejected row was an
+      // unchanged same-attempt retry. Gates the ledger summary write below
+      // (#507): a pure retry that persists nothing new must produce neither a
+      // new audit row nor a new summary entry.
+      let failurePersistenceChanged = false;
       if (effectiveInvalidRows.length > 0) {
         // Derived from (schema, plotID, censusID, uploadAttemptID) — NOT the
         // bulk plan hash, which carries no schema/plotID/censusID and would
@@ -1180,8 +1254,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           REVISION_UPLOAD_FILE_ID,
           failureBatchID
         );
-        await insertIngestionFailureRows(connectionManager, schema, failureRows, transactionID);
-        failedRowCount = effectiveInvalidRows.length;
+        const failureAudit = await recordAuditedIngestionFailureRows({
+          connectionManager,
+          schema,
+          rows: failureRows,
+          transactionID,
+          changedBy: createdBy.slice(0, CHANGED_BY_MAX_LENGTH),
+          plotID: normalizedPlotID,
+          censusID: normalizedCensusID
+        });
+        if (failureAudit.measurementIDs.length !== effectiveInvalidRows.length) {
+          throw new RevisionFailureRowPersistenceError(
+            `Revision failure-row persistence recorded ${failureAudit.measurementIDs.length} of ${effectiveInvalidRows.length} expected rejected row(s)`
+          );
+        }
+        failedRowCount = failureAudit.measurementIDs.length;
+        failurePersistenceChanged = failureAudit.insertedCount + failureAudit.updatedCount > 0;
       }
 
       let updatedCount = 0;
@@ -1260,7 +1348,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       let deletedDuplicateCount = 0;
       const deletedDuplicateIDs: number[] = [];
       for (const dup of effectiveDuplicates) {
-        const dupResult = await verifyAndDeleteDuplicate(connectionManager, schema, dup, normalizedCensusID, normalizedPlotID, transactionID);
+        const dupResult = await verifyAndDeleteDuplicate(connectionManager, schema, dup, normalizedCensusID, normalizedPlotID, transactionID, createdBy);
         deletedDuplicateCount += dupResult.deleted;
         if (dupResult.deleted > 0) {
           deletedDuplicateIDs.push(dup.coreMeasurementID);
@@ -1278,7 +1366,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           normalizedPlotID,
           normalizedCensusID,
           normalizedNewRows.newRows.map(row => row.csvRow),
-          transactionID
+          transactionID,
+          createdBy
         );
       }
 
@@ -1298,7 +1387,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // TargetID is null for bulk rows: the batch has no single "target"
       // measurement. The affected CoreMeasurementIDs are captured in
       // BeforeState JSON, which is where filters/audit should read them from.
-      if (updatedCount > 0 || deletedDuplicateCount > 0 || speciesCorrections !== null) {
+      //
+      // insertedCount and failurePersistenceChanged are included here (#507)
+      // so an insert-only or invalid-only batch — previously silent — also
+      // gets a summary. A same-attempt retry where every rejected row was
+      // already persisted unchanged (failurePersistenceChanged === false) and
+      // nothing else mutated must NOT reach this branch: it has nothing new
+      // to summarize.
+      if (updatedCount > 0 || insertedCount > 0 || deletedDuplicateCount > 0 || speciesCorrections !== null || failurePersistenceChanged) {
         const dedupedUpdatedCoreMeasurementIDs = Array.from(new Set(updatedCoreMeasurementIDs)).sort((a, b) => a - b);
         await writeEditOperation(
           connectionManager,
@@ -1323,7 +1419,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
                   skippedCount,
                   insertedCount,
                   deletedDuplicateCount,
-                  ...(speciesCorrections ? { speciesCorrections } : {})
+                  ...(speciesCorrections ? { speciesCorrections } : {}),
+                  // Only rendered by recentchangesexplorer.tsx when present —
+                  // never written as 0 for an apply that rejected nothing.
+                  failedRowCount
                 }
               }
             ],
@@ -1398,6 +1497,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (errorObj instanceof RevisionStagingIntegrityError) {
       return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
     }
+    if (errorObj instanceof RevisionFailureRowPersistenceError) {
+      return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
     if (errorObj instanceof BulkSpeciesCorrectionUnresolvedMeasurementError) {
       ailogger.error(`${logPrefix} species-correction member unresolved`, errorObj, {
         coreMeasurementID: errorObj.coreMeasurementID,
@@ -1454,6 +1556,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { error: SPECIES_CORRECTION_SERVER_FAILURE_MESSAGE, code: SPECIES_CORRECTION_SERVER_FAILURE_CODE },
         { status: HTTPResponses.INTERNAL_SERVER_ERROR }
       );
+    }
+    if (errorObj instanceof ChangelogWriteError) {
+      return NextResponse.json({ error: 'Unable to record revision history. Please retry.' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
     }
     const status = errorObj instanceof RevisionApplyConflictError ? HTTPResponses.CONFLICT : HTTPResponses.INTERNAL_SERVER_ERROR;
     return NextResponse.json({ error: errorObj.message }, { status });

@@ -12,11 +12,14 @@ import type ConnectionManager from '@/lib/db/connectionmanager';
 import type { FileRow } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { format } from 'mysql2/promise';
-import { handleUpsert } from '@/config/utils';
+import { handleUpsert, toTxExecutor } from '@/config/utils';
 import { FamilyResult, GenusResult } from '@/lib/db/definitions/taxonomies';
 import { RoleResult } from '@/lib/db/definitions/personnel';
 import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
 import { claimReferenceTableReplacement, recordReferenceTableReplacement } from '@/lib/uploads/upload-session-replacement-marker';
+import { recordMutation, ChangelogOperation } from '@/lib/changelog/record-mutation';
+import { auditHandleUpsertResult, auditCensusActivePersonnelLink } from '@/lib/changelog/reference-audit';
+import { buildInPlaceholders } from '@/lib/db/sqlsecurity';
 
 export interface FixedDataProcessingResult {
   insertedCount: number;
@@ -74,17 +77,61 @@ function formatBlockedCleanReuploadValues(values: string[], maxValues: number = 
   return truncateAndJoin(uniqueValues, ', ', maxValues);
 }
 
+/** One DELETE's IN (...) list per batch, bounding packet size for a long-lived table's accumulated rows. */
+const DELETE_BATCH_SIZE = 1000;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let start = 0; start < items.length; start += size) chunks.push(items.slice(start, start + size));
+  return chunks;
+}
+
+/**
+ * Deletes exactly the rows an earlier `SELECT ... FOR UPDATE` captured and
+ * locked, by primary key (#507). An empty capture deletes nothing: no row
+ * exists to delete, and running the SELECT's original WHERE as a standalone
+ * DELETE would also match rows a concurrent transaction committed after the
+ * capture, deleting them unaudited. Throws if the delete count doesn't match
+ * what was captured.
+ */
+async function deleteCapturedRows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  tableName: string,
+  whereSQL: string,
+  whereParams: unknown[],
+  keyColumn: string,
+  capturedRows: Array<Record<string, unknown>>,
+  transactionID: string
+): Promise<void> {
+  if (capturedRows.length === 0) return;
+  const keyValues = capturedRows.map(row => row[keyColumn]);
+  let deletedCount = 0;
+  for (const batch of chunk(keyValues, DELETE_BATCH_SIZE)) {
+    const deleteSQL = format(`DELETE FROM ??.${tableName} WHERE ${whereSQL} AND ${keyColumn} IN (${buildInPlaceholders(batch.length)})`, [schema]);
+    const result = await connectionManager.executeQuery(deleteSQL, [...whereParams, ...batch], transactionID);
+    deletedCount += result?.affectedRows ?? 0;
+  }
+  if (deletedCount !== capturedRows.length) {
+    throw new Error(
+      `Clean re-upload delete count mismatch for ${tableName}: locked ${capturedRows.length} row(s) by ${keyColumn} but deleted ${deletedCount}.`
+    );
+  }
+}
+
 export async function upsertAttributeRows(
   connectionManager: ConnectionManager,
   schema: string,
   rows: FileRow[],
   uploadMode: UploadMode,
   uploadSessionID: string | null,
-  transactionID: string
+  transactionID: string,
+  changedBy: string
 ): Promise<FixedDataProcessingResult> {
   let insertedCount = 0;
   let updatedCount = 0;
   let skippedCount = 0;
+  const tx = toTxExecutor(connectionManager, transactionID);
 
   const duplicateCodes = findDuplicateCodes(rows, row => row.code || row.codes);
   if (duplicateCodes.length > 0) {
@@ -93,8 +140,25 @@ export async function upsertAttributeRows(
 
   const replacesExistingRows = await claimReferenceTableReplacement(connectionManager, schema, uploadMode, uploadSessionID, transactionID);
   if (replacesExistingRows) {
-    const deleteSQL = format(`DELETE FROM ??.attributes WHERE IsActive = 1`, [schema]);
-    await connectionManager.executeQuery(deleteSQL, [], transactionID);
+    // FOR UPDATE: locks the active rows until commit, for deleteCapturedRows below.
+    const activeRowsSQL = format(`SELECT * FROM ??.attributes WHERE IsActive = 1 FOR UPDATE`, [schema]);
+    const activeRows = await connectionManager.executeQuery(activeRowsSQL, [], transactionID);
+
+    await deleteCapturedRows(connectionManager, schema, 'attributes', 'IsActive = 1', [], 'Code', activeRows, transactionID);
+
+    for (const deletedRow of activeRows) {
+      await recordMutation({
+        tx,
+        schema,
+        tableName: 'attributes',
+        recordID: String(deletedRow.Code),
+        operation: ChangelogOperation.DELETE,
+        oldRowState: deletedRow,
+        changedBy,
+        plotID: null,
+        censusID: null
+      });
+    }
   }
 
   // Rows can already be present when this request did not perform the reset: a
@@ -114,14 +178,31 @@ export async function upsertAttributeRows(
     const status = normalizeOptionalString(row.status);
 
     if (rowsMayAlreadyExist) {
-      const existingSQL = format(`SELECT Code FROM ??.attributes WHERE LOWER(Code) = LOWER(?) AND IsActive = 1 LIMIT 1`, [schema]);
+      const existingSQL = format(`SELECT * FROM ??.attributes WHERE LOWER(Code) = LOWER(?) AND IsActive = 1 LIMIT 1 FOR UPDATE`, [schema]);
       const existingRows = await connectionManager.executeQuery(existingSQL, [code], transactionID);
 
       if (existingRows.length > 0) {
-        const existingCode = existingRows[0].Code;
+        const existingRow = existingRows[0];
         const updateSQL = format(`UPDATE ??.attributes SET Code = ?, Description = ?, Status = ?, DeletedAt = NULL WHERE Code = ? AND IsActive = 1`, [schema]);
-        await connectionManager.executeQuery(updateSQL, [code, description, status, existingCode], transactionID);
+        await connectionManager.executeQuery(updateSQL, [code, description, status, existingRow.Code], transactionID);
         updatedCount += 1;
+
+        const noOpUpdate =
+          existingRow.Code === code && existingRow.Description === description && existingRow.Status === status && existingRow.DeletedAt === null;
+        if (!noOpUpdate) {
+          await recordMutation({
+            tx,
+            schema,
+            tableName: 'attributes',
+            recordID: code,
+            operation: ChangelogOperation.UPDATE,
+            oldRowState: existingRow,
+            newRowState: { ...existingRow, Code: code, Description: description, Status: status, DeletedAt: null },
+            changedBy,
+            plotID: null,
+            censusID: null
+          });
+        }
         continue;
       }
     }
@@ -129,6 +210,17 @@ export async function upsertAttributeRows(
     const insertSQL = format(`INSERT INTO ??.attributes (Code, Description, Status, IsActive, DeletedAt) VALUES (?, ?, ?, 1, NULL)`, [schema]);
     await connectionManager.executeQuery(insertSQL, [code, description, status], transactionID);
     insertedCount += 1;
+    await recordMutation({
+      tx,
+      schema,
+      tableName: 'attributes',
+      recordID: code,
+      operation: ChangelogOperation.INSERT,
+      newRowState: { Code: code, Description: description, Status: status, IsActive: 1, DeletedAt: null },
+      changedBy,
+      plotID: null,
+      censusID: null
+    });
   }
 
   if (replacesExistingRows) {
@@ -144,11 +236,13 @@ export async function upsertSpeciesRows(
   rows: FileRow[],
   uploadMode: UploadMode,
   uploadSessionID: string | null,
-  transactionID: string
+  transactionID: string,
+  changedBy: string
 ): Promise<FixedDataProcessingResult> {
   let insertedCount = 0;
   let updatedCount = 0;
   let skippedCount = 0;
+  const tx = toTxExecutor(connectionManager, transactionID);
 
   const duplicateSpeciesCodes = findDuplicateCodes(rows, row => row.spcode);
   if (duplicateSpeciesCodes.length > 0) {
@@ -198,8 +292,25 @@ export async function upsertSpeciesRows(
       );
     }
 
-    const deleteSQL = format(`DELETE FROM ??.species WHERE IsActive = 1`, [schema]);
-    await connectionManager.executeQuery(deleteSQL, [], transactionID);
+    // FOR UPDATE: locks the active rows until commit, for deleteCapturedRows below.
+    const activeSpeciesRowsSQL = format(`SELECT * FROM ??.species WHERE IsActive = 1 FOR UPDATE`, [schema]);
+    const activeSpeciesRows = await connectionManager.executeQuery(activeSpeciesRowsSQL, [], transactionID);
+
+    await deleteCapturedRows(connectionManager, schema, 'species', 'IsActive = 1', [], 'SpeciesID', activeSpeciesRows, transactionID);
+
+    for (const deletedRow of activeSpeciesRows) {
+      await recordMutation({
+        tx,
+        schema,
+        tableName: 'species',
+        recordID: Number(deletedRow.SpeciesID),
+        operation: ChangelogOperation.DELETE,
+        oldRowState: deletedRow,
+        changedBy,
+        plotID: null,
+        censusID: null
+      });
+    }
   }
 
   for (const row of rows) {
@@ -211,9 +322,16 @@ export async function upsertSpeciesRows(
 
     let familyID: number | undefined;
     if (normalizeOptionalString(row.family)) {
-      familyID = (
-        await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family: normalizeOptionalString(row.family)! }, 'FamilyID', transactionID)
-      ).id;
+      const familyResult = await handleUpsert<FamilyResult>(
+        connectionManager,
+        schema,
+        'family',
+        { Family: normalizeOptionalString(row.family)! },
+        'FamilyID',
+        transactionID
+      );
+      familyID = familyResult.id;
+      await auditHandleUpsertResult(connectionManager, schema, transactionID, 'family', 'FamilyID', familyResult, changedBy);
     }
 
     let genusID: number | undefined;
@@ -224,7 +342,9 @@ export async function upsertSpeciesRows(
       if (familyID) {
         genusPayload.FamilyID = familyID;
       }
-      genusID = (await handleUpsert<GenusResult>(connectionManager, schema, 'genus', genusPayload, 'GenusID', transactionID)).id;
+      const genusResult = await handleUpsert<GenusResult>(connectionManager, schema, 'genus', genusPayload, 'GenusID', transactionID);
+      genusID = genusResult.id;
+      await auditHandleUpsertResult(connectionManager, schema, transactionID, 'genus', 'GenusID', genusResult, changedBy);
     }
 
     const speciesPayload = {
@@ -237,7 +357,7 @@ export async function upsertSpeciesRows(
     };
 
     if (rowsMayAlreadyExist) {
-      const existingSQL = format(`SELECT SpeciesID FROM ??.species WHERE LOWER(SpeciesCode) = LOWER(?) AND IsActive = 1 ORDER BY SpeciesID`, [schema]);
+      const existingSQL = format(`SELECT * FROM ??.species WHERE LOWER(SpeciesCode) = LOWER(?) AND IsActive = 1 ORDER BY SpeciesID FOR UPDATE`, [schema]);
       const existingRows = await connectionManager.executeQuery(existingSQL, [speciesCode], transactionID);
 
       if (existingRows.length > 1) {
@@ -245,6 +365,7 @@ export async function upsertSpeciesRows(
       }
 
       if (existingRows.length > 0) {
+        const existingRow = existingRows[0];
         // Source-of-truth semantics (revisions, and every file after the one that
         // performed this session's reset): every column that the species upload
         // CSV format can carry is overwritten unconditionally. Fields the row omits
@@ -269,11 +390,46 @@ export async function upsertSpeciesRows(
             speciesPayload.IDLevel,
             speciesPayload.SpeciesAuthority,
             speciesPayload.SubspeciesAuthority,
-            existingRows[0].SpeciesID
+            existingRow.SpeciesID
           ],
           transactionID
         );
         updatedCount += 1;
+
+        const newRow = {
+          ...existingRow,
+          SpeciesCode: speciesCode,
+          GenusID: speciesPayload.GenusID,
+          SpeciesName: speciesPayload.SpeciesName,
+          SubspeciesName: speciesPayload.SubspeciesName,
+          IDLevel: speciesPayload.IDLevel,
+          SpeciesAuthority: speciesPayload.SpeciesAuthority,
+          SubspeciesAuthority: speciesPayload.SubspeciesAuthority,
+          DeletedAt: null
+        };
+        const noOpUpdate =
+          existingRow.SpeciesCode === speciesCode &&
+          existingRow.GenusID === speciesPayload.GenusID &&
+          existingRow.SpeciesName === speciesPayload.SpeciesName &&
+          existingRow.SubspeciesName === speciesPayload.SubspeciesName &&
+          existingRow.IDLevel === speciesPayload.IDLevel &&
+          existingRow.SpeciesAuthority === speciesPayload.SpeciesAuthority &&
+          existingRow.SubspeciesAuthority === speciesPayload.SubspeciesAuthority &&
+          existingRow.DeletedAt === null;
+        if (!noOpUpdate) {
+          await recordMutation({
+            tx,
+            schema,
+            tableName: 'species',
+            recordID: existingRow.SpeciesID,
+            operation: ChangelogOperation.UPDATE,
+            oldRowState: existingRow,
+            newRowState: newRow,
+            changedBy,
+            plotID: null,
+            censusID: null
+          });
+        }
         continue;
       }
     }
@@ -284,7 +440,7 @@ export async function upsertSpeciesRows(
        VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL)`,
       [schema]
     );
-    await connectionManager.executeQuery(
+    const insertResult = await connectionManager.executeQuery(
       insertSQL,
       [
         speciesPayload.GenusID,
@@ -297,6 +453,21 @@ export async function upsertSpeciesRows(
       ],
       transactionID
     );
+    if (!insertResult?.insertId) {
+      throw new Error(`Species insert for SpeciesCode "${speciesCode}" did not return an insertId; cannot audit the new row.`);
+    }
+    const speciesID = Number(insertResult.insertId);
+    await recordMutation({
+      tx,
+      schema,
+      tableName: 'species',
+      recordID: speciesID,
+      operation: ChangelogOperation.INSERT,
+      newRowState: { SpeciesID: speciesID, SpeciesCode: speciesCode, ...speciesPayload, IsActive: 1, DeletedAt: null },
+      changedBy,
+      plotID: null,
+      censusID: null
+    });
     insertedCount += 1;
   }
 
@@ -320,7 +491,8 @@ export async function upsertPersonnelRows(
   rows: FileRow[],
   uploadMode: UploadMode,
   uploadSessionID: string | null,
-  transactionID: string
+  transactionID: string,
+  changedBy: string
 ): Promise<FixedDataProcessingResult> {
   if (!censusID) {
     throw new Error('CensusID is required for personnel uploads');
@@ -329,23 +501,78 @@ export async function upsertPersonnelRows(
   let insertedCount = 0;
   let updatedCount = 0;
   let skippedCount = 0;
+  const tx = toTxExecutor(connectionManager, transactionID);
 
   const replacesExistingRows = await claimReferenceTableReplacement(connectionManager, schema, uploadMode, uploadSessionID, transactionID);
   // See upsertAttributeRows: anything that is not this session's reset must match before writing.
   const rowsMayAlreadyExist = !replacesExistingRows;
 
   if (replacesExistingRows) {
-    // Remove all census-active links for this census
-    const deleteCapSQL = format(`DELETE FROM ??.censusactivepersonnel WHERE CensusID = ?`, [schema]);
-    await connectionManager.executeQuery(deleteCapSQL, [censusID], transactionID);
-    // Remove personnel who are no longer linked to any census
-    const deleteOrphanedSQL = format(
-      `DELETE p FROM ??.personnel p
+    // FOR UPDATE: locks this census's links until commit, for deleteCapturedRows below.
+    const activeCapRowsSQL = format(`SELECT * FROM ??.censusactivepersonnel WHERE CensusID = ? FOR UPDATE`, [schema]);
+    const activeCapRows = await connectionManager.executeQuery(activeCapRowsSQL, [censusID], transactionID);
+
+    await deleteCapturedRows(connectionManager, schema, 'censusactivepersonnel', 'CensusID = ?', [censusID], 'CAPID', activeCapRows, transactionID);
+    for (const deletedCapRow of activeCapRows) {
+      await recordMutation({
+        tx,
+        schema,
+        tableName: 'censusactivepersonnel',
+        recordID: Number(deletedCapRow.CAPID),
+        operation: ChangelogOperation.DELETE,
+        oldRowState: deletedCapRow,
+        changedBy,
+        plotID: null,
+        censusID
+      });
+    }
+
+    // Personnel orphaned by the cap delete above (no link left in ANY census).
+    // Selected after that delete, before this one, so the changelog records
+    // the row as it actually existed. FOR UPDATE locks the candidates.
+    const orphanedPersonnelSQL = format(
+      `SELECT p.* FROM ??.personnel p
        LEFT JOIN ??.censusactivepersonnel cap ON cap.PersonnelID = p.PersonnelID
-       WHERE cap.PersonnelID IS NULL AND p.IsActive = 1`,
+       WHERE cap.PersonnelID IS NULL AND p.IsActive = 1
+       FOR UPDATE`,
       [schema, schema]
     );
-    await connectionManager.executeQuery(deleteOrphanedSQL, [], transactionID);
+    const orphanedPersonnelRows = await connectionManager.executeQuery(orphanedPersonnelSQL, [], transactionID);
+
+    // Not deleteCapturedRows: "orphaned" is a join condition, not a single-table
+    // WHERE. Same exact-ID bounding; empty capture deletes nothing.
+    if (orphanedPersonnelRows.length > 0) {
+      const orphanedPersonnelIDs = orphanedPersonnelRows.map((row: Record<string, unknown>) => row.PersonnelID);
+      let orphanedDeletedCount = 0;
+      for (const batch of chunk(orphanedPersonnelIDs, DELETE_BATCH_SIZE)) {
+        const deleteOrphanedSQL = format(
+          `DELETE p FROM ??.personnel p
+           LEFT JOIN ??.censusactivepersonnel cap ON cap.PersonnelID = p.PersonnelID
+           WHERE cap.PersonnelID IS NULL AND p.IsActive = 1 AND p.PersonnelID IN (${buildInPlaceholders(batch.length)})`,
+          [schema, schema]
+        );
+        const deleteOrphanedResult = await connectionManager.executeQuery(deleteOrphanedSQL, batch, transactionID);
+        orphanedDeletedCount += deleteOrphanedResult?.affectedRows ?? 0;
+      }
+      if (orphanedDeletedCount !== orphanedPersonnelRows.length) {
+        throw new Error(
+          `Clean re-upload delete count mismatch for personnel: locked ${orphanedPersonnelRows.length} orphaned row(s) but deleted ${orphanedDeletedCount}.`
+        );
+      }
+    }
+    for (const deletedPersonnelRow of orphanedPersonnelRows) {
+      await recordMutation({
+        tx,
+        schema,
+        tableName: 'personnel',
+        recordID: Number(deletedPersonnelRow.PersonnelID),
+        operation: ChangelogOperation.DELETE,
+        oldRowState: deletedPersonnelRow,
+        changedBy,
+        plotID: null,
+        censusID
+      });
+    }
   }
 
   for (const row of rows) {
@@ -365,45 +592,76 @@ export async function upsertPersonnelRows(
       .toLowerCase()
       .trim();
 
-    const roleID = (
-      await handleUpsert<RoleResult>(
-        connectionManager,
-        schema,
-        'roles',
-        {
-          RoleName: normalizedRole,
-          RoleDescription: roleDescription
-        },
-        'RoleID',
-        transactionID
-      )
-    ).id;
+    const roleResult = await handleUpsert<RoleResult>(
+      connectionManager,
+      schema,
+      'roles',
+      {
+        RoleName: normalizedRole,
+        RoleDescription: roleDescription
+      },
+      'RoleID',
+      transactionID
+    );
+    const roleID = roleResult.id;
+    await auditHandleUpsertResult(connectionManager, schema, transactionID, 'roles', 'RoleID', roleResult, changedBy);
 
     if (rowsMayAlreadyExist) {
       const existingSQL = format(
-        `SELECT p.PersonnelID FROM ??.personnel p
+        `SELECT p.* FROM ??.personnel p
          WHERE LOWER(p.FirstName) = LOWER(?) AND LOWER(p.LastName) = LOWER(?) AND p.IsActive = 1
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
         [schema]
       );
       const existingRows = await connectionManager.executeQuery(existingSQL, [firstName, lastName], transactionID);
 
       if (existingRows.length > 0) {
-        const personnelID = Number(existingRows[0].PersonnelID);
+        const existingRow = existingRows[0];
+        const personnelID = Number(existingRow.PersonnelID);
         const updateSQL = format(`UPDATE ??.personnel SET FirstName = ?, LastName = ?, RoleID = ?, DeletedAt = NULL WHERE PersonnelID = ?`, [schema]);
         await connectionManager.executeQuery(updateSQL, [firstName, lastName, roleID, personnelID], transactionID);
-        const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
-        await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
+        await auditCensusActivePersonnelLink(connectionManager, schema, transactionID, censusID, personnelID, changedBy);
         updatedCount += 1;
+
+        const noOpUpdate =
+          existingRow.FirstName === firstName && existingRow.LastName === lastName && existingRow.RoleID === roleID && existingRow.DeletedAt === null;
+        if (!noOpUpdate) {
+          await recordMutation({
+            tx,
+            schema,
+            tableName: 'personnel',
+            recordID: personnelID,
+            operation: ChangelogOperation.UPDATE,
+            oldRowState: existingRow,
+            newRowState: { ...existingRow, FirstName: firstName, LastName: lastName, RoleID: roleID, DeletedAt: null },
+            changedBy,
+            plotID: null,
+            censusID
+          });
+        }
         continue;
       }
     }
 
     const insertSQL = format(`INSERT INTO ??.personnel (FirstName, LastName, RoleID, IsActive, DeletedAt) VALUES (?, ?, ?, 1, NULL)`, [schema]);
     const insertResult = await connectionManager.executeQuery(insertSQL, [firstName, lastName, roleID], transactionID);
+    if (!insertResult?.insertId) {
+      throw new Error(`Personnel insert for "${firstName} ${lastName}" did not return an insertId; cannot audit the new row.`);
+    }
     const personnelID = Number(insertResult.insertId);
-    const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
-    await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
+    await auditCensusActivePersonnelLink(connectionManager, schema, transactionID, censusID, personnelID, changedBy);
+    await recordMutation({
+      tx,
+      schema,
+      tableName: 'personnel',
+      recordID: personnelID,
+      operation: ChangelogOperation.INSERT,
+      newRowState: { PersonnelID: personnelID, FirstName: firstName, LastName: lastName, RoleID: roleID, IsActive: 1, DeletedAt: null },
+      changedBy,
+      plotID: null,
+      censusID
+    });
     insertedCount += 1;
   }
 

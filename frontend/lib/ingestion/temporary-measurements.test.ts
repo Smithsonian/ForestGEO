@@ -155,91 +155,181 @@ describe('cleanupPreviousFileUploads bounded-delete loop control', () => {
   const TEST_BATCH_ID = 'incoming-batch-0001';
   const TEST_PLOT_ID = 22;
   const TEST_CENSUS_ID = 32;
+  const TEST_CHANGED_BY = 'audit-test-user';
   const TEST_TRANSACTION_ID = 'tx-test';
 
-  const CM_DELETE_MARKER = 'DELETE FROM `forestgeo_testing`.coremeasurements';
+  // #507 rewrote the coremeasurements delete from a single `DELETE ... LIMIT n`
+  // per chunk into three statements per chunk — SELECT the chunk's own ids,
+  // audit them, then DELETE by id — so every chunk's audit rows and deleted
+  // rows are provably the same row set. These markers identify each of the
+  // three statements in the executeQuery call log.
+  const SELECT_IDS_MARKER = 'SELECT CoreMeasurementID FROM `forestgeo_testing`.coremeasurements';
+  const AUDIT_INSERT_MARKER = 'INSERT INTO `forestgeo_testing`.unifiedchangelog';
+  const CM_DELETE_MARKER = 'DELETE FROM `forestgeo_testing`.coremeasurements WHERE CoreMeasurementID IN';
   const NOTHING_DELETED = { affectedRows: 0 };
 
+  function makeIdsPage(count: number): number[] {
+    return Array.from({ length: count }, (_, index) => index + 1);
+  }
+
+  interface MockOptions {
+    /** Overrides the audit INSERT's result for a given page (0-indexed). Defaults to `{ affectedRows: page.length }`. */
+    auditResult?: (page: number[], pageIndex: number) => unknown;
+    /** Overrides the id-scoped DELETE's result for a given page (0-indexed). Defaults to `{ affectedRows: page.length }`. */
+    deleteResult?: (page: number[], pageIndex: number) => unknown;
+  }
+
   /**
-   * Drives the coremeasurements delete with a scripted sequence of server
-   * results and lets every other statement report an empty window, so each
-   * assertion is about the loop's reaction to ONE result shape.
+   * Drives the SELECT-ids -> audit -> DELETE sequence with a scripted list of
+   * id pages, one page per expected loop iteration. Every OTHER statement
+   * (measurement_error_log, failedmeasurements, uploadmetrics deletes) reports
+   * an empty window, so each assertion below is about the coremeasurements
+   * path's reaction to ONE page/result shape.
    */
-  function makeConnectionManager(coreMeasurementResults: unknown[]) {
-    const remaining = [...coreMeasurementResults];
+  function makeConnectionManager(idPages: number[][], options: MockOptions = {}) {
+    const remainingPages = [...idPages];
+    let lastPage: number[] = [];
+    let pageIndex = -1;
     const executeQuery = vi.fn(async (sql: string) => {
-      if (!String(sql).includes(CM_DELETE_MARKER)) return NOTHING_DELETED;
-      if (remaining.length === 0) {
-        throw new Error('bounded delete loop asked for more windows than the test scripted — it did not terminate');
+      const sqlString = String(sql);
+      if (sqlString.includes(SELECT_IDS_MARKER)) {
+        if (remainingPages.length === 0) {
+          throw new Error('bounded delete loop asked for more id pages than the test scripted — it did not terminate');
+        }
+        lastPage = remainingPages.shift()!;
+        pageIndex += 1;
+        return lastPage.map(id => ({ CoreMeasurementID: id }));
       }
-      return remaining.shift();
+      if (sqlString.includes(AUDIT_INSERT_MARKER)) {
+        return options.auditResult ? options.auditResult(lastPage, pageIndex) : { affectedRows: lastPage.length };
+      }
+      if (sqlString.includes(CM_DELETE_MARKER)) {
+        return options.deleteResult ? options.deleteResult(lastPage, pageIndex) : { affectedRows: lastPage.length };
+      }
+      return NOTHING_DELETED;
     });
     return { connectionManager: { executeQuery } as unknown as ConnectionManager, executeQuery };
   }
 
   function runCleanup(connectionManager: ConnectionManager) {
-    return cleanupPreviousFileUploads(connectionManager, TEST_SCHEMA, TEST_FILE_NAME, TEST_BATCH_ID, TEST_PLOT_ID, TEST_CENSUS_ID, TEST_TRANSACTION_ID);
+    return cleanupPreviousFileUploads(
+      connectionManager,
+      TEST_SCHEMA,
+      TEST_FILE_NAME,
+      TEST_BATCH_ID,
+      TEST_PLOT_ID,
+      TEST_CENSUS_ID,
+      TEST_CHANGED_BY,
+      TEST_TRANSACTION_ID
+    );
   }
 
   function countCoreMeasurementDeletes(executeQuery: ReturnType<typeof vi.fn>): number {
     return executeQuery.mock.calls.filter(call => String(call[0]).includes(CM_DELETE_MARKER)).length;
   }
 
-  it('keeps requesting windows while the server keeps filling the limit, then stops on the first short window', async () => {
+  function countAuditInserts(executeQuery: ReturnType<typeof vi.fn>): number {
+    return executeQuery.mock.calls.filter(call => String(call[0]).includes(AUDIT_INSERT_MARKER)).length;
+  }
+
+  it('keeps requesting pages while the server keeps filling the limit, then stops on the first short page', async () => {
     const { connectionManager, executeQuery } = makeConnectionManager([
-      { affectedRows: CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE },
-      { affectedRows: CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE },
-      { affectedRows: CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE - 1 }
+      makeIdsPage(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE),
+      makeIdsPage(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE),
+      makeIdsPage(CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE - 1)
     ]);
 
     const deleted = await runCleanup(connectionManager);
 
-    expect(deleted, 'returned total must be the sum of every window, not just the last').toBe(
+    expect(deleted, 'returned total must be the sum of every page, not just the last').toBe(
       CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE * 2 + (CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE - 1)
     );
-    expect(countCoreMeasurementDeletes(executeQuery)).toBe(3);
+    expect(countCoreMeasurementDeletes(executeQuery), 'one DELETE per page').toBe(3);
+    expect(countAuditInserts(executeQuery), 'one audit INSERT per page, matching the DELETE count 1:1').toBe(3);
   });
 
-  it('stops after one window when the very first window is short', async () => {
-    const { connectionManager, executeQuery } = makeConnectionManager([{ affectedRows: 1 }]);
+  it('stops after one page when the very first page is short', async () => {
+    const { connectionManager, executeQuery } = makeConnectionManager([makeIdsPage(1)]);
 
     expect(await runCleanup(connectionManager)).toBe(1);
     expect(countCoreMeasurementDeletes(executeQuery)).toBe(1);
+    expect(countAuditInserts(executeQuery)).toBe(1);
   });
 
-  it('rejects a missing affectedRows instead of silently reporting an empty census', async () => {
-    // Pre-fix this coerced to 0: the loop exited after one window and the caller
-    // was told the census had been fully replaced when nothing had been read.
-    const { connectionManager } = makeConnectionManager([{}]);
+  it('rejects a missing DELETE affectedRows instead of silently reporting an empty census', async () => {
+    // Pre-#507-chunking this coerced to 0: the loop exited after one window and
+    // the caller was told the census had been fully replaced when nothing had
+    // been read. The audit INSERT for this page must still have been attempted
+    // and succeeded BEFORE the unreadable DELETE result is surfaced — the audit
+    // runs first and this test's default auditResult reports it as fully
+    // successful, so the failure is unambiguously the DELETE step's.
+    const { connectionManager } = makeConnectionManager([makeIdsPage(1)], { deleteResult: () => ({}) });
 
     await expect(runCleanup(connectionManager)).rejects.toThrow(/could not read a row count/i);
   });
 
-  it('rejects a non-numeric affectedRows instead of looping forever on NaN', async () => {
+  it('rejects a non-numeric DELETE affectedRows instead of looping forever on NaN', async () => {
     // `Number('many')` is NaN and `NaN < CHUNK_SIZE` is false, so the pre-fix
     // loop re-issued the same DELETE without end. The scripted mock throws a
-    // distinguishable error if a second window is requested.
-    const { connectionManager } = makeConnectionManager([{ affectedRows: 'many' }]);
+    // distinguishable error if a second page is requested.
+    const { connectionManager } = makeConnectionManager([makeIdsPage(1)], { deleteResult: () => ({ affectedRows: 'many' }) });
 
     await expect(runCleanup(connectionManager)).rejects.toThrow(/could not read a row count/i);
   });
 
-  it('rejects a negative affectedRows', async () => {
-    const { connectionManager } = makeConnectionManager([{ affectedRows: -1 }]);
+  it('rejects a negative DELETE affectedRows', async () => {
+    const { connectionManager } = makeConnectionManager([makeIdsPage(1)], { deleteResult: () => ({ affectedRows: -1 }) });
 
     await expect(runCleanup(connectionManager)).rejects.toThrow(/could not read a row count/i);
   });
 
-  it('rejects a fractional affectedRows', async () => {
-    const { connectionManager } = makeConnectionManager([{ affectedRows: 1.5 }]);
+  it('rejects a fractional DELETE affectedRows', async () => {
+    const { connectionManager } = makeConnectionManager([makeIdsPage(2)], { deleteResult: () => ({ affectedRows: 1.5 }) });
 
     await expect(runCleanup(connectionManager)).rejects.toThrow(/could not read a row count/i);
   });
 
-  it('accepts an exactly-zero window as a legitimate empty result', async () => {
-    const { connectionManager, executeQuery } = makeConnectionManager([{ affectedRows: 0 }]);
+  it('refuses to delete when the audit INSERT writes fewer rows than ids selected (#507 integrity guard)', async () => {
+    // The audit must never under-report what is about to be deleted — a
+    // silent mismatch here is exactly the "Recent Changes missed a write"
+    // bug #507 exists to close, now inverted: the data would disappear
+    // without a trace. The DELETE must never even run in this case.
+    const { connectionManager, executeQuery } = makeConnectionManager([makeIdsPage(3)], {
+      auditResult: page => ({ affectedRows: page.length - 1 })
+    });
+
+    await expect(runCleanup(connectionManager)).rejects.toThrow(/audit mismatch/i);
+    expect(countCoreMeasurementDeletes(executeQuery), 'must not delete rows the audit failed to fully record').toBe(0);
+  });
+
+  it('refuses to report success when the DELETE removes fewer rows than were audited (#507 integrity guard)', async () => {
+    // The inverse mismatch: the audit trail would then describe a deletion
+    // that did not actually happen for every row.
+    const { connectionManager } = makeConnectionManager([makeIdsPage(3)], {
+      deleteResult: page => ({ affectedRows: page.length - 1 })
+    });
+
+    await expect(runCleanup(connectionManager)).rejects.toThrow(/audit trail and the data would disagree/i);
+  });
+
+  it('accepts an exactly-empty page as a legitimate empty result without issuing a wasted audit or DELETE', async () => {
+    // An empty SELECT means there is nothing left to remove: the loop must stop
+    // immediately rather than running an audit INSERT and a DELETE for zero rows.
+    const { connectionManager, executeQuery } = makeConnectionManager([[]]);
 
     expect(await runCleanup(connectionManager)).toBe(0);
-    expect(countCoreMeasurementDeletes(executeQuery)).toBe(1);
+    expect(countCoreMeasurementDeletes(executeQuery)).toBe(0);
+    expect(countAuditInserts(executeQuery)).toBe(0);
+  });
+
+  it('attributes every audit row to the caller-supplied changedBy', async () => {
+    const { connectionManager, executeQuery } = makeConnectionManager([makeIdsPage(2)]);
+
+    await runCleanup(connectionManager);
+
+    const auditCall = executeQuery.mock.calls.find(call => String(call[0]).includes(AUDIT_INSERT_MARKER));
+    expect(auditCall, 'audit INSERT was never issued').toBeDefined();
+    const [, auditParams] = auditCall!;
+    expect(auditParams[0]).toBe(TEST_CHANGED_BY);
   });
 });

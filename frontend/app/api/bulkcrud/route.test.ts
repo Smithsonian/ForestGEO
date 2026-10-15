@@ -186,6 +186,7 @@ describe('bulkcrud POST route', () => {
     execSpy.mockResolvedValueOnce([]); // helper: SET caller-owns-transaction flag
     execSpy.mockResolvedValueOnce({}); // CALL bulkingestionprocess
     execSpy.mockResolvedValueOnce([]); // helper: CLEAR caller-owns-transaction flag
+    execSpy.mockResolvedValueOnce({ affectedRows: 2 }); // recordCommittedCoreMeasurementsAudit INSERT ... SELECT
 
     const rows = {
       r1: {
@@ -231,7 +232,7 @@ describe('bulkcrud POST route', () => {
     expect(body.message).toMatch(/Insert to SQL successful/i);
 
     expect(beginSpy).toHaveBeenCalledTimes(1);
-    expect(execSpy).toHaveBeenCalledTimes(4);
+    expect(execSpy).toHaveBeenCalledTimes(5);
     expect(commitSpy).toHaveBeenCalledWith('tx-1');
     expect(rollbackSpy).not.toHaveBeenCalled();
     expect(closeSpy).toHaveBeenCalledTimes(1);
@@ -255,7 +256,119 @@ describe('bulkcrud POST route', () => {
     expect(clearFlagSQL).toBe(CLEAR_CALLER_TRANSACTION_SQL);
     expect(clearFlagTransactionID).toBe('tx-1');
 
+    // #507: the CALL's committed coremeasurements rows are audited to
+    // unifiedchangelog, inside the SAME transaction, before commit.
+    const [auditSQL, auditParams, auditTransactionID] = execSpy.mock.calls[4];
+    expect(String(auditSQL)).toMatch(/INSERT INTO `forestgeo_testing`\.unifiedchangelog/i);
+    expect(String(auditSQL)).toMatch(/FROM `forestgeo_testing`\.coremeasurements/i);
+    expect(auditParams).toEqual(['bulkcrud-test@forestgeo.test', 42, 7, 'sample_bulk_insert.csv', 'test-batch-id']);
+    expect(auditTransactionID).toBe('tx-1');
+
     expect(insertOrUpdate).not.toHaveBeenCalled();
+  });
+
+  /**
+   * @test #507 regression: a client that forges a `user` field in the request
+   * body must NOT have that value recorded as ChangedBy on the coremeasurements
+   * audit row. The route has no `user` input at all — ChangedBy must come only
+   * from the authenticated session resolved via auth().
+   */
+  it('measurementssummary path: audits with the authenticated session identity, ignoring a forged body.user field', async () => {
+    const instance = (ConnectionManager as any).getInstance();
+    vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-forge');
+    const execSpy = vi.spyOn(instance, 'executeQuery');
+    execSpy.mockResolvedValueOnce({ affectedRows: 1 }); // INSERT into temporarymeasurements
+    execSpy.mockResolvedValueOnce([]); // SET caller-owns-transaction flag
+    execSpy.mockResolvedValueOnce({}); // CALL bulkingestionprocess
+    execSpy.mockResolvedValueOnce([]); // CLEAR caller-owns-transaction flag
+    execSpy.mockResolvedValueOnce({ affectedRows: 1 }); // audit INSERT ... SELECT
+
+    const req = makeRequest({
+      gridType: 'measurementssummary',
+      schema: 'forestgeo_testing',
+      plot: { plotID: 42 },
+      census: { dateRanges: [{ censusID: 7 }] },
+      // Forged client-supplied identity — must never reach ChangedBy.
+      user: 'attacker@evil.test',
+      fileRowSet: {
+        r1: { tag: 'A-1', stemtag: 'S1', spcode: 'ABCD', quadrat: 'Q1', lx: 1, ly: 1, dbh: 1, hom: 130, date: '2025-08-01', codes: '', description: '' }
+      }
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(HTTPResponses.OK);
+
+    const [, auditParams] = execSpy.mock.calls[4];
+    expect(auditParams[0]).toBe('bulkcrud-test@forestgeo.test');
+    expect(auditParams[0]).not.toBe('attacker@evil.test');
+  });
+
+  /**
+   * @test #507 regression: if the coremeasurements audit write itself fails
+   * (e.g. a deadlock on unifiedchangelog), the whole transaction — the staged
+   * rows AND the procedure's committed coremeasurements rows — must roll back
+   * together rather than silently committing data with no audit trail.
+   */
+  it('measurementssummary path: rolls back the whole transaction when the coremeasurements audit write fails', async () => {
+    const instance = (ConnectionManager as any).getInstance();
+    vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-audit-fail');
+    const execSpy = vi.spyOn(instance, 'executeQuery');
+    const rollbackSpy = vi.spyOn(instance, 'rollbackTransaction').mockResolvedValueOnce(undefined);
+    const commitSpy = vi.spyOn(instance, 'commitTransaction');
+    const closeSpy = vi.spyOn(instance, 'closeConnection');
+
+    execSpy.mockResolvedValueOnce({ affectedRows: 1 }); // INSERT into temporarymeasurements
+    execSpy.mockResolvedValueOnce([]); // SET caller-owns-transaction flag
+    execSpy.mockResolvedValueOnce({}); // CALL bulkingestionprocess
+    execSpy.mockResolvedValueOnce([]); // CLEAR caller-owns-transaction flag
+    execSpy.mockRejectedValueOnce(new Error('unifiedchangelog deadlock')); // audit INSERT fails
+
+    const res = await POST(
+      makeRequest({
+        gridType: 'measurementssummary',
+        schema: 'forestgeo_testing',
+        plot: { plotID: 42 },
+        census: { dateRanges: [{ censusID: 7 }] },
+        fileRowSet: {
+          r1: { tag: 'A-1', stemtag: 'S1', spcode: 'ABCD', quadrat: 'Q1', lx: 1, ly: 1, dbh: 1, hom: 130, date: '2025-08-01', codes: '', description: '' }
+        }
+      })
+    );
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/Failed to record INSERT audit for coremeasurements/i);
+    expect(body.error).toMatch(/unifiedchangelog deadlock/i);
+
+    expect(commitSpy).not.toHaveBeenCalled();
+    expect(rollbackSpy).toHaveBeenCalledWith('tx-audit-fail');
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * @test #507: a measurement upload with no plotID/censusID scope cannot be
+   * audited (recordCommittedCoreMeasurementsAudit requires both). This must be
+   * rejected BEFORE beginTransaction so the early return does not leave an
+   * un-committed, un-rolled-back transaction open against the pool.
+   */
+  it('measurementssummary path: 400s on missing plotID/censusID without opening a transaction', async () => {
+    const instance = (ConnectionManager as any).getInstance();
+    const beginSpy = vi.spyOn(instance, 'beginTransaction');
+
+    const res = await POST(
+      makeRequest({
+        gridType: 'measurementssummary',
+        schema: 'forestgeo_testing',
+        plot: {},
+        census: { dateRanges: [{}] },
+        fileRowSet: { r1: { tag: 'A-1' } }
+      })
+    );
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const body = await res.json();
+    expect(body.code).toBe('MEASUREMENT_SCOPE_REQUIRED');
+    expect(beginSpy).not.toHaveBeenCalled();
   });
 
   /**
@@ -301,7 +414,11 @@ describe('bulkcrud POST route', () => {
 
     // For generic path, executeQuery may not be used here
     expect(insertOrUpdate).toHaveBeenCalledTimes(2);
-    // Validate the first call's props
+    // Validate the first call's props. #507: fullName must be the SERVER-resolved
+    // session identity (never a client-supplied value — this route has no `user`
+    // field for a client to forge), and transactionID must be the ACTIVE
+    // transaction this request's beginTransaction() opened, so insertOrUpdate's
+    // row write and rollback live in the same transaction as everything else.
     const [firstProps] = (insertOrUpdate as any).mock.calls[0];
     expect(firstProps).toMatchObject({
       schema: 'forestgeo_testing',
@@ -310,8 +427,12 @@ describe('bulkcrud POST route', () => {
       plot: { plotID: 99 },
       census: { dateRanges: [{ censusID: 5 }] },
       quadratID: undefined,
-      fullName: undefined
+      transactionID: 'tx-2',
+      fullName: 'bulkcrud-test@forestgeo.test'
     });
+    // Every row in the batch shares the one active transaction.
+    const [secondProps] = (insertOrUpdate as any).mock.calls[1];
+    expect(secondProps.transactionID).toBe('tx-2');
 
     expect(beginSpy).toHaveBeenCalledTimes(1);
     expect(commitSpy).toHaveBeenCalledWith('tx-2');
@@ -319,6 +440,32 @@ describe('bulkcrud POST route', () => {
     expect(closeSpy).toHaveBeenCalledTimes(1);
     // execSpy may or may not be called; we don’t assert a count here
     void execSpy;
+  });
+
+  /**
+   * @test #507 regression: the generic (non-measurement) path must ignore a
+   * client-forged `user`/identity field and use the authenticated session for
+   * `fullName`, exactly like the measurement path.
+   */
+  it('generic path: ignores a forged body field and uses the authenticated session identity for fullName', async () => {
+    const instance = (ConnectionManager as any).getInstance();
+    vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-generic-forge');
+
+    const req = makeRequest({
+      gridType: 'species',
+      schema: 'forestgeo_testing',
+      plot: { plotID: 1 },
+      census: { dateRanges: [{ censusID: 1 }] },
+      user: 'attacker@evil.test',
+      fileRowSet: { r1: { foo: 1 } }
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(HTTPResponses.OK);
+
+    const [props] = (insertOrUpdate as any).mock.calls[0];
+    expect(props.fullName).toBe('bulkcrud-test@forestgeo.test');
+    expect(props.fullName).not.toBe('attacker@evil.test');
   });
 
   /**
