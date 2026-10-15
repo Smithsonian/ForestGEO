@@ -23,7 +23,7 @@ import type { Pool } from 'mysql2/promise';
 import ailogger from '@/ailogger';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
-import { assertBlobStorageReady, getContainerClient } from '@/config/macros/azurestorage';
+import { getContainerClient } from '@/config/macros/azurestorage';
 import { FileRow, SourceFormat } from '@/config/macros/formdetails';
 import { generateShortBatchID } from '@/config/utils';
 import { normalizeUploadMode } from '@/config/uploadmodes';
@@ -49,7 +49,7 @@ import { deleteUnresolvedRowsForBatchFamily, recordInvalidRows } from '@/lib/upl
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { countStagedRows, MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
 import { runCensusValidations } from '@/lib/uploads/validation-orchestrator';
-import { BlobStorageReadinessError, NonRetryableJobError, WorkerLeaseLostError } from './errors';
+import { NonRetryableJobError, WorkerLeaseLostError } from './errors';
 import {
   assignFileBatchID,
   claimBackgroundJobForWorker,
@@ -109,10 +109,7 @@ export const CHUNK_EVENT_SAMPLE_RATE = 10;
 
 export interface WorkerDeps {
   fetchFileText: (file: BackgroundJobFileRecord) => Promise<string>;
-  assertBlobStorageReady: () => void | Promise<void>;
 }
-
-let lastBlobReadinessWarningAt = 0;
 
 /**
  * Claims and runs a background upload job. A non-claimable job (wrong status,
@@ -122,30 +119,6 @@ let lastBlobReadinessWarningAt = 0;
  */
 export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promise<void> {
   const catalogPool = await getPoolMonitorInstance().getUsablePool();
-  // Determine the server-owned pipeline before applying the blob-only gate.
-  // This keeps staged ArcGIS import sessions independent of Azure blob access.
-  const candidate = await getBackgroundJob(catalogPool, jobID);
-  if (!candidate) return;
-  let candidatePipeline: JobPipeline | null = null;
-  try {
-    candidatePipeline = resolveJobPipeline(candidate);
-  } catch {
-    // Preserve the existing fenced terminal handling for malformed jobs.
-  }
-  const workerDeps = deps ?? { fetchFileText: downloadBlobText, assertBlobStorageReady };
-  if (candidatePipeline === 'measurements_csv') {
-    try {
-      await workerDeps.assertBlobStorageReady();
-    } catch {
-      if (Date.now() - lastBlobReadinessWarningAt > 60_000) {
-        lastBlobReadinessWarningAt = Date.now();
-        const readinessError = new BlobStorageReadinessError();
-        ailogger.error('upload.worker.readiness_unavailable', readinessError, { code: readinessError.code });
-      }
-      // No claim was made, so retry budget and job state remain untouched.
-      return;
-    }
-  }
   // REQUIRED claim invariant (see claimBackgroundJobForWorker): worker IDs must
   // be unique per claim attempt or the confirm-then-throw fencing is racy.
   const workerID = `${process.pid}:${randomUUID()}`;
@@ -161,7 +134,7 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
     connectionManager: ConnectionManager.getInstance(),
     job,
     workerID,
-    deps: workerDeps,
+    deps: deps ?? { fetchFileText: downloadBlobText },
     sessionID: null,
     leaseLost: false,
     cancelRequested: false,
@@ -193,7 +166,6 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
     ctx.sessionID = await registerUploadSession(ctx);
 
     const pipeline = resolveJobPipeline(job);
-    if (candidatePipeline !== null && candidatePipeline !== pipeline) throw new NonRetryableJobError('Upload job pipeline changed while being claimed.');
     if (pipeline === 'arcgis_xlsx') {
       await runArcgisPipeline(ctx);
     } else {
@@ -627,7 +599,7 @@ async function releaseUploadSession(ctx: WorkerRunContext, completed: boolean): 
 
 type JobPipeline = 'measurements_csv' | 'arcgis_xlsx';
 
-function resolveJobPipeline(job: Pick<BackgroundJobWithDetails, 'formType' | 'sourceFormat'>): JobPipeline {
+function resolveJobPipeline(job: BackgroundJobWithDetails): JobPipeline {
   if (isAllowedAsyncPipeline(job.formType, job.sourceFormat)) {
     return job.sourceFormat === SourceFormat.arcgis_xlsx ? 'arcgis_xlsx' : 'measurements_csv';
   }

@@ -505,7 +505,6 @@ describe('provisioned-site lifecycle', () => {
   /** Blob access is dependency-injected, so no Azure call happens. */
   function measurementFixtureDeps(): WorkerDeps {
     return {
-      assertBlobStorageReady: () => undefined,
       fetchFileText: async (file: BackgroundJobFileRecord) => {
         if (file.fileName !== MEASUREMENT_FILE_NAME) throw new Error(`[test deps] no fixture text for ${file.fileName}`);
         return MEASUREMENT_CSV;

@@ -330,7 +330,6 @@ describe('runJobIfClaimable — integration', () => {
 
   function healthyDeps(callLog?: string[]): WorkerDeps {
     return {
-      assertBlobStorageReady: () => undefined,
       fetchFileText: async (file: BackgroundJobFileRecord) => {
         callLog?.push(file.fileName);
         const text = FIXTURE_TEXTS[file.fileName];
@@ -398,22 +397,6 @@ describe('runJobIfClaimable — integration', () => {
   // 1. Happy path
   // -------------------------------------------------------------------------
 
-  it('leaves a job and retry budget untouched when blob configuration is unavailable', async () => {
-    const jobID = await createTwoFileJob();
-    await runJobIfClaimable(jobID, {
-      assertBlobStorageReady: () => {
-        throw new Error('synthetic malformed storage config');
-      },
-      fetchFileText: async () => {
-        throw new Error('must not claim or read');
-      }
-    });
-    const job = await getBackgroundJob(catalogPool, jobID);
-    expect(job?.status).toBe('queued');
-    expect(job?.retryCount).toBe(0);
-    expect(job?.workerID).toBeNull();
-  }, 120000);
-
   it('does not attach a prior setup timeout to a later blob failure', async () => {
     const jobID = await createTwoFileJob();
     await insertStagedTempRow(FILE1_NAME, await batchIDForFile(jobID, FILE1_NAME), 'timeout-row', '1-1', 12.3);
@@ -436,7 +419,6 @@ describe('runJobIfClaimable — integration', () => {
 
     await setNextAttemptPast(jobID);
     await runJobIfClaimable(jobID, {
-      assertBlobStorageReady: () => undefined,
       fetchFileText: async () => {
         throw new Error('later blob outage');
       }
@@ -516,7 +498,6 @@ describe('runJobIfClaimable — integration', () => {
     const FETCH_FAILURE_MESSAGE = 'simulated blob outage for file two';
 
     const failingOnFile2: WorkerDeps = {
-      assertBlobStorageReady: () => undefined,
       fetchFileText: async file => {
         if (file.fileName === FILE2_NAME) throw new Error(FETCH_FAILURE_MESSAGE);
         return FIXTURE_TEXTS[file.fileName];
@@ -581,7 +562,6 @@ describe('runJobIfClaimable — integration', () => {
     const rejectedRows = Array.from({ length: 5 }, (_, i) => `R${i + 1},1,ACERRU,,${i + 1}.5,2.5,10.5,1.3,${MEASUREMENT_DATE},A`);
     const csv = `${FILE1_CSV}\n${rejectedRows.join('\n')}`;
     await runJobIfClaimable(jobID, {
-      assertBlobStorageReady: () => undefined,
       fetchFileText: async file => {
         if (file.fileName === FILE2_NAME) throw new Error('interrupt after file one');
         return csv;
@@ -591,7 +571,6 @@ describe('runJobIfClaimable — integration', () => {
     expect(await fetchRejectIDs(FILE1_NAME)).toHaveLength(6);
     await setNextAttemptPast(jobID);
     await runJobIfClaimable(jobID, {
-      assertBlobStorageReady: () => undefined,
       fetchFileText: async file => (file.fileName === FILE1_NAME ? csv : FIXTURE_TEXTS[file.fileName])
     });
     expect(await fetchRejectIDs(FILE1_NAME)).toHaveLength(6);
@@ -604,7 +583,6 @@ describe('runJobIfClaimable — integration', () => {
   it('fails permanently after UPLOAD_JOB_MAX_RETRIES transitions with always-failing deps', async () => {
     const jobID = await createTwoFileJob();
     const alwaysFailing: WorkerDeps = {
-      assertBlobStorageReady: () => undefined,
       fetchFileText: async () => {
         throw new Error('persistent blob outage');
       }
@@ -638,7 +616,6 @@ describe('runJobIfClaimable — integration', () => {
     const jobID = await createTwoFileJob();
 
     const cancellingDeps: WorkerDeps = {
-      assertBlobStorageReady: () => undefined,
       fetchFileText: async file => {
         if (file.fileName === FILE2_NAME) {
           // User cancels while the worker is mid-run (file 1 already completed).
@@ -729,7 +706,6 @@ describe('runJobIfClaimable — integration', () => {
     // Attempt 1: file 1 fully completes; file 2's fetch crashes AFTER its
     // BatchID was durably assigned in the catalog.
     await runJobIfClaimable(jobID, {
-      assertBlobStorageReady: () => undefined,
       fetchFileText: async file => {
         if (file.fileName === FILE2_NAME) throw new Error('simulated crash after file 2 batch assignment');
         return FIXTURE_TEXTS[file.fileName];
@@ -846,7 +822,6 @@ describe('runJobIfClaimable — integration', () => {
     const jobID = await createTwoFileJob();
 
     const reclaimedDuringFetch: WorkerDeps = {
-      assertBlobStorageReady: () => undefined,
       fetchFileText: async file => {
         if (file.fileName === FILE1_NAME) {
           // Simulate the sweeper deciding this worker's lease went stale.
@@ -887,7 +862,6 @@ describe('runJobIfClaimable — integration', () => {
     // the attempt halts at file 2's fetch so file 1's real post-ingest state
     // (ingested rows, recorded reject, completed uploadmetrics) exists.
     await runJobIfClaimable(jobID, {
-      assertBlobStorageReady: () => undefined,
       fetchFileText: async file => {
         if (file.fileName === FILE2_NAME) throw new Error('halt before file 2 to isolate file 1 state');
         return FIXTURE_TEXTS[file.fileName];

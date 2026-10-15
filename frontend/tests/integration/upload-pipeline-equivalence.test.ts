@@ -533,7 +533,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
       TEST_USER
     );
 
-    const deps: WorkerDeps = { assertBlobStorageReady: () => undefined, fetchFileText: async () => FIXTURE_CSV };
+    const deps: WorkerDeps = { fetchFileText: async () => FIXTURE_CSV };
     await runJobIfClaimable(job.jobID, deps);
 
     const finished = await getBackgroundJob(catalogPool, job.jobID);

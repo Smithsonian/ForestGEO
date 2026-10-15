@@ -9,12 +9,14 @@ export function getBlobServiceClient(): BlobServiceClient {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   if (!storageAccountConnectionString) {
     const errorMsg = 'AZURE_STORAGE_CONNECTION_STRING environment variable is not set';
+    ailogger.error(errorMsg);
     throw new Error(errorMsg);
   }
 
   // Validate connection string format before attempting to use it
   if (!storageAccountConnectionString.includes('AccountName=') || !storageAccountConnectionString.includes('AccountKey=')) {
     const errorMsg = 'AZURE_STORAGE_CONNECTION_STRING appears to be invalid (missing AccountName or AccountKey)';
+    ailogger.error(errorMsg);
     throw new Error(errorMsg);
   }
 
@@ -22,17 +24,14 @@ export function getBlobServiceClient(): BlobServiceClient {
   try {
     // BlobServiceClient.fromConnectionString throws on invalid connection string
     blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
-  } catch {
-    // SDK exceptions can include the connection string and account key.
-    throw new Error('AZURE_STORAGE_CONNECTION_STRING is malformed');
+  } catch (error: any) {
+    const errorMsg = `Failed to create BlobServiceClient: ${error.message}`;
+    ailogger.error(errorMsg);
+    throw new Error(errorMsg);
   }
 
+  ailogger.info('blob service client created & connected');
   return blobServiceClient;
-}
-
-/** Validate local configuration and construct the SDK client without network access. */
-export function assertBlobStorageReady(): void {
-  getBlobServiceClient();
 }
 
 export async function getContainerClient(containerName: string, options: GetContainerClientOptions = {}): Promise<ContainerClient> {
@@ -56,9 +55,7 @@ export async function getContainerClient(containerName: string, options: GetCont
       ailogger.info(`Container '${containerName.toLowerCase()}' already exists`);
     }
   } catch (error: any) {
-    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : undefined;
-    const safeCode = typeof error?.code === 'string' && /^[A-Za-z0-9_]{1,60}$/.test(error.code) ? error.code : undefined;
-    const errorMsg = `Failed to access blob container${statusCode ? ` (HTTP ${statusCode})` : ''}${safeCode ? ` [${safeCode}]` : ''}`;
+    const errorMsg = `Failed to create/access container '${containerName.toLowerCase()}': ${error.message}`;
     ailogger.error(errorMsg);
     throw new Error(errorMsg);
   }

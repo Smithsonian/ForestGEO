@@ -39,7 +39,7 @@ vi.mock('@/lib/db/connectionmanager', () => ({
     })
   }
 }));
-vi.mock('@/config/macros/azurestorage', () => ({ assertBlobStorageReady: vi.fn(), getContainerClient: vi.fn() }));
+vi.mock('@/config/macros/azurestorage', () => ({ getContainerClient: vi.fn() }));
 vi.mock('@/ailogger', () => ({ default: mocks.logger }));
 vi.mock('@/lib/background-jobs/repository', () => ({
   getBackgroundJob: mocks.getBackgroundJob,
@@ -153,7 +153,7 @@ describe('optional setup diagnostic persistence', () => {
           finishWrite = resolve;
         })
     );
-    await runJobIfClaimable(72, { assertBlobStorageReady: vi.fn(), fetchFileText: mocks.fetch });
+    await runJobIfClaimable(72, { fetchFileText: mocks.fetch });
     expect(mocks.complete).toHaveBeenCalledOnce();
     expect(mocks.recordDiagnostic).toHaveBeenCalledOnce();
     expect(mocks.recordDiagnostic.mock.calls[0][2]).toMatchObject({
@@ -171,7 +171,7 @@ describe('optional setup diagnostic persistence', () => {
       throw timeout;
     });
 
-    await runJobIfClaimable(72, { assertBlobStorageReady: vi.fn(), fetchFileText: mocks.fetch });
+    await runJobIfClaimable(72, { fetchFileText: mocks.fetch });
 
     expect(mocks.complete).not.toHaveBeenCalled();
     expect(mocks.retry).toHaveBeenCalledOnce();
