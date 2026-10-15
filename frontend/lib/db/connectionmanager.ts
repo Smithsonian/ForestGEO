@@ -2,6 +2,7 @@
 import '@/lib/connectionlogger';
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
+import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
 import { getConn, killQueryOnThread, QueryTimeoutError, runQuery } from '@/lib/db/primitives';
 import { v4 as uuidv4 } from 'uuid';
 import { patchConnectionManager, flushTransactionChangelog, discardTransactionChangelog } from '@/lib/connectionlogger';
@@ -120,19 +121,6 @@ class ObservableMap<K, V> extends Map<K, V> {
       '[transactionConnections] current:',
       Array.from(this.entries()).map(([id, conn]) => ({ id, threadId: (conn as PoolConnectionWithThreadId).threadId }))
     );
-  }
-}
-
-export class TransactionCallbackTimeoutError extends Error {
-  readonly code = 'TRANSACTION_CALLBACK_TIMEOUT';
-  readonly transactionId: string;
-  readonly timeoutMs: number;
-
-  constructor(transactionId: string, timeoutMs: number) {
-    super(`Transaction ${transactionId} timed out after ${timeoutMs}ms`);
-    this.name = 'TransactionCallbackTimeoutError';
-    this.transactionId = transactionId;
-    this.timeoutMs = timeoutMs;
   }
 }
 
@@ -934,4 +922,5 @@ class ConnectionManager {
 
 patchConnectionManager(ConnectionManager.getInstance());
 
+export { TransactionCallbackTimeoutError } from './transactionerrors';
 export default ConnectionManager;

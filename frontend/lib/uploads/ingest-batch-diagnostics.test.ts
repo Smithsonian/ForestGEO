@@ -2,10 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ manager: null as any, timeout: null as any }));
 
-vi.mock('@/lib/db/connectionmanager', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/db/connectionmanager')>('@/lib/db/connectionmanager');
-  return { ...actual, default: { getInstance: () => state.manager } };
-});
+vi.mock('@/lib/db/connectionmanager', () => ({ default: { getInstance: () => state.manager } }));
 vi.mock('@/lib/db/sqlsecurity', () => ({ safeFormatQuery: (_schema: string, sql: string) => sql.replace(/\?\?/g, 'test_schema') }));
 vi.mock('@/lib/failedinitialcensusrecovery', () => ({ shouldRecoverFailedInitialCensus: () => false }));
 vi.mock('@/lib/batchfailuretransfer', () => ({ moveTemporaryBatchToFailedMeasurements: vi.fn() }));
@@ -16,7 +13,7 @@ vi.mock('@/lib/db/primitives', () => ({
   isKilledStatementError: () => false
 }));
 
-import { TransactionCallbackTimeoutError } from '@/lib/db/connectionmanager';
+import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
 import { ingestBatch, SetupCallbackTimeoutError } from './ingest-batch';
 
 describe('ingestBatch setup diagnostics', () => {

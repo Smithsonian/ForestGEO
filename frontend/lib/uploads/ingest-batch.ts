@@ -24,7 +24,8 @@
  */
 
 import crypto from 'crypto';
-import ConnectionManager, { TransactionCallbackTimeoutError } from '@/lib/db/connectionmanager';
+import ConnectionManager from '@/lib/db/connectionmanager';
+import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';

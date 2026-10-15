@@ -62,8 +62,7 @@ const sharedState = vi.hoisted(() => ({
 // ConnectionManager mock — routes every DB call (including the stored procedure
 // CALL, withTransaction, and GET_LOCK application locking) to the shared real
 // MySQL connection so the production sequence runs against real MySQL state.
-vi.mock('@/lib/db/connectionmanager', async () => {
-  const { TransactionCallbackTimeoutError } = await vi.importActual<typeof import('@/lib/db/connectionmanager')>('@/lib/db/connectionmanager');
+vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
@@ -117,7 +116,7 @@ vi.mock('@/lib/db/connectionmanager', async () => {
     cleanupStaleTransactions: async () => undefined,
     closeConnection: async () => undefined
   };
-  return { TransactionCallbackTimeoutError, default: { getInstance: () => manager } };
+  return { default: { getInstance: () => manager } };
 });
 
 vi.mock('@/ailogger', () => ({

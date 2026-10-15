@@ -760,6 +760,11 @@ describe('ConnectionManager typed transaction timeout', () => {
     expect(timeoutError.timeoutMs).toBe(TIMEOUT_MS);
     expect(timeoutError.message).toBe(`Transaction ${timeoutError.transactionId} timed out after ${TIMEOUT_MS}ms`);
     expect(connection.release, 'the connection must be returned after the timeout rollback').toHaveBeenCalled();
+    const { killQueryOnThread } = await import('@/lib/db/primitives');
+    expect(killQueryOnThread, 'the in-flight statement must be killed by thread id before rollback').toHaveBeenCalledWith(THREAD_ID, expect.any(String));
+    const internals = manager as unknown as { transactionConnections: Map<string, unknown>; transactionMeta: Map<string, unknown> };
+    expect(internals.transactionConnections.has(timeoutError.transactionId), 'connection bookkeeping must be cleared').toBe(false);
+    expect(internals.transactionMeta.has(timeoutError.transactionId), 'transaction metadata must be cleared').toBe(false);
   });
 });
 
@@ -807,5 +812,12 @@ describe('ConnectionManager lock release after COMMIT (review finding 1)', () =>
     expect(connection.commit).toHaveBeenCalledTimes(1);
     expect(outcome).toBe('resolved');
     expect(connection.release).toHaveBeenCalledTimes(1);
+    expect(
+      runQueryMock.mock.calls.some(([, sql]) => String(sql).includes('RELEASE_LOCK')),
+      'RELEASE_LOCK must actually have been attempted, otherwise the failure path was never exercised'
+    ).toBe(true);
+    const internals = manager as unknown as { transactionConnections: Map<string, unknown>; transactionMeta: Map<string, unknown> };
+    expect(internals.transactionConnections.has(transactionId), 'connection bookkeeping must be cleared').toBe(false);
+    expect(internals.transactionMeta.has(transactionId), 'transaction metadata must be cleared').toBe(false);
   });
 });
