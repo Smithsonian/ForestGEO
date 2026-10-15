@@ -23,7 +23,7 @@ import type { Pool } from 'mysql2/promise';
 import ailogger from '@/ailogger';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { getPoolMonitorInstance } from '@/lib/db/poolmonitorsingleton';
-import { getContainerClient } from '@/config/macros/azurestorage';
+import { assertBlobStorageReady, getContainerClient } from '@/config/macros/azurestorage';
 import { FileRow, SourceFormat } from '@/config/macros/formdetails';
 import { generateShortBatchID } from '@/config/utils';
 import { normalizeUploadMode } from '@/config/uploadmodes';
@@ -44,12 +44,12 @@ import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { detectDelimiter } from '@/lib/uploads/detect-delimiter';
 import { sanitizeUploadFileName } from '@/lib/uploads/file-names';
-import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
+import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult, type SetupDiagnostic } from '@/lib/uploads/ingest-batch';
 import { deleteUnresolvedRowsForBatchFamily, recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { countStagedRows, MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
 import { runCensusValidations } from '@/lib/uploads/validation-orchestrator';
-import { NonRetryableJobError, WorkerLeaseLostError } from './errors';
+import { BlobStorageReadinessError, NonRetryableJobError, WorkerLeaseLostError } from './errors';
 import {
   assignFileBatchID,
   claimBackgroundJobForWorker,
@@ -59,9 +59,10 @@ import {
   markBackgroundJobFailed,
   markBackgroundJobWaitingRetryAsWorker,
   setBackgroundJobStatus,
-  updateBackgroundJobFileStatus
+  updateBackgroundJobFileStatus,
+  recordSetupDiagnostic
 } from './repository';
-import type { BackgroundJobFileRecord, BackgroundJobWithDetails, UploadJobPhase } from './types';
+import type { BackgroundJobFileRecord, BackgroundJobWithDetails, UploadJobFailureContext, UploadJobPhase } from './types';
 import { isAllowedAsyncPipeline, UPLOAD_JOB_PHASE_PROGRESS } from './types';
 
 export { UPLOAD_JOB_PHASE_PROGRESS } from './types';
@@ -108,7 +109,10 @@ export const CHUNK_EVENT_SAMPLE_RATE = 10;
 
 export interface WorkerDeps {
   fetchFileText: (file: BackgroundJobFileRecord) => Promise<string>;
+  assertBlobStorageReady: () => void | Promise<void>;
 }
+
+let lastBlobReadinessWarningAt = 0;
 
 /**
  * Claims and runs a background upload job. A non-claimable job (wrong status,
@@ -118,6 +122,30 @@ export interface WorkerDeps {
  */
 export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promise<void> {
   const catalogPool = await getPoolMonitorInstance().getUsablePool();
+  // Determine the server-owned pipeline before applying the blob-only gate.
+  // This keeps staged ArcGIS import sessions independent of Azure blob access.
+  const candidate = await getBackgroundJob(catalogPool, jobID);
+  if (!candidate) return;
+  let candidatePipeline: JobPipeline | null = null;
+  try {
+    candidatePipeline = resolveJobPipeline(candidate);
+  } catch {
+    // Preserve the existing fenced terminal handling for malformed jobs.
+  }
+  const workerDeps = deps ?? { fetchFileText: downloadBlobText, assertBlobStorageReady };
+  if (candidatePipeline === 'measurements_csv') {
+    try {
+      await workerDeps.assertBlobStorageReady();
+    } catch {
+      if (Date.now() - lastBlobReadinessWarningAt > 60_000) {
+        lastBlobReadinessWarningAt = Date.now();
+        const readinessError = new BlobStorageReadinessError();
+        ailogger.error('upload.worker.readiness_unavailable', readinessError, { code: readinessError.code });
+      }
+      // No claim was made, so retry budget and job state remain untouched.
+      return;
+    }
+  }
   // REQUIRED claim invariant (see claimBackgroundJobForWorker): worker IDs must
   // be unique per claim attempt or the confirm-then-throw fencing is racy.
   const workerID = `${process.pid}:${randomUUID()}`;
@@ -133,7 +161,7 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
     connectionManager: ConnectionManager.getInstance(),
     job,
     workerID,
-    deps: deps ?? { fetchFileText: downloadBlobText },
+    deps: workerDeps,
     sessionID: null,
     leaseLost: false,
     cancelRequested: false,
@@ -143,7 +171,9 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
     lastPercent: 0,
     assignedBatches: new Map(),
     deferredInvalidRows: [],
-    heartbeatTimer: null
+    heartbeatTimer: null,
+    latestSetupDiagnostic: null,
+    pendingSetupDiagnosticWrites: 0
   };
 
   const runStartedAt = Date.now();
@@ -163,6 +193,7 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
     ctx.sessionID = await registerUploadSession(ctx);
 
     const pipeline = resolveJobPipeline(job);
+    if (candidatePipeline !== null && candidatePipeline !== pipeline) throw new NonRetryableJobError('Upload job pipeline changed while being claimed.');
     if (pipeline === 'arcgis_xlsx') {
       await runArcgisPipeline(ctx);
     } else {
@@ -173,7 +204,8 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
     await assertStillOwned(ctx);
     await markBackgroundJobCompleted(catalogPool, jobID, workerID, {
       failedRows: ctx.failedRows,
-      unresolvedRows: ctx.unresolvedIngestRows
+      unresolvedRows: ctx.unresolvedIngestRows,
+      attemptID: workerID
     });
     completed = true;
   } catch (error) {
@@ -245,6 +277,8 @@ interface WorkerRunContext {
   /** Parse rejects from zero-valid-row files, recorded after the last ingest (see runMeasurementsPipeline). */
   deferredInvalidRows: Array<{ fileName: string; batchID: string; rows: FileRow[] }>;
   heartbeatTimer: NodeJS.Timeout | null;
+  latestSetupDiagnostic: SetupDiagnostic | null;
+  pendingSetupDiagnosticWrites: number;
 }
 
 /**
@@ -323,6 +357,77 @@ function stopHeartbeat(ctx: WorkerRunContext): void {
   }
 }
 
+function failureContextFor(ctx: WorkerRunContext, code?: string): UploadJobFailureContext | undefined {
+  const d = ctx.latestSetupDiagnostic;
+  if (
+    !d ||
+    !d.terminal ||
+    (d.outcome !== 'failed' &&
+      d.outcome !== 'commit_outcome_unknown' &&
+      !(d.outcome === 'rolled_back' && (code === 'SETUP_CALLBACK_TIMEOUT' || d.errorCode === 'SETUP_CALLBACK_TIMEOUT')))
+  )
+    return undefined;
+  const effectiveCode = code ?? d.errorCode;
+  const summary =
+    effectiveCode === 'SETUP_CALLBACK_TIMEOUT'
+      ? 'The file uploaded, but preparing its measurements took too long.'
+      : effectiveCode === 'SETUP_COMMIT_OUTCOME_UNKNOWN'
+        ? 'Setup commit outcome is unknown. This upload requires recovery review before it can be retried.'
+        : 'Upload setup failed while preparing measurements.';
+  return {
+    ...(effectiveCode ? { code: effectiveCode } : {}),
+    summary,
+    step: d.step,
+    attemptID: ctx.workerID,
+    fileID: d.fileID,
+    batchID: d.batchID,
+    ...(effectiveCode === 'SETUP_COMMIT_OUTCOME_UNKNOWN' ? { recoveryRequired: true } : {})
+  };
+}
+
+function reportSetupDiagnostic(ctx: WorkerRunContext, diagnostic: SetupDiagnostic): void {
+  ctx.latestSetupDiagnostic = diagnostic;
+  const sampledSplit = diagnostic.step !== 'splitting' || (diagnostic.completedBatches ?? 0) % 10 === 0;
+  if ((!diagnostic.terminal && !sampledSplit) || (!diagnostic.terminal && ctx.pendingSetupDiagnosticWrites >= 8)) return;
+  ctx.pendingSetupDiagnosticWrites += 1;
+  void recordSetupDiagnostic(ctx.catalogPool, ctx.job.jobID, {
+    attemptID: ctx.workerID,
+    fileID: diagnostic.fileID,
+    batchID: diagnostic.batchID,
+    schema: diagnostic.schema,
+    plotID: diagnostic.plotID,
+    censusID: diagnostic.censusID,
+    step: diagnostic.step,
+    durationMs: diagnostic.elapsedMs,
+    outcome: diagnostic.outcome,
+    rowCount: diagnostic.rowCount,
+    assignedRows: diagnostic.assignedRows,
+    completedBatches: diagnostic.completedBatches,
+    operation: diagnostic.operation,
+    callbackDurationMs: diagnostic.callbackDurationMs,
+    commitDurationMs: diagnostic.commitDurationMs,
+    cleanupDurationMs: diagnostic.cleanupDurationMs,
+    totalDurationMs: diagnostic.totalDurationMs,
+    terminal: diagnostic.terminal,
+    code: diagnostic.errorCode,
+    ...(diagnostic.errorCode === 'SETUP_CALLBACK_TIMEOUT' ? { summary: 'The file uploaded, but preparing its measurements took too long.' } : {}),
+    ...(diagnostic.errorCode === 'SETUP_COMMIT_OUTCOME_UNKNOWN'
+      ? {
+          summary: 'Setup commit outcome is unknown. This upload requires recovery review before it can be retried.',
+          recoveryRequired: true
+        }
+      : {})
+  })
+    .catch(() => {
+      // Diagnostic persistence is optional telemetry and cannot replace setup or
+      // an authoritative job transition.
+      ailogger.warn('upload.worker.setup_diagnostic_write_failed', { jobID: ctx.job.jobID, attemptID: ctx.workerID });
+    })
+    .finally(() => {
+      ctx.pendingSetupDiagnosticWrites = Math.max(0, ctx.pendingSetupDiagnosticWrites - 1);
+    });
+}
+
 /** Synchronous abort probe shared with ingestBatch — reads the cached flags. */
 function abortProbe(ctx: WorkerRunContext): () => boolean {
   return () => ctx.cancelRequested || ctx.leaseLost;
@@ -392,6 +497,7 @@ async function finalizeCancelledJob(ctx: WorkerRunContext): Promise<void> {
     status: 'cancelled',
     phase: 'cancelled',
     eventType: 'cancelled',
+    attemptID: ctx.workerID,
     eventMessage: 'Upload job cancelled while running; non-completed batches cleaned'
   });
 }
@@ -412,6 +518,13 @@ async function handleRunFailure(ctx: WorkerRunContext, error: unknown): Promise<
 
   const err = error instanceof Error ? error : new Error(String(error));
   try {
+    const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code: unknown }).code) : undefined;
+    if (errorCode === 'SETUP_COMMIT_OUTCOME_UNKNOWN') {
+      const summary = 'Setup commit outcome is unknown. This upload requires recovery review before it can be retried.';
+      const failureContext = failureContextFor(ctx, errorCode);
+      await markBackgroundJobFailed(catalogPool, job.jobID, workerID, new Error(summary), workerID, failureContext);
+      return;
+    }
     // Cancel wins over retry parking: a cancel_requested set while this
     // failure was unwinding must finalize as 'cancelled', not be erased by a
     // waiting_retry/failed transition. (markBackgroundJobWaitingRetryAsWorker
@@ -426,17 +539,23 @@ async function handleRunFailure(ctx: WorkerRunContext, error: unknown): Promise<
     }
     if (err instanceof UploadScopeConflictError) {
       ailogger.info(`[UploadWorker] Job ${job.jobID} parked on scope conflict: ${err.message}`);
-      await markBackgroundJobWaitingRetryAsWorker(catalogPool, job.jobID, workerID, err, SESSION_CONFLICT_RETRY_DELAY_SECONDS, { incrementRetry: false });
+      await markBackgroundJobWaitingRetryAsWorker(catalogPool, job.jobID, workerID, err, SESSION_CONFLICT_RETRY_DELAY_SECONDS, {
+        incrementRetry: false,
+        attemptID: workerID
+      });
       return;
     }
     if (err instanceof NonRetryableJobError) {
       ailogger.error(`[UploadWorker] Job ${job.jobID} failed permanently: ${err.message}`);
-      await markBackgroundJobFailed(catalogPool, job.jobID, workerID, err);
+      await markBackgroundJobFailed(catalogPool, job.jobID, workerID, err, workerID, failureContextFor(ctx, errorCode));
       return;
     }
     const retryDelaySeconds = RETRY_BASE_DELAY_SECONDS * Math.pow(RETRY_BACKOFF_BASE, job.retryCount);
     ailogger.error(`[UploadWorker] Job ${job.jobID} failed (retry budget ${job.retryCount}/${job.maxRetries}): ${err.message}`, err);
-    await markBackgroundJobWaitingRetryAsWorker(catalogPool, job.jobID, workerID, err, retryDelaySeconds);
+    await markBackgroundJobWaitingRetryAsWorker(catalogPool, job.jobID, workerID, err, retryDelaySeconds, {
+      attemptID: workerID,
+      failureContext: failureContextFor(ctx, errorCode)
+    });
   } catch (finalizeError) {
     if (finalizeError instanceof WorkerLeaseLostError) {
       ailogger.info(`[UploadWorker] Lease lost while finalizing job ${job.jobID}; abandoning silently`);
@@ -534,7 +653,7 @@ async function releaseUploadSession(ctx: WorkerRunContext, completed: boolean): 
 
 type JobPipeline = 'measurements_csv' | 'arcgis_xlsx';
 
-function resolveJobPipeline(job: BackgroundJobWithDetails): JobPipeline {
+function resolveJobPipeline(job: Pick<BackgroundJobWithDetails, 'formType' | 'sourceFormat'>): JobPipeline {
   if (isAllowedAsyncPipeline(job.formType, job.sourceFormat)) {
     return job.sourceFormat === SourceFormat.arcgis_xlsx ? 'arcgis_xlsx' : 'measurements_csv';
   }
@@ -751,6 +870,7 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
 
   for (let fileIndex = 0; fileIndex < job.files.length; fileIndex++) {
     const file = job.files[fileIndex];
+    ctx.latestSetupDiagnostic = null;
     await assertStillOwned(ctx);
 
     const batchID = await assignFileBatchID(ctx.catalogPool, file.jobFileID, generateShortBatchID());
@@ -978,11 +1098,14 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
  * is finalized as a cancellation or lease loss rather than a generic failure.
  */
 async function runIngestForBatch(ctx: WorkerRunContext, fileName: string, batchID: string): Promise<IngestBatchResult> {
+  ctx.latestSetupDiagnostic = null;
   try {
     return await ingestBatch(ctx.connectionManager, {
       schema: ctx.job.schemaName,
       fileID: fileName,
       batchID,
+      expectedScope: { plotID: ctx.job.plotID, censusID: ctx.job.censusID },
+      onSetupProgress: diagnostic => reportSetupDiagnostic(ctx, diagnostic),
       isAborted: abortProbe(ctx)
     });
   } catch (error) {

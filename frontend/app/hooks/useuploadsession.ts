@@ -41,6 +41,7 @@ export interface UseUploadSessionReturn {
   updateState: (state: string, errorMessage?: string) => Promise<void>;
   completeSession: () => Promise<void>;
   cancelSession: (cleanup?: boolean) => Promise<void>;
+  holdForRecovery: () => void;
   sendManualHeartbeat: () => Promise<boolean>;
   isSessionValid: () => boolean;
 }
@@ -62,6 +63,7 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
 
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const recoveryHoldRef = useRef(false);
   const isMountedRef = useRef(true);
   const consecutiveHeartbeatFailures = useRef(0);
   const MAX_HEARTBEAT_FAILURES = 3;
@@ -179,6 +181,7 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
         const newSession = data.session;
 
         sessionIdRef.current = newSession.sessionId;
+        recoveryHoldRef.current = false;
         consecutiveHeartbeatFailures.current = 0;
 
         if (isMountedRef.current) {
@@ -299,6 +302,10 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
    */
   const cancelSession = useCallback(
     async (cleanup: boolean = false): Promise<void> => {
+      if (recoveryHoldRef.current) {
+        ailogger.warn('[useUploadSession] Preserving session because setup recovery is required');
+        return;
+      }
       if (!sessionIdRef.current) return;
 
       try {
@@ -349,6 +356,13 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
     return sessionIdRef.current;
   }, []);
 
+  const holdForRecovery = useCallback((): void => {
+    // Synchronous ref write ensures the immediately following UI transition
+    // cannot run unmount cleanup against a possibly committed setup.
+    recoveryHoldRef.current = true;
+    stopHeartbeat();
+  }, [stopHeartbeat]);
+
   /**
    * Handle page visibility change (pause/resume heartbeat)
    */
@@ -374,7 +388,7 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
    */
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (sessionIdRef.current && session.isActive) {
+      if (sessionIdRef.current && session.isActive && !recoveryHoldRef.current) {
         // Standard way to trigger browser's "are you sure?" dialog
         event.preventDefault();
         event.returnValue = 'Upload in progress. Are you sure you want to leave?';
@@ -409,7 +423,7 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
       stopHeartbeat();
 
       // Mark session as abandoned if still active
-      if (sessionIdRef.current) {
+      if (sessionIdRef.current && !recoveryHoldRef.current) {
         const sessionId = sessionIdRef.current;
         // Clear the ref first so any stale async work from an unmounted uploader
         // cannot keep reusing a session that is being torn down.
@@ -437,6 +451,7 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
     updateState,
     completeSession,
     cancelSession,
+    holdForRecovery,
     sendManualHeartbeat: sendHeartbeat,
     isSessionValid
   };

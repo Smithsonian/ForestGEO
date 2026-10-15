@@ -246,7 +246,7 @@ describe('plot-coordinate-ingest — integration', () => {
    * gets the stricter "nothing failed" check.
    */
   async function runIngest(fileName: string, batchID: string, expectPartialFailure = false): Promise<IngestBatchResult> {
-    const result = await ingestBatch(connectionManager, { schema, fileID: fileName, batchID });
+    const result = await ingestBatch(connectionManager, { schema, fileID: fileName, batchID, expectedScope: { plotID, censusID } });
     console.log(
       `[ingestBatch] fileName=${fileName} batchID=${batchID} processedSubBatches=${result.processedSubBatches} totalRows=${result.totalRows} ` +
         `recovered=${result.recovered} noDataFound=${result.noDataFound}`

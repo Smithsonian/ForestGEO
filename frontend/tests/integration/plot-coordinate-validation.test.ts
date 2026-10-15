@@ -275,7 +275,7 @@ describe('plot-coordinate-validation — integration', () => {
    * by the deliberately-hard-failing fixture (invalid species code) below.
    */
   async function runIngest(fileName: string, batchID: string, expectPartialFailure = false): Promise<IngestBatchResult> {
-    const result = await ingestBatch(connectionManager, { schema, fileID: fileName, batchID });
+    const result = await ingestBatch(connectionManager, { schema, fileID: fileName, batchID, expectedScope: { plotID, censusID } });
     console.log(`[ingestBatch] fileName=${fileName} batchID=${batchID} processedSubBatches=${result.processedSubBatches} totalRows=${result.totalRows}`);
     for (const sub of result.subBatchResults) {
       console.log(

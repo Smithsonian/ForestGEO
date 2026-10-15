@@ -121,6 +121,7 @@ export interface BackgroundJobRecord {
   maxRetries: number;
   nextAttemptAt: Date | null;
   lastError: string | null;
+  failureContext?: UploadJobFailureContext | null;
   workerID: string | null;
   workerHeartbeatAt: Date | null;
   payload: Record<string, unknown> | null;
@@ -128,6 +129,17 @@ export interface BackgroundJobRecord {
   updatedAt: Date;
   startedAt: Date | null;
   finishedAt: Date | null;
+}
+
+export interface UploadJobFailureContext {
+  code?: string;
+  summary: string;
+  step?: string;
+  detail?: string;
+  attemptID?: string;
+  fileID?: string;
+  batchID?: string;
+  recoveryRequired?: boolean;
 }
 
 export interface BackgroundJobFileRecord {

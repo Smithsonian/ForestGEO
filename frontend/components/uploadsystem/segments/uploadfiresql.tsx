@@ -46,6 +46,7 @@ import { referenceUploadRowLimitError } from '@/lib/uploads/reference-upload-lim
 import { evaluateUploadReconciliation, type UploadReconciliationVerdict } from '@/lib/ingestion/reconciliation';
 import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
 import { parseQuadratOverlapSummaries } from '@/lib/ingestion/quadrat-overlap-contract';
+import { isSetupRecoveryRequiredUploadError, parseSetupRecoveryRequired } from '@/components/uploadsystemhelpers/setup-recovery-required';
 
 const CSV_MAPPING_REJECTION_SENTENCE: Record<CsvMappingRejectionCode, string> = {
   stale: 'the saved column mapping was built from different headers',
@@ -157,6 +158,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     updateState,
     completeSession,
     cancelSession,
+    holdForRecovery,
     isSessionActive: _isSessionActive
   } = useUploadSession({
     schema,
@@ -324,6 +326,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const buildClientResponseError = useCallback(
     async (response: Response, context: string): Promise<Error> => {
       const payload = await readResponsePayload(response);
+      const recoveryRequired = parseSetupRecoveryRequired(payload);
+      if (recoveryRequired) {
+        holdForRecovery();
+        return markFatalUploadError(recoveryRequired);
+      }
       const overlapSummaries = parseQuadratOverlapSummaries(payload);
       if (response.status === 400 && overlapSummaries) {
         return new QuadratOverlapAcknowledgmentRequiredClientError(getApiErrorMessage(payload) ?? 'Quadrat overlaps require acknowledgment.', overlapSummaries);
@@ -341,7 +348,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       const apiErrorMessage = getApiErrorMessage(payload);
       return new Error(`Client error (${response.status}): ${apiErrorMessage || response.statusText || 'Unknown client error'}`);
     },
-    [markFatalUploadError]
+    [markFatalUploadError, holdForRecovery]
   );
 
   const abortRecoveryVerification = useCallback(() => {
@@ -1622,7 +1629,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
 
           ailogger.error('runUploads failed:', error);
-          if (!isUploadSessionRestartRequiredError(error)) {
+          if (!isUploadSessionRestartRequiredError(error) && !isSetupRecoveryRequiredUploadError(error)) {
             // Cancel the session and clean up staged temp data on error.
             cancelSession(true).catch(cancelErr => {
               ailogger.warn(`Failed to cancel upload session: ${cancelErr.message}`);
@@ -1872,6 +1879,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 })
                 .catch(async (e: any) => {
                   const errorMessage = e?.message || e?.toString() || 'Unknown error';
+                  if (isSetupRecoveryRequiredUploadError(e)) {
+                    holdForRecovery();
+                    markFatalUploadError(e);
+                    queue.clear();
+                    throw e;
+                  }
                   let handledAfterRecovery = false;
                   let recoveryAborted = false;
 
@@ -1967,8 +1980,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
         }
 
-        // Wait for all batch processing to complete, then increment completedOperations once
-        await queue.onEmpty();
+        // Wait for all batch processing to complete, including rejected tasks.
+        await queue.onIdle();
 
         if (fatalUploadErrorRef.current) {
           throw fatalUploadErrorRef.current;
@@ -2227,7 +2240,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
 
         // Cancel the session and clean up staged temp data on processing error.
-        if (!isUploadSessionRestartRequiredError(error)) {
+        if (!isUploadSessionRestartRequiredError(error) && !isSetupRecoveryRequiredUploadError(error)) {
           cancelSession(true).catch(cancelErr => {
             ailogger.warn(`Failed to cancel upload session after processing error: ${cancelErr.message}`);
           });

@@ -30,7 +30,14 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import type { SystemFailureKind } from '@/config/measurementerrors';
-import { buildSubBatchID, buildSubBatchPattern, discoverBatchFamily, highestSubBatchOrdinal, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
+import {
+  BatchFamilyScopeError,
+  buildSubBatchID,
+  buildSubBatchPattern,
+  discoverBatchFamily,
+  highestSubBatchOrdinal,
+  LIKE_ESCAPE_CLAUSE
+} from '@/lib/uploads/batch-family';
 import { isKilledConnectionError, isKilledStatementError, QueryTimeoutError } from '@/lib/db/primitives';
 
 // Sub-batches of 10K rows keep transaction duration ~6.5s (benchmarked),
@@ -147,12 +154,73 @@ export interface IngestBatchParams {
   schema: string;
   fileID: string;
   batchID: string;
+  /** Caller-authorized scope; never derive this from ingestion discovery. */
+  expectedScope: { plotID: number; censusID: number };
   /**
    * Cancellation probe checked between sub-batches and between retry attempts.
    * The HTTP route passes a request-abort check; the worker passes its
    * job-cancellation probe. Defaults to "never aborted".
    */
   isAborted?: () => boolean;
+  /** Synchronous, best-effort setup telemetry. Exceptions are ignored. */
+  onSetupProgress?: (diagnostic: Readonly<SetupDiagnostic>) => void;
+}
+
+export interface SetupDiagnostic {
+  step: 'discovery' | 'lock_wait' | 'post_lock_validation' | 'recovery' | 'cleanup' | 'splitting' | 'commit' | 'terminal';
+  outcome?: 'started' | 'completed' | 'failed' | 'committed' | 'rolled_back' | 'commit_outcome_unknown';
+  schema: string;
+  plotID: number;
+  censusID: number;
+  fileID: string;
+  batchID: string;
+  elapsedMs: number;
+  rowCount?: number;
+  assignedRows?: number;
+  completedBatches?: number;
+  operation?: 'select_ids' | 'assign_interval';
+  errorCode?: string;
+  terminal?: boolean;
+  callbackDurationMs?: number;
+  commitDurationMs?: number;
+  cleanupDurationMs?: number;
+  totalDurationMs?: number;
+}
+
+export class SetupCommitOutcomeUnknownError extends Error {
+  readonly code = 'SETUP_COMMIT_OUTCOME_UNKNOWN';
+  readonly cause: unknown;
+  constructor(cause: unknown) {
+    super('Ingestion setup commit outcome is unknown; recovery is required before retry');
+    this.name = 'SetupCommitOutcomeUnknownError';
+    this.cause = cause;
+  }
+}
+
+export class SetupCallbackTimeoutError extends Error {
+  readonly code = 'SETUP_CALLBACK_TIMEOUT';
+  readonly cause: unknown;
+  constructor(cause: unknown) {
+    super('Ingestion setup transaction callback timed out');
+    this.name = 'SetupCallbackTimeoutError';
+    this.cause = cause;
+  }
+}
+
+function assertExpectedScope(
+  family: NonNullable<Awaited<ReturnType<typeof discoverBatchFamily>>>,
+  plotID: number,
+  censusID: number,
+  fileID: string,
+  batchID: string
+): void {
+  if (family.plotID !== plotID || family.censusID !== censusID) {
+    throw new BatchFamilyScopeError(
+      fileID,
+      batchID,
+      `discovered plot=${family.plotID}, census=${family.censusID}; expected plot=${plotID}, census=${censusID}`
+    );
+  }
 }
 
 export interface IngestBatchResult {
@@ -401,8 +469,12 @@ async function splitIntoSubBatches(
   fileID: string,
   originalBatchID: string,
   totalRows: number,
+  plotID: number,
+  censusID: number,
   transactionID: string,
-  startOrdinal: number = 0
+  startOrdinal: number = 0,
+  checkAbort: () => void = () => undefined,
+  onProgress?: (assignedRows: number, completedBatches: number, operation: SetupDiagnostic['operation']) => void
 ): Promise<string[]> {
   const batchSize = getIngestionBatchSize();
   if (totalRows <= batchSize && startOrdinal === 0) {
@@ -411,10 +483,23 @@ async function splitIntoSubBatches(
 
   const subBatchCount = Math.ceil(totalRows / batchSize);
   const subBatchIDs: string[] = [];
+  let cursor = '0';
+  const boundaryRows = (await connectionManager.executeQuery(
+    safeFormatQuery(
+      schema,
+      `SELECT CAST(MAX(id) AS CHAR) AS upperID FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ? AND PlotID = ? AND CensusID = ?`
+    ),
+    [fileID, originalBatchID, plotID, censusID],
+    transactionID
+  )) as Array<{ upperID: string | null }>;
+  const upperID = boundaryRows?.[0]?.upperID;
+  if (!upperID) throw new Error(`Expected ${totalRows} rows in ${fileID}-${originalBatchID}, found none`);
+  let assigned = 0;
 
   ailogger.info(`Splitting ${totalRows} rows into ${subBatchCount} sub-batches of ~${batchSize} rows each for ${fileID}`);
 
   for (let i = 0; i < subBatchCount; i++) {
+    checkAbort();
     // Continue past any sub-batch left by an interrupted prior attempt so a
     // resumed split cannot reuse an ordinal that already holds rows.
     const subBatchID = buildSubBatchID(originalBatchID, startOrdinal + i + 1);
@@ -425,18 +510,37 @@ async function splitIntoSubBatches(
     // proc's idempotency skip would then silently delete never-ingested rows
     // re-staged under an already-completed sub-batch ID.
     // LIMIT cannot be parameterized in mysql2 prepared statements, so inline the constant
+    const selectSQL = safeFormatQuery(
+      schema,
+      `SELECT CAST(id AS CHAR) AS rowID FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ? AND PlotID = ? AND CensusID = ? AND id > CAST(? AS UNSIGNED) AND id <= CAST(? AS UNSIGNED) ORDER BY temporarymeasurements.id LIMIT ${batchSize}`
+    );
+    onProgress?.(assigned, i, 'select_ids');
+    const selected = (await connectionManager.executeQuery(selectSQL, [fileID, originalBatchID, plotID, censusID, cursor, upperID], transactionID)) as Array<{
+      rowID: string;
+    }>;
+    if (!selected.length) throw new Error(`Batch splitter selected no rows while ${totalRows - assigned} rows remain`);
+    const lastID = String(selected[selected.length - 1].rowID);
     const updateSQL = safeFormatQuery(
       schema,
-      `UPDATE ??.temporarymeasurements SET BatchID = ? WHERE FileID = ? AND BatchID = ? ORDER BY id LIMIT ${batchSize}`
+      `UPDATE ??.temporarymeasurements SET BatchID = ? WHERE FileID = ? AND BatchID = ? AND PlotID = ? AND CensusID = ? AND id > CAST(? AS UNSIGNED) AND id <= CAST(? AS UNSIGNED)`
     );
-    const updateResult = await connectionManager.executeQuery(updateSQL, [subBatchID, fileID, originalBatchID], transactionID);
+    onProgress?.(assigned, i, 'assign_interval');
+    const updateResult = await connectionManager.executeQuery(
+      updateSQL,
+      [subBatchID, fileID, originalBatchID, plotID, censusID, cursor, lastID],
+      transactionID
+    );
     const affectedRows = toCount(updateResult?.affectedRows);
-
-    if (affectedRows === 0) break;
+    if (affectedRows !== selected.length) throw new Error(`Batch splitter selected ${selected.length} rows but assigned ${affectedRows}`);
 
     subBatchIDs.push(subBatchID);
+    assigned += affectedRows;
+    cursor = lastID;
+    onProgress?.(assigned, i + 1, undefined);
     ailogger.info(`Created sub-batch ${subBatchID} with ${affectedRows} rows (${i + 1}/${subBatchCount})`);
   }
+
+  if (assigned !== totalRows) throw new Error(`Batch splitter assigned ${assigned} of ${totalRows} expected rows`);
 
   return subBatchIDs;
 }
@@ -609,87 +713,235 @@ async function processSubBatch(
 export async function ingestBatch(connectionManager: ConnectionManager, params: IngestBatchParams): Promise<IngestBatchResult> {
   const { schema, fileID, batchID } = params;
   const isAborted = params.isAborted ?? (() => false);
+  const { plotID: expectedPlotID, censusID: expectedCensusID } = params.expectedScope ?? ({} as IngestBatchParams['expectedScope']);
+  if (!Number.isSafeInteger(expectedPlotID) || expectedPlotID <= 0 || !Number.isSafeInteger(expectedCensusID) || expectedCensusID <= 0) {
+    throw new TypeError('ingestBatch requires positive integer expectedScope plotID and censusID');
+  }
+  const setupStarted = process.hrtime.bigint();
+  let activeStep: SetupDiagnostic['step'] = 'discovery';
+  let lastDiagnostic: Partial<SetupDiagnostic> = {};
+  let terminalFrozen = false;
+  const emit = (
+    fields: Omit<SetupDiagnostic, 'step' | 'schema' | 'plotID' | 'censusID' | 'fileID' | 'batchID' | 'elapsedMs'> & { step?: SetupDiagnostic['step'] } = {}
+  ) => {
+    if (terminalFrozen || !params.onSetupProgress) return;
+    const diagnostic = Object.freeze({
+      ...lastDiagnostic,
+      schema,
+      plotID: expectedPlotID,
+      censusID: expectedCensusID,
+      fileID,
+      batchID,
+      elapsedMs: Number(process.hrtime.bigint() - setupStarted) / 1_000_000,
+      ...fields,
+      step: fields.step ?? activeStep
+    }) as Readonly<SetupDiagnostic>;
+    lastDiagnostic = diagnostic;
+    try {
+      const callbackResult: unknown = params.onSetupProgress(diagnostic);
+      if (
+        callbackResult &&
+        (typeof callbackResult === 'object' || typeof callbackResult === 'function') &&
+        typeof (callbackResult as { then?: unknown }).then === 'function'
+      ) {
+        void Promise.resolve(callbackResult).catch(() => {
+          /* optional telemetry cannot change ingestion */
+        });
+      }
+    } catch {
+      /* optional telemetry cannot change ingestion */
+    }
+    if (fields.terminal) terminalFrozen = true;
+  };
   const procedureSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
 
   // --- Phase 1: Setup (count rows, get plot/census, recovery, split) ---
-  const setupResult = await connectionManager.withTransaction(
-    async tx => {
-      const lockTimeoutMs = SETUP_PHASE_TIMEOUT_MS;
+  let setupResult: {
+    plotID: number | null;
+    censusID: number | null;
+    totalRows: number;
+    subBatchIDs: string[];
+    recovered: boolean;
+    resumedSubBatchCount: number;
+  };
+  try {
+    setupResult = await connectionManager.withTransaction(
+      async tx => {
+        const lockTimeoutMs = SETUP_PHASE_TIMEOUT_MS;
 
-      // Resolve the WHOLE family (original ID + any `__subNNN` left by an
-      // interrupted prior attempt). Looking up only the unsuffixed ID here is
-      // what let the Harvard incident report "No data found" over 106,227
-      // still-staged rows.
-      const family = await discoverBatchFamily((sql, sqlParams) => tx.query(sql, sqlParams), schema, fileID, batchID);
+        // Resolve the WHOLE family (original ID + any `__subNNN` left by an
+        // interrupted prior attempt). Looking up only the unsuffixed ID here is
+        // what let the Harvard incident report "No data found" over 106,227
+        // still-staged rows.
+        const discover = (currentRead = false) => discoverBatchFamily((sql, sqlParams) => tx.query(sql, sqlParams), schema, fileID, batchID, { currentRead });
+        emit({ step: 'discovery', outcome: 'started' });
+        const family = await discover();
 
-      if (!family) {
+        if (!family) {
+          return {
+            plotID: null as number | null,
+            censusID: null as number | null,
+            totalRows: 0,
+            subBatchIDs: [] as string[],
+            recovered: false,
+            resumedSubBatchCount: 0
+          };
+        }
+
+        assertExpectedScope(family, expectedPlotID, expectedCensusID, fileID, batchID);
+        activeStep = 'lock_wait';
+        emit({ outcome: 'started' });
+        const lockKey = buildIngestionLockName(schema, fileID, expectedPlotID, expectedCensusID);
+        const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, tx.id, lockTimeoutMs);
+        if (!lockAcquired) {
+          throw new Error(`Failed to acquire application lock for file ${fileID}. Another upload may be in progress.`);
+        }
+
+        activeStep = 'post_lock_validation';
+        emit({ outcome: 'started' });
+        const lockedFamily = await discover(true);
+        if (!lockedFamily) throw new Error(`Batch family ${fileID}-${batchID} disappeared while waiting for its setup lock`);
+        assertExpectedScope(lockedFamily, expectedPlotID, expectedCensusID, fileID, batchID);
+        const currentPlotID = expectedPlotID;
+        const currentCensusID = expectedCensusID;
+        const totalRows = lockedFamily.totalRows;
+        const originalOrphans = lockedFamily.members.filter(member => member.batchID !== batchID).map(member => [member.batchID, member.rowCount]);
+        emit({ outcome: 'completed', rowCount: totalRows });
+
+        // Recovery check (uses original batchID before any splitting)
+        activeStep = 'recovery';
+        emit({ outcome: 'started', rowCount: totalRows });
+        const recovered = await recoverFailedInitialCensusIfNeeded(connectionManager, schema, fileID, batchID, currentPlotID, currentCensusID, tx.id);
+        emit({ outcome: 'completed', rowCount: totalRows });
+
+        // If the same census is re-uploaded under a new filename, remove any old
+        // unresolved ingestion rows that exactly match the currently staged rows.
+        activeStep = 'cleanup';
+        emit({ outcome: 'started', rowCount: totalRows });
+        await cleanupMatchedUnresolvedIngestionFailuresForBatch(connectionManager, schema, fileID, batchID, currentCensusID, tx.id);
+        emit({ outcome: 'completed', rowCount: totalRows });
+
+        const authoritativeFamily = await discover(true);
+        if (!authoritativeFamily) throw new Error(`Batch family ${fileID}-${batchID} disappeared during setup`);
+        assertExpectedScope(authoritativeFamily, expectedPlotID, expectedCensusID, fileID, batchID);
+        if (
+          JSON.stringify(authoritativeFamily.members.filter(member => member.batchID !== batchID).map(member => [member.batchID, member.rowCount])) !==
+          JSON.stringify(originalOrphans)
+        )
+          throw new Error(`Pre-existing orphan membership changed during setup for ${fileID}-${batchID}`);
+        const originalCount = authoritativeFamily.originalRowCount;
+        const orphanCount = authoritativeFamily.orphanedSubBatchIDs.length;
+
+        // Resume orphans first, then split whatever is still under the original
+        // ID, numbering past the orphans so ordinals cannot collide.
+        const ids = [...authoritativeFamily.orphanedSubBatchIDs];
+        if (authoritativeFamily.orphanedSubBatchIDs.length > 0) {
+          ailogger.warn(
+            `Resuming ${authoritativeFamily.orphanedSubBatchIDs.length} orphaned sub-batch(es) for ${fileID}-${batchID} ` +
+              `left by an interrupted prior attempt (${authoritativeFamily.totalRows} row(s) total)`
+          );
+        }
+        activeStep = 'splitting';
+        emit({ outcome: 'started', rowCount: authoritativeFamily.totalRows, assignedRows: 0, completedBatches: 0 });
+        if (originalCount > 0) {
+          ids.push(
+            ...(await splitIntoSubBatches(
+              connectionManager,
+              schema,
+              fileID,
+              batchID,
+              originalCount,
+              expectedPlotID,
+              expectedCensusID,
+              tx.id,
+              highestSubBatchOrdinal(authoritativeFamily.orphanedSubBatchIDs, batchID),
+              () => {
+                if (isAborted()) throw new IngestBatchAbortedError(fileID, batchID);
+              },
+              (assignedRows, completedBatches, operation) => emit({ outcome: 'started', rowCount: originalCount, assignedRows, completedBatches, operation })
+            ))
+          );
+        }
+
+        const postSplit = await discover(true);
+        if (!postSplit) throw new Error(`Batch family ${fileID}-${batchID} disappeared after splitting`);
+        assertExpectedScope(postSplit, expectedPlotID, expectedCensusID, fileID, batchID);
+        const preexistingIDs = new Set(authoritativeFamily.orphanedSubBatchIDs);
+        const splitOrphans = postSplit.members.filter(member => preexistingIDs.has(member.batchID)).map(member => [member.batchID, member.rowCount]);
+        const expectedOrphans = authoritativeFamily.members
+          .filter(member => preexistingIDs.has(member.batchID))
+          .map(member => [member.batchID, member.rowCount]);
+        if (JSON.stringify(splitOrphans) !== JSON.stringify(expectedOrphans))
+          throw new Error(`Existing orphan rows changed during split for ${fileID}-${batchID}`);
+        const splitRequired = originalCount > getIngestionBatchSize() || orphanCount > 0;
+        if (splitRequired && (postSplit.originalRowCount !== 0 || postSplit.totalRows !== authoritativeFamily.totalRows))
+          throw new Error(`Batch split membership mismatch for ${fileID}-${batchID}`);
+        if (!splitRequired && (postSplit.originalRowCount !== originalCount || postSplit.totalRows !== authoritativeFamily.totalRows))
+          throw new Error(`Batch family membership changed for ${fileID}-${batchID}`);
+        if (isAborted()) throw new IngestBatchAbortedError(fileID, batchID);
+        emit({ outcome: 'completed', rowCount: authoritativeFamily.totalRows, assignedRows: originalCount, completedBatches: ids.length });
+        activeStep = 'commit';
+        emit({ outcome: 'started', rowCount: authoritativeFamily.totalRows });
+
+        ailogger.info(`Setup complete for ${fileID}: ${totalRows} rows → ${ids.length} batch(es), plot=${currentPlotID}, census=${currentCensusID}`);
+
         return {
-          plotID: null as number | null,
-          censusID: null as number | null,
-          totalRows: 0,
-          subBatchIDs: [] as string[],
-          recovered: false,
-          resumedSubBatchCount: 0
+          plotID: currentPlotID,
+          censusID: currentCensusID,
+          totalRows,
+          subBatchIDs: ids,
+          recovered,
+          resumedSubBatchCount: orphanCount
         };
+      },
+      {
+        timeoutMs: SETUP_PHASE_TIMEOUT_MS,
+        lifecycleObserver: event => {
+          if (event.type === 'callback_succeeded' || event.type === 'callback_failed') emit({ callbackDurationMs: event.callbackDurationMs });
+          if (event.type === 'commit_started') {
+            activeStep = 'commit';
+            emit({ outcome: 'started' });
+          }
+          if (event.type === 'commit_acknowledged')
+            emit({ step: 'commit', outcome: 'committed', commitDurationMs: event.commitDurationMs, totalDurationMs: event.totalDurationMs });
+          if (event.type === 'rollback_acknowledged')
+            emit({ outcome: 'rolled_back', cleanupDurationMs: event.cleanupDurationMs, totalDurationMs: event.totalDurationMs });
+          if (event.type === 'commit_outcome_unknown')
+            emit({
+              step: 'commit',
+              outcome: 'commit_outcome_unknown',
+              errorCode: 'SETUP_COMMIT_OUTCOME_UNKNOWN',
+              commitDurationMs: event.commitDurationMs,
+              totalDurationMs: event.totalDurationMs
+            });
+          if (event.type === 'cleanup_finished') emit({ cleanupDurationMs: event.cleanupDurationMs, totalDurationMs: event.totalDurationMs });
+          if (event.type === 'transaction_finished')
+            emit({
+              outcome: event.outcome === 'rolled_back' ? 'rolled_back' : event.outcome === 'commit_outcome_unknown' ? 'commit_outcome_unknown' : undefined,
+              cleanupDurationMs: event.cleanupDurationMs,
+              totalDurationMs: event.totalDurationMs
+            });
+        }
       }
-
-      const currentPlotID = family.plotID;
-      const currentCensusID = family.censusID;
-      const totalRows = family.totalRows;
-
-      // Acquire lock for setup phase
-      const lockKey = buildIngestionLockName(schema, fileID, currentPlotID, currentCensusID);
-      const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, tx.id, lockTimeoutMs);
-      if (!lockAcquired) {
-        throw new Error(`Failed to acquire application lock for file ${fileID}. Another upload may be in progress.`);
-      }
-
-      // Recovery check (uses original batchID before any splitting)
-      const recovered = await recoverFailedInitialCensusIfNeeded(connectionManager, schema, fileID, batchID, currentPlotID, currentCensusID, tx.id);
-
-      // If the same census is re-uploaded under a new filename, remove any old
-      // unresolved ingestion rows that exactly match the currently staged rows.
-      await cleanupMatchedUnresolvedIngestionFailuresForBatch(connectionManager, schema, fileID, batchID, currentCensusID, tx.id);
-
-      // Resume orphans first, then split whatever is still under the original
-      // ID, numbering past the orphans so ordinals cannot collide.
-      const ids = [...family.orphanedSubBatchIDs];
-      if (family.orphanedSubBatchIDs.length > 0) {
-        ailogger.warn(
-          `Resuming ${family.orphanedSubBatchIDs.length} orphaned sub-batch(es) for ${fileID}-${batchID} ` +
-            `left by an interrupted prior attempt (${family.totalRows} row(s) total)`
-        );
-      }
-      if (family.originalRowCount > 0) {
-        ids.push(
-          ...(await splitIntoSubBatches(
-            connectionManager,
-            schema,
-            fileID,
-            batchID,
-            family.originalRowCount,
-            tx.id,
-            highestSubBatchOrdinal(family.orphanedSubBatchIDs, batchID)
-          ))
-        );
-      }
-
-      ailogger.info(`Setup complete for ${fileID}: ${totalRows} rows → ${ids.length} batch(es), plot=${currentPlotID}, census=${currentCensusID}`);
-
-      return {
-        plotID: currentPlotID,
-        censusID: currentCensusID,
-        totalRows,
-        subBatchIDs: ids,
-        recovered,
-        resumedSubBatchCount: family.orphanedSubBatchIDs.length
-      };
-    },
-    { timeoutMs: SETUP_PHASE_TIMEOUT_MS }
-  );
+    );
+    emit({ outcome: 'committed', rowCount: setupResult.totalRows, terminal: true });
+  } catch (error: any) {
+    const setupError =
+      error?.code === 'TRANSACTION_COMMIT_OUTCOME_UNKNOWN' || error?.name === 'TransactionCommitOutcomeUnknownError'
+        ? new SetupCommitOutcomeUnknownError(error)
+        : error?.code === 'TRANSACTION_CALLBACK_TIMEOUT' || error?.name === 'TransactionCallbackTimeoutError'
+          ? new SetupCallbackTimeoutError(error)
+          : error;
+    const timeout = setupError?.code === 'SETUP_CALLBACK_TIMEOUT';
+    const terminalOutcome =
+      setupError?.code === 'SETUP_COMMIT_OUTCOME_UNKNOWN' ? 'commit_outcome_unknown' : lastDiagnostic.outcome === 'rolled_back' ? 'rolled_back' : 'failed';
+    emit({ outcome: terminalOutcome, errorCode: setupError?.code ?? (timeout ? 'SETUP_CALLBACK_TIMEOUT' : undefined), terminal: true });
+    throw setupError;
+  }
 
   if (setupResult.plotID === null || setupResult.subBatchIDs.length === 0) {
     ailogger.warn(`No temporary rows found for ${fileID}-${batchID}`);
+    emit({ outcome: 'committed', rowCount: 0, terminal: true });
     return {
       processedSubBatches: 0,
       totalRows: setupResult.totalRows,

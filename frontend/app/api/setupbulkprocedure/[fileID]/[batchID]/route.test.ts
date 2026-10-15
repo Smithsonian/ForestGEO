@@ -84,8 +84,8 @@ vi.mock('@/ailogger', () => ({
  * One grouped row per batch-family member, matching discoverBatchFamily's
  * SELECT. Both the route preamble and ingestBatch's setup run that same query.
  */
-function familyRows(members: Array<{ BatchID: string; rowCount: number }> = [{ BatchID: 'batch-1', rowCount: 5 }]) {
-  return members.map(member => ({ ...member, PlotID: 22, CensusID: 6, plotCount: 1, censusCount: 1 }));
+function familyRows(members: Array<{ BatchID: string; rowCount: number }> = [{ BatchID: 'batch-1', rowCount: 5 }], plotID = 22, censusID = 6) {
+  return members.map(member => ({ ...member, PlotID: plotID, CensusID: censusID, plotCount: 1, censusCount: 1 }));
 }
 
 function makeRequest(includeSessionHeader: boolean = true) {
@@ -115,10 +115,13 @@ function mockSuccessfulProcedureRun() {
   );
   cm.executeQuery
     .mockResolvedValueOnce(familyRows()) // route preamble: batch-family discovery for ownership check
-    .mockResolvedValueOnce(familyRows()) // ingestBatch setup: batch-family discovery (plot/census + row count)
+    .mockResolvedValueOnce(familyRows()) // pre-lock discovery
+    .mockResolvedValueOnce(familyRows()) // post-lock current read
     .mockResolvedValueOnce([{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }])
     .mockResolvedValueOnce({ affectedRows: 0 })
     .mockResolvedValueOnce([])
+    .mockResolvedValueOnce(familyRows())
+    .mockResolvedValueOnce(familyRows())
     .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
 }
 
@@ -157,6 +160,46 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     expect(cm.acquireApplicationLock).toHaveBeenCalledTimes(1);
   });
 
+  it('returns recovery-required 409 when commit acknowledgement is lost and never calls the procedure', async () => {
+    const cm = ConnectionManager.getInstance() as any;
+    cm.executeQuery.mockResolvedValueOnce(familyRows());
+    cm.withTransaction.mockRejectedValue(Object.assign(new Error('lost commit acknowledgement'), { code: 'TRANSACTION_COMMIT_OUTCOME_UNKNOWN' }));
+
+    const res = await GET(makeRequest(), makeProps());
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: 'SETUP_COMMIT_OUTCOME_UNKNOWN', recoveryRequired: true, retryable: false });
+    expect(cm.executeQuery.mock.calls.some(([sql]: [string]) => String(sql).includes('bulkingestionprocess'))).toBe(false);
+  });
+
+  it('rejects scope drift between upload-session authorization and setup entry', async () => {
+    const cm = ConnectionManager.getInstance() as any;
+    let familyReads = 0;
+    cm.executeQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('COUNT(DISTINCT PlotID)')) {
+        familyReads++;
+        return familyReads === 1 ? familyRows() : familyRows([{ BatchID: 'batch-1', rowCount: 5 }], 23, 6);
+      }
+      return [];
+    });
+    cm.withTransaction.mockImplementation(
+      async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) => {
+        try {
+          return await fn({ query: (sql, params) => cm.executeQuery(sql, params), id: 'tx-drift' });
+        } catch (error) {
+          throw error;
+        }
+      }
+    );
+
+    const res = await GET(makeRequest(), makeProps());
+
+    expect(requireUploadSessionOwnershipMock).toHaveBeenCalledWith(expect.objectContaining({ plotId: 22, censusId: 6 }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining('expected plot=22, census=6') });
+    expect(cm.executeQuery.mock.calls.some(([sql]: [string]) => String(sql).includes('bulkingestionprocess'))).toBe(false);
+  });
+
   it('narrows failed first-load cleanup to temp rows tied to incomplete uploadmetrics batches', async () => {
     const cm = ConnectionManager.getInstance() as any;
     shouldRecoverFailedInitialCensus.mockReturnValue(true);
@@ -164,20 +207,14 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     cm.withTransaction.mockImplementation(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
       fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
     );
-    cm.executeQuery
-      .mockResolvedValueOnce(familyRows()) // route preamble: batch-family discovery for ownership check
-      .mockResolvedValueOnce(familyRows()) // ingestBatch setup: batch-family discovery (plot/census + row count)
-      .mockResolvedValueOnce([{ completedUploads: 0, incompleteUploads: 1, treeCount: 1, stemCount: 1, coreMeasurementCount: 244 }])
-      .mockResolvedValue({})
-      .mockResolvedValue({})
-      .mockResolvedValue({})
-      .mockResolvedValue({})
-      .mockResolvedValue({})
-      .mockResolvedValue({})
-      .mockResolvedValue({})
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
+    cm.executeQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('COUNT(DISTINCT PlotID)')) return familyRows();
+      if (String(sql).includes('completedUploads'))
+        return [{ completedUploads: 0, incompleteUploads: 1, treeCount: 1, stemCount: 1, coreMeasurementCount: 244 }];
+      if (String(sql).includes('SELECT 1')) return [];
+      if (String(sql).includes('bulkingestionprocess')) return [[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}];
+      return { affectedRows: 0 };
+    });
 
     const res = await GET(makeRequest(), makeProps());
 
@@ -208,10 +245,13 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     );
     cm.executeQuery
       .mockResolvedValueOnce(familyRows()) // route preamble: batch-family discovery for ownership check
-      .mockResolvedValueOnce(familyRows()) // ingestBatch setup: batch-family discovery (plot/census + row count)
+      .mockResolvedValueOnce(familyRows())
+      .mockResolvedValueOnce(familyRows())
       .mockResolvedValueOnce([{ completedUploads: 1, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 244 }])
       .mockResolvedValueOnce({ affectedRows: 244 })
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(familyRows())
+      .mockResolvedValueOnce(familyRows())
       .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
 
     const res = await GET(makeRequest(), makeProps());
@@ -242,11 +282,14 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     );
     cm.executeQuery
       .mockResolvedValueOnce(familyRows()) // route preamble: batch-family discovery for ownership check
-      .mockResolvedValueOnce(familyRows()) // ingestBatch setup: batch-family discovery (plot/census + row count)
+      .mockResolvedValueOnce(familyRows())
+      .mockResolvedValueOnce(familyRows())
       .mockResolvedValueOnce([{ completedUploads: 1, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 244 }])
       .mockResolvedValueOnce({ affectedRows: 0 })
       .mockResolvedValueOnce([{ 1: 1 }])
       .mockResolvedValueOnce({ affectedRows: 244 })
+      .mockResolvedValueOnce(familyRows())
+      .mockResolvedValueOnce(familyRows())
       .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
 
     const res = await GET(makeRequest(), makeProps());

@@ -130,6 +130,7 @@ vi.mock('@/ailogger', () => ({
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
 import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
+import { BatchFamilyScopeError } from '@/lib/uploads/batch-family';
 
 // ---------------------------------------------------------------------------
 // Fixture constants
@@ -249,7 +250,7 @@ describe('ingestBatch — integration', () => {
   }
 
   async function runIngestBatch(fileName: string = FILE_NAME): Promise<IngestBatchResult> {
-    const result = await ingestBatch(connectionManager, { schema, fileID: fileName, batchID: BATCH_ID });
+    const result = await ingestBatch(connectionManager, { schema, fileID: fileName, batchID: BATCH_ID, expectedScope: { plotID, censusID } });
     console.log(
       `[ingestBatch] processedSubBatches=${result.processedSubBatches} totalRows=${result.totalRows} recovered=${result.recovered} ` +
         `noDataFound=${result.noDataFound} totalDurationMs=${result.totalDurationMs}`
@@ -303,6 +304,30 @@ describe('ingestBatch — integration', () => {
     ]);
     return Number(rows[0].count);
   }
+
+  it('rejects a caller scope that differs from the staged family before changing staging or metrics', async () => {
+    await stageFixtureRows();
+    const before = await countTemporaryRows();
+    await expect(
+      ingestBatch(connectionManager, {
+        schema,
+        fileID: FILE_NAME,
+        batchID: BATCH_ID,
+        expectedScope: { plotID, censusID: censusID + 100_000 }
+      })
+    ).rejects.toBeInstanceOf(BatchFamilyScopeError);
+    expect(await countTemporaryRows()).toBe(before);
+    expect(await fetchUploadMetrics()).toHaveLength(0);
+  });
+
+  it('rejects missing or invalid expected scope at the shared boundary', async () => {
+    const before = await countTemporaryRows();
+    await expect(ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID: BATCH_ID } as any)).rejects.toThrow(/expectedScope/);
+    await expect(ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID: BATCH_ID, expectedScope: { plotID: 0, censusID } })).rejects.toThrow(
+      /expectedScope/
+    );
+    expect(await countTemporaryRows()).toBe(before);
+  });
 
   async function countCensusMeasurements(): Promise<number> {
     const [rows] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM coremeasurements WHERE CensusID = ?', [censusID]);
@@ -492,6 +517,7 @@ describe('ingestBatch — integration', () => {
         schema,
         fileID: FILE_NAME,
         batchID: BATCH_ID,
+        expectedScope: { plotID, censusID },
         isAborted: () => true
       });
     } catch (err) {
@@ -546,12 +572,12 @@ describe('ingestBatch — integration', () => {
     await stageFixtureRows();
     expect(await countTemporaryRows()).toBe(EXPECTED_ROW_COUNT);
 
-    // First call to isAborted: the between-batches guard in ingestBatch (returns false → proceed).
-    // All subsequent calls: inside processSubBatch's retry loop (returns true → throw midBatch abort).
+    // Setup checks once before commit and the between-batches guard checks once;
+    // the next call is inside processSubBatch's retry loop.
     let abortCallCount = 0;
     const isAborted = () => {
       abortCallCount++;
-      const shouldAbort = abortCallCount > 1;
+      const shouldAbort = abortCallCount > 2;
       console.log(`[abort-mid] isAborted call #${abortCallCount} → ${shouldAbort}`);
       return shouldAbort;
     };
@@ -560,6 +586,7 @@ describe('ingestBatch — integration', () => {
       schema,
       fileID: FILE_NAME,
       batchID: BATCH_ID,
+      expectedScope: { plotID, censusID },
       isAborted
     });
 
@@ -773,7 +800,7 @@ describe('ingestBatch — integration', () => {
     expect(stageResult.insertedCount).toBe(1);
     expect(stageResult.invalidRows).toHaveLength(0);
 
-    const result = await ingestBatch(connectionManager, { schema, fileID: fileName, batchID: BATCH_ID });
+    const result = await ingestBatch(connectionManager, { schema, fileID: fileName, batchID: BATCH_ID, expectedScope: { plotID, censusID } });
     console.log(`[negative-coord] subBatchResults=${JSON.stringify(result.subBatchResults)}`);
     expect(result.subBatchResults[0].batchFailedButHandled).toBe(false);
 

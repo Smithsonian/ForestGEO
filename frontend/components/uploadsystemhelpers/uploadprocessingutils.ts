@@ -141,6 +141,7 @@ export interface TransactionAwareQueue {
   add: (task: () => Promise<void>) => void;
   clear: () => void;
   onEmpty: () => Promise<void>;
+  onIdle: () => Promise<void>;
   readonly size: number;
 }
 
@@ -157,14 +158,27 @@ export function createTransactionAwareQueue(concurrency: number): TransactionAwa
   let pending: (() => Promise<void>)[] = [];
   let isEmpty = true;
   let emptyResolvers: (() => void)[] = [];
+  let idleResolvers: Array<{ resolve: () => void; reject: (error: unknown) => void }> = [];
+  let firstFailure: unknown = null;
+
+  const settleIdle = () => {
+    if (running !== 0 || pending.length !== 0) return;
+    emptyResolvers.forEach(resolve => resolve());
+    emptyResolvers = [];
+    if (idleResolvers.length > 0) {
+      const failure = firstFailure;
+      firstFailure = null;
+      idleResolvers.forEach(waiter => (failure === null ? waiter.resolve() : waiter.reject(failure)));
+      idleResolvers = [];
+    }
+  };
 
   // Use iterative approach instead of recursion to prevent stack overflow on large queues
   const processNext = async () => {
     if (pending.length === 0) {
       if (running === 0) {
         isEmpty = true;
-        emptyResolvers.forEach(resolve => resolve());
-        emptyResolvers = [];
+        settleIdle();
       }
       return;
     }
@@ -176,6 +190,7 @@ export function createTransactionAwareQueue(concurrency: number): TransactionAwa
     try {
       await task();
     } catch (error) {
+      firstFailure ??= error;
       ailogger.error('Task failed:', error instanceof Error ? error : new Error(String(error)));
     } finally {
       running--;
@@ -184,8 +199,7 @@ export function createTransactionAwareQueue(concurrency: number): TransactionAwa
         setTimeout(() => processNext(), 0);
       } else if (running === 0 && pending.length === 0) {
         isEmpty = true;
-        emptyResolvers.forEach(resolve => resolve());
-        emptyResolvers = [];
+        settleIdle();
       }
     }
   };
@@ -207,6 +221,17 @@ export function createTransactionAwareQueue(concurrency: number): TransactionAwa
       return new Promise<void>(resolve => {
         emptyResolvers.push(resolve);
       });
+    },
+    onIdle: () => {
+      if (isEmpty && running === 0) {
+        if (firstFailure !== null) {
+          const failure = firstFailure;
+          firstFailure = null;
+          return Promise.reject(failure);
+        }
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve, reject) => idleResolvers.push({ resolve, reject }));
     },
     get size() {
       return pending.length;

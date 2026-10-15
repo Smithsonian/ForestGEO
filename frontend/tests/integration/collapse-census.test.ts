@@ -253,7 +253,7 @@ describe('collapseCensus — integration', () => {
 
   async function stageAndIngestFixtureRows(): Promise<void> {
     await stageFixtureRows();
-    const result = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID: BATCH_ID });
+    const result = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID: BATCH_ID, expectedScope: { plotID, censusID } });
     console.log(
       `[ingest] processedSubBatches=${result.processedSubBatches} totalRows=${result.totalRows} ` +
         `recovered=${result.recovered} noDataFound=${result.noDataFound}`

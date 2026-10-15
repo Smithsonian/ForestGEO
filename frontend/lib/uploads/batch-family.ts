@@ -117,7 +117,13 @@ function toCount(value: unknown): number {
  * Returns null when the family is genuinely empty, which is the only case where
  * a caller may legitimately report "No data found".
  */
-export async function discoverBatchFamily(runQuery: BatchFamilyQueryRunner, schema: string, fileID: string, batchID: string): Promise<BatchFamilyScope | null> {
+export async function discoverBatchFamily(
+  runQuery: BatchFamilyQueryRunner,
+  schema: string,
+  fileID: string,
+  batchID: string,
+  options: { currentRead?: boolean } = {}
+): Promise<BatchFamilyScope | null> {
   const familySQL = safeFormatQuery(
     schema,
     `SELECT BatchID AS BatchID,
@@ -130,7 +136,7 @@ export async function discoverBatchFamily(runQuery: BatchFamilyQueryRunner, sche
      WHERE FileID = ?
        AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
      GROUP BY BatchID
-     ORDER BY BatchID`
+     ORDER BY BatchID${options.currentRead ? ' FOR UPDATE' : ''}`
   );
 
   const rows = (await runQuery(familySQL, [fileID, batchID, buildSubBatchPattern(batchID)])) as BatchFamilyRow[] | null | undefined;

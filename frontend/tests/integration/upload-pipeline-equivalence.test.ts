@@ -496,7 +496,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
     console.log(`[sync] rejects recorded before ingest: ${JSON.stringify(rejectsBeforeIngest)}`);
 
     // Then the interactive pipeline's processing phase: ingest + collapse.
-    const ingestResult = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID });
+    const ingestResult = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID, expectedScope: { plotID: plotA, censusID: censusA } });
     console.log(
       `[sync] ingest: subBatches=${ingestResult.processedSubBatches} totalRows=${ingestResult.totalRows} recovered=${ingestResult.recovered} ` +
         `failedSubBatches=${ingestResult.subBatchResults.filter(r => r.batchFailedButHandled).length}`
@@ -533,7 +533,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
       TEST_USER
     );
 
-    const deps: WorkerDeps = { fetchFileText: async () => FIXTURE_CSV };
+    const deps: WorkerDeps = { assertBlobStorageReady: () => undefined, fetchFileText: async () => FIXTURE_CSV };
     await runJobIfClaimable(job.jobID, deps);
 
     const finished = await getBackgroundJob(catalogPool, job.jobID);

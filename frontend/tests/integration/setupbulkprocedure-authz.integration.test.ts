@@ -98,18 +98,40 @@ function makeContext() {
   return { params: Promise.resolve({ fileID: TEST_FILE_ID, batchID: TEST_BATCH_ID }) } as any;
 }
 
-function primeSuccessfulProcedureRun() {
+function primeSuccessfulProcedureRun(options: { driftAfterAuthorization?: boolean } = {}) {
   dbSpies.acquireApplicationLock.mockResolvedValue(true);
   dbSpies.withTransaction.mockImplementation(
     async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
       fn({ query: (sql: string, params?: unknown[]) => dbSpies.executeQuery(sql, params), id: 'tx-1' })
   );
-  dbSpies.executeQuery
-    .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
-    .mockResolvedValueOnce([{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }])
-    .mockResolvedValueOnce({ affectedRows: 0 })
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
+  let familyReads = 0;
+  dbSpies.executeQuery.mockImplementation(async (sql: string) => {
+    const query = String(sql);
+    if (query.includes('COUNT(DISTINCT PlotID)')) {
+      familyReads++;
+      const scopeDrifted = options.driftAfterAuthorization && familyReads > 1;
+      return [
+        {
+          BatchID: TEST_BATCH_ID,
+          PlotID: scopeDrifted ? 23 : 22,
+          CensusID: 6,
+          rowCount: 5,
+          plotCount: 1,
+          censusCount: 1
+        }
+      ];
+    }
+    if (query.includes('completedUploads')) {
+      return [{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }];
+    }
+    if (query.includes('bulkingestionprocess')) {
+      return [[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}];
+    }
+    if (query.startsWith('DELETE') || query.includes('UPDATE forestgeo_panama.temporarymeasurements')) {
+      return { affectedRows: 0 };
+    }
+    return [];
+  });
 }
 
 describe('GET /api/setupbulkprocedure/[fileID]/[batchID] authz', () => {
@@ -147,6 +169,23 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID] authz', () => {
     expect(res.status).toBe(HTTP_OK);
     // Retained token check ran for the member, and the setup transaction executed.
     expect(requireUploadSessionOwnershipMock).toHaveBeenCalledTimes(1);
+    expect(requireUploadSessionOwnershipMock).toHaveBeenCalledWith(expect.objectContaining({ schema: MEMBER_SCHEMA, plotId: 22, censusId: 6 }));
     expect(dbSpies.withTransaction).toHaveBeenCalled();
+    expect(dbSpies.executeQuery.mock.calls.some(([sql]) => String(sql).includes('bulkingestionprocess'))).toBe(true);
+  });
+
+  it('rejects a family whose scope changes after upload-session authorization', async () => {
+    const { auth } = await import('@/auth');
+    vi.mocked(auth).mockResolvedValueOnce({
+      user: { email: MEMBER_EMAIL, userStatus: 'field crew', sites: [{ schemaName: MEMBER_SCHEMA }] }
+    } as any);
+    primeSuccessfulProcedureRun({ driftAfterAuthorization: true });
+
+    const { GET } = await import('@/app/api/setupbulkprocedure/[fileID]/[batchID]/route');
+    const res = await GET(buildRequest(MEMBER_SCHEMA), makeContext());
+
+    expect(requireUploadSessionOwnershipMock).toHaveBeenCalledWith(expect.objectContaining({ plotId: 22, censusId: 6 }));
+    expect(res.status).toBe(503);
+    expect(dbSpies.executeQuery.mock.calls.some(([sql]) => String(sql).includes('bulkingestionprocess'))).toBe(false);
   });
 });

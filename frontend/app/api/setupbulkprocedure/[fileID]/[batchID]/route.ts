@@ -63,6 +63,7 @@ async function handler(request: NextRequest, context: RouteContext) {
   }
 
   const connectionManager = ConnectionManager.getInstance();
+  let authorizedScope: { plotID: number; censusID: number } | undefined;
 
   // Upload-session ownership is a route-only concern: derive the plot/census
   // scope from the staged rows, then verify this session owns that scope.
@@ -96,6 +97,7 @@ async function handler(request: NextRequest, context: RouteContext) {
       allowedStates: [UploadSessionState.UPLOADED, UploadSessionState.PROCESSING],
       contextLabel: `batch processing for ${fileID}-${batchID}`
     });
+    authorizedScope = { plotID: family.plotID, censusID: family.censusID };
   } catch (setupError: any) {
     if (setupError instanceof UploadSessionOwnershipError) {
       return new NextResponse(JSON.stringify({ error: setupError.message, fileID, batchID }), { status: setupError.status });
@@ -114,9 +116,24 @@ async function handler(request: NextRequest, context: RouteContext) {
       schema,
       fileID,
       batchID,
+      expectedScope: authorizedScope!,
       isAborted: () => isRequestAborted(request)
     });
   } catch (error: any) {
+    if (error?.code === 'SETUP_COMMIT_OUTCOME_UNKNOWN') {
+      ailogger.error(`Setup commit outcome is unknown for ${fileID}-${batchID}; recovery is required before retry`, error);
+      return new NextResponse(
+        JSON.stringify({
+          error: 'Setup commit outcome is unknown; recovery is required before retry',
+          code: 'SETUP_COMMIT_OUTCOME_UNKNOWN',
+          recoveryRequired: true,
+          retryable: false,
+          fileID,
+          batchID
+        }),
+        { status: HTTPResponses.CONFLICT }
+      );
+    }
     if (error instanceof IngestBatchAbortedError) {
       return new NextResponse(JSON.stringify({ error: 'Client disconnected', aborted: true }), { status: HTTP_CLIENT_CLOSED_REQUEST });
     }

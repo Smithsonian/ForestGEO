@@ -282,7 +282,7 @@ describe('ingestBatch — a really-KILLed procedure call is never replayed', () 
       expect(await countTemporaryRows()).toBe(FIXTURE_ROW_COUNT);
 
       const killed = killProcedureCallWhenRunning(killVerb);
-      const result = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID: BATCH_ID });
+      const result = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID: BATCH_ID, expectedScope: { plotID, censusID } });
       const killedThreadID = await killed;
 
       console.log(

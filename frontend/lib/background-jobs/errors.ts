@@ -51,3 +51,12 @@ export class NonRetryableJobError extends Error {
     this.name = 'NonRetryableJobError';
   }
 }
+
+/** Local blob-reader configuration is unavailable; do not claim or spend a retry. */
+export class BlobStorageReadinessError extends Error {
+  readonly code = 'BLOB_STORAGE_CONFIGURATION_UNAVAILABLE';
+  constructor() {
+    super('Upload processing is temporarily unavailable because blob storage is not configured on this worker.');
+    this.name = 'BlobStorageReadinessError';
+  }
+}
