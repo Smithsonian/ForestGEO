@@ -183,7 +183,8 @@ function mockMeasurementUploadQueries(
     // (count > 0 means the SourceFormat column already exists, so no ALTER TABLE runs).
     .mockResolvedValueOnce([{ count: 1 }])
     .mockResolvedValueOnce([{ count: preInsertCount }])
-    .mockResolvedValueOnce({})
+    // temporarymeasurements INSERT: the server reports the rows it inserted.
+    .mockResolvedValueOnce({ affectedRows: postInsertCount - preInsertCount })
     .mockResolvedValueOnce([{ count: postInsertCount }]);
 
   if (changelogError) {

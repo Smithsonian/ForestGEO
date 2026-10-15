@@ -11,6 +11,7 @@ import { REFERENCE_REPLACEMENT_LOCK_TIMEOUT_MS, resetUploadSessionReplacementMar
 import { HTTPResponses } from '@/config/macros';
 import { MAX_REFERENCE_UPLOAD_ROWS } from '@/lib/uploads/reference-upload-limits';
 import { SourceFormat } from '@/config/macros/formdetails';
+import { buildSubBatchPattern } from '@/lib/uploads/batch-family';
 import { headerSignature } from '@/lib/column-mapping/mapping';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import ailogger from '@/ailogger';
@@ -401,7 +402,10 @@ describe('sqlpacketload measurement scope validation', () => {
       String(call[0]).includes('DELETE FROM `forestgeo_testing`.temporarymeasurements')
     );
     expect(cleanupCall).toBeDefined();
-    expect(cleanupCall[1]).toEqual([TEST_FILE_NAME, TEST_PLOT_ID, TEST_CENSUS_ID, TEST_BATCH_ID]);
+    // The incoming batch is spared as a FAMILY: its own `__subNNN` members are not stale.
+    expect(String(cleanupCall[0])).toContain('NOT (BatchID <=> ?)');
+    expect(String(cleanupCall[0])).not.toContain('BatchID <> ?');
+    expect(cleanupCall[1]).toEqual([TEST_FILE_NAME, TEST_PLOT_ID, TEST_CENSUS_ID, TEST_BATCH_ID, buildSubBatchPattern(TEST_BATCH_ID)]);
   });
 
   it('cleans up previous census upload data by census scope, not by filename or uploadmetrics', async () => {
@@ -470,7 +474,7 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ affectedRows: 1 })
       .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(undefined);

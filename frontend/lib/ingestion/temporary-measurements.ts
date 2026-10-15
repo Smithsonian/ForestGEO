@@ -180,30 +180,58 @@ export function toTemporaryMeasurementInsertValues(record: TemporaryMeasurementI
   return TEMPORARY_MEASUREMENT_INSERT_COLUMNS.map(column => record[column]);
 }
 
+/** Returns the rows the server inserted (INSERT IGNORE without ON DUPLICATE KEY counts only inserted rows). */
 export async function insertTemporaryMeasurementsInBatches(
   connectionManager: ConnectionManager,
   schema: string,
   rows: FileRow[],
   fileName: string,
-  batchID: string,
+  rowBatchIDs: readonly string[],
   sessionId: string | null,
   sourceFormat: SourceFormat,
   plotID: number,
   censusID: number,
   transactionID: string
-): Promise<void> {
+): Promise<number> {
+  if (rowBatchIDs.length !== rows.length) {
+    throw new Error(`Staging ${fileName} received ${rows.length} row(s) but ${rowBatchIDs.length} BatchID(s)`);
+  }
   const columnList = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.join(', ');
   const placeholderTuple = `(${TEMPORARY_MEASUREMENT_INSERT_COLUMNS.map(() => '?').join(', ')})`;
   const insertSQLPrefix = format(`INSERT IGNORE INTO ??.temporarymeasurements (${columnList}) VALUES `, [schema]);
 
+  let insertedRows = 0;
   for (let start = 0; start < rows.length; start += TEMP_MEASUREMENT_INSERT_BATCH_SIZE) {
     const slice = rows.slice(start, start + TEMP_MEASUREMENT_INSERT_BATCH_SIZE);
     const placeholders = slice.map(() => placeholderTuple).join(', ');
-    const values = slice.flatMap(row =>
-      toTemporaryMeasurementInsertValues(buildTemporaryMeasurementInsertRecord(row, fileName, batchID, sessionId, sourceFormat, plotID, censusID))
+    const values = slice.flatMap((row, index) =>
+      toTemporaryMeasurementInsertValues(
+        buildTemporaryMeasurementInsertRecord(row, fileName, rowBatchIDs[start + index], sessionId, sourceFormat, plotID, censusID)
+      )
     );
-    await connectionManager.executeQuery(`${insertSQLPrefix}${placeholders}`, values, transactionID);
+    const insertSQL = `${insertSQLPrefix}${placeholders}`;
+    const result = await connectionManager.executeQuery(insertSQL, values, transactionID);
+    insertedRows += requireAffectedRows(result, insertSQL);
   }
+  return insertedRows;
+}
+
+/** True when any row of `batchID`'s family (the batch itself or a `__subNNN` member) is staged for the file. */
+export async function familyHasStagedRows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileName: string,
+  batchID: string,
+  transactionID?: string
+): Promise<boolean> {
+  const existsSQL = safeFormatQuery(
+    schema,
+    `SELECT 1 AS staged FROM ??.temporarymeasurements
+     WHERE FileID = ? AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
+     LIMIT 1`
+  );
+  const rows = await connectionManager.executeQuery(existsSQL, [fileName, batchID, buildSubBatchPattern(batchID)], transactionID);
+  return Array.isArray(rows) && rows.length > 0;
 }
 
 export async function cleanupStaleMeasurementBatchesForFile(
@@ -220,10 +248,10 @@ export async function cleanupStaleMeasurementBatchesForFile(
      WHERE FileID = ?
        AND PlotID = ?
        AND CensusID = ?
-       AND BatchID <> ?`,
+       AND ${buildNotIncomingFamilyPredicate('BatchID')}`,
     [schema]
   );
-  const cleanupResult = await connectionManager.executeQuery(cleanupSQL, [fileName, plotID, censusID, batchID], transactionID);
+  const cleanupResult = await connectionManager.executeQuery(cleanupSQL, [fileName, plotID, censusID, batchID, buildSubBatchPattern(batchID)], transactionID);
   const deletedRows = Number((cleanupResult as { affectedRows?: number })?.affectedRows ?? 0);
 
   if (deletedRows > 0) {
@@ -275,13 +303,13 @@ function buildNotIncomingFamilyPredicate(column: string): string {
  * makes `deleted < CHUNK_SIZE` permanently false and the loop never ends.
  * Both are failures the caller must see.
  */
-function requireAffectedRows(result: unknown, deleteSQL: string): number {
+function requireAffectedRows(result: unknown, statementSQL: string): number {
   const affectedRows = (result as { affectedRows?: unknown })?.affectedRows;
   const parsed = Number(affectedRows);
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new Error(
-      `Bounded delete could not read a row count from the server: affectedRows=${JSON.stringify(affectedRows)} ` +
-        `is not a non-negative integer. Statement: ${deleteSQL.replace(/\s+/g, ' ').trim().slice(0, 200)}`
+      `Statement could not read a row count from the server: affectedRows=${JSON.stringify(affectedRows)} ` +
+        `is not a non-negative integer. Statement: ${statementSQL.replace(/\s+/g, ' ').trim().slice(0, 200)}`
     );
   }
   return parsed;
@@ -421,17 +449,21 @@ export async function findDroppedMeasurementCandidates(
   connectionManager: ConnectionManager,
   schema: string,
   fileName: string,
-  batchID: string,
+  rowBatchIDs: readonly string[],
   plotID: number,
   censusID: number,
   chunkRows: FileRow[],
   transactionID: string
 ): Promise<DroppedMeasurementCandidate[]> {
+  if (rowBatchIDs.length !== chunkRows.length) {
+    throw new Error(`Dropped-row audit for ${fileName} received ${chunkRows.length} row(s) but ${rowBatchIDs.length} BatchID(s)`);
+  }
   const tempTable = 'dropped_row_candidates';
   await connectionManager.executeQuery(`DROP TEMPORARY TABLE IF EXISTS ${tempTable}`, [], transactionID);
   await connectionManager.executeQuery(
     `CREATE TEMPORARY TABLE ${tempTable} (
       RowOrdinal INT NOT NULL PRIMARY KEY,
+      BatchID VARCHAR(36) NOT NULL,
       TreeTag VARCHAR(20) NULL,
       StemTag VARCHAR(10) NULL,
       SpeciesCode VARCHAR(25) NULL,
@@ -445,13 +477,14 @@ export async function findDroppedMeasurementCandidates(
   );
 
   try {
-    const insertWidth = 6;
+    const insertWidth = 7;
     const insertBatchSize = 500;
     for (let start = 0; start < chunkRows.length; start += insertBatchSize) {
       const slice = chunkRows.slice(start, start + insertBatchSize);
       const placeholders = slice.map(() => `(${Array(insertWidth).fill('?').join(',')})`).join(', ');
       const params = slice.flatMap((row, index) => [
         start + index + 1,
+        rowBatchIDs[start + index],
         row.tag ?? null,
         row.stemtag || null,
         row.spcode ?? null,
@@ -460,7 +493,7 @@ export async function findDroppedMeasurementCandidates(
       ]);
 
       await connectionManager.executeQuery(
-        `INSERT INTO ${tempTable} (RowOrdinal, TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate) VALUES ${placeholders}`,
+        `INSERT INTO ${tempTable} (RowOrdinal, BatchID, TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate) VALUES ${placeholders}`,
         params,
         transactionID
       );
@@ -479,7 +512,7 @@ export async function findDroppedMeasurementCandidates(
        FROM ${tempTable} drc
        LEFT JOIN ??.temporarymeasurements tm
          ON tm.FileID = ?
-        AND tm.BatchID = ?
+        AND tm.BatchID = drc.BatchID
         AND tm.TreeTag <=> drc.TreeTag
         AND tm.StemTag <=> drc.StemTag
         AND tm.SpeciesCode <=> drc.SpeciesCode
@@ -497,7 +530,7 @@ export async function findDroppedMeasurementCandidates(
        ORDER BY drc.RowOrdinal`
     );
 
-    const results = await connectionManager.executeQuery(droppedRowsSQL, [fileName, batchID, fileName, plotID, censusID], transactionID);
+    const results = await connectionManager.executeQuery(droppedRowsSQL, [fileName, fileName, plotID, censusID], transactionID);
 
     return Array.isArray(results) ? (results as DroppedMeasurementCandidate[]) : [];
   } finally {

@@ -42,7 +42,7 @@ describe('parseUnsignedIntField', () => {
 describe('findDroppedMeasurementCandidates placeholder alignment', () => {
   const TEST_SCHEMA = 'forestgeo_testing';
   const TEST_FILE_NAME = 'SERC_census1_2025.csv';
-  const TEST_BATCH_ID = 'batch-7';
+  const TEST_ROW_BATCH_ID = 'batch-7__sub002';
   const TEST_PLOT_ID = 22;
   const TEST_CENSUS_ID = 32;
   const TEST_TRANSACTION_ID = 'tx-test';
@@ -55,7 +55,7 @@ describe('findDroppedMeasurementCandidates placeholder alignment', () => {
       connectionManager,
       TEST_SCHEMA,
       TEST_FILE_NAME,
-      TEST_BATCH_ID,
+      [TEST_ROW_BATCH_ID],
       TEST_PLOT_ID,
       TEST_CENSUS_ID,
       [{ tag: '100001', stemtag: '1', spcode: 'FAGR', quadrat: '1011', date: '2010-03-17' }] as FileRow[],
@@ -75,13 +75,69 @@ describe('findDroppedMeasurementCandidates placeholder alignment', () => {
     expect(String(sql).match(/`forestgeo_testing`\.temporarymeasurements/g)).toHaveLength(2);
 
     expect(String(sql).match(/\?/g)).toHaveLength(params.length);
-    expect(params).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_FILE_NAME, TEST_PLOT_ID, TEST_CENSUS_ID]);
+    expect(params).toEqual([TEST_FILE_NAME, TEST_FILE_NAME, TEST_PLOT_ID, TEST_CENSUS_ID]);
     expect(params).not.toContain(TEST_SCHEMA);
+    expect(params, 'the per-row BatchID belongs in the candidate table, not the join').not.toContain(TEST_ROW_BATCH_ID);
+    expect(sql).toContain('tm.BatchID = drc.BatchID');
 
-    const slotOrder = ['tm.FileID = ?', 'tm.BatchID = ?', 'dup.FileID = ?', 'dup.PlotID = ?', 'dup.CensusID = ?'];
+    const slotOrder = ['tm.FileID = ?', 'dup.FileID = ?', 'dup.PlotID = ?', 'dup.CensusID = ?'];
     const slotPositions = slotOrder.map(slot => String(sql).indexOf(slot));
     slotPositions.forEach((position, index) => expect(position, `missing value slot ${slotOrder[index]}`).toBeGreaterThan(-1));
     expect(slotPositions, 'value slots appear in a different order than the params array').toEqual([...slotPositions].sort((a, b) => a - b));
+  });
+
+  it("stores each row's own BatchID in the candidate column that the join reads", async () => {
+    const executeQuery = vi.fn().mockResolvedValue([]);
+    const connectionManager = { executeQuery } as unknown as ConnectionManager;
+    const rowBatchIDs = ['batch-7__sub001', 'batch-7__sub002'];
+
+    await findDroppedMeasurementCandidates(
+      connectionManager,
+      TEST_SCHEMA,
+      TEST_FILE_NAME,
+      rowBatchIDs,
+      TEST_PLOT_ID,
+      TEST_CENSUS_ID,
+      [
+        { tag: '100001', stemtag: '1', spcode: 'FAGR', quadrat: '1011', date: '2010-03-17' },
+        { tag: '100002', stemtag: '1', spcode: 'FAGR', quadrat: '1011', date: '2010-03-17' }
+      ] as FileRow[],
+      TEST_TRANSACTION_ID
+    );
+
+    const candidateInsertCall = executeQuery.mock.calls.find(call => String(call[0]).startsWith('INSERT INTO dropped_row_candidates'));
+    expect(candidateInsertCall, 'candidate rows were never inserted').toBeDefined();
+    const [insertSQL, insertParams] = candidateInsertCall!;
+    console.log('[candidate insert]', insertSQL, insertParams);
+
+    const columns = String(insertSQL)
+      .match(/\(([^)]*)\) VALUES/)![1]
+      .split(',')
+      .map(column => column.trim());
+    expect(String(insertSQL).match(/\?/g)).toHaveLength(insertParams.length);
+    const batchIDColumnIndex = columns.indexOf('BatchID');
+    expect(batchIDColumnIndex, `BatchID missing from candidate columns ${columns.join(',')}`).toBeGreaterThan(-1);
+    const insertedBatchIDs = rowBatchIDs.map((_, rowIndex) => insertParams[rowIndex * columns.length + batchIDColumnIndex]);
+    expect(insertedBatchIDs).toEqual(rowBatchIDs);
+  });
+
+  it('rejects a BatchID list that does not match the rows before touching the database', async () => {
+    const executeQuery = vi.fn().mockResolvedValue([]);
+    const connectionManager = { executeQuery } as unknown as ConnectionManager;
+
+    await expect(
+      findDroppedMeasurementCandidates(
+        connectionManager,
+        TEST_SCHEMA,
+        TEST_FILE_NAME,
+        [],
+        TEST_PLOT_ID,
+        TEST_CENSUS_ID,
+        [{ tag: '100001' }] as FileRow[],
+        TEST_TRANSACTION_ID
+      )
+    ).rejects.toThrow(/1 row\(s\) but 0 BatchID/);
+    expect(executeQuery).not.toHaveBeenCalled();
   });
 });
 

@@ -265,7 +265,7 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     schema,
     chunkRows,
     fileName,
-    batchID,
+    chunkRows.map(() => batchID),
     uploadSessionID,
     sourceFormat,
     plotID,
@@ -337,7 +337,16 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
         `${droppedRowCount} row(s) were silently dropped by INSERT IGNORE (likely duplicates). This indicates potential data loss!`
     );
 
-    const droppedCandidates = await findDroppedMeasurementCandidates(connectionManager, schema, fileName, batchID, plotID, censusID, chunkRows, transactionID);
+    const droppedCandidates = await findDroppedMeasurementCandidates(
+      connectionManager,
+      schema,
+      fileName,
+      chunkRows.map(() => batchID),
+      plotID,
+      censusID,
+      chunkRows,
+      transactionID
+    );
     const droppedRows: DroppedMeasurementRow[] = droppedCandidates.map(candidate => {
       const row = chunkRows[candidate.rowOrdinal - 1];
       return Object.assign({}, row, {
