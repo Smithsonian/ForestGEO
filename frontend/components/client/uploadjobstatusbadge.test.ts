@@ -77,7 +77,7 @@ describe('summarizeJobs', () => {
 });
 
 describe('UploadJobStatusBadge rendered status', () => {
-  it('shows a safe recovery summary on the visible card and actionable details by keyboard', async () => {
+  it('shows a safe failure summary on the visible card and actionable details by keyboard', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(
@@ -95,10 +95,9 @@ describe('UploadJobStatusBadge rendered status', () => {
                   maxRetries: 3,
                   sourceFormat: 'csv',
                   failureContext: {
-                    code: 'SETUP_COMMIT_OUTCOME_UNKNOWN',
-                    summary: 'Commit outcome needs recovery review.',
-                    step: 'commit',
-                    recoveryRequired: true
+                    code: 'SETUP_CALLBACK_TIMEOUT',
+                    summary: 'The file uploaded, but preparing its measurements took too long.',
+                    step: 'splitting'
                   },
                   lastError: 'setup failed'
                 }
@@ -109,13 +108,12 @@ describe('UploadJobStatusBadge rendered status', () => {
       )
     );
     render(createElement(UploadJobStatusBadge, { schema: 'forest', plotID: 1, censusID: 1 }));
-    expect(await screen.findByText('Commit outcome needs recovery review.')).toBeTruthy();
+    expect(await screen.findByText('The file uploaded, but preparing its measurements took too long.')).toBeTruthy();
     expect(screen.getByText(/Rows staged 412421/)).toBeTruthy();
     expect(screen.getByRole('status')).toBeTruthy();
     const card = screen.getByRole('button', { name: 'Open upload job progress details' });
     fireEvent.keyDown(card, { key: 'Enter' });
-    await waitFor(() => expect(screen.getByText('Recovery required. Do not retry this upload yet.')).toBeTruthy());
-    expect(screen.getByText('Last step: Commit')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('Last step: Splitting')).toBeTruthy());
     expect(screen.getByText(/retry 3\/3/)).toBeTruthy();
   });
 });

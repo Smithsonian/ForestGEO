@@ -160,18 +160,6 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     expect(cm.acquireApplicationLock).toHaveBeenCalledTimes(1);
   });
 
-  it('returns recovery-required 409 when commit acknowledgement is lost and never calls the procedure', async () => {
-    const cm = ConnectionManager.getInstance() as any;
-    cm.executeQuery.mockResolvedValueOnce(familyRows());
-    cm.withTransaction.mockRejectedValue(Object.assign(new Error('lost commit acknowledgement'), { code: 'TRANSACTION_COMMIT_OUTCOME_UNKNOWN' }));
-
-    const res = await GET(makeRequest(), makeProps());
-
-    expect(res.status).toBe(409);
-    await expect(res.json()).resolves.toMatchObject({ code: 'SETUP_COMMIT_OUTCOME_UNKNOWN', recoveryRequired: true, retryable: false });
-    expect(cm.executeQuery.mock.calls.some(([sql]: [string]) => String(sql).includes('bulkingestionprocess'))).toBe(false);
-  });
-
   it('rejects scope drift between upload-session authorization and setup entry', async () => {
     const cm = ConnectionManager.getInstance() as any;
     let familyReads = 0;

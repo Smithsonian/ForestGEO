@@ -168,7 +168,7 @@ export interface IngestBatchParams {
 
 export interface SetupDiagnostic {
   step: 'discovery' | 'lock_wait' | 'post_lock_validation' | 'recovery' | 'cleanup' | 'splitting' | 'commit' | 'terminal';
-  outcome?: 'started' | 'completed' | 'failed' | 'committed' | 'rolled_back' | 'commit_outcome_unknown';
+  outcome?: 'started' | 'completed' | 'failed' | 'committed' | 'rolled_back';
   schema: string;
   plotID: number;
   censusID: number;
@@ -185,16 +185,6 @@ export interface SetupDiagnostic {
   commitDurationMs?: number;
   cleanupDurationMs?: number;
   totalDurationMs?: number;
-}
-
-export class SetupCommitOutcomeUnknownError extends Error {
-  readonly code = 'SETUP_COMMIT_OUTCOME_UNKNOWN';
-  readonly cause: unknown;
-  constructor(cause: unknown) {
-    super('Ingestion setup commit outcome is unknown; recovery is required before retry');
-    this.name = 'SetupCommitOutcomeUnknownError';
-    this.cause = cause;
-  }
 }
 
 export class SetupCallbackTimeoutError extends Error {
@@ -947,18 +937,10 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
             emit({ step: 'commit', outcome: 'committed', commitDurationMs: event.commitDurationMs, totalDurationMs: event.totalDurationMs });
           if (event.type === 'rollback_acknowledged')
             emit({ outcome: 'rolled_back', cleanupDurationMs: event.cleanupDurationMs, totalDurationMs: event.totalDurationMs });
-          if (event.type === 'commit_outcome_unknown')
-            emit({
-              step: 'commit',
-              outcome: 'commit_outcome_unknown',
-              errorCode: 'SETUP_COMMIT_OUTCOME_UNKNOWN',
-              commitDurationMs: event.commitDurationMs,
-              totalDurationMs: event.totalDurationMs
-            });
           if (event.type === 'cleanup_finished') emit({ cleanupDurationMs: event.cleanupDurationMs, totalDurationMs: event.totalDurationMs });
           if (event.type === 'transaction_finished')
             emit({
-              outcome: event.outcome === 'rolled_back' ? 'rolled_back' : event.outcome === 'commit_outcome_unknown' ? 'commit_outcome_unknown' : undefined,
+              outcome: event.outcome === 'rolled_back' ? 'rolled_back' : undefined,
               cleanupDurationMs: event.cleanupDurationMs,
               totalDurationMs: event.totalDurationMs
             });
@@ -968,14 +950,9 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
     emit({ outcome: 'committed', rowCount: setupResult.totalRows, terminal: true });
   } catch (error: any) {
     const setupError =
-      error?.code === 'TRANSACTION_COMMIT_OUTCOME_UNKNOWN' || error?.name === 'TransactionCommitOutcomeUnknownError'
-        ? new SetupCommitOutcomeUnknownError(error)
-        : error?.code === 'TRANSACTION_CALLBACK_TIMEOUT' || error?.name === 'TransactionCallbackTimeoutError'
-          ? new SetupCallbackTimeoutError(error)
-          : error;
+      error?.code === 'TRANSACTION_CALLBACK_TIMEOUT' || error?.name === 'TransactionCallbackTimeoutError' ? new SetupCallbackTimeoutError(error) : error;
     const timeout = setupError?.code === 'SETUP_CALLBACK_TIMEOUT';
-    const terminalOutcome =
-      setupError?.code === 'SETUP_COMMIT_OUTCOME_UNKNOWN' ? 'commit_outcome_unknown' : lastDiagnostic.outcome === 'rolled_back' ? 'rolled_back' : 'failed';
+    const terminalOutcome = lastDiagnostic.outcome === 'rolled_back' ? 'rolled_back' : 'failed';
     emit({ outcome: terminalOutcome, errorCode: setupError?.code ?? (timeout ? 'SETUP_CALLBACK_TIMEOUT' : undefined), terminal: true });
     throw setupError;
   }

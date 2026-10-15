@@ -282,11 +282,6 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
                   {job.maxRetries ?? '?'}
                 </Typography>
                 {job.failureContext?.step && <Typography level="body-xs">Last step: {formatPhase(job.failureContext.step)}</Typography>}
-                {job.failureContext?.recoveryRequired && (
-                  <Typography level="body-xs" color="danger">
-                    Recovery required. Do not retry this upload yet.
-                  </Typography>
-                )}
                 {job.status === 'waiting_retry' && (
                   <Typography level="body-xs" color="warning">
                     The system is retrying this job.

@@ -67,22 +67,6 @@ describe('useUploadSession', () => {
     );
   });
 
-  it('holds staged rows when setup commit outcome is unknown, including explicit cleanup requests', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: vi.fn().mockResolvedValue({ session: { sessionId: 'session-held', state: 'initialized', uploadedChunks: 1, processedBatches: 0, totalBatches: 1 } })
-    });
-    const { result, unmount } = renderHook(() => useUploadSession({ schema: 'forestgeo_testing', plotId: 1, censusId: 2 }));
-    await act(async () => {
-      await result.current.createSession('census2.csv', 1, 'attempt-hash');
-    });
-    act(() => result.current.holdForRecovery());
-    await act(async () => result.current.cancelSession(true));
-    unmount();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.current.getCurrentSessionId()).toBe('session-held');
-  });
-
   it('clears the active session ref immediately when heartbeat returns 404', async () => {
     const onSessionExpired = vi.fn();
 

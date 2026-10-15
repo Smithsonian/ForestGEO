@@ -282,7 +282,6 @@ export async function recordSetupDiagnostic(
     code?: string;
     summary?: string;
     detail?: string;
-    recoveryRequired?: boolean;
   }
 ): Promise<void> {
   const safe = {
@@ -306,8 +305,7 @@ export async function recordSetupDiagnostic(
     ...(details.terminal ? { terminal: true } : {}),
     ...(details.code && /^[A-Z0-9_]{1,80}$/.test(details.code) ? { code: details.code } : {}),
     ...(details.summary ? { summary: details.summary.slice(0, 500) } : {}),
-    ...(details.detail ? { detail: details.detail.slice(0, 500) } : {}),
-    ...(details.recoveryRequired ? { recoveryRequired: true } : {})
+    ...(details.detail ? { detail: details.detail.slice(0, 500) } : {})
   };
   await addJobEvent(catalogPool, jobID, 'setup_diagnostic', safe.summary ?? `Setup ${safe.step}`, safe);
 }
@@ -545,10 +543,12 @@ export function selectFailureContext(job: BackgroundJobRecord, events: Backgroun
   const embedded = transitionDetails.failureContext;
   if (embedded && typeof embedded === 'object' && !Array.isArray(embedded)) {
     const value = embedded as Record<string, unknown>;
-    const recoveryOnly = value.recoveryRequired === true && value.code === 'SETUP_COMMIT_OUTCOME_UNKNOWN';
     if (
       (typeof value.attemptID === 'string' && value.attemptID !== transitionAttempt) ||
-      (!recoveryOnly && (!transitionFile || !transitionBatch || value.fileID !== transitionFile || value.batchID !== transitionBatch)) ||
+      !transitionFile ||
+      !transitionBatch ||
+      value.fileID !== transitionFile ||
+      value.batchID !== transitionBatch ||
       (typeof value.fileID === 'string' && value.fileID !== transitionFile) ||
       (typeof value.batchID === 'string' && value.batchID !== transitionBatch)
     ) {
@@ -563,8 +563,7 @@ export function selectFailureContext(job: BackgroundJobRecord, events: Backgroun
       ...(typeof value.detail === 'string' ? { detail: value.detail.slice(0, 500) } : {}),
       ...(transitionAttempt ? { attemptID: transitionAttempt } : {}),
       ...(typeof value.fileID === 'string' ? { fileID: value.fileID.slice(0, 255) } : {}),
-      ...(typeof value.batchID === 'string' ? { batchID: value.batchID.slice(0, 255) } : {}),
-      ...(value.recoveryRequired === true ? { recoveryRequired: true } : {})
+      ...(typeof value.batchID === 'string' ? { batchID: value.batchID.slice(0, 255) } : {})
     };
   }
   if (transitionAttempt && transitionFile && transitionBatch) {
@@ -579,9 +578,7 @@ export function selectFailureContext(job: BackgroundJobRecord, events: Backgroun
     if (
       terminal &&
       terminal.details &&
-      (terminal.details.outcome === 'failed' ||
-        terminal.details.outcome === 'commit_outcome_unknown' ||
-        (terminal.details.outcome === 'rolled_back' && terminal.details.code === 'SETUP_CALLBACK_TIMEOUT'))
+      (terminal.details.outcome === 'failed' || (terminal.details.outcome === 'rolled_back' && terminal.details.code === 'SETUP_CALLBACK_TIMEOUT'))
     ) {
       const d = terminal.details;
       const hasSafeSummary = typeof d.summary === 'string' && d.summary.length > 0;
@@ -593,8 +590,7 @@ export function selectFailureContext(job: BackgroundJobRecord, events: Backgroun
         ...(typeof d.detail === 'string' ? { detail: d.detail.slice(0, 500) } : {}),
         attemptID: transitionAttempt,
         ...(typeof d.fileID === 'string' ? { fileID: d.fileID.slice(0, 255) } : {}),
-        ...(typeof d.batchID === 'string' ? { batchID: d.batchID.slice(0, 255) } : {}),
-        ...(d.recoveryRequired === true ? { recoveryRequired: true } : {})
+        ...(typeof d.batchID === 'string' ? { batchID: d.batchID.slice(0, 255) } : {})
       };
     }
   }
@@ -990,22 +986,8 @@ export async function finalizeJobAsSystem(
     ]);
     if (!claimRows.length) return false;
     const displacedWorkerID = typeof claimRows[0].WorkerID === 'string' ? claimRows[0].WorkerID : undefined;
-    let finalStatus = status;
-    let recoveryRequired = false;
-    if (displacedWorkerID) {
-      const [diagnosticRows] = await conn.query<RowDataPacket[]>(
-        `SELECT Details FROM catalog.background_job_events WHERE JobID = ? AND EventType = 'setup_diagnostic' ORDER BY EventID DESC LIMIT 100`,
-        [jobID]
-      );
-      recoveryRequired = diagnosticRows.some(row => {
-        const d = parseJsonObject(row.Details);
-        return d?.attemptID === displacedWorkerID && d?.terminal === true && d?.code === 'SETUP_COMMIT_OUTCOME_UNKNOWN';
-      });
-      if (recoveryRequired) finalStatus = 'failed';
-    }
-    const phase = finalStatus === 'failed' ? 'failed' : 'staging';
-    const isTerminal = finalStatus === 'failed';
-    const finalReason = recoveryRequired ? 'Setup commit outcome is unknown. This upload requires recovery review before it can be retried.' : reason;
+    const phase = status === 'failed' ? 'failed' : 'staging';
+    const isTerminal = status === 'failed';
     const [result] = await conn.query<ResultSetHeader>(
       `UPDATE catalog.background_jobs
      SET Status = ?,
@@ -1018,17 +1000,14 @@ export async function finalizeJobAsSystem(
          FinishedAt = IF(?, NOW(), FinishedAt),
          UpdatedAt = NOW()
      WHERE JobID = ? AND Status = 'running'`,
-      [finalStatus, phase, finalReason, finalStatus === 'failed' ? null : (nextAttemptAt ?? null), isTerminal, jobID]
+      [status, phase, reason, status === 'failed' ? null : (nextAttemptAt ?? null), isTerminal, jobID]
     );
     transitioned = result.affectedRows > 0;
     if (transitioned) {
-      await addJobEvent(conn, jobID, 'reclaimed', finalReason, {
-        finalStatus,
-        nextAttemptAt: finalStatus === 'waiting_retry' ? (nextAttemptAt?.toISOString() ?? null) : null,
-        ...(displacedWorkerID ? { displacedWorkerID, attemptID: displacedWorkerID } : {}),
-        ...(recoveryRequired
-          ? { failureContext: { code: 'SETUP_COMMIT_OUTCOME_UNKNOWN', summary: finalReason, attemptID: displacedWorkerID, recoveryRequired: true } }
-          : {})
+      await addJobEvent(conn, jobID, 'reclaimed', reason, {
+        finalStatus: status,
+        nextAttemptAt: status === 'waiting_retry' ? (nextAttemptAt?.toISOString() ?? null) : null,
+        ...(displacedWorkerID ? { displacedWorkerID, attemptID: displacedWorkerID } : {})
       });
     }
   });

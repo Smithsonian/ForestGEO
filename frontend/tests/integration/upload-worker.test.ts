@@ -413,32 +413,6 @@ describe('runJobIfClaimable — integration', () => {
     expect(job?.workerID).toBeNull();
   }, 120000);
 
-  it('keeps recovery-required terminal when cancellation races an unknown setup commit', async () => {
-    const jobID = await createTwoFileJob();
-    const batchID = await batchIDForFile(jobID, FILE1_NAME);
-    await insertStagedTempRow(FILE1_NAME, batchID, 'recovery-row', '1-1', 12.3);
-    const stagedBefore = await countTempRows(FILE1_NAME);
-    let injected = false;
-    sharedState.onSchemaQuery = async () => {
-      if (injected) return;
-      injected = true;
-      await catalogPool.query(`UPDATE catalog.background_jobs SET Status = 'cancel_requested' WHERE JobID = ?`, [jobID]);
-      const unknown = new Error('synthetic commit acknowledgment loss');
-      Object.assign(unknown, { code: 'SETUP_COMMIT_OUTCOME_UNKNOWN' });
-      throw unknown;
-    };
-    try {
-      await runJobIfClaimable(jobID, healthyDeps());
-    } finally {
-      sharedState.onSchemaQuery = null;
-    }
-    const job = await getBackgroundJob(catalogPool, jobID);
-    expect(job?.status).toBe('failed');
-    expect(job?.retryCount).toBe(0);
-    expect(job?.lastError).toContain('requires recovery review');
-    expect(await countTempRows(FILE1_NAME)).toBe(stagedBefore);
-  }, 120000);
-
   it('does not attach a prior setup timeout to a later blob failure', async () => {
     const jobID = await createTwoFileJob();
     await insertStagedTempRow(FILE1_NAME, await batchIDForFile(jobID, FILE1_NAME), 'timeout-row', '1-1', 12.3);

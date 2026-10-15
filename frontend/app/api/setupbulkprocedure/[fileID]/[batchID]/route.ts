@@ -120,20 +120,6 @@ async function handler(request: NextRequest, context: RouteContext) {
       isAborted: () => isRequestAborted(request)
     });
   } catch (error: any) {
-    if (error?.code === 'SETUP_COMMIT_OUTCOME_UNKNOWN') {
-      ailogger.error(`Setup commit outcome is unknown for ${fileID}-${batchID}; recovery is required before retry`, error);
-      return new NextResponse(
-        JSON.stringify({
-          error: 'Setup commit outcome is unknown; recovery is required before retry',
-          code: 'SETUP_COMMIT_OUTCOME_UNKNOWN',
-          recoveryRequired: true,
-          retryable: false,
-          fileID,
-          batchID
-        }),
-        { status: HTTPResponses.CONFLICT }
-      );
-    }
     if (error instanceof IngestBatchAbortedError) {
       return new NextResponse(JSON.stringify({ error: 'Client disconnected', aborted: true }), { status: HTTP_CLIENT_CLOSED_REQUEST });
     }

@@ -362,26 +362,21 @@ function failureContextFor(ctx: WorkerRunContext, code?: string): UploadJobFailu
   if (
     !d ||
     !d.terminal ||
-    (d.outcome !== 'failed' &&
-      d.outcome !== 'commit_outcome_unknown' &&
-      !(d.outcome === 'rolled_back' && (code === 'SETUP_CALLBACK_TIMEOUT' || d.errorCode === 'SETUP_CALLBACK_TIMEOUT')))
+    (d.outcome !== 'failed' && !(d.outcome === 'rolled_back' && (code === 'SETUP_CALLBACK_TIMEOUT' || d.errorCode === 'SETUP_CALLBACK_TIMEOUT')))
   )
     return undefined;
   const effectiveCode = code ?? d.errorCode;
   const summary =
     effectiveCode === 'SETUP_CALLBACK_TIMEOUT'
       ? 'The file uploaded, but preparing its measurements took too long.'
-      : effectiveCode === 'SETUP_COMMIT_OUTCOME_UNKNOWN'
-        ? 'Setup commit outcome is unknown. This upload requires recovery review before it can be retried.'
-        : 'Upload setup failed while preparing measurements.';
+      : 'Upload setup failed while preparing measurements.';
   return {
     ...(effectiveCode ? { code: effectiveCode } : {}),
     summary,
     step: d.step,
     attemptID: ctx.workerID,
     fileID: d.fileID,
-    batchID: d.batchID,
-    ...(effectiveCode === 'SETUP_COMMIT_OUTCOME_UNKNOWN' ? { recoveryRequired: true } : {})
+    batchID: d.batchID
   };
 }
 
@@ -410,13 +405,7 @@ function reportSetupDiagnostic(ctx: WorkerRunContext, diagnostic: SetupDiagnosti
     totalDurationMs: diagnostic.totalDurationMs,
     terminal: diagnostic.terminal,
     code: diagnostic.errorCode,
-    ...(diagnostic.errorCode === 'SETUP_CALLBACK_TIMEOUT' ? { summary: 'The file uploaded, but preparing its measurements took too long.' } : {}),
-    ...(diagnostic.errorCode === 'SETUP_COMMIT_OUTCOME_UNKNOWN'
-      ? {
-          summary: 'Setup commit outcome is unknown. This upload requires recovery review before it can be retried.',
-          recoveryRequired: true
-        }
-      : {})
+    ...(diagnostic.errorCode === 'SETUP_CALLBACK_TIMEOUT' ? { summary: 'The file uploaded, but preparing its measurements took too long.' } : {})
   })
     .catch(() => {
       // Diagnostic persistence is optional telemetry and cannot replace setup or
@@ -519,12 +508,6 @@ async function handleRunFailure(ctx: WorkerRunContext, error: unknown): Promise<
   const err = error instanceof Error ? error : new Error(String(error));
   try {
     const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code: unknown }).code) : undefined;
-    if (errorCode === 'SETUP_COMMIT_OUTCOME_UNKNOWN') {
-      const summary = 'Setup commit outcome is unknown. This upload requires recovery review before it can be retried.';
-      const failureContext = failureContextFor(ctx, errorCode);
-      await markBackgroundJobFailed(catalogPool, job.jobID, workerID, new Error(summary), workerID, failureContext);
-      return;
-    }
     // Cancel wins over retry parking: a cancel_requested set while this
     // failure was unwinding must finalize as 'cancelled', not be erased by a
     // waiting_retry/failed transition. (markBackgroundJobWaitingRetryAsWorker

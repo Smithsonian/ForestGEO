@@ -139,7 +139,6 @@ export interface UploadJobFailureContext {
   attemptID?: string;
   fileID?: string;
   batchID?: string;
-  recoveryRequired?: boolean;
 }
 
 export interface BackgroundJobFileRecord {
