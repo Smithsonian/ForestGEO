@@ -17,20 +17,46 @@ The [implementation plan](2026-10-15-mpala-upload-ingestion-timeout-plan.md) and
 
 ## Validation
 
-| Check                                         | Result                                                                                                                               |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `npm run test:unit:ci`                        | Passed: 261 files, 4,177 tests.                                                                                                      |
-| `npm run test:integration`                    | Full guarded-local suite in progress; final result below.                                                                            |
-| `npm run build`                               | Passed, including formatting, lint, Next compilation/type checking, and 69 static pages. Existing warning-only lint messages remain. |
-| Standalone `tsc --noEmit --incremental false` | Same 90 test-file diagnostics as the clean baseline; no additional normalized diagnostics.                                           |
-| `graphify update .`                           | Passed: 4,785 nodes, 8,290 edges, 582 communities; generated output remains ignored.                                                 |
-| `git diff --check`                            | Passed.                                                                                                                              |
+| Check                                         | Result                                                                                                                                               |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run test:unit:ci`                        | Passed: 261 files, 4,177 tests.                                                                                                                      |
+| `npm run test:integration`                    | Full run: 139 files passed; one authorization fixture failed. Corrected fixture and final focused rerun: 6 files / 49 checks passed (details below). |
+| `npm run build`                               | Passed, including formatting, lint, Next compilation/type checking, and 69 static pages. Existing warning-only lint messages remain.                 |
+| Standalone `tsc --noEmit --incremental false` | Same 90 test-file diagnostics as the clean baseline; no additional normalized diagnostics.                                                           |
+| `graphify update .`                           | Passed: 4,793 nodes / 8,305 edges from the final AST-only refresh; generated output remains ignored.                                                 |
+| PR dependency-cycle / any-escape gates        | Passed at their existing baselines: 33 cycles / 489 any escapes.                                                                                     |
+| `git diff --check`                            | Passed.                                                                                                                                              |
 
 Full-size setup measurements deliberately stop before the stored procedure; they are not full-source upload acceptance. The benchmark is synthetic and includes controlled transport/timeout fault injection in separate correctness tests. Fault injection is not reproduction of the original Azure performance failure.
+
+Final implementation/benchmark source revision: `082b2529a3b241e43d80fb661d63f1bf4cc86f47` (the evidence-only commit follows it).
 
 Runtime: Node `v25.2.1`, npm `11.6.2`, MySQL `8.0.36`, InnoDB buffer pool `268435456` bytes. Package-lock SHA-256: `7a07d18cdf95027343657ea506ba5b322ec711e6d170433182bd9a02e50ab769`.
 
 The initial focused baseline had six existing setup-route test failures; those fixtures were updated. A clean baseline TypeScript snapshot reports 90 diagnostics, all in tests. Final checks compare against that snapshot rather than treating those failures as new implementation defects.
+
+## Local setup performance and index decision
+
+The full-size benchmark uses 412,421 synthetic accepted rows plus 50,000 interleaved, untouched history rows. Each arm starts with a truncated test-only staging table, reset AUTO_INCREMENT, and independently inserted identical IDs. Exact staged/final membership hashes agree across every arm. Three A/B pairs alternate order; no other test or database workload ran concurrently. Cache conditions are explicitly **warm after staging in a shared local buffer pool**; no cold-cache claim is made.
+
+A is the frozen test-only legacy LIMIT loop. B runs the actual shared ingestion setup, including discovery, locks, recovery checks, cleanup checks, split verification, COMMIT and connection cleanup, stopping before the stored procedure. A includes the application lock and transaction lifecycle but omits B's additional setup validation queries; this is a conservative timing comparison for B. The configured 10,000-row split size and 120-second callback timeout are unchanged.
+
+| Statistics                                              | Legacy A median | Keyset B median | B / A | Local ≤ 0.50 target |
+| ------------------------------------------------------- | --------------: | --------------: | ----: | ------------------- |
+| Frozen while empty, auto-recalc disabled before staging |        43.744 s |        17.442 s | 0.399 | Passed              |
+| Fresh ANALYZE after each staging, auto-recalc disabled  |        38.925 s |        17.403 s | 0.447 | Passed              |
+
+The frozen runs were A = 43.744 / 43.975 / 43.321 seconds and B = 17.550 / 17.442 / 16.742 seconds. The fresh-statistics runs were A = 38.786 / 40.718 / 38.925 seconds and B = 17.403 / 17.056 / 18.474 seconds. Both three-pair acceptance assertions passed. The [machine-readable evidence archive](2026-10-15-mpala-setup-benchmark-evidence.json) retains the failed exploratory run and both final comparisons with complete emitted phase/event fields. In the first pair, the captured setup-thread statement events examined 9,124,106 rows for A and 2,621,810 for B; both affected exactly 412,421 rows. These are actual MySQL performance-schema counts, not EXPLAIN estimates. Prepared Execute events have null SQL text; the archive retains their raw per-thread sequence without inventing a statement mapping. Actual SELECT/UPDATE shapes, first/last-window EXPLAIN plans, optimizer settings (including index extensions), index definitions, staging cost, and callback/commit/cleanup/total durations are also retained. Capturing the transaction thread adds one small SELECT to both arms; its measured overhead is included and reported.
+
+The first exploratory full-size run reused rows through repeated in-place resets and missed the target (median B 34.653 s / A 47.750 s, ratio 0.726). It is retained as failed exploratory evidence, not silently discarded. The final harness restages each arm to avoid unequal physical fixture histories. Setup was also revised to combine the post-recovery original count and upper-ID snapshot. Review retained the final whole-family current read because READ COMMITTED row locks do not exclude phantoms; a late-family-row fault-injection test verifies rollback.
+
+The existing-index B result supports shipping **no new index or schema-contract migration**. The optional candidate-C arm remains test-only tooling; a small diagnostic run does not justify a production index. Canonical indexes must still be present in the deployment environment. These local, setup-only results do not waive cold-cache, representative Azure, or full-source pipeline acceptance.
+
+## Additional verification detail
+
+The full integration run completed 140 files: 139 passed; the only failure was the setup authorization fixture's stale query sequence (1,345 passing checks, one failure, seven pre-existing skips). The fixture was corrected to respond to query meaning and a scope-drift regression added. After the final setup changes, the six relevant ingestion/worker/authorization integration files passed all 49 checks. The full run also passed the real transaction timeout/COMMIT fault-injection, repository transition atomicity, schema migration contract, and stored-procedure scale suites. This records the full run and targeted rerun honestly rather than claiming a second full-suite execution.
+
+The failed-census recovery regression seeds failed metrics for the original batch, its orphan, and an adjacent wildcard-like family, then proves exact current-family preservation and neighbor cleanup. An optional temporary production-code mutation was rejected by automatic approval review; production code remained intact. A safer negative control executed the old and new predicates only on synthetic TEMPORARY tables in a uniquely named local test schema, then removed that schema: old exact-batch exclusion deleted the orphan; escaped-family exclusion retained it. No real staging table or private research row participated.
 
 ## Operational evidence and remaining rollout gates
 
@@ -53,7 +79,7 @@ Restore the previous application release while retaining compatible batch IDs, d
 
 ## Review
 
-Codex completed five separate review passes in this order. Review findings were corrected and rechecked before the final result:
+Codex completed and repeated the five separate review passes on the final code revision in this order. Review findings were corrected and rechecked before the final result:
 
 1. Security and input validation: no remaining actionable findings. Authorized scope is retained across callers, SQL values remain bound, and storage SDK failures do not expose credentials.
 2. Correctness and edge cases: no remaining actionable findings. Numeric ID ordering, current reads after locking, small-file behavior, orphan isolation, interval counts, scope drift, and cancellation/lease boundaries are covered.
