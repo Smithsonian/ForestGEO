@@ -107,7 +107,7 @@ function primeSuccessfulProcedureRun(options: { driftAfterAuthorization?: boolea
   let familyReads = 0;
   dbSpies.executeQuery.mockImplementation(async (sql: string) => {
     const query = String(sql);
-    if (query.includes('COUNT(DISTINCT PlotID)')) {
+    if (query.includes('GROUP BY BatchID')) {
       familyReads++;
       const scopeDrifted = options.driftAfterAuthorization && familyReads > 1;
       return [
@@ -120,6 +120,12 @@ function primeSuccessfulProcedureRun(options: { driftAfterAuthorization?: boolea
           censusCount: 1
         }
       ];
+    }
+    if (query.includes('CAST(MAX(id) AS CHAR)')) {
+      return [{ rowCount: 5, upperID: '5', plotID: 22, censusID: 6, plotCount: 1, censusCount: 1 }];
+    }
+    if (query.includes('COUNT(*) AS rowCount') && query.includes('FOR UPDATE')) {
+      return [{ rowCount: 5, plotID: 22, censusID: 6, plotCount: 1, censusCount: 1 }];
     }
     if (query.includes('completedUploads')) {
       return [{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }];

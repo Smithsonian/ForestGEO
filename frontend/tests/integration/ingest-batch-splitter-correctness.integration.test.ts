@@ -160,6 +160,58 @@ describe('ingestBatch scoped keyset splitter (real local MySQL)', () => {
     expect(final.filter(row => row.BatchID === `${family.batchID}__sub003`)).toHaveLength(2);
   });
 
+  it('preserves the current family during failed-census recovery without matching a neighboring wildcard family', async () => {
+    const family = { ...newFamily('recovery_wildcard'), batchID: 'fam_%' };
+    const orphanBatchID = `${family.batchID}__sub001`;
+    // This ID would be captured by the unescaped LIKE pattern `fam_%__sub%`.
+    const neighboringBatchID = 'famXQ__sub777';
+    for (let i = 1; i <= 6; i++) await insertRow(family.fileID, family.batchID, i);
+    for (let i = 20; i <= 21; i++) await insertRow(family.fileID, orphanBatchID, i);
+    await insertRow(family.fileID, neighboringBatchID, 30);
+    const before = await memberships(family.fileID);
+    const originalRows = before.filter(row => row.BatchID === family.batchID);
+    const orphanRows = before.filter(row => row.BatchID === orphanBatchID);
+
+    for (const [uploadId, failedBatchID] of [
+      ['recovery-current', family.batchID],
+      ['recovery-orphan', orphanBatchID],
+      ['recovery-neighbor', neighboringBatchID]
+    ]) {
+      await connection.query(
+        `INSERT INTO uploadmetrics (uploadId, fileID, batchID, schema_name, plotID, censusID, sourceRecords, status, startTime)
+         VALUES (?, ?, ?, ?, ?, ?, 1, 'failed', NOW())`,
+        [uploadId, family.fileID, failedBatchID, config.database, testData.plots[0].plotID, testData.census[0].censusID]
+      );
+    }
+    await connection.query(
+      `INSERT INTO coremeasurements (CensusID, StemGUID, MeasurementDate, MeasuredDBH, MeasuredHOM, UploadFileID, UploadBatchID, RawTreeTag, RawStemTag)
+       VALUES (?, NULL, '2020-01-01', 1, 1, 'prior_failed.csv', 'prior_failed', 'PRIOR', '1')`,
+      [testData.census[0].censusID]
+    );
+    const recoveryStateRows = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS coreCount FROM coremeasurements WHERE CensusID = ?', [
+      testData.census[0].censusID
+    ]);
+    expect(Number(recoveryStateRows[0][0].coreCount)).toBeGreaterThan(0);
+
+    const diagnostics = await runSetupOnly(family.fileID, family.batchID);
+    expect(diagnostics.some(event => event.step === 'recovery' && event.outcome === 'completed')).toBe(true);
+
+    const after = await memberships(family.fileID);
+    expect(after.filter(row => row.BatchID === orphanBatchID)).toEqual(orphanRows);
+    const expectedCurrentFamily = [
+      ...orphanRows,
+      ...originalRows.slice(0, 4).map(row => ({ ...row, BatchID: `${family.batchID}__sub002` })),
+      ...originalRows.slice(4).map(row => ({ ...row, BatchID: `${family.batchID}__sub003` }))
+    ].sort((left, right) => (BigInt(left.rowID) < BigInt(right.rowID) ? -1 : 1));
+    expect(after.filter(row => row.BatchID.startsWith(`${family.batchID}__sub`))).toEqual(expectedCurrentFamily);
+    expect(after.some(row => row.BatchID === neighboringBatchID)).toBe(false);
+    expect(
+      await connection
+        .query<RowDataPacket[]>('SELECT COUNT(*) AS rowCount FROM coremeasurements WHERE CensusID = ?', [testData.census[0].censusID])
+        .then(([rows]) => Number(rows[0].rowCount))
+    ).toBe(0);
+  });
+
   it('supports the maximum source BatchID length that leaves room for a sub-batch suffix', async () => {
     const family = { ...newFamily('length'), batchID: 'b'.repeat(28) }; // temporarymeasurements.BatchID is varchar(36), suffix is 8 characters.
     for (let i = 1; i <= 5; i++) await insertRow(family.fileID, family.batchID, i);
@@ -291,6 +343,42 @@ describe('ingestBatch scoped keyset splitter (real local MySQL)', () => {
     };
     try {
       await expect(runSetupOnly(family.fileID, family.batchID)).rejects.toThrow(/split membership mismatch/);
+    } finally {
+      manager.executeQuery = originalQuery;
+    }
+    expect(await memberships(family.fileID)).toEqual(before);
+  });
+
+  it('rejects a late orphan-family phantom and rolls the setup back', async () => {
+    const family = newFamily('new_orphan');
+    for (let i = 1; i <= 9; i++) await insertRow(family.fileID, family.batchID, i);
+    const before = await memberships(family.fileID);
+    const manager = ConnectionManager.getInstance();
+    const originalQuery = manager.executeQuery.bind(manager);
+    let inserted = false;
+    manager.executeQuery = async (sql: string, params?: unknown[], transactionID?: string) => {
+      const result = await originalQuery(sql, params, transactionID);
+      if (!inserted && String(sql).includes('AS rowID')) {
+        inserted = true;
+        await originalQuery(
+          `INSERT INTO \`${config.database}\`.temporarymeasurements
+           (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate)
+           VALUES (?, ?, ?, ?, 'NEWORPHAN', '1', ?, ?, 1, 1, 10, 1.3, '2024-03-15')`,
+          [
+            family.fileID,
+            `${family.batchID}__sub999`,
+            testData.plots[0].plotID,
+            testData.census[0].censusID,
+            testData.species[0].SpeciesCode,
+            testData.quadrats[0].QuadratName
+          ],
+          transactionID
+        );
+      }
+      return result;
+    };
+    try {
+      await expect(runSetupOnly(family.fileID, family.batchID)).rejects.toThrow(/Batch split membership mismatch/);
     } finally {
       manager.executeQuery = originalQuery;
     }

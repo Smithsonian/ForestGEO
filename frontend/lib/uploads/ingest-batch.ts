@@ -341,9 +341,9 @@ async function recoverFailedInitialCensusIfNeeded(
          WHERE tm.PlotID = ?
            AND tm.CensusID = ?
            AND um.status IN ('failed', 'processing')
-           AND NOT (tm.FileID = ? AND tm.BatchID = ?)`
+           AND NOT (tm.FileID = ? AND (tm.BatchID = ? OR tm.BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}))`
       ),
-      params: [plotID, censusID, fileID, batchID]
+      params: [plotID, censusID, fileID, batchID, buildSubBatchPattern(batchID)]
     },
     {
       sql: safeFormatQuery(schema, 'DELETE FROM ??.uploadintegrityalerts WHERE PlotID = ? AND CensusID = ?'),
@@ -472,6 +472,7 @@ async function splitIntoSubBatches(
   plotID: number,
   censusID: number,
   transactionID: string,
+  frozenUpperID: string,
   startOrdinal: number = 0,
   checkAbort: () => void = () => undefined,
   onProgress?: (assignedRows: number, completedBatches: number, operation: SetupDiagnostic['operation']) => void
@@ -484,15 +485,7 @@ async function splitIntoSubBatches(
   const subBatchCount = Math.ceil(totalRows / batchSize);
   const subBatchIDs: string[] = [];
   let cursor = '0';
-  const boundaryRows = (await connectionManager.executeQuery(
-    safeFormatQuery(
-      schema,
-      `SELECT CAST(MAX(id) AS CHAR) AS upperID FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ? AND PlotID = ? AND CensusID = ?`
-    ),
-    [fileID, originalBatchID, plotID, censusID],
-    transactionID
-  )) as Array<{ upperID: string | null }>;
-  const upperID = boundaryRows?.[0]?.upperID;
+  const upperID = frozenUpperID;
   if (!upperID) throw new Error(`Expected ${totalRows} rows in ${fileID}-${originalBatchID}, found none`);
   let assigned = 0;
 
@@ -805,7 +798,6 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
         const currentPlotID = expectedPlotID;
         const currentCensusID = expectedCensusID;
         const totalRows = lockedFamily.totalRows;
-        const originalOrphans = lockedFamily.members.filter(member => member.batchID !== batchID).map(member => [member.batchID, member.rowCount]);
         emit({ outcome: 'completed', rowCount: totalRows });
 
         // Recovery check (uses original batchID before any splitting)
@@ -821,28 +813,75 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
         await cleanupMatchedUnresolvedIngestionFailuresForBatch(connectionManager, schema, fileID, batchID, currentCensusID, tx.id);
         emit({ outcome: 'completed', rowCount: totalRows });
 
-        const authoritativeFamily = await discover(true);
-        if (!authoritativeFamily) throw new Error(`Batch family ${fileID}-${batchID} disappeared during setup`);
-        assertExpectedScope(authoritativeFamily, expectedPlotID, expectedCensusID, fileID, batchID);
+        // Recovery can remove stale temporary rows, so recalculate the
+        // original batch's exact count and upper ID after cleanup. This scoped
+        // aggregate avoids rediscovering and regrouping the entire family.
+        const originalSnapshot = (await tx.query(
+          safeFormatQuery(
+            schema,
+            `SELECT COUNT(*) AS rowCount,
+                                         CAST(MAX(id) AS CHAR) AS upperID,
+                                         MIN(PlotID) AS plotID,
+                                         MIN(CensusID) AS censusID,
+                                         COUNT(DISTINCT PlotID) AS plotCount,
+                                         COUNT(DISTINCT CensusID) AS censusCount
+                                  FROM ??.temporarymeasurements
+                                  WHERE FileID = ? AND BatchID = ?
+                                  FOR UPDATE`
+          ),
+          [fileID, batchID]
+        )) as Array<{
+          rowCount: number | string;
+          upperID: string | null;
+          plotID: number | string | null;
+          censusID: number | string | null;
+          plotCount: number | string;
+          censusCount: number | string;
+        }>;
+        const originalSnapshotRow = originalSnapshot?.[0];
+        const originalCount = toCount(originalSnapshotRow?.rowCount);
+        const upperID = originalSnapshotRow?.upperID ?? '0';
+        if (originalCount > 0 && upperID === '0') {
+          throw new Error(`Expected ${originalCount} rows in ${fileID}-${batchID}, found no upper ID`);
+        }
         if (
-          JSON.stringify(authoritativeFamily.members.filter(member => member.batchID !== batchID).map(member => [member.batchID, member.rowCount])) !==
-          JSON.stringify(originalOrphans)
-        )
-          throw new Error(`Pre-existing orphan membership changed during setup for ${fileID}-${batchID}`);
-        const originalCount = authoritativeFamily.originalRowCount;
-        const orphanCount = authoritativeFamily.orphanedSubBatchIDs.length;
+          originalCount > 0 &&
+          (toCount(originalSnapshotRow.plotCount) !== 1 ||
+            toCount(originalSnapshotRow.censusCount) !== 1 ||
+            toCount(originalSnapshotRow.plotID) !== expectedPlotID ||
+            toCount(originalSnapshotRow.censusID) !== expectedCensusID)
+        ) {
+          throw new BatchFamilyScopeError(fileID, batchID, 'the original batch changed scope during setup');
+        }
+
+        // Failed-census recovery must retain interrupted sub-batches from this
+        // very upload. Verify that exceptional path explicitly; otherwise the
+        // post-lock row locks and original-only update predicate preserve them.
+        if (recovered && lockedFamily.orphanedSubBatchIDs.length > 0) {
+          const recoveredFamily = await discover(true);
+          const expectedOrphans = lockedFamily.members.filter(member => member.batchID !== batchID).map(member => [member.batchID, member.rowCount]);
+          const actualOrphans = recoveredFamily?.members.filter(member => member.batchID !== batchID).map(member => [member.batchID, member.rowCount]) ?? [];
+          if (JSON.stringify(actualOrphans) !== JSON.stringify(expectedOrphans)) {
+            throw new Error(`Pre-existing orphan membership changed during recovery for ${fileID}-${batchID}`);
+          }
+        }
+
+        // Existing orphan rows remain locked; the final current-read family
+        // validation below also detects phantoms because READ COMMITTED does
+        // not use gap locks.
+        const orphanCount = lockedFamily.orphanedSubBatchIDs.length;
 
         // Resume orphans first, then split whatever is still under the original
         // ID, numbering past the orphans so ordinals cannot collide.
-        const ids = [...authoritativeFamily.orphanedSubBatchIDs];
-        if (authoritativeFamily.orphanedSubBatchIDs.length > 0) {
+        const ids = [...lockedFamily.orphanedSubBatchIDs];
+        if (lockedFamily.orphanedSubBatchIDs.length > 0) {
           ailogger.warn(
-            `Resuming ${authoritativeFamily.orphanedSubBatchIDs.length} orphaned sub-batch(es) for ${fileID}-${batchID} ` +
-              `left by an interrupted prior attempt (${authoritativeFamily.totalRows} row(s) total)`
+            `Resuming ${lockedFamily.orphanedSubBatchIDs.length} orphaned sub-batch(es) for ${fileID}-${batchID} ` +
+              `left by an interrupted prior attempt (${lockedFamily.totalRows} row(s) total)`
           );
         }
         activeStep = 'splitting';
-        emit({ outcome: 'started', rowCount: authoritativeFamily.totalRows, assignedRows: 0, completedBatches: 0 });
+        emit({ outcome: 'started', rowCount: lockedFamily.totalRows, assignedRows: 0, completedBatches: 0 });
         if (originalCount > 0) {
           ids.push(
             ...(await splitIntoSubBatches(
@@ -854,7 +893,8 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
               expectedPlotID,
               expectedCensusID,
               tx.id,
-              highestSubBatchOrdinal(authoritativeFamily.orphanedSubBatchIDs, batchID),
+              upperID,
+              highestSubBatchOrdinal(lockedFamily.orphanedSubBatchIDs, batchID),
               () => {
                 if (isAborted()) throw new IngestBatchAbortedError(fileID, batchID);
               },
@@ -863,25 +903,26 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
           );
         }
 
+        const splitRequired = originalCount > getIngestionBatchSize() || orphanCount > 0;
         const postSplit = await discover(true);
         if (!postSplit) throw new Error(`Batch family ${fileID}-${batchID} disappeared after splitting`);
         assertExpectedScope(postSplit, expectedPlotID, expectedCensusID, fileID, batchID);
-        const preexistingIDs = new Set(authoritativeFamily.orphanedSubBatchIDs);
-        const splitOrphans = postSplit.members.filter(member => preexistingIDs.has(member.batchID)).map(member => [member.batchID, member.rowCount]);
-        const expectedOrphans = authoritativeFamily.members
-          .filter(member => preexistingIDs.has(member.batchID))
-          .map(member => [member.batchID, member.rowCount]);
-        if (JSON.stringify(splitOrphans) !== JSON.stringify(expectedOrphans))
+        const preexistingIDs = new Set(lockedFamily.orphanedSubBatchIDs);
+        const actualOrphans = postSplit.members.filter(member => preexistingIDs.has(member.batchID)).map(member => [member.batchID, member.rowCount]);
+        const expectedOrphans = lockedFamily.members.filter(member => preexistingIDs.has(member.batchID)).map(member => [member.batchID, member.rowCount]);
+        if (JSON.stringify(actualOrphans) !== JSON.stringify(expectedOrphans)) {
           throw new Error(`Existing orphan rows changed during split for ${fileID}-${batchID}`);
-        const splitRequired = originalCount > getIngestionBatchSize() || orphanCount > 0;
-        if (splitRequired && (postSplit.originalRowCount !== 0 || postSplit.totalRows !== authoritativeFamily.totalRows))
+        }
+        if (splitRequired && (postSplit.originalRowCount !== 0 || postSplit.totalRows !== lockedFamily.totalRows)) {
           throw new Error(`Batch split membership mismatch for ${fileID}-${batchID}`);
-        if (!splitRequired && (postSplit.originalRowCount !== originalCount || postSplit.totalRows !== authoritativeFamily.totalRows))
+        }
+        if (!splitRequired && (postSplit.originalRowCount !== originalCount || postSplit.totalRows !== lockedFamily.totalRows)) {
           throw new Error(`Batch family membership changed for ${fileID}-${batchID}`);
+        }
         if (isAborted()) throw new IngestBatchAbortedError(fileID, batchID);
-        emit({ outcome: 'completed', rowCount: authoritativeFamily.totalRows, assignedRows: originalCount, completedBatches: ids.length });
+        emit({ outcome: 'completed', rowCount: lockedFamily.totalRows, assignedRows: originalCount, completedBatches: ids.length });
         activeStep = 'commit';
-        emit({ outcome: 'started', rowCount: authoritativeFamily.totalRows });
+        emit({ outcome: 'started', rowCount: lockedFamily.totalRows });
 
         ailogger.info(`Setup complete for ${fileID}: ${totalRows} rows → ${ids.length} batch(es), plot=${currentPlotID}, census=${currentCensusID}`);
 

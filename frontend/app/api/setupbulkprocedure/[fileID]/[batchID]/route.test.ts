@@ -113,16 +113,16 @@ function mockSuccessfulProcedureRun() {
   cm.withTransaction.mockImplementation(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
     fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
   );
-  cm.executeQuery
-    .mockResolvedValueOnce(familyRows()) // route preamble: batch-family discovery for ownership check
-    .mockResolvedValueOnce(familyRows()) // pre-lock discovery
-    .mockResolvedValueOnce(familyRows()) // post-lock current read
-    .mockResolvedValueOnce([{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }])
-    .mockResolvedValueOnce({ affectedRows: 0 })
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce(familyRows())
-    .mockResolvedValueOnce(familyRows())
-    .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
+  cm.executeQuery.mockImplementation(async (sql: string) => {
+    const query = String(sql);
+    if (query.includes('GROUP BY BatchID')) return familyRows();
+    if (query.includes('CAST(MAX(id) AS CHAR)')) return [{ rowCount: 5, upperID: '5', plotID: 22, censusID: 6, plotCount: 1, censusCount: 1 }];
+    if (query.includes('COUNT(*) AS rowCount') && query.includes('FOR UPDATE')) return [{ rowCount: 5, plotID: 22, censusID: 6, plotCount: 1, censusCount: 1 }];
+    if (query.includes('completedUploads')) return [{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }];
+    if (query.includes('SELECT 1')) return [];
+    if (query.includes('bulkingestionprocess')) return [[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}];
+    return { affectedRows: 0 };
+  });
 }
 
 describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
@@ -208,7 +208,10 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
     );
     cm.executeQuery.mockImplementation(async (sql: string) => {
-      if (String(sql).includes('COUNT(DISTINCT PlotID)')) return familyRows();
+      if (String(sql).includes('GROUP BY BatchID')) return familyRows();
+      if (String(sql).includes('CAST(MAX(id) AS CHAR)')) return [{ rowCount: 5, upperID: '5', plotID: 22, censusID: 6, plotCount: 1, censusCount: 1 }];
+      if (String(sql).includes('COUNT(*) AS rowCount') && String(sql).includes('FOR UPDATE'))
+        return [{ rowCount: 5, plotID: 22, censusID: 6, plotCount: 1, censusCount: 1 }];
       if (String(sql).includes('completedUploads'))
         return [{ completedUploads: 0, incompleteUploads: 1, treeCount: 1, stemCount: 1, coreMeasurementCount: 244 }];
       if (String(sql).includes('SELECT 1')) return [];
@@ -227,7 +230,7 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
           sql.includes('DELETE tm') &&
           sql.includes('INNER JOIN forestgeo_testing.uploadmetrics um') &&
           sql.includes("um.status IN ('failed', 'processing')") &&
-          sql.includes('NOT (tm.FileID = ? AND tm.BatchID = ?)')
+          sql.includes('NOT (tm.FileID = ? AND (tm.BatchID = ? OR tm.BatchID LIKE ?')
       )
     ).toBe(true);
     expect(
@@ -243,16 +246,17 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     cm.withTransaction.mockImplementation(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
       fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
     );
-    cm.executeQuery
-      .mockResolvedValueOnce(familyRows()) // route preamble: batch-family discovery for ownership check
-      .mockResolvedValueOnce(familyRows())
-      .mockResolvedValueOnce(familyRows())
-      .mockResolvedValueOnce([{ completedUploads: 1, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 244 }])
-      .mockResolvedValueOnce({ affectedRows: 244 })
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(familyRows())
-      .mockResolvedValueOnce(familyRows())
-      .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
+    cm.executeQuery.mockImplementation(async (sql: string) => {
+      const query = String(sql);
+      if (query.includes('GROUP BY BatchID')) return familyRows();
+      if (query.includes('CAST(MAX(id) AS CHAR)')) return [{ rowCount: 5, upperID: '5', plotID: 22, censusID: 6, plotCount: 1, censusCount: 1 }];
+      if (query.includes('COUNT(*) AS rowCount') && query.includes('FOR UPDATE'))
+        return [{ rowCount: 5, plotID: 22, censusID: 6, plotCount: 1, censusCount: 1 }];
+      if (query.includes('completedUploads')) return [{ completedUploads: 1, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 244 }];
+      if (query.includes('SELECT 1')) return [];
+      if (query.includes('bulkingestionprocess')) return [[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}];
+      return { affectedRows: 244 };
+    });
 
     const res = await GET(makeRequest(), makeProps());
 
@@ -280,17 +284,17 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     cm.withTransaction.mockImplementation(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
       fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
     );
-    cm.executeQuery
-      .mockResolvedValueOnce(familyRows()) // route preamble: batch-family discovery for ownership check
-      .mockResolvedValueOnce(familyRows())
-      .mockResolvedValueOnce(familyRows())
-      .mockResolvedValueOnce([{ completedUploads: 1, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 244 }])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce([{ 1: 1 }])
-      .mockResolvedValueOnce({ affectedRows: 244 })
-      .mockResolvedValueOnce(familyRows())
-      .mockResolvedValueOnce(familyRows())
-      .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
+    cm.executeQuery.mockImplementation(async (sql: string) => {
+      const query = String(sql);
+      if (query.includes('GROUP BY BatchID')) return familyRows();
+      if (query.includes('CAST(MAX(id) AS CHAR)')) return [{ rowCount: 5, upperID: '5', plotID: 22, censusID: 6, plotCount: 1, censusCount: 1 }];
+      if (query.includes('COUNT(*) AS rowCount') && query.includes('FOR UPDATE'))
+        return [{ rowCount: 5, plotID: 22, censusID: 6, plotCount: 1, censusCount: 1 }];
+      if (query.includes('completedUploads')) return [{ completedUploads: 1, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 244 }];
+      if (query.includes('SELECT 1')) return [{ 1: 1 }];
+      if (query.includes('bulkingestionprocess')) return [[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}];
+      return { affectedRows: 244 };
+    });
 
     const res = await GET(makeRequest(), makeProps());
 
@@ -342,10 +346,13 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       cm.executeQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
         const text = String(sql);
 
-        if (text.includes('FROM forestgeo_testing.temporarymeasurements')) {
+        if (text.includes('GROUP BY BatchID')) {
           // Only a family-scoped lookup sees the orphaned rows.
           return text.includes('BatchID LIKE ?') ? familyRows(ORPHANED_SUB_BATCHES) : [];
         }
+        if (text.includes('CAST(MAX(id) AS CHAR)')) return [{ rowCount: 0, upperID: null, plotID: null, censusID: null, plotCount: 0, censusCount: 0 }];
+        if (text.includes('COUNT(*) AS rowCount') && text.includes('FOR UPDATE'))
+          return [{ rowCount: 0, plotID: null, censusID: null, plotCount: 0, censusCount: 0 }];
         if (text.includes('completedUploads')) {
           return [{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }];
         }

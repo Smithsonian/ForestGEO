@@ -30,7 +30,10 @@ describe('ingestBatch setup diagnostics', () => {
     state.timeout = timeout;
     const family = [{ BatchID: 'batch', PlotID: 5, CensusID: 7, rowCount: 4, plotCount: 1, censusCount: 1 }];
     const executeQuery = vi.fn(async (sql: string) => {
-      if (sql.includes('COUNT(DISTINCT PlotID)')) return family;
+      if (sql.includes('COUNT(DISTINCT PlotID)') && sql.includes('GROUP BY BatchID')) return family;
+      if (sql.includes('CAST(MAX(id) AS CHAR)')) return [{ rowCount: 4, upperID: '4', plotID: 5, censusID: 7, plotCount: 1, censusCount: 1 }];
+      if (sql.includes('FROM test_schema.temporarymeasurements') && sql.includes('FOR UPDATE'))
+        return [{ rowCount: 4, plotID: 5, censusID: 7, plotCount: 1, censusCount: 1 }];
       if (sql.includes('completedUploads')) return [{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }];
       if (sql.includes('SELECT 1')) return [];
       return { affectedRows: 0 };
