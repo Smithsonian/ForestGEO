@@ -56,18 +56,27 @@ export interface DetailedCMIDRow extends CMIDRow {
   speciesName?: string;
 }
 
-function mergeFreshRevisionPlan(result: RevisionUploadResponse, freshPlan: BulkEditPlan): RevisionUploadResponse {
+/**
+ * Reconciles a 409 plan-hash-mismatch response into the current match
+ * result. `freshInvalidRows`/`freshInvalidRowsIntegrityHash` are the apply
+ * route's AUTHORITATIVE replacement for the ENTIRE invalidRows set (see
+ * apply/route.ts's RevisionApplyPlanHashMismatchError) — they are adopted
+ * verbatim, never recomputed from `freshPlan.rowPlans` here. Reconstructing
+ * an equivalent set from rowPlans would risk disagreeing with what the
+ * server actually hashed/persisted, and `rowPlans[].rowIndex` is a position
+ * into the survivor-only bulk input the apply route built, not the row's
+ * source csvIndex — conflating the two would attribute a reason to the
+ * wrong source row.
+ */
+export function mergeFreshRevisionPlan(
+  result: RevisionUploadResponse,
+  freshPlan: BulkEditPlan,
+  freshInvalidRows: RevisionInvalidRow[],
+  freshInvalidRowsIntegrityHash: string
+): RevisionUploadResponse {
   const changesByTarget = new Map<number, Record<string, { from: unknown; to: unknown }>>();
-  const invalidByTarget = new Map<number, string>();
-  const invalidByCsvIndex = new Map<number, string>();
   for (const rowPlan of freshPlan.rowPlans) {
-    if (rowPlan.status === 'invalid') {
-      const reason = rowPlan.reason ?? 'Row failed validation';
-      if (rowPlan.targetID !== undefined) invalidByTarget.set(rowPlan.targetID, reason);
-      invalidByCsvIndex.set(rowPlan.rowIndex, reason);
-      continue;
-    }
-    if (rowPlan.targetID === undefined) continue;
+    if (rowPlan.status === 'invalid' || rowPlan.targetID === undefined) continue;
     const changes: Record<string, { from: unknown; to: unknown }> = {};
     for (const change of rowPlan.plan?.fieldChanges ?? []) {
       changes[change.field] = { from: change.from, to: change.to };
@@ -75,39 +84,32 @@ function mergeFreshRevisionPlan(result: RevisionUploadResponse, freshPlan: BulkE
     changesByTarget.set(rowPlan.targetID, changes);
   }
 
-  const matchedRows: RevisionMatchedRow[] = [];
-  const demotedInvalidRows: RevisionInvalidRow[] = [];
-  for (const row of result.matchedRows) {
-    const invalidReason = invalidByTarget.get(row.coreMeasurementID) ?? invalidByCsvIndex.get(row.csvIndex);
-    if (invalidReason !== undefined) {
-      demotedInvalidRows.push({
-        csvRow: row.csvRow,
-        csvIndex: row.csvIndex,
-        reason: invalidReason
-      });
-      continue;
-    }
-    matchedRows.push({
+  // A matched row whose csvIndex now appears in the server's authoritative
+  // invalid set was demoted by this apply attempt and must drop out of
+  // matchedRows — matched purely by csvIndex, never by array position.
+  const freshInvalidCsvIndexes = new Set(freshInvalidRows.map(row => row.csvIndex));
+  const matchedRows: RevisionMatchedRow[] = result.matchedRows
+    .filter(row => !freshInvalidCsvIndexes.has(row.csvIndex))
+    .map(row => ({
       ...row,
       changes: changesByTarget.get(row.coreMeasurementID) ?? row.changes
-    });
-  }
+    }));
 
-  const invalidRows = [...result.invalidRows, ...demotedInvalidRows];
   const matchedWithChanges = matchedRows.filter(row => Object.keys(row.changes).length > 0 || (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0).length;
 
   return {
     ...result,
     matchedRows,
-    invalidRows,
+    invalidRows: freshInvalidRows,
     counts: {
       ...result.counts,
       matched: matchedRows.length,
       matchedWithChanges,
-      invalid: invalidRows.length,
-      total: matchedRows.length + result.newRows.length + invalidRows.length
+      invalid: freshInvalidRows.length,
+      total: matchedRows.length + result.newRows.length + freshInvalidRows.length + (result.collapsedRows?.length ?? 0)
     },
-    bulkPlan: freshPlan
+    bulkPlan: freshPlan,
+    invalidRowsIntegrityHash: freshInvalidRowsIntegrityHash
   };
 }
 
@@ -181,6 +183,14 @@ function UploadParentInner(props: UploadParentProps) {
   // unmount cleanup can abort it explicitly rather than leaving it to resolve into a
   // component that no longer wants the result.
   const revisionMatchAbortControllerRef = useRef<AbortController | null>(null);
+
+  // The uploadAttemptID the match route minted for the CURRENT upload, so a
+  // re-match of this same attempt (not a new upload) can echo it back and
+  // retain its identity -- see app/api/revisionupload/route.ts's
+  // previousUploadAttemptID. Cleared everywhere a NEW attempt begins (every
+  // call site that resets revisionMatchResult to null ahead of a fresh
+  // parse/upload), so a genuinely new upload never inherits a prior identity.
+  const currentUploadAttemptIDRef = useRef<string | null>(null);
 
   // Context and session
   const _currentPlot = usePlotContext();
@@ -366,6 +376,7 @@ function UploadParentInner(props: UploadParentProps) {
       setParsedData({});
       setIsReingestionMode(false);
       setRevisionMatchResult(null);
+      currentUploadAttemptIDRef.current = null;
       setRevisionConfirmNewRows(false);
       setArcgisImportSession(null);
       setQuadratOverlapAcknowledgment(null);
@@ -398,6 +409,7 @@ function UploadParentInner(props: UploadParentProps) {
     setParsedData({});
     setIsReingestionMode(false);
     setRevisionMatchResult(null);
+    currentUploadAttemptIDRef.current = null;
     setRevisionConfirmNewRows(false);
     setArcgisImportSession(null);
     setQuadratOverlapAcknowledgment(null);
@@ -479,6 +491,9 @@ function UploadParentInner(props: UploadParentProps) {
         const stagedParsedData = await parseRevisionFiles();
         setParsedData(stagedParsedData);
         setRevisionMatchResult(null);
+        // A fresh file parse is always a NEW upload, never a re-match of a
+        // prior attempt — clear so handleRevisionMatch mints a new identity.
+        currentUploadAttemptIDRef.current = null;
         setRevisionConfirmNewRows(false);
 
         // Pre-flight role check: if the file contains spcode and the user is
@@ -543,7 +558,11 @@ function UploadParentInner(props: UploadParentProps) {
           files,
           plotID: currentPlotID,
           censusID: currentCensusID,
-          schema: currentSite?.schemaName
+          schema: currentSite?.schemaName,
+          // Set only when this call is re-matching the SAME attempt (see the
+          // ref's declaration above); omitted for a genuinely new upload, so
+          // the match route mints a fresh identity instead of reusing one.
+          ...(currentUploadAttemptIDRef.current ? { previousUploadAttemptID: currentUploadAttemptIDRef.current } : {})
         }),
         signal
       });
@@ -554,6 +573,7 @@ function UploadParentInner(props: UploadParentProps) {
       }
 
       const result: RevisionUploadResponse = await response.json();
+      currentUploadAttemptIDRef.current = result.uploadAttemptID;
       setRevisionMatchResult(result);
     } catch (err: unknown) {
       // A manual abort (cancel button or unmount) means the user has already navigated
@@ -573,6 +593,14 @@ function UploadParentInner(props: UploadParentProps) {
       errorHandling.setError(errorObj);
       uploadState.setReviewState(ReviewStates.ERRORS);
     }
+  }
+
+  // Re-runs match for the SAME upload (parsedData/files untouched) -- unlike
+  // every other setRevisionMatchResult(null) call site, currentUploadAttemptIDRef
+  // is deliberately NOT cleared here, so the re-match below retains its identity
+  // (see the ref's declaration above and route.ts's previousUploadAttemptID).
+  function handleRefreshRevisionMatch() {
+    setRevisionMatchResult(null);
   }
 
   useEffect(() => {
@@ -758,6 +786,7 @@ function UploadParentInner(props: UploadParentProps) {
             matchedRows={revisionMatchResult.matchedRows}
             newRows={revisionMatchResult.newRows}
             invalidRows={revisionMatchResult.invalidRows}
+            collapsedRows={revisionMatchResult.collapsedRows}
             counts={revisionMatchResult.counts}
             bulkPlan={revisionMatchResult.bulkPlan}
             schema={currentSite?.schemaName || ''}
@@ -770,6 +799,7 @@ function UploadParentInner(props: UploadParentProps) {
               uploadState.setReviewState(ReviewStates.REVISION_APPLY);
             }}
             handleReturnToStart={handleReturnToStart}
+            onRefreshMatch={handleRefreshRevisionMatch}
           />
         );
       case ReviewStates.REVISION_APPLY:
@@ -786,10 +816,14 @@ function UploadParentInner(props: UploadParentProps) {
             confirmNewRows={revisionConfirmNewRows}
             schema={currentSite?.schemaName || ''}
             bulkPlanHash={revisionMatchResult?.bulkPlan?.planHash ?? ''}
+            uploadAttemptID={revisionMatchResult?.uploadAttemptID ?? ''}
+            invalidRowsIntegrityHash={revisionMatchResult?.invalidRowsIntegrityHash ?? ''}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
-            onPlanConflict={freshPlan => {
-              setRevisionMatchResult(current => (current ? mergeFreshRevisionPlan(current, freshPlan) : current));
+            onPlanConflict={(freshPlan, freshInvalidRows, freshInvalidRowsIntegrityHash) => {
+              setRevisionMatchResult(current =>
+                current ? mergeFreshRevisionPlan(current, freshPlan, freshInvalidRows, freshInvalidRowsIntegrityHash) : current
+              );
             }}
           />
         );

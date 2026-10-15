@@ -25,9 +25,18 @@ interface UploadRevisionApplyProps {
   confirmNewRows: boolean;
   schema: string;
   bulkPlanHash: string;
+  /** Minted by the match endpoint (UUID v4); echoed back unchanged. See shared/invalidrowintegrity.ts. */
+  uploadAttemptID: string;
+  /** Authenticated HMAC the match endpoint computed over invalidRows; echoed back unchanged. See shared/invalidrowintegrity.ts. */
+  invalidRowsIntegrityHash: string;
   setReviewState: (state: ReviewStates) => void;
   setIsDataUnsaved: (unsaved: boolean) => void;
-  onPlanConflict: (freshPlan: BulkEditPlan) => void;
+  /**
+   * Fired on a 409 plan-hash mismatch. freshInvalidRows/freshInvalidRowsIntegrityHash
+   * are the apply route's AUTHORITATIVE replacement for the whole invalidRows
+   * set — adopt both verbatim, never merge with the stale submitted set.
+   */
+  onPlanConflict: (freshPlan: BulkEditPlan, freshInvalidRows: RevisionInvalidRow[], freshInvalidRowsIntegrityHash: string) => void;
 }
 
 type ApplyStatus = 'applying' | 'success' | 'error';
@@ -63,7 +72,19 @@ function hasRevisionFieldValues(csvRow: FileRow): boolean {
 }
 
 export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyProps>) {
-  const { matchedRows, newRows, invalidRows, confirmNewRows, schema, bulkPlanHash, setReviewState, setIsDataUnsaved, onPlanConflict } = props;
+  const {
+    matchedRows,
+    newRows,
+    invalidRows,
+    confirmNewRows,
+    schema,
+    bulkPlanHash,
+    uploadAttemptID,
+    invalidRowsIntegrityHash,
+    setReviewState,
+    setIsDataUnsaved,
+    onPlanConflict
+  } = props;
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -128,14 +149,21 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
             schema,
             plotID,
             censusID,
-            bulkPlanHash
+            bulkPlanHash,
+            uploadAttemptID,
+            invalidRowsIntegrityHash
           })
         });
 
         if (!response.ok) {
           const errorBody = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-          if (response.status === 409 && errorBody.freshPlan) {
-            onPlanConflict(errorBody.freshPlan as BulkEditPlan);
+          if (
+            response.status === 409 &&
+            errorBody.freshPlan &&
+            Array.isArray(errorBody.freshInvalidRows) &&
+            typeof errorBody.freshInvalidRowsIntegrityHash === 'string'
+          ) {
+            onPlanConflict(errorBody.freshPlan as BulkEditPlan, errorBody.freshInvalidRows as RevisionInvalidRow[], errorBody.freshInvalidRowsIntegrityHash);
             setReviewState(ReviewStates.REVISION_MATCH);
             return;
           }
@@ -168,7 +196,20 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
     }
 
     void runApply();
-  }, [applyAttempt, applyStatus, bulkPlanHash, censusID, onPlanConflict, plotID, schema, setIsDataUnsaved, setReviewState, startValidation]);
+  }, [
+    applyAttempt,
+    applyStatus,
+    bulkPlanHash,
+    censusID,
+    invalidRowsIntegrityHash,
+    onPlanConflict,
+    plotID,
+    schema,
+    setIsDataUnsaved,
+    setReviewState,
+    startValidation,
+    uploadAttemptID
+  ]);
 
   function retryApply() {
     setApplyResult(null);
@@ -218,6 +259,11 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
           <Typography level="body-md">{applyResult.updatedCount} measurement(s) updated</Typography>
           {applyResult.deletedDuplicateCount > 0 && <Typography level="body-md">{applyResult.deletedDuplicateCount} duplicate(s) deleted</Typography>}
           {applyResult.insertedCount > 0 && <Typography level="body-md">{applyResult.insertedCount} new measurement(s) inserted</Typography>}
+          {(applyResult.failedRowCount ?? 0) > 0 && (
+            <Typography level="body-md" color="warning" data-testid="revision-apply-failed-count">
+              {applyResult.failedRowCount} rejected row(s) recorded as failed measurements
+            </Typography>
+          )}
           {applyResult.skippedCount > 0 && (
             <Typography level="body-md" color="neutral">
               {applyResult.skippedCount} matched row(s) required no field updates
