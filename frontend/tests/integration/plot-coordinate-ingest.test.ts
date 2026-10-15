@@ -228,6 +228,7 @@ describe('plot-coordinate-ingest — integration', () => {
       delimiter: CSV_DELIMITER,
       uploadSessionID: `${batchID}-session`,
       transactionID,
+      firstRowOrdinal: null,
       changedBy: CHANGED_BY
     };
     const result = await stageMeasurementChunk(connectionManager, params);

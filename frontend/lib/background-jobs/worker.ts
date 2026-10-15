@@ -888,6 +888,7 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
           storedMapping: columnMappings[file.fileName],
           uploadSessionID: ctx.sessionID,
           transactionID,
+          firstRowOrdinal: null,
           changedBy: job.createdBy,
           // Census replacement may only run while staging the job's FIRST
           // file — later files would wipe earlier files' completed batches.

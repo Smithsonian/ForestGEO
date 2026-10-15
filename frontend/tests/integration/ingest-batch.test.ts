@@ -240,6 +240,7 @@ describe('ingestBatch — integration', () => {
       delimiter: CSV_DELIMITER,
       uploadSessionID: UPLOAD_SESSION_ID,
       transactionID,
+      firstRowOrdinal: null,
       changedBy: CHANGED_BY
     };
     const result = await stageMeasurementChunk(connectionManager, params);
@@ -792,6 +793,7 @@ describe('ingestBatch — integration', () => {
       delimiter: CSV_DELIMITER,
       uploadSessionID: UPLOAD_SESSION_ID,
       transactionID,
+      firstRowOrdinal: null,
       changedBy: CHANGED_BY
     };
     const stageResult = await stageMeasurementChunk(connectionManager, params);

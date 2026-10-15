@@ -205,22 +205,18 @@ function makeFixedDataRequest(
  * `undefined` to a downstream call and surfacing as an unrelated 500. Keying on
  * the SQL keeps these tests about the behaviour they name.
  */
-function primeMeasurementQueries(manager: any, options: { stagedRowsAfterInsert?: number } = {}): void {
-  // insertedCount is measured as the staged-row delta across the INSERT(s).
-  // stagedRowsAfterInsert lets a chunk-splitting test declare the post-insert
-  // total without depending on how many INSERT statements it was split into.
-  const stagedRowsAfterInsert = options.stagedRowsAfterInsert ?? 1;
-  let insertSeen = false;
-  manager.executeQuery.mockImplementation(async (sql: string) => {
+function primeMeasurementQueries(manager: any): void {
+  // insertedCount is the INSERT IGNORE affectedRows sum, so a staging INSERT
+  // reports one affected row per VALUES tuple, as MySQL does when nothing is ignored.
+  manager.executeQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     const text = String(sql);
     if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
     if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
-    if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: insertSeen ? stagedRowsAfterInsert : 0 }];
     if (text.includes('COUNT(')) return [{ count: 0 }];
     if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 0 };
     if (text.trimStart().toUpperCase().startsWith('INSERT')) {
-      if (text.includes('temporarymeasurements')) insertSeen = true;
-      return { affectedRows: 1, insertId: 1 };
+      const stagedTupleCount = text.includes('temporarymeasurements') && Array.isArray(params) ? params.length / TEMP_MEASUREMENT_COLUMNS_PER_ROW : 1;
+      return { affectedRows: stagedTupleCount, insertId: 1 };
     }
     return [];
   });
@@ -375,7 +371,7 @@ describe('sqlpacketload measurement scope validation', () => {
       ])
     );
 
-    primeMeasurementQueries(mockConnectionManager, { stagedRowsAfterInsert: 1001 });
+    primeMeasurementQueries(mockConnectionManager);
 
     const res = (await POST(makeMeasurementRequest({ fileRowSet: largeRowSet })))!;
 
@@ -472,10 +468,9 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
       .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
       .mockResolvedValueOnce({ affectedRows: 1 })
-      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(undefined);
 

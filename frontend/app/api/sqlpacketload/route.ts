@@ -487,6 +487,7 @@ export async function POST(request: NextRequest) {
           storedMapping: isColumnMappingShape(clientMapping) ? clientMapping : undefined,
           uploadSessionID: sessionId,
           transactionID,
+          firstRowOrdinal: null,
           preKeyedRows: useServerResolution ? undefined : Object.values(fileRowSet ?? {}),
           changedBy: user,
           onInvalidRows: invalidRows => {

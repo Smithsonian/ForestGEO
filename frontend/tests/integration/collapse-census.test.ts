@@ -242,6 +242,7 @@ describe('collapseCensus — integration', () => {
       delimiter: CSV_DELIMITER,
       uploadSessionID: UPLOAD_SESSION_ID,
       transactionID,
+      firstRowOrdinal: null,
       changedBy: CHANGED_BY
     };
     const result = await stageMeasurementChunk(connectionManager, params);

@@ -443,6 +443,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
         storedMapping: undefined,
         uploadSessionID: null,
         transactionID: stagingTxn,
+        firstRowOrdinal: null,
         changedBy: TEST_USER,
         onInvalidRows: rows => {
           invalidRows = rows;
