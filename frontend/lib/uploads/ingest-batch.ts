@@ -36,30 +36,11 @@ import {
   buildSubBatchID,
   buildSubBatchPattern,
   discoverBatchFamily,
+  getIngestionBatchSize,
   highestSubBatchOrdinal,
   LIKE_ESCAPE_CLAUSE
 } from '@/lib/uploads/batch-family';
 import { isKilledConnectionError, isKilledStatementError, QueryTimeoutError } from '@/lib/db/primitives';
-
-// Sub-batches of 10K rows keep transaction duration ~6.5s (benchmarked),
-// well under the 50s innodb_lock_wait_timeout on Azure MySQL.
-const INGESTION_BATCH_SIZE = 10_000;
-
-/**
- * Split threshold, overridable so tests can force a multi-sub-batch split
- * without staging 10K rows. The production default is unchanged; only an
- * explicit positive integer in INGESTION_SUB_BATCH_ROWS overrides it.
- */
-function getIngestionBatchSize(): number {
-  const raw = process.env.INGESTION_SUB_BATCH_ROWS;
-  if (raw === undefined || raw === '') return INGESTION_BATCH_SIZE;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    ailogger.warn(`INGESTION_SUB_BATCH_ROWS="${raw}" is not a positive integer; using default ${INGESTION_BATCH_SIZE}`);
-    return INGESTION_BATCH_SIZE;
-  }
-  return parsed;
-}
 
 const MAX_ATTEMPTS_PER_SUBBATCH = 5;
 const SETUP_PHASE_TIMEOUT_MS = 2 * 60 * 1000;
@@ -446,7 +427,7 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
 }
 
 /**
- * Splits a large batch into sub-batches of INGESTION_BATCH_SIZE by updating
+ * Splits a large batch into sub-batches of getIngestionBatchSize() rows by updating
  * the BatchID column on subsets of rows. Returns the list of sub-batch IDs
  * (or the original batchID if no split was needed).
  */

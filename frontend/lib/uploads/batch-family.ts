@@ -14,6 +14,7 @@
  * on LIKE escaping.
  */
 
+import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 /**
@@ -178,4 +179,98 @@ export function highestSubBatchOrdinal(subBatchIDs: string[], originalBatchID: s
     const ordinal = Number(id.slice(prefix.length));
     return Number.isInteger(ordinal) && ordinal > highest ? ordinal : highest;
   }, 0);
+}
+
+const DEFAULT_INGESTION_SUB_BATCH_ROWS = 10_000;
+const INGESTION_SUB_BATCH_ROWS_ENV = 'INGESTION_SUB_BATCH_ROWS';
+
+/** temporarymeasurements.BatchID is varchar(36). */
+export const STAGED_BATCH_ID_MAX_LENGTH = 36;
+export const MAX_ORIGINAL_BATCH_ID_LENGTH = STAGED_BATCH_ID_MAX_LENGTH - SUB_BATCH_SEPARATOR.length - SUB_BATCH_ORDINAL_WIDTH;
+export const MAX_SUB_BATCH_ORDINAL = 10 ** SUB_BATCH_ORDINAL_WIDTH - 1;
+
+const SUB_BATCH_SUFFIX = new RegExp(`${SUB_BATCH_SEPARATOR}\\d{${SUB_BATCH_ORDINAL_WIDTH}}$`);
+
+/**
+ * Rows per sub-batch. Staging and setup must read the same value: staging
+ * assigns membership with it and setup rejects members larger than it.
+ */
+export function getIngestionBatchSize(): number {
+  const raw = process.env[INGESTION_SUB_BATCH_ROWS_ENV];
+  if (raw === undefined || raw === '') return DEFAULT_INGESTION_SUB_BATCH_ROWS;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    ailogger.warn(`${INGESTION_SUB_BATCH_ROWS_ENV}="${raw}" is not a positive integer; using default ${DEFAULT_INGESTION_SUB_BATCH_ROWS}`);
+    return DEFAULT_INGESTION_SUB_BATCH_ROWS;
+  }
+  return parsed;
+}
+
+export class SubBatchOrdinalOverflowError extends Error {
+  readonly code = 'SUB_BATCH_ORDINAL_OVERFLOW';
+  constructor(originalBatchID: string, rowOrdinal: number, ordinal: number) {
+    super(`Row ${rowOrdinal} of batch ${originalBatchID} needs sub-batch ${ordinal}, beyond the ${MAX_SUB_BATCH_ORDINAL} the suffix can name`);
+    this.name = 'SubBatchOrdinalOverflowError';
+  }
+}
+
+export class OriginalBatchIDTooLongError extends Error {
+  readonly code = 'ORIGINAL_BATCH_ID_TOO_LONG';
+  constructor(originalBatchID: string) {
+    super(`Batch ID "${originalBatchID}" is ${originalBatchID.length} characters; at most ${MAX_ORIGINAL_BATCH_ID_LENGTH} leave room for a sub-batch suffix`);
+    this.name = 'OriginalBatchIDTooLongError';
+  }
+}
+
+/**
+ * Final BatchID for the row at 0-based `rowOrdinal` in a file's parsed row
+ * sequence. A pure function of the file and the batch size, so a retry that
+ * re-stages the same file reproduces identical membership — the property the
+ * procedure's completed-batch skip depends on.
+ */
+export function subBatchIDForRowOrdinal(originalBatchID: string, rowOrdinal: number, batchSize: number = getIngestionBatchSize()): string {
+  if (!Number.isSafeInteger(rowOrdinal) || rowOrdinal < 0) {
+    throw new RangeError(`Row ordinal must be a non-negative safe integer; received ${rowOrdinal}`);
+  }
+  if (originalBatchID.length > MAX_ORIGINAL_BATCH_ID_LENGTH) throw new OriginalBatchIDTooLongError(originalBatchID);
+  const ordinal = Math.floor(rowOrdinal / batchSize) + 1;
+  if (ordinal > MAX_SUB_BATCH_ORDINAL) throw new SubBatchOrdinalOverflowError(originalBatchID, rowOrdinal, ordinal);
+  return buildSubBatchID(originalBatchID, ordinal);
+}
+
+/** The original BatchID a staged BatchID belongs to. */
+export function familyRootOf(batchID: string): string {
+  const suffix = SUB_BATCH_SUFFIX.exec(batchID);
+  return suffix ? batchID.slice(0, suffix.index) : batchID;
+}
+
+export interface StagedBatchRow {
+  FileID: string;
+  BatchID: string;
+  maxRowID: string | number;
+}
+
+export interface FileBatchFamilySelection {
+  fileID: string;
+  batchID: string;
+  familyCount: number;
+}
+
+/** One entry per file: the family that holds the file's most recently staged row. */
+export function selectNewestFamilyPerFile(rows: StagedBatchRow[]): FileBatchFamilySelection[] {
+  const families = new Map<string, Map<string, bigint>>();
+  for (const row of rows) {
+    const root = familyRootOf(String(row.BatchID));
+    const fileFamilies = families.get(row.FileID) ?? new Map<string, bigint>();
+    const rowID = BigInt(String(row.maxRowID));
+    const known = fileFamilies.get(root);
+    if (known === undefined || rowID > known) fileFamilies.set(root, rowID);
+    families.set(row.FileID, fileFamilies);
+  }
+  return [...families.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([fileID, fileFamilies]) => {
+      const [batchID] = [...fileFamilies.entries()].reduce((newest, candidate) => (candidate[1] > newest[1] ? candidate : newest));
+      return { fileID, batchID, familyCount: fileFamilies.size };
+    });
 }
