@@ -291,7 +291,7 @@ describe('ingestBatch scoped keyset splitter (real local MySQL)', () => {
         }
       })
     ).rejects.toBeInstanceOf(IngestBatchAbortedError);
-    expect(diagnostics.some(event => event.terminal && event.outcome === 'rolled_back')).toBe(true);
+    expect(diagnostics.some(event => event.terminal && event.outcome === 'failed')).toBe(true);
     expect(await memberships(cancelFamily.fileID)).toEqual(cancelBefore);
 
     const leaseFamily = newFamily('lease_loss');

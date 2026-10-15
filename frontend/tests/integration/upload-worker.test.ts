@@ -76,7 +76,8 @@ const sharedState = vi.hoisted(() => ({
 
 // ConnectionManager mock — mirrors the ingest-batch/collapse-census pattern.
 // Routes every schema-side DB call to the shared real MySQL connection.
-vi.mock('@/lib/db/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const { TransactionCallbackTimeoutError } = await vi.importActual<typeof import('@/lib/db/connectionmanager')>('@/lib/db/connectionmanager');
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
@@ -134,7 +135,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
     cleanupStaleTransactions: async () => undefined,
     closeConnection: async () => undefined
   };
-  return { default: { getInstance: () => manager } };
+  return { TransactionCallbackTimeoutError, default: { getInstance: () => manager } };
 });
 
 // PoolMonitor mock — the worker reads the catalog pool from
@@ -178,7 +179,7 @@ import { UPLOAD_JOB_MAX_RETRIES, type BackgroundJobFileRecord } from '@/lib/back
 import { createUploadSession, ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { FormType, SourceFormat, type FileRow } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
-import ConnectionManager from '@/lib/db/connectionmanager';
+import ConnectionManager, { TransactionCallbackTimeoutError } from '@/lib/db/connectionmanager';
 import { recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
 import { testDbServerOptions } from '../setup/test-db-connection';
 
@@ -420,9 +421,7 @@ describe('runJobIfClaimable — integration', () => {
     sharedState.onSchemaQuery = async query => {
       if (injected || !query.includes('GROUP BY BatchID')) return;
       injected = true;
-      const timeout = new Error('synthetic setup callback timeout');
-      Object.assign(timeout, { name: 'TransactionCallbackTimeoutError', timeoutMs: 1000, transactionId: 'test-setup-timeout' });
-      throw timeout;
+      throw new TransactionCallbackTimeoutError('test-setup-timeout', 1000);
     };
     try {
       await runJobIfClaimable(jobID, healthyDeps());

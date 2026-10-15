@@ -24,7 +24,7 @@
  */
 
 import crypto from 'crypto';
-import ConnectionManager from '@/lib/db/connectionmanager';
+import ConnectionManager, { TransactionCallbackTimeoutError } from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
@@ -168,7 +168,7 @@ export interface IngestBatchParams {
 
 export interface SetupDiagnostic {
   step: 'discovery' | 'lock_wait' | 'post_lock_validation' | 'recovery' | 'cleanup' | 'splitting' | 'commit' | 'terminal';
-  outcome?: 'started' | 'completed' | 'failed' | 'committed' | 'rolled_back';
+  outcome?: 'started' | 'completed' | 'failed' | 'committed';
   schema: string;
   plotID: number;
   censusID: number;
@@ -181,10 +181,6 @@ export interface SetupDiagnostic {
   operation?: 'select_ids' | 'assign_interval';
   errorCode?: string;
   terminal?: boolean;
-  callbackDurationMs?: number;
-  commitDurationMs?: number;
-  cleanupDurationMs?: number;
-  totalDurationMs?: number;
 }
 
 export class SetupCallbackTimeoutError extends Error {
@@ -925,35 +921,12 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
           resumedSubBatchCount: orphanCount
         };
       },
-      {
-        timeoutMs: SETUP_PHASE_TIMEOUT_MS,
-        lifecycleObserver: event => {
-          if (event.type === 'callback_succeeded' || event.type === 'callback_failed') emit({ callbackDurationMs: event.callbackDurationMs });
-          if (event.type === 'commit_started') {
-            activeStep = 'commit';
-            emit({ outcome: 'started' });
-          }
-          if (event.type === 'commit_acknowledged')
-            emit({ step: 'commit', outcome: 'committed', commitDurationMs: event.commitDurationMs, totalDurationMs: event.totalDurationMs });
-          if (event.type === 'rollback_acknowledged')
-            emit({ outcome: 'rolled_back', cleanupDurationMs: event.cleanupDurationMs, totalDurationMs: event.totalDurationMs });
-          if (event.type === 'cleanup_finished') emit({ cleanupDurationMs: event.cleanupDurationMs, totalDurationMs: event.totalDurationMs });
-          if (event.type === 'transaction_finished')
-            emit({
-              outcome: event.outcome === 'rolled_back' ? 'rolled_back' : undefined,
-              cleanupDurationMs: event.cleanupDurationMs,
-              totalDurationMs: event.totalDurationMs
-            });
-        }
-      }
+      { timeoutMs: SETUP_PHASE_TIMEOUT_MS }
     );
     emit({ outcome: 'committed', rowCount: setupResult.totalRows, terminal: true });
   } catch (error: any) {
-    const setupError =
-      error?.code === 'TRANSACTION_CALLBACK_TIMEOUT' || error?.name === 'TransactionCallbackTimeoutError' ? new SetupCallbackTimeoutError(error) : error;
-    const timeout = setupError?.code === 'SETUP_CALLBACK_TIMEOUT';
-    const terminalOutcome = lastDiagnostic.outcome === 'rolled_back' ? 'rolled_back' : 'failed';
-    emit({ outcome: terminalOutcome, errorCode: setupError?.code ?? (timeout ? 'SETUP_CALLBACK_TIMEOUT' : undefined), terminal: true });
+    const setupError = error instanceof TransactionCallbackTimeoutError ? new SetupCallbackTimeoutError(error) : error;
+    emit({ outcome: 'failed', errorCode: setupError?.code, terminal: true });
     throw setupError;
   }
 

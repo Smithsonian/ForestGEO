@@ -274,10 +274,6 @@ export async function recordSetupDiagnostic(
     assignedRows?: number;
     completedBatches?: number;
     operation?: 'select_ids' | 'assign_interval';
-    callbackDurationMs?: number;
-    commitDurationMs?: number;
-    cleanupDurationMs?: number;
-    totalDurationMs?: number;
     terminal?: boolean;
     code?: string;
     summary?: string;
@@ -298,20 +294,12 @@ export async function recordSetupDiagnostic(
     ...boundedCount('assignedRows', details.assignedRows),
     ...boundedCount('completedBatches', details.completedBatches),
     ...(details.operation === 'select_ids' || details.operation === 'assign_interval' ? { operation: details.operation } : {}),
-    ...boundedDuration('callbackDurationMs', details.callbackDurationMs),
-    ...boundedDuration('commitDurationMs', details.commitDurationMs),
-    ...boundedDuration('cleanupDurationMs', details.cleanupDurationMs),
-    ...boundedDuration('totalDurationMs', details.totalDurationMs),
     ...(details.terminal ? { terminal: true } : {}),
     ...(details.code && /^[A-Z0-9_]{1,80}$/.test(details.code) ? { code: details.code } : {}),
     ...(details.summary ? { summary: details.summary.slice(0, 500) } : {}),
     ...(details.detail ? { detail: details.detail.slice(0, 500) } : {})
   };
   await addJobEvent(catalogPool, jobID, 'setup_diagnostic', safe.summary ?? `Setup ${safe.step}`, safe);
-}
-
-function boundedDuration(key: 'callbackDurationMs' | 'commitDurationMs' | 'cleanupDurationMs' | 'totalDurationMs', value?: number): Record<string, number> {
-  return Number.isFinite(value) && value! >= 0 && value! <= 86_400_000 ? { [key]: value! } : {};
 }
 
 function boundedCount(key: 'rowCount' | 'assignedRows' | 'completedBatches', value?: number): Record<string, number> {
@@ -575,11 +563,7 @@ export function selectFailureContext(job: BackgroundJobRecord, events: Backgroun
         event.details?.batchID === transitionBatch
     );
     const terminal = diagnostics.find(event => event.details?.terminal === true);
-    if (
-      terminal &&
-      terminal.details &&
-      (terminal.details.outcome === 'failed' || (terminal.details.outcome === 'rolled_back' && terminal.details.code === 'SETUP_CALLBACK_TIMEOUT'))
-    ) {
+    if (terminal && terminal.details && terminal.details.outcome === 'failed') {
       const d = terminal.details;
       const hasSafeSummary = typeof d.summary === 'string' && d.summary.length > 0;
       const step = hasSafeSummary && typeof d.step === 'string' && FAILURE_STEPS.has(d.step) ? d.step : undefined;

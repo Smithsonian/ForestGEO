@@ -359,12 +359,7 @@ function stopHeartbeat(ctx: WorkerRunContext): void {
 
 function failureContextFor(ctx: WorkerRunContext, code?: string): UploadJobFailureContext | undefined {
   const d = ctx.latestSetupDiagnostic;
-  if (
-    !d ||
-    !d.terminal ||
-    (d.outcome !== 'failed' && !(d.outcome === 'rolled_back' && (code === 'SETUP_CALLBACK_TIMEOUT' || d.errorCode === 'SETUP_CALLBACK_TIMEOUT')))
-  )
-    return undefined;
+  if (!d || !d.terminal || d.outcome !== 'failed') return undefined;
   const effectiveCode = code ?? d.errorCode;
   const summary =
     effectiveCode === 'SETUP_CALLBACK_TIMEOUT'
@@ -399,10 +394,6 @@ function reportSetupDiagnostic(ctx: WorkerRunContext, diagnostic: SetupDiagnosti
     assignedRows: diagnostic.assignedRows,
     completedBatches: diagnostic.completedBatches,
     operation: diagnostic.operation,
-    callbackDurationMs: diagnostic.callbackDurationMs,
-    commitDurationMs: diagnostic.commitDurationMs,
-    cleanupDurationMs: diagnostic.cleanupDurationMs,
-    totalDurationMs: diagnostic.totalDurationMs,
     terminal: diagnostic.terminal,
     code: diagnostic.errorCode,
     ...(diagnostic.errorCode === 'SETUP_CALLBACK_TIMEOUT' ? { summary: 'The file uploaded, but preparing its measurements took too long.' } : {})

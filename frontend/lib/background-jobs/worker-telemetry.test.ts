@@ -107,11 +107,7 @@ const diagnostic = {
   batchID: 'batch-8',
   elapsedMs: 2,
   assignedRows: 19,
-  operation: 'assign_interval' as const,
-  callbackDurationMs: 11,
-  commitDurationMs: 12,
-  cleanupDurationMs: 13,
-  totalDurationMs: 14
+  operation: 'assign_interval' as const
 };
 
 beforeEach(() => {
@@ -162,11 +158,7 @@ describe('optional setup diagnostic persistence', () => {
     expect(mocks.recordDiagnostic).toHaveBeenCalledOnce();
     expect(mocks.recordDiagnostic.mock.calls[0][2]).toMatchObject({
       assignedRows: 19,
-      operation: 'assign_interval',
-      callbackDurationMs: 11,
-      commitDurationMs: 12,
-      cleanupDurationMs: 13,
-      totalDurationMs: 14
+      operation: 'assign_interval'
     });
     finishWrite();
   });

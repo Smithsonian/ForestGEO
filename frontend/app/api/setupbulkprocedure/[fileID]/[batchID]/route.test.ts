@@ -28,7 +28,8 @@ vi.mock('@/auth', () => ({
   auth: vi.fn(async () => ({ user: { email: 'runner@forestgeo.test', userStatus: 'global', sites: [] } }))
 }));
 
-vi.mock('@/lib/db/connectionmanager', () => {
+vi.mock('@/lib/db/connectionmanager', async () => {
+  const { TransactionCallbackTimeoutError } = await vi.importActual<typeof import('@/lib/db/connectionmanager')>('@/lib/db/connectionmanager');
   const instance = {
     withTransaction: vi.fn(),
     executeQuery: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
   };
 
   return {
+    TransactionCallbackTimeoutError,
     default: {
       getInstance: () => instance
     }

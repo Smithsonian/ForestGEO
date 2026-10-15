@@ -35,78 +35,6 @@ export interface TxExecutor {
   readonly id: string;
 }
 
-export class TransactionCallbackTimeoutError extends Error {
-  readonly code = 'TRANSACTION_CALLBACK_TIMEOUT';
-  readonly timeoutMs: number;
-  readonly transactionId: string;
-  constructor(transactionId: string, timeoutMs: number) {
-    super(`Transaction ${transactionId} timed out after ${timeoutMs}ms`);
-    this.name = 'TransactionCallbackTimeoutError';
-    this.transactionId = transactionId;
-    this.timeoutMs = timeoutMs;
-  }
-}
-
-export class TransactionCommitOutcomeUnknownError extends Error {
-  readonly code = 'TRANSACTION_COMMIT_OUTCOME_UNKNOWN';
-  readonly cause: unknown;
-  constructor(cause: unknown) {
-    super(`Transaction COMMIT acknowledgement was not received: ${getErrorMessage(cause)}`);
-    this.name = 'TransactionCommitOutcomeUnknownError';
-    this.cause = cause;
-  }
-}
-
-export class TransactionCommitCleanupError extends Error {
-  readonly code = 'TRANSACTION_COMMITTED_CLEANUP_FAILED';
-  readonly committed = true;
-  readonly cause: unknown;
-  constructor(cause: unknown) {
-    super(`Transaction committed, but post-commit cleanup failed: ${getErrorMessage(cause)}`);
-    this.name = 'TransactionCommitCleanupError';
-    this.cause = cause;
-  }
-}
-
-export class TransactionRollbackCleanupError extends Error {
-  readonly rollbackAcknowledged = true;
-  readonly cause: unknown;
-  constructor(cause: unknown) {
-    super(`Transaction rollback was acknowledged, but connection cleanup failed: ${getErrorMessage(cause)}`);
-    this.name = 'TransactionRollbackCleanupError';
-    this.cause = cause;
-  }
-}
-
-export type TransactionOutcome = 'committed' | 'rolled_back' | 'commit_outcome_unknown' | 'commit_acknowledged_cleanup_failed' | 'failed';
-export interface TransactionLifecycleEvent {
-  readonly type:
-    | 'callback_started'
-    | 'callback_succeeded'
-    | 'callback_failed'
-    | 'commit_started'
-    | 'commit_acknowledged'
-    | 'commit_outcome_unknown'
-    | 'rollback_started'
-    | 'rollback_acknowledged'
-    | 'cleanup_finished'
-    | 'transaction_finished';
-  readonly elapsedMs: number;
-  readonly callbackDurationMs?: number;
-  readonly commitDurationMs?: number;
-  readonly cleanupDurationMs?: number;
-  readonly totalDurationMs?: number;
-  readonly outcome?: TransactionOutcome;
-}
-export interface WithTransactionOptions {
-  timeoutMs?: number;
-  lifecycleObserver?: (event: TransactionLifecycleEvent) => void;
-}
-
-function monotonicNow(): number {
-  return typeof performance !== 'undefined' ? performance.now() : Number(process.hrtime.bigint()) / 1_000_000;
-}
-
 interface QueryTimingDetails {
   schema: string | null;
   transactionId?: string;
@@ -195,6 +123,19 @@ class ObservableMap<K, V> extends Map<K, V> {
   }
 }
 
+export class TransactionCallbackTimeoutError extends Error {
+  readonly code = 'TRANSACTION_CALLBACK_TIMEOUT';
+  readonly transactionId: string;
+  readonly timeoutMs: number;
+
+  constructor(transactionId: string, timeoutMs: number) {
+    super(`Transaction ${transactionId} timed out after ${timeoutMs}ms`);
+    this.name = 'TransactionCallbackTimeoutError';
+    this.transactionId = transactionId;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 class ConnectionManager {
   private static instance: ConnectionManager | null = null; // Singleton instance
   private transactionConnections = new ObservableMap<string, PoolConnection>(); // Store transaction-specific connections
@@ -274,9 +215,13 @@ class ConnectionManager {
       const errMsg = error instanceof Error ? error.message : String(error);
       ailogger.error(chalk.red(`Error executing query: ${errMsg}`));
       if (transactionId && error instanceof QueryTimeoutError) {
-        // runQuery destroyed this connection, so it cannot be reused. Server
-        // settlement is not inferred from socket destruction. Finalize local
-        // bookkeeping so a later rollback cannot replace the original timeout.
+        // runQuery destroyed this connection, so the transaction is over: the
+        // server rolls it back when the socket closes. Without finalizing here,
+        // the caller's `rollbackTransaction` in its catch/finally would find the
+        // map entry still present, call rollback() on a closed connection, and
+        // throw "closed state" — replacing the QueryTimeoutError in the route's
+        // 500 with a misleading one. Finalize now so that later rollback takes
+        // the existing already-finalized no-op path.
         this.finalizeTransactionAfterConnectionLoss(transactionId, `statement timed out after ${error.timeoutMs}ms`);
       }
       throw error;
@@ -385,14 +330,10 @@ class ConnectionManager {
   }
 
   // Commit a transaction
-  public async commitTransaction(
-    transactionId: string,
-    timing?: (event: 'acknowledged' | 'outcome_unknown' | 'cleanup_finished', elapsedMs: number) => void
-  ): Promise<void> {
+  public async commitTransaction(transactionId: string): Promise<void> {
     const connection = this.transactionConnections.get(transactionId);
 
     if (!connection) {
-      if (timing) throw new Error(`Connection lost before COMMIT for transaction ${transactionId}`);
       ailogger.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
       // Clean up metadata even if connection is gone
       const meta = this.transactionMeta.get(transactionId);
@@ -404,75 +345,40 @@ class ConnectionManager {
       return; // Avoid throwing an error for an already finalized transaction
     }
 
-    const commitStartedAt = monotonicNow();
-    let acknowledged = false;
-    let commitError: unknown;
-    let cleanupError: unknown;
     try {
       await connection.commit();
-      acknowledged = true;
-      timing?.('acknowledged', monotonicNow() - commitStartedAt);
       ailogger.info(chalk.green(`Transaction committed: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
 
       // Flush buffered changelog entries now that the transaction is committed
       flushTransactionChangelog(transactionId);
     } catch (error: unknown) {
-      commitError = error;
       const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
       ailogger.error(chalk.red(`Error committing transaction: ${getErrorMessage(error)}`), errorObj);
 
       // Discard changelog entries if commit itself failed
       discardTransactionChangelog(transactionId);
-      if (acknowledged) cleanupError = error;
-    }
-    if (!acknowledged) {
-      // A rejected COMMIT command does not establish whether the server committed.
-      // Quarantine before any release path; never issue ROLLBACK on this session.
-      const commitDurationMs = monotonicNow() - commitStartedAt;
-      timing?.('outcome_unknown', commitDurationMs);
-      const cleanupStartedAt = monotonicNow();
-      this.discardTransaction(transactionId, 'COMMIT acknowledgement lost; server outcome unknown');
-      timing?.('cleanup_finished', monotonicNow() - cleanupStartedAt);
-      throw new TransactionCommitOutcomeUnknownError(commitError);
-    }
-
-    const cleanupStartedAt = monotonicNow();
-    try {
+      throw error;
+    } finally {
       // Clean up application locks before releasing connection
       await this.cleanupApplicationLocks(transactionId);
-    } catch (error: unknown) {
-      cleanupError ??= error;
-    }
-    if (cleanupError !== undefined) {
-      this.discardTransaction(transactionId, 'acknowledged COMMIT cleanup failed');
-    } else {
-      try {
-        connection.release();
-        this.transactionConnections.delete(transactionId);
-        this.releaseTransactionSlot();
-      } catch (error: unknown) {
-        cleanupError = error;
-        this.discardTransaction(transactionId, 'connection release failed after acknowledged COMMIT');
-      }
-    }
+      connection.release();
+      this.transactionConnections.delete(transactionId);
 
-    // CRITICAL FIX: Clean up metadata to prevent leaks
-    const meta = this.transactionMeta.get(transactionId);
-    if (meta) {
-      if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
-      if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
-      this.transactionMeta.delete(transactionId);
+      // CRITICAL FIX: Clean up metadata to prevent leaks
+      const meta = this.transactionMeta.get(transactionId);
+      if (meta) {
+        if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
+        if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
+        this.transactionMeta.delete(transactionId);
+      }
+
+      // Release a waiting transaction slot (race condition fix)
+      this.releaseTransactionSlot();
     }
-    timing?.('cleanup_finished', monotonicNow() - cleanupStartedAt);
-    if (cleanupError !== undefined) throw new TransactionCommitCleanupError(cleanupError);
   }
 
   // Rollback a transaction
   public async rollbackTransaction(transactionId: string): Promise<void> {
-    await this.rollbackTransactionWithOutcome(transactionId);
-  }
-
-  private async rollbackTransactionWithOutcome(transactionId: string): Promise<boolean> {
     const connection = this.transactionConnections.get(transactionId);
 
     if (!connection) {
@@ -484,70 +390,47 @@ class ConnectionManager {
         if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
         this.transactionMeta.delete(transactionId);
       }
-      return false; // No server acknowledgement was observed.
+      return; // Avoid throwing an error for an already finalized transaction
     }
 
-    let rollbackAcknowledged = false;
-    let rollbackFailed = false;
-    let rollbackError: unknown;
-    let cleanupFailed = false;
-    let cleanupError: unknown;
     try {
       await connection.rollback();
-      rollbackAcknowledged = true;
       ailogger.warn(chalk.yellow(`Transaction rolled back: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
     } catch (error: unknown) {
-      rollbackFailed = true;
-      rollbackError = error;
       const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
       ailogger.error(chalk.red(`Error rolling back transaction: ${getErrorMessage(error)}`), errorObj);
-    }
+      throw error;
+    } finally {
+      // Discard any buffered changelog entries — the transaction was rolled back
+      discardTransactionChangelog(transactionId);
 
-    if (this.transactionConnections.has(transactionId)) discardTransactionChangelog(transactionId);
-    try {
-      if (this.transactionConnections.has(transactionId)) await this.cleanupApplicationLocks(transactionId);
-    } catch (error: unknown) {
-      cleanupFailed = true;
-      cleanupError = error;
-    }
+      // Clean up application locks before releasing connection
+      await this.cleanupApplicationLocks(transactionId);
+      connection.release();
+      this.transactionConnections.delete(transactionId);
 
-    if (rollbackFailed || cleanupFailed) {
-      this.discardTransaction(transactionId, rollbackError !== undefined ? 'ROLLBACK failed' : 'rollback lock cleanup failed');
-    } else if (this.transactionConnections.has(transactionId)) {
-      try {
-        connection.release();
-        this.transactionConnections.delete(transactionId);
-        this.releaseTransactionSlot();
-      } catch (error: unknown) {
-        cleanupFailed = true;
-        cleanupError = error;
-        this.discardTransaction(transactionId, 'connection release failed after acknowledged ROLLBACK');
+      // CRITICAL FIX: Clean up metadata to prevent leaks
+      const meta = this.transactionMeta.get(transactionId);
+      if (meta) {
+        if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
+        if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
+        this.transactionMeta.delete(transactionId);
       }
-    }
 
-    const meta = this.transactionMeta.get(transactionId);
-    if (meta) {
-      if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
-      if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
-      this.transactionMeta.delete(transactionId);
+      // Release a waiting transaction slot (race condition fix)
+      this.releaseTransactionSlot();
     }
-
-    if (rollbackFailed) throw rollbackError;
-    if (cleanupFailed) {
-      if (rollbackAcknowledged) throw new TransactionRollbackCleanupError(cleanupError);
-      throw cleanupError;
-    }
-    return rollbackAcknowledged;
   }
 
   /**
-   * Finalize local bookkeeping for a transaction whose connection is already
-   * gone. Socket destruction prevents connection reuse but does not establish
-   * whether the server-side statement or transaction has settled:
+   * Finalize a managed transaction whose connection is already gone (destroyed
+   * by the DB layer after a statement timeout). There is nothing left to
+   * ROLLBACK over the wire — the server rolled the transaction back when the
+   * socket closed — so this only settles the bookkeeping:
    *
    *   - drop the map entry and metadata (clearing its timers),
-   *   - discard buffered changelog entries that can no longer be safely
-   *     associated with a confirmed transaction outcome,
+   *   - discard buffered changelog entries, which describe writes that were
+   *     rolled back and must never be flushed,
    *   - release the transaction slot so a queued waiter is woken.
    *
    * Runs exactly once per transaction: the map entry is the guard, and every
@@ -555,14 +438,14 @@ class ConnectionManager {
    * rollbackTransaction land on its "already finalized" no-op branch.
    *
    * Application locks are NOT released here: they are session-scoped MySQL
-   * GET_LOCKs. Their server-side status is unknown when the session is lost.
+   * GET_LOCKs, and the session is gone, so the server has already dropped them.
    */
   private finalizeTransactionAfterConnectionLoss(transactionId: string, reason: string): void {
     if (!this.transactionConnections.has(transactionId)) return;
 
     ailogger.warn(
       chalk.yellow(
-        `Transaction ${transactionId} bookkeeping finalized without ROLLBACK — its connection was destroyed (${reason}). Server-side settlement is not inferred.`
+        `Transaction ${transactionId} finalized without ROLLBACK — its connection was destroyed (${reason}). The server rolled it back on socket close.`
       )
     );
 
@@ -581,8 +464,8 @@ class ConnectionManager {
 
   /**
    * Destroy a transaction's connection whose session state can no longer be
-   * trusted, so it never returns to the pool. Socket destruction does not prove
-   * server-side settlement; bookkeeping settles through
+   * trusted, so it never returns to the pool. The server rolls the transaction
+   * back on socket close; bookkeeping settles through
    * {@link finalizeTransactionAfterConnectionLoss}, so a later commit/rollback
    * is a no-op. Never throws, so it cannot mask the caller's own error.
    */
@@ -617,27 +500,16 @@ class ConnectionManager {
    * could not run until it finished on its own — which would defeat the timeout
    * and pin the slot. To avoid that, on timeout this method issues
    * `KILL QUERY <threadId>` from a SEPARATE connection (see {@link
-   * killQueryOnThread}) to abort the running statement, so ROLLBACK can proceed
-   * promptly. If cancellation cannot be confirmed, the connection is discarded
-   * without claiming server settlement. An `AbortSignal` cannot
+   * killQueryOnThread}) to abort the running statement, so the queued ROLLBACK
+   * and connection release proceed promptly — returning control to the caller
+   * at ~timeoutMs and freeing the transaction slot. An `AbortSignal` cannot
    * substitute for this: MySQL has no protocol-level statement abort, so the
    * server keeps executing until the statement is KILLed. The orphan
    * `fnPromise` rejection (the KILLed statement) is swallowed so it cannot
    * surface as an unhandled rejection.
    */
-  public async withTransaction<T>(fn: (tx: TxExecutor) => Promise<T>, opts?: WithTransactionOptions): Promise<T> {
+  public async withTransaction<T>(fn: (tx: TxExecutor) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
     const timeoutMs = opts?.timeoutMs ?? this.DEFAULT_TX_TIMEOUT_MS;
-    const transactionStartedAt = monotonicNow();
-    const notify = (event: Omit<TransactionLifecycleEvent, 'elapsedMs'>) => {
-      try {
-        const result: unknown = opts?.lifecycleObserver?.(Object.freeze({ ...event, elapsedMs: monotonicNow() - transactionStartedAt }));
-        if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
-          Promise.resolve(result).catch(() => undefined);
-        }
-      } catch {
-        // Lifecycle telemetry must never influence database work.
-      }
-    };
 
     // Slot reservation is owned entirely by beginTransaction now: each attempt
     // reserves its own slot and, on failure, releases it before throwing. So
@@ -744,42 +616,15 @@ class ConnectionManager {
     // Defer invocation into a promise so a non-async callback that throws
     // before returning a promise follows the same rollback/cleanup path as an
     // asynchronously rejected callback.
-    const callbackStartedAt = monotonicNow();
-    notify({ type: 'callback_started' });
     const fnPromise = Promise.resolve().then(() => fn(tx));
-    let callbackDurationMs: number | undefined;
-    let commitDurationMs: number | undefined;
-    let cleanupDurationMs: number | undefined;
 
     try {
       const result = (await Promise.race([fnPromise, timeoutPromise])) as T;
-      callbackDurationMs = monotonicNow() - callbackStartedAt;
-      notify({ type: 'callback_succeeded', callbackDurationMs });
       // success path
       if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
       if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
-      notify({ type: 'commit_started', callbackDurationMs });
-      await this.commitTransaction(transactionId!, (event, duration) => {
-        if (event === 'acknowledged') {
-          commitDurationMs = duration;
-          notify({ type: 'commit_acknowledged', callbackDurationMs, commitDurationMs });
-        } else if (event === 'outcome_unknown') {
-          commitDurationMs = duration;
-          notify({ type: 'commit_outcome_unknown', callbackDurationMs, commitDurationMs, outcome: 'commit_outcome_unknown' });
-        } else {
-          cleanupDurationMs = duration;
-          notify({ type: 'cleanup_finished', callbackDurationMs, commitDurationMs, cleanupDurationMs });
-        }
-      });
+      await this.commitTransaction(transactionId!);
       this.transactionMeta.delete(transactionId!);
-      notify({
-        type: 'transaction_finished',
-        callbackDurationMs,
-        commitDurationMs,
-        cleanupDurationMs,
-        totalDurationMs: monotonicNow() - transactionStartedAt,
-        outcome: 'committed'
-      });
       return result;
     } catch (err: unknown) {
       // on error / timeout
@@ -796,33 +641,6 @@ class ConnectionManager {
 
       // Enhanced error logging
       const errMessage = getErrorMessage(err);
-      callbackDurationMs ??= monotonicNow() - callbackStartedAt;
-      if (err instanceof TransactionCommitOutcomeUnknownError) {
-        this.transactionMeta.delete(transactionId!);
-        notify({
-          type: 'transaction_finished',
-          callbackDurationMs,
-          commitDurationMs,
-          cleanupDurationMs,
-          totalDurationMs: monotonicNow() - transactionStartedAt,
-          outcome: 'commit_outcome_unknown'
-        });
-        throw err;
-      }
-      if (err instanceof TransactionCommitCleanupError) {
-        this.transactionMeta.delete(transactionId!);
-        notify({ type: 'cleanup_finished', callbackDurationMs, commitDurationMs, cleanupDurationMs, outcome: 'commit_acknowledged_cleanup_failed' });
-        notify({
-          type: 'transaction_finished',
-          callbackDurationMs,
-          commitDurationMs,
-          cleanupDurationMs,
-          totalDurationMs: monotonicNow() - transactionStartedAt,
-          outcome: 'commit_acknowledged_cleanup_failed'
-        });
-        throw err;
-      }
-      notify({ type: 'callback_failed', callbackDurationMs });
       const errorType = err instanceof Error ? err.constructor.name : 'Unknown';
       const errorObj = err instanceof Error ? err : new Error(errMessage);
       ailogger.error(`Transaction ${transactionId!} failed: ${errMessage}`, errorObj, {
@@ -836,55 +654,21 @@ class ConnectionManager {
       // On timeout the callback's statement is still running on the tx's
       // dedicated connection; the ROLLBACK below would queue behind it. KILL it
       // from a separate connection first so rollback/release proceed promptly.
-      const cleanupStartedAt = monotonicNow();
-      let safeToAttemptRollback = true;
       if (timedOut) {
         const txConnection = this.transactionConnections.get(transactionId!) as PoolConnectionWithThreadId | undefined;
         const threadId = txConnection?.threadId;
         if (typeof threadId === 'number') {
-          try {
-            const cancellation = await killQueryOnThread(threadId, 'transaction timeout');
-            if (cancellation.status === 'no_kill_connection') {
-              safeToAttemptRollback = false;
-              this.discardTransaction(transactionId!, 'timed-out statement could not be confirmed stopped');
-            }
-          } catch (killError: unknown) {
-            ailogger.error(`Unable to cancel timed-out transaction ${transactionId!}: ${getErrorMessage(killError)}`);
-            safeToAttemptRollback = false;
-            this.discardTransaction(transactionId!, 'timed-out statement cancellation failed');
-          }
-        } else {
-          safeToAttemptRollback = false;
-          this.discardTransaction(transactionId!, 'timed-out transaction has no connection thread id');
+          await killQueryOnThread(threadId, 'transaction timeout');
         }
       }
 
-      let rollbackAcknowledged = false;
-      if (safeToAttemptRollback) {
-        try {
-          notify({ type: 'rollback_started' });
-          rollbackAcknowledged = await this.rollbackTransactionWithOutcome(transactionId!);
-          if (rollbackAcknowledged) notify({ type: 'rollback_acknowledged' });
-        } catch (rbErr: unknown) {
-          if (rbErr instanceof TransactionRollbackCleanupError) {
-            rollbackAcknowledged = true;
-            notify({ type: 'rollback_acknowledged' });
-          }
-          ailogger.error(`Rollback failed for transaction ${transactionId!}: ${getErrorMessage(rbErr)}`);
-        }
+      try {
+        await this.rollbackTransaction(transactionId!);
+      } catch (rbErr: unknown) {
+        ailogger.error(`Rollback failed for transaction ${transactionId!}: ${getErrorMessage(rbErr)}`);
       }
 
-      cleanupDurationMs = monotonicNow() - cleanupStartedAt;
-      notify({ type: 'cleanup_finished', callbackDurationMs, cleanupDurationMs });
       this.transactionMeta.delete(transactionId!);
-      notify({
-        type: 'transaction_finished',
-        callbackDurationMs,
-        commitDurationMs,
-        cleanupDurationMs,
-        totalDurationMs: monotonicNow() - transactionStartedAt,
-        outcome: rollbackAcknowledged ? 'rolled_back' : 'failed'
-      });
       throw err;
     }
   }
@@ -989,14 +773,11 @@ class ConnectionManager {
         ailogger.info(chalk.blue(`MySQL lock released: ${lockName} by transaction ${transactionId}`));
       } else if (result && result[0]?.released === 0) {
         ailogger.warn(chalk.yellow(`Lock ${lockName} was not held by transaction ${transactionId}`));
-        throw new Error(`MySQL lock ${lockName} was not held by transaction ${transactionId}`);
-      } else {
-        throw new Error(`Could not confirm release of MySQL lock ${lockName} for transaction ${transactionId}`);
       }
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
       ailogger.error(chalk.red(`Error releasing MySQL lock ${lockName}: ${getErrorMessage(error)}`), errorObj);
-      throw error;
+      // Don't throw - we want cleanup to continue even if release fails
     }
   }
 
@@ -1008,17 +789,14 @@ class ConnectionManager {
       // Release all locks for this transaction
       const releasePromises = Array.from(meta.resourceLocks).map(lockName => this.releaseApplicationLock(lockName, transactionId));
 
-      let timeoutHandle: NodeJS.Timeout | undefined;
-      try {
-        await Promise.race([
-          Promise.all(releasePromises),
-          new Promise<never>((_, reject) => {
-            timeoutHandle = setTimeout(() => reject(new Error('Lock cleanup timeout')), 10000);
-          })
-        ]);
-      } finally {
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-      }
+      // Wait for all releases to complete (with timeout)
+      await Promise.race([Promise.all(releasePromises), new Promise((_, reject) => setTimeout(() => reject(new Error('Lock cleanup timeout')), 10000))]).catch(
+        (error: unknown) => {
+          const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
+          ailogger.error(`Error during lock cleanup for transaction ${transactionId}: ${getErrorMessage(error)}`, errorObj);
+          // Continue anyway - locks will be auto-released when connection closes
+        }
+      );
     }
   }
 
