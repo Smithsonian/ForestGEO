@@ -393,8 +393,10 @@ describe('UploadParent - Hook Integration Tests', () => {
         { timeout: 5000 }
       );
 
-      // onUploadComplete callback should be called
-      expect(mockOnUploadComplete).toHaveBeenCalled();
+      // onUploadComplete fires from a passive effect that can commit after the COMPLETE markup above.
+      await waitFor(() => {
+        expect(mockOnUploadComplete).toHaveBeenCalledTimes(1);
+      });
     });
   });
 
@@ -559,8 +561,11 @@ describe('UploadParent - Hook Integration Tests', () => {
         { timeout: 5000 }
       );
 
-      // Verify all hooks worked together
-      expect(mockOnUploadComplete).toHaveBeenCalledTimes(1);
+      // Verify all hooks worked together; onUploadComplete fires from a passive effect
+      // that can commit after the COMPLETE markup above.
+      await waitFor(() => {
+        expect(mockOnUploadComplete).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('should skip to processing when skipToProcessing flag is set', async () => {
