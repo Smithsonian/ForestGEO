@@ -10,6 +10,15 @@ import { isMissingTableError } from '@/lib/errorhelpers';
 
 export const TEMP_MEASUREMENT_INSERT_BATCH_SIZE = 1000;
 
+export class StagingBatchIDCountMismatchError extends Error {
+  readonly code = 'STAGING_BATCH_ID_COUNT_MISMATCH';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'StagingBatchIDCountMismatchError';
+  }
+}
+
 const verifiedTemporaryMeasurementSourceFormatSchemas = new Set<string>();
 
 export function resetTemporaryMeasurementsSourceFormatColumnCacheForTests(): void {
@@ -194,7 +203,7 @@ export async function insertTemporaryMeasurementsInBatches(
   transactionID: string
 ): Promise<number> {
   if (rowBatchIDs.length !== rows.length) {
-    throw new Error(`Staging ${fileName} received ${rows.length} row(s) but ${rowBatchIDs.length} BatchID(s)`);
+    throw new StagingBatchIDCountMismatchError(`Staging ${fileName} received ${rows.length} row(s) but ${rowBatchIDs.length} BatchID(s)`);
   }
   const columnList = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.join(', ');
   const placeholderTuple = `(${TEMPORARY_MEASUREMENT_INSERT_COLUMNS.map(() => '?').join(', ')})`;
@@ -222,7 +231,7 @@ export async function familyHasStagedRows(
   schema: string,
   fileName: string,
   batchID: string,
-  transactionID?: string
+  transactionID: string
 ): Promise<boolean> {
   const existsSQL = safeFormatQuery(
     schema,
@@ -231,7 +240,13 @@ export async function familyHasStagedRows(
      LIMIT 1`
   );
   const rows = await connectionManager.executeQuery(existsSQL, [fileName, batchID, buildSubBatchPattern(batchID)], transactionID);
-  return Array.isArray(rows) && rows.length > 0;
+  if (!Array.isArray(rows)) {
+    throw new Error(
+      `Family staging probe for ${fileName} (batch ${batchID}) expected a row list from the server but got ${JSON.stringify(rows)}; ` +
+        `refusing to report the family as not staged.`
+    );
+  }
+  return rows.length > 0;
 }
 
 export async function cleanupStaleMeasurementBatchesForFile(
@@ -252,7 +267,7 @@ export async function cleanupStaleMeasurementBatchesForFile(
     [schema]
   );
   const cleanupResult = await connectionManager.executeQuery(cleanupSQL, [fileName, plotID, censusID, batchID, buildSubBatchPattern(batchID)], transactionID);
-  const deletedRows = Number((cleanupResult as { affectedRows?: number })?.affectedRows ?? 0);
+  const deletedRows = requireAffectedRows(cleanupResult, cleanupSQL);
 
   if (deletedRows > 0) {
     ailogger.warn(
@@ -456,7 +471,7 @@ export async function findDroppedMeasurementCandidates(
   transactionID: string
 ): Promise<DroppedMeasurementCandidate[]> {
   if (rowBatchIDs.length !== chunkRows.length) {
-    throw new Error(`Dropped-row audit for ${fileName} received ${chunkRows.length} row(s) but ${rowBatchIDs.length} BatchID(s)`);
+    throw new StagingBatchIDCountMismatchError(`Dropped-row audit for ${fileName} received ${chunkRows.length} row(s) but ${rowBatchIDs.length} BatchID(s)`);
   }
   const tempTable = 'dropped_row_candidates';
   await connectionManager.executeQuery(`DROP TEMPORARY TABLE IF EXISTS ${tempTable}`, [], transactionID);
@@ -471,7 +486,7 @@ export async function findDroppedMeasurementCandidates(
       MeasurementDate DATE NULL,
       INDEX idx_dropped_row_candidates_match (TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate),
       INDEX idx_dropped_row_candidates_duplicate (TreeTag, StemTag, QuadratName)
-    ) ENGINE=MEMORY`,
+    )`,
     [],
     transactionID
   );

@@ -92,13 +92,20 @@ import {
   cleanupStaleMeasurementBatchesForFile,
   familyHasStagedRows,
   findDroppedMeasurementCandidates,
-  insertTemporaryMeasurementsInBatches
+  insertTemporaryMeasurementsInBatches,
+  StagingBatchIDCountMismatchError
 } from '@/lib/ingestion/temporary-measurements';
 
 const INCOMING_FAMILY = 'fam';
 const INCOMING_FAMILY_PREFIX_ONLY = 'fa';
 const OTHER_FAMILY = 'other';
 const VALID_DATE = '2024-03-15';
+// A sibling whose `__` separator is replaced by other characters. An unescaped
+// LIKE pattern treats `_` as a single-character wildcard and would spare it.
+const UNESCAPED_UNDERSCORE_LOOKALIKE = `${INCOMING_FAMILY}XYsub001`;
+// Above the ~11k rows a fixed-width MEMORY table holds under the default 16 MiB max_heap_table_size.
+const LARGE_CANDIDATE_ROW_COUNT = 15000;
+const LARGE_AUDIT_TIMEOUT_MS = 120000;
 
 describe('pre-partitioned staging primitives — integration', () => {
   let connection: Connection;
@@ -163,7 +170,14 @@ describe('pre-partitioned staging primitives — integration', () => {
 
   it('stale-batch cleanup keeps every member of the incoming family and removes other families (spec test 4)', async () => {
     const FILE = 'prepart_cleanup.csv';
-    for (const batchID of [INCOMING_FAMILY, `${INCOMING_FAMILY}__sub001`, `${INCOMING_FAMILY}__sub002`, OTHER_FAMILY, `${OTHER_FAMILY}__sub001`]) {
+    for (const batchID of [
+      INCOMING_FAMILY,
+      `${INCOMING_FAMILY}__sub001`,
+      `${INCOMING_FAMILY}__sub002`,
+      UNESCAPED_UNDERSCORE_LOOKALIKE,
+      OTHER_FAMILY,
+      `${OTHER_FAMILY}__sub001`
+    ]) {
       await stageRawRow(FILE, batchID, `T-${batchID}`);
     }
     console.log('[cleanup] before:', await stagedBatchIDs(FILE));
@@ -175,7 +189,8 @@ describe('pre-partitioned staging primitives — integration', () => {
     const after = await stagedBatchIDs(FILE);
     console.log(`[cleanup] deleted=${deleted} after:`, after);
     expect(after).toEqual([INCOMING_FAMILY, `${INCOMING_FAMILY}__sub001`, `${INCOMING_FAMILY}__sub002`]);
-    expect(deleted).toBe(2);
+    expect(after, `${UNESCAPED_UNDERSCORE_LOOKALIKE} is not in the family and must be deleted`).not.toContain(UNESCAPED_UNDERSCORE_LOOKALIKE);
+    expect(deleted).toBe(3);
   });
 
   it('treats a family holding only a later sub-batch as already staged', async () => {
@@ -183,8 +198,15 @@ describe('pre-partitioned staging primitives — integration', () => {
     await stageRawRow(FILE, `${INCOMING_FAMILY}__sub003`, 'T1');
     console.log('[exists] staged:', await stagedBatchIDs(FILE));
 
-    const incomingFamilyStaged = await familyHasStagedRows(connectionManager, schema, FILE, INCOMING_FAMILY);
-    const prefixFamilyStaged = await familyHasStagedRows(connectionManager, schema, FILE, INCOMING_FAMILY_PREFIX_ONLY);
+    const transactionID = await connectionManager.beginTransaction();
+    let incomingFamilyStaged: boolean;
+    let prefixFamilyStaged: boolean;
+    try {
+      incomingFamilyStaged = await familyHasStagedRows(connectionManager, schema, FILE, INCOMING_FAMILY, transactionID);
+      prefixFamilyStaged = await familyHasStagedRows(connectionManager, schema, FILE, INCOMING_FAMILY_PREFIX_ONLY, transactionID);
+    } finally {
+      await connectionManager.rollbackTransaction(transactionID);
+    }
     console.log(`[exists] ${INCOMING_FAMILY}=${incomingFamilyStaged} ${INCOMING_FAMILY_PREFIX_ONLY}=${prefixFamilyStaged}`);
     expect(incomingFamilyStaged).toBe(true);
     expect(prefixFamilyStaged).toBe(false);
@@ -237,6 +259,20 @@ describe('pre-partitioned staging primitives — integration', () => {
           transactionID
         )
       ).rejects.toThrow(/1 row\(s\) but 0 BatchID/);
+      await expect(
+        insertTemporaryMeasurementsInBatches(
+          connectionManager,
+          schema,
+          [measurementRow('T1')],
+          'x.csv',
+          [],
+          null,
+          SourceFormat.csv,
+          plotID,
+          censusID,
+          transactionID
+        )
+      ).rejects.toBeInstanceOf(StagingBatchIDCountMismatchError);
     } finally {
       await connectionManager.rollbackTransaction(transactionID);
     }
@@ -279,4 +315,28 @@ describe('pre-partitioned staging primitives — integration', () => {
       await connectionManager.rollbackTransaction(transactionID);
     }
   });
+
+  it(
+    'audits a whole-file chunk larger than an in-memory temporary table can hold',
+    async () => {
+      const FILE = 'prepart_large_audit.csv';
+      const rows = Array.from({ length: LARGE_CANDIDATE_ROW_COUNT }, (_, index) => measurementRow(`L${index + 1}`));
+      const rowBatchIDs = rows.map(() => `${INCOMING_FAMILY}__sub001`);
+      const [[heapLimit]] = await connection.query<RowDataPacket[]>('SELECT @@session.max_heap_table_size AS maxHeapTableSize');
+      console.log(`[large audit] rows=${rows.length} max_heap_table_size=${heapLimit.maxHeapTableSize}`);
+
+      const transactionID = await connectionManager.beginTransaction();
+      try {
+        const startedAt = Date.now();
+        const candidates = await findDroppedMeasurementCandidates(connectionManager, schema, FILE, rowBatchIDs, plotID, censusID, rows, transactionID);
+        console.log(`[large audit] candidates=${candidates.length} durationMs=${Date.now() - startedAt}`);
+        expect(candidates).toHaveLength(LARGE_CANDIDATE_ROW_COUNT);
+        expect(Number(candidates[0].rowOrdinal)).toBe(1);
+        expect(Number(candidates[LARGE_CANDIDATE_ROW_COUNT - 1].rowOrdinal)).toBe(LARGE_CANDIDATE_ROW_COUNT);
+      } finally {
+        await connectionManager.rollbackTransaction(transactionID);
+      }
+    },
+    LARGE_AUDIT_TIMEOUT_MS
+  );
 });

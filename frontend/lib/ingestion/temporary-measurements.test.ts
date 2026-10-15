@@ -3,6 +3,8 @@ import {
   buildTemporaryMeasurementInsertRecord,
   CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   cleanupPreviousFileUploads,
+  cleanupStaleMeasurementBatchesForFile,
+  familyHasStagedRows,
   findDroppedMeasurementCandidates,
   isUnsignedIntFieldInvalid,
   MYSQL_UNSIGNED_INT_MAX,
@@ -137,7 +139,45 @@ describe('findDroppedMeasurementCandidates placeholder alignment', () => {
         TEST_TRANSACTION_ID
       )
     ).rejects.toThrow(/1 row\(s\) but 0 BatchID/);
+    await expect(
+      findDroppedMeasurementCandidates(
+        connectionManager,
+        TEST_SCHEMA,
+        TEST_FILE_NAME,
+        [],
+        TEST_PLOT_ID,
+        TEST_CENSUS_ID,
+        [{ tag: '100001' }] as FileRow[],
+        TEST_TRANSACTION_ID
+      )
+    ).rejects.toMatchObject({ name: 'StagingBatchIDCountMismatchError', code: 'STAGING_BATCH_ID_COUNT_MISMATCH' });
     expect(executeQuery).not.toHaveBeenCalled();
+  });
+});
+
+describe('family staging probes fail loud on an unreadable server answer', () => {
+  const TEST_SCHEMA = 'forestgeo_testing';
+  const TEST_FILE_NAME = 'SERC_census1_2025.csv';
+  const TEST_BATCH_ID = 'batch-7';
+  const TEST_TRANSACTION_ID = 'tx-test';
+
+  it.each([[undefined], [{ affectedRows: 0 }], [null]])('familyHasStagedRows refuses to answer "not staged" when the server returns %j', async serverAnswer => {
+    const executeQuery = vi.fn().mockResolvedValue(serverAnswer);
+    const connectionManager = { executeQuery } as unknown as ConnectionManager;
+
+    await expect(familyHasStagedRows(connectionManager, TEST_SCHEMA, TEST_FILE_NAME, TEST_BATCH_ID, TEST_TRANSACTION_ID)).rejects.toThrow(
+      /expected a row list.*refusing to report the family as not staged/
+    );
+    expect(executeQuery).toHaveBeenCalledWith(expect.stringContaining('LIMIT 1'), [TEST_FILE_NAME, TEST_BATCH_ID, 'batch-7\\_\\_sub%'], TEST_TRANSACTION_ID);
+  });
+
+  it('cleanupStaleMeasurementBatchesForFile throws instead of reporting zero when the deleted count is unreadable', async () => {
+    const executeQuery = vi.fn().mockResolvedValue({});
+    const connectionManager = { executeQuery } as unknown as ConnectionManager;
+
+    await expect(
+      cleanupStaleMeasurementBatchesForFile(connectionManager, TEST_SCHEMA, TEST_FILE_NAME, TEST_BATCH_ID, 22, 32, TEST_TRANSACTION_ID)
+    ).rejects.toThrow(/could not read a row count/i);
   });
 });
 
