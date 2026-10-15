@@ -181,6 +181,8 @@ export function highestSubBatchOrdinal(subBatchIDs: string[], originalBatchID: s
   }, 0);
 }
 
+// Sub-batches of 10K rows keep transaction duration ~6.5s (benchmarked),
+// well under the 50s innodb_lock_wait_timeout on Azure MySQL.
 const DEFAULT_INGESTION_SUB_BATCH_ROWS = 10_000;
 const INGESTION_SUB_BATCH_ROWS_ENV = 'INGESTION_SUB_BATCH_ROWS';
 
@@ -194,6 +196,9 @@ const SUB_BATCH_SUFFIX = new RegExp(`${SUB_BATCH_SEPARATOR}\\d{${SUB_BATCH_ORDIN
 /**
  * Rows per sub-batch. Staging and setup must read the same value: staging
  * assigns membership with it and setup rejects members larger than it.
+ * Overridable via INGESTION_SUB_BATCH_ROWS so tests can force multi-sub-batch
+ * families without staging 10K rows; only an explicit positive integer
+ * overrides the default.
  */
 export function getIngestionBatchSize(): number {
   const raw = process.env[INGESTION_SUB_BATCH_ROWS_ENV];
