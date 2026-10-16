@@ -35,7 +35,7 @@ import {
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
-import { OriginalBatchIDTooLongError, SubBatchOrdinalOverflowError, subBatchIDForRowOrdinal } from '@/lib/uploads/batch-family';
+import { MAX_ORIGINAL_BATCH_ID_LENGTH, OriginalBatchIDTooLongError, SubBatchOrdinalOverflowError, subBatchIDForRowOrdinal } from '@/lib/uploads/batch-family';
 
 const ARCGIS_COMMIT_INSERT_FAILURE_FALLBACK = 'Unknown error during insert';
 const CHANGELOG_TABLE_NAME = 'file_upload';
@@ -65,15 +65,15 @@ function toNullableNumber(value: unknown): number | null {
 }
 
 /**
- * Stages each row under its final sub-batch, so setup has nothing to split. A
- * batch ID or row count the sub-batch suffix cannot name is the caller's input
- * error, reported before any statement runs.
+ * Stages each row under its final sub-batch, so setup has nothing to split. The
+ * batch ID length is checked before the transaction; a session with more rows
+ * than the sub-batch suffix can name is only knowable once it is claimed.
  */
 function assignArcgisRowBatchIDs(batchID: string, rowCount: number): string[] {
   try {
     return Array.from({ length: rowCount }, (_, rowOrdinal) => subBatchIDForRowOrdinal(batchID, rowOrdinal));
   } catch (error: unknown) {
-    if (error instanceof OriginalBatchIDTooLongError || error instanceof SubBatchOrdinalOverflowError) {
+    if (error instanceof SubBatchOrdinalOverflowError) {
       throw new ArcgisImportSessionError(error.message, HTTPResponses.INVALID_REQUEST);
     }
     throw error;
@@ -82,6 +82,10 @@ function assignArcgisRowBatchIDs(batchID: string, rowCount: number): string[] {
 
 export async function commitArcgisImport(connectionManager: ConnectionManager, params: CommitArcgisImportParams): Promise<CommitArcgisImportResult> {
   const { schema, plotID, censusID, importSessionId, batchID, uploadMode, userId, uploadSessionID } = params;
+
+  if (batchID.length > MAX_ORIGINAL_BATCH_ID_LENGTH) {
+    throw new ArcgisImportSessionError(new OriginalBatchIDTooLongError(batchID).message, HTTPResponses.INVALID_REQUEST);
+  }
 
   await ensureArcgisImportTables(schema);
   await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, schema);
@@ -233,7 +237,7 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
         uploadMode,
         rowCount: insertedCount,
         droppedCount: droppedRowCount,
-        batchCount: 1
+        batchCount: new Set(rowBatchIDs).size
       });
       const insertChangelogSQL = safeFormatQuery(
         schema,

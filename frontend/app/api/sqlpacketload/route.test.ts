@@ -128,6 +128,8 @@ vi.mock('mysql2/promise', async importOriginal => {
 
 /** Number of columns in the temporarymeasurements INSERT (FileID through PublishedStemID) */
 const TEMP_MEASUREMENT_COLUMNS_PER_ROW = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.length;
+/** Position of the first staged row's BatchID among the INSERT params. */
+const STAGED_BATCH_ID_PARAM_INDEX = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.indexOf('BatchID');
 
 const TEST_SESSION_ID = 'session-1';
 const TEST_PLOT_ID = 22;
@@ -222,6 +224,7 @@ function primeMeasurementQueries(manager: any): void {
   // reports one affected row per VALUES tuple, as MySQL does when nothing is ignored.
   manager.executeQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     const text = String(sql);
+    // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
     if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
     if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
     if (text.includes('COUNT(')) return [{ count: 0 }];
@@ -376,10 +379,10 @@ describe('sqlpacketload measurement scope validation', () => {
     const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
       String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
     );
-    console.log(`[first-row-ordinal-absent] status=${res.status} stagedBatchID=${insertCall?.[1]?.[1]}`);
+    console.log(`[first-row-ordinal-absent] status=${res.status} stagedBatchID=${insertCall?.[1]?.[STAGED_BATCH_ID_PARAM_INDEX]}`);
 
     expect(res.status).toBe(HTTPResponses.OK);
-    expect(insertCall[1][1]).toBe(TEST_BATCH_ID);
+    expect(insertCall[1][STAGED_BATCH_ID_PARAM_INDEX]).toBe(TEST_BATCH_ID);
   });
 
   it('stages each row under its final sub-batch when firstRowOrdinal is sent', async () => {
@@ -390,10 +393,10 @@ describe('sqlpacketload measurement scope validation', () => {
     const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
       String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
     );
-    console.log(`[first-row-ordinal-zero] status=${res.status} stagedBatchID=${insertCall?.[1]?.[1]}`);
+    console.log(`[first-row-ordinal-zero] status=${res.status} stagedBatchID=${insertCall?.[1]?.[STAGED_BATCH_ID_PARAM_INDEX]}`);
 
     expect(res.status).toBe(HTTPResponses.OK);
-    expect(insertCall[1][1]).toBe(buildSubBatchID(TEST_BATCH_ID, FIRST_SUB_BATCH_ORDINAL));
+    expect(insertCall[1][STAGED_BATCH_ID_PARAM_INDEX]).toBe(buildSubBatchID(TEST_BATCH_ID, FIRST_SUB_BATCH_ORDINAL));
   });
 
   it('rejects a batch ID with no room for the sub-batch suffix with INVALID_REQUEST and stages nothing', async () => {
@@ -413,6 +416,8 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
     expect(body.code).toBe(expectedCode);
     expect(stagingInserts).toHaveLength(0);
+    expect(mockConnectionManager.executeQuery, 'the batch ID is rejected before any query').not.toHaveBeenCalled();
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
     expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
   });
 
@@ -628,6 +633,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
       if (text.includes('DELETE FROM') && text.includes('measurement_error_log')) throw missingError;
+      // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
       if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
       if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: stagedRowCount }];
@@ -687,6 +693,7 @@ describe('sqlpacketload measurement scope validation', () => {
     let insertSeen = false;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
+      // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
       if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
       if (text.includes('dropped_row_candidates') && text.trimStart().toUpperCase().startsWith('SELECT')) {

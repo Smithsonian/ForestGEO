@@ -273,7 +273,7 @@ export function selectNewestFamilyPerFile(rows: StagedBatchRow[]): FileBatchFami
     families.set(row.FileID, fileFamilies);
   }
   return [...families.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([fileID, fileFamilies]) => {
       const [batchID] = [...fileFamilies.entries()].reduce((newest, candidate) => (candidate[1] > newest[1] ? candidate : newest));
       return { fileID, batchID, familyCount: fileFamilies.size };

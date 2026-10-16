@@ -1339,7 +1339,6 @@ describe('runJobIfClaimable — integration', () => {
     const PREPARTITION_CHUNK_ROWS = 3;
     const PREPARTITION_ROW_COUNT = PREPARTITION_SUB_BATCH_ROWS * 2 + 1;
     const EXPECTED_MEMBER_ROW_COUNTS = [PREPARTITION_SUB_BATCH_ROWS, PREPARTITION_SUB_BATCH_ROWS, 1];
-    const EXPECTED_MEMBER_SUFFIXES = ['__sub001', '__sub002', '__sub003'];
     const PREPARTITION_FILE_NAME = 'worker-prepartitioned.csv';
     const PREPARTITION_QUADRATS = ['Q01', 'Q02', 'Q03'];
     const PREPARTITION_CSV = [
@@ -1418,8 +1417,8 @@ describe('runJobIfClaimable — integration', () => {
       const finishedJob = await getBackgroundJob(catalogPool, jobID);
       const ingestedIDs = await fetchIngestedIDs(PREPARTITION_FILE_NAME);
       const [metricRows] = await connection.query<RowDataPacket[]>(
-        `SELECT batchID, status FROM uploadmetrics WHERE batchID LIKE ? ESCAPE '\\\\' ORDER BY batchID`,
-        [`${batchID}\\_\\_sub%`]
+        `SELECT batchID, status FROM uploadmetrics WHERE batchID LIKE ? ${LIKE_ESCAPE_CLAUSE} ORDER BY batchID`,
+        [buildSubBatchPattern(batchID)]
       );
       console.log(
         `[prepartition] batchID=${batchID} status=${finishedJob?.status} lastError=${finishedJob?.lastError ?? 'none'} ` +
@@ -1428,9 +1427,9 @@ describe('runJobIfClaimable — integration', () => {
       );
 
       expect(membersAtSetup, 'setup discovery never ran').not.toBeNull();
-      const expectedMembers = EXPECTED_MEMBER_SUFFIXES.map((suffix, memberIndex) => ({
-        batchID: `${batchID}${suffix}`,
-        rowCount: EXPECTED_MEMBER_ROW_COUNTS[memberIndex]
+      const expectedMembers = EXPECTED_MEMBER_ROW_COUNTS.map((rowCount, memberIndex) => ({
+        batchID: buildSubBatchID(batchID, memberIndex + 1),
+        rowCount
       }));
       expect(membersAtSetup, 'every row must already sit under its final sub-batch, none under the original ID').toEqual(expectedMembers);
       expect(splitUpdates, 'setup must not rewrite BatchID on a pre-partitioned family').toEqual([]);

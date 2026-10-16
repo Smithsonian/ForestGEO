@@ -354,7 +354,7 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     expect(metadata.uploadMode).toBe(UploadMode.REVISIONS);
     expect(metadata.rowCount).toBe(stagedRowCount);
     expect(metadata.droppedCount).toBe(0);
-    expect(metadata.batchCount).toBe(1);
+    expect(metadata.batchCount, 'batchCount counts the sub-batch members the commit staged').toBe(stagedMembers.length);
   });
 
   // -------------------------------------------------------------------------
@@ -613,7 +613,7 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     expect(overLengthName.length).toBeGreaterThan(MAX_MEASUREMENT_FILE_ID_LENGTH);
 
     const seeded = await seedValidStagedSession({ fileName: overLengthName });
-    const batchID = `arcgis_too_long_${Date.now()}`;
+    const batchID = `arc_too_long_${Date.now()}`;
     const connectionManager = ConnectionManager.getInstance();
 
     await expect(
@@ -748,7 +748,7 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     // assertUploadableArcgisSession's `session.user_id !== scope.userId` check trips.
     const foreignOwner = 'someone-else@example.com';
     const seeded = await seedValidStagedSession({ userId: foreignOwner });
-    const batchID = `arcgis_neg_wronguser_${Date.now()}`;
+    const batchID = `arc_neg_user_${Date.now()}`;
 
     const response = await commitPOST(
       buildCommitRequest(
@@ -775,7 +775,7 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
 
   it('rejects a commit when the body plot/census scope does NOT match the staged session (409 CONFLICT) and stages no rows', async () => {
     const seeded = await seedValidStagedSession();
-    const batchID = `arcgis_neg_scope_${Date.now()}`;
+    const batchID = `arc_neg_scope_${Date.now()}`;
 
     // The scope guard (assertCanEditMeasurementScope) runs BEFORE the staged-session
     // scope check and rejects a non-existent census with 403, so to reach the
@@ -815,7 +815,7 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
 
   it('rejects a commit when the body fileName does NOT match the staged session file (409 CONFLICT) and stages no rows', async () => {
     const seeded = await seedValidStagedSession();
-    const batchID = `arcgis_neg_file_${Date.now()}`;
+    const batchID = `arc_neg_file_${Date.now()}`;
     const mismatchedFileName = `not-the-staged-file-${Date.now()}.xlsx`;
 
     const response = await commitPOST(
@@ -876,7 +876,7 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     });
     expect(importReference.rowCount).toBe(0);
 
-    const batchID = `arcgis_neg_empty_${Date.now()}`;
+    const batchID = `arc_neg_empty_${Date.now()}`;
     const response = await commitPOST(
       buildCommitRequest(
         {
