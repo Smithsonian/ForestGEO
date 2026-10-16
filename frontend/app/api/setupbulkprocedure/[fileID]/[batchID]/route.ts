@@ -127,7 +127,7 @@ async function handler(request: NextRequest, context: RouteContext) {
     // Only Phase-1 (setup) errors escape ingestBatch; sub-batch failures are
     // handled internally by moving rows to unresolved coremeasurements.
     if (error instanceof OversizedSubBatchError) {
-      ailogger.error(`Oversized sub-batch for ${fileID}-${batchID}: ${error.message}`, error);
+      ailogger.warn(`Oversized sub-batch for ${fileID}-${batchID}: ${error.message}`);
       return new NextResponse(
         JSON.stringify({ error: setupFailureSummary(SETUP_FAILURE_CODES.oversizedSubBatch), code: SETUP_FAILURE_CODES.oversizedSubBatch }),
         {

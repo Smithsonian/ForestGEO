@@ -205,13 +205,16 @@ describe('optional setup diagnostic persistence', () => {
       fileID: file.fileName,
       batchID: 'batch-8'
     });
+    const persisted = mocks.recordDiagnostic.mock.calls.at(-1)?.[2];
+    console.log('[finding-2] persisted setup diagnostic:', persisted);
+    expect(persisted).toMatchObject({ step: 'cleanup', code: 'ER_LOCK_DEADLOCK', summary: setupFailureSummary('ER_LOCK_DEADLOCK') });
   });
 
   it('fails an oversized sub-batch permanently without spending the retry budget', async () => {
     const MockedOversizedSubBatchError = OversizedSubBatchError as unknown as new (message: string) => Error;
     const oversized = new MockedOversizedSubBatchError('Sub-batch batch-8__sub001 of sample.csv holds too many rows');
     mocks.ingest.mockImplementation(async (_cm: unknown, params: { onSetupProgress: (d: typeof diagnostic) => void }) => {
-      params.onSetupProgress({ ...diagnostic, step: 'cleanup', errorCode: SETUP_FAILURE_CODES.oversizedSubBatch });
+      params.onSetupProgress({ ...diagnostic, step: 'discovery', errorCode: SETUP_FAILURE_CODES.oversizedSubBatch });
       throw oversized;
     });
 
@@ -223,7 +226,7 @@ describe('optional setup diagnostic persistence', () => {
     expect(mocks.fail.mock.calls[0][5]).toEqual({
       code: SETUP_FAILURE_CODES.oversizedSubBatch,
       summary: setupFailureSummary(SETUP_FAILURE_CODES.oversizedSubBatch),
-      step: 'cleanup',
+      step: 'discovery',
       attemptID: expect.any(String),
       fileID: file.fileName,
       batchID: 'batch-8'
