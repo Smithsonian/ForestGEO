@@ -372,14 +372,6 @@ async function withCatalogTransition<T>(pool: Pool, operation: (conn: PoolConnec
     }
   }
   if (primaryError !== undefined) throw primaryError;
-  // Release failures happen after an acknowledged commit. Surface an explicit
-  // committed marker so callers never mistake this for a retryable write error.
-  if (!reusable) {
-    const error = new Error('Catalog transition committed, but its connection could not be released safely.') as Error & { code: string; committed: true };
-    error.code = 'TRANSACTION_COMMITTED_CLEANUP_FAILED';
-    error.committed = true;
-    throw error;
-  }
   return result;
 }
 

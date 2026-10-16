@@ -263,8 +263,11 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
 
   // A retry of the same file should not inherit stale batches that were left
   // behind by an earlier interrupted upload for the same plot/census. Only the
-  // first chunk to land for the family cleans; chunks arrive in any order.
-  // Any staged member of this batch family, including `__subNNN` rows, means this upload is already in progress; batch IDs are fresh per upload attempt, and the worker clears the family before a retry.
+  // first chunk to land for the family cleans. Browser chunks are sent serially,
+  // so they only arrive out of order through retries.
+  // Any staged member of this batch family, including `__subNNN` rows, means this
+  // upload is already in progress; batch IDs are fresh per upload attempt, and the
+  // worker clears the family before a retry.
   if (!(await familyHasStagedRows(connectionManager, schema, fileName, batchID, transactionID))) {
     if (uploadMode === UploadMode.CLEAN_REUPLOAD && !params.suppressCensusReplacementCleanup) {
       // Clean up data from any previous uploads for this census.

@@ -60,8 +60,8 @@ async function handler(request: NextRequest, context: RouteContext) {
     // were never judged, so they must not be recorded as ingestion SQL errors.
     const failureKind = inferSystemFailureKind(failureReason);
 
-    // After sub-batching, remaining rows may have sub-batch IDs (e.g. batchID__sub001).
-    // Try exact match first, then fall back to moving all sub-batches for this file.
+    // The family is normally all sub-batches (batchID__sub001, ...); the exact-ID
+    // move covers legacy staging. Try it first, then move every sub-batch for this file.
     let movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, batchID, failureReason, failureKind);
 
     if (movedRows === 0) {

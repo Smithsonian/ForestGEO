@@ -367,10 +367,14 @@ function reportSetupDiagnostic(ctx: WorkerRunContext, diagnostic: SetupDiagnosti
     code: diagnostic.errorCode,
     ...(diagnostic.terminal && diagnostic.outcome === 'failed' ? { summary: setupFailureSummary(diagnostic.errorCode) } : {})
   })
-    .catch(() => {
+    .catch((error: unknown) => {
       // Diagnostic persistence is optional telemetry and cannot replace setup or
       // an authoritative job transition.
-      ailogger.warn('upload.worker.setup_diagnostic_write_failed', { jobID: ctx.job.jobID, attemptID: ctx.workerID });
+      ailogger.warn('upload.worker.setup_diagnostic_write_failed', {
+        jobID: ctx.job.jobID,
+        attemptID: ctx.workerID,
+        error: error instanceof Error ? error.message : String(error)
+      });
     })
     .finally(() => {
       ctx.pendingSetupDiagnosticWrites = Math.max(0, ctx.pendingSetupDiagnosticWrites - 1);
