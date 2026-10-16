@@ -156,7 +156,7 @@ export interface IngestBatchParams {
 }
 
 export interface SetupDiagnostic {
-  step: 'discovery' | 'lock_wait' | 'post_lock_validation' | 'recovery' | 'cleanup' | 'splitting' | 'commit' | 'terminal';
+  step: 'discovery' | 'lock_wait' | 'recovery' | 'cleanup' | 'splitting' | 'commit' | 'terminal';
   outcome?: 'started' | 'completed' | 'failed' | 'committed';
   schema: string;
   plotID: number;

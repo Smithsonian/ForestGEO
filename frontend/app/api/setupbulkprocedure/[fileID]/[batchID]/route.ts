@@ -4,8 +4,9 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
-import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
+import { ingestBatch, IngestBatchAbortedError, OversizedSubBatchError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
 import { BatchFamilyScopeError, discoverBatchFamily } from '@/lib/uploads/batch-family';
+import { SETUP_FAILURE_CODES, setupFailureSummary } from '@/lib/uploads/setup-failure';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -125,6 +126,15 @@ async function handler(request: NextRequest, context: RouteContext) {
     }
     // Only Phase-1 (setup) errors escape ingestBatch; sub-batch failures are
     // handled internally by moving rows to unresolved coremeasurements.
+    if (error instanceof OversizedSubBatchError) {
+      ailogger.error(`Oversized sub-batch for ${fileID}-${batchID}: ${error.message}`, error);
+      return new NextResponse(
+        JSON.stringify({ error: setupFailureSummary(SETUP_FAILURE_CODES.oversizedSubBatch), code: SETUP_FAILURE_CODES.oversizedSubBatch }),
+        {
+          status: HTTPResponses.UNPROCESSABLE_ENTITY
+        }
+      );
+    }
     ailogger.error(`Setup phase failed for ${fileID}-${batchID}: ${error.message}`, error);
     return new NextResponse(JSON.stringify({ error: `Setup failed: ${error.message}`, fileID, batchID }), { status: HTTPResponses.SERVICE_UNAVAILABLE });
   }

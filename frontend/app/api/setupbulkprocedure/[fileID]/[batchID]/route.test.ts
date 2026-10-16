@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { HTTPResponses } from '@/config/macros';
+import { SETUP_FAILURE_CODES, setupFailureSummary } from '@/lib/uploads/setup-failure';
 
 const { loggerInfo, loggerWarn, loggerError } = vi.hoisted(() => ({
   loggerInfo: vi.fn(),
@@ -383,7 +385,7 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       expect(body.subBatchCount).toBe(ORPHANED_SUB_BATCHES.length);
     });
 
-    it('fails setup without calling the procedure when a member exceeds the batch size', async () => {
+    it('answers an oversized member with a permanent 422 and never calls the procedure', async () => {
       const cm = mockOrphanedSubBatchRun();
       const OVERSIZED_MEMBER_ROWS = 96_227;
       const groupedFamily = cm.executeQuery.getMockImplementation();
@@ -397,8 +399,11 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       const body = await res.json();
       console.log('[oversized member] status:', res.status, 'body:', body);
 
-      expect(res.status).toBe(503);
-      expect(body.error).toContain(`batch-1__sub002 of file.csv holds ${OVERSIZED_MEMBER_ROWS} rows`);
+      expect(res.status).toBe(HTTPResponses.UNPROCESSABLE_ENTITY);
+      expect(body).toEqual({
+        error: setupFailureSummary(SETUP_FAILURE_CODES.oversizedSubBatch),
+        code: SETUP_FAILURE_CODES.oversizedSubBatch
+      });
       expect(cm.executeQuery.mock.calls.some(([sql]: [string]) => String(sql).includes('bulkingestionprocess'))).toBe(false);
     });
 
