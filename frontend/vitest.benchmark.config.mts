@@ -9,6 +9,7 @@ const BENCHMARK_TEST_TIMEOUT_MS = 30 * 60 * 1000;
  * (mergeConfig would union them and pull the whole integration suite in). No integration or unit include glob matches
  * the benchmark glob.
  */
+// Not mergeConfig: it unions the `include` arrays, which would pull the whole integration suite into the benchmark run.
 export default defineConfig({
   ...integrationConfig,
   test: {
