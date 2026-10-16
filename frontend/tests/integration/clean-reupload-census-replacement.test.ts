@@ -104,6 +104,9 @@ const LEGACY_MIGRATED_FILE = 'ctfs-migration';
 
 const CONTROL_FILE = 'control.csv';
 
+/** Attributes every DELETE-audit row this suite's cleanup runs write (#507). */
+const TEST_CHANGED_BY = 'clean-reupload-integration-test';
+
 /** NULL-UploadBatchID legacy rows seeded into each CONTROL census. */
 const CONTROL_NULL_BATCH_ROW_COUNT = 2;
 
@@ -330,8 +333,24 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
 
   async function runCleanReupload(): Promise<void> {
     const transactionID = await connectionManager.beginTransaction();
-    await cleanupPreviousFileUploads(connectionManager, schema, INCOMING_FILE, INCOMING_BATCH, plotID, targetCensusID, transactionID);
+    await cleanupPreviousFileUploads(connectionManager, schema, INCOMING_FILE, INCOMING_BATCH, plotID, targetCensusID, TEST_CHANGED_BY, transactionID);
     await connectionManager.commitTransaction(transactionID);
+  }
+
+  /** The DELETE-audit rows #507 adds for the coremeasurements deletes this suite's cleanup runs. */
+  async function deleteAuditRows(censusID: number): Promise<RowDataPacket[]> {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT RecordID, OldRowState, ChangedBy FROM unifiedchangelog
+       WHERE TableName = 'coremeasurements' AND Operation = 'DELETE' AND CensusID = ?
+       ORDER BY RecordID`,
+      [censusID]
+    );
+    return rows;
+  }
+
+  /** The mysql2 driver may hand back a JSON column already parsed, or as text. */
+  function rowState(value: unknown): Record<string, unknown> {
+    return typeof value === 'string' ? JSON.parse(value) : (value as Record<string, unknown>);
   }
 
   beforeEach(async () => {
@@ -344,6 +363,13 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     await connection.query(`DELETE FROM stems`);
     await connection.query(`DELETE FROM trees`);
     await connection.query(`DELETE FROM uploadmetrics`);
+    // Every DELETE-audit test below reads unifiedchangelog scoped only by
+    // CensusID (#507) — this census id is reused across every `it()` in this
+    // file, so without clearing it here, an earlier test's audit rows for the
+    // SAME census silently inflate a later test's count (the data they
+    // describe is already gone via the DELETE above, but the audit rows
+    // describing it were never cleared).
+    await connection.query(`DELETE FROM unifiedchangelog`);
     rowIndexCounter = 0;
     sharedState.statements.length = 0;
   });
@@ -649,4 +675,81 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     await runCleanReupload();
     expect(await countRows(targetCensusID, 'all')).toBe(0);
   }, 120000);
+
+  // -------------------------------------------------------------------------
+  // 5. DELETE-audit trail (#507) — cleanupPreviousFileUploads' own
+  //    deleteCoreMeasurementsInBoundedChunksWithAudit must leave Recent
+  //    Changes a record of every row it removed, not just remove the row.
+  // -------------------------------------------------------------------------
+
+  it("writes one DELETE-audit row per deleted coremeasurements row, with the row's actual prior state (#507)", async () => {
+    await seedFixture();
+    const before = await countRows(targetCensusID, 'all'); // 17 — see test #1 above
+    expect(before).toBeGreaterThan(0);
+
+    await runCleanReupload();
+
+    const auditRows = await deleteAuditRows(targetCensusID);
+    console.log(`[delete-audit] target census: ${auditRows.length} audit row(s) for ${before} deleted coremeasurements row(s)`);
+    // One audit row per deleted row — not fewer (a dropped row) and not more
+    // (a duplicate audit for the same physical delete).
+    expect(auditRows).toHaveLength(before);
+
+    const recordIDs = new Set(auditRows.map(row => Number(row.RecordID)));
+    expect(recordIDs.size).toBe(before); // every RecordID distinct — no duplicate CoreMeasurementID
+
+    for (const row of auditRows) {
+      expect(row.ChangedBy).toBe(TEST_CHANGED_BY);
+      const state = rowState(row.OldRowState);
+      // OldRowState is the row's OWN last state, not a placeholder: its
+      // CoreMeasurementID must match the RecordID it was filed under, and
+      // its CensusID must be the census this cleanup actually targeted.
+      expect(Number(state.CoreMeasurementID)).toBe(Number(row.RecordID));
+      expect(Number(state.CensusID)).toBe(targetCensusID);
+    }
+
+    // The one seeded row that was fully ingested (seedIngestedRow) has a
+    // non-null StemGUID; its audit entry must carry that forward, proving
+    // OldRowState was read from the live row and not synthesized generically.
+    const ingestedAudit = auditRows.find(row => rowState(row.OldRowState).StemGUID !== null);
+    expect(ingestedAudit).toBeDefined();
+    // And at least one parked (failed-ingestion) row's RawTreeTag survives
+    // into the audit trail — the parked-row shape, not just the ingested shape.
+    const parkedAudit = auditRows.find(row => rowState(row.OldRowState).RawTreeTag !== null);
+    expect(parkedAudit).toBeDefined();
+  }, 120000);
+
+  it('writes NO DELETE-audit rows for censuses this cleanup did not touch (#507 isolation)', async () => {
+    await seedFixture();
+
+    await runCleanReupload();
+
+    const sameplotAudit = await deleteAuditRows(samePlotOtherCensusID);
+    const otherPlotAudit = await deleteAuditRows(otherPlotCensusID);
+    console.log(`[delete-audit isolation] samePlotOtherCensus=${sameplotAudit.length} otherPlotCensus=${otherPlotAudit.length}`);
+    expect(sameplotAudit).toHaveLength(0);
+    expect(otherPlotAudit).toHaveLength(0);
+  }, 120000);
+
+  it('audits deletes past a single chunk window, not just the first (#507)', async () => {
+    const overOneChunk = CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE + 137;
+    await connection.query(`SET SESSION cte_max_recursion_depth = ?`, [overOneChunk + 1]);
+    await connection.query(
+      `INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+         UploadFileID, UploadBatchID, RawTreeTag, SourceRowIndex, IsActive)
+       WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
+       SELECT ?, NULL, FALSE, '2024-03-15', 1.0, 1.0, ?, 'bulk-prior-batch', CONCAT('A', n), n, 1 FROM seq`,
+      [overOneChunk, targetCensusID, PRIOR_FILE_WITH_METRICS]
+    );
+    expect(await countRows(targetCensusID, 'all')).toBe(overOneChunk);
+
+    await runCleanReupload();
+
+    const auditRows = await deleteAuditRows(targetCensusID);
+    console.log(`[delete-audit chunking] seeded=${overOneChunk} chunk=${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE} audited=${auditRows.length}`);
+    // Every row across BOTH chunk windows got audited — not just the first
+    // CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE-row window the loop processes first.
+    expect(auditRows).toHaveLength(overOneChunk);
+    expect(await countRows(targetCensusID, 'all')).toBe(0);
+  }, 180000);
 });

@@ -177,9 +177,10 @@ export async function runQuery(connection: PoolConnection, query: string, params
       params = params.map(param => (param === undefined ? null : param));
     }
     // mysql2's execute() uses prepared statements, which don't support
-    // bulk INSERT ... VALUES ? with nested arrays or CALL. Use query() for those.
+    // bulk VALUES arrays, CALL, or savepoint commands. Use query() for those.
     const hasBulkValues = params?.some(p => Array.isArray(p) && p.length > 0 && Array.isArray(p[0]));
-    const useTextProtocol = query.trim().startsWith('CALL') || hasBulkValues;
+    const requiresTextProtocol = /^\s*(?:CALL\b|SAVEPOINT\b|RELEASE\s+SAVEPOINT\b|ROLLBACK\s+TO\s+(?:SAVEPOINT\s+)?)/i.test(query);
+    const useTextProtocol = requiresTextProtocol || hasBulkValues;
     inFlight = useTextProtocol ? connection.query(query, params) : connection.execute(query, params);
     const [rows] = (await Promise.race([inFlight, timer])) as [any, unknown];
     return rows;

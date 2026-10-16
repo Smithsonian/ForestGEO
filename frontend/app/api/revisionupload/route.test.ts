@@ -237,15 +237,79 @@ describe('POST /api/revisionupload', () => {
       ],
       newRows: [],
       invalidRows: [],
+      collapsedRows: [],
       counts: {
         matched: 1,
         matchedWithChanges: 1,
         new: 0,
         invalid: 0,
+        collapsed: 0,
         total: 1
       },
-      bulkPlan: EMPTY_BULK_PLAN
+      bulkPlan: EMPTY_BULK_PLAN,
+      // Minted fresh by this route per #505 (randomUUID, so not a fixed
+      // literal here); asserted present/well-shaped by pattern. The
+      // uploadAttemptID/invalidRowsIntegrityHash contract itself — malformed/
+      // missing/mismatched — is exercised in depth by apply/route.test.ts,
+      // which is where a wrong value actually changes behavior (400/409).
+      uploadAttemptID: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+      invalidRowsIntegrityHash: expect.stringMatching(/^[0-9a-f]{64}$/)
     });
+  });
+
+  // #505 review round 2: route.ts used to mint a brand-new random
+  // uploadAttemptID on every call, with no way for a client re-matching the
+  // SAME attempt (as opposed to starting a new upload) to retain its
+  // identity. The per-attempt failed-row batchID (shared/invalidrowintegrity.ts)
+  // is derived from uploadAttemptID, so losing it on a re-match would orphan
+  // any evidence already tied to the first attempt.
+  it('reuses a valid previousUploadAttemptID as this response uploadAttemptID instead of minting a new one', async () => {
+    const PREVIOUS_UPLOAD_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
+
+    const response = await POST(
+      buildRequest({
+        rows: [{ tag: 'T1', stemtag: '1', spcode: 'QUAS', quadrat: '101', lx: '1', ly: '2', date: '2026-04-01', dbh: '10.0' }],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing',
+        previousUploadAttemptID: PREVIOUS_UPLOAD_ATTEMPT_ID
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.uploadAttemptID).toBe(PREVIOUS_UPLOAD_ATTEMPT_ID);
+  });
+
+  it('returns 400 when previousUploadAttemptID is present but not a valid UUID', async () => {
+    const response = await POST(
+      buildRequest({
+        rows: [{ tag: 'T1', stemtag: '1', spcode: 'QUAS', quadrat: '101', lx: '1', ly: '2', date: '2026-04-01', dbh: '10.0' }],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing',
+        previousUploadAttemptID: 'not-a-uuid'
+      })
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'previousUploadAttemptID must be a valid UUID when present' });
+    expect(mocks.analyzeBulk).not.toHaveBeenCalled();
+  });
+
+  it('mints a fresh uploadAttemptID when previousUploadAttemptID is omitted (a genuinely new upload)', async () => {
+    const response = await POST(
+      buildRequest({
+        rows: [{ tag: 'T1', stemtag: '1', spcode: 'QUAS', quadrat: '101', lx: '1', ly: '2', date: '2026-04-01', dbh: '10.0' }],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.uploadAttemptID).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   });
 
   it('falls back to tag + stemtag matching when stemid is absent', async () => {
@@ -366,7 +430,14 @@ describe('POST /api/revisionupload', () => {
     expect(body.invalidRows[0].reason).toMatch(/MeasuredDBH/);
   });
 
-  it('flags duplicate stemid rows within a single file as invalid instead of silently collapsing them', async () => {
+  // #505 regression: the first occurrence of a repeated stemid used to be
+  // invalidated right alongside its later duplicate(s), losing the one
+  // legitimate row entirely. The first occurrence must survive (here: as a
+  // newRow, since the stemid lookup resolves to no DB row) and only the
+  // later same-key row(s) with genuinely different content are rejected —
+  // with a stable csvIndex apply can later persist as a DUPLICATE_ENTRY
+  // failed measurement.
+  it('keeps the first occurrence of a duplicate stemid and flags only the later copy as invalid (#505)', async () => {
     mocks.executeQuery.mockResolvedValue([]);
 
     const response = await POST(
@@ -390,15 +461,18 @@ describe('POST /api/revisionupload', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
 
-    expect(body.invalidRows).toHaveLength(2);
+    expect(body.invalidRows).toHaveLength(1);
+    expect(body.invalidRows[0].csvIndex).toBe(1);
     expect(body.invalidRows[0].reason).toMatch(/duplicate stemid 100/);
-    expect(body.invalidRows[1].reason).toMatch(/duplicate stemid 100/);
-    expect(body.invalidRows.map((row: { csvIndex: number }) => row.csvIndex)).toEqual([0, 1]);
-    expect(body.newRows).toHaveLength(1);
-    expect(body.newRows[0].csvRow.stemid).toBe('200');
+    expect(body.collapsedRows).toHaveLength(0);
+    expect(body.newRows).toHaveLength(2);
+    expect(body.newRows.map((row: { csvIndex: number }) => row.csvIndex)).toEqual([0, 2]);
+    expect(body.newRows[0].csvRow.stemid).toBe('100');
+    expect(body.newRows[1].csvRow.stemid).toBe('200');
+    expect(body.counts).toMatchObject({ new: 2, invalid: 1, collapsed: 0, total: 3 });
   });
 
-  it('flags duplicate tag+stemtag rows within a single file as invalid', async () => {
+  it('keeps the first occurrence of a duplicate tag+stemtag and flags only the later copy as invalid (#505)', async () => {
     mocks.executeQuery.mockResolvedValue([]);
 
     const response = await POST(
@@ -421,9 +495,81 @@ describe('POST /api/revisionupload', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
 
-    expect(body.invalidRows).toHaveLength(2);
+    expect(body.invalidRows).toHaveLength(1);
+    expect(body.invalidRows[0].csvIndex).toBe(1);
     expect(body.invalidRows[0].reason).toMatch(/duplicate tag\+stemtag/);
-    expect(body.newRows).toHaveLength(0);
+    expect(body.newRows).toHaveLength(1);
+    expect(body.newRows[0].csvIndex).toBe(0);
+  });
+
+  // #505: an EXACT duplicate (identical content, not just the same key) must
+  // follow the same survive-first/invalidate-later rule as a content-differing
+  // duplicate — the bug this regresses against invalidated BOTH copies of an
+  // exact duplicate, losing the only legitimate occurrence.
+  it('keeps the first occurrence of an EXACT duplicate row (identical content) and flags only the later copy as invalid (#505)', async () => {
+    mocks.executeQuery.mockResolvedValue([]);
+
+    const identicalRow = { stemid: '300', tag: 't3', stemtag: 's', spcode: 'quas', quadrat: 'q', lx: '1', ly: '1', dbh: '10.0', date: '2026-04-01' };
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'exact-duplicates.csv',
+            rows: [identicalRow, { ...identicalRow }]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(body.newRows).toHaveLength(1);
+    expect(body.newRows[0].csvIndex).toBe(0);
+    expect(body.invalidRows).toHaveLength(1);
+    expect(body.invalidRows[0].csvIndex).toBe(1);
+    expect(body.invalidRows[0].reason).toMatch(/duplicate stemid 300/);
+    expect(body.collapsedRows).toHaveLength(0);
+  });
+
+  // #505: a later row sharing a match key with an earlier row, differing only
+  // beyond coremeasurements' stored DECIMAL(12,6) precision (export-tool float
+  // rounding noise in the 7th+ decimal), must collapse into the earlier row
+  // instead of invalidating either copy — this is accounting-only, not a
+  // failure, and must show up in counts.collapsed/total.
+  it('collapses a later row into the earlier occurrence when they differ only beyond stored DECIMAL(12,6) precision (#505)', async () => {
+    mocks.executeQuery.mockResolvedValue([]);
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'precision-noise.csv',
+            rows: [
+              { stemid: '400', tag: 't4', stemtag: 's', spcode: 'quas', quadrat: 'q', lx: '1', ly: '1', dbh: '44.000000', date: '2026-04-01' },
+              { stemid: '400', tag: 't4', stemtag: 's', spcode: 'quas', quadrat: 'q', lx: '1', ly: '1', dbh: '44.0000004', date: '2026-04-01' }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(body.invalidRows).toHaveLength(0);
+    expect(body.newRows).toHaveLength(1);
+    expect(body.newRows[0].csvIndex).toBe(0);
+    expect(body.collapsedRows).toHaveLength(1);
+    expect(body.collapsedRows[0]).toMatchObject({ csvIndex: 1, collapsedIntoCsvIndex: 0 });
+    expect(body.counts).toMatchObject({ new: 1, invalid: 0, collapsed: 1, total: 2 });
   });
 
   it('routes unmatched stemid rows to newRows with a stemid-not-found reason', async () => {

@@ -19,7 +19,6 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
-import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { ColumnMapping } from '@/lib/column-mapping/types';
 import { resolveMeasurementChunk } from '@/lib/column-mapping/measurement-rows';
@@ -34,7 +33,10 @@ import {
   isUnsignedIntFieldInvalid,
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
-import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
+import { buildFileUploadChangelogRecordID, measurementFileIDValidationError, mergeFileUploadChunkIntoMetadata } from '@/lib/uploads/file-names';
+import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-failure-audit';
+import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
+import { isEffectivelyEmptyMeasurementInput } from '@/lib/uploads/blank-measurement-input';
 import {
   buildSubBatchPattern,
   LIKE_ESCAPE_CLAUSE,
@@ -51,6 +53,29 @@ import {
 
 const CHANGELOG_TABLE_NAME = 'file_upload';
 const MEASUREMENTS_FORM_TYPE = 'measurements';
+
+const FILE_UPLOAD_SUMMARY_LOCK_TIMEOUT_MS = 30_000;
+
+/**
+ * Serializes the file_upload summary's read-merge-write per (schema,
+ * RecordID, CensusID) via MySQL GET_LOCK — the same fix as
+ * lib/changelog/ingestion-failure-audit.ts's batch lock, for the same reason:
+ * `SELECT ... FOR UPDATE` takes no gap lock on a row that does not exist yet
+ * under READ COMMITTED, so two concurrent "first chunk of this attempt"
+ * callers could both see no existing summary row and both INSERT one,
+ * instead of the second merging into the first. Held until the caller's
+ * transaction commits or rolls back (ConnectionManager's
+ * cleanupApplicationLocks releases it then); acquireApplicationLock is
+ * idempotent for a name this same transaction already holds.
+ */
+function buildFileUploadSummaryLockName(schema: string, recordID: string, censusID: number): string {
+  const digest = crypto
+    .createHash('sha256')
+    .update(JSON.stringify([schema, recordID, censusID]))
+    .digest('hex')
+    .slice(0, 40);
+  return `file-upload-summary:${digest}`;
+}
 
 /**
  * Thrown when the chunk-level header resolution plan does not match the parsed
@@ -82,6 +107,28 @@ export function parseFirstRowOrdinal(value: unknown): number | null {
   if (value === undefined || value === null) return null;
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new InvalidFirstRowOrdinalError(value);
   return value;
+}
+
+/**
+ * Thrown when a chunk's input is structurally empty (see blank-measurement-input.ts)
+ * BEFORE any write or the destructive CLEAN_REUPLOAD cleanup. Second line of defense
+ * behind the worker's own per-file guard, so every caller gets the same protection even
+ * if its own empty-file check is missing. Callers map this to their own error surface
+ * (sync route returns 422; the worker never reaches here, having already failed first).
+ */
+export class EmptyMeasurementUploadError extends Error {
+  readonly fileName: string;
+  readonly batchID: string;
+
+  constructor(fileName: string, batchID: string) {
+    super(
+      `Refusing to stage ${fileName} (batch ${batchID}): the input has no data rows (header-only or entirely blank). ` +
+        `A Clean Re-Upload must not replace existing census data with an empty file.`
+    );
+    this.name = 'EmptyMeasurementUploadError';
+    this.fileName = fileName;
+    this.batchID = batchID;
+  }
 }
 
 export interface StageMeasurementChunkParams {
@@ -131,6 +178,13 @@ export interface StageMeasurementChunkParams {
    * when a later statement throws and the transaction rolls back.
    */
   onInvalidRows?: (invalidRows: FileRow[]) => void;
+  /**
+   * This chunk's own identity for the file_upload running-totals merge
+   * (mergeFileUploadChunkIntoMetadata, #507). `batchID` can't serve this role
+   * since one file's chunks share one batchID. Defaults to `batchID` for
+   * callers that stage one chunk per batchID.
+   */
+  chunkIdentity?: string;
 }
 
 export interface StageMeasurementChunkResult {
@@ -189,6 +243,16 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     throw new Error(fileIDError);
   }
 
+  // Structural emptiness guard — before resolution, any write, and the destructive
+  // CLEAN_REUPLOAD cleanup below (issue #504). "Empty" is structural (no rows, or every
+  // row blank), NOT "zero rows survived validation" — an all-invalid nonempty file must
+  // still reach resolution so its failures are recorded normally. preKeyedRows takes
+  // precedence here because when set, rawRows is ignored entirely (see JSDoc above).
+  const structuralInputRows = params.preKeyedRows ?? params.rawRows;
+  if (isEffectivelyEmptyMeasurementInput(structuralInputRows)) {
+    throw new EmptyMeasurementUploadError(params.fileName, params.batchID);
+  }
+
   const {
     schema,
     fileName,
@@ -202,7 +266,8 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     delimiter,
     storedMapping,
     uploadSessionID,
-    transactionID
+    transactionID,
+    changedBy
   } = params;
 
   const firstRowOrdinal = parseFirstRowOrdinal(params.firstRowOrdinal);
@@ -259,6 +324,18 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     await ensureUploadSessionReplacementMarkerColumn(connectionManager, schema, CENSUS_REPLACEMENT_MARKER_COLUMN);
   }
 
+  const fileUploadAttemptIdentity = uploadSessionID ?? batchID;
+  const fileUploadRecordID = buildFileUploadChangelogRecordID(fileName, fileUploadAttemptIdentity);
+  // Falls back to batchID only for a caller that genuinely stages one chunk
+  // per batchID — see StageMeasurementChunkParams.chunkIdentity's doc comment.
+  const chunkIdentity = params.chunkIdentity ?? batchID;
+
+  const summaryLockName = buildFileUploadSummaryLockName(schema, fileUploadRecordID, censusID);
+  const summaryLockAcquired = await connectionManager.acquireApplicationLock(summaryLockName, transactionID, FILE_UPLOAD_SUMMARY_LOCK_TIMEOUT_MS);
+  if (!summaryLockAcquired) {
+    throw new Error(`Failed to acquire the file-upload summary serialization lock for ${fileUploadRecordID} within ${FILE_UPLOAD_SUMMARY_LOCK_TIMEOUT_MS}ms`);
+  }
+
   const expectedRowCount = chunkRows.length;
 
   // A retry of the same file should not inherit stale batches that were left
@@ -293,7 +370,7 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
         uploadSessionID !== null &&
         (await uploadSessionHasCompletedReplacement(connectionManager, schema, uploadSessionID, CENSUS_REPLACEMENT_MARKER_COLUMN, transactionID));
       if (!sessionAlreadyReplacedCensus) {
-        await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
+        await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, changedBy ?? null, transactionID);
         if (uploadSessionID !== null) {
           await markUploadSessionReplacementCompleted(connectionManager, schema, uploadSessionID, CENSUS_REPLACEMENT_MARKER_COLUMN, transactionID);
         }
@@ -400,30 +477,61 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
       );
     }
 
-    // Persist dropped rows as unresolved ingestion errors in coremeasurements.
+    // Persist dropped rows as unresolved ingestion errors in coremeasurements,
+    // audited bounded to exactly these rows' (fileID, batchID, SourceRowIndex)
+    // keys via the shared helper (#507) — never the whole batch scope other
+    // chunks of this same upload share. See recordAuditedIngestionFailureRows's
+    // doc comment for the retry contract this block implements: a
+    // ChangelogWriteError is an audit-infrastructure failure and must roll
+    // back this whole transaction immediately, never be treated as a
+    // retryable DATA-persistence problem by the best-effort fallback below.
     if (droppedRows.length > 0) {
+      const ingestionFailureRows = buildIngestionFailurePayload(droppedRows, plotID, censusID, fileName, batchID);
+
       try {
-        await insertIngestionFailureRows(
+        const auditedResult = await recordAuditedIngestionFailureRows({
           connectionManager,
           schema,
-          buildIngestionFailurePayload(droppedRows, plotID, censusID, fileName, batchID),
-          transactionID
+          rows: ingestionFailureRows,
+          transactionID,
+          changedBy: changedBy ?? null,
+          plotID,
+          censusID
+        });
+        ailogger.info(
+          `Persisted ${droppedRows.length} dropped rows as unresolved ingestion errors for ${fileName}-${batchID} ` +
+            `(audited: ${auditedResult.insertedCount} inserted, ${auditedResult.updatedCount} updated, ${auditedResult.unchangedCount} unchanged)`
         );
-        ailogger.info(`Persisted ${droppedRows.length} dropped rows as unresolved ingestion errors for ${fileName}-${batchID}`);
-      } catch (failedInsertError: any) {
-        ailogger.error(`Failed to persist dropped rows as unresolved ingestion errors (attempt 1): ${failedInsertError.message}`);
+      } catch (failedInsertError: unknown) {
+        if (failedInsertError instanceof ChangelogWriteError) {
+          throw failedInsertError;
+        }
+
+        const failedInsertMessage = failedInsertError instanceof Error ? failedInsertError.message : String(failedInsertError);
+        ailogger.error(`Failed to persist dropped rows as unresolved ingestion errors (attempt 1): ${failedInsertMessage}`);
 
         // Retry once before giving up
         try {
-          await insertIngestionFailureRows(
+          const retryAuditedResult = await recordAuditedIngestionFailureRows({
             connectionManager,
             schema,
-            buildIngestionFailurePayload(droppedRows, plotID, censusID, fileName, batchID),
-            transactionID
+            rows: ingestionFailureRows,
+            transactionID,
+            changedBy: changedBy ?? null,
+            plotID,
+            censusID
+          });
+          ailogger.info(
+            `Retry successful: persisted ${droppedRows.length} dropped rows as unresolved ingestion errors for ${fileName}-${batchID} ` +
+              `(audited: ${retryAuditedResult.insertedCount} inserted, ${retryAuditedResult.updatedCount} updated, ${retryAuditedResult.unchangedCount} unchanged)`
           );
-          ailogger.info(`Retry successful: persisted ${droppedRows.length} dropped rows as unresolved ingestion errors for ${fileName}-${batchID}`);
-        } catch (retryError: any) {
-          ailogger.error(`Failed to persist dropped rows as unresolved ingestion errors (attempt 2): ${retryError.message}`);
+        } catch (retryError: unknown) {
+          if (retryError instanceof ChangelogWriteError) {
+            throw retryError;
+          }
+
+          const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
+          ailogger.error(`Failed to persist dropped rows as unresolved ingestion errors (attempt 2): ${retryMessage}`);
 
           // Critical: log to uploadintegrityalerts so data loss is not silent.
           try {
@@ -436,7 +544,7 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
                VALUES (?, ?, ?, ?, ?, 'FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS', ?, 'critical', ?, ?, ?, ?)`
             );
             const alertMessage = JSON.stringify({
-              error: retryError.message,
+              error: retryMessage,
               droppedRowCount: droppedRows.length,
               timestamp: new Date().toISOString(),
               note: 'These rows were dropped during upload and could not be persisted as unresolved ingestion errors'
@@ -447,8 +555,9 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
               transactionID
             );
             ailogger.error(`Logged failed insert to uploadintegrityalerts for ${fileName}-${batchID}`);
-          } catch (alertError: any) {
-            ailogger.error(`CRITICAL: Failed to log data loss to uploadintegrityalerts: ${alertError.message}. Dropped rows: ${droppedRows.length}`);
+          } catch (alertError: unknown) {
+            const alertErrorMessage = alertError instanceof Error ? alertError.message : String(alertError);
+            ailogger.error(`CRITICAL: Failed to log data loss to uploadintegrityalerts: ${alertErrorMessage}. Dropped rows: ${droppedRows.length}`);
           }
         }
       }
@@ -457,28 +566,31 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     ailogger.info(`Successfully inserted ${actualInsertedCount} rows for ${fileName}-${batchID} (expected: ${expectedRowCount}, no data loss detected)`);
   }
 
-  // Track file upload in unifiedchangelog (single row per file, not per batch)
+  // Track file upload in unifiedchangelog (single row per upload ATTEMPT, not
+  // per batch — and NOT per filename: see buildFileUploadChangelogRecordID's
+  // doc comment, issue #507. uploadSessionID identifies the attempt when one
+  // exists; batchID (the incoming batch family) is the fallback when it does
+  // not, which still separates distinct ingestion attempts for the same file.
   try {
-    // Check if we've already logged this file upload
     const existingEntrySQL = safeFormatQuery(
       schema,
       `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
        WHERE TableName = '${CHANGELOG_TABLE_NAME}' AND RecordID = ? AND CensusID = ?
-       ORDER BY ChangeID DESC LIMIT 1`
+       ORDER BY ChangeID DESC LIMIT 1
+       FOR UPDATE`
     );
-    const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID], transactionID);
+    const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileUploadRecordID, censusID], transactionID);
 
     if (existingEntry.length === 0) {
-      // First batch for this file - insert new entry
-      const uploadMetadata = JSON.stringify({
+      // First chunk for this attempt - insert new entry
+      const uploadMetadata: Record<string, unknown> = {
         fileName,
+        uploadSessionID,
         formType: MEASUREMENTS_FORM_TYPE,
         sourceFormat,
-        uploadMode,
-        rowCount: actualInsertedCount,
-        droppedCount: droppedRowCount,
-        batchCount: 1
-      });
+        uploadMode
+      };
+      mergeFileUploadChunkIntoMetadata(uploadMetadata, chunkIdentity, { rowCount: actualInsertedCount, droppedCount: droppedRowCount });
       const insertChangelogSQL = safeFormatQuery(
         schema,
         `INSERT INTO ??.unifiedchangelog
@@ -487,24 +599,32 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
       );
       await connectionManager.executeQuery(
         insertChangelogSQL,
-        [CHANGELOG_TABLE_NAME, fileName, 'INSERT', uploadMetadata, params.changedBy ?? null, plotID, censusID],
+        [CHANGELOG_TABLE_NAME, fileUploadRecordID, 'INSERT', JSON.stringify(uploadMetadata), params.changedBy ?? null, plotID, censusID],
         transactionID
       );
     } else {
-      // Subsequent batch - update the existing entry with accumulated count
+      // Subsequent chunk - merge this chunk's counts into the accumulated
+      // total, keyed by chunkIdentity (#507) — see mergeFileUploadChunkIntoMetadata.
       // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
       const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
       metadata.sourceFormat = sourceFormat;
       metadata.uploadMode = uploadMode;
-      metadata.rowCount = (metadata.rowCount || 0) + actualInsertedCount;
-      metadata.droppedCount = (metadata.droppedCount || 0) + droppedRowCount;
-      metadata.batchCount = (metadata.batchCount || 1) + 1;
+      mergeFileUploadChunkIntoMetadata(metadata, chunkIdentity, { rowCount: actualInsertedCount, droppedCount: droppedRowCount });
       const updateChangelogSQL = safeFormatQuery(schema, `UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`);
       await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
     }
   } catch (logError: any) {
-    // Log but don't fail the upload if changelog tracking fails
+    // Propagate (#507): this is the ONLY `unifiedchangelog` record of the
+    // upload attempt itself (file_upload), separate from the per-row
+    // coremeasurements audit ingestBatch writes later. Swallowing this let
+    // the staged rows commit with no Recent Changes trace that the upload
+    // ever happened — silently incomplete, not merely best-effort. The
+    // caller owns transactionID (see module doc above), so throwing here
+    // rolls the WHOLE chunk back, including the temporarymeasurements rows
+    // just staged, and the caller's retry starts from a clean, consistent
+    // state rather than retrying on top of an already-staged-but-unlogged chunk.
     ailogger.error('Failed to log file upload to changelog', logError);
+    throw logError;
   }
 
   return {

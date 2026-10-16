@@ -138,7 +138,9 @@ describe('GET /api/setupbulkfailure/[fileID]/[batchID] authz', () => {
       TEST_FILE_ID,
       TEST_BATCH_ID,
       'Batch moved after max attempts',
-      'sql_exception'
+      'sql_exception',
+      undefined,
+      expect.objectContaining({ plotID: 22, censusID: 6, changedBy: expect.any(String) })
     );
   });
 });
@@ -177,7 +179,9 @@ describe('GET /api/setupbulkfailure/[fileID]/[batchID] failure-kind classificati
       TEST_FILE_ID,
       TEST_BATCH_ID,
       INTERRUPTION_REASON,
-      'interrupted_upload'
+      'interrupted_upload',
+      undefined,
+      expect.objectContaining({ plotID: 22, censusID: 6, changedBy: expect.any(String) })
     );
   });
 
@@ -197,7 +201,9 @@ describe('GET /api/setupbulkfailure/[fileID]/[batchID] failure-kind classificati
       TEST_FILE_ID,
       TEST_BATCH_ID,
       GENUINE_SQL_REASON,
-      'sql_exception'
+      'sql_exception',
+      undefined,
+      expect.objectContaining({ plotID: 22, censusID: 6, changedBy: expect.any(String) })
     );
   });
 
@@ -220,7 +226,9 @@ describe('GET /api/setupbulkfailure/[fileID]/[batchID] failure-kind classificati
       TEST_FILE_ID,
       TEST_BATCH_ID,
       INTERRUPTION_REASON,
-      'interrupted_upload'
+      'interrupted_upload',
+      undefined,
+      expect.objectContaining({ plotID: 22, censusID: 6, changedBy: expect.any(String) })
     );
   });
 });

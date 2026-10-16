@@ -1,3 +1,4 @@
+import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
 /**
  * In-process background upload worker (async-upload remediation Task 10).
  *
@@ -48,6 +49,7 @@ import { ingestBatch, IngestBatchAbortedError, OversizedSubBatchError, type Inge
 import { setupFailureSummary } from '@/lib/uploads/setup-failure';
 import { deleteUnresolvedRowsForBatchFamily, recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
+import { isBlankMeasurementRow, isEffectivelyEmptyMeasurementInput } from '@/lib/uploads/blank-measurement-input';
 import { countStagedRows, MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
 import { runCensusValidations } from '@/lib/uploads/validation-orchestrator';
 import { NonRetryableJobError, WorkerLeaseLostError } from './errors';
@@ -778,7 +780,17 @@ async function cleanupBatchArtifacts(ctx: BatchScopeContext, fileName: string, b
   );
   await ctx.connectionManager.executeQuery(deleteTempSQL, [fileName, plotID, censusID, batchID, subBatchPattern]);
   const completedSubBatchIDs = await getCompletedSubBatchIDs(ctx, batchID);
-  await deleteUnresolvedRowsForBatchFamily(ctx.connectionManager, schemaName, fileName, batchID, censusID, undefined, completedSubBatchIDs);
+  await deleteUnresolvedRowsForBatchFamily(
+    ctx.connectionManager,
+    schemaName,
+    fileName,
+    batchID,
+    censusID,
+    undefined,
+    completedSubBatchIDs,
+    ctx.job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null,
+    plotID
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -834,7 +846,6 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
 
     await transitionSessionState(ctx, UploadSessionState.UPLOADING);
     await setProgress(ctx, 'staging', UPLOAD_JOB_PHASE_PROGRESS.staging, `Staging ${file.fileName}`);
-    await cleanupBatchArtifacts(ctx, file.fileName, batchID);
 
     const text = await ctx.deps.fetchFileText(file);
     const delimiter = detectDelimiter(text, file.fileName, selectedDelimiters[file.fileName]);
@@ -847,16 +858,37 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
       throw new NonRetryableJobError(`CSV parse failed for ${file.fileName}: ${fatalParseError.message}`);
     }
     const csvHeaders = (parsed.meta.fields ?? []).map(String);
-    const rawRows = parsed.data;
+    // skipEmptyLines only drops zero-character lines; a delimiter/whitespace-only line
+    // still parses to a row of blank cells. Filter those out before chunking so a chunk
+    // made entirely of padding can't throw below after earlier chunks already
+    // committed. Merely-invalid (non-blank) rows are untouched and still fail normally.
+    const rawRows = parsed.data.filter(row => !isBlankMeasurementRow(row));
+
+    // Issue #504: a header-only/blank CSV must never reach the chunk/staging loop —
+    // for CLEAN_REUPLOAD, staging even one chunk triggers cleanupPreviousFileUploads'
+    // census-wide DELETE before any row count check, which previously let a blank file
+    // silently wipe a census while the job still reported success.
+    if (isEffectivelyEmptyMeasurementInput(rawRows)) {
+      throw new NonRetryableJobError(
+        `${file.fileName} has no data rows after parsing (header-only or entirely blank file). ` +
+          `A Clean Re-Upload must not replace existing census data with an empty file.`
+      );
+    }
+
+    // Must run after the empty-input guard above, not before: cleaning up this batch's
+    // retry artifacts is only safe once we know this attempt's input is non-blank, so a
+    // blank retry can't destroy artifacts a prior valid attempt left behind.
+    await cleanupBatchArtifacts(ctx, file.fileName, batchID);
 
     let fileInsertedRows = 0;
     let fileExpectedRows = 0;
     let fileDroppedRows = 0;
     const fileInvalidRows: FileRow[] = [];
 
-    // At least one staging call even for an empty file so the CLEAN_REUPLOAD
-    // census replacement and the changelog tracking row still happen.
-    const chunkCount = Math.max(1, Math.ceil(rawRows.length / chunkRows));
+    // rawRows is guaranteed nonempty here (guard above), so chunkCount is
+    // always >= 1 without needing the Math.max(1, ...) floor that used to
+    // paper over the empty-file case by staging one empty chunk.
+    const chunkCount = Math.ceil(rawRows.length / chunkRows);
     for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
       // Cancellation takes effect BETWEEN chunks, not only between files. A
       // census-scale file stages over ~22 chunks, and probing only at the file
@@ -889,10 +921,16 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
           uploadSessionID: ctx.sessionID,
           transactionID,
           firstRowOrdinal: chunkIndex * chunkRows,
-          changedBy: job.createdBy,
+          changedBy: job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null,
           // Census replacement may only run while staging the job's FIRST
           // file — later files would wipe earlier files' completed batches.
-          suppressCensusReplacementCleanup: fileIndex > 0
+          suppressCensusReplacementCleanup: fileIndex > 0,
+          // Every chunk of this file shares `batchID` (#507) — chunkIndex is
+          // this chunk's own stable identity for the file_upload changelog
+          // running totals, so a worker retry of this exact chunk replaces
+          // its prior contribution instead of a second, different chunk
+          // overwriting it.
+          chunkIdentity: `${batchID}:chunk${chunkIndex}`
         });
         await connectionManager.commitTransaction(transactionID);
 
@@ -994,6 +1032,7 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
           censusID: job.censusID,
           fileName: file.fileName,
           batchID,
+          changedBy: job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null,
           sourceRowIndexOffset: parseRejectIndexOffset(fileInvalidRows.length)
         },
         fileInvalidRows
@@ -1032,6 +1071,7 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
         censusID: job.censusID,
         fileName: deferred.fileName,
         batchID: deferred.batchID,
+        changedBy: job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null,
         sourceRowIndexOffset: parseRejectIndexOffset(deferred.rows.length)
       },
       deferred.rows
@@ -1053,7 +1093,10 @@ async function runIngestForBatch(ctx: WorkerRunContext, fileName: string, batchI
       batchID,
       expectedScope: { plotID: ctx.job.plotID, censusID: ctx.job.censusID },
       onSetupProgress: diagnostic => reportSetupDiagnostic(ctx, diagnostic),
-      isAborted: abortProbe(ctx)
+      isAborted: abortProbe(ctx),
+      // Job creator's identity, not any client-provided field — same contract
+      // documented on IngestBatchParams.changedBy (#507).
+      changedBy: ctx.job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null
     });
   } catch (error) {
     if (error instanceof IngestBatchAbortedError) {

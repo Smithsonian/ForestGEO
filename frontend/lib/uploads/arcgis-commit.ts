@@ -17,7 +17,6 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
-import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import {
   ArcgisImportSessionError,
@@ -34,7 +33,8 @@ import {
   insertTemporaryMeasurementsInBatches,
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
-import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
+import { buildFileUploadChangelogRecordID, measurementFileIDValidationError, mergeFileUploadChunkIntoMetadata } from '@/lib/uploads/file-names';
+import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-failure-audit';
 import {
   BatchIDContainsSubBatchSeparatorError,
   MAX_ORIGINAL_BATCH_ID_LENGTH,
@@ -143,7 +143,7 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
     const rowBatchIDs = assignArcgisRowBatchIDs(batchID, staged.rows.length);
 
     if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-      await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
+      await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, userId, transactionID);
     }
     await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
 
@@ -195,12 +195,14 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
       if (droppedRows.length > 0) {
         // Unlike the CSV sqlpacketload path, which wraps failure-row persistence in a retry-once-then-uploadintegrityalerts
         // best-effort fallback, this commit deliberately persists dropped rows inside the same transaction as the staging
-        // insert so the commit is all-or-nothing: if failure-row persistence throws, the entire commit rolls back rather than
-        // leaving a half-committed batch. Do not "restore parity" with a best-effort fallback here — that would weaken atomicity.
-        await insertIngestionFailureRows(
+        // insert so the commit is all-or-nothing: if failure-row persistence (or its audit) throws, the entire commit rolls
+        // back rather than leaving a half-committed batch. Do not "restore parity" with a best-effort fallback here — that
+        // would weaken atomicity. recordAuditedIngestionFailureRows (#507) bounds its before/after audit to exactly these
+        // rows' (fileID, batchID, SourceRowIndex) keys, never the whole batch scope.
+        const droppedRowAuditResult = await recordAuditedIngestionFailureRows({
           connectionManager,
           schema,
-          droppedRows.map(row => ({
+          rows: droppedRows.map(row => ({
             plotID,
             censusID,
             tag: row.tag,
@@ -219,9 +221,16 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
             sourceRowIndex: row.sourceRowIndex,
             failureReason: row.failureReason || ARCGIS_COMMIT_INSERT_FAILURE_FALLBACK
           })),
-          transactionID
+          transactionID,
+          changedBy: userId,
+          plotID,
+          censusID
+        });
+        ailogger.info(
+          `Persisted ${droppedRows.length} dropped ArcGIS rows as unresolved ingestion errors for ${fileName}-${batchID} ` +
+            `(audited: ${droppedRowAuditResult.insertedCount} inserted, ${droppedRowAuditResult.updatedCount} updated, ` +
+            `${droppedRowAuditResult.unchangedCount} unchanged)`
         );
-        ailogger.info(`Persisted ${droppedRows.length} dropped ArcGIS rows as unresolved ingestion errors for ${fileName}-${batchID}`);
       }
     }
 
@@ -232,24 +241,33 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
     // transaction with no best-effort try/catch fallback: the commit is
     // all-or-nothing, so if changelog tracking fails the staging insert rolls
     // back too rather than leaving an upload invisible in history.
+    //
+    // RecordID is keyed by upload ATTEMPT (uploadSessionID), not by fileName
+    // alone — see buildFileUploadChangelogRecordID's doc comment (#507). ArcGIS
+    // commits always carry a non-null uploadSessionID, so there is no fallback
+    // branch here.
+    const fileUploadRecordID = buildFileUploadChangelogRecordID(fileName, uploadSessionID);
+    // FOR UPDATE: serializes this read-merge-write against any concurrent
+    // writer of the SAME RecordID under the existing per-commit transaction
+    // (same reasoning as the CSV path's identical lock).
     const existingEntrySQL = safeFormatQuery(
       schema,
       `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
        WHERE TableName = '${CHANGELOG_TABLE_NAME}' AND RecordID = ? AND CensusID = ?
-       ORDER BY ChangeID DESC LIMIT 1`
+       ORDER BY ChangeID DESC LIMIT 1
+       FOR UPDATE`
     );
-    const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID], transactionID);
+    const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileUploadRecordID, censusID], transactionID);
 
     if (existingEntry.length === 0) {
-      const uploadMetadata = JSON.stringify({
+      const uploadMetadata: Record<string, unknown> = {
         fileName,
+        uploadSessionID,
         formType: FormType.measurements,
         sourceFormat: SourceFormat.arcgis_xlsx,
-        uploadMode,
-        rowCount: insertedCount,
-        droppedCount: droppedRowCount,
-        batchCount: new Set(rowBatchIDs).size
-      });
+        uploadMode
+      };
+      mergeFileUploadChunkIntoMetadata(uploadMetadata, batchID, { rowCount: insertedCount, droppedCount: droppedRowCount });
       const insertChangelogSQL = safeFormatQuery(
         schema,
         `INSERT INTO ??.unifiedchangelog
@@ -258,16 +276,19 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
       );
       await connectionManager.executeQuery(
         insertChangelogSQL,
-        [CHANGELOG_TABLE_NAME, fileName, 'INSERT', uploadMetadata, userId, plotID, censusID],
+        [CHANGELOG_TABLE_NAME, fileUploadRecordID, 'INSERT', JSON.stringify(uploadMetadata), userId, plotID, censusID],
         transactionID
       );
     } else {
+      // Keyed by batchID (#507), same as the CSV path — see
+      // mergeFileUploadChunkIntoMetadata's doc comment. A retry that reaches
+      // this branch under the SAME batchID (claimArcgisImportSessionForCommit
+      // normally short-circuits that case via alreadyCommitted, so this is
+      // belt-and-suspenders) replaces its own contribution rather than adding to it.
       const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
       metadata.sourceFormat = SourceFormat.arcgis_xlsx;
       metadata.uploadMode = uploadMode;
-      metadata.rowCount = (metadata.rowCount || 0) + insertedCount;
-      metadata.droppedCount = (metadata.droppedCount || 0) + droppedRowCount;
-      metadata.batchCount = (metadata.batchCount || 1) + 1;
+      mergeFileUploadChunkIntoMetadata(metadata, batchID, { rowCount: insertedCount, droppedCount: droppedRowCount });
       const updateChangelogSQL = safeFormatQuery(schema, `UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`);
       await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
     }

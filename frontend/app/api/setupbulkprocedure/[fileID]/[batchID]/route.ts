@@ -8,6 +8,8 @@ import { ingestBatch, IngestBatchAbortedError, OversizedSubBatchError, type Inge
 import { BatchFamilyScopeError, discoverBatchFamily } from '@/lib/uploads/batch-family';
 import { SETUP_FAILURE_CODES, setupFailureSummary } from '@/lib/uploads/setup-failure';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
+import { auth } from '@/auth';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -107,6 +109,12 @@ async function handler(request: NextRequest, context: RouteContext) {
     return new NextResponse(JSON.stringify({ error: `Setup failed: ${setupError.message}`, fileID, batchID }), { status: HTTPResponses.SERVICE_UNAVAILABLE });
   }
 
+  // withRouteAuthz already authenticated this request and does not forward the
+  // session to the handler, so it is re-resolved here for the audit identity
+  // (same pattern as changelogChangedBy in config/macros/coreapifunctions.ts).
+  // MUST be the authenticated session, never a client-supplied field.
+  const changedBy = authenticatedSessionIdentity((await auth())?.user);
+
   let result: IngestBatchResult;
   try {
     result = await ingestBatch(connectionManager, {
@@ -114,7 +122,8 @@ async function handler(request: NextRequest, context: RouteContext) {
       fileID,
       batchID,
       expectedScope: authorizedScope!,
-      isAborted: () => isRequestAborted(request)
+      isAborted: () => isRequestAborted(request),
+      changedBy
     });
   } catch (error: any) {
     if (error instanceof IngestBatchAbortedError) {

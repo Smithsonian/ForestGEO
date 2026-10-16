@@ -138,6 +138,69 @@ describe('ConnectionManager.withTransaction callback failures', () => {
   });
 });
 
+describe('ConnectionManager.acquireApplicationLock — idempotent re-acquire within one transaction', () => {
+  // Regression for #507: MySQL's GET_LOCK is refcounted per (session, name) —
+  // acquiring the same name twice on one connection needs TWO RELEASE_LOCK
+  // calls to fully drop it. cleanupApplicationLocks only ever issues one
+  // release per tracked name, so a second real GET_LOCK for an already-held
+  // name would leave the lock stuck on the pooled connection after this
+  // transaction's own commit/rollback believes it released it.
+  it('issues GET_LOCK only once for a name this transaction already holds, and a single cleanup release fully drops it', async () => {
+    const connection = {
+      threadId: 4242,
+      query: vi.fn().mockResolvedValue([[]]),
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+      ping: vi.fn()
+    };
+    getConnMock.mockResolvedValueOnce(connection);
+
+    const getLockCalls: unknown[][] = [];
+    const releaseLockCalls: unknown[][] = [];
+    runQueryMock.mockImplementation(async (_conn: unknown, query: string, params?: unknown[]) => {
+      if (query.includes('GET_LOCK')) {
+        getLockCalls.push(params ?? []);
+        return [{ acquired: 1 }];
+      }
+      if (query.includes('RELEASE_LOCK')) {
+        releaseLockCalls.push(params ?? []);
+        return [{ released: 1 }];
+      }
+      return [];
+    });
+
+    const { default: ConnectionManager } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const manager = ConnectionManager.getInstance();
+    const internals = manager as unknown as {
+      transactionConnections: Map<string, unknown>;
+      transactionMeta: Map<string, { resourceLocks: Set<string> }>;
+      transactionSlotQueue: Array<() => void>;
+      startingTransactions: number;
+    };
+    internals.transactionConnections.clear();
+    internals.transactionMeta.clear();
+    internals.transactionSlotQueue.length = 0;
+    internals.startingTransactions = 0;
+
+    const transactionId = await manager.beginTransaction();
+    const lockName = 'ingestion-failure:unit-test-lock';
+
+    const first = await manager.acquireApplicationLock(lockName, transactionId, 1000);
+    const second = await manager.acquireApplicationLock(lockName, transactionId, 1000);
+
+    expect(first).toBe(true);
+    expect(second, 'a re-acquire of a lock this transaction already holds must still report success').toBe(true);
+    expect(getLockCalls, 'the same lock name must not issue a second real GET_LOCK within one transaction').toHaveLength(1);
+    expect(internals.transactionMeta.get(transactionId)?.resourceLocks.size).toBe(1);
+
+    await manager.commitTransaction(transactionId);
+
+    expect(releaseLockCalls, 'exactly one RELEASE_LOCK must fire for a lock acquired (tracked) exactly once').toHaveLength(1);
+    expect(connection.release).toHaveBeenCalledOnce();
+  });
+});
+
 describe('ConnectionManager transaction-slot accounting — beginTransaction is the single slot authority', () => {
   // Named constants (repo rule: NO MAGIC NUMBERS). These mirror the private
   // ConnectionManager values the tests reach into and the timings they drive.

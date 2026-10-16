@@ -430,13 +430,39 @@ function buildRepeatedRowPattern(rowCount: number, rowPattern: string): string {
   return new Array(rowCount).fill(rowPattern).join(', ');
 }
 
+export interface IngestionFailureRowKey {
+  fileID: string | null;
+  batchID: string | null;
+  sourceRowIndex: number;
+}
+
+/**
+ * The (UploadFileID, UploadBatchID, SourceRowIndex) identity one
+ * IngestionFailureRowInput will land under — the same default this module
+ * applies internally (`row.sourceRowIndex ?? index + 1`), exported so a
+ * caller that must know the key BEFORE calling insertIngestionFailureRows
+ * (e.g. a bounded before/after audit) computes the identical value rather
+ * than duplicating this default.
+ */
+export function ingestionFailureRowKey(row: IngestionFailureRowInput, index: number): IngestionFailureRowKey {
+  return {
+    fileID: row.fileID ?? null,
+    batchID: row.batchID ?? null,
+    sourceRowIndex: row.sourceRowIndex ?? index + 1
+  };
+}
+
 function prepareIngestionFailureRows(rows: IngestionFailureRowInput[]): PreparedIngestionFailureRow[] {
   return rows.map((row, index) => ({
     resultIndex: index,
     row,
     normalizedDate: normalizeDate(row.date),
     description: normalizeFailureDescription(row.failureReason),
-    sourceRowIndex: row.sourceRowIndex ?? index + 1,
+    // The canonical default — see ingestionFailureRowKey's doc comment. Reads
+    // only .sourceRowIndex from the shared helper (not fileID/batchID) since
+    // this is the one place that still needs fileID/batchID exactly as given
+    // (possibly absent) rather than defaulted to null for a map key.
+    sourceRowIndex: ingestionFailureRowKey(row, index).sourceRowIndex,
     errors: classifyIngestionFailure(row.failureKind ?? 'parser_reject', row.failureReason)
   }));
 }

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
+import { buildMeasuredStemCountSql, buildMeasuredTreeCountSql } from '@/config/dashboardmetricsqueries';
 // ===== import the handler AFTER mocks =====
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
@@ -216,6 +217,9 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     const [sql, params] = (exec as any).mock.calls[0];
     expect(String(sql)).toMatch(/WITH measured_quads AS/i);
     expect(String(sql)).toMatch(/FROM myschema\.quadrats q/i);
+    // Agreement with the CountStems tile: a quadrat should not read as "populated"
+    // from a soft-deleted measurement/stem that the Stems tile does not count.
+    expect(String(sql)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1/i);
     expect(params).toEqual([9, 3, 3]); // censusID, plotID, plotID
   });
 
@@ -268,7 +272,7 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
   //   expect(getContainerClientMock).toHaveBeenCalledWith('MyPlot-2');
   // });
 
-  it('CountTrees: 200 and proper JSON; SQL + params sanity', async () => {
+  it('CountTrees: 200 and proper JSON; counts only trees with an active measured stem', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ CountTrees: 123 }]);
 
@@ -279,12 +283,19 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     expect(body).toEqual({ CountTrees: 123 });
 
     const [sql, params] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/FROM myschema\.trees t JOIN myschema\.census c/i);
-    expect(String(sql)).toMatch(/WHERE t\.CensusID = \? AND c\.PlotID = \?/i);
-    expect(params).toEqual([22, 11]);
+    // The query must be byte-for-byte the shared builder's output, so this route
+    // and the aggregated `all` route can never drift from each other again.
+    expect(String(sql)).toBe(buildMeasuredTreeCountSql('myschema'));
+    // Joins through coremeasurements (not a direct trees-table count) and excludes
+    // soft-deleted rows — this is what makes the tile shrink when the last
+    // measurement for a tree's stems is hard-deleted.
+    expect(String(sql)).toMatch(/FROM myschema\.coremeasurements cm/i);
+    expect(String(sql)).toMatch(/COUNT\(DISTINCT t\.TreeID\)/i);
+    expect(String(sql)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1 AND t\.IsActive = 1/i);
+    expect(params).toEqual([22, 11]); // [censusID, plotID]
   });
 
-  it('CountStems: 200 and proper JSON; SQL + params sanity', async () => {
+  it('CountStems: 200 and proper JSON; counts only stems with an active measurement', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ CountStems: 456 }]);
 
@@ -295,9 +306,11 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     expect(body).toEqual({ CountStems: 456 });
 
     const [sql, params] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/FROM myschema\.stems st JOIN myschema\.census c/i);
-    expect(String(sql)).toMatch(/WHERE st\.CensusID = \? AND c\.PlotID = \?/i);
-    expect(params).toEqual([99, 8]);
+    expect(String(sql)).toBe(buildMeasuredStemCountSql('myschema'));
+    expect(String(sql)).toMatch(/FROM myschema\.coremeasurements cm/i);
+    expect(String(sql)).toMatch(/COUNT\(DISTINCT s\.StemGUID\)/i);
+    expect(String(sql)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1/i);
+    expect(params).toEqual([99, 8]); // [censusID, plotID]
   });
 
   it('unknown metric: returns 200 with empty object', async () => {
@@ -354,6 +367,9 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       const [sql2, params2] = exec.mock.calls[1];
       expect(String(sql2)).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
       expect(String(sql2)).not.toMatch(/previous_stems/i);
+      // Agreement with the CountStems/CountTrees tiles: a soft-deleted measurement,
+      // stem, or tree must not inflate CountMultiStems/CountNewRecruits above them.
+      expect(String(sql2)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1 AND t\.IsActive = 1/i);
       expect(params2).toEqual([1, 1]); // censusID, censusID
     });
 
@@ -395,6 +411,8 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       expect(String(sql2)).toMatch(/COALESCE\(SUM\(CASE/i);
       // Multi-stems must come from the current-census grouping, not the previous-census diff
       expect(String(sql2)).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
+      // Agreement with the CountStems/CountTrees tiles for the current census.
+      expect(String(sql2)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1 AND t\.IsActive = 1/i);
       // Parameters: censusID, censusID, previousCensusID, previousCensusID, previousCensusID
       expect(params2).toEqual([2, 2, 1, 1, 1]);
     });

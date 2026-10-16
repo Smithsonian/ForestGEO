@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import ConnectionManager from '@/lib/db/connectionmanager';
@@ -5,7 +6,7 @@ import { isValidSchema } from '@/lib/db/sqlsecurity';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { FileRow } from '@/config/macros/formdetails';
-import { RevisionInvalidRow, RevisionMatchedRow, RevisionNewRowCandidate, RevisionUploadResponse } from '@/config/revisionuploadtypes';
+import { RevisionCollapsedRow, RevisionInvalidRow, RevisionMatchedRow, RevisionNewRowCandidate, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { analyzeBulk, BulkInput, isGroupBlockingPreviewError } from '@/config/editplan/bulkanalyzer';
 import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
@@ -15,6 +16,7 @@ import { DuplicateDeletion } from '@/config/editplan/types';
 import { InvalidClearError, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 import {
   buildAnalyzerRowFromChanges,
+  compareSourceRows,
   computeDiff,
   ExistingMeasurementRow,
   isBlankOrNullPlaceholder,
@@ -25,6 +27,7 @@ import {
   normalizeDateToString,
   readExplicitSpeciesCode
 } from './shared/matchdiff';
+import { computeInvalidRowsIntegrityHash, isValidUploadAttemptID, REVISION_UPLOAD_FILE_ID } from './shared/invalidrowintegrity';
 import { requireSession } from '@/lib/auth-helpers';
 
 export const runtime = 'nodejs';
@@ -49,6 +52,17 @@ interface RevisionUploadRequest {
   plotID: number | string;
   censusID: number | string;
   schema: string;
+  /**
+   * The uploadAttemptID a PRIOR call to this route minted for this same
+   * upload (echoed back by a client re-matching the same attempt, e.g. after
+   * a conflict forces a refresh, as opposed to starting a new upload). When
+   * present it must be a valid UUID (validated below) and is reused verbatim
+   * as this response's uploadAttemptID instead of minting a new one — so the
+   * per-attempt failed-row batchID derived from it (see
+   * shared/invalidrowintegrity.ts) stays stable across the re-match. Omit
+   * this for a genuinely new upload, which always gets a fresh identity.
+   */
+  previousUploadAttemptID?: string;
 }
 
 interface IndexedFileRow {
@@ -146,13 +160,37 @@ function detectMatchStrategy(rows: IndexedFileRow[], fileName: string): MatchStr
   throw new RevisionUploadRequestError(`Revision file "${fileName}" must include stemid values or both tag and stemtag headers`);
 }
 
-function buildResolutionCandidates(rows: IndexedFileRow[], strategy: MatchStrategy): { candidates: ResolutionCandidate[]; invalidRows: RevisionInvalidRow[] } {
-  const firstSeen = new Map<string, ResolutionCandidate>();
-  const duplicateKeys = new Set<string>();
+/**
+ * Classifies every row sharing a match key (stemid, or tag+stemtag) against
+ * the FIRST occurrence of that key in the file. The first occurrence is
+ * always kept as the real resolution candidate — it is never itself
+ * invalidated just because a later row repeats its key. A later row with the
+ * same key is then either:
+ *  - collapsed into the first occurrence when the two rows are identical
+ *    except for a difference beyond coremeasurements' stored decimal
+ *    precision (float-rounding noise, not a second entry), or
+ *  - rejected as invalid (genuine duplicate — same key, same or conflicting
+ *    content) so the apply step can park it as a failed DUPLICATE_ENTRY
+ *    measurement instead of silently discarding it.
+ *
+ * This fixes two source-row-accounting bugs: an exact duplicate used to
+ * invalidate BOTH copies (losing the legitimate first occurrence), and a
+ * pair differing only beyond stored precision used to invalidate both
+ * copies as "different" duplicates even though they represent one
+ * measurement.
+ */
+function buildResolutionCandidates(
+  rows: IndexedFileRow[],
+  strategy: MatchStrategy
+): { candidates: ResolutionCandidate[]; invalidRows: RevisionInvalidRow[]; collapsedRows: RevisionCollapsedRow[] } {
+  const survivorByKey = new Map<string, ResolutionCandidate>();
   const invalidRows: RevisionInvalidRow[] = [];
-  const acceptedRows: ResolutionCandidate[] = [];
+  const collapsedRows: RevisionCollapsedRow[] = [];
+  const candidates: ResolutionCandidate[] = [];
 
   for (const row of rows) {
+    let candidate: ResolutionCandidate;
+
     if (strategy === 'stemid') {
       const parsedStemID = parsePositiveInteger(row.csvRow['stemid']);
       if (parsedStemID === null) {
@@ -165,61 +203,57 @@ function buildResolutionCandidates(rows: IndexedFileRow[], strategy: MatchStrate
         continue;
       }
 
-      const candidate: ResolutionCandidate = {
-        ...row,
-        key: String(parsedStemID),
-        stemID: parsedStemID
-      };
-      acceptedRows.push(candidate);
-      if (firstSeen.has(candidate.key)) {
-        duplicateKeys.add(candidate.key);
-      } else {
-        firstSeen.set(candidate.key, candidate);
-      }
-      continue;
-    }
-
-    const key = buildTagStemKey(row.csvRow['tag'], row.csvRow['stemtag']);
-    if (!key) {
-      invalidRows.push({
-        csvRow: row.csvRow,
-        csvIndex: row.csvIndex,
-        reason: 'missing tag/stemtag'
-      });
-      continue;
-    }
-
-    const candidate: ResolutionCandidate = {
-      ...row,
-      key,
-      tag: normalizeTagStemKeyPart(row.csvRow['tag']) ?? undefined,
-      stemtag: normalizeTagStemKeyPart(row.csvRow['stemtag']) ?? undefined
-    };
-    acceptedRows.push(candidate);
-    if (firstSeen.has(candidate.key)) {
-      duplicateKeys.add(candidate.key);
+      candidate = { ...row, key: String(parsedStemID), stemID: parsedStemID };
     } else {
-      firstSeen.set(candidate.key, candidate);
-    }
-  }
+      const key = buildTagStemKey(row.csvRow['tag'], row.csvRow['stemtag']);
+      if (!key) {
+        invalidRows.push({
+          csvRow: row.csvRow,
+          csvIndex: row.csvIndex,
+          reason: 'missing tag/stemtag'
+        });
+        continue;
+      }
 
-  const candidates: ResolutionCandidate[] = [];
-  for (const candidate of acceptedRows) {
-    if (duplicateKeys.has(candidate.key)) {
-      invalidRows.push({
+      candidate = {
+        ...row,
+        key,
+        tag: normalizeTagStemKeyPart(row.csvRow['tag']) ?? undefined,
+        stemtag: normalizeTagStemKeyPart(row.csvRow['stemtag']) ?? undefined
+      };
+    }
+
+    const survivor = survivorByKey.get(candidate.key);
+    if (!survivor) {
+      survivorByKey.set(candidate.key, candidate);
+      candidates.push(candidate);
+      continue;
+    }
+
+    // Always compare against the ORIGINAL survivor, not the previous
+    // duplicate in a longer run, so a three-plus-row chain collapses or
+    // invalidates relative to one stable reference instead of drifting.
+    const comparison = compareSourceRows(survivor.csvRow, candidate.csvRow);
+    if (comparison === 'precision-equivalent') {
+      collapsedRows.push({
         csvRow: candidate.csvRow,
         csvIndex: candidate.csvIndex,
-        reason: buildDuplicateKeyReason(strategy, candidate)
+        collapsedIntoCsvIndex: survivor.csvIndex
       });
       continue;
     }
 
-    candidates.push(candidate);
+    invalidRows.push({
+      csvRow: candidate.csvRow,
+      csvIndex: candidate.csvIndex,
+      reason: buildDuplicateKeyReason(strategy, candidate)
+    });
   }
 
   return {
     candidates: candidates.sort((left, right) => left.csvIndex - right.csvIndex),
-    invalidRows
+    invalidRows,
+    collapsedRows
   };
 }
 
@@ -314,9 +348,14 @@ async function classifyFileRows(
   plotID: number,
   fileName: string,
   rows: IndexedFileRow[]
-): Promise<{ matchedRows: RevisionMatchedRow[]; newRows: RevisionNewRowCandidate[]; invalidRows: RevisionInvalidRow[] }> {
+): Promise<{
+  matchedRows: RevisionMatchedRow[];
+  newRows: RevisionNewRowCandidate[];
+  invalidRows: RevisionInvalidRow[];
+  collapsedRows: RevisionCollapsedRow[];
+}> {
   const strategy = detectMatchStrategy(rows, fileName);
-  const { candidates, invalidRows } = buildResolutionCandidates(rows, strategy);
+  const { candidates, invalidRows, collapsedRows } = buildResolutionCandidates(rows, strategy);
 
   let lookup = new Map<string, ExistingMeasurementRow[]>();
   if (strategy === 'stemid') {
@@ -416,7 +455,7 @@ async function classifyFileRows(
   // row's explicitSpeciesCode into #427 batch grouping. Stripping it out
   // per-file here, before grouping ever sees it, would hide a sibling row's
   // contradicting correction request (#427).
-  return { matchedRows, newRows, invalidRows };
+  return { matchedRows, newRows, invalidRows, collapsedRows };
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -431,13 +470,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const { plotID, censusID, schema } = body;
+  const { plotID, censusID, schema, previousUploadAttemptID } = body;
 
   if (plotID === undefined || censusID === undefined || !schema) {
     return NextResponse.json(
       { error: 'Missing required parameters: files (array) or rows (array), plotID, censusID, schema' },
       { status: HTTPResponses.INVALID_REQUEST }
     );
+  }
+
+  if (previousUploadAttemptID !== undefined && !isValidUploadAttemptID(previousUploadAttemptID)) {
+    return NextResponse.json({ error: 'previousUploadAttemptID must be a valid UUID when present' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
   const normalizedPlotID = parsePositiveInteger(plotID);
@@ -478,6 +521,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const matchedRows: RevisionMatchedRow[] = [];
   const newRows: RevisionNewRowCandidate[] = [];
   const invalidRows: RevisionInvalidRow[] = [];
+  const collapsedRows: RevisionCollapsedRow[] = [];
 
   try {
     await assertCanEditMeasurementScope(connectionManager, session!, {
@@ -498,6 +542,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       matchedRows.push(...classifiedRows.matchedRows);
       newRows.push(...classifiedRows.newRows);
       invalidRows.push(...classifiedRows.invalidRows);
+      collapsedRows.push(...classifiedRows.collapsedRows);
       csvIndexOffset += file.rows.length;
     }
 
@@ -569,18 +614,45 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const bulkPlan = applyRevisionRolePolicy(baseBulkPlan, session!.user.userStatus, buildRevisionRoleFieldCandidates(matchedRows, newRows));
 
+    // The client echoes both uploadAttemptID and invalidRowsIntegrityHash back
+    // unchanged on /apply, which recomputes the hash from whatever invalidRows
+    // it actually receives and 409s on a mismatch — see
+    // shared/invalidrowintegrity.ts. Computed from the FINAL invalidRows
+    // (after the analyzeBulk demotion pass above), not the per-file
+    // invalidRows collected earlier, or a demoted row would be hashed under a
+    // stale set and every apply would 409 on its own output. A valid
+    // previousUploadAttemptID (checked above) means the client is
+    // re-matching the SAME attempt, not starting a new one — reuse its
+    // identity instead of minting a fresh one.
+    const uploadAttemptID = isValidUploadAttemptID(previousUploadAttemptID) ? previousUploadAttemptID : randomUUID();
+    const invalidRowsIntegrityHash = computeInvalidRowsIntegrityHash(
+      schema,
+      normalizedPlotID,
+      normalizedCensusID,
+      uploadAttemptID,
+      REVISION_UPLOAD_FILE_ID,
+      invalidRows
+    );
+
     const response: RevisionUploadResponse = {
       matchedRows,
       newRows,
       invalidRows,
+      collapsedRows,
       counts: {
         matched: matchedRows.length,
         matchedWithChanges: matchedRows.filter(row => Object.keys(row.changes).length > 0 || (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0).length,
         new: newRows.length,
         invalid: invalidRows.length,
-        total: matchedRows.length + newRows.length + invalidRows.length
+        collapsed: collapsedRows.length,
+        // Every source row across every uploaded file ends up in exactly one
+        // of matched/new/invalid/collapsed — this total is the accounting
+        // check the review UI uses to confirm no row vanished silently.
+        total: matchedRows.length + newRows.length + invalidRows.length + collapsedRows.length
       },
-      bulkPlan
+      bulkPlan,
+      uploadAttemptID,
+      invalidRowsIntegrityHash
     };
 
     return NextResponse.json(response, { status: HTTPResponses.OK });

@@ -422,7 +422,24 @@ create procedure clearcensusfull(IN targetCensusID int)
 SQL SECURITY DEFINER
 BEGIN
     declare vCountCensus int;
-    -- Disable triggers to prevent changelog tracking during bulk census deletion
+    declare vPrevForeignKeyChecks int;
+    declare vPrevDisableTriggers int default null;
+
+    -- Issue #509: restore the caller's EXACT prior foreign_key_checks /
+    -- @disable_triggers on every exit path (a caller may invoke this from
+    -- within its own already-overridden scope, or @disable_triggers may still
+    -- be its default NULL) — not hard-coded 1/0 — so a mid-procedure failure
+    -- can't leave the pooled connection poisoned for the next caller.
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET foreign_key_checks = vPrevForeignKeyChecks;
+        SET @disable_triggers = vPrevDisableTriggers;
+        RESIGNAL;
+    END;
+
+    SET vPrevForeignKeyChecks = @@foreign_key_checks;
+    SET vPrevDisableTriggers = @disable_triggers;
     set @disable_triggers = 1;
     set foreign_key_checks = 0;
     START TRANSACTION;
@@ -444,6 +461,13 @@ BEGIN
     FROM measurementssummary
     WHERE CensusID = targetCensusID;
 
+    -- Issue #509: viewfulltable is materialized (populated by
+    -- RefreshViewFullTable), never recomputed on read, and must be cleared
+    -- explicitly with the rest of the census.
+    DELETE
+    FROM viewfulltable
+    WHERE CensusID = targetCensusID;
+
     delete from coremeasurements where CensusID = targetCensusID;
     delete from stems where CensusID = targetCensusID;
 
@@ -453,32 +477,52 @@ BEGIN
 
     if vCountCensus = 1 then
         -- there's only one census. if so, clear all fixed data tables as well to "fully" clean the census
-        truncate attributes;
-        truncate personnel;
-        truncate roles;
-        truncate quadrats;
-        truncate species;
-        truncate specieslimits;
-        truncate genus;
-        truncate family;
-        truncate reference;
-        truncate unifiedchangelog;
+        -- Issue #509: DELETE (not TRUNCATE) keeps this inside the transaction
+        -- above so the EXIT HANDLER's ROLLBACK actually reverts it.
+        delete from attributes;
+        delete from personnel;
+        delete from roles;
+        delete from quadrats;
+        delete from species;
+        delete from specieslimits;
+        delete from genus;
+        delete from family;
+        delete from reference;
+        -- Issue #509: unifiedchangelog is audit history, not census data —
+        -- intentionally NOT cleared here (previously destroyed by TRUNCATE).
     end if;
 
     DELETE
     FROM census
     WHERE CensusID = targetCensusID;
 
+    -- Historical (viewfulltable) and source deletes above are complete; commit now.
     COMMIT;
-    set foreign_key_checks = 1;
-    -- Re-enable triggers after census deletion
-    set @disable_triggers = 0;
+    SET foreign_key_checks = vPrevForeignKeyChecks;
+    SET @disable_triggers = vPrevDisableTriggers;
 END $$
 
 create procedure clearcensusmsmts(IN targetCensusID int)
 SQL SECURITY DEFINER
 BEGIN
-    -- Disable triggers to prevent changelog tracking during bulk census deletion
+    declare vPrevForeignKeyChecks int;
+    declare vPrevDisableTriggers int default null;
+
+    -- Issue #509: restore the caller's EXACT prior foreign_key_checks /
+    -- @disable_triggers on every exit path (a caller may invoke this from
+    -- within its own already-overridden scope, or @disable_triggers may still
+    -- be its default NULL) — not hard-coded 1/0 — so a mid-procedure failure
+    -- can't leave the pooled connection poisoned for the next caller.
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET foreign_key_checks = vPrevForeignKeyChecks;
+        SET @disable_triggers = vPrevDisableTriggers;
+        RESIGNAL;
+    END;
+
+    SET vPrevForeignKeyChecks = @@foreign_key_checks;
+    SET vPrevDisableTriggers = @disable_triggers;
     set @disable_triggers = 1;
     set foreign_key_checks = 0;
     START TRANSACTION;
@@ -502,6 +546,13 @@ BEGIN
     FROM measurementssummary
     WHERE CensusID = targetCensusID;
 
+    -- Issue #509: viewfulltable is materialized (populated by
+    -- RefreshViewFullTable), never recomputed on read, and must be cleared
+    -- explicitly with the rest of the census.
+    DELETE
+    FROM viewfulltable
+    WHERE CensusID = targetCensusID;
+
     -- Delete core measurements, stems, and trees for this census
     delete from coremeasurements where CensusID = targetCensusID;
     delete from stems where CensusID = targetCensusID;
@@ -511,10 +562,10 @@ BEGIN
     FROM census
     WHERE CensusID = targetCensusID;
 
+    -- Historical (viewfulltable) and source deletes above are complete; commit now.
     COMMIT;
-    set foreign_key_checks = 1;
-    -- Re-enable triggers after census deletion
-    set @disable_triggers = 0;
+    SET foreign_key_checks = vPrevForeignKeyChecks;
+    SET @disable_triggers = vPrevDisableTriggers;
 END $$
 
 -- reingestfailedrows removed: operated on legacy failedmeasurements table.
@@ -559,40 +610,50 @@ begin
       AND q.PlotID = ${currentPlotID};',
             'Calculating the number of all live stem records for the current site, plot, and census', true),
            ('Number of all trees',
-            'select count(t.TreeID) as TotalTrees
-    from ${schema}.coremeasurements cm
-    join ${schema}.stems s on s.StemGUID = cm.StemGUID and s.IsActive is true
-    join ${schema}.census c on c.CensusID = cm.CensusID and c.IsActive is true
-    join ${schema}.trees t on t.CensusID = c.CensusID and t.IsActive is true
-    join ${schema}.quadrats q on q.QuadratID = s.QuadratID and q.IsActive is true
-    where c.CensusID = ${currentCensusID} and c.PlotID = ${currentPlotID}',
+            'select count(distinct t.TreeID) as TotalTrees
+from ${schema}.coremeasurements cm
+join ${schema}.stems s on s.StemGUID = cm.StemGUID and s.IsActive is true
+join ${schema}.census c on c.CensusID = cm.CensusID and c.IsActive is true
+join ${schema}.trees t on t.TreeID = s.TreeID and t.CensusID = c.CensusID and t.IsActive is true
+join ${schema}.quadrats q on q.QuadratID = s.QuadratID and q.IsActive is true
+where cm.IsActive is true and c.CensusID = ${currentCensusID} and c.PlotID = ${currentPlotID}',
             'Calculating the total number of all trees for the current site, plot, and census', true),
            ('All dead or missing stems and count by census',
-            'SELECT cm.CensusID,
-               COUNT(s.StemGUID) AS DeadOrMissingStems,
-               GROUP_CONCAT(s.StemTag ORDER BY s.StemTag) AS DeadOrMissingStemList
-               FROM ${schema}.stems s
-               JOIN ${schema}.coremeasurements cm ON cm.StemGUID = s.StemGUID and cm.IsActive is true
-               JOIN ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
-               JOIN ${schema}.attributes a ON a.Code = cma.Code and a.IsActive is true
-               WHERE a.Status IN (''dead'', ''missing'') and s.IsActive is true
-               GROUP BY cm.CensusID;',
+            'SELECT dm.CensusID,
+       COUNT(*) AS DeadOrMissingStems,
+       GROUP_CONCAT(dm.StemTag ORDER BY dm.StemTag) AS DeadOrMissingStemList
+FROM (
+         SELECT DISTINCT cm.CensusID, s.StemGUID, s.StemTag
+         FROM ${schema}.stems s
+         JOIN ${schema}.coremeasurements cm ON cm.StemGUID = s.StemGUID and cm.IsActive is true
+         JOIN ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
+         JOIN ${schema}.attributes a ON a.Code = cma.Code and a.IsActive is true
+         JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID and q.IsActive is true
+         WHERE a.Status IN (''dead'', ''missing'') and s.IsActive is true
+           and cm.CensusID = ${currentCensusID} and q.PlotID = ${currentPlotID}
+     ) dm
+GROUP BY dm.CensusID;',
             'Finds and returns a count of, then all dead or missing stems by census', true),
            ('All trees outside plot limits',
-            'select t.TreeTag,
-           (s.LocalX + q.StartX + p.GlobalX) as GlobalStemX,
-           (s.LocalY + q.StartY + p.GlobalY) as GlobalStemY
-    from ${schema}.coremeasurements cm
-             join ${schema}.stems s on s.StemGUID = cm.StemGUID
-             join ${schema}.census c on c.CensusID = cm.CensusID
-             join ${schema}.plots p on p.PlotID = c.PlotID
-             join ${schema}.trees t on t.CensusID = c.CensusID and t.TreeID = s.TreeID and t.IsActive is true
-             join ${schema}.quadrats q on q.QuadratID = s.QuadratID and q.IsActive is true
-    where (s.LocalX is null or q.StartX is null or p.GlobalX is null or p.DimensionX is null)
-       or (s.LocalY is null or q.StartY is null or p.GlobalY is null or p.DimensionY is null)
-       or (s.LocalX + q.StartX + p.GlobalX) > (p.GlobalX + p.DimensionX)
-       or (s.LocalY + q.StartY + p.GlobalY) > (p.GlobalY + p.DimensionY)
-        and (p.PlotID = ${currentPlotID} and c.CensusID = ${currentCensusID});',
+            'select distinct t.TreeTag,
+       (s.LocalX + q.StartX + p.GlobalX) as GlobalStemX,
+       (s.LocalY + q.StartY + p.GlobalY) as GlobalStemY
+from ${schema}.coremeasurements cm
+         join ${schema}.stems s on s.StemGUID = cm.StemGUID and s.IsActive is true
+         join ${schema}.census c on c.CensusID = cm.CensusID and c.IsActive is true
+         join ${schema}.plots p on p.PlotID = c.PlotID
+         join ${schema}.trees t on t.CensusID = c.CensusID and t.TreeID = s.TreeID and t.IsActive is true
+         join ${schema}.quadrats q on q.QuadratID = s.QuadratID and q.IsActive is true
+where cm.IsActive is true
+  and (
+       (s.LocalX is null or q.StartX is null or p.GlobalX is null or p.DimensionX is null)
+    or (s.LocalY is null or q.StartY is null or p.GlobalY is null or p.DimensionY is null)
+    or (s.LocalX + q.StartX + p.GlobalX) > (p.GlobalX + p.DimensionX)
+    or (s.LocalY + q.StartY + p.GlobalY) > (p.GlobalY + p.DimensionY)
+    or (s.LocalX + q.StartX + p.GlobalX) < p.GlobalX
+    or (s.LocalY + q.StartY + p.GlobalY) < p.GlobalY
+  )
+  and p.PlotID = ${currentPlotID} and c.CensusID = ${currentCensusID};',
             'Finds and returns any trees outside plot limits', true),
            ('Highest DBH measurement and HOM measurement by species',
             'select sp.SpeciesCode, sp.SpeciesName, max(cm.MeasuredDBH) as LargestDBH, max(cm.MeasuredHOM) as LargestHOM
