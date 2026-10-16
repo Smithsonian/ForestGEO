@@ -1,58 +1,173 @@
 import MapperFactory from '@/config/datamapper';
-import { handleUpsert } from '@/config/utils';
+import { handleUpsert, toTxExecutor } from '@/config/utils';
 import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/lib/db/definitions/views';
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { safeFormatQuery, safeEscapeId } from '@/lib/db/sqlsecurity';
 import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
 import type { UpsertOperation } from '@/config/utils';
+import { recordMutation, ChangelogOperation, type ChangelogRowState } from '@/lib/changelog/record-mutation';
+import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
 
 // need to try integrating this into validation system:
 
+interface GenericUpsertIdentity {
+  /** The table actually mutated. Lowercase, matching db/sql/tablestructures.sql — never `mapping.tableName`'s casing, which is cosmetic. */
+  realTableName: string;
+  recordIDColumn: string;
+  /** Mirrors the table's real UNIQUE constraint so an UPDATE is matched by the same key MySQL itself uses, not by guessing from whichever columns happen to be non-null. */
+  matchColumns: string[];
+  fixedMatch?: Record<string, number>;
+}
+
+/**
+ * Natural-key lookup for the generic (no specialProcessing) upsert path (#507).
+ * `attributes` has no auto-increment column, so `handleUpsert`'s insertId trick
+ * can't classify INSERT vs UPDATE here; a pre-upsert SELECT on each table's real
+ * unique key does, and also captures the honest prior row for the changelog —
+ * no oldRowState:null is needed on this path.
+ *
+ * Add an entry here before giving a new fileMapping entry a generic (no
+ * specialProcessing) upsert: insertOrUpdate refuses to run rather than silently
+ * writing a row with no audit coverage.
+ */
+const GENERIC_UPSERT_IDENTITY: Record<string, GenericUpsertIdentity> = {
+  attributes: { realTableName: 'attributes', recordIDColumn: 'Code', matchColumns: ['Code'], fixedMatch: { IsActive: 1 } },
+  quadrats: { realTableName: 'quadrats', recordIDColumn: 'QuadratID', matchColumns: ['PlotID', 'QuadratName'], fixedMatch: { IsActive: 1 } }
+};
+
 export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<void> {
   const { formType, schema, ...subProps } = props;
-  const { connectionManager, rowData } = subProps;
+  const { connectionManager, rowData, transactionID } = subProps;
   const mapping = fileMappings[formType];
   if (!mapping) {
     throw new Error(`Mapping not found for file type: ${formType}`);
   }
   if (formType === 'measurements') {
     throw new Error('Individual measurements processing is no longer supported. Use bulk processing instead.');
-  } else {
-    if (mapping.specialProcessing) {
-      await mapping.specialProcessing({ ...subProps, schema });
-    } else {
-      const columns = Object.keys(mapping.columnMappings);
-      if (columns.includes('plotID')) rowData['plotID'] = subProps.plot?.plotID?.toString() ?? null;
-      if (columns.includes('censusID')) rowData['censusID'] = subProps.census?.dateRanges?.[0]?.censusID?.toString() ?? null;
-      const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
-      const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
-      const values = columns.map(fileColumn => {
-        const value = rowData[fileColumn];
-        if (typeof value === 'string' && value === '') return null;
-        return value;
-      });
-      const query = `
-        INSERT INTO ${schema}.${mapping.tableName} (${tableColumns})
-        VALUES (${placeholders})
-        ON DUPLICATE KEY
-          UPDATE ${tableColumns
-            .split(', ')
-            .map(column => `${column} = VALUES(${column})`)
-            .join(', ')};
-      `;
+  }
 
+  if (mapping.specialProcessing) {
+    // specialProcessing implementations (processPersonnel, processSpecies) read
+    // subProps.transactionID themselves; passed through untouched here.
+    await mapping.specialProcessing({ ...subProps, schema });
+    return;
+  }
+
+  const identity = GENERIC_UPSERT_IDENTITY[formType];
+  if (!identity) {
+    throw new Error(
+      `insertOrUpdate has no audit identity for file type "${formType}". Add an entry to GENERIC_UPSERT_IDENTITY ` +
+        `in components/processors/processorhelperfunctions.tsx describing its real unique key before routing it through the generic upsert path.`
+    );
+  }
+  if (!transactionID) {
+    throw new Error(`insertOrUpdate requires a transactionID for file type "${formType}" so the row write and its changelog audit share one transaction.`);
+  }
+  if (!subProps.fullName) {
+    throw new Error(`insertOrUpdate requires fullName (the resolved session identity) for file type "${formType}" to attribute the changelog entry honestly.`);
+  }
+  // unifiedchangelog.ChangedBy is varchar(64) (see identity.ts) — truncate here
+  // rather than let a long Smithsonian address roll back this row's own write.
+  const changedBy = subProps.fullName.slice(0, CHANGED_BY_MAX_LENGTH);
+
+  const columns = Object.keys(mapping.columnMappings);
+  if (columns.includes('plotID')) rowData['plotID'] = subProps.plot?.plotID?.toString() ?? null;
+  if (columns.includes('censusID')) rowData['censusID'] = subProps.census?.dateRanges?.[0]?.censusID?.toString() ?? null;
+
+  const dbColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]);
+  const valueByColumn: Record<string, unknown> = {};
+  columns.forEach((fileColumn, index) => {
+    const raw = rowData[fileColumn];
+    valueByColumn[dbColumns[index]] = typeof raw === 'string' && raw === '' ? null : raw;
+  });
+
+  const tx = toTxExecutor(connectionManager, transactionID);
+  const fixedMatchColumns = Object.keys(identity.fixedMatch ?? {});
+  const matchColumns = [...identity.matchColumns, ...fixedMatchColumns];
+  const matchWhere = matchColumns.map(column => `${safeEscapeId(column)} = ?`).join(' AND ');
+  const matchParams = [...identity.matchColumns.map(column => valueByColumn[column]), ...fixedMatchColumns.map(column => identity.fixedMatch![column])];
+  // FOR UPDATE: holds a row lock on the matched natural key from the moment the
+  // prior state is captured until this transaction commits, so a concurrent
+  // writer cannot change or delete the same row between this SELECT and the
+  // INSERT ... ON DUPLICATE KEY UPDATE below (#507 — a TOCTOU gap here would let
+  // the captured oldRowState silently stop matching what was actually
+  // overwritten).
+  const selectSQL = safeFormatQuery(schema, `SELECT * FROM ??.${safeEscapeId(identity.realTableName)} WHERE ${matchWhere} FOR UPDATE`);
+
+  const existingRows = await tx.query<ChangelogRowState[]>(selectSQL, matchParams);
+  let existingRow = existingRows[0] ?? null;
+
+  const tableColumns = dbColumns.map(column => safeEscapeId(column)).join(', ');
+  const placeholders = dbColumns.map(() => '?').join(', ');
+  const values = dbColumns.map(column => valueByColumn[column]);
+  const updateAssignments = dbColumns.map(column => `${safeEscapeId(column)} = VALUES(${safeEscapeId(column)})`).join(', ');
+  const insertQuery = `INSERT INTO ${safeEscapeId(schema)}.${safeEscapeId(identity.realTableName)} (${tableColumns}) VALUES (${placeholders})`;
+  const upsertQuery = `${insertQuery} ON DUPLICATE KEY UPDATE ${updateAssignments}`;
+
+  try {
+    if (existingRow) {
+      await tx.query(upsertQuery, values);
+    } else {
       try {
-        // Execute the query using the provided connection
-        await connectionManager.executeQuery(query, values);
-      } catch (error: any) {
-        // Rollback the transaction in case of an error
-        ailogger.error(`INSERT OR UPDATE: error in query execution: ${error}. Returning error breaking row to user... `);
-        throw error;
+        // READ COMMITTED does not lock an absent natural key. A plain INSERT
+        // detects a peer's first insert without overwriting its uncaptured row.
+        await tx.query(insertQuery, values);
+      } catch (error) {
+        if (!(error instanceof Error) || (error as Error & { code?: string }).code !== 'ER_DUP_ENTRY') throw error;
+        const peerRows = await tx.query<ChangelogRowState[]>(selectSQL, matchParams);
+        existingRow = peerRows[0] ?? null;
+        if (!existingRow) throw error;
+        await tx.query(upsertQuery, values);
       }
     }
+  } catch (error: any) {
+    ailogger.error(`INSERT OR UPDATE: error in query execution: ${error}. Returning error breaking row to user... `);
+    throw error;
   }
+
+  const newRows = await tx.query<ChangelogRowState[]>(selectSQL, matchParams);
+  const newRow = newRows[0];
+  if (!newRow) {
+    throw new Error(`insertOrUpdate: ${identity.realTableName} row vanished immediately after its own upsert (formType "${formType}").`);
+  }
+  const recordID = newRow[identity.recordIDColumn] as string | number;
+  const plotIDForAudit = newRow.PlotID !== undefined && newRow.PlotID !== null ? Number(newRow.PlotID) : null;
+
+  if (!existingRow) {
+    await recordMutation({
+      tx,
+      schema,
+      tableName: identity.realTableName,
+      recordID,
+      operation: ChangelogOperation.INSERT,
+      newRowState: newRow,
+      changedBy,
+      plotID: plotIDForAudit,
+      censusID: null
+    });
+    return;
+  }
+
+  if (JSON.stringify(existingRow) === JSON.stringify(newRow)) {
+    // True no-op: every value this upsert would write already matched. Logging
+    // this would put a changelog row in front of a change that never happened.
+    return;
+  }
+
+  await recordMutation({
+    tx,
+    schema,
+    tableName: identity.realTableName,
+    recordID,
+    operation: ChangelogOperation.UPDATE,
+    oldRowState: existingRow,
+    newRowState: newRow,
+    changedBy,
+    plotID: plotIDForAudit,
+    censusID: null
+  });
 }
 
 type FieldList = string[];

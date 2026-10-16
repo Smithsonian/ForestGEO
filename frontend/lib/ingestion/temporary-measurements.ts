@@ -1,8 +1,10 @@
 import { format } from 'mysql2/promise';
 import moment from 'moment/moment';
-import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildInPlaceholders, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import { recordDeletedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
 import ailogger from '@/ailogger';
 import { FileRow, SourceFormat } from '@/config/macros/formdetails';
 import { toFiniteNumber } from '@/config/measurementerrors';
@@ -303,11 +305,91 @@ async function deleteInBoundedChunks(connectionManager: ConnectionManager, delet
 }
 
 /**
+ * Same per-statement bound as deleteInBoundedChunks, but for coremeasurements
+ * only, with a `unifiedchangelog` DELETE-audit row per row removed (#507).
+ * Exported so lib/uploads/ingest-batch.ts's stale-failure cleanup can reuse
+ * this select-lock-audit-delete sequence instead of duplicating it.
+ *
+ * Each chunk: SELECT ... FOR UPDATE the chunk's ids (stable ORDER BY, so a
+ * reissued `LIMIT n` can't pick a different n rows; FOR UPDATE locks them for
+ * the audit read but does not stop a concurrent INSERT matching a LATER
+ * chunk), audit via recordDeletedCoreMeasurementsAudit, then DELETE by id —
+ * all in the same transaction, so a rollback discards both together.
+ *
+ * Deliberately does NOT audit the measurement_error_log/failedmeasurements/
+ * uploadmetrics deletes elsewhere in cleanupPreviousFileUploads — derivative
+ * bookkeeping, reconstructed by the replacement ingestion that follows.
+ *
+ * `fromSQL` defaults to the plain table (unchanged SQL for the common
+ * single-table caller); pass a `??.coremeasurements cm INNER JOIN ...`
+ * fragment when `whereSQL` needs other tables — the SELECT then adds
+ * `DISTINCT` so a join can't select (and audit) one id twice.
+ */
+export async function deleteCoreMeasurementsInBoundedChunksWithAudit(
+  connectionManager: ConnectionManager,
+  schema: string,
+  whereSQL: string,
+  whereParams: unknown[],
+  changedBy: string | null,
+  plotID: number,
+  censusID: number,
+  transactionID: string,
+  fromSQL: string = '??.coremeasurements'
+): Promise<number> {
+  const isJoinedSource = fromSQL !== '??.coremeasurements';
+  const idColumnSQL = isJoinedSource ? 'DISTINCT cm.CoreMeasurementID' : 'CoreMeasurementID';
+  const orderBySQL = isJoinedSource ? 'cm.CoreMeasurementID' : 'CoreMeasurementID';
+  const selectIdsSQL = safeFormatQuery(
+    schema,
+    `SELECT ${idColumnSQL} FROM ${fromSQL}
+     WHERE ${whereSQL}
+     ORDER BY ${orderBySQL}
+     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}
+     FOR UPDATE`
+  );
+  const tx = transactionExecutorFor(connectionManager, transactionID);
+  let totalDeleted = 0;
+
+  for (;;) {
+    const idRows = await connectionManager.executeQuery(selectIdsSQL, whereParams, transactionID);
+    const ids = (Array.isArray(idRows) ? idRows : []).map((row: { CoreMeasurementID: number }) => row.CoreMeasurementID);
+    if (ids.length === 0) return totalDeleted;
+
+    const auditedCount = await recordDeletedCoreMeasurementsAudit({ tx, schema, coreMeasurementIDs: ids, changedBy, plotID, censusID });
+    if (auditedCount !== ids.length) {
+      throw new Error(
+        `Audit mismatch: selected ${ids.length} coremeasurements row(s) for deletion but only ` +
+          `audited ${auditedCount}. Refusing to delete — the audit trail and the data would disagree.`
+      );
+    }
+
+    const deleteSQL = safeFormatQuery(schema, `DELETE FROM ??.coremeasurements WHERE CoreMeasurementID IN (${buildInPlaceholders(ids.length)})`);
+    const deleteResult = await connectionManager.executeQuery(deleteSQL, ids, transactionID);
+    const deletedThisChunk = requireAffectedRows(deleteResult, deleteSQL);
+    if (deletedThisChunk !== ids.length) {
+      throw new Error(
+        `Audited delete removed ${deletedThisChunk} coremeasurements row(s) but audited ${ids.length} — ` + `the audit trail and the data would disagree.`
+      );
+    }
+
+    totalDeleted += deletedThisChunk;
+    if (ids.length < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return totalDeleted;
+  }
+}
+
+/**
  * Clean up all data from previous uploads for the same plot/census scope.
  * Clean measurement uploads are census replacements: a new upload fully replaces
  * any earlier measurement batches for that census, even if the filename changed.
  *
  * Removes: validation error links, coremeasurements, failedmeasurements (if legacy table exists), uploadmetrics
+ *
+ * `changedBy` attributes the coremeasurements DELETE audit rows this writes
+ * to `unifiedchangelog` (#507). `null` records an unattributed cleanup rather
+ * than throwing — see recordDeletedCoreMeasurementsAudit. The derivative
+ * measurement_error_log/failedmeasurements/uploadmetrics deletes below are
+ * deliberately NOT audited; see deleteCoreMeasurementsInBoundedChunksWithAudit's
+ * doc comment for why.
  */
 export async function cleanupPreviousFileUploads(
   connectionManager: ConnectionManager,
@@ -316,6 +398,7 @@ export async function cleanupPreviousFileUploads(
   currentBatchID: string,
   plotID: number,
   censusID: number,
+  changedBy: string | null,
   transactionID: string
 ): Promise<number> {
   // SCOPE: the whole target census, minus the incoming batch family.
@@ -373,13 +456,20 @@ export async function cleanupPreviousFileUploads(
   }
 
   // Every prior measurement in the census — ingested and unresolved alike.
-  const deleteCmSQL = safeFormatQuery(
+  // Audited per row (#507): deleteCoreMeasurementsInBoundedChunksWithAudit
+  // writes a DELETE unifiedchangelog row for each one, in this same
+  // transaction, before removing it.
+  const deleteCmWhereSQL = `CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'UploadBatchID')}`;
+  const deletedCmRows = await deleteCoreMeasurementsInBoundedChunksWithAudit(
+    connectionManager,
     schema,
-    `DELETE FROM ??.coremeasurements
-     WHERE CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'UploadBatchID')}
-     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
+    deleteCmWhereSQL,
+    [censusID, ...familyParams],
+    changedBy,
+    plotID,
+    censusID,
+    transactionID
   );
-  const deletedCmRows = await deleteInBoundedChunks(connectionManager, deleteCmSQL, [censusID, ...familyParams], transactionID);
 
   const deleteFailedSQL = safeFormatQuery(
     schema,

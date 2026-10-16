@@ -1,3 +1,4 @@
+import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
 /**
  * In-process background upload worker (async-upload remediation Task 10).
  *
@@ -714,7 +715,17 @@ async function cleanupBatchArtifacts(ctx: BatchScopeContext, fileName: string, b
   );
   await ctx.connectionManager.executeQuery(deleteTempSQL, [fileName, plotID, censusID, batchID, subBatchPattern]);
   const completedSubBatchIDs = await getCompletedSubBatchIDs(ctx, batchID);
-  await deleteUnresolvedRowsForBatchFamily(ctx.connectionManager, schemaName, fileName, batchID, censusID, undefined, completedSubBatchIDs);
+  await deleteUnresolvedRowsForBatchFamily(
+    ctx.connectionManager,
+    schemaName,
+    fileName,
+    batchID,
+    censusID,
+    undefined,
+    completedSubBatchIDs,
+    ctx.job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null,
+    plotID
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -843,10 +854,16 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
           storedMapping: columnMappings[file.fileName],
           uploadSessionID: ctx.sessionID,
           transactionID,
-          changedBy: job.createdBy,
+          changedBy: job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null,
           // Census replacement may only run while staging the job's FIRST
           // file — later files would wipe earlier files' completed batches.
-          suppressCensusReplacementCleanup: fileIndex > 0
+          suppressCensusReplacementCleanup: fileIndex > 0,
+          // Every chunk of this file shares `batchID` (#507) — chunkIndex is
+          // this chunk's own stable identity for the file_upload changelog
+          // running totals, so a worker retry of this exact chunk replaces
+          // its prior contribution instead of a second, different chunk
+          // overwriting it.
+          chunkIdentity: `${batchID}:chunk${chunkIndex}`
         });
         await connectionManager.commitTransaction(transactionID);
 
@@ -948,6 +965,7 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
           censusID: job.censusID,
           fileName: file.fileName,
           batchID,
+          changedBy: job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null,
           sourceRowIndexOffset: parseRejectIndexOffset(fileInvalidRows.length)
         },
         fileInvalidRows
@@ -986,6 +1004,7 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
         censusID: job.censusID,
         fileName: deferred.fileName,
         batchID: deferred.batchID,
+        changedBy: job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null,
         sourceRowIndexOffset: parseRejectIndexOffset(deferred.rows.length)
       },
       deferred.rows
@@ -1004,7 +1023,10 @@ async function runIngestForBatch(ctx: WorkerRunContext, fileName: string, batchI
       schema: ctx.job.schemaName,
       fileID: fileName,
       batchID,
-      isAborted: abortProbe(ctx)
+      isAborted: abortProbe(ctx),
+      // Job creator's identity, not any client-provided field — same contract
+      // documented on IngestBatchParams.changedBy (#507).
+      changedBy: ctx.job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null
     });
   } catch (error) {
     if (error instanceof IngestBatchAbortedError) {

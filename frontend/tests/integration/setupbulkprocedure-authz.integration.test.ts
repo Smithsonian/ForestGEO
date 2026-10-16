@@ -31,6 +31,10 @@ const MEMBER_EMAIL = 'member@forestgeo.test';
 const TEST_FILE_ID = 'file.csv';
 const TEST_BATCH_ID = 'batch-1';
 const TEST_SESSION_ID = 'session-1';
+const TEST_PLOT_ID = 22;
+const TEST_CENSUS_ID = 6;
+const TEST_ROW_COUNT = 5;
+const SUBBATCH_TRANSACTION_ID = 'tx-subbatch';
 
 vi.mock('@/auth', () => ({
   auth: vi.fn(async () => ({ user: { email: ADMIN_EMAIL, userStatus: 'global', sites: [] } }))
@@ -74,7 +78,10 @@ vi.mock('@/lib/batchfailuretransfer', () => ({
 const dbSpies = vi.hoisted(() => ({
   executeQuery: vi.fn(),
   acquireApplicationLock: vi.fn(async () => true),
-  withTransaction: vi.fn()
+  withTransaction: vi.fn(),
+  beginTransaction: vi.fn(),
+  commitTransaction: vi.fn(),
+  rollbackTransaction: vi.fn()
 }));
 
 vi.mock('@/lib/db/connectionmanager', () => ({
@@ -82,7 +89,10 @@ vi.mock('@/lib/db/connectionmanager', () => ({
     getInstance: () => ({
       executeQuery: dbSpies.executeQuery,
       acquireApplicationLock: dbSpies.acquireApplicationLock,
-      withTransaction: dbSpies.withTransaction
+      withTransaction: dbSpies.withTransaction,
+      beginTransaction: dbSpies.beginTransaction,
+      commitTransaction: dbSpies.commitTransaction,
+      rollbackTransaction: dbSpies.rollbackTransaction
     })
   }
 }));
@@ -104,12 +114,23 @@ function primeSuccessfulProcedureRun() {
     async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
       fn({ query: (sql: string, params?: unknown[]) => dbSpies.executeQuery(sql, params), id: 'tx-1' })
   );
-  dbSpies.executeQuery
-    .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
-    .mockResolvedValueOnce([{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }])
-    .mockResolvedValueOnce({ affectedRows: 0 })
-    .mockResolvedValueOnce([])
-    .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
+  dbSpies.beginTransaction.mockResolvedValue(SUBBATCH_TRANSACTION_ID);
+  dbSpies.commitTransaction.mockResolvedValue(undefined);
+  dbSpies.rollbackTransaction.mockResolvedValue(undefined);
+  // Keyed on statement text, not call order: ingestBatch's per-sub-batch transaction
+  // and audit statements (#507/#527) must not shift which response a query receives.
+  dbSpies.executeQuery.mockImplementation(async (sql: string) => {
+    const text = String(sql);
+    if (text.includes('.temporarymeasurements') && text.includes('GROUP BY BatchID')) {
+      return [{ BatchID: TEST_BATCH_ID, PlotID: TEST_PLOT_ID, CensusID: TEST_CENSUS_ID, rowCount: TEST_ROW_COUNT, plotCount: 1, censusCount: 1 }];
+    }
+    if (text.includes('completedUploads')) return [{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }];
+    if (text.includes('bulkingestion_caller_owns_transaction')) return {};
+    if (text.includes('bulkingestionprocess')) return [[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}];
+    if (text.includes('UPDATE') && text.includes('.temporarymeasurements')) return { affectedRows: 0 };
+    if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 0 };
+    return [];
+  });
 }
 
 describe('GET /api/setupbulkprocedure/[fileID]/[batchID] authz', () => {
@@ -148,5 +169,11 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID] authz', () => {
     // Retained token check ran for the member, and the setup transaction executed.
     expect(requireUploadSessionOwnershipMock).toHaveBeenCalledTimes(1);
     expect(dbSpies.withTransaction).toHaveBeenCalled();
+    const procedureCalls = dbSpies.executeQuery.mock.calls.filter(
+      ([sql]: [string]) => String(sql).includes('CALL') && String(sql).includes('bulkingestionprocess')
+    );
+    expect(procedureCalls, 'the member must reach the bulkingestionprocess CALL').toHaveLength(1);
+    expect(dbSpies.commitTransaction).toHaveBeenCalledWith(SUBBATCH_TRANSACTION_ID);
+    expect(dbSpies.rollbackTransaction).not.toHaveBeenCalled();
   });
 });

@@ -128,7 +128,14 @@ class ConnectionManager {
   private transactionConnections = new ObservableMap<string, PoolConnection>(); // Store transaction-specific connections
   private transactionMeta = new Map<
     string,
-    { startedAt: number; timeoutHandle: NodeJS.Timeout | null; keepAliveHandle: NodeJS.Timeout | null; resourceLocks: Set<string> }
+    {
+      startedAt: number;
+      timeoutHandle: NodeJS.Timeout | null;
+      keepAliveHandle: NodeJS.Timeout | null;
+      resourceLocks: Set<string>;
+      /** In-flight acquireApplicationLock calls for this transaction, keyed by lock name — see acquireApplicationLock's doc comment. */
+      pendingLockAcquisitions: Map<string, Promise<boolean>>;
+    }
   >();
   private readonly DEFAULT_TX_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
   private readonly MAX_CONCURRENT_TRANSACTIONS = 12; // Reduced to prevent overwhelming connection pool
@@ -273,7 +280,8 @@ class ConnectionManager {
             startedAt: Date.now(),
             timeoutHandle: null as NodeJS.Timeout | null,
             keepAliveHandle: null as NodeJS.Timeout | null,
-            resourceLocks: new Set<string>()
+            resourceLocks: new Set<string>(),
+            pendingLockAcquisitions: new Map<string, Promise<boolean>>()
           };
           this.transactionMeta.set(transactionId, meta);
 
@@ -555,7 +563,8 @@ class ConnectionManager {
       startedAt: Date.now(),
       timeoutHandle: null as NodeJS.Timeout | null,
       keepAliveHandle: null as NodeJS.Timeout | null,
-      resourceLocks: new Set<string>()
+      resourceLocks: new Set<string>(),
+      pendingLockAcquisitions: new Map<string, Promise<boolean>>()
     };
 
     // Enhanced keep-alive mechanism: ping every 90 seconds for long transactions
@@ -700,7 +709,50 @@ class ConnectionManager {
   }
 
   // Application-level lock management using MySQL distributed locks
+  /**
+   * MySQL's GET_LOCK is refcounted per (session, name): acquiring the same
+   * name twice on one connection requires two RELEASE_LOCK calls to fully
+   * drop it, while cleanupApplicationLocks only ever releases once per name
+   * tracked in `resourceLocks`. A transaction that already tracks this name
+   * already holds it for its full remaining lifetime, so a re-acquire is a
+   * safe no-op rather than a second real GET_LOCK call — handled below for
+   * both a sequential re-acquire (already in `resourceLocks`) and a
+   * concurrent one racing the first (joins its in-flight `pendingLockAcquisitions`
+   * promise instead of starting a second real GET_LOCK that would raise the
+   * session's refcount a second time).
+   *
+   * `transactionId` must name a transaction THIS instance is actively
+   * tracking: an unknown id has no `resourceLocks` to register the lock in,
+   * so cleanupApplicationLocks could never release it — an untracked lock
+   * held forever on a connection returned to the pool. Rejected outright
+   * rather than silently taking the lock anyway.
+   */
   public async acquireApplicationLock(lockName: string, transactionId: string, timeoutMs: number = this.LOCK_TIMEOUT_MS): Promise<boolean> {
+    const meta = this.transactionMeta.get(transactionId);
+    if (!meta) {
+      ailogger.error(chalk.red(`acquireApplicationLock: unknown transaction ${transactionId} — refusing to take an untracked lock ${lockName}`));
+      return false;
+    }
+
+    if (meta.resourceLocks.has(lockName)) {
+      return true;
+    }
+
+    const pendingAcquisition = meta.pendingLockAcquisitions.get(lockName);
+    if (pendingAcquisition) {
+      return pendingAcquisition;
+    }
+
+    const acquisition = this.acquireApplicationLockOnce(lockName, transactionId, timeoutMs, meta);
+    meta.pendingLockAcquisitions.set(lockName, acquisition);
+    try {
+      return await acquisition;
+    } finally {
+      meta.pendingLockAcquisitions.delete(lockName);
+    }
+  }
+
+  private async acquireApplicationLockOnce(lockName: string, transactionId: string, timeoutMs: number, meta: { resourceLocks: Set<string> }): Promise<boolean> {
     const lockStartTime = Date.now();
     const timeoutSeconds = Math.ceil(timeoutMs / 1000);
 
@@ -714,11 +766,7 @@ class ConnectionManager {
       const result = await this.executeQuery(query, [lockName, timeoutSeconds], transactionId);
 
       if (result && result[0]?.acquired === 1) {
-        // Track lock for cleanup
-        const meta = this.transactionMeta.get(transactionId);
-        if (meta) {
-          meta.resourceLocks.add(lockName);
-        }
+        meta.resourceLocks.add(lockName);
 
         const lockWaitTime = Date.now() - lockStartTime;
         if (lockWaitTime > 10000) {

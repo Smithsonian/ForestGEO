@@ -58,7 +58,8 @@ vi.mock('@/lib/db/connectionmanager', () => {
   const beginTransaction = vi.fn().mockResolvedValue('tx-test');
   const commitTransaction = vi.fn().mockResolvedValue(undefined);
   const rollbackTransaction = vi.fn().mockResolvedValue(undefined);
-  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction };
+  const acquireApplicationLock = vi.fn().mockResolvedValue(true);
+  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction, acquireApplicationLock };
   return { default: { getInstance: () => instance } };
 });
 
@@ -159,6 +160,7 @@ describe('POST /api/sqlpacketload authz', () => {
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
+    mockConnectionManager.acquireApplicationLock.mockResolvedValue(true);
   });
 
   it('denies a non-admin user outside the schema scope with 403 BEFORE any SQL or the token check', async () => {
@@ -206,6 +208,8 @@ describe('POST /api/sqlpacketload authz', () => {
     expect(res.status).toBe(HTTP_OK);
     const body = await res.json();
     expect(body.insertedCount).toBe(1);
+    // The file-upload summary serialization lock (#507) is taken on the request transaction.
+    expect(mockConnectionManager.acquireApplicationLock).toHaveBeenCalledWith(expect.any(String), 'tx-test', expect.any(Number));
     // Retained token check ran for the member on the measurements branch.
     expect(requireUploadSessionOwnershipMock).toHaveBeenCalledTimes(1);
   });

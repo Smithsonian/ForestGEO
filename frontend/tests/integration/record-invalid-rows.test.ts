@@ -1,3 +1,4 @@
+import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 /**
  * recordInvalidRows / deleteUnresolvedRowsForBatchFamily — Integration Tests
  *
@@ -10,7 +11,7 @@
  * Run in isolation:
  *   npx vitest run --config vitest.integration.config.mts tests/integration/record-invalid-rows.test.ts
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 
@@ -37,17 +38,58 @@ const TRANSACTION_ID_PREFIX = 'record-invalid-rows-tx-';
 const sharedState = vi.hoisted(() => ({
   connection: null as Connection | null,
   activeTransactionID: null as string | null,
-  transactionCounter: 0
+  transactionCounter: 0,
+  /** Every statement issued through the mock, oldest first — lets a test assert ordering. */
+  queryLog: [] as string[],
+  /** When set, the next `INSERT INTO ... unifiedchangelog` statement throws this instead of running. */
+  unifiedchangelogInsertFailureError: null as Error | null,
+  /** True once a statement actually hit the injected unifiedchangelog-INSERT failure above. */
+  unifiedchangelogInsertFailureReached: false,
+  /**
+   * Lock names GET_LOCK-acquired by each active transactionID — mirrors
+   * ConnectionManager's real `transactionMeta.resourceLocks` (lib/db/connectionmanager.ts:703-788):
+   * re-acquiring a name already held by the SAME transaction is a no-op, and
+   * every tracked name is RELEASE_LOCK'd exactly once when that transaction
+   * commits or rolls back.
+   */
+  transactionLocks: new Map<string, Set<string>>(),
+  /** Every lock name ever requested, across all transactions — read by each test's afterEach leak check. */
+  lockNamesSeen: new Set<string>()
 }));
 
+function isUnifiedChangelogInsert(sql: string): boolean {
+  return sql.trimStart().toUpperCase().startsWith('INSERT') && sql.includes('unifiedchangelog');
+}
+
+/** RELEASE_LOCKs and untracks every lock name `transactionID` holds — the mock's cleanupApplicationLocks equivalent. */
+async function releaseLocksForTransaction(transactionID: string): Promise<void> {
+  const heldLocks = sharedState.transactionLocks.get(transactionID);
+  sharedState.transactionLocks.delete(transactionID);
+  if (!heldLocks || heldLocks.size === 0 || !sharedState.connection) return;
+  for (const lockName of heldLocks) {
+    await sharedState.connection.query('SELECT RELEASE_LOCK(?) as released', [lockName]);
+  }
+}
+
 // ConnectionManager mock — routes every DB call to the shared real MySQL
-// connection so commits/rollbacks operate on actual transactions.
+// connection so commits/rollbacks (and, via GET_LOCK/RELEASE_LOCK, application
+// locking — recordAuditedIngestionFailureRows' batch serialization) operate on
+// actual MySQL state. Mirrors the same proxy-to-real-DB pattern used by
+// tests/integration/stage-measurements.test.ts and ingest-batch.test.ts, and
+// the real per-transaction lock lifecycle in lib/db/connectionmanager.ts:703-788
+// (re-acquire-within-transaction is a no-op; one RELEASE_LOCK per held name,
+// fired in commit/rollback's `finally` so it runs even when they throw).
 vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
         throw new Error(`ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
+      }
+      sharedState.queryLog.push(query);
+      if (sharedState.unifiedchangelogInsertFailureError && isUnifiedChangelogInsert(query)) {
+        sharedState.unifiedchangelogInsertFailureReached = true;
+        throw sharedState.unifiedchangelogInsertFailureError;
       }
       const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
       return rows;
@@ -59,6 +101,7 @@ vi.mock('@/lib/db/connectionmanager', () => {
       sharedState.transactionCounter += 1;
       const id = `${TRANSACTION_ID_PREFIX}${sharedState.transactionCounter}`;
       sharedState.activeTransactionID = id;
+      sharedState.transactionLocks.set(id, new Set());
       return id;
     },
     commitTransaction: async (transactionID: string) => {
@@ -66,16 +109,44 @@ vi.mock('@/lib/db/connectionmanager', () => {
       if (transactionID !== sharedState.activeTransactionID) {
         throw new Error('ConnectionManager mock: commit transactionID mismatch');
       }
-      await sharedState.connection.commit();
-      sharedState.activeTransactionID = null;
+      try {
+        await sharedState.connection.commit();
+      } finally {
+        await releaseLocksForTransaction(transactionID);
+        sharedState.activeTransactionID = null;
+      }
     },
     rollbackTransaction: async (transactionID: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       if (transactionID !== sharedState.activeTransactionID) {
         throw new Error('ConnectionManager mock: rollback transactionID mismatch');
       }
-      await sharedState.connection.rollback();
-      sharedState.activeTransactionID = null;
+      try {
+        await sharedState.connection.rollback();
+      } finally {
+        await releaseLocksForTransaction(transactionID);
+        sharedState.activeTransactionID = null;
+      }
+    },
+    // Real MySQL GET_LOCK/RELEASE_LOCK — recordAuditedIngestionFailureRows serializes
+    // its bounded before-snapshot per (schema, batchID) with this. Faithful to
+    // lib/db/connectionmanager.ts:703-788: a transaction that already holds
+    // `lockName` gets a no-op true, never a second real GET_LOCK call.
+    acquireApplicationLock: async (lockName: string, transactionID: string, timeoutMs: number) => {
+      if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      sharedState.lockNamesSeen.add(lockName);
+      const heldByThisTransaction = sharedState.transactionLocks.get(transactionID);
+      if (heldByThisTransaction?.has(lockName)) return true;
+
+      const [rows] = await sharedState.connection.query<RowDataPacket[]>('SELECT GET_LOCK(?, ?) as acquired', [lockName, Math.ceil(timeoutMs / 1000)]);
+      const acquired = (rows as RowDataPacket[])[0]?.acquired === 1;
+      if (acquired && heldByThisTransaction) heldByThisTransaction.add(lockName);
+      return acquired;
+    },
+    releaseApplicationLock: async (lockName: string, transactionID: string) => {
+      if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      await sharedState.connection.query('SELECT RELEASE_LOCK(?) as released', [lockName]);
+      sharedState.transactionLocks.get(transactionID)?.delete(lockName);
     },
     cleanupStaleTransactions: async () => undefined,
     closeConnection: async () => undefined
@@ -137,12 +208,31 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
 
   beforeEach(async () => {
     if (sharedState.activeTransactionID) {
+      const staleTransactionID = sharedState.activeTransactionID;
       await connection.rollback();
+      await releaseLocksForTransaction(staleTransactionID);
       sharedState.activeTransactionID = null;
     }
+    sharedState.queryLog = [];
+    sharedState.unifiedchangelogInsertFailureError = null;
+    sharedState.unifiedchangelogInsertFailureReached = false;
+    sharedState.lockNamesSeen = new Set();
     // Clean any rows left by previous test cases scoped to our FILE_NAME/BATCH_IDs.
     await connection.query(`DELETE FROM \`${schema}\`.coremeasurements WHERE UploadFileID = ? AND StemGUID IS NULL`, [FILE_NAME]);
     console.log('[beforeEach] cleared coremeasurements parse-reject rows for fixture file');
+  });
+
+  // Faithfulness check (lib/db/connectionmanager.ts:703-788): every application
+  // lock a test acquired must have been released exactly once by the time the
+  // test finishes, via the real commit/rollback cleanup path above — never left
+  // held on the shared connection for a later test to silently inherit.
+  afterEach(async () => {
+    expect(sharedState.transactionLocks.size, 'no transaction should still be tracking held application locks after a test').toBe(0);
+    for (const lockName of sharedState.lockNamesSeen) {
+      const [rows] = await connection.query<RowDataPacket[]>('SELECT IS_USED_LOCK(?) AS owner', [lockName]);
+      console.log(`[afterEach] IS_USED_LOCK(${lockName}) = ${JSON.stringify(rows[0]?.owner)}`);
+      expect(rows[0]?.owner, `application lock "${lockName}" must not remain held after the test`).toBeNull();
+    }
   });
 
   // -------------------------------------------------------------------------
@@ -168,6 +258,52 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
       [measurementID]
     );
     return rows;
+  }
+
+  /**
+   * unifiedchangelog rows written for one coremeasurements RecordID (#507 audit
+   * trail for the ingestion-failure wrappers), oldest first.
+   */
+  async function fetchChangelogRows(coreMeasurementID: number): Promise<RowDataPacket[]> {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT Operation, OldRowState, NewRowState, ChangedBy, PlotID, CensusID
+       FROM \`${schema}\`.unifiedchangelog
+       WHERE TableName = 'coremeasurements' AND RecordID = ?
+       ORDER BY ChangeID`,
+      [String(coreMeasurementID)]
+    );
+    return rows;
+  }
+
+  /** measurement_error_log rows for every unresolved coremeasurement in one (fileID, batchID) scope. */
+  async function countMeasurementErrorLogRowsForBatch(batchID: string): Promise<number> {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS n
+       FROM \`${schema}\`.measurement_error_log mel
+       JOIN \`${schema}\`.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
+       WHERE cm.UploadFileID = ? AND cm.UploadBatchID = ?`,
+      [FILE_NAME, batchID]
+    );
+    return Number(rows[0].n);
+  }
+
+  /** unifiedchangelog rows mentioning a given batchID+RawTreeTag, found by scanning either row-state side (not by RecordID, which a rolled-back write never obtained). */
+  async function countUnifiedChangelogRowsForTag(batchID: string, rawTreeTag: string): Promise<number> {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS n
+       FROM \`${schema}\`.unifiedchangelog
+       WHERE TableName = 'coremeasurements'
+         AND (NewRowState->>'$.UploadBatchID' = ? OR OldRowState->>'$.UploadBatchID' = ?)
+         AND (NewRowState->>'$.RawTreeTag' = ? OR OldRowState->>'$.RawTreeTag' = ?)`,
+      [batchID, batchID, rawTreeTag, rawTreeTag]
+    );
+    return Number(rows[0].n);
+  }
+
+  /** JSON columns round-trip as objects via mysql2, but tolerate a string in case a driver config changes that. */
+  function rowState(value: unknown): Record<string, unknown> | null {
+    if (value == null) return null;
+    return typeof value === 'string' ? JSON.parse(value) : (value as Record<string, unknown>);
   }
 
   async function fetchRecordedRows(batchID: string): Promise<RowDataPacket[]> {
@@ -563,5 +699,255 @@ describe('recordInvalidRows / deleteUnresolvedRowsForBatchFamily — integration
     const retryErrors = await fetchMeasurementErrors(retryMeasurementID!);
     console.log(`[test5] retry row error_log entries: ${JSON.stringify(retryErrors)}`);
     expect(retryErrors.length).toBeGreaterThan(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 6: own-or-caller transaction contract (#507) — recordInvalidRows must
+  // open its own transaction only when the caller did not supply one.
+  // -------------------------------------------------------------------------
+
+  it("own-or-caller transaction: opens its own transaction when none is supplied, reuses the caller's when one is", async () => {
+    const ctx: InvalidRowContext = { schema, plotID, censusID, fileName: FILE_NAME, batchID: `${BATCH_ID}__owntx` };
+    const beginSpy = vi.spyOn(connectionManager, 'beginTransaction');
+
+    beginSpy.mockClear();
+    const ownedCount = await recordInvalidRows(connectionManager, ctx, [{ tag: 'T0600', failureReason: 'owned-tx case' }]);
+    console.log(`[test6] no transactionID supplied: beginTransaction call count=${beginSpy.mock.calls.length}`);
+    expect(ownedCount).toBe(1);
+    expect(beginSpy, 'recordInvalidRows must open its own transaction when the caller passed none').toHaveBeenCalledTimes(1);
+
+    beginSpy.mockClear();
+    const callerTx = await connectionManager.beginTransaction();
+    const callerOwnedCount = await recordInvalidRows(connectionManager, { ...ctx, batchID: `${BATCH_ID}__ownertx` }, [{ tag: 'T0601' }], callerTx);
+    await connectionManager.commitTransaction(callerTx);
+    console.log(`[test6] caller transactionID supplied: beginTransaction call count=${beginSpy.mock.calls.length}`);
+    expect(callerOwnedCount).toBe(1);
+    // beginTransaction was called once here (by the test itself, for callerTx) —
+    // recordInvalidRows must NOT call it again on top of that.
+    expect(beginSpy, "recordInvalidRows must reuse the caller's transaction, not open a second one").toHaveBeenCalledTimes(1);
+
+    beginSpy.mockRestore();
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 7: audit trail (#507) — INSERT on first write, UPDATE on a changed
+  // retry, no additional row on an unchanged retry. Attributed to ctx.changedBy.
+  // -------------------------------------------------------------------------
+
+  it('audits an INSERT on first write, an UPDATE recording the actual old/new field values on a changed retry, and exactly zero new rows on an unchanged retry', async () => {
+    const changedBy = 'audit-tester@example.com';
+    const auditBatchID = `${BATCH_ID}__audit`;
+    const ctx: InvalidRowContext = { schema, plotID, censusID, fileName: FILE_NAME, batchID: auditBatchID, changedBy };
+
+    await recordInvalidRows(connectionManager, ctx, [{ tag: 'T0700', failureReason: 'first reason', comments: 'first comment' }]);
+    const measurementID = await fetchCoreMeasurementID(FILE_NAME, auditBatchID, 'T0700');
+    expect(measurementID).not.toBeNull();
+
+    const afterInsert = await fetchChangelogRows(measurementID!);
+    console.log(`[test7] after first write: ${JSON.stringify(afterInsert)}`);
+    expect(afterInsert).toHaveLength(1);
+    expect(afterInsert[0].Operation).toBe('INSERT');
+    expect(afterInsert[0].ChangedBy).toBe(changedBy);
+    expect(afterInsert[0].PlotID).toBe(plotID);
+    expect(afterInsert[0].CensusID).toBe(censusID);
+    expect(afterInsert[0].OldRowState).toBeNull();
+    expect(rowState(afterInsert[0].NewRowState)?.Description).toBe('first reason');
+    expect(rowState(afterInsert[0].NewRowState)?.RawComments).toBe('first comment');
+
+    // Same (batchID, SourceRowIndex=1) key, two changed fields: must UPDATE the
+    // same coremeasurements row (ON DUPLICATE KEY UPDATE), not insert a second
+    // one, and the UPDATE's OldRowState/NewRowState must carry the ACTUAL prior
+    // and new values for BOTH changed fields — not just one of them.
+    await recordInvalidRows(connectionManager, ctx, [{ tag: 'T0700', failureReason: 'second reason', comments: 'second comment' }]);
+    const measurementIDAfterUpdate = await fetchCoreMeasurementID(FILE_NAME, auditBatchID, 'T0700');
+    expect(measurementIDAfterUpdate).toBe(measurementID);
+
+    const afterUpdate = await fetchChangelogRows(measurementID!);
+    console.log(`[test7] after changed retry: ${JSON.stringify(afterUpdate)}`);
+    expect(afterUpdate).toHaveLength(2);
+    expect(afterUpdate[1].Operation).toBe('UPDATE');
+    expect(afterUpdate[1].ChangedBy).toBe(changedBy);
+    const oldRow = rowState(afterUpdate[1].OldRowState)!;
+    const newRow = rowState(afterUpdate[1].NewRowState)!;
+    expect(oldRow.Description).toBe('first reason');
+    expect(oldRow.RawComments).toBe('first comment');
+    expect(newRow.Description).toBe('second reason');
+    expect(newRow.RawComments).toBe('second comment');
+    // Fields NOT touched by the retry must be identical across old and new —
+    // an UPDATE audit row must describe what actually changed, not a
+    // fabricated or partial diff.
+    expect(newRow.RawTreeTag).toBe(oldRow.RawTreeTag);
+    expect(newRow.CoreMeasurementID).toBe(oldRow.CoreMeasurementID);
+
+    // Identical retry (same reason/comments as the last write): must be a true
+    // no-op — no new coremeasurements row, and EXACTLY zero new audit rows.
+    await recordInvalidRows(connectionManager, ctx, [{ tag: 'T0700', failureReason: 'second reason', comments: 'second comment' }]);
+    const afterNoop = await fetchChangelogRows(measurementID!);
+    console.log(`[test7] after unchanged retry: ${JSON.stringify(afterNoop)}`);
+    expect(afterNoop, 'an unchanged retry must add exactly zero new history rows for the same key').toHaveLength(2);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 8: late audit failure rollback (#507, persistence path) — precise
+  // fault injection AT the unifiedchangelog INSERT itself (not an over-length
+  // ChangedBy, which couples the test to actor-normalization behavior rather
+  // than proving a genuinely late failure). recordInvalidRows opened its own
+  // transaction (no transactionID supplied), so the coremeasurements row the
+  // data step already wrote — and its measurement_error_log links — must roll
+  // back along with the failed audit, and no unifiedchangelog row survives.
+  // -------------------------------------------------------------------------
+
+  it('rolls back the just-written coremeasurements row and its error-log links, leaving no audit row, when the unifiedchangelog INSERT fails (own-transaction persistence path)', async () => {
+    const sentinelError = new Error(`SENTINEL_UNIFIEDCHANGELOG_INSERT_FAILURE_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+    const rollbackBatchID = `${BATCH_ID}__rollback`;
+    const ctx: InvalidRowContext = { schema, plotID, censusID, fileName: FILE_NAME, batchID: rollbackBatchID, changedBy: 'rollback-tester@example.com' };
+
+    const errorLogCountBefore = await countMeasurementErrorLogRowsForBatch(rollbackBatchID);
+    const auditCountBefore = await countUnifiedChangelogRowsForTag(rollbackBatchID, 'T0800');
+    expect(errorLogCountBefore).toBe(0);
+    expect(auditCountBefore).toBe(0);
+
+    sharedState.unifiedchangelogInsertFailureError = sentinelError;
+    try {
+      const thrown = await recordInvalidRows(connectionManager, ctx, [{ tag: 'T0800', failureReason: 'should not persist' }]).then(
+        () => null,
+        (error: unknown) => error
+      );
+      console.log(`[test8] recordInvalidRows rejected with: ${thrown instanceof Error ? thrown.message : String(thrown)}`);
+      expect(thrown).toBeInstanceOf(ChangelogWriteError);
+      expect((thrown as ChangelogWriteError).cause).toBe(sentinelError);
+      expect(sharedState.unifiedchangelogInsertFailureReached, 'the injected fault must actually have fired').toBe(true);
+
+      // Ordering: the coremeasurements INSERT must have already run, in the
+      // SAME transaction, before the unifiedchangelog INSERT that failed.
+      const coremeasurementsInsertIndex = sharedState.queryLog.findIndex(sql => /insert\s+into\s+\S*coremeasurements/i.test(sql));
+      const unifiedchangelogInsertIndex = sharedState.queryLog.findIndex(sql => /insert\s+into\s+\S*unifiedchangelog/i.test(sql));
+      console.log(`[test8] coremeasurementsInsertIndex=${coremeasurementsInsertIndex} unifiedchangelogInsertIndex=${unifiedchangelogInsertIndex}`);
+      expect(coremeasurementsInsertIndex, 'the coremeasurements INSERT must actually have run').toBeGreaterThanOrEqual(0);
+      expect(unifiedchangelogInsertIndex, 'the unifiedchangelog INSERT must run strictly AFTER the coremeasurements INSERT').toBeGreaterThan(
+        coremeasurementsInsertIndex
+      );
+    } finally {
+      sharedState.unifiedchangelogInsertFailureError = null;
+    }
+
+    const measurementID = await fetchCoreMeasurementID(FILE_NAME, rollbackBatchID, 'T0800');
+    console.log(`[test8] coremeasurements row after rollback: ${measurementID}`);
+    expect(measurementID, 'the data write must roll back with the failed audit, not survive it').toBeNull();
+
+    const errorLogCountAfter = await countMeasurementErrorLogRowsForBatch(rollbackBatchID);
+    const auditCountAfter = await countUnifiedChangelogRowsForTag(rollbackBatchID, 'T0800');
+    expect(errorLogCountAfter, 'measurement_error_log must be restored exactly to its pre-call state').toBe(errorLogCountBefore);
+    expect(auditCountAfter, 'unifiedchangelog must be restored exactly to its pre-call state — the rolled-back audit INSERT leaves nothing behind').toBe(
+      auditCountBefore
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 9: family cleanup DELETE audit (#507) + preserveBatchIDs — a deleted
+  // row gets exactly one DELETE audit row; a preserved (completed-sibling)
+  // row gets none and is never removed.
+  // -------------------------------------------------------------------------
+
+  it('deleteUnresolvedRowsForBatchFamily audits one DELETE row per removed coremeasurement and never touches a preserved sibling', async () => {
+    const changedBy = 'cleanup-tester@example.com';
+    const cleanupBatchID = `${BATCH_ID}__cleanup`;
+    const preservedSubBatchID = `${cleanupBatchID}__sub001`;
+    const ctx: InvalidRowContext = { schema, plotID, censusID, fileName: FILE_NAME, batchID: cleanupBatchID };
+
+    await recordInvalidRows(connectionManager, ctx, [{ tag: 'T0900', failureReason: 'to be deleted' }]);
+    const deletedMeasurementID = await fetchCoreMeasurementID(FILE_NAME, cleanupBatchID, 'T0900');
+    expect(deletedMeasurementID).not.toBeNull();
+
+    await recordInvalidRows(connectionManager, { ...ctx, batchID: preservedSubBatchID }, [{ tag: 'T0901', failureReason: 'completed sibling, must survive' }]);
+    const preservedMeasurementID = await fetchCoreMeasurementID(FILE_NAME, preservedSubBatchID, 'T0901');
+    expect(preservedMeasurementID).not.toBeNull();
+
+    // plotID is deliberately OMITTED here: deleteUnresolvedRowsForBatchFamily must
+    // resolve it itself from the census row (lib/uploads/record-invalid-rows.test.ts
+    // unit-tests the lookup/missing-census-row mechanics directly) rather than
+    // require every caller to already know it.
+    const deletedCount = await deleteUnresolvedRowsForBatchFamily(
+      connectionManager,
+      schema,
+      FILE_NAME,
+      cleanupBatchID,
+      censusID,
+      undefined,
+      [preservedSubBatchID],
+      changedBy
+    );
+    console.log(`[test9] deletedCount=${deletedCount}`);
+    expect(deletedCount).toBe(1);
+
+    expect(await fetchCoreMeasurementID(FILE_NAME, cleanupBatchID, 'T0900'), 'the non-preserved row must be gone').toBeNull();
+    expect(await fetchCoreMeasurementID(FILE_NAME, preservedSubBatchID, 'T0901'), 'the preserved sibling must survive untouched').toBe(preservedMeasurementID);
+
+    const deletedRowAudit = await fetchChangelogRows(deletedMeasurementID!);
+    console.log(`[test9] deleted row audit trail: ${JSON.stringify(deletedRowAudit)}`);
+    // INSERT (from recordInvalidRows above) + DELETE (from the cleanup).
+    expect(deletedRowAudit).toHaveLength(2);
+    expect(deletedRowAudit[1].Operation).toBe('DELETE');
+    expect(deletedRowAudit[1].ChangedBy).toBe(changedBy);
+    // plotID was omitted above — the DELETE audit row's PlotID must be the real
+    // census row's PlotID (server-resolved), not absent/null/wrong.
+    expect(deletedRowAudit[1].PlotID).toBe(plotID);
+    expect(rowState(deletedRowAudit[1].OldRowState)?.RawTreeTag).toBe('T0900');
+    expect(deletedRowAudit[1].NewRowState).toBeNull();
+
+    const preservedRowAudit = await fetchChangelogRows(preservedMeasurementID!);
+    console.log(`[test9] preserved sibling audit trail: ${JSON.stringify(preservedRowAudit)}`);
+    // Only its own original INSERT — the cleanup must never produce a DELETE
+    // audit row for a row it did not (and must not) delete.
+    expect(preservedRowAudit).toHaveLength(1);
+    expect(preservedRowAudit[0].Operation).toBe('INSERT');
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 10: late audit failure rollback (#507, delete path) — precise fault
+  // injection AT the unifiedchangelog DELETE-audit INSERT (not an over-length
+  // ChangedBy). The candidate row and its error links must survive untouched,
+  // and no DELETE history row must exist for a delete that never committed.
+  // -------------------------------------------------------------------------
+
+  it('preserves the unresolved row and its error-log links, writing no DELETE history row, when the delete audit INSERT fails (own-transaction delete path)', async () => {
+    const deleteRollbackBatchID = `${BATCH_ID}__deleterollback`;
+    const ctx: InvalidRowContext = { schema, plotID, censusID, fileName: FILE_NAME, batchID: deleteRollbackBatchID };
+
+    await recordInvalidRows(connectionManager, ctx, [{ tag: 'T1000', failureReason: 'must survive a failed cleanup audit' }]);
+    const measurementID = await fetchCoreMeasurementID(FILE_NAME, deleteRollbackBatchID, 'T1000');
+    expect(measurementID).not.toBeNull();
+    const errorsBefore = await fetchMeasurementErrors(measurementID!);
+    expect(errorsBefore.length).toBeGreaterThan(0);
+    const auditRowsBefore = await fetchChangelogRows(measurementID!);
+    expect(auditRowsBefore).toHaveLength(1);
+    expect(auditRowsBefore[0].Operation).toBe('INSERT');
+
+    const sentinelError = new Error(`SENTINEL_DELETE_UNIFIEDCHANGELOG_INSERT_FAILURE_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+    sharedState.unifiedchangelogInsertFailureError = sentinelError;
+    try {
+      const thrown = await deleteUnresolvedRowsForBatchFamily(connectionManager, schema, FILE_NAME, deleteRollbackBatchID, censusID).then(
+        () => null,
+        (error: unknown) => error
+      );
+      console.log(`[test10] deleteUnresolvedRowsForBatchFamily rejected with: ${thrown instanceof Error ? thrown.message : String(thrown)}`);
+      expect(thrown).toBeInstanceOf(ChangelogWriteError);
+      expect((thrown as ChangelogWriteError).cause).toBe(sentinelError);
+      expect(sharedState.unifiedchangelogInsertFailureReached, 'the delete audit fault must actually have fired').toBe(true);
+    } finally {
+      sharedState.unifiedchangelogInsertFailureError = null;
+    }
+
+    const survivingMeasurementID = await fetchCoreMeasurementID(FILE_NAME, deleteRollbackBatchID, 'T1000');
+    console.log(`[test10] row after failed cleanup audit: ${survivingMeasurementID}`);
+    expect(survivingMeasurementID, 'the original candidate row must survive a failed delete audit').toBe(measurementID);
+
+    const errorsAfter = await fetchMeasurementErrors(survivingMeasurementID!);
+    expect(errorsAfter.length, 'its error-log links must survive untouched').toBe(errorsBefore.length);
+
+    const auditRowsAfter = await fetchChangelogRows(measurementID!);
+    console.log(`[test10] audit trail after failed cleanup: ${JSON.stringify(auditRowsAfter)}`);
+    expect(auditRowsAfter, 'no DELETE history row must exist for a delete that never committed').toHaveLength(1);
+    expect(auditRowsAfter[0].Operation).toBe('INSERT');
   });
 });

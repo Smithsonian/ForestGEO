@@ -213,10 +213,13 @@ describe('UploadFireSQL — the /api/sqlpacketload request body', () => {
       { timeout: 10_000 }
     );
 
-    const requestModes = fetchMock.mock.calls
+    const requestBodies = fetchMock.mock.calls
       .filter(call => String(call[0]).includes('/api/sqlpacketload'))
-      .map(call => JSON.parse(String((call[1] as RequestInit).body)).uploadMode);
-    expect(requestModes).toEqual([UploadMode.CLEAN_REUPLOAD]);
+      .map(call => JSON.parse(String((call[1] as RequestInit).body)));
+    expect(requestBodies.map(body => body.uploadMode)).toEqual([UploadMode.CLEAN_REUPLOAD]);
+    // #507: the fileRowSet (client-resolved) branch must also send chunkSequence,
+    // not only the rawPayload (server-resolved) branch.
+    expect(requestBodies[0].chunkSequence).toBe(1);
   });
 
   it.each([
@@ -372,6 +375,17 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
       expect(requestBody.rawRows).toBeDefined();
       expect(requestBody.fileRowSet).toBeUndefined();
     }
+
+    // #507: every chunk request must carry its own stable 1-based chunkSequence
+    // (PapaParse's actualChunkCount at parse time), and every chunk of this
+    // upload must occupy a DISTINCT position — proving two different chunks
+    // never collapse onto the same identity even though the queue may upload
+    // them out of parse order.
+    const chunkSequences = requests.map(requestBody => requestBody.chunkSequence);
+    for (const value of chunkSequences) {
+      expect(Number.isInteger(value) && value > 0, `chunkSequence must be a positive integer, got ${JSON.stringify(value)}`).toBe(true);
+    }
+    expect([...chunkSequences].sort((a, b) => a - b)).toEqual(Array.from({ length: requests.length }, (_, index) => index + 1));
   });
 
   // Issue #504: skipEmptyLines must be 'greedy' for measurements specifically, so a delimiter-only

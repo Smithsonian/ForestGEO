@@ -70,6 +70,18 @@ function toPositiveInteger(value: unknown): number | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+const MEASUREMENT_CHUNK_SEQUENCE_INVALID_CODE = 'MEASUREMENT_CHUNK_SEQUENCE_INVALID';
+
+/** Optional positive chunk position; reject ambiguous string spellings and unsafe integers. */
+function parseChunkSequence(value: unknown): { ok: true; value: number | undefined } | { ok: false } {
+  if (value === undefined || value === null) return { ok: true, value: undefined };
+  if (typeof value !== 'number' && typeof value !== 'string') return { ok: false };
+  if (typeof value === 'string' && !/^[1-9]\d*$/.test(value)) return { ok: false };
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) return { ok: false };
+  return { ok: true, value: parsed };
+}
+
 function buildMeasurementScopeErrorResponse(status: HTTPResponses, message: string, details: Record<string, unknown>): NextResponse {
   return new NextResponse(
     JSON.stringify({
@@ -352,6 +364,12 @@ export async function POST(request: NextRequest) {
   const denied = assertSchemaAccess(session!, schema);
   if (denied) return denied;
 
+  // Server-resolved identity for EVERY audit path this route writes (#507): measurement
+  // staging, the fixed-data generic upsert, and the file_upload changelog entry. MUST come
+  // from the authenticated session, never from `body.user` — that field is client-supplied
+  // and would let a caller forge ChangedBy on someone else's upload.
+  const changedBy = authenticatedSessionIdentity(session!.user);
+
   const formType: string = body.formType;
   const sourceFormat = normalizeSourceFormat(body.sourceFormat ?? SourceFormat.csv);
   if (sourceFormat !== SourceFormat.csv) {
@@ -375,7 +393,6 @@ export async function POST(request: NextRequest) {
   const uploadMode = normalizeUploadMode(body.uploadMode);
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
-  const user: string = body.user;
   const fileRowSet: FileRowSet = body.fileRowSet ?? {};
   const fileName: string = body.fileName;
   // Optional RAW-rows path (#6, server half): when present, the server re-resolves/keys/validates
@@ -468,6 +485,23 @@ export async function POST(request: NextRequest) {
     // visible to the client instead of vanishing.
     let mappingDiagnostics: { invalidDateValues: string[]; extraColumnRows: number; ignoredColumnCount: number } | null = null;
 
+    // Capture the position once so retries reuse it and identical chunks at
+    // different positions stay distinct. Older clients retain the content hash.
+    const chunkSequenceResult = parseChunkSequence(body.chunkSequence);
+    if (!chunkSequenceResult.ok) {
+      return NextResponse.json(
+        { error: 'chunkSequence must be a positive integer.', code: MEASUREMENT_CHUNK_SEQUENCE_INVALID_CODE },
+        { status: HTTPResponses.INVALID_REQUEST }
+      );
+    }
+    const chunkSequence = chunkSequenceResult.value;
+    const chunkIdentity =
+      chunkSequence !== undefined
+        ? `${batchID}:chunk${chunkSequence}`
+        : rawRows !== undefined
+          ? crypto.createHash('sha256').update(JSON.stringify(rawRows)).digest('hex')
+          : hashChunkContent(fileRowSet);
+
     // Retry logic for database operations
     while (retryCount <= maxRetries) {
       try {
@@ -488,7 +522,8 @@ export async function POST(request: NextRequest) {
           uploadSessionID: sessionId,
           transactionID,
           preKeyedRows: useServerResolution ? undefined : Object.values(fileRowSet ?? {}),
-          changedBy: user,
+          changedBy,
+          chunkIdentity,
           onInvalidRows: invalidRows => {
             resolutionInvalidRows = invalidRows;
           }
@@ -633,9 +668,9 @@ export async function POST(request: NextRequest) {
             transactionID
           );
         } else if (formType === 'attributes') {
-          fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, sessionId, transactionID);
+          fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, sessionId, transactionID, changedBy);
         } else if (formType === 'species') {
-          fixedDataProcessingResult = await upsertSpeciesRows(connectionManager, schema, uploadRows, uploadMode, sessionId, transactionID);
+          fixedDataProcessingResult = await upsertSpeciesRows(connectionManager, schema, uploadRows, uploadMode, sessionId, transactionID, changedBy);
         } else if (formType === 'personnel') {
           fixedDataProcessingResult = await upsertPersonnelRows(
             connectionManager,
@@ -644,7 +679,8 @@ export async function POST(request: NextRequest) {
             uploadRows,
             uploadMode,
             sessionId,
-            transactionID
+            transactionID,
+            changedBy
           );
         } else {
           for (rowId in fileRowSet) {
@@ -656,15 +692,17 @@ export async function POST(request: NextRequest) {
               rowData: row,
               plot,
               census,
-              fullName: user
+              transactionID,
+              fullName: changedBy
             };
-            try {
-              await insertOrUpdate(props);
-              fixedDataProcessingResult.updatedCount += 1;
-            } catch (e: any) {
-              ailogger.error(`Error processing row for file ${fileName}:`, e.message);
-              failingRows.add(row);
-            }
+            // insertOrUpdate writes the row AND records its changelog audit in the same
+            // transaction. A failure here -- from either half -- must not be swallowed
+            // into failingRows and continued past: that would let the commit below write
+            // an unaudited mutation (or an audit row with no mutation behind it). Let it
+            // propagate to the outer catch, which rolls back the whole packet and retries
+            // exactly like any other transaction-fatal error in this request.
+            await insertOrUpdate(props);
+            fixedDataProcessingResult.updatedCount += 1;
           }
         }
 
@@ -690,7 +728,7 @@ export async function POST(request: NextRequest) {
           );
           await connectionManager.executeQuery(
             insertChangelogSQL,
-            ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID],
+            ['file_upload', fileName, 'INSERT', uploadMetadata, changedBy, plot?.plotID, censusID],
             transactionID
           );
 
@@ -710,21 +748,13 @@ export async function POST(request: NextRequest) {
           }
         } catch (logError: any) {
           ailogger.error('Failed to log file upload to changelog', logError);
-          // The changelog now shares the data transaction, so a transaction-fatal error here
-          // (deadlock, lock-wait timeout, lost connection -- e.g. two concurrent chunks racing
-          // on the same changelog row) may have rolled the WHOLE transaction back. Swallowing
-          // it would let the commit below no-op "succeed" and return 200 while this chunk's
-          // data rows were silently lost. Rethrow so the outer catch rolls back cleanly and
-          // the retry loop re-runs the chunk.
-          if (isRetryableUploadError(logError)) {
-            throw logError;
-          }
-          // An overlap acknowledgment is part of the write authorization and provenance, not
-          // optional telemetry. Keep it in the same transaction so an audit failure rolls the
-          // quadrat data back. Preserve the legacy best-effort behavior for unrelated uploads.
-          if (fixedDataProcessingResult.acknowledgedOverlapSummaries?.length) {
-            throw new Error(`Failed to persist quadrat overlap acknowledgment: ${logError instanceof Error ? logError.message : String(logError)}`);
-          }
+          // The changelog shares the data transaction (#507): every committed write needs a
+          // history row, so a failure writing EITHER the file_upload entry or the quadrat
+          // overlap acknowledgment must roll the whole packet back rather than let the
+          // commit below write data with no audit trail. Rethrowing unconditionally -- not
+          // only for retryable infrastructure errors -- sends it to the outer catch, which
+          // still classifies it via isRetryableUploadError for the retry loop above.
+          throw logError;
         }
 
         await connectionManager.commitTransaction(transactionID ?? '');

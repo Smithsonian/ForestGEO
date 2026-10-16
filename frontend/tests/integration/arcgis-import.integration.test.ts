@@ -36,8 +36,15 @@ const sharedState = vi.hoisted(() => ({
   activeTransactionID: null as string | null,
   transactionCounter: 0
 }));
+// Echoes back the caller-supplied sessionId (the `x-upload-session-id` header
+// value route.ts forwards as `options.sessionId`) rather than a fixed string —
+// commitArcgisImport's uploadSessionID is `uploadSession.sessionId ?? sessionId`,
+// so a mock that always returns the same session id would key every commit's
+// file_upload changelog row to that one identity regardless of which attempt
+// actually ran, making buildFileUploadChangelogRecordID lookups for a test's
+// OWN uploadSessionId miss entirely (#507).
 const uploadSessionState = vi.hoisted((): { requireOwnership: (...args: unknown[]) => Promise<{ sessionId: string }> } => ({
-  requireOwnership: async () => ({ sessionId: 'mock-upload-session' })
+  requireOwnership: async (options: { sessionId?: string | null }) => ({ sessionId: options?.sessionId ?? 'mock-upload-session' })
 }));
 
 // Auth mock — 'global' role lets assertCanEditMeasurementScope pass the
@@ -86,14 +93,19 @@ vi.mock('@/lib/db/connectionmanager', () => {
       await sharedState.connection.rollback();
       sharedState.activeTransactionID = null;
     },
-    withTransaction: async <T>(fn: (transactionID: string) => Promise<T>) => {
+    // Production's withTransaction (lib/db/connectionmanager.ts) hands the callback a
+    // TxExecutor — `{ id, query }` — not a bare transaction-id string. arcgis-commit.ts
+    // reads `tx.id` (line ~78) and passes `tx` itself to transactionExecutorFor-shaped
+    // callers; a mock that invoked `fn(txID)` here silently handed every one of those
+    // `undefined`, which is what the dropped-row ArcGIS tests were actually tripping over.
+    withTransaction: async <T>(fn: (tx: { id: string; query: <R = unknown>(sql: string, params?: unknown[]) => Promise<R> }) => Promise<T>) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       await sharedState.connection.beginTransaction();
       sharedState.transactionCounter += 1;
       const txID = `${TRANSACTION_ID_PREFIX}${sharedState.transactionCounter}`;
       sharedState.activeTransactionID = txID;
       try {
-        const result = await fn(txID);
+        const result = await fn({ id: txID, query: (sql, params) => manager.executeQuery(sql, params, txID) });
         await sharedState.connection.commit();
         sharedState.activeTransactionID = null;
         return result;
@@ -102,6 +114,17 @@ vi.mock('@/lib/db/connectionmanager', () => {
         sharedState.activeTransactionID = null;
         throw err;
       }
+    },
+    // Real MySQL GET_LOCK/RELEASE_LOCK (#507) — recordAuditedIngestionFailureRows
+    // serializes its bounded before-snapshot per (schema, batchID) with this.
+    acquireApplicationLock: async (lockName: string, transactionID: string, timeoutMs: number) => {
+      if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      const [rows] = await sharedState.connection.query('SELECT GET_LOCK(?, ?) as acquired', [lockName, Math.ceil(timeoutMs / 1000)]);
+      return (rows as { acquired: number }[])[0]?.acquired === 1;
+    },
+    releaseApplicationLock: async (lockName: string) => {
+      if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      await sharedState.connection.query('SELECT RELEASE_LOCK(?) as released', [lockName]);
     },
     cleanupStaleTransactions: async () => undefined,
     closeConnection: async () => undefined
@@ -132,11 +155,12 @@ vi.mock('@/config/uploadsessiontracker', async () => {
 import { POST as commitPOST } from '@/app/api/arcgis/commit/route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
-import { MAX_MEASUREMENT_FILE_ID_LENGTH } from '@/lib/uploads/file-names';
+import { buildFileUploadChangelogRecordID, MAX_MEASUREMENT_FILE_ID_LENGTH } from '@/lib/uploads/file-names';
 import { createArcgisImportSession } from '@/lib/arcgis/import-session';
 import { UploadMode } from '@/config/uploadmodes';
 import { HTTPResponses } from '@/config/macros';
 import { UploadSessionOwnershipError } from '@/config/uploadsessiontracker';
+import { TEMPORARY_MEASUREMENT_INSERT_COLUMNS } from '@/lib/ingestion/temporary-measurements';
 
 async function buildWorkbook(sheets: Record<string, unknown[][]>): Promise<ArrayBuffer> {
   const wb = new ExcelJS.Workbook();
@@ -176,8 +200,14 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
   });
 
   beforeEach(async () => {
-    uploadSessionState.requireOwnership = async () => ({ sessionId: 'mock-upload-session' });
+    // Echo the caller's sessionId by default — see the hoisted mock's doc
+    // comment above for why a fixed string here breaks RecordID lookups.
+    uploadSessionState.requireOwnership = async (options: { sessionId?: string | null }) => ({ sessionId: options?.sessionId ?? 'mock-upload-session' });
     await cleanupTestMeasurements(connection, testData);
+    // This suite's shared connection accumulates GET_LOCKs across tests (MySQL
+    // ties them to the session, not the transaction) — release them all so one
+    // test's lock state can never bleed into the next.
+    await connection.query('SELECT RELEASE_ALL_LOCKS()');
   });
 
   it('ingests a tree + its additional stem with inherited coordinates and joined codes', async () => {
@@ -324,11 +354,16 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     // Audit-trail parity with the CSV measurements path: the commit must write a
     // single file_upload row into unifiedchangelog so the upload appears in the
     // upload-history UI, carrying arcgis_xlsx provenance and the inserted rowCount.
+    // RecordID is keyed by upload ATTEMPT (buildFileUploadChangelogRecordID:
+    // `${fileName}::${uploadSessionID}`, #507), not by fileName alone — a
+    // plain-filename lookup here would silently match zero rows once two
+    // attempts for the same file both exist.
+    const fileUploadRecordID = buildFileUploadChangelogRecordID(fileName, uploadSessionId);
     const [changelogRows] = await connection.query<RowDataPacket[]>(
       `SELECT ChangedBy, PlotID, CensusID, NewRowState
          FROM unifiedchangelog
         WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?`,
-      [fileName, censusID]
+      [fileUploadRecordID, censusID]
     );
     expect(changelogRows).toHaveLength(1);
 
@@ -347,6 +382,49 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     expect(metadata.rowCount).toBe(stagedRowCount);
     expect(metadata.droppedCount).toBe(0);
     expect(metadata.batchCount).toBe(1);
+
+    // A second, genuinely DIFFERENT upload attempt for the SAME file+census
+    // (new importSessionId + batchID + uploadSessionID) must get its OWN
+    // changelog row under its OWN attempt-scoped RecordID — proving distinct
+    // attempts stay separate rather than merging into one row (#507).
+    const secondImportReference = await createArcgisImportSession({
+      schema,
+      plotID,
+      censusID,
+      userId: AUTH_USER_EMAIL,
+      fileName,
+      result
+    });
+    const secondBatchID = `arcgis_second_${Date.now()}`;
+    const secondUploadSessionId = 'upload-session-arcgis-commit-second';
+    const secondResponse = await commitPOST(
+      buildCommitRequest(
+        {
+          schema,
+          plotID,
+          censusID,
+          importSessionId: secondImportReference.importSessionId,
+          fileName,
+          batchID: secondBatchID,
+          uploadMode: UploadMode.REVISIONS
+        },
+        secondUploadSessionId
+      )
+    );
+    expect(secondResponse.status).toBe(HTTPResponses.OK);
+
+    const secondFileUploadRecordID = buildFileUploadChangelogRecordID(fileName, secondUploadSessionId);
+    const [firstAttemptRowsAfterSecond] = await connection.query<RowDataPacket[]>(
+      `SELECT ChangeID FROM unifiedchangelog WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?`,
+      [fileUploadRecordID, censusID]
+    );
+    const [secondAttemptRows] = await connection.query<RowDataPacket[]>(
+      `SELECT ChangeID FROM unifiedchangelog WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?`,
+      [secondFileUploadRecordID, censusID]
+    );
+    expect(firstAttemptRowsAfterSecond, 'the first attempt row must be untouched by a second, distinct attempt').toHaveLength(1);
+    expect(secondAttemptRows, 'a second distinct attempt must get its own changelog row, not merge into the first').toHaveLength(1);
+    expect(secondFileUploadRecordID).not.toBe(fileUploadRecordID);
   });
 
   // -------------------------------------------------------------------------
@@ -544,11 +622,16 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     expect(Number(sessionRow.committed_row_count)).toBe(seeded.stagedRowCount);
     expect(sessionRow.committed_at).toBeTruthy();
 
+    // The replay's `alreadyCommitted` short-circuit (claimArcgisImportSessionForCommit)
+    // returns before the file_upload changelog block runs at all, so only the FIRST
+    // call's uploadSessionID ever produces a RecordID (#507: buildFileUploadChangelogRecordID
+    // keys by attempt, not by fileName alone — a plain-filename lookup silently matches 0 rows).
+    const fileUploadRecordID = buildFileUploadChangelogRecordID(seeded.fileName, 'upload-session-arcgis-idem-1');
     const [changelogRows] = await connection.query<RowDataPacket[]>(
       `SELECT NewRowState
          FROM unifiedchangelog
         WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?`,
-      [seeded.fileName, seeded.censusID]
+      [fileUploadRecordID, seeded.censusID]
     );
     expect(changelogRows).toHaveLength(1);
     const metadata = typeof changelogRows[0].NewRowState === 'string' ? JSON.parse(changelogRows[0].NewRowState) : changelogRows[0].NewRowState;
@@ -559,12 +642,13 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
   // Worker-style direct call (Task 10 in-process worker): no HTTP request, no
   // auth/ownership guards — commitArcgisImport is invoked exactly as the
   // background worker will invoke it, and a same-batch retry must be a no-op.
-  it('commitArcgisImport called directly twice: second call returns alreadyCommitted with the preserved rowCount and stages no new rows', async () => {
+  it('commitArcgisImport called directly twice: second call returns alreadyCommitted, stages/audits/changelogs nothing new (#507)', async () => {
     // Keep the fixture name within temporarymeasurements.FileID's canonical width
     // or INSERT IGNORE silently truncates it and count-by-FileID finds nothing.
     const seeded = await seedValidStagedSession({ fileName: `arc-direct-${Date.now()}.xlsx` });
     const batchID = `arcgis_direct_idem_${Date.now()}`;
     const connectionManager = ConnectionManager.getInstance();
+    const uploadSessionID = 'worker-session-direct-idem';
     const params = {
       schema: seeded.schema,
       plotID: seeded.plotID,
@@ -574,12 +658,25 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
       batchID,
       uploadMode: UploadMode.REVISIONS,
       userId: AUTH_USER_EMAIL,
-      uploadSessionID: 'worker-session-direct-idem'
+      uploadSessionID
     };
 
     const first = await commitArcgisImport(connectionManager, params);
     expect(first).toEqual({ rowCount: seeded.stagedRowCount, fileName: seeded.fileName, alreadyCommitted: false });
     expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
+
+    const [coreCountBefore] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM coremeasurements WHERE UploadFileID = ?', [
+      seeded.fileName
+    ]);
+    const [auditCountBefore] = await connection.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS count FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND RecordID IN (SELECT CoreMeasurementID FROM coremeasurements WHERE UploadFileID = ?)`,
+      [seeded.fileName]
+    );
+    const [changelogBefore] = await connection.query<RowDataPacket[]>(
+      `SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload' AND RecordID = ?`,
+      [`${seeded.fileName}::${uploadSessionID}`]
+    );
+    const metadataBefore = typeof changelogBefore[0].NewRowState === 'string' ? JSON.parse(changelogBefore[0].NewRowState) : changelogBefore[0].NewRowState;
 
     const second = await commitArcgisImport(connectionManager, params);
     expect(second).toEqual({ rowCount: seeded.stagedRowCount, fileName: seeded.fileName, alreadyCommitted: true });
@@ -587,10 +684,188 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     // The retry must NOT have inserted any additional temporarymeasurements rows.
     expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
 
+    // #507: claimArcgisImportSessionForCommit's alreadyCommitted short-circuit
+    // must prevent the dropped-row diff/audit AND the file_upload changelog
+    // merge code paths from running at all on replay — proven by exact counts
+    // and byte-identical metadata, not merely asserted.
+    const [coreCountAfter] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM coremeasurements WHERE UploadFileID = ?', [
+      seeded.fileName
+    ]);
+    expect(Number(coreCountAfter[0].count), 'a replay must create zero new coremeasurements rows').toBe(Number(coreCountBefore[0].count));
+
+    const [auditCountAfter] = await connection.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS count FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND RecordID IN (SELECT CoreMeasurementID FROM coremeasurements WHERE UploadFileID = ?)`,
+      [seeded.fileName]
+    );
+    expect(Number(auditCountAfter[0].count), 'a replay must write zero new coremeasurements audit rows').toBe(Number(auditCountBefore[0].count));
+
+    const [changelogAfter] = await connection.query<RowDataPacket[]>(
+      `SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload' AND RecordID = ?`,
+      [`${seeded.fileName}::${uploadSessionID}`]
+    );
+    expect(changelogAfter, 'a replay must not create a second file_upload changelog row').toHaveLength(1);
+    const metadataAfter = typeof changelogAfter[0].NewRowState === 'string' ? JSON.parse(changelogAfter[0].NewRowState) : changelogAfter[0].NewRowState;
+    expect(metadataAfter, 'a replay must leave the summary metadata byte-identical').toEqual(metadataBefore);
+
     const sessionRow = await getImportSession(seeded.importSessionId);
     expect(sessionRow.state).toBe('committed');
     expect(sessionRow.committed_batch_id).toBe(batchID);
     expect(Number(sessionRow.committed_row_count)).toBe(seeded.stagedRowCount);
+  });
+
+  // -------------------------------------------------------------------------
+  // #507: dropped-row audit — temporarymeasurements has no unique key (same
+  // documented reality as the CSV path's own drop-fixture test), so a real
+  // INSERT IGNORE collision cannot occur naturally. The spy below strips one
+  // row's VALUES tuple from the staging INSERT before it reaches the server —
+  // exactly what a duplicate-key collision would do to the statement's
+  // effect — so every downstream step (count diff, candidate detection,
+  // failure-row persistence, and its audit) still runs for real.
+  // -------------------------------------------------------------------------
+
+  function spyOnTemporaryMeasurementsDrop(connectionManager: ConnectionManager, droppedTreeTag: string) {
+    const columnCount = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.length;
+    const treeTagColumnIndex = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.indexOf('TreeTag');
+    const realExecuteQuery = connectionManager.executeQuery.bind(connectionManager);
+    return vi.spyOn(connectionManager, 'executeQuery').mockImplementation(async (query: string, params?: unknown[], transactionId?: string) => {
+      if (typeof query === 'string' && query.includes('INSERT IGNORE INTO') && query.includes('.temporarymeasurements') && Array.isArray(params)) {
+        const rowCount = params.length / columnCount;
+        let dropRowIndex = -1;
+        for (let i = 0; i < rowCount; i++) {
+          if (params[i * columnCount + treeTagColumnIndex] === droppedTreeTag) {
+            dropRowIndex = i;
+            break;
+          }
+        }
+        if (dropRowIndex !== -1) {
+          const [beforeValues, afterValues] = query.split(' VALUES ');
+          const tuples = afterValues.match(/\([^()]*\)/g) ?? [];
+          tuples.splice(dropRowIndex, 1);
+          const newQuery = `${beforeValues} VALUES ${tuples.join(', ')}`;
+          const newParams = [...params.slice(0, dropRowIndex * columnCount), ...params.slice((dropRowIndex + 1) * columnCount)];
+          return realExecuteQuery(newQuery, newParams, transactionId);
+        }
+      }
+      return realExecuteQuery(query, params, transactionId);
+    });
+  }
+
+  it('persists a dropped ArcGIS row as an unresolved ingestion error and audits it as a real INSERT (#507)', async () => {
+    const DROPPED_TREE_TAG = 'N300'; // seedValidStagedSession's tree row
+    const seeded = await seedValidStagedSession({ fileName: `arc-dropped-${Date.now()}.xlsx` });
+    const batchID = `arcgis_dropped_${Date.now()}`;
+    const connectionManager = ConnectionManager.getInstance();
+    const executeQuerySpy = spyOnTemporaryMeasurementsDrop(connectionManager, DROPPED_TREE_TAG);
+
+    try {
+      const params = {
+        schema: seeded.schema,
+        plotID: seeded.plotID,
+        censusID: seeded.censusID,
+        importSessionId: seeded.importSessionId,
+        fileName: seeded.fileName,
+        batchID,
+        uploadMode: UploadMode.REVISIONS,
+        userId: AUTH_USER_EMAIL,
+        uploadSessionID: 'worker-session-dropped'
+      };
+
+      const result = await commitArcgisImport(connectionManager, params);
+      console.log(`[arcgis-dropped] rowCount=${result.rowCount} alreadyCommitted=${result.alreadyCommitted}`);
+      expect(result.alreadyCommitted).toBe(false);
+      expect(result.rowCount).toBe(seeded.stagedRowCount - 1);
+
+      const [failedRows] = await connection.query<RowDataPacket[]>(
+        `SELECT CoreMeasurementID, RawTreeTag FROM coremeasurements WHERE StemGUID IS NULL AND RawTreeTag = ? AND UploadFileID = ?`,
+        [DROPPED_TREE_TAG, seeded.fileName]
+      );
+      expect(failedRows, 'the dropped row must be recorded as an unresolved ingestion error').toHaveLength(1);
+
+      const [auditRows] = await connection.query<RowDataPacket[]>(
+        `SELECT Operation, NewRowState FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND RecordID = ?`,
+        [failedRows[0].CoreMeasurementID]
+      );
+      console.log(`[arcgis-dropped] audit rows: ${JSON.stringify(auditRows)}`);
+      expect(auditRows, 'the dropped ArcGIS row must have exactly one audit entry — not zero, not duplicated').toHaveLength(1);
+      expect(auditRows[0].Operation).toBe('INSERT');
+      const newState = typeof auditRows[0].NewRowState === 'string' ? JSON.parse(auditRows[0].NewRowState) : auditRows[0].NewRowState;
+      expect(newState.RawTreeTag).toBe(DROPPED_TREE_TAG);
+      expect(newState.StemGUID).toBeNull();
+    } finally {
+      executeQuerySpy.mockRestore();
+    }
+  });
+
+  it('rolls back the ENTIRE commit — staging insert and dropped-row persistence included — when the late audit of a dropped row fails (#507)', async () => {
+    const DROPPED_TREE_TAG = 'N300';
+    const seeded = await seedValidStagedSession({ fileName: `arc-late-audit-fail-${Date.now()}.xlsx` });
+    const batchID = `arcgis_late_audit_fail_${Date.now()}`;
+    const connectionManager = ConnectionManager.getInstance();
+    const AUDIT_FAILURE_MESSAGE = 'Simulated unifiedchangelog write failure for an ArcGIS dropped row';
+
+    const columnCount = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.length;
+    const treeTagColumnIndex = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.indexOf('TreeTag');
+    const realExecuteQuery = connectionManager.executeQuery.bind(connectionManager);
+    const auditFailureSpy = vi
+      .spyOn(connectionManager, 'executeQuery')
+      .mockImplementation(async (query: string, params?: unknown[], transactionId?: string) => {
+        // recordAuditedIngestionFailureRows' keyed diff writes its INSERT audit
+        // row via recordSnapshotRowsAudit (lib/changelog/ingestion-audit.ts),
+        // which serializes the caller-supplied before/after snapshots directly
+        // rather than the old whole-scope `INSERT ... SELECT ... NOT EXISTS`
+        // shape — match THAT statement's distinctive column list (both
+        // OldRowState and NewRowState together is unique to it among every
+        // other unifiedchangelog write this commit issues).
+        if (typeof query === 'string' && query.includes('.unifiedchangelog') && query.includes('OldRowState') && query.includes('NewRowState')) {
+          throw new Error(AUDIT_FAILURE_MESSAGE);
+        }
+        if (typeof query === 'string' && query.includes('INSERT IGNORE INTO') && query.includes('.temporarymeasurements') && Array.isArray(params)) {
+          const rowCount = params.length / columnCount;
+          let dropRowIndex = -1;
+          for (let i = 0; i < rowCount; i++) {
+            if (params[i * columnCount + treeTagColumnIndex] === DROPPED_TREE_TAG) {
+              dropRowIndex = i;
+              break;
+            }
+          }
+          if (dropRowIndex !== -1) {
+            const [beforeValues, afterValues] = query.split(' VALUES ');
+            const tuples = afterValues.match(/\([^()]*\)/g) ?? [];
+            tuples.splice(dropRowIndex, 1);
+            const newQuery = `${beforeValues} VALUES ${tuples.join(', ')}`;
+            const newParams = [...params.slice(0, dropRowIndex * columnCount), ...params.slice((dropRowIndex + 1) * columnCount)];
+            return realExecuteQuery(newQuery, newParams, transactionId);
+          }
+        }
+        return realExecuteQuery(query, params, transactionId);
+      });
+
+    try {
+      const params = {
+        schema: seeded.schema,
+        plotID: seeded.plotID,
+        censusID: seeded.censusID,
+        importSessionId: seeded.importSessionId,
+        fileName: seeded.fileName,
+        batchID,
+        uploadMode: UploadMode.REVISIONS,
+        userId: AUTH_USER_EMAIL,
+        uploadSessionID: 'worker-session-late-audit-fail'
+      };
+
+      await expect(commitArcgisImport(connectionManager, params)).rejects.toThrow(AUDIT_FAILURE_MESSAGE);
+
+      expect(await countStagedRows(seeded.fileName, batchID), 'the commit is all-or-nothing: a failed late audit must roll back the staging insert too').toBe(
+        0
+      );
+      const [coreRows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS total FROM coremeasurements WHERE UploadFileID = ?`, [seeded.fileName]);
+      expect(Number(coreRows[0].total), 'the dropped-row insert must have rolled back together with its failed audit').toBe(0);
+
+      const sessionRow = await getImportSession(seeded.importSessionId);
+      expect(sessionRow.state, 'the import session must not be marked committed when the commit rolled back').not.toBe('committed');
+    } finally {
+      auditFailureSpy.mockRestore();
+    }
   });
 
   // arcgis_import_sessions.file_id is varchar(255), wider than the varchar(50)

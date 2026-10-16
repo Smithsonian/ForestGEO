@@ -82,6 +82,7 @@ const sharedState = vi.hoisted(() => ({
   connection: null as import('mysql2/promise').Connection | null,
   activeTransactionID: null as string | null,
   transactionCounter: 0,
+  heldLocks: new Set<string>(),
   catalogPool: null as import('mysql2/promise').Pool | null,
   // Test hook: awaited before every schema-side query so a test can inject
   // state changes (e.g. flip the job to cancel_requested) at a deterministic
@@ -92,6 +93,10 @@ const sharedState = vi.hoisted(() => ({
 // ConnectionManager mock — mirrors the ingest-batch/collapse-census pattern.
 // Routes every schema-side DB call to the shared real MySQL connection.
 vi.mock('@/lib/db/connectionmanager', () => {
+  const releaseLocks = async () => {
+    for (const name of sharedState.heldLocks) await sharedState.connection!.query('SELECT RELEASE_LOCK(?)', [name]);
+    sharedState.heldLocks.clear();
+  };
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
@@ -115,12 +120,14 @@ vi.mock('@/lib/db/connectionmanager', () => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: commit transactionID mismatch');
       await sharedState.connection.commit();
+      await releaseLocks();
       sharedState.activeTransactionID = null;
     },
     rollbackTransaction: async (transactionID: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: rollback transactionID mismatch');
       await sharedState.connection.rollback();
+      await releaseLocks();
       sharedState.activeTransactionID = null;
     },
     withTransaction: async <T>(fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<any>; readonly id: string }) => Promise<T>): Promise<T> => {
@@ -140,11 +147,15 @@ vi.mock('@/lib/db/connectionmanager', () => {
     },
     acquireApplicationLock: async (lockName: string, _transactionID: string, timeoutMs: number) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      if (_transactionID !== sharedState.activeTransactionID) throw new Error('Unknown lock transaction');
+      if (sharedState.heldLocks.has(lockName)) return true;
       const [rows] = await sharedState.connection.query<import('mysql2/promise').RowDataPacket[]>('SELECT GET_LOCK(?, ?) as acquired', [
         lockName,
         Math.ceil(timeoutMs / 1000)
       ]);
-      return (rows as import('mysql2/promise').RowDataPacket[])[0]?.acquired === 1;
+      const acquired = (rows as import('mysql2/promise').RowDataPacket[])[0]?.acquired === 1;
+      if (acquired) sharedState.heldLocks.add(lockName);
+      return acquired;
     },
     cleanupStaleTransactions: async () => undefined,
     closeConnection: async () => undefined
@@ -410,6 +421,58 @@ describe('runJobIfClaimable — integration', () => {
   // 1. Happy path
   // -------------------------------------------------------------------------
 
+  it('attributes deferred rejects from an all-invalid first file to the job creator', async () => {
+    const jobID = await createTwoFileJob();
+    await runJobIfClaimable(jobID, {
+      fetchFileText: async file => (file.fileName === FILE1_NAME ? [CSV_HEADER, `DEFERRED,1,ACERRU,,1,2,10,1.3,${MEASUREMENT_DATE},A`].join('\n') : FILE2_CSV)
+    });
+    expect((await getBackgroundJob(catalogPool, jobID))!.status).toBe('completed');
+    expect(await fetchIngestedIDs(FILE2_NAME)).toHaveLength(FILE2_VALID_ROW_COUNT);
+    const rejects = await fetchRejectIDs(FILE1_NAME);
+    expect(rejects).toHaveLength(1);
+    const [audit] = await connection.query<RowDataPacket[]>(
+      "SELECT Operation, ChangedBy, NewRowState FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND RecordID = ?",
+      [rejects[0]]
+    );
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ Operation: 'INSERT', ChangedBy: TEST_USER });
+    expect(audit[0].NewRowState.RawTreeTag).toBe('DEFERRED');
+  });
+
+  it('rolls back a parse-reject audit failure while preserving earlier committed ingestion and leaving the job retryable', async () => {
+    const jobID = await createTwoFileJob();
+    let faultReached = false;
+    let failedRowExisted = false;
+    const sentinel = new Error('parse-reject audit unavailable');
+    sharedState.onSchemaQuery = async (sql, params) => {
+      if (!sql.includes('INSERT INTO') || !sql.includes('unifiedchangelog') || params[0] !== 'coremeasurements' || params[2] !== 'INSERT') return;
+      const state = typeof params[4] === 'string' ? JSON.parse(params[4]) : null;
+      if (!state || state.SourceRowIndex >= 0) return;
+      const [rows] = await connection.query<RowDataPacket[]>('SELECT CoreMeasurementID FROM coremeasurements WHERE CoreMeasurementID = ?', [
+        state.CoreMeasurementID
+      ]);
+      failedRowExisted = rows.length === 1;
+      faultReached = true;
+      throw sentinel;
+    };
+    try {
+      await runJobIfClaimable(jobID, healthyDeps());
+    } finally {
+      sharedState.onSchemaQuery = null;
+    }
+    expect(faultReached).toBe(true);
+    expect(failedRowExisted).toBe(true);
+    expect(await fetchIngestedIDs(FILE1_NAME)).toHaveLength(FILE1_VALID_ROW_COUNT);
+    expect(await fetchRejectIDs(FILE1_NAME)).toHaveLength(0);
+    const job = await getBackgroundJob(catalogPool, jobID);
+    expect(job!.status).toBe('waiting_retry');
+    expect(job!.lastError).toContain(sentinel.message);
+    const [audits] = await connection.query<RowDataPacket[]>(
+      "SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND Operation = 'INSERT'"
+    );
+    expect(audits.some(row => row.NewRowState?.RawTreeTag === 'W1006')).toBe(false);
+  });
+
   it('completes a 2-file job: rows ingested, reject recorded, validations run, session released', async () => {
     const jobID = await createTwoFileJob();
     const fetchCalls: string[] = [];
@@ -436,6 +499,14 @@ describe('runJobIfClaimable — integration', () => {
     expect(file1IDs).toHaveLength(FILE1_VALID_ROW_COUNT);
     expect(file2IDs).toHaveLength(FILE2_VALID_ROW_COUNT);
     expect(file1Rejects).toHaveLength(FILE1_REJECT_ROW_COUNT);
+    const [rejectAudit] = await connection.query<RowDataPacket[]>(
+      "SELECT Operation, ChangedBy, OldRowState, NewRowState FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND RecordID = ?",
+      [file1Rejects[0]]
+    );
+    expect(rejectAudit).toHaveLength(1);
+    expect(rejectAudit[0]).toMatchObject({ Operation: 'INSERT', ChangedBy: TEST_USER, OldRowState: null });
+    expect(rejectAudit[0].NewRowState.RawTreeTag).toBe('W1006');
+
     expect(await countTempRows()).toBe(0);
 
     // Per-file catalog records carry processed/failed counts.
@@ -659,6 +730,48 @@ describe('runJobIfClaimable — integration', () => {
     expect(await countTempRows()).toBe(0);
     expect(await fetchIngestedIDs(FILE1_NAME)).toHaveLength(0);
     expect(await fetchIngestedIDs(FILE2_NAME)).toHaveLength(0);
+  }, 180000);
+
+  /**
+   * #507: every chunk of FILE1 shares ONE batchID (assigned once per file,
+   * not per chunk — see createSingleFileJob's batchID reuse above and
+   * worker.ts's chunkIndex loop). stageMeasurementChunk's file_upload
+   * changelog running totals used to be keyed by batchID alone, which
+   * collapsed every chunk but the last into nothing. BACKGROUND_UPLOAD_CHUNK_ROWS=2
+   * forces FILE1's 6 rows (5 valid + 1 reject, all staged regardless of later
+   * validation) into 3 real staging chunks; the changelog's rowCount must sum
+   * across all of them and batchCount must equal the chunk count, proving the
+   * worker's `chunkIdentity: \`${batchID}:chunk${chunkIndex}\`` produced a
+   * DISTINCT identity per chunk rather than every chunk overwriting one slot.
+   */
+  it('passes a distinct chunkIdentity per chunkIndex so all chunks of one batchID accumulate in the file_upload changelog (#507)', async () => {
+    const originalChunkRows = process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+    process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = '2';
+
+    const jobID = await createTwoFileJob();
+    try {
+      await runJobIfClaimable(jobID, healthyDeps());
+    } finally {
+      if (originalChunkRows === undefined) delete process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+      else process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = originalChunkRows;
+    }
+
+    const job = await getBackgroundJob(catalogPool, jobID);
+    expect(job!.status).toBe('completed');
+    expect(await fetchIngestedIDs(FILE1_NAME)).toHaveLength(FILE1_VALID_ROW_COUNT);
+
+    const [changelogRows] = await connection.query<RowDataPacket[]>(
+      `SELECT RecordID, NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload' AND RecordID LIKE ? ORDER BY ChangeID`,
+      [`${FILE1_NAME}::%`]
+    );
+    expect(changelogRows, 'exactly one file_upload row for this attempt, not one per chunk').toHaveLength(1);
+    const metadata = typeof changelogRows[0].NewRowState === 'string' ? JSON.parse(changelogRows[0].NewRowState) : changelogRows[0].NewRowState;
+    console.log(`[chunk-identity] FILE1 (6 rows / 2 per chunk = 3 chunks) metadata: ${JSON.stringify(metadata)}`);
+    // 6 raw rows (5 valid + 1 parse reject that never reaches staging) split
+    // into 3 chunks of 2 — the valid rows actually staged must sum across all
+    // 3 chunks, not just reflect whichever chunk happened to run last.
+    expect(metadata.rowCount, 'all 3 chunks worth of staged rows must be summed, not just the last chunk').toBe(FILE1_VALID_ROW_COUNT);
+    expect(metadata.batchCount, 'one distinct chunk identity per chunkIndex under the SAME batchID').toBe(3);
   }, 180000);
 
   it('cancel during a retry attempt also cleans prior-attempt batches the attempt never reached', async () => {
@@ -1607,6 +1720,14 @@ describe('runJobIfClaimable — integration', () => {
         'completed sub-batch failure row must survive cancel cleanup'
       ).toBe(true);
       expect(secondRows, 'abandoned sub-batch residue must be removed').toHaveLength(0);
+      const [deletedAudit] = await connection.query<RowDataPacket[]>(
+        `SELECT ChangedBy, OldRowState FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND Operation = 'DELETE'
+         AND JSON_UNQUOTE(JSON_EXTRACT(OldRowState, '$.RawTreeTag')) IN (?, ?)`,
+        [PRESERVED_TAG, ABANDONED_TAG]
+      );
+      expect(deletedAudit).toHaveLength(1);
+      expect(deletedAudit[0].ChangedBy).toBe(TEST_USER);
+      expect(deletedAudit[0].OldRowState.RawTreeTag).toBe(ABANDONED_TAG);
     }, 180000);
   });
 });

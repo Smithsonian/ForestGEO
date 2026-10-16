@@ -10,6 +10,7 @@ import {
   type EditOperationStateColumn,
   type EditOperationWriteInput
 } from './editoperations';
+import { BULK_REVISION_SUMMARY_KIND } from '@/lib/changelog/edit-operation-projection';
 
 const ORIGINAL_EDIT_OPERATION_ID = 7;
 const REVERTING_EDIT_OPERATION_ID = 8;
@@ -148,17 +149,37 @@ describe('editoperations', () => {
     expect(record?.targetID).toBeNull();
   });
 
-  it('writes bulk revision row ledger entries with explicit revertability', async () => {
+  it('writes bulk revision row ledger entries with explicit revertability, dual-writing the summary projection in the SAME transaction', async () => {
     const cm = makeConnectionManager();
     cm.executeQuery.mockResolvedValue({ insertId: 55 });
 
     const id = await writeEditOperation(cm, 'forestgeo_testing', buildInput({ operationType: 'bulk-revision-row', revertable: false }), 'tx');
 
     expect(id).toBe(55);
-    expect(cm.executeQuery).toHaveBeenCalledTimes(1);
+    // Call 0: the edit_operations ledger INSERT itself.
+    expect(cm.executeQuery).toHaveBeenCalledTimes(2);
     expect(cm.executeQuery.mock.calls[0][0]).toContain('OperationType, Revertable, DataType');
     expect(cm.executeQuery.mock.calls[0][1][0]).toBe('bulk-revision-row');
     expect(cm.executeQuery.mock.calls[0][1][1]).toBe(false);
+    expect(cm.executeQuery.mock.calls[0][2]).toBe('tx');
+
+    // Call 1: writeEditOperation's dual-write of the bulk-revision summary
+    // (projectBulkRevisionRow's BeforeState[0], tagged summaryKind — never a
+    // fabricated per-row diff) into unifiedchangelog, on the same transactionID.
+    const [changelogSQL, changelogParams, changelogTransactionID] = cm.executeQuery.mock.calls[1];
+    expect(changelogSQL).toContain('INSERT INTO');
+    expect(changelogSQL).toContain('unifiedchangelog');
+    expect(changelogTransactionID).toBe('tx');
+
+    const [tableName, recordID, operation, oldRowState, newRowState, changedBy, plotID, censusID] = changelogParams;
+    expect(tableName).toBe('coremeasurements');
+    expect(recordID).toBe('42::edit-op-55');
+    expect(operation).toBe('UPDATE');
+    expect(oldRowState).toBeNull();
+    expect(JSON.parse(newRowState)).toEqual({ MeasuredDBH: 10, summaryKind: BULK_REVISION_SUMMARY_KIND });
+    expect(changedBy).toBe('mason@example.com');
+    expect(plotID).toBe(1);
+    expect(censusID).toBe(2);
   });
 
   it('maps Revertable from database rows when reading ledger entries', async () => {
