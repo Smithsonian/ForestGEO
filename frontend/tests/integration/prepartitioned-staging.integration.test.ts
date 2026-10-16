@@ -100,6 +100,8 @@ import {
   TEMPORARY_MEASUREMENT_INSERT_COLUMNS
 } from '@/lib/ingestion/temporary-measurements';
 import { countStagedRows, stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
+import { buildSubBatchID, MAX_ORIGINAL_BATCH_ID_LENGTH, OriginalBatchIDTooLongError } from '@/lib/uploads/batch-family';
+import type { FileRow } from '@/config/macros/formdetails';
 
 const INCOMING_FAMILY = 'fam';
 const INCOMING_FAMILY_PREFIX_ONLY = 'fa';
@@ -121,6 +123,11 @@ const STAGING_TIMEOUT_MS = 180000;
 const TAG_PREFIX = 'P';
 const TAG_ORDINAL_WIDTH = 7;
 const ABANDONED_FAMILY = 'abandoned';
+const BOUNDARY_STRADDLING_CHUNK_ROWS = 7_000;
+const PRE_KEYED_RAW_ROW_COUNT = 21_000;
+const PRE_KEYED_CHUNK_SIZES = [7_000, 10_000];
+const CLIENT_DROP_EVERY = 7;
+const CLIENT_DROP_REMAINDER = 3;
 
 describe('pre-partitioned staging primitives — integration', () => {
   let connection: Connection;
@@ -436,7 +443,54 @@ describe('pre-partitioned staging primitives — integration', () => {
   }
 
   function expectedBatchFor(batchID: string, ordinal: number): string {
-    return `${batchID}__sub${String(Math.floor(ordinal / SUB_BATCH_ROWS) + 1).padStart(3, '0')}`;
+    return buildSubBatchID(batchID, Math.floor(ordinal / SUB_BATCH_ROWS) + 1);
+  }
+
+  /**
+   * Stages pre-keyed chunks the way a legacy fileRowSet client sends them: the
+   * client already dropped some rows, so each chunk is shorter than its raw
+   * span, while firstRowOrdinal is still the chunk's RAW offset in the file.
+   * Returns the membership the staging contract promises for that input.
+   */
+  async function stagePreKeyedFileInChunks(
+    fileName: string,
+    batchID: string,
+    rawRows: FileRow[],
+    chunkRows: number,
+    isDroppedClientSide: (ordinal: number) => boolean
+  ): Promise<{ expected: Array<[string, string]>; sentPerChunk: number[] }> {
+    const expected: Array<[string, string]> = [];
+    const sentPerChunk: number[] = [];
+    for (let firstRowOrdinal = 0; firstRowOrdinal < rawRows.length; firstRowOrdinal += chunkRows) {
+      const preKeyedRows = rawRows.slice(firstRowOrdinal, firstRowOrdinal + chunkRows).filter((_, offset) => !isDroppedClientSide(firstRowOrdinal + offset));
+      preKeyedRows.forEach((row, position) => expected.push([String(row.tag), expectedBatchFor(batchID, firstRowOrdinal + position)]));
+      sentPerChunk.push(preKeyedRows.length);
+      const transactionID = await connectionManager.beginTransaction();
+      try {
+        await stageMeasurementChunk(connectionManager, {
+          schema,
+          fileName,
+          batchID,
+          plotID,
+          censusID,
+          uploadMode: UploadMode.REVISIONS,
+          sourceFormat: SourceFormat.csv,
+          rawRows: [],
+          csvHeaders: [],
+          delimiter: CSV_DELIMITER,
+          preKeyedRows,
+          uploadSessionID: null,
+          transactionID,
+          firstRowOrdinal
+        });
+        await connectionManager.commitTransaction(transactionID);
+      } catch (error) {
+        await connectionManager.rollbackTransaction(transactionID);
+        throw error;
+      }
+    }
+    expected.sort(([left], [right]) => left.localeCompare(right));
+    return { expected, sentPerChunk };
   }
 
   it.each(ALIGNMENT_CHUNK_SIZES)(
@@ -470,7 +524,8 @@ describe('pre-partitioned staging primitives — integration', () => {
     async () => {
       const FILE = 'prepart_reject.csv';
       const BATCH = 'reject';
-      const REJECTED = new Set([9_998, 9_999]);
+      const MID_CHUNK_REJECT = 7_000;
+      const REJECTED = new Set([MID_CHUNK_REJECT, 9_998, 9_999]);
       const results = await stageFileInChunks(FILE, BATCH, buildRawRows(2 * SUB_BATCH_ROWS, REJECTED), STAGING_CHUNK_ROWS);
       const counts = await perMemberCounts(FILE);
       console.log(
@@ -484,15 +539,101 @@ describe('pre-partitioned staging primitives — integration', () => {
         [`${BATCH}__sub001`, SUB_BATCH_ROWS - REJECTED.size],
         [`${BATCH}__sub002`, SUB_BATCH_ROWS]
       ]);
-      const staged = await membership(FILE);
-      const firstOfSecond = staged.find(([tag]) => tag === tagForOrdinal(SUB_BATCH_ROWS));
-      const lastOfFirst = staged.find(([tag]) => tag === tagForOrdinal(SUB_BATCH_ROWS - REJECTED.size - 1));
-      console.log('[reject] last kept row of sub001:', lastOfFirst, 'first row of sub002:', firstOfSecond);
-      expect(lastOfFirst?.[1]).toBe(`${BATCH}__sub001`);
-      expect(firstOfSecond?.[1]).toBe(`${BATCH}__sub002`);
+      const staged = new Map(await membership(FILE));
+      const afterMidChunkReject = staged.get(tagForOrdinal(MID_CHUNK_REJECT + 1));
+      const lastOfFirst = staged.get(tagForOrdinal(9_997));
+      const firstOfSecond = staged.get(tagForOrdinal(SUB_BATCH_ROWS));
+      console.log(
+        `[reject] ${tagForOrdinal(MID_CHUNK_REJECT + 1)}=${afterMidChunkReject} ${tagForOrdinal(9_997)}=${lastOfFirst} ` +
+          `${tagForOrdinal(SUB_BATCH_ROWS)}=${firstOfSecond} rejected staged=${[...REJECTED].filter(ordinal => staged.has(tagForOrdinal(ordinal)))}`
+      );
+      expect(afterMidChunkReject).toBe(`${BATCH}__sub001`);
+      expect(lastOfFirst).toBe(`${BATCH}__sub001`);
+      expect(firstOfSecond).toBe(`${BATCH}__sub002`);
     },
     STAGING_TIMEOUT_MS
   );
+
+  it(
+    'a rejected row mid-chunk in a chunk that straddles a sub-batch boundary does not pull later rows back (spec test 2)',
+    async () => {
+      const FILE = 'prepart_reject_straddle.csv';
+      const BATCH = 'straddle';
+      const MID_CHUNK_REJECT = 9_000;
+      const results = await stageFileInChunks(FILE, BATCH, buildRawRows(2 * SUB_BATCH_ROWS, new Set([MID_CHUNK_REJECT])), BOUNDARY_STRADDLING_CHUNK_ROWS);
+      const counts = await perMemberCounts(FILE);
+      const staged = new Map(await membership(FILE));
+      console.log(
+        '[straddle] invalid per chunk:',
+        results.map(result => result.invalidRows.length),
+        'per-member counts:',
+        counts,
+        `${tagForOrdinal(SUB_BATCH_ROWS - 1)}=${staged.get(tagForOrdinal(SUB_BATCH_ROWS - 1))} ${tagForOrdinal(SUB_BATCH_ROWS)}=${staged.get(tagForOrdinal(SUB_BATCH_ROWS))}`
+      );
+      expect(counts).toEqual([
+        [`${BATCH}__sub001`, SUB_BATCH_ROWS - 1],
+        [`${BATCH}__sub002`, SUB_BATCH_ROWS]
+      ]);
+      expect(staged.get(tagForOrdinal(SUB_BATCH_ROWS - 1))).toBe(`${BATCH}__sub001`);
+      expect(staged.get(tagForOrdinal(SUB_BATCH_ROWS))).toBe(`${BATCH}__sub002`);
+    },
+    STAGING_TIMEOUT_MS
+  );
+
+  it.each(PRE_KEYED_CHUNK_SIZES)(
+    'pre-keyed chunks of %i raw rows with client-side drops stay within the sub-batch size and re-stage identically',
+    async chunkRows => {
+      const FILE = `prepart_prekeyed_${chunkRows}.csv`;
+      const BATCH = `prekeyed${chunkRows}`;
+      const rawRows: FileRow[] = buildRawRows(PRE_KEYED_RAW_ROW_COUNT);
+      const isDroppedClientSide = (ordinal: number) => ordinal % CLIENT_DROP_EVERY === CLIENT_DROP_REMAINDER;
+
+      const { expected, sentPerChunk } = await stagePreKeyedFileInChunks(FILE, BATCH, rawRows, chunkRows, isDroppedClientSide);
+      const first = await membership(FILE);
+      const counts = await perMemberCounts(FILE);
+      const mismatches = first.filter(([tag, batch], index) => expected[index]?.[0] !== tag || expected[index]?.[1] !== batch);
+      console.log(
+        `[prekeyed ${chunkRows}] sent per chunk=${sentPerChunk.join(',')} staged=${first.length} mismatches=${mismatches.length} member counts:`,
+        counts
+      );
+      expect(first).toHaveLength(expected.length);
+      expect(mismatches).toEqual([]);
+      expect(counts.filter(([, rowCount]) => rowCount > SUB_BATCH_ROWS)).toEqual([]);
+
+      await connection.query('DELETE FROM temporarymeasurements WHERE FileID = ?', [FILE]);
+      await stagePreKeyedFileInChunks(FILE, BATCH, rawRows, chunkRows, isDroppedClientSide);
+      const second = await membership(FILE);
+      console.log(`[prekeyed ${chunkRows}] re-staged=${second.length} member counts:`, await perMemberCounts(FILE));
+      expect(second).toEqual(first);
+    },
+    STAGING_TIMEOUT_MS
+  );
+
+  it('rejects an over-long batch ID before any statement even when every row of the chunk is rejected', async () => {
+    const FILE = 'prepart_too_long.csv';
+    const OVER_LONG_BATCH = 'b'.repeat(MAX_ORIGINAL_BATCH_ID_LENGTH + 1);
+    const allRejected = buildRawRows(3, new Set([0, 1, 2]));
+    const executeQuerySpy = vi.spyOn(connectionManager, 'executeQuery');
+    const transactionID = await connectionManager.beginTransaction();
+    let thrown: unknown;
+    try {
+      await stageMeasurementChunk(connectionManager, chunkParams(FILE, OVER_LONG_BATCH, allRejected, allRejected.length, 0, transactionID));
+    } catch (error) {
+      thrown = error;
+    } finally {
+      await connectionManager.rollbackTransaction(transactionID);
+    }
+    const statementsIssued = executeQuerySpy.mock.calls.map(([sql]) => String(sql));
+    executeQuerySpy.mockRestore();
+    const [stagedRows] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS rowCount FROM temporarymeasurements WHERE FileID = ?', [FILE]);
+    console.log(
+      `[too-long] batchID length=${OVER_LONG_BATCH.length} threw=${thrown instanceof Error ? thrown.name : thrown} ` +
+        `statements=${statementsIssued.length} staged=${stagedRows[0].rowCount}`
+    );
+    expect(thrown).toBeInstanceOf(OriginalBatchIDTooLongError);
+    expect(statementsIssued).toEqual([]);
+    expect(Number(stagedRows[0].rowCount)).toBe(0);
+  });
 
   it(
     're-staging after a rollback reproduces identical membership (spec test 3)',

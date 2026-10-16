@@ -35,7 +35,13 @@ import {
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
-import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE, subBatchIDForRowOrdinal } from '@/lib/uploads/batch-family';
+import {
+  buildSubBatchPattern,
+  LIKE_ESCAPE_CLAUSE,
+  MAX_ORIGINAL_BATCH_ID_LENGTH,
+  OriginalBatchIDTooLongError,
+  subBatchIDForRowOrdinal
+} from '@/lib/uploads/batch-family';
 import {
   CENSUS_REPLACEMENT_MARKER_COLUMN,
   ensureUploadSessionReplacementMarkerColumn,
@@ -66,7 +72,7 @@ export class MeasurementChunkResolutionError extends Error {
 export class InvalidFirstRowOrdinalError extends Error {
   readonly code = 'INVALID_FIRST_ROW_ORDINAL';
   constructor(value: unknown) {
-    super(`firstRowOrdinal must be a non-negative integer; received ${JSON.stringify(value)}`);
+    super(`firstRowOrdinal must be a non-negative integer; received ${typeof value === 'string' ? JSON.stringify(value) : String(value)}`);
     this.name = 'InvalidFirstRowOrdinalError';
   }
 }
@@ -200,6 +206,9 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
   } = params;
 
   const firstRowOrdinal = parseFirstRowOrdinal(params.firstRowOrdinal);
+  if (firstRowOrdinal !== null && batchID.length > MAX_ORIGINAL_BATCH_ID_LENGTH) {
+    throw new OriginalBatchIDTooLongError(batchID);
+  }
 
   let chunkRows: FileRow[];
   let chunkRowOffsets: number[];
@@ -238,6 +247,9 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
 
   params.onInvalidRows?.(invalidRows);
 
+  const rowBatchIDs =
+    firstRowOrdinal === null ? chunkRows.map(() => batchID) : chunkRowOffsets.map(offset => subBatchIDForRowOrdinal(batchID, firstRowOrdinal + offset));
+
   await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, schema);
 
   // Only the census-replacing path reads the marker, so only it pays for the
@@ -248,12 +260,11 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
   }
 
   const expectedRowCount = chunkRows.length;
-  const rowBatchIDs =
-    firstRowOrdinal === null ? chunkRows.map(() => batchID) : chunkRowOffsets.map(offset => subBatchIDForRowOrdinal(batchID, firstRowOrdinal + offset));
 
   // A retry of the same file should not inherit stale batches that were left
   // behind by an earlier interrupted upload for the same plot/census. Only the
   // first chunk to land for the family cleans; chunks arrive in any order.
+  // Any staged member of this batch family, including `__subNNN` rows, means this upload is already in progress; batch IDs are fresh per upload attempt, and the worker clears the family before a retry.
   if (!(await familyHasStagedRows(connectionManager, schema, fileName, batchID, transactionID))) {
     if (uploadMode === UploadMode.CLEAN_REUPLOAD && !params.suppressCensusReplacementCleanup) {
       // Clean up data from any previous uploads for this census.

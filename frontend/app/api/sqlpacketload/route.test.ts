@@ -5,7 +5,8 @@ import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import {
   CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   resetTemporaryMeasurementsSourceFormatColumnCacheForTests,
-  TEMP_MEASUREMENT_INSERT_BATCH_SIZE
+  TEMP_MEASUREMENT_INSERT_BATCH_SIZE,
+  TEMPORARY_MEASUREMENT_INSERT_COLUMNS
 } from '@/lib/ingestion/temporary-measurements';
 import { REFERENCE_REPLACEMENT_LOCK_TIMEOUT_MS, resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
 import { HTTPResponses } from '@/config/macros';
@@ -117,7 +118,7 @@ vi.mock('mysql2/promise', async importOriginal => {
 });
 
 /** Number of columns in the temporarymeasurements INSERT (FileID through PublishedStemID) */
-const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 20;
+const TEMP_MEASUREMENT_COLUMNS_PER_ROW = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.length;
 
 const TEST_SESSION_ID = 'session-1';
 const TEST_PLOT_ID = 22;
