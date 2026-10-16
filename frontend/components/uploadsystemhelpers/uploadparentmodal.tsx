@@ -130,28 +130,9 @@ export default function UploadParentModal(props: UPMProps) {
               <Typography level="body-sm">
                 {isArcgisMode ? 'ArcGIS workbooks are imported as a clean re-upload.' : `Select how this ${formType} CSV should be applied.`}
               </Typography>
-              <Card variant="outlined">
-                <CardContent>
-                  <Stack spacing={1}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography level="title-md">{UploadModeLabels[UploadMode.CLEAN_REUPLOAD]}</Typography>
-                      <Chip color="danger" size="sm">
-                        Destructive
-                      </Chip>
-                    </Box>
-                    <Typography level="body-sm">
-                      {isArcgisMode
-                        ? 'Deletes all existing measurements for the selected census, then inserts the uploaded workbook as the new source of truth.'
-                        : `Deletes all existing ${formType} data, then inserts the uploaded file as the new source of truth.`}
-                    </Typography>
-                  </Stack>
-                </CardContent>
-                <CardActions sx={{ justifyContent: 'flex-start' }}>
-                  <Button color="danger" variant="outlined" onClick={() => setUploadMode(UploadMode.CLEAN_REUPLOAD)}>
-                    Use Clean Re-Upload
-                  </Button>
-                </CardActions>
-              </Card>
+              {/* Revisions is listed first (issue #504): it's the non-destructive,
+                  recommended path -- Clean Re-Upload is reinforced instead by the
+                  type-to-confirm dialog UploadParent shows before it runs. */}
               {!isArcgisMode && (
                 <Card variant="outlined">
                   <CardContent>
@@ -174,6 +155,28 @@ export default function UploadParentModal(props: UPMProps) {
                   </CardActions>
                 </Card>
               )}
+              <Card variant="outlined">
+                <CardContent>
+                  <Stack spacing={1}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography level="title-md">{UploadModeLabels[UploadMode.CLEAN_REUPLOAD]}</Typography>
+                      <Chip color="danger" size="sm">
+                        Destructive
+                      </Chip>
+                    </Box>
+                    <Typography level="body-sm">
+                      {isArcgisMode
+                        ? 'Deletes all existing measurements for the selected census, then inserts the uploaded workbook as the new source of truth.'
+                        : `Deletes all existing ${formType} data, then inserts the uploaded file as the new source of truth.`}
+                    </Typography>
+                  </Stack>
+                </CardContent>
+                <CardActions sx={{ justifyContent: 'flex-start' }}>
+                  <Button color="danger" variant="outlined" onClick={() => setUploadMode(UploadMode.CLEAN_REUPLOAD)}>
+                    Use Clean Re-Upload
+                  </Button>
+                </CardActions>
+              </Card>
             </Stack>
           )}
         </ModalDialog>

@@ -10,10 +10,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import UploadParent from './uploadparent';
-import { FormType } from '@/config/macros/formdetails';
+import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { UploadMode } from '@/config/uploadmodes';
 import React from 'react';
@@ -124,6 +124,21 @@ vi.mock('@/app/contexts/userselectionprovider', () => ({
   useSiteContext: () => ({ schemaName: 'forestgeo_testing', siteName: 'Test Site' })
 }));
 
+// uploadparent.tsx actually reads context via '@/app/contexts/compat-hooks' (the
+// userselectionprovider mock above is unused by it but left in place for other
+// potential consumers). Mutable so the replacement-confirmation describe block below
+// can exercise real schema/plot/census values; every other describe block in this
+// file is unaffected since its new gate only activates for an explicit
+// UploadMode.CLEAN_REUPLOAD measurements upload, which none of them set.
+let compatCensusValue: any = { plotCensusNumber: 1, dateRanges: [{ censusID: 1 }] };
+let compatPlotValue: any = { plotID: 1, plotName: 'Test Plot' };
+let compatSiteValue: any = { schemaName: 'forestgeo_testing', siteName: 'Test Site' };
+vi.mock('@/app/contexts/compat-hooks', () => ({
+  useOrgCensusContext: () => compatCensusValue,
+  usePlotContext: () => compatPlotValue,
+  useSiteContext: () => compatSiteValue
+}));
+
 // Mock AI logger
 vi.mock('@/ailogger', () => ({
   default: {
@@ -170,7 +185,7 @@ vi.mock('@/components/uploadsystem/segments/uploadstart', () => ({
 }));
 
 vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
-  default: ({ uploadForm, acceptedFiles, handleAddFile, handleRemoveFile, handleReplaceFile: _handleReplaceFile, handleInitialSubmit }: any) => (
+  default: ({ uploadForm, acceptedFiles, handleAddFile, handleRemoveFile, handleReplaceFile, handleInitialSubmit }: any) => (
     <div data-testid="upload-parse-files">
       <div data-testid="upload-parse-files-form-value">{uploadForm || 'none'}</div>
       <div data-testid="file-count">{acceptedFiles.length}</div>
@@ -193,7 +208,32 @@ vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
       >
         Add File
       </button>
+      <button
+        onClick={() => {
+          // Issue #504: a NEW File object sharing the first file's name must still
+          // invalidate a pending replacement check/confirmation -- useFileManagement
+          // tracks files by array reference, not by name, so this proves the gate
+          // isn't fooled by name-only comparisons.
+          const first = acceptedFiles[0];
+          const replacement = new File(['tag,stemtag,quadrat,dbh,date\nT002,S2,Q1,12,2024-02-02\n'], first?.name ?? 'test.csv', {
+            type: 'text/csv',
+            lastModified: first?.lastModified
+          });
+          Object.assign(replacement, { path: '/test.csv' });
+          handleReplaceFile(0, replacement);
+        }}
+      >
+        Replace First File With New Object
+      </button>
       <button onClick={() => handleInitialSubmit()}>Continue Upload</button>
+    </div>
+  )
+}));
+
+vi.mock('@/components/uploadsystem/segments/uploadarcgispreflight', () => ({
+  default: ({ onProceed }: { onProceed: (reference: { importSessionId: string; fileName: string; rowCount: number }) => void }) => (
+    <div data-testid="upload-arcgis-preflight">
+      <button onClick={() => onProceed({ importSessionId: 'session-1', fileName: 'workbook.xlsx', rowCount: 5 })}>Proceed with import</button>
     </div>
   )
 }));
@@ -777,4 +817,336 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
 
     expect(signals[0]?.aborted).toBe(true);
   });
+});
+
+// Issue #504: a header-only CSV was shown as "Valid" by client validation, submitted as
+// a measurements Clean Re-Upload, and the server-side census replacement silently
+// deleted every existing measurement. UploadParent now fetches the existing row count
+// for the exact plot+census being replaced before a Clean Re-Upload is allowed to
+// start, and requires a typed confirmation whenever that count is greater than zero.
+describe('UploadParent - Measurements Clean Re-Upload replacement confirmation (issue #504)', () => {
+  const mockOnReset = vi.fn();
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    originalFetch = global.fetch;
+    compatCensusValue = { plotCensusNumber: 3, dateRanges: [{ censusID: 1 }] };
+    compatPlotValue = { plotID: 1, plotName: 'Test Plot' };
+    compatSiteValue = { schemaName: 'forestgeo_testing', siteName: 'Test Site' };
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  function mockReplacementPreviewFetch(responder: (url: string) => { ok: boolean; status?: number; json?: unknown } | Promise<Response>) {
+    const calls: string[] = [];
+    const impl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      calls.push(url);
+      if (!url.startsWith('/api/uploads/replacement-preview')) {
+        throw new Error(`Unexpected fetch call to ${url} in replacement-preview test`);
+      }
+      const result = responder(url);
+      if (result instanceof Promise) return result;
+      return new Response(JSON.stringify(result.json ?? {}), {
+        status: result.status ?? (result.ok ? 200 : 500),
+        headers: new Headers({ 'content-type': 'application/json' })
+      });
+    });
+    global.fetch = impl as unknown as typeof global.fetch;
+    return { calls, impl };
+  }
+
+  async function driveToCleanReuploadContinue(user: ReturnType<typeof userEvent.setup>) {
+    const renderResult = render(
+      <UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} overrideUploadMode={UploadMode.CLEAN_REUPLOAD} />
+    );
+
+    await user.click(screen.getByText('Add File'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+
+    await user.click(screen.getByText('Continue Upload'));
+
+    return renderResult;
+  }
+
+  it('shows a typed confirmation naming the existing row count, blocks Continue until the exact phrase is typed, and proceeds to UPLOAD_SQL once confirmed', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: 20 } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByText('Confirm measurement replacement')).toBeInTheDocument());
+    expect(screen.getByText('20')).toBeInTheDocument();
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('plotID=1');
+    expect(calls[0]).toContain('censusID=1');
+    expect(calls[0]).toContain('schema=forestgeo_testing');
+
+    const confirmButton = screen.getByTestId('measurement-replacement-confirm');
+    expect(confirmButton).toBeDisabled();
+
+    const input = screen.getByTestId('measurement-replacement-typed-confirm-input');
+    await user.type(input, 'DELETE 20');
+    expect(confirmButton).not.toBeDisabled();
+
+    await user.click(confirmButton);
+
+    await waitFor(() => expect(screen.getByTestId('upload-fire-sql')).toBeInTheDocument());
+    expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument();
+  });
+
+  it('Cancel preserves the file list and review state, and never starts the upload', async () => {
+    const user = userEvent.setup();
+    mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: 20 } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByText('Confirm measurement replacement')).toBeInTheDocument());
+
+    await user.click(screen.getByTestId('measurement-replacement-cancel'));
+
+    await waitFor(() => expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument());
+
+    // Still on the file-parse screen with the same file -- Cancel must not have
+    // advanced reviewState or cleared the uploader's selections.
+    expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument();
+    expect(screen.getByTestId('file-count')).toHaveTextContent('1');
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('upload-error')).not.toBeInTheDocument();
+  });
+
+  it('proceeds straight to UPLOAD_SQL without any confirmation dialog when the existing row count is zero', async () => {
+    const user = userEvent.setup();
+    mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: 0 } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByTestId('upload-fire-sql')).toBeInTheDocument());
+    expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument();
+  });
+
+  it('blocks with an error (never proceeding to UPLOAD_SQL) when the replacement-preview request fails', async () => {
+    const user = userEvent.setup();
+    mockReplacementPreviewFetch(() => ({ ok: false, status: 500, json: { error: 'boom' } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByTestId('upload-error')).toBeInTheDocument());
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+    expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument();
+  });
+
+  it('blocks with an error when the server reports a malformed (non-numeric/negative) count rather than treating it as zero', async () => {
+    const user = userEvent.setup();
+    mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: -1 } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByTestId('upload-error')).toBeInTheDocument());
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+  });
+
+  it('ignores a stale replacement-preview response once the scope it was requested for has changed (no dialog, no progression)', async () => {
+    const user = userEvent.setup();
+    let releaseFetch: (() => void) | undefined;
+    const deferred = new Promise<void>(resolve => {
+      releaseFetch = resolve;
+    });
+    const { calls } = mockReplacementPreviewFetch(async () => {
+      await deferred;
+      return new Response(JSON.stringify({ existingRowCount: 20 }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
+    });
+
+    await driveToCleanReuploadContinue(user);
+    await waitFor(() => expect(calls).toHaveLength(1));
+
+    // Change files while the first check is still in flight: adding a second file gives
+    // fileManagement.files a new reference, which the invalidation effect and filesSnapshot check are bound to.
+    await user.click(screen.getByText('Add File'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('2'));
+
+    releaseFetch?.();
+
+    // The stale response must not resurrect a confirmation dialog for the scope it
+    // was originally requested under, nor advance past UPLOAD_FILES.
+    await waitFor(() => {
+      expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument();
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('upload-error')).not.toBeInTheDocument();
+  });
+
+  it('invalidates a pending confirmation when a NEW File object replaces the existing one under the same name, and resets the typed text on the next request even though the count is unchanged', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: 20 } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByText('Confirm measurement replacement')).toBeInTheDocument());
+    expect(calls).toHaveLength(1);
+
+    const firstInput = screen.getByTestId('measurement-replacement-typed-confirm-input');
+    await user.type(firstInput, 'DELETE 20');
+    expect(screen.getByTestId('measurement-replacement-confirm')).not.toBeDisabled();
+
+    // useFileManagement tracks files by array reference, not by name: swapping in a
+    // new File object (same name, same lastModified) must still invalidate the
+    // confirmation that was computed for the old object.
+    await user.click(screen.getByText('Replace First File With New Object'));
+
+    await waitFor(() => expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument());
+    expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument();
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+
+    // Re-trigger the check against the replacement file. The server reports the same
+    // existingRowCount (20) as before, so a naive "reset only when the count changes"
+    // implementation would leave the old 'DELETE 20' text sitting in the input --
+    // confirming would then look valid without the user ever having re-typed it for
+    // this new request.
+    await user.click(screen.getByText('Continue Upload'));
+
+    await waitFor(() => expect(screen.getByText('Confirm measurement replacement')).toBeInTheDocument());
+    expect(calls).toHaveLength(2);
+
+    const secondInput = screen.getByTestId('measurement-replacement-typed-confirm-input');
+    expect(secondInput).toHaveValue('');
+    expect(screen.getByTestId('measurement-replacement-confirm')).toBeDisabled();
+
+    await user.type(secondInput, 'DELETE 20');
+    await user.click(screen.getByTestId('measurement-replacement-confirm'));
+
+    await waitFor(() => expect(screen.getByTestId('upload-fire-sql')).toBeInTheDocument());
+  });
+
+  it('discards a stale replacement-preview response reporting existingRowCount 0 for a File that was replaced while the request was in flight, never auto-starting the upload', async () => {
+    const user = userEvent.setup();
+    let releaseFetch: (() => void) | undefined;
+    const deferred = new Promise<void>(resolve => {
+      releaseFetch = resolve;
+    });
+    const { calls } = mockReplacementPreviewFetch(async () => {
+      await deferred;
+      return new Response(JSON.stringify({ existingRowCount: 0 }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
+    });
+
+    await driveToCleanReuploadContinue(user);
+    await waitFor(() => expect(calls).toHaveLength(1));
+
+    // Swap in a NEW File object under the same name while the first check for the
+    // OLD File is still pending. useFileManagement's new array reference triggers the
+    // invalidation effect, bumping replacementCheckTokenRef before the stale request
+    // ever resolves.
+    await user.click(screen.getByText('Replace First File With New Object'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+
+    // Now resolve the OLD request. existingRowCount 0 would, for a current request,
+    // skip confirmation and proceed straight to UPLOAD_SQL (see the "proceeds straight
+    // to UPLOAD_SQL ... when the existing row count is zero" test above) -- so if the
+    // token check were missing or wrong, this stale response would auto-start the
+    // upload for the replaced File it was never actually computed for.
+    await act(async () => {
+      releaseFetch?.();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    // Still a single request was ever made (for the OLD file); the replacement never
+    // triggered its own check because the user never clicked Continue Upload again.
+    expect(calls).toHaveLength(1);
+    // Still at file selection, with exactly the one (replaced) file -- the stale
+    // response must not have advanced reviewState.
+    expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument();
+    expect(screen.getByTestId('file-count')).toHaveTextContent('1');
+    // Decisive: the upload must NOT have auto-started from the stale zero-count result.
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { label: 'a fractional count', existingRowCount: 3.5 },
+    { label: 'a count beyond Number.MAX_SAFE_INTEGER', existingRowCount: Number.MAX_SAFE_INTEGER + 1 },
+    { label: 'a count sent as a string', existingRowCount: '42' }
+  ])('blocks with an error (never zero, never proceeding) when the server reports $label for existingRowCount', async ({ existingRowCount }) => {
+    const user = userEvent.setup();
+    mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount } }));
+
+    await driveToCleanReuploadContinue(user);
+
+    await waitFor(() => expect(screen.getByTestId('upload-error')).toBeInTheDocument());
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+    expect(screen.queryByText('Confirm measurement replacement')).not.toBeInTheDocument();
+  });
+
+  it('routes the ArcGIS "Proceed with import" action through the same replacement-confirmation gate as a CSV Clean Re-Upload', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: 20 } }));
+
+    render(
+      <UploadParent
+        onReset={mockOnReset}
+        overrideUploadForm={FormType.measurements}
+        overrideUploadMode={UploadMode.CLEAN_REUPLOAD}
+        overrideSourceFormat={SourceFormat.arcgis_xlsx}
+      />
+    );
+
+    await user.click(screen.getByText('Add File'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+    await user.click(screen.getByText('Continue Upload'));
+
+    // handleInitialSubmit checks sourceFormat === arcgis_xlsx before the clean-reupload
+    // branch, so the ArcGIS workbook goes to its own preflight screen first; the
+    // replacement-preview check must not have fired yet.
+    await waitFor(() => expect(screen.getByTestId('upload-arcgis-preflight')).toBeInTheDocument());
+    expect(calls).toHaveLength(0);
+
+    await user.click(screen.getByText('Proceed with import'));
+
+    // onProceed wraps its work in requestCleanMeasurementsReplacementConfirmation, the
+    // exact same gate the CSV path uses -- it must not be bypassed for ArcGIS imports.
+    await waitFor(() => expect(screen.getByText('Confirm measurement replacement')).toBeInTheDocument());
+    expect(calls).toHaveLength(1);
+    expect(screen.queryByTestId('upload-fire-sql')).not.toBeInTheDocument();
+
+    const input = screen.getByTestId('measurement-replacement-typed-confirm-input');
+    await user.type(input, 'DELETE 20');
+    await user.click(screen.getByTestId('measurement-replacement-confirm'));
+
+    await waitFor(() => expect(screen.getByTestId('upload-fire-sql')).toBeInTheDocument());
+  });
+
+  it('does not gate a Revisions upload behind the replacement-preview check', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockReplacementPreviewFetch(() => ({ ok: true, json: { existingRowCount: 20 } }));
+    mockRevisionUploadFetchForGatingCheck();
+
+    render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} overrideUploadMode={UploadMode.REVISIONS} />);
+
+    await user.click(screen.getByText('Add File'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+    await user.click(screen.getByText('Continue Upload'));
+
+    // Revisions goes through /api/revisionupload, never /api/uploads/replacement-preview.
+    await waitFor(() => expect(screen.getByText(/matching revision rows/i)).toBeInTheDocument());
+    expect(calls).toHaveLength(0);
+  });
+
+  function mockRevisionUploadFetchForGatingCheck() {
+    // Layered on top of mockReplacementPreviewFetch's global.fetch stub: Revisions
+    // mode must never call replacement-preview, so this only needs to keep
+    // /api/revisionupload from throwing as "unexpected" if the gate were ever
+    // (incorrectly) bypassed in the other direction.
+    const previous = global.fetch;
+    global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/api/revisionupload') {
+        return new Promise<Response>(() => {}); // never resolves; test only checks the loading state
+      }
+      return previous(input, init);
+    }) as unknown as typeof global.fetch;
+  }
 });

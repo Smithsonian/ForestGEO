@@ -1,5 +1,5 @@
 'use client';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
@@ -21,6 +21,7 @@ import UploadReingestion from '@/components/uploadsystem/segments/uploadreingest
 import UploadRevisionMatch from '@/components/uploadsystem/segments/uploadrevisionmatch';
 import UploadRevisionApply from '@/components/uploadsystem/segments/uploadrevisionapply';
 import UploadArcgisPreflight from '@/components/uploadsystem/segments/uploadarcgispreflight';
+import MeasurementReplacementConfirmDialog from '@/components/uploadsystem/segments/measurementreplacementconfirmdialog';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import ailogger from '@/ailogger';
 import { useFileManagement } from '@/app/hooks/usefilemanagement';
@@ -193,6 +194,140 @@ function UploadParentInner(props: UploadParentProps) {
     schema: currentSite?.schemaName,
     formType: uploadState.state.uploadForm
   });
+
+  // Measurements Clean Re-Upload replacement confirmation (issue #504): a header-only
+  // CSV previously reached this destructive path and silently deleted an existing
+  // census, so before it proceeds we fetch how many rows the exact target scope has
+  // and require a typed confirmation if any do. scopeKey covers every field that
+  // changes which rows would be deleted; file identity is tracked separately by object
+  // reference so a same-named File swap also invalidates an in-flight check.
+  const cleanReplacementScopeKey = useMemo(
+    () =>
+      JSON.stringify({
+        schema: currentSite?.schemaName ?? null,
+        plotID: currentPlotID,
+        censusID: currentCensusID,
+        uploadMode: uploadState.state.uploadMode ?? null,
+        uploadForm: uploadState.state.uploadForm ?? null,
+        sourceFormat: uploadState.state.sourceFormat ?? null
+      }),
+    [currentSite?.schemaName, currentPlotID, currentCensusID, uploadState.state.uploadMode, uploadState.state.uploadForm, uploadState.state.sourceFormat]
+  );
+  const [replacementPreview, setReplacementPreview] = useState<{
+    requestId: number;
+    scopeKey: string;
+    filesSnapshot: typeof fileManagement.files;
+    status: 'checking' | 'needsConfirmation';
+    existingRowCount?: number;
+  } | null>(null);
+  // Monotonically-increasing token: guards against a stale async response landing
+  // after its scope changed, and doubles as a per-request id so the confirmation
+  // dialog remounts (resetting typed text) even when existingRowCount repeats.
+  const replacementCheckTokenRef = useRef(0);
+  const pendingReplacementActionRef = useRef<(() => void) | null>(null);
+
+  function invalidatePendingReplacementCheck() {
+    replacementCheckTokenRef.current += 1;
+    pendingReplacementActionRef.current = null;
+  }
+
+  function filesMatchSnapshot(snapshot: typeof fileManagement.files): boolean {
+    const current = fileManagement.files;
+    if (current.length !== snapshot.length) return false;
+    return current.every((file, index) => file === snapshot[index]);
+  }
+
+  // Any change to scope OR to any selected File's identity invalidates an in-flight
+  // check / shown confirmation, since it was computed for a target that no longer
+  // exists. `fileManagement.files` is only a new array when add/remove/replaceFile
+  // actually runs (see useFileManagement), so this also catches a same-named File swap.
+  useEffect(() => {
+    invalidatePendingReplacementCheck();
+    setReplacementPreview(null);
+  }, [cleanReplacementScopeKey, fileManagement.files]);
+
+  // Unmount must invalidate too, so a response that resolves after this component is
+  // gone can never invoke an action against a component that no longer exists.
+  useEffect(() => {
+    return () => {
+      invalidatePendingReplacementCheck();
+    };
+  }, []);
+
+  async function requestCleanMeasurementsReplacementConfirmation(onConfirmed: () => void) {
+    const scopeKey = cleanReplacementScopeKey;
+    const filesSnapshot = fileManagement.files;
+    const token = ++replacementCheckTokenRef.current;
+    pendingReplacementActionRef.current = null;
+    setReplacementPreview({ requestId: token, scopeKey, filesSnapshot, status: 'checking' });
+
+    try {
+      if (!currentSite?.schemaName || !currentPlotID || !currentCensusID) {
+        throw new Error('Site, plot, and census must all be selected before a Clean Re-Upload can proceed.');
+      }
+
+      const params = new URLSearchParams({
+        schema: currentSite.schemaName,
+        plotID: String(currentPlotID),
+        censusID: String(currentCensusID)
+      });
+      const response = await fetch(`/api/uploads/replacement-preview?${params.toString()}`, { cache: 'no-store' });
+
+      // A newer request has already superseded this one; let that one decide.
+      if (replacementCheckTokenRef.current !== token) return;
+
+      if (!response.ok) {
+        throw new Error(`Failed to check existing measurements for this census (HTTP ${response.status}).`);
+      }
+
+      const payload = await response.json().catch(() => null);
+      const existingRowCount = payload?.existingRowCount;
+      // A fetch failure, non-200, or a count that isn't a safe nonnegative integer must
+      // never be treated as "zero existing rows" -- that would reopen the hole this
+      // confirmation exists to close.
+      if (!Number.isSafeInteger(existingRowCount) || existingRowCount < 0) {
+        throw new Error('Received an invalid existing measurement count from the server.');
+      }
+
+      if (replacementCheckTokenRef.current !== token) return;
+
+      if (existingRowCount === 0) {
+        setReplacementPreview(null);
+        onConfirmed();
+        return;
+      }
+
+      pendingReplacementActionRef.current = onConfirmed;
+      setReplacementPreview({ requestId: token, scopeKey, filesSnapshot, status: 'needsConfirmation', existingRowCount });
+    } catch (err: unknown) {
+      if (replacementCheckTokenRef.current !== token) return;
+      setReplacementPreview(null);
+      pendingReplacementActionRef.current = null;
+      const errorObj = err instanceof Error ? err : new Error(String(err));
+      errorHandling.setError(errorObj);
+      uploadState.setReviewState(ReviewStates.ERRORS);
+    }
+  }
+
+  function handleReplacementConfirmed() {
+    const action = pendingReplacementActionRef.current;
+    const preview = replacementPreview;
+    pendingReplacementActionRef.current = null;
+    setReplacementPreview(null);
+
+    // Defense in depth: re-verify scope/file-identity right before the destructive
+    // action, even though the effect above already clears the dialog on change.
+    if (!action || !preview) return;
+    if (preview.scopeKey !== cleanReplacementScopeKey) return;
+    if (!filesMatchSnapshot(preview.filesSnapshot)) return;
+
+    action();
+  }
+
+  function handleReplacementCancelled() {
+    pendingReplacementActionRef.current = null;
+    setReplacementPreview(null);
+  }
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -379,6 +514,8 @@ function UploadParentInner(props: UploadParentProps) {
         errorHandling.setError(errorObj);
         uploadState.setReviewState(ReviewStates.ERRORS);
       }
+    } else if (uploadState.state.uploadForm === FormType.measurements && uploadState.state.uploadMode === UploadMode.CLEAN_REUPLOAD) {
+      await requestCleanMeasurementsReplacementConfirmation(() => uploadState.setReviewState(ReviewStates.UPLOAD_SQL));
     } else {
       uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
     }
@@ -524,8 +661,14 @@ function UploadParentInner(props: UploadParentProps) {
             plotID={currentPlotID ?? 0}
             censusID={currentCensusID ?? 0}
             onProceed={importSession => {
-              setArcgisImportSession(importSession);
-              uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+              // ArcGIS workbooks are always imported as a clean re-upload of
+              // measurements (see UploadParentModal) -- route through the same
+              // replacement confirmation as the CSV clean-re-upload path before
+              // committing.
+              void requestCleanMeasurementsReplacementConfirmation(() => {
+                setArcgisImportSession(importSession);
+                uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+              });
             }}
             onBack={() => uploadState.setReviewState(ReviewStates.UPLOAD_FILES)}
             onError={error => {
@@ -690,6 +833,16 @@ function UploadParentInner(props: UploadParentProps) {
         );
     }
   };
+
+  // Re-verified at render time (not just when the preview was set): if the scope or any
+  // selected File's identity has changed since this preview was computed, the dialog
+  // must not show, regardless of what `replacementPreview.status` still says.
+  const replacementNeedsConfirmation =
+    !!replacementPreview &&
+    replacementPreview.status === 'needsConfirmation' &&
+    replacementPreview.scopeKey === cleanReplacementScopeKey &&
+    filesMatchSnapshot(replacementPreview.filesSnapshot);
+
   return (
     <ContextValidationGuard
       requireSite={true}
@@ -698,6 +851,17 @@ function UploadParentInner(props: UploadParentProps) {
       customMessage="Upload functionality requires site, plot, and census selections to be active."
     >
       <>
+        <MeasurementReplacementConfirmDialog
+          // Keyed on the request id so a brand-new confirmation request always mounts
+          // fresh, resetting any previously-typed confirmation text even when the new
+          // existingRowCount happens to equal the old one.
+          key={replacementPreview?.requestId ?? 'none'}
+          open={replacementNeedsConfirmation}
+          censusLabel={_currentCensus?.plotCensusNumber !== undefined ? `Census ${_currentCensus.plotCensusNumber}` : 'This census'}
+          existingRowCount={replacementPreview?.existingRowCount ?? 0}
+          onCancel={handleReplacementCancelled}
+          onConfirm={handleReplacementConfirmed}
+        />
         <FailedMeasurementsModal
           open={showFailedMeasurementsModal}
           handleCloseModal={async ({ dataChanged = false } = {}) => {

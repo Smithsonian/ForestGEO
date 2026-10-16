@@ -15,6 +15,7 @@ import type { Connection, RowDataPacket } from 'mysql2/promise';
 import { setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 import { SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
+import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 // ---------------------------------------------------------------------------
 // Safety guard — setupTestDatabase DROPs/CREATEs its schema; never run remote.
@@ -90,7 +91,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 import ConnectionManager from '@/lib/db/connectionmanager';
-import { countStagedRows, stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
+import { countStagedRows, EmptyMeasurementUploadError, stageMeasurementChunk, type StageMeasurementChunkParams } from '@/lib/uploads/stage-measurements';
 import { ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { TEMPORARY_MEASUREMENT_INSERT_COLUMNS } from '@/lib/ingestion/temporary-measurements';
 import { resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
@@ -642,19 +643,28 @@ describe('stageMeasurementChunk — integration', () => {
    * The zero-staged edge the staged-row proxy could not see.
    *
    * "Has this session already replaced the census" used to be answered by "has
-   * this session staged any rows". When every row of file A drops as an INSERT
-   * IGNORE duplicate, nothing is staged — so file B read "no staged rows",
-   * re-ran the census-wide cleanup, and deleted the failure rows file A had just
-   * recorded. The durable marker records the replacement itself, so it is right
-   * even when the staging produced nothing.
+   * this session staged any rows". When every row of file A fails row
+   * validation, nothing is staged — so file B read "no staged rows", re-ran
+   * the census-wide cleanup, and deleted the failure rows file A had just
+   * recorded. The durable marker records the replacement itself, so it is
+   * right even when the staging produced nothing.
+   *
+   * Deliberately nonempty-but-all-invalid input (every row is missing the
+   * required `quadrat` field) rather than `rawRows: []` — issue #504's
+   * structural-empty guard (EmptyMeasurementUploadError) now rejects a truly
+   * empty/blank chunk before staging runs at all, so `rawRows: []` can no
+   * longer stand in for "zero VALID rows" here. See the
+   * "empty/blank input guard" tests below for that guard's own coverage.
    */
   it('skips the second file’s cleanup even when the first file staged ZERO rows', async () => {
     await seedUploadSession(UPLOAD_SESSION_ID);
 
-    // File A: every row is dropped before insert, so nothing is staged. Its
-    // rejects still land in coremeasurements, which is what must survive.
+    // File A: every row carries real data but fails validation (missing
+    // quadrat), so nothing is staged. Its rejects still land in
+    // coremeasurements, which is what must survive.
+    const allInvalidNonblankRows = buildFixtureChunk().map(row => ({ ...row, quadrat: '' }));
     const firstTransactionID = await connectionManager.beginTransaction();
-    await stageMeasurementChunk(connectionManager, baseParams(firstTransactionID, { rawRows: [] }));
+    await stageMeasurementChunk(connectionManager, baseParams(firstTransactionID, { rawRows: allInvalidNonblankRows }));
     await connectionManager.commitTransaction(firstTransactionID);
 
     const stagedByFileA = await countStagedRows(connectionManager, schema, FILE_NAME, BATCH_ID, plotID, censusID);
@@ -676,6 +686,159 @@ describe('stageMeasurementChunk — integration', () => {
     const surviving = await countCensusMeasurements();
     console.log(`[zero-staged] file A's failure rows surviving file B: ${surviving}`);
     expect(surviving).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #504: structurally empty/blank input must be rejected BEFORE any
+  // destructive CLEAN_REUPLOAD census-replacement cleanup runs — a header-only
+  // (or otherwise entirely blank) chunk must never be able to wipe an existing
+  // census. This is distinct from "zero VALID rows" (covered by the
+  // zero-staged test above): a row with real-but-invalid data must still
+  // proceed to normal validation/failure-recording, never be treated as
+  // "empty".
+  // -------------------------------------------------------------------------
+  describe('empty/blank input guard (issue #504)', () => {
+    /**
+     * In-transaction reads via connectionManager — NOT the suite's separate
+     * `connection`, which cannot see uncommitted writes. These exist because
+     * the companion test "loses the marker with the cleanup when the
+     * transaction rolls back" (below) proves that a cleanup + marker write
+     * that FULLY RUNS and then rolls back leaves the exact same post-rollback
+     * state as a cleanup that never ran at all. Asserting only after rollback
+     * would therefore still pass if the EmptyMeasurementUploadError guard were
+     * moved to AFTER the destructive cleanup — rollback would quietly mask the
+     * damage. Reading mid-transaction is the only way to prove the cleanup
+     * DELETE, the marker UPDATE, and the staging INSERT never ran in the first
+     * place.
+     */
+    async function countCensusMeasurementsInTransaction(transactionID: string): Promise<number> {
+      const countSQL = safeFormatQuery(schema, `SELECT COUNT(*) AS count FROM ??.coremeasurements WHERE CensusID = ?`);
+      const rows = await connectionManager.executeQuery(countSQL, [censusID], transactionID);
+      return Number(rows[0]?.count ?? 0);
+    }
+
+    async function censusReplacementMarkerInTransaction(sessionID: string, transactionID: string): Promise<string | null> {
+      const markerSQL = safeFormatQuery(schema, `SELECT census_replacement_completed_at AS marker FROM ??.upload_sessions WHERE session_id = ?`);
+      const rows = await connectionManager.executeQuery(markerSQL, [sessionID], transactionID);
+      return rows.length === 0 || rows[0].marker === null ? null : String(rows[0].marker);
+    }
+
+    async function countStagedRowsInTransaction(fileName: string, batchID: string, transactionID: string): Promise<number> {
+      const countSQL = safeFormatQuery(schema, `SELECT COUNT(*) AS count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`);
+      const rows = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
+      return Number(rows[0]?.count ?? 0);
+    }
+
+    it('rejects an empty rawRows array before any census-replacement cleanup, preserving existing rows', async () => {
+      await seedUploadSession(UPLOAD_SESSION_ID);
+      await seedEarlierFileFailureRow('previous-upload-batch');
+      expect(await countCensusMeasurements()).toBe(1);
+
+      const transactionID = await connectionManager.beginTransaction();
+      await expect(stageMeasurementChunk(connectionManager, baseParams(transactionID, { rawRows: [] }))).rejects.toThrow(EmptyMeasurementUploadError);
+
+      const inTxnCensusCount = await countCensusMeasurementsInTransaction(transactionID);
+      const inTxnMarker = await censusReplacementMarkerInTransaction(UPLOAD_SESSION_ID, transactionID);
+      const inTxnStagedCount = await countStagedRowsInTransaction(FILE_NAME, BATCH_ID, transactionID);
+      console.log(`[empty-guard] rawRows:[] — IN-TXN (pre-rollback): censusCount=${inTxnCensusCount} marker=${inTxnMarker} stagedCount=${inTxnStagedCount}`);
+      expect(inTxnCensusCount, 'the census-replacement DELETE must never have run, not merely been rolled back').toBe(1);
+      expect(inTxnMarker, 'the replacement marker UPDATE must never have run, not merely been rolled back').toBeNull();
+      expect(inTxnStagedCount, 'the staging INSERT must never have run, not merely been rolled back').toBe(0);
+
+      await connectionManager.rollbackTransaction(transactionID);
+
+      console.log(`[empty-guard] rawRows:[] — census rows after rejected chunk: ${await countCensusMeasurements()}`);
+      expect(await countCensusMeasurements(), 'an empty rawRows chunk must not have run the census-replacement cleanup').toBe(1);
+      expect(await censusReplacementMarker(UPLOAD_SESSION_ID), 'no replacement marker should have been written for a rejected empty chunk').toBeNull();
+      expect(await countStagedRows(connectionManager, schema, FILE_NAME, BATCH_ID, plotID, censusID)).toBe(0);
+    });
+
+    it('rejects an empty preKeyedRows array before any census-replacement cleanup, even when rawRows is nonempty', async () => {
+      await seedUploadSession(UPLOAD_SESSION_ID);
+      await seedEarlierFileFailureRow('previous-upload-batch');
+      expect(await countCensusMeasurements()).toBe(1);
+
+      const transactionID = await connectionManager.beginTransaction();
+      // preKeyedRows takes precedence over rawRows (see stage-measurements.ts
+      // JSDoc) — this proves the structural-empty check honours that same
+      // precedence rather than falling back to the nonempty rawRows.
+      await expect(stageMeasurementChunk(connectionManager, baseParams(transactionID, { preKeyedRows: [], rawRows: buildFixtureChunk() }))).rejects.toThrow(
+        EmptyMeasurementUploadError
+      );
+
+      // See the comment on the in-txn helpers above: post-rollback-only
+      // assertions cannot distinguish "guard ran first" from "cleanup ran,
+      // then rolled back" — both land on the same final state.
+      const inTxnCensusCount = await countCensusMeasurementsInTransaction(transactionID);
+      const inTxnMarker = await censusReplacementMarkerInTransaction(UPLOAD_SESSION_ID, transactionID);
+      const inTxnStagedCount = await countStagedRowsInTransaction(FILE_NAME, BATCH_ID, transactionID);
+      console.log(
+        `[empty-guard] preKeyedRows:[] — IN-TXN (pre-rollback): censusCount=${inTxnCensusCount} marker=${inTxnMarker} stagedCount=${inTxnStagedCount}`
+      );
+      expect(inTxnCensusCount, 'the census-replacement DELETE must never have run, not merely been rolled back').toBe(1);
+      expect(inTxnMarker, 'the replacement marker UPDATE must never have run, not merely been rolled back').toBeNull();
+      expect(inTxnStagedCount, 'the staging INSERT must never have run, not merely been rolled back').toBe(0);
+
+      await connectionManager.rollbackTransaction(transactionID);
+
+      console.log(`[empty-guard] preKeyedRows:[] — census rows after rejected chunk: ${await countCensusMeasurements()}`);
+      expect(await countCensusMeasurements(), 'an empty preKeyedRows chunk must not have run the census-replacement cleanup').toBe(1);
+      expect(await censusReplacementMarker(UPLOAD_SESSION_ID)).toBeNull();
+    });
+
+    it('rejects an all-blank-cell rawRows chunk (e.g. delimiter-only CSV lines) before any census-replacement cleanup', async () => {
+      await seedUploadSession(UPLOAD_SESSION_ID);
+      await seedEarlierFileFailureRow('previous-upload-batch');
+      expect(await countCensusMeasurements()).toBe(1);
+
+      // Shape a real CSV parse of ",,,,,,,,,\n,,,,,,,,,\n" would produce under
+      // header:true — every cell an empty string, not an absent row.
+      const blankCellRows: Record<string, string>[] = [
+        { treetag: '', stemtag: '', speciescode: '', quadrat: '', lx: '', ly: '', dbh: '', hom: '', date: '', codes: '' },
+        { treetag: '   ', stemtag: '', speciescode: '', quadrat: '', lx: '', ly: '', dbh: '', hom: '', date: '', codes: '' }
+      ];
+
+      const transactionID = await connectionManager.beginTransaction();
+      await expect(stageMeasurementChunk(connectionManager, baseParams(transactionID, { rawRows: blankCellRows }))).rejects.toThrow(
+        EmptyMeasurementUploadError
+      );
+
+      // See the comment on the in-txn helpers above: post-rollback-only
+      // assertions cannot distinguish "guard ran first" from "cleanup ran,
+      // then rolled back" — both land on the same final state.
+      const inTxnCensusCount = await countCensusMeasurementsInTransaction(transactionID);
+      const inTxnMarker = await censusReplacementMarkerInTransaction(UPLOAD_SESSION_ID, transactionID);
+      const inTxnStagedCount = await countStagedRowsInTransaction(FILE_NAME, BATCH_ID, transactionID);
+      console.log(
+        `[empty-guard] all-blank-cell rows — IN-TXN (pre-rollback): censusCount=${inTxnCensusCount} marker=${inTxnMarker} stagedCount=${inTxnStagedCount}`
+      );
+      expect(inTxnCensusCount, 'the census-replacement DELETE must never have run, not merely been rolled back').toBe(1);
+      expect(inTxnMarker, 'the replacement marker UPDATE must never have run, not merely been rolled back').toBeNull();
+      expect(inTxnStagedCount, 'the staging INSERT must never have run, not merely been rolled back').toBe(0);
+
+      await connectionManager.rollbackTransaction(transactionID);
+
+      console.log(`[empty-guard] all-blank-cell rows — census rows after rejected chunk: ${await countCensusMeasurements()}`);
+      expect(await countCensusMeasurements(), 'an all-blank-cell chunk must not have run the census-replacement cleanup').toBe(1);
+      expect(await censusReplacementMarker(UPLOAD_SESSION_ID)).toBeNull();
+    });
+
+    it('does NOT treat a nonempty chunk whose rows all fail validation as empty — it still proceeds to staging/failure recording', async () => {
+      await seedUploadSession(UPLOAD_SESSION_ID);
+
+      // Every row carries real data (a tag, species, etc.) but is missing the
+      // required `quadrat` field. This must NOT throw EmptyMeasurementUploadError:
+      // it is "zero valid rows", not "empty input", and must still run the
+      // census-replacement cleanup and record the rows as invalid.
+      const allInvalidNonblankRows = buildFixtureChunk().map(row => ({ ...row, quadrat: '' }));
+      const transactionID = await connectionManager.beginTransaction();
+      const result = await stageMeasurementChunk(connectionManager, baseParams(transactionID, { rawRows: allInvalidNonblankRows }));
+      await connectionManager.commitTransaction(transactionID);
+
+      expect(result.insertedCount).toBe(0);
+      expect(result.invalidRows.length).toBe(allInvalidNonblankRows.length);
+      expect(await censusReplacementMarker(UPLOAD_SESSION_ID), 'a nonempty-but-all-invalid chunk is a real CLEAN_REUPLOAD attempt').not.toBeNull();
+    });
   });
 
   it('loses the marker with the cleanup when the transaction rolls back, so the retry cleans again', async () => {

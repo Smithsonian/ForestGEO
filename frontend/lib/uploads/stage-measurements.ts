@@ -34,6 +34,7 @@ import {
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
+import { isEffectivelyEmptyMeasurementInput } from '@/lib/uploads/blank-measurement-input';
 import {
   CENSUS_REPLACEMENT_MARKER_COLUMN,
   ensureUploadSessionReplacementMarkerColumn,
@@ -56,6 +57,28 @@ export class MeasurementChunkResolutionError extends Error {
   constructor(fileName: string, batchID: string) {
     super(`Header plan misalignment for the uploaded file ${fileName} (batch ${batchID})`);
     this.name = 'MeasurementChunkResolutionError';
+    this.fileName = fileName;
+    this.batchID = batchID;
+  }
+}
+
+/**
+ * Thrown when a chunk's input is structurally empty (see blank-measurement-input.ts)
+ * BEFORE any write or the destructive CLEAN_REUPLOAD cleanup. Second line of defense
+ * behind the worker's own per-file guard, so every caller gets the same protection even
+ * if its own empty-file check is missing. Callers map this to their own error surface
+ * (sync route returns 422; the worker never reaches here, having already failed first).
+ */
+export class EmptyMeasurementUploadError extends Error {
+  readonly fileName: string;
+  readonly batchID: string;
+
+  constructor(fileName: string, batchID: string) {
+    super(
+      `Refusing to stage ${fileName} (batch ${batchID}): the input has no data rows (header-only or entirely blank). ` +
+        `A Clean Re-Upload must not replace existing census data with an empty file.`
+    );
+    this.name = 'EmptyMeasurementUploadError';
     this.fileName = fileName;
     this.batchID = batchID;
   }
@@ -157,6 +180,16 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
   const fileIDError = measurementFileIDValidationError(params.fileName);
   if (fileIDError) {
     throw new Error(fileIDError);
+  }
+
+  // Structural emptiness guard — before resolution, any write, and the destructive
+  // CLEAN_REUPLOAD cleanup below (issue #504). "Empty" is structural (no rows, or every
+  // row blank), NOT "zero rows survived validation" — an all-invalid nonempty file must
+  // still reach resolution so its failures are recorded normally. preKeyedRows takes
+  // precedence here because when set, rawRows is ignored entirely (see JSDoc above).
+  const structuralInputRows = params.preKeyedRows ?? params.rawRows;
+  if (isEffectivelyEmptyMeasurementInput(structuralInputRows)) {
+    throw new EmptyMeasurementUploadError(params.fileName, params.batchID);
   }
 
   const {
