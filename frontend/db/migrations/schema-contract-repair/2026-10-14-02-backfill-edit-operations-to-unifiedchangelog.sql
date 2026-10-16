@@ -20,6 +20,11 @@
 -- edit_operations has no entry in tablestructures.sql or the migration manifest —
 -- it's created lazily by ensureEditOperationsTable() on first write, so CREATE
 -- TABLE IF NOT EXISTS below is required before the INSERT ... SELECT statements.
+--
+-- Every JSON_TABLE string column pins COLLATE utf8mb4_0900_ai_ci (the schema contract
+-- collation). Unpinned, those columns inherit the session collation, and the deploy
+-- runner's mysql2 connection negotiates utf8mb4_unicode_ci, so each comparison with a
+-- unifiedchangelog column fails with "Illegal mix of collations".
 -- =====================================================================================
 
 CREATE TABLE IF NOT EXISTS edit_operations (
@@ -61,8 +66,8 @@ FROM edit_operations eo
 JOIN JSON_TABLE(
     eo.AfterState, '$[*]'
     COLUMNS (
-        tbl VARCHAR(64) PATH '$.table',
-        pkval VARCHAR(255) PATH '$.primaryKeyValue',
+        tbl VARCHAR(64) COLLATE utf8mb4_0900_ai_ci PATH '$.table',
+        pkval VARCHAR(255) COLLATE utf8mb4_0900_ai_ci PATH '$.primaryKeyValue',
         row_json JSON PATH '$.row'
     )
 ) a ON a.row_json IS NOT NULL AND JSON_TYPE(a.row_json) <> 'NULL'
@@ -72,8 +77,8 @@ WHERE eo.OperationType IN ('single-row-edit', 'revert')
       SELECT 1 FROM JSON_TABLE(
           eo.BeforeState, '$[*]'
           COLUMNS (
-              tbl VARCHAR(64) PATH '$.table',
-              pkval VARCHAR(255) PATH '$.primaryKeyValue',
+              tbl VARCHAR(64) COLLATE utf8mb4_0900_ai_ci PATH '$.table',
+              pkval VARCHAR(255) COLLATE utf8mb4_0900_ai_ci PATH '$.primaryKeyValue',
               row_json JSON PATH '$.row'
           )
       ) b
@@ -103,16 +108,16 @@ FROM edit_operations eo
 JOIN JSON_TABLE(
     eo.AfterState, '$[*]'
     COLUMNS (
-        tbl VARCHAR(64) PATH '$.table',
-        pkval VARCHAR(255) PATH '$.primaryKeyValue',
+        tbl VARCHAR(64) COLLATE utf8mb4_0900_ai_ci PATH '$.table',
+        pkval VARCHAR(255) COLLATE utf8mb4_0900_ai_ci PATH '$.primaryKeyValue',
         row_json JSON PATH '$.row'
     )
 ) a ON a.row_json IS NOT NULL AND JSON_TYPE(a.row_json) <> 'NULL'
 JOIN JSON_TABLE(
     eo.BeforeState, '$[*]'
     COLUMNS (
-        tbl VARCHAR(64) PATH '$.table',
-        pkval VARCHAR(255) PATH '$.primaryKeyValue',
+        tbl VARCHAR(64) COLLATE utf8mb4_0900_ai_ci PATH '$.table',
+        pkval VARCHAR(255) COLLATE utf8mb4_0900_ai_ci PATH '$.primaryKeyValue',
         row_json JSON PATH '$.row'
     )
 ) b ON b.tbl = a.tbl AND b.pkval = a.pkval
@@ -142,8 +147,8 @@ FROM edit_operations eo
 JOIN JSON_TABLE(
     eo.BeforeState, '$[*]'
     COLUMNS (
-        tbl VARCHAR(64) PATH '$.table',
-        pkval VARCHAR(255) PATH '$.primaryKeyValue',
+        tbl VARCHAR(64) COLLATE utf8mb4_0900_ai_ci PATH '$.table',
+        pkval VARCHAR(255) COLLATE utf8mb4_0900_ai_ci PATH '$.primaryKeyValue',
         row_json JSON PATH '$.row'
     )
 ) b ON b.row_json IS NOT NULL AND JSON_TYPE(b.row_json) <> 'NULL'
@@ -153,8 +158,8 @@ WHERE eo.OperationType IN ('single-row-edit', 'revert')
       SELECT 1 FROM JSON_TABLE(
           eo.AfterState, '$[*]'
           COLUMNS (
-              tbl VARCHAR(64) PATH '$.table',
-              pkval VARCHAR(255) PATH '$.primaryKeyValue',
+              tbl VARCHAR(64) COLLATE utf8mb4_0900_ai_ci PATH '$.table',
+              pkval VARCHAR(255) COLLATE utf8mb4_0900_ai_ci PATH '$.primaryKeyValue',
               row_json JSON PATH '$.row'
           )
       ) a
@@ -183,8 +188,8 @@ FROM edit_operations eo
 JOIN JSON_TABLE(
     eo.BeforeState, '$[0]'
     COLUMNS (
-        tbl VARCHAR(64) PATH '$.table',
-        pkval VARCHAR(255) PATH '$.primaryKeyValue',
+        tbl VARCHAR(64) COLLATE utf8mb4_0900_ai_ci PATH '$.table',
+        pkval VARCHAR(255) COLLATE utf8mb4_0900_ai_ci PATH '$.primaryKeyValue',
         row_json JSON PATH '$.row'
     )
 ) s ON s.row_json IS NOT NULL AND JSON_TYPE(s.row_json) <> 'NULL'

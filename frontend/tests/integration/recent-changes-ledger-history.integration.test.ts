@@ -108,6 +108,7 @@ const CENSUS_SCOPE = 3;
 // default sql_mode on MySQL 8, confirmed by metadata-changelog-audit's
 // ER_DATA_TOO_LONG test) that INSERT raises an error instead of truncating.
 const OVERSIZED_PRIMARY_KEY_VALUE = 'x'.repeat(300);
+const DEPLOY_RUNNER_SESSION_COLLATION = 'utf8mb4_unicode_ci';
 
 interface ChangelogRow extends RowDataPacket {
   ChangeID: number;
@@ -557,6 +558,69 @@ describe('Recent Changes ledger history (#507)', () => {
 
       expect(coreRows).toHaveLength(2);
       expect(cmaRows).toHaveLength(2);
+    });
+
+    it('backfills under the deploy runner session collation (mysql2 default utf8mb4_unicode_ci), not just the harness-pinned utf8mb4_0900_ai_ci', async () => {
+      // scripts/lib/schema-cli.ts opens the deploy connection without a charset, so
+      // mysql2 negotiates utf8mb4_unicode_ci. JSON_TABLE string columns inherit the
+      // session collation, so every comparison against a utf8mb4_0900_ai_ci column
+      // raises ER_CANT_AGGREGATE_2COLLATIONS unless the migration pins it.
+      const [[sessionRow]] = await connection.query<RowDataPacket[]>('SELECT @@collation_connection AS collation');
+      const harnessCollation = String(sessionRow.collation);
+
+      const singleRowEditID = await insertHistoricalLedgerRow({
+        operationType: 'single-row-edit',
+        beforeState: [
+          { table: 'coremeasurements', primaryKey: 'CoreMeasurementID', primaryKeyValue: 7102, row: { MeasuredDBH: 20 } },
+          { table: 'cmattributes', primaryKey: 'CMAID', primaryKeyValue: 600, row: { Code: 'DEAD' } }
+        ],
+        afterState: [
+          { table: 'coremeasurements', primaryKey: 'CoreMeasurementID', primaryKeyValue: 7102, row: { MeasuredDBH: 25 } },
+          { table: 'coremeasurements', primaryKey: 'CoreMeasurementID', primaryKeyValue: 7103, row: { MeasuredDBH: 30 } }
+        ]
+      });
+      const bulkRevisionID = await insertHistoricalLedgerRow({
+        operationType: 'bulk-revision-row',
+        beforeState: [{ table: 'coremeasurements', primaryKey: 'CoreMeasurementID', primaryKeyValue: 7104, row: { MeasuredDBH: 40 } }],
+        afterState: []
+      });
+      await connection.query(
+        `INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangedBy)
+         VALUES ('coremeasurements', ?, 'INSERT', NULL, JSON_OBJECT('MeasuredDBH', 30), 'already-dual-written@forestgeo.test')`,
+        [`7103::edit-op-${singleRowEditID}`]
+      );
+
+      let result: ApplyResult;
+      try {
+        await connection.query(`SET NAMES utf8mb4 COLLATE ${DEPLOY_RUNNER_SESSION_COLLATION}`);
+        result = await runMigration();
+      } finally {
+        await connection.query(`SET NAMES utf8mb4 COLLATE ${harnessCollation}`);
+      }
+
+      expect(result.failed, `migration under ${DEPLOY_RUNNER_SESSION_COLLATION}: ${JSON.stringify(result.failed)}`).toBeNull();
+      expect(result.appliedNow).toContain(MIGRATION_ID);
+
+      const coreRows = await readChangelog('coremeasurements');
+      const cmaRows = await readChangelog('cmattributes');
+      const describeRows = (rows: ChangelogRow[]) => rows.map(r => `${r.RecordID}:${r.Operation}:${r.ChangedBy}`).join(', ');
+
+      expect(
+        coreRows.find(r => r.RecordID === `7102::edit-op-${singleRowEditID}`)?.Operation,
+        `UPDATE branch; coremeasurements rows: ${describeRows(coreRows)}`
+      ).toBe('UPDATE');
+      const dualWritten = coreRows.filter(r => r.RecordID === `7103::edit-op-${singleRowEditID}`);
+      expect(dualWritten, `INSERT branch must skip the already dual-written row; got: ${describeRows(dualWritten)}`).toHaveLength(1);
+      expect(dualWritten[0].ChangedBy).toBe('already-dual-written@forestgeo.test');
+      expect(
+        coreRows.find(r => r.RecordID === `7104::edit-op-${bulkRevisionID}`)?.Operation,
+        `bulk-revision summary branch; coremeasurements rows: ${describeRows(coreRows)}`
+      ).toBe('UPDATE');
+      expect(cmaRows.find(r => r.RecordID === `600::edit-op-${singleRowEditID}`)?.Operation, `DELETE branch; cmattributes rows: ${describeRows(cmaRows)}`).toBe(
+        'DELETE'
+      );
+      expect(coreRows, describeRows(coreRows)).toHaveLength(3);
+      expect(cmaRows, describeRows(cmaRows)).toHaveLength(1);
     });
 
     it('backfills a historical revert entry with the identical pairing logic', async () => {
