@@ -147,13 +147,15 @@ describe('POST /api/bulkcrud authz', () => {
 
     expect(res.status).toBe(HTTP_OK);
     // The bulk path runs the temporarymeasurements INSERT, then the caller-owns-transaction
-    // flag SET, the bulkingestionprocess CALL and the flag CLEAR, all on the route transaction.
+    // flag SET, the bulkingestionprocess CALL, the flag CLEAR and the Recent Changes audit
+    // INSERT (#507), all on the route transaction.
     expect(dbSpies.beginTransaction).toHaveBeenCalledTimes(1);
     expect(dbSpies.executeQuery.mock.calls.map(call => call[0])).toEqual([
       expect.stringContaining('temporarymeasurements'),
       CALLER_OWNS_TRANSACTION_SQL,
       expect.stringContaining('bulkingestionprocess'),
-      CLEAR_CALLER_TRANSACTION_SQL
+      CLEAR_CALLER_TRANSACTION_SQL,
+      expect.stringContaining('unifiedchangelog')
     ]);
     expect(dbSpies.executeQuery.mock.calls.every(call => call[2] === 'tx-bulkcrud')).toBe(true);
     expect(dbSpies.commitTransaction).toHaveBeenCalledTimes(1);
