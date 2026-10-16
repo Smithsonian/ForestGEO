@@ -1,9 +1,10 @@
 /**
  * Batch-family identity — the single owner of the relationship between an
- * original BatchID and the `<batchID>__subNNN` IDs that splitting creates.
+ * original BatchID and the `<batchID>__subNNN` IDs that members are staged under.
  *
- * Why this exists: once ingestBatch splits a large batch, the original BatchID
- * no longer matches any staged row. Every caller that asks "does this file/batch
+ * Why this exists: pre-partitioned staging normally writes every row under a
+ * `__subNNN` member (ingestBatch's fallback split only creates them after the
+ * fact), so the original BatchID usually matches no staged row. Every caller that asks "does this file/batch
  * still have work?" by looking up the unsuffixed ID alone gets a false negative.
  * That is the 2026-07-27 Harvard Forest incident: the retry found zero rows under
  * the original ID and returned 200 "No data found" in 31ms while 106,227 rows
@@ -74,7 +75,7 @@ export interface BatchFamilyScope {
   members: BatchFamilyMember[];
   /** Rows still staged under the unsuffixed original ID. */
   originalRowCount: number;
-  /** Sub-batch IDs left by a prior interrupted attempt, in lexical order. */
+  /** Existing `__subNNN` member IDs, in lexical order: normally every member written by pre-partitioned staging, or those left by a fallback split or interrupted attempt. */
   orphanedSubBatchIDs: string[];
 }
 

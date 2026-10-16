@@ -4,8 +4,9 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { SETUP_FAILURE_CODES, setupFailureSummary } from '@/lib/uploads/setup-failure';
 
-const { loggerInfo, loggerWarn, loggerError } = vi.hoisted(() => ({
+const { loggerInfo, loggerDebug, loggerWarn, loggerError } = vi.hoisted(() => ({
   loggerInfo: vi.fn(),
+  loggerDebug: vi.fn(),
   loggerWarn: vi.fn(),
   loggerError: vi.fn()
 }));
@@ -77,6 +78,7 @@ vi.mock('@/lib/batchfailuretransfer', () => ({
 vi.mock('@/ailogger', () => ({
   default: {
     info: loggerInfo,
+    debug: loggerDebug,
     warn: loggerWarn,
     error: loggerError
   }
@@ -372,6 +374,18 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       expect(requireUploadSessionOwnershipMock).toHaveBeenCalledWith(
         expect.objectContaining({ schema: 'forestgeo_testing', plotId: 22, censusId: 6, sessionId: 'session-1' })
       );
+    });
+
+    it('treats sub-batch members as the normal staged shape and does not warn about recovery', async () => {
+      mockOrphanedSubBatchRun();
+      loggerWarn.mockClear();
+
+      const res = await GET(makeRequest(), makeProps());
+
+      expect(res.status).toBe(200);
+      const orphanWarnings = loggerWarn.mock.calls.filter(([message]) => /orphan/i.test(String(message)));
+      expect(orphanWarnings, `unexpected orphan warnings: ${JSON.stringify(orphanWarnings)}`).toEqual([]);
+      expect(loggerDebug).toHaveBeenCalledWith(expect.stringContaining('sub-batch member(s)'));
     });
 
     it('runs the stored procedure once per orphaned sub-batch, in lexical order', async () => {

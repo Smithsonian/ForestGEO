@@ -262,8 +262,8 @@ export interface IngestBatchResult {
   /** Per-sub-batch detail for callers that shape HTTP responses or job metrics. */
   subBatchResults: SubBatchResult[];
   /**
-   * Members already staged under `__subNNN` IDs when setup began (pre-partitioned
-   * staging, or an interrupted prior split) rather than created by this run's split.
+   * Count of the family's existing `__subNNN` members when setup began: normally
+   * every member for pre-partitioned uploads, rather than ones created by this run's split.
    */
   resumedSubBatchCount: number;
 }

@@ -70,8 +70,9 @@ async function handler(request: NextRequest, context: RouteContext) {
   // scope from the staged rows, then verify this session owns that scope.
   //
   // The scope must come from the whole batch FAMILY, not just the unsuffixed
-  // BatchID. Once a prior attempt split this batch, every row lives under
-  // `<batchID>__subNNN` and an exact-match lookup finds nothing — which is how
+  // BatchID. Staging normally writes every row under `<batchID>__subNNN` (and a
+  // fallback split or an interrupted attempt can leave them there too), so an
+  // exact-match lookup finds nothing — which is how
   // the 2026-07-27 Harvard retry returned 200 "No data found" in 31ms while
   // 106,227 rows were still staged. Only a genuinely empty family may return
   // early; otherwise authorize the discovered scope and let ingestBatch resume.
@@ -83,12 +84,7 @@ async function handler(request: NextRequest, context: RouteContext) {
       return noDataFoundResponse();
     }
 
-    if (family.orphanedSubBatchIDs.length > 0) {
-      ailogger.warn(
-        `Found ${family.orphanedSubBatchIDs.length} orphaned sub-batch(es) for ${fileID}-${batchID} ` +
-          `holding ${family.totalRows} row(s); authorizing their scope and resuming`
-      );
-    }
+    ailogger.debug(`Batch family ${fileID}-${batchID} has ${family.orphanedSubBatchIDs.length} sub-batch member(s) holding ${family.totalRows} row(s)`);
 
     await requireUploadSessionOwnership({
       schema,

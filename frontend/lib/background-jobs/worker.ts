@@ -622,8 +622,8 @@ function getRecordPayload<T>(payload: Record<string, unknown> | null, key: strin
  * ingestion. Completed batches are skipped ENTIRELY (no cleanup, no staging,
  * no ingest) — see module docs for why this order is load-bearing.
  *
- * The probe spans the batch FAMILY. Once ingestBatch splits a file, the
- * procedure records uploadmetrics per `<batchID>__subNNN` and the unsuffixed ID
+ * The probe spans the batch FAMILY. Staged files normally live under
+ * `<batchID>__subNNN` members, so the procedure records uploadmetrics per member and the unsuffixed ID
  * never reaches 'completed' on its own. Probing the bare ID would therefore
  * declare a fully-ingested 106K-row file "incomplete" and re-stage it, which on
  * a Harvard-sized recycle means duplicate work over already-ingested rows.
