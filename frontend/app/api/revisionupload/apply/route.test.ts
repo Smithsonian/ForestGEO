@@ -13,10 +13,19 @@ import { POST } from './route';
 // branches actually exercised here.
 import { SpeciesCorrectionTransactionMismatchError, SpeciesCorrectionWriteConflictError } from '@/config/editplan/tree-species-correction-writer';
 import { SpeciesCorrectionGroupMemberContextError } from '@/config/editplan/writers/measurementssummary';
+// Deliberately NOT mocked: route.ts imports this same module directly, so
+// using the real computeInvalidRowsIntegrityHash here (instead of a
+// hand-rolled stand-in) is what makes buildValidBody's default hash and
+// the route's recomputed hash provably the same function, not just two
+// implementations that happen to agree today.
+import { computeInvalidRowsIntegrityHash, REVISION_UPLOAD_FILE_ID } from '../shared/invalidrowintegrity';
 
 const REVISION_TRANSACTION_ID = 'tx-1';
 const MATCHED_PLAN_HASH = 'plan-hash-matched';
 const DRIFTED_PLAN_HASH = 'plan-hash-drifted';
+// Valid per the UPLOAD_ATTEMPT_ID_PATTERN in shared/invalidrowintegrity.ts
+// (UUID v4 shape: version nibble 4, variant nibble in [89ab]).
+const VALID_UPLOAD_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
 
 const mocks = vi.hoisted(() => {
   class MockPendingUserEditForbiddenError extends Error {}
@@ -222,15 +231,34 @@ function buildRequest(body: Record<string, unknown>) {
   }) as any;
 }
 
+/**
+ * Every test in this suite that reaches past the uploadAttemptID/
+ * invalidRowsIntegrityHash gate (route.ts ~823-835) needs a hash that
+ * actually matches whatever invalidRows it submits — the route recomputes
+ * computeInvalidRowsIntegrityHash from the submitted body and 409s on any
+ * mismatch (route.ts ~868-881), before any mutation. Computing it here with
+ * the REAL function (not a stand-in) against the SAME schema/plotID/
+ * censusID/uploadAttemptID/invalidRows the body ends up carrying keeps the
+ * two provably in sync: a test that overrides invalidRows gets a hash for
+ * that exact array, not the empty-array default.
+ */
 function buildValidBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const schema = (overrides.schema as string | undefined) ?? 'forestgeo_testing';
+  const plotID = (overrides.plotID as number | undefined) ?? 1;
+  const censusID = (overrides.censusID as number | undefined) ?? 2;
+  const uploadAttemptID = (overrides.uploadAttemptID as string | undefined) ?? VALID_UPLOAD_ATTEMPT_ID;
+  const invalidRows = (overrides.invalidRows as Array<{ csvIndex: number; csvRow?: Record<string, unknown>; reason: string }> | undefined) ?? [];
+
   return {
     matchedRows: [],
     newRows: [],
     confirmNewRows: false,
-    schema: 'forestgeo_testing',
-    plotID: 1,
-    censusID: 2,
+    schema,
+    plotID,
+    censusID,
     bulkPlanHash: MATCHED_PLAN_HASH,
+    uploadAttemptID,
+    invalidRowsIntegrityHash: computeInvalidRowsIntegrityHash(schema, plotID, censusID, uploadAttemptID, REVISION_UPLOAD_FILE_ID, invalidRows),
     ...overrides
   };
 }
@@ -431,6 +459,57 @@ describe('POST /api/revisionupload/apply', () => {
     expect(response.status).toBe(400);
     const body = await response.json();
     expect(body.error).toContain('bulkPlanHash');
+  });
+
+  it('rejects requests missing uploadAttemptID', async () => {
+    const validBody = buildValidBody() as Record<string, unknown>;
+    delete validBody.uploadAttemptID;
+
+    const response = await POST(buildRequest(validBody));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('uploadAttemptID');
+    expect(mocks.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed (non-UUID-v4-shaped) uploadAttemptID', async () => {
+    const response = await POST(buildRequest(buildValidBody({ uploadAttemptID: 'not-a-uuid' })));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('uploadAttemptID');
+    expect(mocks.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects requests missing invalidRowsIntegrityHash', async () => {
+    const validBody = buildValidBody() as Record<string, unknown>;
+    delete validBody.invalidRowsIntegrityHash;
+
+    const response = await POST(buildRequest(validBody));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('invalidRowsIntegrityHash');
+    expect(mocks.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 without writing anything when invalidRowsIntegrityHash does not match the recomputed hash of the submitted invalidRows (client tampered with a reviewed rejected row after match)', async () => {
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }],
+          // Deliberately stale: this is the hash of an EMPTY invalidRows array
+          // (buildValidBody's own default), not the array actually submitted above.
+          invalidRowsIntegrityHash: computeInvalidRowsIntegrityHash('forestgeo_testing', 1, 2, VALID_UPLOAD_ATTEMPT_ID, REVISION_UPLOAD_FILE_ID, [])
+        })
+      )
+    );
+
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body.error).toContain('invalidRows no longer match the reviewed plan');
+    expect(mocks.withTransaction, 'a tampered-hash request must be rejected before any transaction opens').not.toHaveBeenCalled();
   });
 
   it('returns 403 before scope checks for pending users', async () => {
@@ -779,18 +858,30 @@ describe('POST /api/revisionupload/apply', () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
       error: 'plan hash mismatch',
-      freshPlan
+      freshPlan,
+      // No invalidRows were submitted and nothing was demoted, so the
+      // authoritative replacement set the 409 hands back is empty — but it
+      // must still be present and its hash must be the real function's hash
+      // of that exact (empty) set, not the client's stale hash.
+      freshInvalidRows: [],
+      freshInvalidRowsIntegrityHash: computeInvalidRowsIntegrityHash('forestgeo_testing', 1, 2, VALID_UPLOAD_ATTEMPT_ID, REVISION_UPLOAD_FILE_ID, [])
     });
     expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
   });
 
-  it('moves apply-time invalid matched rows into the hash plan and only writes surviving matched rows', async () => {
+  it('moves apply-time invalid matched rows into the hash plan, only writes surviving matched rows, and persists the demoted row as a failed measurement', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
       if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
         return [buildDbRow(101), buildDbRow(202)];
       }
+      // insertIngestionFailureRows (shared/measurementerrors.ts) resolves a
+      // measurement_errors.ErrorID via INSERT ... ON DUPLICATE KEY UPDATE
+      // ErrorID = LAST_INSERT_ID(ErrorID) before it will persist the demoted
+      // row; without an insertId here it falls through to a SELECT this mock
+      // answers with [], which throws instead of persisting the failure row.
+      if (query.includes('INSERT INTO ??.measurement_errors')) return { insertId: 501 };
       return [];
     });
     mocks.analyzeBulk
@@ -828,7 +919,8 @@ describe('POST /api/revisionupload/apply', () => {
     await expect(response.json()).resolves.toMatchObject({
       updatedCount: 1,
       skippedCount: 0,
-      deletedDuplicateCount: 0
+      deletedDuplicateCount: 0,
+      failedRowCount: 1
     });
     expect(mocks.analyzeBulk).toHaveBeenCalledTimes(2);
     const secondBulkInput = (mocks.analyzeBulk.mock.calls[1] as unknown as Array<unknown>)[5] as {
@@ -913,6 +1005,10 @@ describe('POST /api/revisionupload/apply', () => {
       if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
         return [buildDbRow(101), buildDbRow(202)];
       }
+      // See the identical comment in the sibling demotion test above: without
+      // an insertId here, resolving the demoted row's measurement_errors
+      // definition throws instead of persisting the failure row.
+      if (query.includes('INSERT INTO ??.measurement_errors')) return { insertId: 501 };
       return [];
     });
     mocks.analyzeBulk
@@ -963,7 +1059,8 @@ describe('POST /api/revisionupload/apply', () => {
     await expect(response.json()).resolves.toMatchObject({
       updatedCount: 1,
       skippedCount: 0,
-      deletedDuplicateCount: 0
+      deletedDuplicateCount: 0,
+      failedRowCount: 1
     });
     expect(
       mocks.analyzeBulk,
@@ -1201,6 +1298,7 @@ describe('POST /api/revisionupload/apply', () => {
       skippedCount: 1,
       insertedCount: 0,
       deletedDuplicateCount: 1,
+      failedRowCount: 0,
       applyErrors: [],
       validationPending: true
     });
@@ -1235,6 +1333,7 @@ describe('POST /api/revisionupload/apply', () => {
       skippedCount: 0,
       insertedCount: 0,
       deletedDuplicateCount: 0,
+      failedRowCount: 0,
       applyErrors: [],
       validationPending: true
     });
@@ -1314,6 +1413,7 @@ describe('POST /api/revisionupload/apply', () => {
       skippedCount: 1,
       insertedCount: 0,
       deletedDuplicateCount: 0,
+      failedRowCount: 0,
       applyErrors: [],
       validationPending: false
     });
@@ -1365,6 +1465,7 @@ describe('POST /api/revisionupload/apply', () => {
       skippedCount: 1,
       insertedCount: 0,
       deletedDuplicateCount: 0,
+      failedRowCount: 0,
       applyErrors: [],
       validationPending: false
     });

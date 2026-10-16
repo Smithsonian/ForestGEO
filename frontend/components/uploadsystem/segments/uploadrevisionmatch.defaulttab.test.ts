@@ -8,7 +8,7 @@ import { resolveDefaultTabValue } from './uploadrevisionmatch';
 // find, with the action reading "Apply 0 Revisions" and disabled. The same pattern
 // would strand invalid-only and unchanged-only uploads, so those fall through too.
 
-const NONE = { changes: 0, duplicates: 0, newRows: 0, invalid: 0, unchanged: 0 };
+const NONE = { changes: 0, duplicates: 0, newRows: 0, invalid: 0, collapsed: 0, unchanged: 0 };
 
 describe('resolveDefaultTabValue', () => {
   it('prefers changes when rows need updating', () => {
@@ -27,6 +27,10 @@ describe('resolveDefaultTabValue', () => {
     expect(resolveDefaultTabValue({ ...NONE, invalid: 4 })).toBe('invalid');
   });
 
+  it('opens on collapsed rows when that is the only content (precision-equivalent duplicates, #505)', () => {
+    expect(resolveDefaultTabValue({ ...NONE, collapsed: 2 })).toBe('collapsed');
+  });
+
   it('opens on unchanged rows when that is all there is', () => {
     expect(resolveDefaultTabValue({ ...NONE, unchanged: 9 })).toBe('unchanged');
   });
@@ -40,7 +44,9 @@ describe('resolveDefaultTabValue', () => {
     const shapes = [
       { ...NONE, newRows: 2, unchanged: 5 },
       { ...NONE, duplicates: 1, invalid: 3 },
-      { ...NONE, invalid: 1, unchanged: 1 }
+      { ...NONE, invalid: 1, unchanged: 1 },
+      { ...NONE, collapsed: 2, unchanged: 1 },
+      { ...NONE, invalid: 1, collapsed: 1 }
     ];
 
     for (const shape of shapes) {
@@ -50,6 +56,7 @@ describe('resolveDefaultTabValue', () => {
         duplicates: shape.duplicates,
         new: shape.newRows,
         invalid: shape.invalid,
+        collapsed: shape.collapsed,
         unchanged: shape.unchanged
       }[resolved];
 

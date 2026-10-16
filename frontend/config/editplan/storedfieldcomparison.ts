@@ -33,7 +33,7 @@ export function fieldChanged(field: string, from: unknown, to: unknown): boolean
 // the UI precision above rounds to fewer digits for display/diff purposes.
 // A locked, freshly re-read DB value must be compared at this full stored
 // scale so a sub-UI-precision concurrent change is never missed.
-const STORED_DECIMAL_SCALE = 6;
+export const STORED_DECIMAL_SCALE = 6;
 
 /**
  * Like `fieldChanged`, but numeric fields are compared at the full stored

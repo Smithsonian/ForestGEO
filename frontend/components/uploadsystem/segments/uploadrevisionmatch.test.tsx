@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import UploadRevisionMatch from './uploadrevisionmatch';
-import { EMPTY_REVISION_MATCH_COUNTS, RevisionMatchedRow, RevisionNewRowCandidate } from '@/config/revisionuploadtypes';
+import { EMPTY_REVISION_MATCH_COUNTS, RevisionCollapsedRow, RevisionMatchedRow, RevisionNewRowCandidate } from '@/config/revisionuploadtypes';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import type { BulkEditPlan, Effect } from '@/config/editplan/types';
 
@@ -233,6 +233,40 @@ describe('UploadRevisionMatch', () => {
     expect(onApply).toHaveBeenCalledWith(false);
   });
 
+  // #505: a file consisting entirely of rejected rows (no matched/new rows)
+  // must still be Apply-able — invalidRows are persisted as StemGUID=NULL
+  // failed-measurement rows by the apply route, not silently dropped. A
+  // disabled button here would mean the uploader has no way to record them.
+  it('treats an invalid-only upload as actionable so rejected rows can still be recorded', async () => {
+    const onApply = vi.fn();
+    const handleReturnToStart = vi.fn(async () => undefined);
+    const setReviewState = vi.fn<(state: ReviewStates) => void>();
+    const invalidRows = [{ csvRow: { tag: 'T1' }, csvIndex: 0, reason: 'Missing required field: stemtag' }];
+
+    render(
+      <UploadRevisionMatch
+        matchedRows={[]}
+        newRows={[]}
+        invalidRows={invalidRows}
+        counts={{ ...EMPTY_REVISION_MATCH_COUNTS, invalid: 1, total: 1 }}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        setReviewState={setReviewState}
+        onApply={onApply}
+        handleReturnToStart={handleReturnToStart}
+      />
+    );
+
+    const applyButton = screen.getByRole('button', { name: 'Record 1 Invalid Row' });
+    expect(applyButton).toBeEnabled();
+
+    const user = userEvent.setup();
+    await user.click(applyButton);
+
+    expect(onApply).toHaveBeenCalledWith(false);
+  });
+
   it('surfaces a warning in the New Rows tab when a supplied stemid did not match any measurement in the census', async () => {
     const onApply = vi.fn();
     const handleReturnToStart = vi.fn(async () => undefined);
@@ -439,5 +473,47 @@ describe('UploadRevisionMatch', () => {
     expect(within(changesTab).getByText('AAAAAA')).toBeInTheDocument();
     expect(within(changesTab).getByText('ly')).toBeInTheDocument();
     expect(within(changesTab).getByText('1111')).toBeInTheDocument();
+  });
+
+  // #505: rows that differ from an earlier same-key row only beyond stored
+  // DECIMAL(12,6) precision are accounting-only collapses, not failures — they
+  // need their own tab/chip so the uploader can see the row was accounted for
+  // instead of mistaking it for a silent drop.
+  it('shows the Collapsed tab and chip for precision-equivalent duplicate rows', async () => {
+    const onApply = vi.fn();
+    const handleReturnToStart = vi.fn(async () => undefined);
+    const setReviewState = vi.fn<(state: ReviewStates) => void>();
+    const collapsedRows: RevisionCollapsedRow[] = [
+      {
+        csvRow: { stemid: '5283365', dbh: '44.000000999' },
+        csvIndex: 4,
+        collapsedIntoCsvIndex: 1
+      }
+    ];
+
+    render(
+      <UploadRevisionMatch
+        matchedRows={[]}
+        newRows={[]}
+        invalidRows={[]}
+        collapsedRows={collapsedRows}
+        counts={{ ...EMPTY_REVISION_MATCH_COUNTS, collapsed: 1, total: 1 }}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        setReviewState={setReviewState}
+        onApply={onApply}
+        handleReturnToStart={handleReturnToStart}
+      />
+    );
+
+    expect(screen.getByTestId('revision-collapsed-chip')).toHaveTextContent('1 row collapsed (precision-only duplicate)');
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('tab', { name: 'Collapsed (1)' }));
+
+    expect(screen.getByText('5283365')).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument(); // collapsedIntoCsvIndex 1 -> displayed as Row # 2
+    expect(screen.getByText('5')).toBeInTheDocument(); // csvIndex 4 -> displayed as Row # 5
   });
 });

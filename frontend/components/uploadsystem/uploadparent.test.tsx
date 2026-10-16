@@ -12,10 +12,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import UploadParent from './uploadparent';
+import UploadParent, { mergeFreshRevisionPlan } from './uploadparent';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { UploadMode } from '@/config/uploadmodes';
+import { RevisionUploadResponse } from '@/config/revisionuploadtypes';
+import { BulkEditPlan } from '@/config/editplan/types';
 import React from 'react';
 
 // Mock AttributeStatusOptions and HC functions
@@ -164,7 +166,7 @@ vi.mock('@/app/hooks/useasyncuploadfeature', () => ({
 
 // Mock upload segment components
 vi.mock('@/components/uploadsystem/segments/uploadstart', () => ({
-  default: ({ uploadForm, setUploadForm, setReviewState, personnelRecording, setPersonnelRecording }: any) => (
+  default: ({ uploadForm, setUploadForm, setUploadMode, setReviewState, personnelRecording, setPersonnelRecording }: any) => (
     <div data-testid="upload-start">
       <button
         onClick={() => {
@@ -174,6 +176,10 @@ vi.mock('@/components/uploadsystem/segments/uploadstart', () => ({
       >
         Select Measurements
       </button>
+      {/* Only exercised by the cross-upload identity-reset test below, which needs
+          uploadMode restored to REVISIONS after a real resetToStart() (the reducer
+          clears it) to re-enter revision mode without remounting the component. */}
+      <button onClick={() => setUploadMode(UploadMode.REVISIONS)}>Select Revision Mode</button>
       {/* Mirrors the real UploadStart: selecting a form and finalizing are separate
           steps (see FinalizeSelectionsButton in uploadstart.tsx), and only finalizing
           advances reviewState to UPLOAD_FILES. */}
@@ -387,8 +393,10 @@ describe('UploadParent - Hook Integration Tests', () => {
         { timeout: 5000 }
       );
 
-      // onUploadComplete callback should be called
-      expect(mockOnUploadComplete).toHaveBeenCalled();
+      // onUploadComplete fires from a passive effect that can commit after the COMPLETE markup above.
+      await waitFor(() => {
+        expect(mockOnUploadComplete).toHaveBeenCalledTimes(1);
+      });
     });
   });
 
@@ -553,8 +561,11 @@ describe('UploadParent - Hook Integration Tests', () => {
         { timeout: 5000 }
       );
 
-      // Verify all hooks worked together
-      expect(mockOnUploadComplete).toHaveBeenCalledTimes(1);
+      // Verify all hooks worked together; onUploadComplete fires from a passive effect
+      // that can commit after the COMPLETE markup above.
+      await waitFor(() => {
+        expect(mockOnUploadComplete).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('should skip to processing when skipToProcessing flag is set', async () => {
@@ -659,13 +670,18 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     return { signals };
   }
 
+  // Shared by driveToRevisionMatch (first upload, fresh mount) and the
+  // cross-upload identity-reset test below (second upload, same mount).
+  async function addFileAndContinueUpload(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByText('Add File'));
+    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+    await user.click(screen.getByText('Continue Upload'));
+  }
+
   async function driveToRevisionMatch(user: ReturnType<typeof userEvent.setup>) {
     const renderResult = render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} overrideUploadMode={UploadMode.REVISIONS} />);
 
-    await user.click(screen.getByText('Add File'));
-    await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
-
-    await user.click(screen.getByText('Continue Upload'));
+    await addFileAndContinueUpload(user);
 
     return renderResult;
   }
@@ -724,7 +740,7 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     await waitFor(() => expect(screen.getByText('Revisions Applied')).toBeInTheDocument());
   });
 
-  it('opens on the Invalid tab for an invalid-only revision upload, and keeps Apply disabled', async () => {
+  it('opens on the Invalid tab for an invalid-only revision upload, and keeps Apply enabled so the rejected row is persisted', async () => {
     const user = userEvent.setup();
 
     const invalidCsvRow = { tag: 'T404', stemtag: 'S1', quadrat: 'Q1', dbh: '10', date: '2024-01-01' };
@@ -746,7 +762,11 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     // exist in the DOM at all if Changes is not the tab that ended up selected.
     expect(screen.queryByText('No rows with changes were found.')).not.toBeInTheDocument();
 
-    expect(screen.getByTestId('revision-match-apply')).toBeDisabled();
+    // #505: an invalid-only upload is NOT a no-op -- the apply route persists
+    // every invalid row as a StemGUID=NULL failed-measurement audit row (see
+    // app/api/revisionupload/apply/route.ts). Apply must stay enabled or that
+    // persisted trace is unreachable for an invalid-only file.
+    expect(screen.getByTestId('revision-match-apply')).not.toBeDisabled();
   });
 
   it('opens on the Unchanged tab for an unchanged-only revision upload, and keeps Apply disabled', async () => {
@@ -816,6 +836,375 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     unmount();
 
     expect(signals[0]?.aborted).toBe(true);
+  });
+
+  // #505 review round 2, finding 2: a 409 plan-hash mismatch must bounce the
+  // UI back to the review screen carrying the apply route's AUTHORITATIVE
+  // freshInvalidRows/freshInvalidRowsIntegrityHash (not a client-reconstructed
+  // equivalent), demote the conflicting row out of matchedRows, and let the
+  // user retry apply with that exact set/hash while keeping the same
+  // uploadAttemptID throughout.
+  it('recovers from a 409 plan-hash conflict by adopting the server-authoritative invalidRows/hash and successfully re-applying', async () => {
+    const user = userEvent.setup();
+
+    const UPLOAD_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
+    const STALE_INVALID_ROWS_INTEGRITY_HASH = 'a'.repeat(64);
+    const FRESH_INVALID_ROWS_INTEGRITY_HASH = 'b'.repeat(64);
+    const rowA = { tag: 'T1', stemtag: 'S1', quadrat: 'Q1', dbh: '12.5', date: '2024-01-01' };
+    const rowB = { tag: 'T2', stemtag: 'S1', quadrat: 'Q1', dbh: '22.5', date: '2024-01-01' };
+
+    const matchResponse = {
+      matchedRows: [
+        {
+          csvIndex: 0,
+          csvRow: rowA,
+          coreMeasurementID: 101,
+          changes: { dbh: { from: '10', to: '12.5' } },
+          existingValues: { measuredDBH: 10, measuredHOM: null, measurementDate: '2024-01-01', rawCodes: null, description: null }
+        },
+        {
+          csvIndex: 1,
+          csvRow: rowB,
+          coreMeasurementID: 202,
+          changes: { dbh: { from: '20', to: '22.5' } },
+          existingValues: { measuredDBH: 20, measuredHOM: null, measurementDate: '2024-01-01', rawCodes: null, description: null }
+        }
+      ],
+      newRows: [],
+      invalidRows: [],
+      counts: { matched: 2, matchedWithChanges: 2, new: 0, invalid: 0, total: 2 },
+      uploadAttemptID: UPLOAD_ATTEMPT_ID,
+      invalidRowsIntegrityHash: STALE_INVALID_ROWS_INTEGRITY_HASH
+    };
+
+    // Row A was demoted by the apply-time TOCTOU re-check; row B is untouched.
+    const freshInvalidRows = [{ csvRow: rowA, csvIndex: 0, reason: 'Quadrat 999 was not found in this plot/census' }];
+    const conflictResponse = {
+      error: 'plan hash mismatch',
+      freshPlan: {
+        dataType: 'measurementssummary',
+        rowCount: 1,
+        rowPlans: [],
+        aggregateEffects: [],
+        maxSeverity: 'warn',
+        planHash: 'fresh-hash',
+        generatedAt: '2026-04-21T00:00:00Z',
+        duplicateDeletions: []
+      },
+      freshInvalidRows,
+      freshInvalidRowsIntegrityHash: FRESH_INVALID_ROWS_INTEGRITY_HASH
+    };
+    const applySuccessResponse = {
+      updatedCount: 1,
+      skippedCount: 0,
+      insertedCount: 0,
+      deletedDuplicateCount: 0,
+      failedRowCount: 1,
+      applyErrors: [],
+      validationPending: true
+    };
+
+    const applyRequestBodies: Array<Record<string, unknown>> = [];
+    let applyCallCount = 0;
+    const jsonResponse = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), { status, headers: new Headers({ 'content-type': 'application/json' }) });
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/api/revisionupload') {
+        return jsonResponse(matchResponse);
+      }
+      if (url === '/api/revisionupload/apply') {
+        applyCallCount += 1;
+        applyRequestBodies.push(init?.body ? JSON.parse(init.body as string) : {});
+        return applyCallCount === 1 ? jsonResponse(conflictResponse, 409) : jsonResponse(applySuccessResponse);
+      }
+      throw new Error(`Unexpected fetch call to ${url} in revision conflict recovery test`);
+    }) as unknown as typeof global.fetch;
+
+    await driveToRevisionMatch(user);
+
+    await waitFor(() => expect(screen.getByText('2 rows to update')).toBeInTheDocument(), { timeout: 3000 });
+
+    await user.click(screen.getByTestId('revision-match-apply'));
+
+    // First apply attempt 409s -- the UI must bounce back to the review
+    // screen (not stay on the apply screen, not silently drop row A) with
+    // row A demoted into the Invalid tab.
+    await waitFor(() => expect(applyRequestBodies).toHaveLength(1));
+    await waitFor(() => expect(screen.getByText('Invalid (1)')).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getByText('1 rows to update')).toBeInTheDocument();
+
+    const retryApplyButton = screen.getByTestId('revision-match-apply');
+    expect(retryApplyButton).not.toBeDisabled();
+    await user.click(retryApplyButton);
+
+    // The merged result now carries the conflict's freshPlan as bulkPlan, so
+    // confirming apply routes through the ImpactSummary dialog instead of
+    // calling onApply directly -- confirm there to actually resubmit.
+    await waitFor(() => expect(screen.getByTestId('impact-summary-apply')).toBeInTheDocument());
+    await user.click(screen.getByTestId('impact-summary-apply'));
+
+    await waitFor(() => expect(applyRequestBodies).toHaveLength(2));
+
+    // The retried apply must submit the server's authoritative invalidRows/
+    // hash for row A, never the client's original (now-stale) empty
+    // invalidRows/hash -- and uploadAttemptID must survive unchanged through
+    // the whole conflict/retry cycle.
+    expect(applyRequestBodies[0].uploadAttemptID).toBe(UPLOAD_ATTEMPT_ID);
+    expect(applyRequestBodies[0].invalidRows).toEqual([]);
+    expect(applyRequestBodies[0].invalidRowsIntegrityHash).toBe(STALE_INVALID_ROWS_INTEGRITY_HASH);
+    expect(applyRequestBodies[1].uploadAttemptID).toBe(UPLOAD_ATTEMPT_ID);
+    expect(applyRequestBodies[1].invalidRows).toEqual(freshInvalidRows);
+    expect(applyRequestBodies[1].invalidRowsIntegrityHash).toBe(FRESH_INVALID_ROWS_INTEGRITY_HASH);
+    // Row A must not resurface as a matched row on the retried apply -- only
+    // row B (the real survivor) is submitted as matched.
+    expect((applyRequestBodies[1].matchedRows as Array<{ coreMeasurementID: number }>).map(row => row.coreMeasurementID)).toEqual([202]);
+
+    await waitFor(() => expect(screen.getByText('Revisions Applied')).toBeInTheDocument());
+    expect(screen.getByTestId('revision-apply-failed-count')).toHaveTextContent('1 rejected row(s) recorded as failed measurements');
+  });
+
+  // #505 route.ts previousUploadAttemptID contract: a re-match of the SAME
+  // selected upload must retain its attempt identity; a genuinely new
+  // upload (a fresh session) must never inherit one.
+  it('retains the uploadAttemptID across a same-upload refresh by sending it back as previousUploadAttemptID', async () => {
+    const user = userEvent.setup();
+
+    const FIRST_UPLOAD_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
+    const SECOND_UPLOAD_ATTEMPT_ID = '22222222-2222-4222-9222-222222222222';
+    const matchRequestBodies: Array<Record<string, unknown>> = [];
+    let matchCallCount = 0;
+    const jsonResponse = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url !== '/api/revisionupload') {
+        throw new Error(`Unexpected fetch call to ${url} in attempt-identity refresh test`);
+      }
+      matchCallCount += 1;
+      matchRequestBodies.push(init?.body ? JSON.parse(init.body as string) : {});
+      return jsonResponse({
+        matchedRows: [],
+        newRows: [{ csvRow: { tag: 'T001', stemtag: 'S1', quadrat: 'Q1', dbh: '10', date: '2024-01-01' }, csvIndex: 0, reason: 'no-match-key-in-db' }],
+        invalidRows: [],
+        counts: { matched: 0, matchedWithChanges: 0, new: 1, invalid: 0, total: 1 },
+        uploadAttemptID: matchCallCount === 1 ? FIRST_UPLOAD_ATTEMPT_ID : SECOND_UPLOAD_ATTEMPT_ID,
+        invalidRowsIntegrityHash: 'a'.repeat(64)
+      });
+    }) as unknown as typeof global.fetch;
+
+    await driveToRevisionMatch(user);
+    await waitFor(() => expect(screen.getByText('Confirm new row insertion')).toBeInTheDocument());
+
+    expect(matchRequestBodies).toHaveLength(1);
+    expect(matchRequestBodies[0].previousUploadAttemptID, 'the first match of a new upload must never send a prior attempt identity').toBeUndefined();
+
+    await user.click(screen.getByTestId('revision-match-refresh'));
+
+    await waitFor(() => expect(matchRequestBodies).toHaveLength(2));
+    expect(matchRequestBodies[1].previousUploadAttemptID, "refreshing the SAME upload must echo back the prior response's uploadAttemptID").toBe(
+      FIRST_UPLOAD_ATTEMPT_ID
+    );
+  });
+
+  // Regression target: a fresh component mount would trivially omit
+  // previousUploadAttemptID even if the ref-clearing logic were broken (the
+  // ref starts null regardless). This drives TWO uploads through the SAME
+  // mounted UploadParent via the real Cancel -> Return to Start -> re-select
+  // -> re-upload path, so a leaked ref would be caught: upload #2's match
+  // call must never echo back upload #1's attemptID.
+  it('omits previousUploadAttemptID for a second, genuinely new upload started via Cancel/Return to Start in the SAME mounted session', async () => {
+    const user = userEvent.setup();
+
+    const FIRST_UPLOAD_ATTEMPT_ID = '44444444-4444-4444-8444-444444444444';
+    const SECOND_UPLOAD_ATTEMPT_ID = '55555555-5555-4555-9555-555555555555';
+    const matchRequestBodies: Array<Record<string, unknown>> = [];
+    let matchCallCount = 0;
+    const jsonResponse = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url !== '/api/revisionupload') {
+        throw new Error(`Unexpected fetch call to ${url} in cross-upload identity-reset test`);
+      }
+      matchCallCount += 1;
+      matchRequestBodies.push(init?.body ? JSON.parse(init.body as string) : {});
+      return jsonResponse({
+        matchedRows: [],
+        newRows: [{ csvRow: { tag: 'T001', stemtag: 'S1', quadrat: 'Q1', dbh: '10', date: '2024-01-01' }, csvIndex: 0, reason: 'no-match-key-in-db' }],
+        invalidRows: [],
+        counts: { matched: 0, matchedWithChanges: 0, new: 1, invalid: 0, total: 1 },
+        uploadAttemptID: matchCallCount === 1 ? FIRST_UPLOAD_ATTEMPT_ID : SECOND_UPLOAD_ATTEMPT_ID,
+        invalidRowsIntegrityHash: 'd'.repeat(64)
+      });
+    }) as unknown as typeof global.fetch;
+
+    // Deliberately NOT driveToRevisionMatch (it mounts a new component) --
+    // a single mount drives both uploads below.
+    render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} overrideUploadMode={UploadMode.REVISIONS} />);
+
+    // Upload #1: establishes attempt A.
+    await addFileAndContinueUpload(user);
+    await waitFor(() => expect(screen.getByText('Confirm new row insertion')).toBeInTheDocument());
+    expect(matchRequestBodies).toHaveLength(1);
+    expect(matchRequestBodies[0].previousUploadAttemptID).toBeUndefined();
+
+    // The REAL reset path: resetToStart() clears uploadMode too, so revision
+    // mode must be explicitly re-selected before re-entering handleInitialSubmit's
+    // revision branch -- exercising the actual production code (handleReturnToStart,
+    // handleInitialSubmit's currentUploadAttemptIDRef reset), not a remount.
+    await user.click(screen.getByText('Cancel'));
+    await waitFor(() => expect(screen.getByTestId('upload-start')).toBeInTheDocument());
+
+    await user.click(screen.getByText('Select Measurements'));
+    await user.click(screen.getByText('Select Revision Mode'));
+    await user.click(screen.getByText('Finalize Selection'));
+    await waitFor(() => expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument());
+
+    // Upload #2: a genuinely new upload, same mount.
+    await addFileAndContinueUpload(user);
+    await waitFor(() => expect(matchRequestBodies).toHaveLength(2));
+
+    expect(
+      matchRequestBodies[1].previousUploadAttemptID,
+      "a new upload started via the real reset path must never echo back the previous upload's attempt identity"
+    ).toBeUndefined();
+  });
+});
+
+describe('mergeFreshRevisionPlan', () => {
+  const baseResult: RevisionUploadResponse = {
+    matchedRows: [],
+    newRows: [],
+    invalidRows: [],
+    collapsedRows: [],
+    counts: { matched: 0, matchedWithChanges: 0, new: 0, invalid: 0, collapsed: 0, total: 0 },
+    bulkPlan: {
+      dataType: 'measurementssummary',
+      rowCount: 0,
+      rowPlans: [],
+      aggregateEffects: [],
+      maxSeverity: 'info',
+      planHash: 'stale-hash',
+      generatedAt: '2026-04-21T00:00:00Z',
+      duplicateDeletions: []
+    },
+    uploadAttemptID: '11111111-1111-4111-8111-111111111111',
+    invalidRowsIntegrityHash: 'a'.repeat(64)
+  };
+
+  function buildFreshPlan(overrides: Partial<BulkEditPlan> = {}): BulkEditPlan {
+    return {
+      dataType: 'measurementssummary',
+      rowCount: 1,
+      rowPlans: [],
+      aggregateEffects: [],
+      maxSeverity: 'warn',
+      planHash: 'fresh-hash',
+      generatedAt: '2026-04-21T00:00:00Z',
+      duplicateDeletions: [],
+      ...overrides
+    };
+  }
+
+  it('adopts the server-authoritative freshInvalidRows/freshInvalidRowsIntegrityHash verbatim, without recomputing an equivalent set from freshPlan.rowPlans', () => {
+    const result: RevisionUploadResponse = {
+      ...baseResult,
+      matchedRows: [
+        {
+          csvIndex: 0,
+          csvRow: { tag: 'T1' },
+          coreMeasurementID: 101,
+          changes: { dbh: { from: '10', to: '12.5' } },
+          existingValues: { measuredDBH: 10, measuredHOM: null, measurementDate: null, rawCodes: null, description: null }
+        },
+        {
+          csvIndex: 1,
+          csvRow: { tag: 'T2' },
+          coreMeasurementID: 202,
+          changes: { dbh: { from: '20', to: '22.5' } },
+          existingValues: { measuredDBH: 20, measuredHOM: null, measurementDate: null, rawCodes: null, description: null }
+        }
+      ],
+      counts: { matched: 2, matchedWithChanges: 2, new: 0, invalid: 0, collapsed: 0, total: 2 }
+    };
+
+    const freshInvalidRows = [{ csvRow: { tag: 'T1' }, csvIndex: 0, reason: 'Quadrat 999 was not found in this plot/census' }];
+    const freshPlan = buildFreshPlan();
+
+    const merged = mergeFreshRevisionPlan(result, freshPlan, freshInvalidRows, 'b'.repeat(64));
+
+    expect(merged.invalidRows).toBe(freshInvalidRows);
+    expect(merged.invalidRowsIntegrityHash).toBe('b'.repeat(64));
+    expect(merged.matchedRows.map(row => row.coreMeasurementID)).toEqual([202]);
+    expect(merged.bulkPlan).toBe(freshPlan);
+    expect(merged.counts).toEqual({ matched: 1, matchedWithChanges: 1, new: 0, invalid: 1, collapsed: 0, total: 2 });
+    // uploadAttemptID must survive the merge untouched -- a re-applied attempt
+    // after a conflict is still the same attempt, not a new upload.
+    expect(merged.uploadAttemptID).toBe(baseResult.uploadAttemptID);
+  });
+
+  it('demotes a matched row by matching freshInvalidRows entries on csvIndex, never on its array position (regression: freshPlan.rowPlans is indexed over the survivor-only bulk input apply rebuilt, not the source CSV)', () => {
+    // csvIndex (10) deliberately differs from this row's array position (0)
+    // in both matchedRows and freshPlan.rowPlans.
+    const result: RevisionUploadResponse = {
+      ...baseResult,
+      matchedRows: [
+        {
+          csvIndex: 10,
+          csvRow: { tag: 'T1' },
+          coreMeasurementID: 101,
+          changes: { dbh: { from: '10', to: '12.5' } },
+          existingValues: { measuredDBH: 10, measuredHOM: null, measurementDate: null, rawCodes: null, description: null }
+        }
+      ],
+      counts: { matched: 1, matchedWithChanges: 1, new: 0, invalid: 0, collapsed: 0, total: 1 }
+    };
+    const freshInvalidRows = [{ csvRow: { tag: 'T1' }, csvIndex: 10, reason: 'Quadrat 999 was not found in this plot/census' }];
+
+    const merged = mergeFreshRevisionPlan(result, buildFreshPlan(), freshInvalidRows, 'c'.repeat(64));
+
+    expect(merged.matchedRows).toEqual([]);
+    expect(merged.invalidRows).toEqual(freshInvalidRows);
+  });
+
+  it("refreshes a surviving matched row's changes from freshPlan.rowPlans, keyed by coreMeasurementID", () => {
+    const result: RevisionUploadResponse = {
+      ...baseResult,
+      matchedRows: [
+        {
+          csvIndex: 0,
+          csvRow: { tag: 'T1' },
+          coreMeasurementID: 101,
+          changes: { dbh: { from: '10', to: '12.5' } },
+          existingValues: { measuredDBH: 10, measuredHOM: null, measurementDate: null, rawCodes: null, description: null }
+        }
+      ],
+      counts: { matched: 1, matchedWithChanges: 1, new: 0, invalid: 0, collapsed: 0, total: 1 }
+    };
+    const freshPlan = buildFreshPlan({
+      rowPlans: [
+        {
+          rowIndex: 0,
+          targetID: 101,
+          status: 'matched',
+          plan: {
+            dataType: 'measurementssummary',
+            targetID: 101,
+            fieldChanges: [{ field: 'dbh', from: '10', to: '13.0' }],
+            effects: [],
+            maxSeverity: 'info',
+            planHash: 'member-plan',
+            generatedAt: '2026-04-21T00:00:00Z'
+          }
+        }
+      ]
+    });
+
+    const merged = mergeFreshRevisionPlan(result, freshPlan, [], 'd'.repeat(64));
+
+    expect(merged.matchedRows[0].changes).toEqual({ dbh: { from: '10', to: '13.0' } });
   });
 });
 
