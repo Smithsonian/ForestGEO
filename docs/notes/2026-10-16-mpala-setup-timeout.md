@@ -42,7 +42,13 @@ Making the split faster cannot reach the budget. The split has to stop rewriting
 - Hinted fallback split for rows still under the original BatchID (legacy clients, `/api/reingest`): `INDEX(... ingest_temporarymeasurements_FBPC_index)`, with a warning logged when it runs.
 - An oversized sub-batch is a permanent failure: HTTP 422 from the route, `NonRetryableJobError` in the worker.
 - Every failed setup records step and attempt context.
-- Lock release after COMMIT is log-and-continue. `GET /api/uploadjobs` queries events only for failing jobs.
+- Kept dev's log-and-continue lock release after COMMIT (the original PR made it fatal). `GET /api/uploadjobs` queries events only for failing jobs.
+- Job transitions now write their status and event in one catalog transaction (`withCatalogTransition`, `lib/background-jobs/repository.ts`), so the recorded failure context always matches the transition. A failed event insert now fails the transition.
+
+## Deploy precondition
+
+- **Risk:** a measurements background job whose earlier attempt ran on the old code and completed a `__subNNN` metric, then retried on the new code, can re-ingest a few rows. The old split used accepted-row order; the new one uses raw row position.
+- **Required:** before deploying, confirm no measurement job is `running` or `waiting_retry` with a completed sub-batch metric, or let the queue drain.
 
 ## Moved out
 
