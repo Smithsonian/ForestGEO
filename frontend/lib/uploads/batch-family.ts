@@ -18,9 +18,10 @@ import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 
 /**
- * Suffix separator written by splitIntoSubBatches. Changing it here without
- * changing the writer silently orphans every in-flight split, so the split
- * writer imports this constant rather than repeating the literal.
+ * Suffix separator written by pre-partitioned staging and the setup fallback
+ * split. Changing it here without changing the writers silently orphans every
+ * in-flight family, so both writers build IDs through buildSubBatchID rather than repeating
+ * the literal.
  */
 export const SUB_BATCH_SEPARATOR = '__sub';
 

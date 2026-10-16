@@ -162,6 +162,7 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
 
   it('rejects scope drift between upload-session authorization and setup entry', async () => {
     const cm = ConnectionManager.getInstance() as any;
+    cm.acquireApplicationLock.mockResolvedValue(true);
     let familyReads = 0;
     cm.executeQuery.mockImplementation(async (sql: string) => {
       if (String(sql).includes('COUNT(DISTINCT PlotID)')) {
@@ -313,9 +314,10 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
    * still fully staged.
    */
   describe('resuming a batch whose rows were renamed into sub-batches', () => {
+    // Each member holds at most one batch of rows: setup rejects a larger member.
     const ORPHANED_SUB_BATCHES = [
       { BatchID: 'batch-1__sub001', rowCount: 10_000 },
-      { BatchID: 'batch-1__sub002', rowCount: 96_227 }
+      { BatchID: 'batch-1__sub002', rowCount: 6_227 }
     ];
 
     /**
@@ -379,6 +381,25 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       const procedureCalls = cm.executeQuery.mock.calls.filter(([sql]: [string]) => String(sql).includes('bulkingestionprocess'));
       expect(procedureCalls.map(([, params]: [string, string[]]) => params[1])).toEqual(['batch-1__sub001', 'batch-1__sub002']);
       expect(body.subBatchCount).toBe(ORPHANED_SUB_BATCHES.length);
+    });
+
+    it('fails setup without calling the procedure when a member exceeds the batch size', async () => {
+      const cm = mockOrphanedSubBatchRun();
+      const OVERSIZED_MEMBER_ROWS = 96_227;
+      const groupedFamily = cm.executeQuery.getMockImplementation();
+      cm.executeQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+        String(sql).includes('GROUP BY BatchID')
+          ? familyRows([ORPHANED_SUB_BATCHES[0], { BatchID: 'batch-1__sub002', rowCount: OVERSIZED_MEMBER_ROWS }])
+          : groupedFamily(sql, params)
+      );
+
+      const res = await GET(makeRequest(), makeProps());
+      const body = await res.json();
+      console.log('[oversized member] status:', res.status, 'body:', body);
+
+      expect(res.status).toBe(503);
+      expect(body.error).toContain(`batch-1__sub002 of file.csv holds ${OVERSIZED_MEMBER_ROWS} rows`);
+      expect(cm.executeQuery.mock.calls.some(([sql]: [string]) => String(sql).includes('bulkingestionprocess'))).toBe(false);
     });
 
     it('does not re-split orphaned sub-batches into new ones', async () => {

@@ -106,8 +106,7 @@ const diagnostic = {
   fileID: file.fileName,
   batchID: 'batch-8',
   elapsedMs: 2,
-  assignedRows: 19,
-  operation: 'assign_interval' as const
+  assignedRows: 19
 };
 
 beforeEach(() => {
@@ -158,7 +157,7 @@ describe('optional setup diagnostic persistence', () => {
     expect(mocks.recordDiagnostic).toHaveBeenCalledOnce();
     expect(mocks.recordDiagnostic.mock.calls[0][2]).toMatchObject({
       assignedRows: 19,
-      operation: 'assign_interval'
+      step: 'discovery'
     });
     finishWrite();
   });

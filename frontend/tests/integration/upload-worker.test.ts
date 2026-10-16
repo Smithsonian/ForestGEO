@@ -938,16 +938,17 @@ describe('runJobIfClaimable — integration', () => {
   }, 180000);
 
   // -------------------------------------------------------------------------
-  // 9. Split-batch recycle recovery (2026-07-27 Harvard Forest incident)
+  // 9. Batch-family recycle recovery (2026-07-27 Harvard Forest incident)
   //
-  // A file large enough to split is ingested as `<batchID>__subNNN`. Everything
-  // keyed on the unsuffixed BatchID — the uploadmetrics completion probe and the
-  // retry cleanup — then looks at an ID that owns no rows and no metrics. These
-  // tests force a split with a low threshold and prove the worker reasons about
-  // the whole family.
+  // The worker stages every row under its final `<batchID>__subNNN` member and
+  // setup ingests those members as staged; nothing owns rows or metrics under
+  // the unsuffixed BatchID. Everything keyed on that bare ID — the uploadmetrics
+  // completion probe and the retry cleanup — would look at an empty ID. These
+  // tests force a multi-member family with a low batch size and prove the worker
+  // reasons about the whole family.
   //
   // Measured scope of each test (verified by reverting buildSubBatchPattern to
-  // bare-ID semantics and re-running):
+  // bare-ID semantics and re-running, when setup still split the family itself):
   //   - 'recycled after every sub-batch completed' FAILS without the
   //     family-scoped completion probe. This is the load-bearing regression:
   //     a fully-ingested split file is otherwise re-staged and re-ingested.
@@ -959,7 +960,7 @@ describe('runJobIfClaimable — integration', () => {
   //     tests/integration/record-invalid-rows.test.ts.
   // -------------------------------------------------------------------------
 
-  describe('split-batch recycle recovery', () => {
+  describe('batch-family recycle recovery', () => {
     /** Forces FILE1's 5 valid rows into 3 sub-batches (2 + 2 + 1). */
     const SPLIT_THRESHOLD_ROWS = 2;
     const EXPECTED_SUB_BATCH_COUNT = Math.ceil(FILE1_VALID_ROW_COUNT / SPLIT_THRESHOLD_ROWS);
@@ -1039,8 +1040,8 @@ describe('runJobIfClaimable — integration', () => {
       const familyMetrics = await fetchFamilyMetrics(batchID);
       console.log(`[split] batchID=${batchID} familyMetrics=${JSON.stringify(familyMetrics)}`);
 
-      // Precondition for the recycle tests below: the split really happened, so
-      // the unsuffixed ID owns no metric of its own.
+      // Precondition for the recycle tests below: the file really ingested as a
+      // multi-member family, so the unsuffixed ID owns no metric of its own.
       expect(Object.keys(familyMetrics)).toHaveLength(EXPECTED_SUB_BATCH_COUNT);
       expect(familyMetrics[batchID]).toBeUndefined();
       expect(Object.values(familyMetrics).every(status => status === UPLOADMETRICS_STATUS_COMPLETED)).toBe(true);

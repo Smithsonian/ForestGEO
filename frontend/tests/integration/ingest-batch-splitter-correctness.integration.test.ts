@@ -1,4 +1,4 @@
-/** Real local-MySQL correctness checks for the scoped keyset setup splitter. */
+/** Real local-MySQL correctness checks for the setup fallback splitter (rows staged under the original BatchID). */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createConnection, type Connection, type RowDataPacket } from 'mysql2/promise';
 import ConnectionManager from '../../lib/db/connectionmanager';
@@ -52,6 +52,21 @@ async function memberships(fileID: string): Promise<Array<{ rowID: string; Batch
     [fileID]
   );
   return rows.map(row => ({ rowID: String(row.rowID), BatchID: String(row.BatchID) }));
+}
+
+const FAMILY_DISCOVERY = /GROUP BY BatchID[\s\S]*ORDER BY BatchID/i;
+
+type QueryExecutor = (sql: string, params?: unknown[], transactionID?: string) => Promise<unknown>;
+
+/** Stages one more original-batch row inside setup's own transaction, as a concurrent stager would. */
+async function insertLateRow(runQuery: QueryExecutor, fileID: string, batchID: string, treeTag: string, transactionID?: string): Promise<void> {
+  await runQuery(
+    `INSERT INTO \`${config.database}\`.temporarymeasurements
+     (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate)
+     VALUES (?, ?, ?, ?, ?, '1', ?, ?, 1, 1, 10, 1.3, '2024-03-15')`,
+    [fileID, batchID, testData.plots[0].plotID, testData.census[0].censusID, treeTag, testData.species[0].SpeciesCode, testData.quadrats[0].QuadratName],
+    transactionID
+  );
 }
 
 async function runSetupOnly(fileID: string, batchID: string): Promise<SetupDiagnostic[]> {
@@ -313,7 +328,7 @@ describe('ingestBatch scoped keyset splitter (real local MySQL)', () => {
     expect(await memberships(leaseFamily.fileID)).toEqual(leaseBefore);
   });
 
-  it('rejects new original-batch rows beyond the frozen upper ID and rolls the setup back', async () => {
+  it('rejects an original-batch row staged between discovery and the frozen bound and rolls the setup back', async () => {
     const family = newFamily('new_row');
     for (let i = 1; i <= 9; i++) await insertRow(family.fileID, family.batchID, i);
     const before = await memberships(family.fileID);
@@ -322,37 +337,26 @@ describe('ingestBatch scoped keyset splitter (real local MySQL)', () => {
     let inserted = false;
     manager.executeQuery = async (sql: string, params?: unknown[], transactionID?: string) => {
       const result = await originalQuery(sql, params, transactionID);
-      if (!inserted && String(sql).includes('AS rowID')) {
+      if (!inserted && FAMILY_DISCOVERY.test(String(sql))) {
         inserted = true;
-        await originalQuery(
-          `INSERT INTO \`${config.database}\`.temporarymeasurements
-           (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate)
-           VALUES (?, ?, ?, ?, 'NEWAFTER', '1', ?, ?, 1, 1, 10, 1.3, '2024-03-15')`,
-          [
-            family.fileID,
-            family.batchID,
-            testData.plots[0].plotID,
-            testData.census[0].censusID,
-            testData.species[0].SpeciesCode,
-            testData.quadrats[0].QuadratName
-          ],
-          transactionID
-        );
+        await insertLateRow(originalQuery, family.fileID, family.batchID, 'NEWBEFORE', transactionID);
       }
       return result;
     };
     try {
-      await expect(runSetupOnly(family.fileID, family.batchID)).rejects.toThrow(/split membership mismatch/);
+      await expect(runSetupOnly(family.fileID, family.batchID)).rejects.toThrow(/changed during setup: discovered 9 original row\(s\), found 10/);
     } finally {
       manager.executeQuery = originalQuery;
     }
+    console.log('[new_row] inserted after discovery:', inserted, 'memberships after rollback:', await memberships(family.fileID));
+    expect(inserted).toBe(true);
     expect(await memberships(family.fileID)).toEqual(before);
   });
 
-  it('rejects a late orphan-family phantom and rolls the setup back', async () => {
-    const family = newFamily('new_orphan');
+  it('leaves an original-batch row staged after the frozen bound under the original BatchID', async () => {
+    const family = newFamily('late_row');
     for (let i = 1; i <= 9; i++) await insertRow(family.fileID, family.batchID, i);
-    const before = await memberships(family.fileID);
+    const discovered = await memberships(family.fileID);
     const manager = ConnectionManager.getInstance();
     const originalQuery = manager.executeQuery.bind(manager);
     let inserted = false;
@@ -360,32 +364,23 @@ describe('ingestBatch scoped keyset splitter (real local MySQL)', () => {
       const result = await originalQuery(sql, params, transactionID);
       if (!inserted && String(sql).includes('AS rowID')) {
         inserted = true;
-        await originalQuery(
-          `INSERT INTO \`${config.database}\`.temporarymeasurements
-           (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate)
-           VALUES (?, ?, ?, ?, 'NEWORPHAN', '1', ?, ?, 1, 1, 10, 1.3, '2024-03-15')`,
-          [
-            family.fileID,
-            `${family.batchID}__sub999`,
-            testData.plots[0].plotID,
-            testData.census[0].censusID,
-            testData.species[0].SpeciesCode,
-            testData.quadrats[0].QuadratName
-          ],
-          transactionID
-        );
+        await insertLateRow(originalQuery, family.fileID, family.batchID, 'NEWAFTER', transactionID);
       }
       return result;
     };
     try {
-      await expect(runSetupOnly(family.fileID, family.batchID)).rejects.toThrow(/Batch split membership mismatch/);
+      await runSetupOnly(family.fileID, family.batchID);
     } finally {
       manager.executeQuery = originalQuery;
     }
-    expect(await memberships(family.fileID)).toEqual(before);
+    const final = await memberships(family.fileID);
+    console.log('[late_row] memberships after setup:', final);
+    const expectedSplit = discovered.map((row, index) => ({ ...row, BatchID: `${family.batchID}__sub${String(Math.floor(index / 4) + 1).padStart(3, '0')}` }));
+    expect(final.slice(0, discovered.length)).toEqual(expectedSplit);
+    expect(final.slice(discovered.length).map(row => row.BatchID)).toEqual([family.batchID]);
   });
 
-  it('revalidates scope drift after waiting on a lock acquired by a separate session', async () => {
+  it('validates scope after waiting on a lock acquired by a separate session', async () => {
     const family = newFamily('scope_wait');
     for (let i = 1; i <= 5; i++) await insertRow(family.fileID, family.batchID, i);
     const lockName = buildIngestionLockName(config.database, family.fileID, testData.plots[0].plotID, testData.census[0].censusID);

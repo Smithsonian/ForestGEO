@@ -365,7 +365,6 @@ function reportSetupDiagnostic(ctx: WorkerRunContext, diagnostic: SetupDiagnosti
     rowCount: diagnostic.rowCount,
     assignedRows: diagnostic.assignedRows,
     completedBatches: diagnostic.completedBatches,
-    operation: diagnostic.operation,
     terminal: diagnostic.terminal,
     code: diagnostic.errorCode,
     ...(diagnostic.errorCode === 'SETUP_CALLBACK_TIMEOUT' ? { summary: 'The file uploaded, but preparing its measurements took too long.' } : {})

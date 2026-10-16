@@ -273,7 +273,6 @@ export async function recordSetupDiagnostic(
     rowCount?: number;
     assignedRows?: number;
     completedBatches?: number;
-    operation?: 'select_ids' | 'assign_interval';
     terminal?: boolean;
     code?: string;
     summary?: string;
@@ -293,7 +292,6 @@ export async function recordSetupDiagnostic(
     ...boundedCount('rowCount', details.rowCount),
     ...boundedCount('assignedRows', details.assignedRows),
     ...boundedCount('completedBatches', details.completedBatches),
-    ...(details.operation === 'select_ids' || details.operation === 'assign_interval' ? { operation: details.operation } : {}),
     ...(details.terminal ? { terminal: true } : {}),
     ...(details.code && /^[A-Z0-9_]{1,80}$/.test(details.code) ? { code: details.code } : {}),
     ...(details.summary ? { summary: details.summary.slice(0, 500) } : {}),
