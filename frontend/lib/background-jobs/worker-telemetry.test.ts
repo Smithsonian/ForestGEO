@@ -71,12 +71,20 @@ vi.mock('@/config/uploadsessiontracker', () => ({
   }
 }));
 vi.mock('@/lib/uploads/stage-measurements', () => ({ stageMeasurementChunk: mocks.stage, countStagedRows: mocks.countStaged }));
-vi.mock('@/lib/uploads/ingest-batch', () => ({ ingestBatch: mocks.ingest, IngestBatchAbortedError: class extends Error {} }));
+vi.mock('@/lib/uploads/ingest-batch', () => ({
+  ingestBatch: mocks.ingest,
+  IngestBatchAbortedError: class extends Error {},
+  OversizedSubBatchError: class OversizedSubBatchError extends Error {
+    readonly code = 'SETUP_OVERSIZED_SUB_BATCH';
+  }
+}));
 vi.mock('@/lib/uploads/record-invalid-rows', () => ({ recordInvalidRows: vi.fn(), deleteUnresolvedRowsForBatchFamily: vi.fn() }));
 vi.mock('@/lib/uploads/collapse-census', () => ({ collapseCensus: mocks.collapse }));
 vi.mock('@/lib/uploads/validation-orchestrator', () => ({ runCensusValidations: mocks.validations }));
 
 import { runJobIfClaimable } from './worker';
+import { OversizedSubBatchError } from '@/lib/uploads/ingest-batch';
+import { SETUP_FAILURE_CODES, setupFailureSummary } from '@/lib/uploads/setup-failure';
 
 const file = { jobFileID: 8, fileName: 'sample.csv', status: 'pending', expectedRows: 1, processedRows: 0, failedRows: 0 };
 const job = (status: string) => ({
@@ -176,5 +184,49 @@ describe('optional setup diagnostic persistence', () => {
     expect(mocks.retry).toHaveBeenCalledOnce();
     expect(mocks.retry.mock.calls[0][3]).toBe(timeout);
     expect(mocks.retry.mock.calls[0][5].failureContext).toMatchObject({ code: 'SETUP_CALLBACK_TIMEOUT', step: 'discovery' });
+  });
+
+  it('records step and code for a clean-rollback setup failure that is not a timeout (finding 2)', async () => {
+    const deadlock = Object.assign(new Error('Deadlock found when trying to get lock'), { code: 'ER_LOCK_DEADLOCK' });
+    mocks.ingest.mockImplementation(async (_cm: unknown, params: { onSetupProgress: (d: typeof diagnostic) => void }) => {
+      params.onSetupProgress({ ...diagnostic, step: 'cleanup', errorCode: 'ER_LOCK_DEADLOCK' });
+      throw deadlock;
+    });
+
+    await runJobIfClaimable(72, { fetchFileText: mocks.fetch });
+
+    const context = mocks.retry.mock.calls[0][5].failureContext;
+    console.log('[finding-2] worker failureContext:', context);
+    expect(context).toEqual({
+      code: 'ER_LOCK_DEADLOCK',
+      summary: setupFailureSummary('ER_LOCK_DEADLOCK'),
+      step: 'cleanup',
+      attemptID: expect.any(String),
+      fileID: file.fileName,
+      batchID: 'batch-8'
+    });
+  });
+
+  it('fails an oversized sub-batch permanently without spending the retry budget', async () => {
+    const MockedOversizedSubBatchError = OversizedSubBatchError as unknown as new (message: string) => Error;
+    const oversized = new MockedOversizedSubBatchError('Sub-batch batch-8__sub001 of sample.csv holds too many rows');
+    mocks.ingest.mockImplementation(async (_cm: unknown, params: { onSetupProgress: (d: typeof diagnostic) => void }) => {
+      params.onSetupProgress({ ...diagnostic, step: 'cleanup', errorCode: SETUP_FAILURE_CODES.oversizedSubBatch });
+      throw oversized;
+    });
+
+    await runJobIfClaimable(72, { fetchFileText: mocks.fetch });
+
+    console.log('[oversized] retry calls:', mocks.retry.mock.calls.length, 'fail calls:', mocks.fail.mock.calls.length);
+    expect(mocks.retry).not.toHaveBeenCalled();
+    expect(mocks.fail).toHaveBeenCalledOnce();
+    expect(mocks.fail.mock.calls[0][5]).toEqual({
+      code: SETUP_FAILURE_CODES.oversizedSubBatch,
+      summary: setupFailureSummary(SETUP_FAILURE_CODES.oversizedSubBatch),
+      step: 'cleanup',
+      attemptID: expect.any(String),
+      fileID: file.fileName,
+      batchID: 'batch-8'
+    });
   });
 });

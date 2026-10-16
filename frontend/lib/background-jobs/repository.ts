@@ -2,6 +2,7 @@ import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql
 import { ensureBackgroundJobCatalogTables } from './catalog';
 import { BackgroundJobScopeUnavailableError, IdempotencyKeyConflictError, JobFileNotFoundError, WorkerLeaseLostError } from './errors';
 import { releaseSchemaOperationLock, tryAcquireSchemaOperationLock } from '@/lib/provisioning/schema-operation-lock';
+import { buildInPlaceholders } from '@/lib/db/sqlsecurity';
 import type {
   BackgroundJobEventRecord,
   BackgroundJobFileRecord,
@@ -510,7 +511,8 @@ export async function getBackgroundJobWithDetails(catalogPool: Pool, jobID: numb
   };
 }
 
-const FAILURE_STEPS = new Set(['discovery', 'lock_wait', 'post_lock_validation', 'recovery', 'cleanup', 'splitting', 'commit']);
+const FAILURE_STEPS = new Set(['discovery', 'lock_wait', 'recovery', 'cleanup', 'splitting', 'commit']);
+const FAILURE_CONTEXT_EVENT_WINDOW = 100;
 const FAILURE_TRANSITIONS = new Set(['failed', 'waiting_retry', 'cancelled']);
 
 /** Resolve status text only from the event for the current authoritative transition and its attempt. */
@@ -534,9 +536,7 @@ export function selectFailureContext(job: BackgroundJobRecord, events: Backgroun
       !transitionFile ||
       !transitionBatch ||
       value.fileID !== transitionFile ||
-      value.batchID !== transitionBatch ||
-      (typeof value.fileID === 'string' && value.fileID !== transitionFile) ||
-      (typeof value.batchID === 'string' && value.batchID !== transitionBatch)
+      value.batchID !== transitionBatch
     ) {
       return job.lastError ? { summary: job.lastError.slice(0, 500) } : null;
     }
@@ -579,26 +579,24 @@ export function selectFailureContext(job: BackgroundJobRecord, events: Backgroun
   return job.lastError ? { summary: job.lastError.slice(0, 500) } : null;
 }
 
-/** Bounded shared event lookup used by list responses. */
+/** Bounded event lookup for the jobs that can carry failure context; other jobs cost no query. */
 export async function attachFailureContexts(catalogPool: Pool, jobs: BackgroundJobRecord[]): Promise<BackgroundJobRecord[]> {
-  if (jobs.length === 0) return jobs;
-  const grouped = new Map<number, BackgroundJobEventRecord[]>();
-  const ids = jobs.map(job => job.jobID);
+  const failingJobIDs = jobs.filter(job => FAILURE_TRANSITIONS.has(job.status)).map(job => job.jobID);
+  if (failingJobIDs.length === 0) return jobs;
   const [rows] = await catalogPool.query<BackgroundJobEventRow[]>(
     `SELECT EventID, JobID, EventType, Message, Details, CreatedAt FROM (
        SELECT EventID, JobID, EventType, Message, Details, CreatedAt,
          ROW_NUMBER() OVER (PARTITION BY JobID ORDER BY EventID DESC) AS rowRank
-       FROM catalog.background_job_events WHERE JobID IN (${ids.map(() => '?').join(',')})
-     ) ranked WHERE rowRank <= 100 ORDER BY JobID, EventID DESC`,
-    ids
+       FROM catalog.background_job_events WHERE JobID IN (${buildInPlaceholders(failingJobIDs.length)})
+     ) ranked WHERE rowRank <= ${FAILURE_CONTEXT_EVENT_WINDOW} ORDER BY JobID, EventID DESC`,
+    failingJobIDs
   );
+  const grouped = new Map<number, BackgroundJobEventRecord[]>();
   for (const row of rows) {
     const event = mapEvent(row);
-    const events = grouped.get(event.jobID) ?? [];
-    events.push(event);
-    grouped.set(event.jobID, events);
+    grouped.set(event.jobID, [...(grouped.get(event.jobID) ?? []), event]);
   }
-  return jobs.map(job => ({ ...job, failureContext: selectFailureContext(job, grouped.get(job.jobID) ?? []) }));
+  return jobs.map(job => (FAILURE_TRANSITIONS.has(job.status) ? { ...job, failureContext: selectFailureContext(job, grouped.get(job.jobID) ?? []) } : job));
 }
 
 export interface ListBackgroundJobsOptions {

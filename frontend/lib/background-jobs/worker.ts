@@ -44,7 +44,8 @@ import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { detectDelimiter } from '@/lib/uploads/detect-delimiter';
 import { sanitizeUploadFileName } from '@/lib/uploads/file-names';
-import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult, type SetupDiagnostic } from '@/lib/uploads/ingest-batch';
+import { ingestBatch, IngestBatchAbortedError, OversizedSubBatchError, type IngestBatchResult, type SetupDiagnostic } from '@/lib/uploads/ingest-batch';
+import { setupFailureSummary } from '@/lib/uploads/setup-failure';
 import { deleteUnresolvedRowsForBatchFamily, recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { countStagedRows, MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
@@ -88,6 +89,8 @@ const DEFAULT_CHUNK_ROWS = 5_000;
 /** Base for the exponential retry delay: base * 2^RetryCount seconds. */
 export const RETRY_BASE_DELAY_SECONDS = 60;
 const RETRY_BACKOFF_BASE = 2;
+const SPLIT_PROGRESS_SAMPLE_EVERY = 10;
+const MAX_PENDING_SETUP_DIAGNOSTIC_WRITES = 8;
 
 /**
  * Short park delay used when an external party owns the plot/census scope (an
@@ -329,28 +332,23 @@ function stopHeartbeat(ctx: WorkerRunContext): void {
   }
 }
 
-function failureContextFor(ctx: WorkerRunContext, code?: string): UploadJobFailureContext | undefined {
-  const d = ctx.latestSetupDiagnostic;
-  if (!d || !d.terminal || d.outcome !== 'failed') return undefined;
-  const effectiveCode = code ?? d.errorCode;
-  const summary =
-    effectiveCode === 'SETUP_CALLBACK_TIMEOUT'
-      ? 'The file uploaded, but preparing its measurements took too long.'
-      : 'Upload setup failed while preparing measurements.';
+function failureContextFor(ctx: WorkerRunContext): UploadJobFailureContext | undefined {
+  const diagnostic = ctx.latestSetupDiagnostic;
+  if (!diagnostic?.terminal || diagnostic.outcome !== 'failed') return undefined;
   return {
-    ...(effectiveCode ? { code: effectiveCode } : {}),
-    summary,
-    step: d.step,
+    ...(diagnostic.errorCode ? { code: diagnostic.errorCode } : {}),
+    summary: setupFailureSummary(diagnostic.errorCode),
+    step: diagnostic.step,
     attemptID: ctx.workerID,
-    fileID: d.fileID,
-    batchID: d.batchID
+    fileID: diagnostic.fileID,
+    batchID: diagnostic.batchID
   };
 }
 
 function reportSetupDiagnostic(ctx: WorkerRunContext, diagnostic: SetupDiagnostic): void {
   ctx.latestSetupDiagnostic = diagnostic;
-  const sampledSplit = diagnostic.step !== 'splitting' || (diagnostic.completedBatches ?? 0) % 10 === 0;
-  if ((!diagnostic.terminal && !sampledSplit) || (!diagnostic.terminal && ctx.pendingSetupDiagnosticWrites >= 8)) return;
+  const sampledSplit = diagnostic.step !== 'splitting' || (diagnostic.completedBatches ?? 0) % SPLIT_PROGRESS_SAMPLE_EVERY === 0;
+  if ((!diagnostic.terminal && !sampledSplit) || (!diagnostic.terminal && ctx.pendingSetupDiagnosticWrites >= MAX_PENDING_SETUP_DIAGNOSTIC_WRITES)) return;
   ctx.pendingSetupDiagnosticWrites += 1;
   void recordSetupDiagnostic(ctx.catalogPool, ctx.job.jobID, {
     attemptID: ctx.workerID,
@@ -367,7 +365,7 @@ function reportSetupDiagnostic(ctx: WorkerRunContext, diagnostic: SetupDiagnosti
     completedBatches: diagnostic.completedBatches,
     terminal: diagnostic.terminal,
     code: diagnostic.errorCode,
-    ...(diagnostic.errorCode === 'SETUP_CALLBACK_TIMEOUT' ? { summary: 'The file uploaded, but preparing its measurements took too long.' } : {})
+    ...(diagnostic.terminal && diagnostic.outcome === 'failed' ? { summary: setupFailureSummary(diagnostic.errorCode) } : {})
   })
     .catch(() => {
       // Diagnostic persistence is optional telemetry and cannot replace setup or
@@ -469,7 +467,6 @@ async function handleRunFailure(ctx: WorkerRunContext, error: unknown): Promise<
 
   const err = error instanceof Error ? error : new Error(String(error));
   try {
-    const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code: unknown }).code) : undefined;
     // Cancel wins over retry parking: a cancel_requested set while this
     // failure was unwinding must finalize as 'cancelled', not be erased by a
     // waiting_retry/failed transition. (markBackgroundJobWaitingRetryAsWorker
@@ -492,14 +489,14 @@ async function handleRunFailure(ctx: WorkerRunContext, error: unknown): Promise<
     }
     if (err instanceof NonRetryableJobError) {
       ailogger.error(`[UploadWorker] Job ${job.jobID} failed permanently: ${err.message}`);
-      await markBackgroundJobFailed(catalogPool, job.jobID, workerID, err, workerID, failureContextFor(ctx, errorCode));
+      await markBackgroundJobFailed(catalogPool, job.jobID, workerID, err, workerID, failureContextFor(ctx));
       return;
     }
     const retryDelaySeconds = RETRY_BASE_DELAY_SECONDS * Math.pow(RETRY_BACKOFF_BASE, job.retryCount);
     ailogger.error(`[UploadWorker] Job ${job.jobID} failed (retry budget ${job.retryCount}/${job.maxRetries}): ${err.message}`, err);
     await markBackgroundJobWaitingRetryAsWorker(catalogPool, job.jobID, workerID, err, retryDelaySeconds, {
       attemptID: workerID,
-      failureContext: failureContextFor(ctx, errorCode)
+      failureContext: failureContextFor(ctx)
     });
   } catch (finalizeError) {
     if (finalizeError instanceof WorkerLeaseLostError) {
@@ -1057,6 +1054,9 @@ async function runIngestForBatch(ctx: WorkerRunContext, fileName: string, batchI
   } catch (error) {
     if (error instanceof IngestBatchAbortedError) {
       await assertStillOwned(ctx); // throws JobCancelledSignal or WorkerLeaseLostError
+    }
+    if (error instanceof OversizedSubBatchError) {
+      throw new NonRetryableJobError(error.message, { cause: error });
     }
     throw error;
   }

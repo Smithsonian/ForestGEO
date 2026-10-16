@@ -5,6 +5,7 @@ import { Box, Button, Chip, LinearProgress, Modal, ModalClose, Sheet, Stack, Typ
 import CloudUploadOutlined from '@mui/icons-material/CloudUploadOutlined';
 import ErrorOutline from '@mui/icons-material/ErrorOutline';
 import ailogger from '@/ailogger';
+import { SourceFormat } from '@/config/macros/formdetails';
 import type { UploadJobFailureContext } from '@/lib/background-jobs/types';
 
 const JOB_POLL_INTERVAL_MS = 10_000;
@@ -226,7 +227,7 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <LinearProgress determinate value={progressValue} color={color} sx={{ flex: 1 }} />
             <Typography level="body-xs" color="neutral">
-              {primaryJob.sourceFormat === 'csv' ? 'Rows staged' : 'Rows handled'} {primaryJob.processedRows} / {primaryJob.failedRows} failed
+              {primaryJob.sourceFormat === SourceFormat.csv ? 'Rows staged' : 'Rows handled'} {primaryJob.processedRows} / {primaryJob.failedRows} failed
             </Typography>
           </Box>
         </Stack>
@@ -278,8 +279,8 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
                 </Stack>
                 <Typography level="body-xs" color="neutral">
                   {describeJobStatus(job.status) ?? formatPhase(job.phase)} - {job.totalFiles} file{job.totalFiles === 1 ? '' : 's'} -{' '}
-                  {job.sourceFormat === 'csv' ? 'Rows staged' : 'Rows handled'} {job.processedRows} - {job.failedRows} failed - retry {job.retryCount ?? 0}/
-                  {job.maxRetries ?? '?'}
+                  {job.sourceFormat === SourceFormat.csv ? 'Rows staged' : 'Rows handled'} {job.processedRows} - {job.failedRows} failed - retry{' '}
+                  {job.retryCount ?? 0}/{job.maxRetries ?? '?'}
                 </Typography>
                 {job.failureContext?.step && <Typography level="body-xs">Last step: {formatPhase(job.failureContext.step)}</Typography>}
                 {job.status === 'waiting_retry' && (
