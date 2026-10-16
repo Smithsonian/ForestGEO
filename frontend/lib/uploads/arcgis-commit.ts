@@ -35,7 +35,14 @@ import {
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
-import { MAX_ORIGINAL_BATCH_ID_LENGTH, OriginalBatchIDTooLongError, SubBatchOrdinalOverflowError, subBatchIDForRowOrdinal } from '@/lib/uploads/batch-family';
+import {
+  BatchIDContainsSubBatchSeparatorError,
+  MAX_ORIGINAL_BATCH_ID_LENGTH,
+  OriginalBatchIDTooLongError,
+  SUB_BATCH_SEPARATOR,
+  SubBatchOrdinalOverflowError,
+  subBatchIDForRowOrdinal
+} from '@/lib/uploads/batch-family';
 
 const ARCGIS_COMMIT_INSERT_FAILURE_FALLBACK = 'Unknown error during insert';
 const CHANGELOG_TABLE_NAME = 'file_upload';
@@ -85,6 +92,10 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
 
   if (batchID.length > MAX_ORIGINAL_BATCH_ID_LENGTH) {
     throw new ArcgisImportSessionError(new OriginalBatchIDTooLongError(batchID).message, HTTPResponses.INVALID_REQUEST);
+  }
+
+  if (batchID.includes(SUB_BATCH_SEPARATOR)) {
+    throw new ArcgisImportSessionError(new BatchIDContainsSubBatchSeparatorError(batchID).message, HTTPResponses.INVALID_REQUEST);
   }
 
   await ensureArcgisImportTables(schema);

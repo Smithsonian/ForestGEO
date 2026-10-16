@@ -240,6 +240,18 @@ export class OriginalBatchIDTooLongError extends Error {
 }
 
 /**
+ * A client-sent `X__sub001` would stage as `X__sub001__sub001`, match family X's
+ * LIKE pattern, and `familyRootOf` would then resolve it to the wrong root.
+ */
+export class BatchIDContainsSubBatchSeparatorError extends Error {
+  readonly code = 'INVALID_BATCH_ID';
+  constructor(batchID: string) {
+    super(`Batch ID "${batchID}" must not contain the reserved sub-batch separator "${SUB_BATCH_SEPARATOR}"`);
+    this.name = 'BatchIDContainsSubBatchSeparatorError';
+  }
+}
+
+/**
  * Final BatchID for the row at 0-based `rowOrdinal` in a file's parsed row
  * sequence. A pure function of the file and the batch size, so a retry that
  * re-stages the same file reproduces identical membership — the property the

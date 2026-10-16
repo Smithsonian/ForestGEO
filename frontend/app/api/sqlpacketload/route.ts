@@ -23,10 +23,12 @@ import { assertSchemaAccess } from '@/lib/authz';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import { InvalidFirstRowOrdinalError, MeasurementChunkResolutionError, parseFirstRowOrdinal, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
 import {
+  BatchIDContainsSubBatchSeparatorError,
   buildSubBatchPattern,
   LIKE_ESCAPE_CLAUSE,
   MAX_ORIGINAL_BATCH_ID_LENGTH,
   OriginalBatchIDTooLongError,
+  SUB_BATCH_SEPARATOR,
   SubBatchOrdinalOverflowError
 } from '@/lib/uploads/batch-family';
 import {
@@ -405,6 +407,10 @@ export async function POST(request: NextRequest) {
     }
 
     const batchID = body.batchID || generateShortBatchID();
+    if (batchID.includes(SUB_BATCH_SEPARATOR)) {
+      const batchIDError = new BatchIDContainsSubBatchSeparatorError(batchID);
+      return NextResponse.json({ error: batchIDError.message, code: batchIDError.code }, { status: HTTPResponses.INVALID_REQUEST });
+    }
     if (firstRowOrdinal !== null && batchID.length > MAX_ORIGINAL_BATCH_ID_LENGTH) {
       const batchIDError = new OriginalBatchIDTooLongError(batchID);
       return NextResponse.json({ error: batchIDError.message, code: batchIDError.code }, { status: HTTPResponses.INVALID_REQUEST });

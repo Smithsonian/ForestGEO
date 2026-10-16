@@ -13,12 +13,14 @@ import { HTTPResponses } from '@/config/macros';
 import { MAX_REFERENCE_UPLOAD_ROWS } from '@/lib/uploads/reference-upload-limits';
 import { SourceFormat } from '@/config/macros/formdetails';
 import {
+  BatchIDContainsSubBatchSeparatorError,
   buildSubBatchID,
   buildSubBatchPattern,
   getIngestionBatchSize,
   MAX_ORIGINAL_BATCH_ID_LENGTH,
   MAX_SUB_BATCH_ORDINAL,
   OriginalBatchIDTooLongError,
+  SUB_BATCH_SEPARATOR,
   SubBatchOrdinalOverflowError
 } from '@/lib/uploads/batch-family';
 import { InvalidFirstRowOrdinalError } from '@/lib/uploads/stage-measurements';
@@ -419,6 +421,39 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(mockConnectionManager.executeQuery, 'the batch ID is rejected before any query').not.toHaveBeenCalled();
     expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
     expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+  });
+
+  describe.each([
+    { scenario: 'with firstRowOrdinal', overrides: { firstRowOrdinal: 0 } },
+    { scenario: 'without firstRowOrdinal', overrides: {} }
+  ])('client batch ID containing the sub-batch separator ($scenario)', ({ overrides }) => {
+    it('is rejected with INVALID_REQUEST before any query or transaction', async () => {
+      const separatorBatchID = `batch-1${SUB_BATCH_SEPARATOR}001`;
+      const expectedCode = new BatchIDContainsSubBatchSeparatorError(separatorBatchID).code;
+      primeMeasurementQueries(mockConnectionManager);
+
+      const res = (await POST(makeMeasurementRequest({ batchID: separatorBatchID, ...overrides })))!;
+      const body = await res.json();
+      console.log(`[batch-id-separator] batchID=${separatorBatchID} status=${res.status} body=${JSON.stringify(body)}`);
+
+      expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+      expect(body.code).toBe(expectedCode);
+      expect(mockConnectionManager.executeQuery, 'the batch ID is rejected before any query').not.toHaveBeenCalled();
+      expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  it('still stages a normal client batch ID that has no sub-batch separator', async () => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest({ batchID: 'm9x7k2a-8fh3k9d2x5p', firstRowOrdinal: 0 })))!;
+    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
+    );
+    console.log(`[batch-id-normal] status=${res.status} stagedBatchID=${insertCall?.[1]?.[STAGED_BATCH_ID_PARAM_INDEX]}`);
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(insertCall[1][STAGED_BATCH_ID_PARAM_INDEX]).toBe(buildSubBatchID('m9x7k2a-8fh3k9d2x5p', 1));
   });
 
   it('rejects a firstRowOrdinal past the last nameable sub-batch with INVALID_REQUEST and stages nothing', async () => {
