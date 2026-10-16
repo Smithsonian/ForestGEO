@@ -1016,7 +1016,7 @@ describe('stageMeasurementChunk — integration', () => {
   // GET_LOCK contention between it and the suite's shared connection is real.
   // ---------------------------------------------------------------------------
 
-  it('serializes overlapping first chunks before counting rows, producing one exact summary through real ConnectionManager', async () => {
+  it('serializes overlapping first chunks before staging rows, producing one exact summary through real ConnectionManager', async () => {
     if (!['localhost', '127.0.0.1'].includes(process.env.AZURE_SQL_SERVER ?? '')) throw new Error('Local DB required');
     const { default: RealConnectionManager } = await vi.importActual<typeof import('@/lib/db/connectionmanager')>('@/lib/db/connectionmanager');
     const manager = RealConnectionManager.getInstance();
@@ -1028,9 +1028,9 @@ describe('stageMeasurementChunk — integration', () => {
     const firstGate = new Promise<void>(resolve => {
       releaseFirst = resolve;
     });
-    let sawFirstCount!: () => void;
-    const firstCount = new Promise<void>(resolve => {
-      sawFirstCount = resolve;
+    let sawFirstInsert!: () => void;
+    const firstInsert = new Promise<void>(resolve => {
+      sawFirstInsert = resolve;
     });
     let sawSecondLock!: () => void;
     const secondLock = new Promise<void>(resolve => {
@@ -1041,9 +1041,10 @@ describe('stageMeasurementChunk — integration', () => {
     let paused = false;
     const querySpy = vi.spyOn(manager, 'executeQuery').mockImplementation(async (sql, params, tx) => {
       const result = await execute(sql, params, tx);
-      if (tx === txA && !paused && sql.includes('COUNT(*)') && sql.includes('temporarymeasurements')) {
+      // Pauses A after its summary lock and first staging INSERT, so B must queue behind that lock.
+      if (tx === txA && !paused && sql.includes('INSERT') && sql.includes('temporarymeasurements')) {
         paused = true;
-        sawFirstCount();
+        sawFirstInsert();
         await firstGate;
       }
       return result;
@@ -1073,7 +1074,7 @@ describe('stageMeasurementChunk — integration', () => {
     const runA = run(txA, rowsA, 'chunk-a');
     let runB: ReturnType<typeof run> | undefined;
     try {
-      await firstCount;
+      await firstInsert;
       runB = run(txB, rowsB, 'chunk-b');
       await secondLock;
       releaseFirst();

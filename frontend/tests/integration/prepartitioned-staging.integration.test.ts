@@ -41,8 +41,16 @@ const TRANSACTION_ID_PREFIX = 'prepartitioned-staging-tx-';
 const sharedState = vi.hoisted(() => ({
   connection: null as Connection | null,
   activeTransactionID: null as string | null,
-  transactionCounter: 0
+  transactionCounter: 0,
+  /** GET_LOCK names taken inside the active transaction; released when it ends, as ConnectionManager does. */
+  heldLockNames: [] as string[]
 }));
+
+async function releaseHeldLocks(): Promise<void> {
+  for (const lockName of sharedState.heldLockNames.splice(0)) {
+    await sharedState.connection!.query('SELECT RELEASE_LOCK(?) AS released', [lockName]);
+  }
+}
 
 vi.mock('@/lib/db/connectionmanager', () => {
   const manager = {
@@ -68,12 +76,24 @@ vi.mock('@/lib/db/connectionmanager', () => {
       if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: commit transactionID mismatch');
       await sharedState.connection.commit();
       sharedState.activeTransactionID = null;
+      await releaseHeldLocks();
     },
     rollbackTransaction: async (transactionID: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: rollback transactionID mismatch');
       await sharedState.connection.rollback();
       sharedState.activeTransactionID = null;
+      await releaseHeldLocks();
+    },
+    // Real MySQL GET_LOCK (#507): staging serializes the file-upload summary per (schema, RecordID, CensusID) with it.
+    acquireApplicationLock: async (lockName: string, transactionID: string, timeoutMs: number) => {
+      if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: lock transactionID mismatch');
+      if (sharedState.heldLockNames.includes(lockName)) return true;
+      const [rows] = await sharedState.connection.query('SELECT GET_LOCK(?, ?) AS acquired', [lockName, Math.ceil(timeoutMs / 1000)]);
+      const acquired = (rows as { acquired: number }[])[0]?.acquired === 1;
+      if (acquired) sharedState.heldLockNames.push(lockName);
+      return acquired;
     },
     cleanupStaleTransactions: async () => undefined,
     closeConnection: async () => undefined

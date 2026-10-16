@@ -724,6 +724,8 @@ describe('sqlpacketload measurement scope validation', () => {
     let insertSeen = false;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
+      // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
+      if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
       if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
       if (text.includes('SELECT CoreMeasurementID FROM') && text.includes('.coremeasurements')) {

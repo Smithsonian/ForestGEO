@@ -810,7 +810,7 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
   it('rolls back the ENTIRE commit — staging insert and dropped-row persistence included — when the late audit of a dropped row fails (#507)', async () => {
     const DROPPED_TREE_TAG = 'N300';
     const seeded = await seedValidStagedSession({ fileName: `arc-late-audit-fail-${Date.now()}.xlsx` });
-    const batchID = `arcgis_late_audit_fail_${Date.now()}`;
+    const batchID = `arcgis_audit_${Date.now()}`;
     const connectionManager = ConnectionManager.getInstance();
     const AUDIT_FAILURE_MESSAGE = 'Simulated unifiedchangelog write failure for an ArcGIS dropped row';
 
