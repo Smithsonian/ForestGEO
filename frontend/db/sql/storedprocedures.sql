@@ -422,7 +422,24 @@ create procedure clearcensusfull(IN targetCensusID int)
 SQL SECURITY DEFINER
 BEGIN
     declare vCountCensus int;
-    -- Disable triggers to prevent changelog tracking during bulk census deletion
+    declare vPrevForeignKeyChecks int;
+    declare vPrevDisableTriggers int default null;
+
+    -- Issue #509: restore the caller's EXACT prior foreign_key_checks /
+    -- @disable_triggers on every exit path (a caller may invoke this from
+    -- within its own already-overridden scope, or @disable_triggers may still
+    -- be its default NULL) — not hard-coded 1/0 — so a mid-procedure failure
+    -- can't leave the pooled connection poisoned for the next caller.
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET foreign_key_checks = vPrevForeignKeyChecks;
+        SET @disable_triggers = vPrevDisableTriggers;
+        RESIGNAL;
+    END;
+
+    SET vPrevForeignKeyChecks = @@foreign_key_checks;
+    SET vPrevDisableTriggers = @disable_triggers;
     set @disable_triggers = 1;
     set foreign_key_checks = 0;
     START TRANSACTION;
@@ -444,6 +461,13 @@ BEGIN
     FROM measurementssummary
     WHERE CensusID = targetCensusID;
 
+    -- Issue #509: viewfulltable is materialized (populated by
+    -- RefreshViewFullTable), never recomputed on read, and must be cleared
+    -- explicitly with the rest of the census.
+    DELETE
+    FROM viewfulltable
+    WHERE CensusID = targetCensusID;
+
     delete from coremeasurements where CensusID = targetCensusID;
     delete from stems where CensusID = targetCensusID;
 
@@ -453,32 +477,52 @@ BEGIN
 
     if vCountCensus = 1 then
         -- there's only one census. if so, clear all fixed data tables as well to "fully" clean the census
-        truncate attributes;
-        truncate personnel;
-        truncate roles;
-        truncate quadrats;
-        truncate species;
-        truncate specieslimits;
-        truncate genus;
-        truncate family;
-        truncate reference;
-        truncate unifiedchangelog;
+        -- Issue #509: DELETE (not TRUNCATE) keeps this inside the transaction
+        -- above so the EXIT HANDLER's ROLLBACK actually reverts it.
+        delete from attributes;
+        delete from personnel;
+        delete from roles;
+        delete from quadrats;
+        delete from species;
+        delete from specieslimits;
+        delete from genus;
+        delete from family;
+        delete from reference;
+        -- Issue #509: unifiedchangelog is audit history, not census data —
+        -- intentionally NOT cleared here (previously destroyed by TRUNCATE).
     end if;
 
     DELETE
     FROM census
     WHERE CensusID = targetCensusID;
 
+    -- Historical (viewfulltable) and source deletes above are complete; commit now.
     COMMIT;
-    set foreign_key_checks = 1;
-    -- Re-enable triggers after census deletion
-    set @disable_triggers = 0;
+    SET foreign_key_checks = vPrevForeignKeyChecks;
+    SET @disable_triggers = vPrevDisableTriggers;
 END $$
 
 create procedure clearcensusmsmts(IN targetCensusID int)
 SQL SECURITY DEFINER
 BEGIN
-    -- Disable triggers to prevent changelog tracking during bulk census deletion
+    declare vPrevForeignKeyChecks int;
+    declare vPrevDisableTriggers int default null;
+
+    -- Issue #509: restore the caller's EXACT prior foreign_key_checks /
+    -- @disable_triggers on every exit path (a caller may invoke this from
+    -- within its own already-overridden scope, or @disable_triggers may still
+    -- be its default NULL) — not hard-coded 1/0 — so a mid-procedure failure
+    -- can't leave the pooled connection poisoned for the next caller.
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET foreign_key_checks = vPrevForeignKeyChecks;
+        SET @disable_triggers = vPrevDisableTriggers;
+        RESIGNAL;
+    END;
+
+    SET vPrevForeignKeyChecks = @@foreign_key_checks;
+    SET vPrevDisableTriggers = @disable_triggers;
     set @disable_triggers = 1;
     set foreign_key_checks = 0;
     START TRANSACTION;
@@ -502,6 +546,13 @@ BEGIN
     FROM measurementssummary
     WHERE CensusID = targetCensusID;
 
+    -- Issue #509: viewfulltable is materialized (populated by
+    -- RefreshViewFullTable), never recomputed on read, and must be cleared
+    -- explicitly with the rest of the census.
+    DELETE
+    FROM viewfulltable
+    WHERE CensusID = targetCensusID;
+
     -- Delete core measurements, stems, and trees for this census
     delete from coremeasurements where CensusID = targetCensusID;
     delete from stems where CensusID = targetCensusID;
@@ -511,10 +562,10 @@ BEGIN
     FROM census
     WHERE CensusID = targetCensusID;
 
+    -- Historical (viewfulltable) and source deletes above are complete; commit now.
     COMMIT;
-    set foreign_key_checks = 1;
-    -- Re-enable triggers after census deletion
-    set @disable_triggers = 0;
+    SET foreign_key_checks = vPrevForeignKeyChecks;
+    SET @disable_triggers = vPrevDisableTriggers;
 END $$
 
 -- reingestfailedrows removed: operated on legacy failedmeasurements table.
