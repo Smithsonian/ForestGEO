@@ -3,6 +3,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -27,9 +28,13 @@ async function handler(request: NextRequest, _context: RouteContext) {
 
   try {
     const verificationSQL = batchID
-      ? safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ? AND PlotID = ? AND CensusID = ?')
+      ? safeFormatQuery(
+          schema,
+          `SELECT COUNT(*) as count FROM ??.temporarymeasurements
+           WHERE FileID = ? AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}) AND PlotID = ? AND CensusID = ?`
+        )
       : safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND PlotID = ? AND CensusID = ?');
-    const verificationParams = batchID ? [fileName, batchID, plotID, censusID] : [fileName, plotID, censusID];
+    const verificationParams = batchID ? [fileName, batchID, buildSubBatchPattern(batchID), plotID, censusID] : [fileName, plotID, censusID];
     const result = await connectionManager.executeQuery(verificationSQL, verificationParams);
 
     const count = result[0]?.count || 0;

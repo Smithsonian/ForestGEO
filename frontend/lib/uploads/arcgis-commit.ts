@@ -35,6 +35,7 @@ import {
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
 import { measurementFileIDValidationError } from '@/lib/uploads/file-names';
+import { OriginalBatchIDTooLongError, SubBatchOrdinalOverflowError, subBatchIDForRowOrdinal } from '@/lib/uploads/batch-family';
 
 const ARCGIS_COMMIT_INSERT_FAILURE_FALLBACK = 'Unknown error during insert';
 const CHANGELOG_TABLE_NAME = 'file_upload';
@@ -61,6 +62,22 @@ function toNullableNumber(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Stages each row under its final sub-batch, so setup has nothing to split. A
+ * batch ID or row count the sub-batch suffix cannot name is the caller's input
+ * error, reported before any statement runs.
+ */
+function assignArcgisRowBatchIDs(batchID: string, rowCount: number): string[] {
+  try {
+    return Array.from({ length: rowCount }, (_, rowOrdinal) => subBatchIDForRowOrdinal(batchID, rowOrdinal));
+  } catch (error: unknown) {
+    if (error instanceof OriginalBatchIDTooLongError || error instanceof SubBatchOrdinalOverflowError) {
+      throw new ArcgisImportSessionError(error.message, HTTPResponses.INVALID_REQUEST);
+    }
+    throw error;
+  }
 }
 
 export async function commitArcgisImport(connectionManager: ConnectionManager, params: CommitArcgisImportParams): Promise<CommitArcgisImportResult> {
@@ -108,31 +125,25 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
       throw new ArcgisImportSessionError('ArcGIS import session contains no rows', HTTPResponses.UNPROCESSABLE_ENTITY);
     }
 
-    const countSQL = safeFormatQuery(schema, `SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`);
-    const preInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
-    const preInsertCount = preInsertResult[0]?.count || 0;
+    const rowBatchIDs = assignArcgisRowBatchIDs(batchID, staged.rows.length);
 
     if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
       await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
     }
     await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
 
-    await insertTemporaryMeasurementsInBatches(
+    insertedCount = await insertTemporaryMeasurementsInBatches(
       connectionManager,
       schema,
       staged.rows,
       fileName,
-      staged.rows.map(() => batchID),
+      rowBatchIDs,
       uploadSessionID,
       SourceFormat.arcgis_xlsx,
       plotID,
       censusID,
       transactionID
     );
-
-    const postInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
-    const postInsertCount = postInsertResult[0]?.count || 0;
-    insertedCount = postInsertCount - preInsertCount;
 
     const droppedRowCount = staged.rows.length - insertedCount;
     if (droppedRowCount > 0) {
@@ -145,7 +156,7 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
         connectionManager,
         schema,
         fileName,
-        staged.rows.map(() => batchID),
+        rowBatchIDs,
         plotID,
         censusID,
         staged.rows,

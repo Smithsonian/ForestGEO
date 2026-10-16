@@ -12,7 +12,16 @@ import { REFERENCE_REPLACEMENT_LOCK_TIMEOUT_MS, resetUploadSessionReplacementMar
 import { HTTPResponses } from '@/config/macros';
 import { MAX_REFERENCE_UPLOAD_ROWS } from '@/lib/uploads/reference-upload-limits';
 import { SourceFormat } from '@/config/macros/formdetails';
-import { buildSubBatchPattern } from '@/lib/uploads/batch-family';
+import {
+  buildSubBatchID,
+  buildSubBatchPattern,
+  getIngestionBatchSize,
+  MAX_ORIGINAL_BATCH_ID_LENGTH,
+  MAX_SUB_BATCH_ORDINAL,
+  OriginalBatchIDTooLongError,
+  SubBatchOrdinalOverflowError
+} from '@/lib/uploads/batch-family';
+import { InvalidFirstRowOrdinalError } from '@/lib/uploads/stage-measurements';
 import { headerSignature } from '@/lib/column-mapping/mapping';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import ailogger from '@/ailogger';
@@ -125,6 +134,8 @@ const TEST_PLOT_ID = 22;
 const TEST_CENSUS_ID = 32;
 const TEST_BATCH_ID = 'batch-1';
 const TEST_FILE_NAME = 'SERC_census1_2025.csv';
+/** The per-chunk scope check: one sampled row of the batch family, never an aggregate over it. */
+const FAMILY_SCOPE_SAMPLE_SQL = /SELECT PlotID AS plotID, CensusID AS censusID\s+FROM\s+\S*temporarymeasurements[\s\S]*LIMIT 1/;
 
 function makeMeasurementRequest(overrides: Partial<Record<string, unknown>> = {}) {
   const body = {
@@ -211,8 +222,8 @@ function primeMeasurementQueries(manager: any): void {
   // reports one affected row per VALUES tuple, as MySQL does when nothing is ignored.
   manager.executeQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     const text = String(sql);
+    if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
     if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
-    if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
     if (text.includes('COUNT(')) return [{ count: 0 }];
     if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 0 };
     if (text.trimStart().toUpperCase().startsWith('INSERT')) {
@@ -298,9 +309,7 @@ describe('sqlpacketload measurement scope validation', () => {
   });
 
   it('rejects when an existing batch already has a different census scope', async () => {
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 1, distinctCensusCount: 1, plotID: TEST_PLOT_ID, censusID: 99 }]);
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }]).mockResolvedValueOnce([{ plotID: TEST_PLOT_ID, censusID: 99 }]);
 
     const res = (await POST(makeMeasurementRequest()))!;
 
@@ -308,6 +317,123 @@ describe('sqlpacketload measurement scope validation', () => {
     const body = await res.json();
     expect(body.error).toMatch(/Existing batch scope does not match incoming plot\/census/i);
     expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('samples one row of the batch family for the scope check instead of aggregating the whole batch', async () => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest()))!;
+
+    const executedSql: string[] = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
+    const scopeSampleCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) => FAMILY_SCOPE_SAMPLE_SQL.test(String(call[0])));
+    const aggregateScopeSql = executedSql.filter(sql => /COUNT\(DISTINCT/i.test(sql));
+    console.log(`[scope-sample] status=${res.status} sampleParams=${JSON.stringify(scopeSampleCall?.[1])} aggregateScopeQueries=${aggregateScopeSql.length}`);
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(scopeSampleCall, 'the scope check must issue a LIMIT 1 family sample').toBeDefined();
+    expect(scopeSampleCall[1]).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, buildSubBatchPattern(TEST_BATCH_ID)]);
+    expect(aggregateScopeSql).toEqual([]);
+  });
+
+  it('rejects with CONFLICT when the sampled family row belongs to a different plot', async () => {
+    const OTHER_PLOT_ID = TEST_PLOT_ID + 1;
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
+      .mockResolvedValueOnce([{ plotID: OTHER_PLOT_ID, censusID: TEST_CENSUS_ID }]);
+
+    const res = (await POST(makeMeasurementRequest()))!;
+    const body = await res.json();
+    console.log(`[scope-sample-conflict] status=${res.status} body=${JSON.stringify(body)}`);
+
+    expect(res.status).toBe(HTTPResponses.CONFLICT);
+    expect(body.details).toMatchObject({ batchPlotID: OTHER_PLOT_ID, batchCensusID: TEST_CENSUS_ID, resolvedPlotID: TEST_PLOT_ID });
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a negative ordinal', -1],
+    ['a fractional ordinal', 1.5],
+    ['a numeric string', '3'],
+    ['an ordinal beyond the safe-integer range', 1e300]
+  ])('rejects %s as firstRowOrdinal with INVALID_REQUEST before touching the database', async (_label, firstRowOrdinal) => {
+    const expectedCode = new InvalidFirstRowOrdinalError(firstRowOrdinal).code;
+
+    const res = (await POST(makeMeasurementRequest({ firstRowOrdinal })))!;
+    const body = await res.json();
+    console.log(`[first-row-ordinal] value=${JSON.stringify(firstRowOrdinal)} status=${res.status} body=${JSON.stringify(body)}`);
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body.code).toBe(expectedCode);
+    expect(body.error).toContain('firstRowOrdinal');
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('stages under the original batch ID when firstRowOrdinal is absent (legacy client)', async () => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest()))!;
+    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
+    );
+    console.log(`[first-row-ordinal-absent] status=${res.status} stagedBatchID=${insertCall?.[1]?.[1]}`);
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(insertCall[1][1]).toBe(TEST_BATCH_ID);
+  });
+
+  it('stages each row under its final sub-batch when firstRowOrdinal is sent', async () => {
+    const FIRST_SUB_BATCH_ORDINAL = 1;
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest({ firstRowOrdinal: 0 })))!;
+    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
+    );
+    console.log(`[first-row-ordinal-zero] status=${res.status} stagedBatchID=${insertCall?.[1]?.[1]}`);
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(insertCall[1][1]).toBe(buildSubBatchID(TEST_BATCH_ID, FIRST_SUB_BATCH_ORDINAL));
+  });
+
+  it('rejects a batch ID with no room for the sub-batch suffix with INVALID_REQUEST and stages nothing', async () => {
+    const overLongBatchID = 'b'.repeat(MAX_ORIGINAL_BATCH_ID_LENGTH + 1);
+    const expectedCode = new OriginalBatchIDTooLongError(overLongBatchID).code;
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest({ batchID: overLongBatchID, firstRowOrdinal: 0 })))!;
+    const body = await res.json();
+    const stagingInserts = mockConnectionManager.executeQuery.mock.calls.filter(
+      (call: any[]) => String(call[0]).includes('temporarymeasurements') && String(call[0]).trimStart().startsWith('INSERT')
+    );
+    console.log(
+      `[batch-id-too-long] length=${overLongBatchID.length} status=${res.status} body=${JSON.stringify(body)} stagingInserts=${stagingInserts.length}`
+    );
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body.code).toBe(expectedCode);
+    expect(stagingInserts).toHaveLength(0);
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a firstRowOrdinal past the last nameable sub-batch with INVALID_REQUEST and stages nothing', async () => {
+    const firstRowOrdinal = getIngestionBatchSize() * MAX_SUB_BATCH_ORDINAL;
+    const expectedCode = new SubBatchOrdinalOverflowError(TEST_BATCH_ID, firstRowOrdinal, MAX_SUB_BATCH_ORDINAL + 1).code;
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest({ firstRowOrdinal })))!;
+    const body = await res.json();
+    const stagingInserts = mockConnectionManager.executeQuery.mock.calls.filter(
+      (call: any[]) => String(call[0]).includes('temporarymeasurements') && String(call[0]).trimStart().startsWith('INSERT')
+    );
+    console.log(
+      `[sub-batch-overflow] firstRowOrdinal=${firstRowOrdinal} status=${res.status} body=${JSON.stringify(body)} stagingInserts=${stagingInserts.length}`
+    );
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body.code).toBe(expectedCode);
+    expect(stagingInserts).toHaveLength(0);
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
   });
 
   it('accepts valid scope and inserts temporary rows using the resolved plot/census IDs', async () => {
@@ -338,9 +464,7 @@ describe('sqlpacketload measurement scope validation', () => {
   it('rejects measurement uploads when the upload session does not own the scope', async () => {
     requireUploadSessionOwnershipMock.mockRejectedValueOnce(new MockUploadSessionOwnershipError('Upload session expired before measurement chunk upload', 409));
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }]);
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }]).mockResolvedValueOnce([]);
 
     const res = (await POST(makeMeasurementRequest()))!;
 
@@ -467,7 +591,7 @@ describe('sqlpacketload measurement scope validation', () => {
   it('skips previous-upload cleanup for measurement revisions uploads', async () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
@@ -504,8 +628,8 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
       if (text.includes('DELETE FROM') && text.includes('measurement_error_log')) throw missingError;
+      if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
-      if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
       if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: stagedRowCount }];
       if (text.includes('COUNT(')) return [{ count: 0 }];
       if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 1 };
@@ -563,8 +687,8 @@ describe('sqlpacketload measurement scope validation', () => {
     let insertSeen = false;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
+      if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
-      if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
       if (text.includes('dropped_row_candidates') && text.trimStart().toUpperCase().startsWith('SELECT')) {
         return [{ rowOrdinal: 2, existingBatch: null }];
       }
@@ -1910,9 +2034,7 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     const rawRow = { MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17' };
 
     // Scope validation runs before the resolution stage; provide the two scope queries so we reach it.
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }]);
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }]).mockResolvedValueOnce([]);
 
     const res = (await POST(makeRawRowsRequest([rawRow], { mapping: { version: 99 } })))!;
 

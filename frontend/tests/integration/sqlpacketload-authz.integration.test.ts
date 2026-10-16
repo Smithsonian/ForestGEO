@@ -188,8 +188,8 @@ describe('POST /api/sqlpacketload authz', () => {
     let stagedRowCount = 0;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
+      if (text.includes('SELECT PlotID AS plotID, CensusID AS censusID')) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
-      if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
       if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: stagedRowCount }];
       if (text.includes('COUNT(')) return [{ count: 0 }];
       if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 0 };

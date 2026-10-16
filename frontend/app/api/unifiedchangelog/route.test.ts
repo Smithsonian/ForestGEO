@@ -177,7 +177,8 @@ function mockMeasurementUploadQueries(
 
   exec
     .mockResolvedValueOnce([{ PlotID: 1 }])
-    .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+    // sqlpacketload family scope sample: nothing staged for this batch family yet.
+    .mockResolvedValueOnce([])
     // ensureTemporaryMeasurementsSourceFormatColumn: information_schema column existence check
     // (count > 0 means the SourceFormat column already exists, so no ALTER TABLE runs).
     .mockResolvedValueOnce([{ count: 1 }])

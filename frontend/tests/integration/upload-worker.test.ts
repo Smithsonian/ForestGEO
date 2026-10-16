@@ -181,6 +181,7 @@ import { UploadMode } from '@/config/uploadmodes';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
 import { recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
+import { buildSubBatchID, buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { testDbServerOptions } from '../setup/test-db-connection';
 
 // ---------------------------------------------------------------------------
@@ -230,6 +231,8 @@ const FIXTURE_TEXTS: Record<string, string> = {
 };
 
 const UPLOADMETRICS_STATUS_COMPLETED = 'completed';
+/** Fixture files are far below the sub-batch size, so each stages as one `__sub001` member. */
+const SINGLE_MEMBER_ORDINAL = 1;
 
 // ---------------------------------------------------------------------------
 // Suite lifecycle
@@ -373,8 +376,12 @@ describe('runJobIfClaimable — integration', () => {
     return Number(rows[0].count);
   }
 
+  /** Metric statuses for the whole batch family; staging pre-partitions, so a small file's metric lives under `__sub001`. */
   async function fetchUploadMetricsStatus(batchID: string): Promise<string[]> {
-    const [rows] = await connection.query<RowDataPacket[]>(`SELECT status FROM uploadmetrics WHERE batchID = ?`, [batchID]);
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT status FROM uploadmetrics WHERE batchID = ? OR batchID LIKE ? ${LIKE_ESCAPE_CLAUSE} ORDER BY batchID`,
+      [batchID, buildSubBatchPattern(batchID)]
+    );
     return rows.map(row => String(row.status));
   }
 
@@ -877,14 +884,17 @@ describe('runJobIfClaimable — integration', () => {
     // uploadmetrics row never reached 'completed', undrained staged temp rows
     // linger, and rows the interrupted run already wrote (ingested rows and
     // the recorded reject) are still present.
-    await connection.query(`UPDATE uploadmetrics SET status = 'processing' WHERE batchID = ?`, [batch1]);
-    await insertStagedTempRow(FILE1_NAME, batch1, 'W1004', 'Q02', 15.2);
-    await insertStagedTempRow(FILE1_NAME, batch1, 'W1005', 'Q03', 25.8);
+    // File 1 fits in one sub-batch, so its metric and any re-staged rows live
+    // under the family's first member.
+    const batch1Member = buildSubBatchID(batch1, SINGLE_MEMBER_ORDINAL);
+    await connection.query(`UPDATE uploadmetrics SET status = 'processing' WHERE batchID = ?`, [batch1Member]);
+    await insertStagedTempRow(FILE1_NAME, batch1Member, 'W1004', 'Q02', 15.2);
+    await insertStagedTempRow(FILE1_NAME, batch1Member, 'W1005', 'Q03', 25.8);
     await catalogPool.query(
       `UPDATE catalog.background_jobs SET Status = 'queued', NextAttemptAt = NULL, WorkerID = NULL, WorkerHeartbeatAt = NULL WHERE JobID = ?`,
       [jobID]
     );
-    console.log(`[crash-recovery] simulated mid-ingestion crash: batch1=${batch1} → status=processing, 2 stale temp rows re-staged`);
+    console.log(`[crash-recovery] simulated mid-ingestion crash: ${batch1Member} → status=processing, 2 stale temp rows re-staged`);
 
     // Phase 3: re-run the worker with healthy deps.
     await runJobIfClaimable(jobID, healthyDeps());
@@ -1315,6 +1325,121 @@ describe('runJobIfClaimable — integration', () => {
         'completed sub-batch failure row must survive cancel cleanup'
       ).toBe(true);
       expect(secondRows, 'abandoned sub-batch residue must be removed').toHaveLength(0);
+    }, 180000);
+  });
+
+  // -------------------------------------------------------------------------
+  // 9. Pre-partitioned staging — the worker stages each row under its final
+  //    `__subNNN` member, so setup has nothing left under the original ID to
+  //    split and never issues the BatchID UPDATE.
+  // -------------------------------------------------------------------------
+
+  describe('pre-partitioned staging', () => {
+    const PREPARTITION_SUB_BATCH_ROWS = 4;
+    const PREPARTITION_CHUNK_ROWS = 3;
+    const PREPARTITION_ROW_COUNT = PREPARTITION_SUB_BATCH_ROWS * 2 + 1;
+    const EXPECTED_MEMBER_ROW_COUNTS = [PREPARTITION_SUB_BATCH_ROWS, PREPARTITION_SUB_BATCH_ROWS, 1];
+    const EXPECTED_MEMBER_SUFFIXES = ['__sub001', '__sub002', '__sub003'];
+    const PREPARTITION_FILE_NAME = 'worker-prepartitioned.csv';
+    const PREPARTITION_QUADRATS = ['Q01', 'Q02', 'Q03'];
+    const PREPARTITION_CSV = [
+      CSV_HEADER,
+      ...Array.from({ length: PREPARTITION_ROW_COUNT }, (_, rowIndex) => {
+        const tag = `W9${String(rowIndex + 1).padStart(3, '0')}`;
+        const quadrat = PREPARTITION_QUADRATS[rowIndex % PREPARTITION_QUADRATS.length];
+        return `${tag},1,ACERRU,${quadrat},${rowIndex + 0.5},${rowIndex + 1.5},${10 + rowIndex},1.3,${MEASUREMENT_DATE},A`;
+      })
+    ].join('\n');
+    /** The family-discovery aggregate setup runs before it takes the ingestion lock. */
+    const SETUP_FAMILY_DISCOVERY = /COUNT\(DISTINCT PlotID\) AS plotCount[\s\S]*GROUP BY BatchID/i;
+    const SPLIT_BATCH_ID_UPDATE = /UPDATE[\s\S]*temporarymeasurements[\s\S]*SET BatchID/i;
+
+    let previousSubBatchRows: string | undefined;
+    let previousChunkRows: string | undefined;
+
+    beforeEach(() => {
+      previousSubBatchRows = process.env.INGESTION_SUB_BATCH_ROWS;
+      previousChunkRows = process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+      process.env.INGESTION_SUB_BATCH_ROWS = String(PREPARTITION_SUB_BATCH_ROWS);
+      process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = String(PREPARTITION_CHUNK_ROWS);
+    });
+
+    afterEach(() => {
+      if (previousSubBatchRows === undefined) delete process.env.INGESTION_SUB_BATCH_ROWS;
+      else process.env.INGESTION_SUB_BATCH_ROWS = previousSubBatchRows;
+      if (previousChunkRows === undefined) delete process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+      else process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = previousChunkRows;
+    });
+
+    it('stages a 9-row file as three sub-batch members across chunk boundaries and ingests every row without a split UPDATE', async () => {
+      const job = await createUploadBackgroundJob(
+        catalogPool,
+        {
+          schema,
+          plotID,
+          censusID,
+          uploadMode: UploadMode.CLEAN_REUPLOAD,
+          sourceFormat: SourceFormat.csv,
+          formType: FormType.measurements,
+          payload: { selectedDelimiters: { [PREPARTITION_FILE_NAME]: ',' } },
+          files: [
+            {
+              fileName: PREPARTITION_FILE_NAME,
+              blobContainer: BLOB_CONTAINER,
+              blobName: `uploads/${PREPARTITION_FILE_NAME}`,
+              expectedRows: PREPARTITION_ROW_COUNT
+            }
+          ]
+        },
+        TEST_USER
+      );
+      const jobID = job.jobID;
+
+      const splitUpdates: string[] = [];
+      let membersAtSetup: Array<{ batchID: string; rowCount: number }> | null = null;
+      sharedState.onSchemaQuery = async query => {
+        if (SPLIT_BATCH_ID_UPDATE.test(query)) splitUpdates.push(query.replace(/\s+/g, ' ').trim());
+        if (membersAtSetup !== null || !SETUP_FAMILY_DISCOVERY.test(query)) return;
+        const [rows] = await connection.query<RowDataPacket[]>(
+          `SELECT BatchID, COUNT(*) AS rowCount FROM temporarymeasurements WHERE FileID = ? GROUP BY BatchID ORDER BY BatchID`,
+          [PREPARTITION_FILE_NAME]
+        );
+        membersAtSetup = rows.map(row => ({ batchID: String(row.BatchID), rowCount: Number(row.rowCount) }));
+        console.log(`[prepartition] staged members seen at setup discovery: ${JSON.stringify(membersAtSetup)}`);
+      };
+
+      try {
+        await runJobIfClaimable(jobID, { fetchFileText: async () => PREPARTITION_CSV });
+      } finally {
+        sharedState.onSchemaQuery = null;
+      }
+
+      const batchID = await batchIDForFile(jobID, PREPARTITION_FILE_NAME);
+      const finishedJob = await getBackgroundJob(catalogPool, jobID);
+      const ingestedIDs = await fetchIngestedIDs(PREPARTITION_FILE_NAME);
+      const [metricRows] = await connection.query<RowDataPacket[]>(
+        `SELECT batchID, status FROM uploadmetrics WHERE batchID LIKE ? ESCAPE '\\\\' ORDER BY batchID`,
+        [`${batchID}\\_\\_sub%`]
+      );
+      console.log(
+        `[prepartition] batchID=${batchID} status=${finishedJob?.status} lastError=${finishedJob?.lastError ?? 'none'} ` +
+          `ingested=${ingestedIDs.length}/${PREPARTITION_ROW_COUNT} tempRowsLeft=${await countTempRows(PREPARTITION_FILE_NAME)} ` +
+          `metrics=${JSON.stringify(metricRows)} splitUpdates=${JSON.stringify(splitUpdates)}`
+      );
+
+      expect(membersAtSetup, 'setup discovery never ran').not.toBeNull();
+      const expectedMembers = EXPECTED_MEMBER_SUFFIXES.map((suffix, memberIndex) => ({
+        batchID: `${batchID}${suffix}`,
+        rowCount: EXPECTED_MEMBER_ROW_COUNTS[memberIndex]
+      }));
+      expect(membersAtSetup, 'every row must already sit under its final sub-batch, none under the original ID').toEqual(expectedMembers);
+      expect(splitUpdates, 'setup must not rewrite BatchID on a pre-partitioned family').toEqual([]);
+      expect(finishedJob!.status, 'staging verification and ingestion must both pass').toBe('completed');
+      expect(ingestedIDs).toHaveLength(PREPARTITION_ROW_COUNT);
+      expect(await countTempRows(PREPARTITION_FILE_NAME)).toBe(0);
+      expect(metricRows.map(row => [String(row.batchID), String(row.status)])).toEqual(
+        expectedMembers.map(member => [member.batchID, UPLOADMETRICS_STATUS_COMPLETED])
+      );
     }, 180000);
   });
 });
