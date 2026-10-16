@@ -13,7 +13,7 @@ import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
 import { SUPPORTED_DELIMITERS } from '@/lib/uploads/detect-delimiter';
 import { isAsyncUploadEnabledFor } from '@/lib/background-jobs/feature-gate';
 import { isAllowedAsyncPipeline } from '@/lib/background-jobs/types';
-import { createUploadBackgroundJob, listBackgroundJobs } from '@/lib/background-jobs/repository';
+import { attachFailureContexts, createUploadBackgroundJob, listBackgroundJobs } from '@/lib/background-jobs/repository';
 import { BackgroundJobScopeUnavailableError, IdempotencyKeyConflictError } from '@/lib/background-jobs/errors';
 import { isPrivilegedSession, MAX_UPLOAD_JOB_REQUEST_BYTES, parseOptionalPositiveInteger } from '@/lib/background-jobs/route-helpers';
 import { runJobIfClaimable } from '@/lib/background-jobs/worker';
@@ -517,7 +517,7 @@ async function getHandler(request: NextRequest) {
     limit
   });
 
-  return NextResponse.json({ jobs }, { status: HTTPResponses.OK });
+  return NextResponse.json({ jobs: await attachFailureContexts(catalogPool, jobs) }, { status: HTTPResponses.OK });
 }
 
 const authorizedPost = withRouteAuthz('uploadjobs', postHandler, { schema: fromBody('schema') });

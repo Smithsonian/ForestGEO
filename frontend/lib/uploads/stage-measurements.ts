@@ -27,6 +27,7 @@ import {
   cleanupPreviousFileUploads,
   cleanupStaleMeasurementBatchesForFile,
   ensureTemporaryMeasurementsSourceFormatColumn,
+  familyHasStagedRows,
   findDroppedMeasurementCandidates,
   insertTemporaryMeasurementsInBatches,
   isUnsignedIntFieldInvalid,
@@ -36,6 +37,13 @@ import { buildFileUploadChangelogRecordID, measurementFileIDValidationError, mer
 import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-failure-audit';
 import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { isEffectivelyEmptyMeasurementInput } from '@/lib/uploads/blank-measurement-input';
+import {
+  buildSubBatchPattern,
+  LIKE_ESCAPE_CLAUSE,
+  MAX_ORIGINAL_BATCH_ID_LENGTH,
+  OriginalBatchIDTooLongError,
+  subBatchIDForRowOrdinal
+} from '@/lib/uploads/batch-family';
 import {
   CENSUS_REPLACEMENT_MARKER_COLUMN,
   ensureUploadSessionReplacementMarkerColumn,
@@ -86,6 +94,21 @@ export class MeasurementChunkResolutionError extends Error {
   }
 }
 
+export class InvalidFirstRowOrdinalError extends Error {
+  readonly code = 'INVALID_FIRST_ROW_ORDINAL';
+  constructor(value: unknown) {
+    super(`firstRowOrdinal must be a non-negative integer; received ${typeof value === 'string' ? JSON.stringify(value) : String(value)}`);
+    this.name = 'InvalidFirstRowOrdinalError';
+  }
+}
+
+/** Absent → null (legacy client). Present → a non-negative safe integer or InvalidFirstRowOrdinalError. */
+export function parseFirstRowOrdinal(value: unknown): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new InvalidFirstRowOrdinalError(value);
+  return value;
+}
+
 /**
  * Thrown when a chunk's input is structurally empty (see blank-measurement-input.ts)
  * BEFORE any write or the destructive CLEAN_REUPLOAD cleanup. Second line of defense
@@ -122,6 +145,13 @@ export interface StageMeasurementChunkParams {
   storedMapping?: ColumnMapping;
   uploadSessionID: string | null; // null for worker-driven jobs
   transactionID: string; // caller owns the transaction
+  /**
+   * 0-based ordinal of this chunk's first raw row in the file. Rows are staged
+   * under their final sub-batch (see subBatchIDForRowOrdinal), so setup never
+   * rewrites BatchID. null stages under `batchID` unchanged (legacy clients);
+   * setup's fallback split handles those rows.
+   */
+  firstRowOrdinal: number | null;
   /**
    * Pre-keyed rows for callers that bypass server-side header resolution
    * (legacy fileRowSet uploads and REVISIONS uploads, whose rows are already
@@ -240,12 +270,21 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     changedBy
   } = params;
 
+  const firstRowOrdinal = parseFirstRowOrdinal(params.firstRowOrdinal);
+  if (firstRowOrdinal !== null && batchID.length > MAX_ORIGINAL_BATCH_ID_LENGTH) {
+    throw new OriginalBatchIDTooLongError(batchID);
+  }
+
   let chunkRows: FileRow[];
+  let chunkRowOffsets: number[];
   const invalidRows: FileRow[] = [];
   let diagnostics: StageMeasurementChunkResult['diagnostics'] = null;
 
   if (params.preKeyedRows) {
     chunkRows = params.preKeyedRows;
+    // Pre-keyed rows carry no raw positions. A position is never later than
+    // the row's raw ordinal, so no sub-batch can grow past the batch size.
+    chunkRowOffsets = chunkRows.map((_, index) => index);
   } else {
     // SERVER-RESOLUTION STAGE (#6): the server is authoritative over CSV header
     // resolution. Rows are re-keyed/validated via the shared lib/column-mapping
@@ -263,6 +302,7 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
       throw new MeasurementChunkResolutionError(fileName, batchID);
     }
     chunkRows = resolved.validRows;
+    chunkRowOffsets = resolved.validRowSourceIndexes;
     invalidRows.push(...resolved.invalidRows);
     diagnostics = resolved.diagnostics;
     if (diagnostics.ignoredColumnCount > 0) {
@@ -271,6 +311,9 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
   }
 
   params.onInvalidRows?.(invalidRows);
+
+  const rowBatchIDs =
+    firstRowOrdinal === null ? chunkRows.map(() => batchID) : chunkRowOffsets.map(offset => subBatchIDForRowOrdinal(batchID, firstRowOrdinal + offset));
 
   await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, schema);
 
@@ -293,16 +336,16 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     throw new Error(`Failed to acquire the file-upload summary serialization lock for ${fileUploadRecordID} within ${FILE_UPLOAD_SUMMARY_LOCK_TIMEOUT_MS}ms`);
   }
 
-  // Count rows BEFORE insert so we can measure the delta (important when
-  // multiple chunks share a single BatchID under batch consolidation).
   const expectedRowCount = chunkRows.length;
-  const countSQL = safeFormatQuery(schema, `SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`);
-  const preInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
-  const preInsertCount = preInsertResult[0]?.count || 0;
 
   // A retry of the same file should not inherit stale batches that were left
-  // behind by an earlier interrupted upload for the same plot/census.
-  if (preInsertCount === 0) {
+  // behind by an earlier interrupted upload for the same plot/census. Only the
+  // first chunk to land for the family cleans. Browser chunks are sent serially,
+  // so they only arrive out of order through retries.
+  // Any staged member of this batch family, including `__subNNN` rows, means this
+  // upload is already in progress; batch IDs are fresh per upload attempt, and the
+  // worker clears the family before a retry.
+  if (!(await familyHasStagedRows(connectionManager, schema, fileName, batchID, transactionID))) {
     if (uploadMode === UploadMode.CLEAN_REUPLOAD && !params.suppressCensusReplacementCleanup) {
       // Clean up data from any previous uploads for this census.
       // Clean re-upload is census replacement, not filename replacement.
@@ -337,12 +380,12 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
   }
 
-  await insertTemporaryMeasurementsInBatches(
+  const actualInsertedCount = await insertTemporaryMeasurementsInBatches(
     connectionManager,
     schema,
     chunkRows,
     fileName,
-    batchID,
+    rowBatchIDs,
     uploadSessionID,
     sourceFormat,
     plotID,
@@ -400,11 +443,6 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     }
   }
 
-  // CRITICAL FIX: Verify expected vs actual row count to detect silent data loss from INSERT IGNORE
-  const postInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
-  const postInsertCount = postInsertResult[0]?.count || 0;
-  const actualInsertedCount = postInsertCount - preInsertCount;
-
   // Check for discrepancy - this would indicate INSERT IGNORE silently dropped rows
   const droppedRowCount = expectedRowCount - actualInsertedCount;
 
@@ -414,7 +452,16 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
         `${droppedRowCount} row(s) were silently dropped by INSERT IGNORE (likely duplicates). This indicates potential data loss!`
     );
 
-    const droppedCandidates = await findDroppedMeasurementCandidates(connectionManager, schema, fileName, batchID, plotID, censusID, chunkRows, transactionID);
+    const droppedCandidates = await findDroppedMeasurementCandidates(
+      connectionManager,
+      schema,
+      fileName,
+      rowBatchIDs,
+      plotID,
+      censusID,
+      chunkRows,
+      transactionID
+    );
     const droppedRows: DroppedMeasurementRow[] = droppedCandidates.map(candidate => {
       const row = chunkRows[candidate.rowOrdinal - 1];
       return Object.assign({}, row, {
@@ -590,6 +637,7 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
   };
 }
 
+/** Rows staged for the file under `batchID` or any of its `__subNNN` members, in the given plot/census. */
 export async function countStagedRows(
   connectionManager: ConnectionManager,
   schema: string,
@@ -600,8 +648,9 @@ export async function countStagedRows(
 ): Promise<number> {
   const countSQL = safeFormatQuery(
     schema,
-    `SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ? AND PlotID = ? AND CensusID = ?`
+    `SELECT COUNT(*) as count FROM ??.temporarymeasurements
+     WHERE FileID = ? AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}) AND PlotID = ? AND CensusID = ?`
   );
-  const rows = await connectionManager.executeQuery(countSQL, [fileName, batchID, plotID, censusID]);
+  const rows = await connectionManager.executeQuery(countSQL, [fileName, batchID, buildSubBatchPattern(batchID), plotID, censusID]);
   return Number(rows?.[0]?.count ?? 0);
 }

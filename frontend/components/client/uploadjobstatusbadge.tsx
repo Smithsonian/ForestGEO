@@ -5,6 +5,8 @@ import { Box, Button, Chip, LinearProgress, Modal, ModalClose, Sheet, Stack, Typ
 import CloudUploadOutlined from '@mui/icons-material/CloudUploadOutlined';
 import ErrorOutline from '@mui/icons-material/ErrorOutline';
 import ailogger from '@/ailogger';
+import { SourceFormat } from '@/config/macros/formdetails';
+import type { UploadJobFailureContext } from '@/lib/background-jobs/types';
 
 const JOB_POLL_INTERVAL_MS = 10_000;
 const TERMINAL_JOB_VISIBILITY_MS = 24 * 60 * 60 * 1000;
@@ -22,6 +24,10 @@ export interface UploadJobSummary {
   processedRows: number;
   failedRows: number;
   lastError: string | null;
+  failureContext?: UploadJobFailureContext | null;
+  retryCount?: number;
+  maxRetries?: number;
+  sourceFormat?: string | null;
   updatedAt: string;
 }
 
@@ -75,6 +81,16 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
   // a cancel request was rejected, so stale local state resyncs right away).
   const [refetchNonce, setRefetchNonce] = useState(0);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const announcedStateRef = useRef('');
+  const [announcement, setAnnouncement] = useState('');
+
+  useEffect(() => {
+    const state = jobs.map(job => `${job.jobID}:${job.status}`).join('|');
+    if (state && state !== announcedStateRef.current) {
+      announcedStateRef.current = state;
+      setAnnouncement(jobs.map(job => `Upload job ${job.jobID}: ${describeJobStatus(job.status) ?? formatPhase(job.phase)}`).join('. '));
+    }
+  }, [jobs]);
 
   async function handleCancelJob(jobID: number) {
     if (!schema) {
@@ -203,14 +219,27 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
             </Chip>
             <Typography level="body-xs">{progressValue}%</Typography>
           </Stack>
+          {primaryJob.failureContext?.summary && (primaryJob.status === 'failed' || primaryJob.status === 'waiting_retry') && (
+            <Typography level="body-xs" color={primaryJob.status === 'failed' ? 'danger' : 'warning'}>
+              {primaryJob.failureContext.summary}
+            </Typography>
+          )}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <LinearProgress determinate value={progressValue} color={color} sx={{ flex: 1 }} />
             <Typography level="body-xs" color="neutral">
-              {primaryJob.processedRows} processed / {primaryJob.failedRows} failed
+              {primaryJob.sourceFormat === SourceFormat.csv ? 'Rows staged' : 'Rows handled'} {primaryJob.processedRows} / {primaryJob.failedRows} failed
             </Typography>
           </Box>
         </Stack>
       </Sheet>
+      <Typography
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        sx={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}
+      >
+        {announcement}
+      </Typography>
 
       <Modal open={detailOpen} onClose={() => setDetailOpen(false)}>
         <Sheet
@@ -249,12 +278,24 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
                   </Typography>
                 </Stack>
                 <Typography level="body-xs" color="neutral">
-                  {describeJobStatus(job.status) ?? formatPhase(job.phase)} - {job.totalFiles} file{job.totalFiles === 1 ? '' : 's'} - {job.processedRows}{' '}
-                  processed - {job.failedRows} failed
+                  {describeJobStatus(job.status) ?? formatPhase(job.phase)} - {job.totalFiles} file{job.totalFiles === 1 ? '' : 's'} -{' '}
+                  {job.sourceFormat === SourceFormat.csv ? 'Rows staged' : 'Rows handled'} {job.processedRows} - {job.failedRows} failed - retry{' '}
+                  {job.retryCount ?? 0}/{job.maxRetries ?? '?'}
                 </Typography>
-                {job.lastError && (
+                {job.failureContext?.step && <Typography level="body-xs">Last step: {formatPhase(job.failureContext.step)}</Typography>}
+                {job.status === 'waiting_retry' && (
+                  <Typography level="body-xs" color="warning">
+                    The system is retrying this job.
+                  </Typography>
+                )}
+                {job.status === 'failed' && (job.retryCount ?? 0) >= (job.maxRetries ?? Number.MAX_SAFE_INTEGER) && (
                   <Typography level="body-xs" color="danger">
-                    {job.lastError}
+                    Automatic retries exhausted.
+                  </Typography>
+                )}
+                {(job.failureContext?.detail || job.lastError) && (
+                  <Typography level="body-xs" color="danger">
+                    {job.failureContext?.detail ?? job.lastError}
                   </Typography>
                 )}
                 {CANCELLABLE_JOB_STATUSES.has(job.status) && (

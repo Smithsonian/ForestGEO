@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createElement } from 'react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { selectVisibleJobs, summarizeJobs, type UploadJobSummary } from './uploadjobstatusbadge';
+import UploadJobStatusBadge from './uploadjobstatusbadge';
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const NOW = Date.parse('2026-07-28T12:00:00.000Z');
 
@@ -65,5 +73,47 @@ describe('summarizeJobs', () => {
     const summary = summarizeJobs(jobs);
     expect(summary.hasFailure).toBe(true);
     expect(summary.primaryJob.jobID).toBe(41);
+  });
+});
+
+describe('UploadJobStatusBadge rendered status', () => {
+  it('shows a safe failure summary on the visible card and actionable details by keyboard', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              jobs: [
+                {
+                  ...job('failed', new Date().toISOString(), 26),
+                  percentComplete: 45,
+                  totalFiles: 1,
+                  processedRows: 412421,
+                  failedRows: 6,
+                  retryCount: 3,
+                  maxRetries: 3,
+                  sourceFormat: 'csv',
+                  failureContext: {
+                    code: 'SETUP_CALLBACK_TIMEOUT',
+                    summary: 'The file uploaded, but preparing its measurements took too long.',
+                    step: 'splitting'
+                  },
+                  lastError: 'setup failed'
+                }
+              ]
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+      )
+    );
+    render(createElement(UploadJobStatusBadge, { schema: 'forest', plotID: 1, censusID: 1 }));
+    expect(await screen.findByText('The file uploaded, but preparing its measurements took too long.')).toBeTruthy();
+    expect(screen.getByText(/Rows staged 412421/)).toBeTruthy();
+    expect(screen.getByRole('status')).toBeTruthy();
+    const card = screen.getByRole('button', { name: 'Open upload job progress details' });
+    fireEvent.keyDown(card, { key: 'Enter' });
+    await waitFor(() => expect(screen.getByText('Last step: Splitting')).toBeTruthy());
+    expect(screen.getByText(/retry 3\/3/)).toBeTruthy();
   });
 });

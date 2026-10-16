@@ -784,3 +784,103 @@ describe('ConnectionManager.discardTransaction', () => {
     expect(internals.transactionConnections.size + internals.startingTransactions).toBe(occupancyBefore);
   });
 });
+
+describe('ConnectionManager typed transaction timeout', () => {
+  const TIMEOUT_MS = 20;
+  const TIMEOUT_ERROR_CODE = 'TRANSACTION_CALLBACK_TIMEOUT';
+  const THREAD_ID = 4242;
+
+  function makeConnection() {
+    return {
+      threadId: THREAD_ID,
+      query: vi.fn().mockResolvedValue([[]]),
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+      destroy: vi.fn()
+    };
+  }
+
+  beforeEach(() => {
+    getConnMock.mockReset();
+    runQueryMock.mockReset();
+    vi.clearAllMocks();
+  });
+
+  it('rejects a hung callback with TransactionCallbackTimeoutError carrying the legacy message', async () => {
+    const { default: ConnectionManager, TransactionCallbackTimeoutError } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const connection = makeConnection();
+    getConnMock.mockResolvedValueOnce(connection);
+    const manager = ConnectionManager.getInstance();
+
+    const outcome = await manager.withTransaction(() => new Promise<never>(() => undefined), { timeoutMs: TIMEOUT_MS }).catch((error: unknown) => error);
+
+    console.log('[typed-timeout] outcome:', outcome);
+    expect(outcome).toBeInstanceOf(TransactionCallbackTimeoutError);
+    const timeoutError = outcome as InstanceType<typeof TransactionCallbackTimeoutError>;
+    expect(timeoutError.code).toBe(TIMEOUT_ERROR_CODE);
+    expect(timeoutError.timeoutMs).toBe(TIMEOUT_MS);
+    expect(timeoutError.message).toBe(`Transaction ${timeoutError.transactionId} timed out after ${TIMEOUT_MS}ms`);
+    expect(connection.release, 'the connection must be returned after the timeout rollback').toHaveBeenCalled();
+    const { killQueryOnThread } = await import('@/lib/db/primitives');
+    expect(killQueryOnThread, 'the in-flight statement must be killed by thread id before rollback').toHaveBeenCalledWith(THREAD_ID, expect.any(String));
+    const internals = manager as unknown as { transactionConnections: Map<string, unknown>; transactionMeta: Map<string, unknown> };
+    expect(internals.transactionConnections.has(timeoutError.transactionId), 'connection bookkeeping must be cleared').toBe(false);
+    expect(internals.transactionMeta.has(timeoutError.transactionId), 'transaction metadata must be cleared').toBe(false);
+  });
+});
+
+describe('ConnectionManager lock release after COMMIT (review finding 1)', () => {
+  const LOCK_NAME = 'upload:file:finding1';
+  const LOCK_WAIT_MS = 1_000;
+  const LOST_CONNECTION_CODE = 'PROTOCOL_CONNECTION_LOST';
+
+  beforeEach(() => {
+    getConnMock.mockReset();
+    runQueryMock.mockReset();
+    vi.clearAllMocks();
+  });
+
+  it('reports a committed transaction as committed when RELEASE_LOCK fails afterwards', async () => {
+    const { default: ConnectionManager } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const connection = {
+      threadId: 4243,
+      query: vi.fn().mockResolvedValue([[]]),
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+      destroy: vi.fn()
+    };
+    getConnMock.mockResolvedValueOnce(connection);
+    runQueryMock.mockImplementation(async (_conn: unknown, sql: string) => {
+      if (sql.includes('GET_LOCK')) return [{ acquired: 1 }];
+      if (sql.includes('RELEASE_LOCK')) {
+        throw Object.assign(new Error('Connection lost: The server closed the connection.'), { code: LOST_CONNECTION_CODE });
+      }
+      return [];
+    });
+    const manager = ConnectionManager.getInstance();
+    const transactionId = await manager.beginTransaction();
+    const acquired = await manager.acquireApplicationLock(LOCK_NAME, transactionId, LOCK_WAIT_MS);
+    expect(acquired, 'precondition: the lock must be held before COMMIT').toBe(true);
+
+    const outcome = await manager.commitTransaction(transactionId).then(
+      () => 'resolved',
+      (error: unknown) => error
+    );
+
+    console.log('[finding-1] commit outcome after failed RELEASE_LOCK:', outcome);
+    expect(connection.commit).toHaveBeenCalledTimes(1);
+    expect(outcome).toBe('resolved');
+    expect(connection.release).toHaveBeenCalledTimes(1);
+    expect(
+      runQueryMock.mock.calls.some(([, sql]) => String(sql).includes('RELEASE_LOCK')),
+      'RELEASE_LOCK must actually have been attempted, otherwise the failure path was never exercised'
+    ).toBe(true);
+    const internals = manager as unknown as { transactionConnections: Map<string, unknown>; transactionMeta: Map<string, unknown> };
+    expect(internals.transactionConnections.has(transactionId), 'connection bookkeeping must be cleared').toBe(false);
+    expect(internals.transactionMeta.has(transactionId), 'transaction metadata must be cleared').toBe(false);
+  });
+});

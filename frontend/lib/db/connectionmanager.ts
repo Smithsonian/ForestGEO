@@ -2,6 +2,7 @@
 import '@/lib/connectionlogger';
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
+import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
 import { getConn, killQueryOnThread, QueryTimeoutError, runQuery } from '@/lib/db/primitives';
 import { v4 as uuidv4 } from 'uuid';
 import { patchConnectionManager, flushTransactionChangelog, discardTransactionChangelog } from '@/lib/connectionlogger';
@@ -593,7 +594,7 @@ class ConnectionManager {
     const timeoutPromise = new Promise<never>((_, reject) => {
       meta.timeoutHandle = setTimeout(() => {
         timedOut = true;
-        reject(new Error(`Transaction ${transactionId!} timed out after ${timeoutMs}ms`));
+        reject(new TransactionCallbackTimeoutError(transactionId!, timeoutMs));
       }, timeoutMs);
     });
 
@@ -969,4 +970,5 @@ class ConnectionManager {
 
 patchConnectionManager(ConnectionManager.getInstance());
 
+export { TransactionCallbackTimeoutError } from './transactionerrors';
 export default ConnectionManager;

@@ -21,7 +21,22 @@ import { requireSession } from '@/lib/auth-helpers';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { assertSchemaAccess } from '@/lib/authz';
 import { isColumnMappingShape } from '@/lib/column-mapping/mapping';
-import { EmptyMeasurementUploadError, MeasurementChunkResolutionError, stageMeasurementChunk } from '@/lib/uploads/stage-measurements';
+import {
+  EmptyMeasurementUploadError,
+  InvalidFirstRowOrdinalError,
+  MeasurementChunkResolutionError,
+  parseFirstRowOrdinal,
+  stageMeasurementChunk
+} from '@/lib/uploads/stage-measurements';
+import {
+  BatchIDContainsSubBatchSeparatorError,
+  buildSubBatchPattern,
+  LIKE_ESCAPE_CLAUSE,
+  MAX_ORIGINAL_BATCH_ID_LENGTH,
+  OriginalBatchIDTooLongError,
+  SUB_BATCH_SEPARATOR,
+  SubBatchOrdinalOverflowError
+} from '@/lib/uploads/batch-family';
 import {
   type FixedDataProcessingResult,
   ReferenceUploadValidationError,
@@ -254,53 +269,37 @@ async function validateMeasurementUploadScope(
     });
   }
 
-  const batchScopeSQL = format(
-    `SELECT COUNT(DISTINCT PlotID) as distinctPlotCount,
-            COUNT(DISTINCT CensusID) as distinctCensusCount,
-            MIN(PlotID) as plotID,
-            MIN(CensusID) as censusID
+  // One sampled row, not an aggregate: each chunk compares the family's scope
+  // to its own, so by induction every staged row matches the first chunk's.
+  // Setup's discoverBatchFamily still rejects a mixed family.
+  const familyScopeSQL = format(
+    `SELECT PlotID AS plotID, CensusID AS censusID
      FROM ??.temporarymeasurements
-     WHERE FileID = ? AND BatchID = ?`,
+     WHERE FileID = ? AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
+     LIMIT 1`,
     [schema]
   );
-  const batchScopeResult = await connectionManager.executeQuery(batchScopeSQL, [fileName, batchID]);
-  const batchScope = batchScopeResult?.[0] ?? {};
-  const distinctPlotCount = Number(batchScope.distinctPlotCount ?? 0);
-  const distinctCensusCount = Number(batchScope.distinctCensusCount ?? 0);
-  const batchPlotID = toPositiveInteger(batchScope.plotID ?? batchScope.PlotID);
-  const batchCensusID = toPositiveInteger(batchScope.censusID ?? batchScope.CensusID);
+  const familyScopeRows = await connectionManager.executeQuery(familyScopeSQL, [fileName, batchID, buildSubBatchPattern(batchID)]);
+  const stagedScope = familyScopeRows?.[0];
+  const stagedPlotID = toPositiveInteger(stagedScope?.plotID);
+  const stagedCensusID = toPositiveInteger(stagedScope?.censusID);
 
-  if (distinctPlotCount > 1 || distinctCensusCount > 1) {
-    ailogger.error(
-      `Rejected measurement upload for ${fileName}: existing batch ${batchID} already contains mixed plot/census scope ` +
-        `(plots=${distinctPlotCount}, censuses=${distinctCensusCount}, batchPlotID=${batchPlotID}, batchCensusID=${batchCensusID})`
-    );
-    return buildMeasurementScopeErrorResponse(HTTPResponses.CONFLICT, 'Existing batch contains mixed plot/census scope', {
-      fileName,
-      batchID,
-      distinctPlotCount,
-      distinctCensusCount,
-      batchPlotID,
-      batchCensusID
-    });
-  }
-
-  if ((batchPlotID !== null && batchPlotID !== resolvedPlotID) || (batchCensusID !== null && batchCensusID !== resolvedCensusID)) {
+  if (stagedScope && (stagedPlotID !== resolvedPlotID || stagedCensusID !== resolvedCensusID)) {
     ailogger.warn(`Rejected measurement upload for ${fileName}: existing batch scope does not match incoming plot/census`, {
       fileName,
       batchID,
       resolvedPlotID,
       resolvedCensusID,
-      batchPlotID,
-      batchCensusID
+      stagedPlotID,
+      stagedCensusID
     });
     return buildMeasurementScopeErrorResponse(HTTPResponses.CONFLICT, 'Existing batch scope does not match incoming plot/census', {
       fileName,
       batchID,
       resolvedPlotID,
       resolvedCensusID,
-      batchPlotID,
-      batchCensusID
+      batchPlotID: stagedPlotID,
+      batchCensusID: stagedCensusID
     });
   }
 
@@ -420,7 +419,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: fileIDError, code: 'MEASUREMENT_FILE_NAME_TOO_LONG' }, { status: HTTPResponses.INVALID_REQUEST });
     }
 
+    let firstRowOrdinal: number | null;
+    try {
+      firstRowOrdinal = parseFirstRowOrdinal(body.firstRowOrdinal);
+    } catch (error: unknown) {
+      if (error instanceof InvalidFirstRowOrdinalError) {
+        return NextResponse.json({ error: error.message, code: error.code }, { status: HTTPResponses.INVALID_REQUEST });
+      }
+      throw error;
+    }
+
     const batchID = body.batchID || generateShortBatchID();
+    if (batchID.includes(SUB_BATCH_SEPARATOR)) {
+      const batchIDError = new BatchIDContainsSubBatchSeparatorError(batchID);
+      return NextResponse.json({ error: batchIDError.message, code: batchIDError.code }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+    if (firstRowOrdinal !== null && batchID.length > MAX_ORIGINAL_BATCH_ID_LENGTH) {
+      const batchIDError = new OriginalBatchIDTooLongError(batchID);
+      return NextResponse.json({ error: batchIDError.message, code: batchIDError.code }, { status: HTTPResponses.INVALID_REQUEST });
+    }
     let scopeValidation: Awaited<ReturnType<typeof validateMeasurementUploadScope>>;
     try {
       scopeValidation = await validateMeasurementUploadScope(connectionManager, schema, fileName, batchID, plot, census);
@@ -521,6 +538,7 @@ export async function POST(request: NextRequest) {
           storedMapping: isColumnMappingShape(clientMapping) ? clientMapping : undefined,
           uploadSessionID: sessionId,
           transactionID,
+          firstRowOrdinal,
           preKeyedRows: useServerResolution ? undefined : Object.values(fileRowSet ?? {}),
           changedBy,
           chunkIdentity,
@@ -577,6 +595,9 @@ export async function POST(request: NextRequest) {
           return new NextResponse(JSON.stringify({ responseMessage: 'Header plan misalignment for the uploaded file', fileName, batchID }), {
             status: HTTPResponses.UNPROCESSABLE_ENTITY
           });
+        }
+        if (e instanceof OriginalBatchIDTooLongError || e instanceof SubBatchOrdinalOverflowError) {
+          return NextResponse.json({ error: e.message, code: e.code }, { status: HTTPResponses.INVALID_REQUEST });
         }
 
         if (e instanceof EmptyMeasurementUploadError) {

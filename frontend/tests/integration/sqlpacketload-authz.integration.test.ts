@@ -32,6 +32,8 @@ const MEMBER_EMAIL = 'member@forestgeo.test';
 
 const TEST_SESSION_ID = 'session-1';
 const TEST_PLOT_ID = 22;
+/** The sqlpacketload per-chunk family scope sample (mirrors FAMILY_SCOPE_SAMPLE_SQL in route.test.ts). */
+const FAMILY_SCOPE_SAMPLE_SQL_FRAGMENT = 'SELECT PlotID AS plotID, CensusID AS censusID';
 const TEST_CENSUS_ID = 32;
 const TEST_BATCH_ID = 'batch-1';
 const TEST_FILE_NAME = 'SERC_census1_2025.csv';
@@ -190,8 +192,9 @@ describe('POST /api/sqlpacketload authz', () => {
     let stagedRowCount = 0;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
+      // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
+      if (text.includes(FAMILY_SCOPE_SAMPLE_SQL_FRAGMENT)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
-      if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
       if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: stagedRowCount }];
       if (text.includes('COUNT(')) return [{ count: 0 }];
       if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 0 };

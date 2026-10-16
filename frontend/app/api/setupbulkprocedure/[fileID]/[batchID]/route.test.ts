@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
+import { SETUP_FAILURE_CODES, setupFailureSummary } from '@/lib/uploads/setup-failure';
 
-const { loggerInfo, loggerWarn, loggerError } = vi.hoisted(() => ({
+const { loggerInfo, loggerDebug, loggerWarn, loggerError } = vi.hoisted(() => ({
   loggerInfo: vi.fn(),
+  loggerDebug: vi.fn(),
   loggerWarn: vi.fn(),
   loggerError: vi.fn()
 }));
@@ -99,6 +101,7 @@ vi.mock('@/lib/batchfailuretransfer', () => ({
 vi.mock('@/ailogger', () => ({
   default: {
     info: loggerInfo,
+    debug: loggerDebug,
     warn: loggerWarn,
     error: loggerError
   }
@@ -110,14 +113,19 @@ const BATCH_ID = 'batch-1';
 const SESSION_ID = 'session-1';
 const DISCOVERED_PLOT_ID = 22;
 const DISCOVERED_CENSUS_ID = 6;
+const DRIFTED_PLOT_ID = 23;
 const SUB_BATCH_LIKE_PATTERN = 'batch-1\\_\\_sub%';
 
 /**
  * One grouped row per batch-family member, matching discoverBatchFamily's
  * SELECT. Both the route preamble and ingestBatch's setup run that same query.
  */
-function familyRows(members: Array<{ BatchID: string; rowCount: number }> = [{ BatchID: BATCH_ID, rowCount: 5 }]) {
-  return members.map(member => ({ ...member, PlotID: DISCOVERED_PLOT_ID, CensusID: DISCOVERED_CENSUS_ID, plotCount: 1, censusCount: 1 }));
+function familyRows(
+  members: Array<{ BatchID: string; rowCount: number }> = [{ BatchID: BATCH_ID, rowCount: 5 }],
+  plotID: number = DISCOVERED_PLOT_ID,
+  censusID: number = DISCOVERED_CENSUS_ID
+) {
+  return members.map(member => ({ ...member, PlotID: plotID, CensusID: censusID, plotCount: 1, censusCount: 1 }));
 }
 
 function makeRequest(includeSessionHeader: boolean = true) {
@@ -312,6 +320,26 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     expect(cm.acquireApplicationLock).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects scope drift between upload-session authorization and setup entry', async () => {
+    const cm = primeSetupBulkProcedureQueries();
+    const fixture = cm.executeQuery.getMockImplementation();
+    let familyReads = 0;
+    cm.executeQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (!String(sql).includes('GROUP BY BatchID')) return fixture(sql, params);
+      familyReads++;
+      return familyReads === 1 ? familyRows() : familyRows([{ BatchID: BATCH_ID, rowCount: 5 }], DRIFTED_PLOT_ID);
+    });
+
+    const res = await GET(makeRequest(), makeProps());
+
+    expect(requireUploadSessionOwnershipMock).toHaveBeenCalledWith(expect.objectContaining({ plotId: DISCOVERED_PLOT_ID, censusId: DISCOVERED_CENSUS_ID }));
+    expect(res.status).toBe(HTTPResponses.SERVICE_UNAVAILABLE);
+    expect(await res.json()).toMatchObject({
+      error: expect.stringContaining(`expected plot=${DISCOVERED_PLOT_ID}, census=${DISCOVERED_CENSUS_ID}`)
+    });
+    expect(cm.executeQuery.mock.calls.some(([sql]: [string]) => String(sql).includes('bulkingestionprocess'))).toBe(false);
+  });
+
   it("audits a newly committed sub-batch row against the after-CALL snapshot, inside the sub-batch's own transaction", async () => {
     const newRow = {
       CoreMeasurementID: 7001,
@@ -387,7 +415,7 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
           sql.includes('DELETE tm') &&
           sql.includes(`INNER JOIN ${SCHEMA}.uploadmetrics um`) &&
           sql.includes("um.status IN ('failed', 'processing')") &&
-          sql.includes('NOT (tm.FileID = ? AND tm.BatchID = ?)')
+          sql.includes('NOT (tm.FileID = ? AND (tm.BatchID = ? OR tm.BatchID LIKE ?')
       ),
       diagnostic
     ).toBe(true);
@@ -472,7 +500,8 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       );
     });
     expect(captureIndex, diagnostic).toBeGreaterThan(-1);
-    expect(calls[captureIndex][1]).toEqual([FILE_ID, BATCH_ID, DISCOVERED_CENSUS_ID, FILE_ID, BATCH_ID, SUB_BATCH_LIKE_PATTERN]);
+    // The JOIN binds the incoming family (FileID, BatchID, LIKE pattern) before the WHERE's census and exclusion params.
+    expect(calls[captureIndex][1]).toEqual([FILE_ID, BATCH_ID, SUB_BATCH_LIKE_PATTERN, DISCOVERED_CENSUS_ID, FILE_ID, BATCH_ID, SUB_BATCH_LIKE_PATTERN]);
     expect(calls[captureIndex][2]).toBe(PHASE1_TRANSACTION_ID);
 
     expectAuditedBoundedDelete(cm, captureIndex, crossFileCoreMeasurementIDs, diagnostic);
@@ -481,9 +510,10 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
   // 2026-07-27 Harvard Forest incident: an unsuffixed-ID-only lookup after a
   // split returned a false "No data found" over still-staged rows.
   describe('resuming a batch whose rows were renamed into sub-batches', () => {
+    // Each member holds at most one batch of rows: setup rejects a larger member.
     const ORPHANED_SUB_BATCHES = [
       { BatchID: 'batch-1__sub001', rowCount: 10_000 },
-      { BatchID: 'batch-1__sub002', rowCount: 96_227 }
+      { BatchID: 'batch-1__sub002', rowCount: 6_227 }
     ];
 
     it('authorizes the orphaned rows’ scope instead of returning early', async () => {
@@ -509,6 +539,36 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       const procedureCalls = cm.executeQuery.mock.calls.filter(([sql]: [string]) => String(sql).includes('bulkingestionprocess'));
       expect(procedureCalls.map(([, params]: [string, string[]]) => params[1])).toEqual(['batch-1__sub001', 'batch-1__sub002']);
       expect(body.subBatchCount).toBe(ORPHANED_SUB_BATCHES.length);
+    });
+
+    it('treats sub-batch members as the normal staged shape and does not warn about recovery', async () => {
+      primeSetupBulkProcedureQueries({ familyMembers: ORPHANED_SUB_BATCHES });
+      loggerWarn.mockClear();
+
+      const res = await GET(makeRequest(), makeProps());
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      const orphanWarnings = loggerWarn.mock.calls.filter(([message]) => /orphan/i.test(String(message)));
+      expect(orphanWarnings, `unexpected orphan warnings: ${JSON.stringify(orphanWarnings)}`).toEqual([]);
+      expect(loggerDebug).toHaveBeenCalledWith(expect.stringContaining('sub-batch member(s)'));
+    });
+
+    it('answers an oversized member with a permanent 422 and never calls the procedure', async () => {
+      const OVERSIZED_MEMBER_ROWS = 96_227;
+      const cm = primeSetupBulkProcedureQueries({
+        familyMembers: [ORPHANED_SUB_BATCHES[0], { BatchID: 'batch-1__sub002', rowCount: OVERSIZED_MEMBER_ROWS }]
+      });
+
+      const res = await GET(makeRequest(), makeProps());
+      const body = await res.json();
+      console.log('[oversized member] status:', res.status, 'body:', body);
+
+      expect(res.status).toBe(HTTPResponses.UNPROCESSABLE_ENTITY);
+      expect(body).toEqual({
+        error: setupFailureSummary(SETUP_FAILURE_CODES.oversizedSubBatch),
+        code: SETUP_FAILURE_CODES.oversizedSubBatch
+      });
+      expect(cm.executeQuery.mock.calls.some(([sql]: [string]) => String(sql).includes('bulkingestionprocess'))).toBe(false);
     });
 
     it('does not re-split orphaned sub-batches into new ones', async () => {

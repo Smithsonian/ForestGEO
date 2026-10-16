@@ -35,6 +35,14 @@ import {
 } from '@/lib/ingestion/temporary-measurements';
 import { buildFileUploadChangelogRecordID, measurementFileIDValidationError, mergeFileUploadChunkIntoMetadata } from '@/lib/uploads/file-names';
 import { recordAuditedIngestionFailureRows } from '@/lib/changelog/ingestion-failure-audit';
+import {
+  BatchIDContainsSubBatchSeparatorError,
+  MAX_ORIGINAL_BATCH_ID_LENGTH,
+  OriginalBatchIDTooLongError,
+  SUB_BATCH_SEPARATOR,
+  SubBatchOrdinalOverflowError,
+  subBatchIDForRowOrdinal
+} from '@/lib/uploads/batch-family';
 
 const ARCGIS_COMMIT_INSERT_FAILURE_FALLBACK = 'Unknown error during insert';
 const CHANGELOG_TABLE_NAME = 'file_upload';
@@ -63,8 +71,32 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * Stages each row under its final sub-batch, so setup has nothing to split. The
+ * batch ID length is checked before the transaction; a session with more rows
+ * than the sub-batch suffix can name is only knowable once it is claimed.
+ */
+function assignArcgisRowBatchIDs(batchID: string, rowCount: number): string[] {
+  try {
+    return Array.from({ length: rowCount }, (_, rowOrdinal) => subBatchIDForRowOrdinal(batchID, rowOrdinal));
+  } catch (error: unknown) {
+    if (error instanceof SubBatchOrdinalOverflowError) {
+      throw new ArcgisImportSessionError(error.message, HTTPResponses.INVALID_REQUEST);
+    }
+    throw error;
+  }
+}
+
 export async function commitArcgisImport(connectionManager: ConnectionManager, params: CommitArcgisImportParams): Promise<CommitArcgisImportResult> {
   const { schema, plotID, censusID, importSessionId, batchID, uploadMode, userId, uploadSessionID } = params;
+
+  if (batchID.length > MAX_ORIGINAL_BATCH_ID_LENGTH) {
+    throw new ArcgisImportSessionError(new OriginalBatchIDTooLongError(batchID).message, HTTPResponses.INVALID_REQUEST);
+  }
+
+  if (batchID.includes(SUB_BATCH_SEPARATOR)) {
+    throw new ArcgisImportSessionError(new BatchIDContainsSubBatchSeparatorError(batchID).message, HTTPResponses.INVALID_REQUEST);
+  }
 
   await ensureArcgisImportTables(schema);
   await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, schema);
@@ -108,31 +140,25 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
       throw new ArcgisImportSessionError('ArcGIS import session contains no rows', HTTPResponses.UNPROCESSABLE_ENTITY);
     }
 
-    const countSQL = safeFormatQuery(schema, `SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`);
-    const preInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
-    const preInsertCount = preInsertResult[0]?.count || 0;
+    const rowBatchIDs = assignArcgisRowBatchIDs(batchID, staged.rows.length);
 
     if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
       await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, plotID, censusID, userId, transactionID);
     }
     await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, plotID, censusID, transactionID);
 
-    await insertTemporaryMeasurementsInBatches(
+    insertedCount = await insertTemporaryMeasurementsInBatches(
       connectionManager,
       schema,
       staged.rows,
       fileName,
-      batchID,
+      rowBatchIDs,
       uploadSessionID,
       SourceFormat.arcgis_xlsx,
       plotID,
       censusID,
       transactionID
     );
-
-    const postInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
-    const postInsertCount = postInsertResult[0]?.count || 0;
-    insertedCount = postInsertCount - preInsertCount;
 
     const droppedRowCount = staged.rows.length - insertedCount;
     if (droppedRowCount > 0) {
@@ -145,7 +171,7 @@ export async function commitArcgisImport(connectionManager: ConnectionManager, p
         connectionManager,
         schema,
         fileName,
-        batchID,
+        rowBatchIDs,
         plotID,
         censusID,
         staged.rows,

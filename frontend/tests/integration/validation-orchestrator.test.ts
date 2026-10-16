@@ -245,6 +245,7 @@ describe('runCensusValidations — integration', () => {
       delimiter: CSV_DELIMITER,
       uploadSessionID: UPLOAD_SESSION_ID,
       transactionID,
+      firstRowOrdinal: null,
       changedBy: CHANGED_BY
     };
     const stageResult = await stageMeasurementChunk(connectionManager, params);
@@ -253,7 +254,7 @@ describe('runCensusValidations — integration', () => {
     expect(stageResult.insertedCount).toBe(expectedInserted);
     expect(stageResult.invalidRows).toHaveLength(0);
 
-    const ingestResult = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID: BATCH_ID });
+    const ingestResult = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID: BATCH_ID, expectedScope: { plotID, censusID } });
     console.log(`[ingest] processedSubBatches=${ingestResult.processedSubBatches} totalRows=${ingestResult.totalRows} noDataFound=${ingestResult.noDataFound}`);
     expect(ingestResult.noDataFound).toBe(false);
     expect(ingestResult.subBatchResults[0].batchFailedButHandled).toBe(false);

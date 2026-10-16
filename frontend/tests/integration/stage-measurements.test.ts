@@ -287,6 +287,7 @@ describe('stageMeasurementChunk — integration', () => {
       delimiter: CSV_DELIMITER,
       uploadSessionID: UPLOAD_SESSION_ID,
       transactionID,
+      firstRowOrdinal: null,
       changedBy: CHANGED_BY,
       ...overrides
     };
@@ -421,7 +422,7 @@ describe('stageMeasurementChunk — integration', () => {
   // dropped-row detection path with a REAL drop, this test intercepts the bulk
   // INSERT statement and strips one row's VALUES tuple before it reaches the
   // server — exactly what a duplicate-key collision would do to the statement's
-  // effect. Every downstream step (the pre/post count diff, findDroppedMeasurementCandidates,
+  // effect. Every downstream step (the INSERT affectedRows sum, findDroppedMeasurementCandidates,
   // and the failure-row insert) still runs against the real database.
   it('records RawPlotX/RawPlotY when a row is silently dropped by INSERT IGNORE', async () => {
     const KEPT_TREETAG = 'T9001';
@@ -788,7 +789,7 @@ describe('stageMeasurementChunk — integration', () => {
     // (sqlscripting/tablestructures.sql defines only non-unique indexes), so the
     // INSERT IGNORE in insertTemporaryMeasurementsInBatches has nothing to
     // collide with: re-staging the identical chunk duplicates every row and the
-    // pre/post-count delta reports zero drops. Within-batch dedup happens
+    // inserted count reports zero drops. Within-batch dedup happens
     // downstream in bulkingestionprocess, not at staging time. If a unique key
     // is ever added, this test will fail and must be flipped to assert
     // droppedCount === EXPECTED_STAGED_ROW_COUNT and totalStaged === EXPECTED_STAGED_ROW_COUNT.
@@ -798,7 +799,7 @@ describe('stageMeasurementChunk — integration', () => {
     expect(totalStaged).toBe(EXPECTED_STAGED_ROW_COUNT * 2);
 
     // Same file+batch on the second pass must NOT trigger the stale-batch
-    // cleanup (preInsertCount > 0 skips it) — first-pass rows survive.
+    // cleanup (the family is already staged) — first-pass rows survive.
     const staged = await fetchStagedRows();
     const tagCounts = staged.reduce<Record<string, number>>((acc, row) => {
       acc[String(row.TreeTag)] = (acc[String(row.TreeTag)] ?? 0) + 1;
@@ -1015,7 +1016,7 @@ describe('stageMeasurementChunk — integration', () => {
   // GET_LOCK contention between it and the suite's shared connection is real.
   // ---------------------------------------------------------------------------
 
-  it('serializes overlapping first chunks before counting rows, producing one exact summary through real ConnectionManager', async () => {
+  it('serializes overlapping first chunks before staging rows, producing one exact summary through real ConnectionManager', async () => {
     if (!['localhost', '127.0.0.1'].includes(process.env.AZURE_SQL_SERVER ?? '')) throw new Error('Local DB required');
     const { default: RealConnectionManager } = await vi.importActual<typeof import('@/lib/db/connectionmanager')>('@/lib/db/connectionmanager');
     const manager = RealConnectionManager.getInstance();
@@ -1027,9 +1028,9 @@ describe('stageMeasurementChunk — integration', () => {
     const firstGate = new Promise<void>(resolve => {
       releaseFirst = resolve;
     });
-    let sawFirstCount!: () => void;
-    const firstCount = new Promise<void>(resolve => {
-      sawFirstCount = resolve;
+    let sawFirstInsert!: () => void;
+    const firstInsert = new Promise<void>(resolve => {
+      sawFirstInsert = resolve;
     });
     let sawSecondLock!: () => void;
     const secondLock = new Promise<void>(resolve => {
@@ -1040,9 +1041,10 @@ describe('stageMeasurementChunk — integration', () => {
     let paused = false;
     const querySpy = vi.spyOn(manager, 'executeQuery').mockImplementation(async (sql, params, tx) => {
       const result = await execute(sql, params, tx);
-      if (tx === txA && !paused && sql.includes('COUNT(*)') && sql.includes('temporarymeasurements')) {
+      // Pauses A after its summary lock and first staging INSERT, so B must queue behind that lock.
+      if (tx === txA && !paused && sql.includes('INSERT') && sql.includes('temporarymeasurements')) {
         paused = true;
-        sawFirstCount();
+        sawFirstInsert();
         await firstGate;
       }
       return result;
@@ -1072,7 +1074,7 @@ describe('stageMeasurementChunk — integration', () => {
     const runA = run(txA, rowsA, 'chunk-a');
     let runB: ReturnType<typeof run> | undefined;
     try {
-      await firstCount;
+      await firstInsert;
       runB = run(txB, rowsB, 'chunk-b');
       await secondLock;
       releaseFirst();

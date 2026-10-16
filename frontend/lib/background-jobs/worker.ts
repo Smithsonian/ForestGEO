@@ -45,7 +45,8 @@ import { commitArcgisImport } from '@/lib/uploads/arcgis-commit';
 import { collapseCensus } from '@/lib/uploads/collapse-census';
 import { detectDelimiter } from '@/lib/uploads/detect-delimiter';
 import { sanitizeUploadFileName } from '@/lib/uploads/file-names';
-import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
+import { ingestBatch, IngestBatchAbortedError, OversizedSubBatchError, type IngestBatchResult, type SetupDiagnostic } from '@/lib/uploads/ingest-batch';
+import { setupFailureSummary } from '@/lib/uploads/setup-failure';
 import { deleteUnresolvedRowsForBatchFamily, recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { isBlankMeasurementRow, isEffectivelyEmptyMeasurementInput } from '@/lib/uploads/blank-measurement-input';
@@ -61,9 +62,10 @@ import {
   markBackgroundJobFailed,
   markBackgroundJobWaitingRetryAsWorker,
   setBackgroundJobStatus,
-  updateBackgroundJobFileStatus
+  updateBackgroundJobFileStatus,
+  recordSetupDiagnostic
 } from './repository';
-import type { BackgroundJobFileRecord, BackgroundJobWithDetails, UploadJobPhase } from './types';
+import type { BackgroundJobFileRecord, BackgroundJobWithDetails, UploadJobFailureContext, UploadJobPhase } from './types';
 import { isAllowedAsyncPipeline, UPLOAD_JOB_PHASE_PROGRESS } from './types';
 
 export { UPLOAD_JOB_PHASE_PROGRESS } from './types';
@@ -89,6 +91,8 @@ const DEFAULT_CHUNK_ROWS = 5_000;
 /** Base for the exponential retry delay: base * 2^RetryCount seconds. */
 export const RETRY_BASE_DELAY_SECONDS = 60;
 const RETRY_BACKOFF_BASE = 2;
+const SPLIT_PROGRESS_SAMPLE_EVERY = 10;
+const MAX_PENDING_SETUP_DIAGNOSTIC_WRITES = 8;
 
 /**
  * Short park delay used when an external party owns the plot/census scope (an
@@ -145,7 +149,9 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
     lastPercent: 0,
     assignedBatches: new Map(),
     deferredInvalidRows: [],
-    heartbeatTimer: null
+    heartbeatTimer: null,
+    latestSetupDiagnostic: null,
+    pendingSetupDiagnosticWrites: 0
   };
 
   const runStartedAt = Date.now();
@@ -175,7 +181,8 @@ export async function runJobIfClaimable(jobID: number, deps?: WorkerDeps): Promi
     await assertStillOwned(ctx);
     await markBackgroundJobCompleted(catalogPool, jobID, workerID, {
       failedRows: ctx.failedRows,
-      unresolvedRows: ctx.unresolvedIngestRows
+      unresolvedRows: ctx.unresolvedIngestRows,
+      attemptID: workerID
     });
     completed = true;
   } catch (error) {
@@ -247,6 +254,8 @@ interface WorkerRunContext {
   /** Parse rejects from zero-valid-row files, recorded after the last ingest (see runMeasurementsPipeline). */
   deferredInvalidRows: Array<{ fileName: string; batchID: string; rows: FileRow[] }>;
   heartbeatTimer: NodeJS.Timeout | null;
+  latestSetupDiagnostic: SetupDiagnostic | null;
+  pendingSetupDiagnosticWrites: number;
 }
 
 /**
@@ -325,6 +334,55 @@ function stopHeartbeat(ctx: WorkerRunContext): void {
   }
 }
 
+function failureContextFor(ctx: WorkerRunContext): UploadJobFailureContext | undefined {
+  const diagnostic = ctx.latestSetupDiagnostic;
+  if (!diagnostic?.terminal || diagnostic.outcome !== 'failed') return undefined;
+  return {
+    ...(diagnostic.errorCode ? { code: diagnostic.errorCode } : {}),
+    summary: setupFailureSummary(diagnostic.errorCode),
+    step: diagnostic.step,
+    attemptID: ctx.workerID,
+    fileID: diagnostic.fileID,
+    batchID: diagnostic.batchID
+  };
+}
+
+function reportSetupDiagnostic(ctx: WorkerRunContext, diagnostic: SetupDiagnostic): void {
+  ctx.latestSetupDiagnostic = diagnostic;
+  const sampledSplit = diagnostic.step !== 'splitting' || (diagnostic.completedBatches ?? 0) % SPLIT_PROGRESS_SAMPLE_EVERY === 0;
+  if ((!diagnostic.terminal && !sampledSplit) || (!diagnostic.terminal && ctx.pendingSetupDiagnosticWrites >= MAX_PENDING_SETUP_DIAGNOSTIC_WRITES)) return;
+  ctx.pendingSetupDiagnosticWrites += 1;
+  void recordSetupDiagnostic(ctx.catalogPool, ctx.job.jobID, {
+    attemptID: ctx.workerID,
+    fileID: diagnostic.fileID,
+    batchID: diagnostic.batchID,
+    schema: diagnostic.schema,
+    plotID: diagnostic.plotID,
+    censusID: diagnostic.censusID,
+    step: diagnostic.step,
+    durationMs: diagnostic.elapsedMs,
+    outcome: diagnostic.outcome,
+    rowCount: diagnostic.rowCount,
+    assignedRows: diagnostic.assignedRows,
+    completedBatches: diagnostic.completedBatches,
+    terminal: diagnostic.terminal,
+    code: diagnostic.errorCode,
+    ...(diagnostic.terminal && diagnostic.outcome === 'failed' ? { summary: setupFailureSummary(diagnostic.errorCode) } : {})
+  })
+    .catch((error: unknown) => {
+      // Diagnostic persistence is optional telemetry and cannot replace setup or
+      // an authoritative job transition.
+      ailogger.warn('upload.worker.setup_diagnostic_write_failed', {
+        jobID: ctx.job.jobID,
+        attemptID: ctx.workerID,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    })
+    .finally(() => {
+      ctx.pendingSetupDiagnosticWrites = Math.max(0, ctx.pendingSetupDiagnosticWrites - 1);
+    });
+}
+
 /** Synchronous abort probe shared with ingestBatch — reads the cached flags. */
 function abortProbe(ctx: WorkerRunContext): () => boolean {
   return () => ctx.cancelRequested || ctx.leaseLost;
@@ -394,6 +452,7 @@ async function finalizeCancelledJob(ctx: WorkerRunContext): Promise<void> {
     status: 'cancelled',
     phase: 'cancelled',
     eventType: 'cancelled',
+    attemptID: ctx.workerID,
     eventMessage: 'Upload job cancelled while running; non-completed batches cleaned'
   });
 }
@@ -428,17 +487,23 @@ async function handleRunFailure(ctx: WorkerRunContext, error: unknown): Promise<
     }
     if (err instanceof UploadScopeConflictError) {
       ailogger.info(`[UploadWorker] Job ${job.jobID} parked on scope conflict: ${err.message}`);
-      await markBackgroundJobWaitingRetryAsWorker(catalogPool, job.jobID, workerID, err, SESSION_CONFLICT_RETRY_DELAY_SECONDS, { incrementRetry: false });
+      await markBackgroundJobWaitingRetryAsWorker(catalogPool, job.jobID, workerID, err, SESSION_CONFLICT_RETRY_DELAY_SECONDS, {
+        incrementRetry: false,
+        attemptID: workerID
+      });
       return;
     }
     if (err instanceof NonRetryableJobError) {
       ailogger.error(`[UploadWorker] Job ${job.jobID} failed permanently: ${err.message}`);
-      await markBackgroundJobFailed(catalogPool, job.jobID, workerID, err);
+      await markBackgroundJobFailed(catalogPool, job.jobID, workerID, err, workerID, failureContextFor(ctx));
       return;
     }
     const retryDelaySeconds = RETRY_BASE_DELAY_SECONDS * Math.pow(RETRY_BACKOFF_BASE, job.retryCount);
     ailogger.error(`[UploadWorker] Job ${job.jobID} failed (retry budget ${job.retryCount}/${job.maxRetries}): ${err.message}`, err);
-    await markBackgroundJobWaitingRetryAsWorker(catalogPool, job.jobID, workerID, err, retryDelaySeconds);
+    await markBackgroundJobWaitingRetryAsWorker(catalogPool, job.jobID, workerID, err, retryDelaySeconds, {
+      attemptID: workerID,
+      failureContext: failureContextFor(ctx)
+    });
   } catch (finalizeError) {
     if (finalizeError instanceof WorkerLeaseLostError) {
       ailogger.info(`[UploadWorker] Lease lost while finalizing job ${job.jobID}; abandoning silently`);
@@ -563,8 +628,8 @@ function getRecordPayload<T>(payload: Record<string, unknown> | null, key: strin
  * ingestion. Completed batches are skipped ENTIRELY (no cleanup, no staging,
  * no ingest) — see module docs for why this order is load-bearing.
  *
- * The probe spans the batch FAMILY. Once ingestBatch splits a file, the
- * procedure records uploadmetrics per `<batchID>__subNNN` and the unsuffixed ID
+ * The probe spans the batch FAMILY. Staged files normally live under
+ * `<batchID>__subNNN` members, so the procedure records uploadmetrics per member and the unsuffixed ID
  * never reaches 'completed' on its own. Probing the bare ID would therefore
  * declare a fully-ingested 106K-row file "incomplete" and re-stage it, which on
  * a Harvard-sized recycle means duplicate work over already-ingested rows.
@@ -763,6 +828,7 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
 
   for (let fileIndex = 0; fileIndex < job.files.length; fileIndex++) {
     const file = job.files[fileIndex];
+    ctx.latestSetupDiagnostic = null;
     await assertStillOwned(ctx);
 
     const batchID = await assignFileBatchID(ctx.catalogPool, file.jobFileID, generateShortBatchID());
@@ -854,6 +920,7 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
           storedMapping: columnMappings[file.fileName],
           uploadSessionID: ctx.sessionID,
           transactionID,
+          firstRowOrdinal: chunkIndex * chunkRows,
           changedBy: job.createdBy?.trim().slice(0, CHANGED_BY_MAX_LENGTH) ?? null,
           // Census replacement may only run while staging the job's FIRST
           // file — later files would wipe earlier files' completed batches.
@@ -1018,11 +1085,14 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
  * is finalized as a cancellation or lease loss rather than a generic failure.
  */
 async function runIngestForBatch(ctx: WorkerRunContext, fileName: string, batchID: string): Promise<IngestBatchResult> {
+  ctx.latestSetupDiagnostic = null;
   try {
     return await ingestBatch(ctx.connectionManager, {
       schema: ctx.job.schemaName,
       fileID: fileName,
       batchID,
+      expectedScope: { plotID: ctx.job.plotID, censusID: ctx.job.censusID },
+      onSetupProgress: diagnostic => reportSetupDiagnostic(ctx, diagnostic),
       isAborted: abortProbe(ctx),
       // Job creator's identity, not any client-provided field — same contract
       // documented on IngestBatchParams.changedBy (#507).
@@ -1031,6 +1101,9 @@ async function runIngestForBatch(ctx: WorkerRunContext, fileName: string, batchI
   } catch (error) {
     if (error instanceof IngestBatchAbortedError) {
       await assertStillOwned(ctx); // throws JobCancelledSignal or WorkerLeaseLostError
+    }
+    if (error instanceof OversizedSubBatchError) {
+      throw new NonRetryableJobError(error.message, { cause: error });
     }
     throw error;
   }

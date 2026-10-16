@@ -4,8 +4,9 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
-import { ingestBatch, IngestBatchAbortedError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
+import { ingestBatch, IngestBatchAbortedError, OversizedSubBatchError, type IngestBatchResult } from '@/lib/uploads/ingest-batch';
 import { BatchFamilyScopeError, discoverBatchFamily } from '@/lib/uploads/batch-family';
+import { SETUP_FAILURE_CODES, setupFailureSummary } from '@/lib/uploads/setup-failure';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { auth } from '@/auth';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
@@ -65,13 +66,15 @@ async function handler(request: NextRequest, context: RouteContext) {
   }
 
   const connectionManager = ConnectionManager.getInstance();
+  let authorizedScope: { plotID: number; censusID: number } | undefined;
 
   // Upload-session ownership is a route-only concern: derive the plot/census
   // scope from the staged rows, then verify this session owns that scope.
   //
   // The scope must come from the whole batch FAMILY, not just the unsuffixed
-  // BatchID. Once a prior attempt split this batch, every row lives under
-  // `<batchID>__subNNN` and an exact-match lookup finds nothing — which is how
+  // BatchID. Staging normally writes every row under `<batchID>__subNNN` (and a
+  // fallback split or an interrupted attempt can leave them there too), so an
+  // exact-match lookup finds nothing — which is how
   // the 2026-07-27 Harvard retry returned 200 "No data found" in 31ms while
   // 106,227 rows were still staged. Only a genuinely empty family may return
   // early; otherwise authorize the discovered scope and let ingestBatch resume.
@@ -83,12 +86,7 @@ async function handler(request: NextRequest, context: RouteContext) {
       return noDataFoundResponse();
     }
 
-    if (family.orphanedSubBatchIDs.length > 0) {
-      ailogger.warn(
-        `Found ${family.orphanedSubBatchIDs.length} orphaned sub-batch(es) for ${fileID}-${batchID} ` +
-          `holding ${family.totalRows} row(s); authorizing their scope and resuming`
-      );
-    }
+    ailogger.debug(`Batch family ${fileID}-${batchID} has ${family.orphanedSubBatchIDs.length} sub-batch member(s) holding ${family.totalRows} row(s)`);
 
     await requireUploadSessionOwnership({
       schema,
@@ -98,6 +96,7 @@ async function handler(request: NextRequest, context: RouteContext) {
       allowedStates: [UploadSessionState.UPLOADED, UploadSessionState.PROCESSING],
       contextLabel: `batch processing for ${fileID}-${batchID}`
     });
+    authorizedScope = { plotID: family.plotID, censusID: family.censusID };
   } catch (setupError: any) {
     if (setupError instanceof UploadSessionOwnershipError) {
       return new NextResponse(JSON.stringify({ error: setupError.message, fileID, batchID }), { status: setupError.status });
@@ -122,6 +121,7 @@ async function handler(request: NextRequest, context: RouteContext) {
       schema,
       fileID,
       batchID,
+      expectedScope: authorizedScope!,
       isAborted: () => isRequestAborted(request),
       changedBy
     });
@@ -131,6 +131,15 @@ async function handler(request: NextRequest, context: RouteContext) {
     }
     // Only Phase-1 (setup) errors escape ingestBatch; sub-batch failures are
     // handled internally by moving rows to unresolved coremeasurements.
+    if (error instanceof OversizedSubBatchError) {
+      ailogger.warn(`Oversized sub-batch for ${fileID}-${batchID}: ${error.message}`);
+      return new NextResponse(
+        JSON.stringify({ error: setupFailureSummary(SETUP_FAILURE_CODES.oversizedSubBatch), code: SETUP_FAILURE_CODES.oversizedSubBatch }),
+        {
+          status: HTTPResponses.UNPROCESSABLE_ENTITY
+        }
+      );
+    }
     ailogger.error(`Setup phase failed for ${fileID}-${batchID}: ${error.message}`, error);
     return new NextResponse(JSON.stringify({ error: `Setup failed: ${error.message}`, fileID, batchID }), { status: HTTPResponses.SERVICE_UNAVAILABLE });
   }

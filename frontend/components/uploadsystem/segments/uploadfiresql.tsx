@@ -567,7 +567,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     async (
       fileData: FileCollectionRowSet | null,
       fileName: string,
-      batchID?: string,
+      batchID: string | undefined,
+      firstRowOrdinal: number | null,
       rawPayload?: { rawRows: FileRow[]; csvHeaders: string[]; mapping: ColumnMapping | null; delimiter: string },
       /**
        * This chunk's own 1-based position within the file (PapaParse's
@@ -624,6 +625,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                       mapping: rawPayload.mapping,
                       delimiter: rawPayload.delimiter,
                       ...(batchID ? { batchID } : {}),
+                      ...(firstRowOrdinal !== null ? { firstRowOrdinal } : {}),
                       ...(chunkSequence !== undefined ? { chunkSequence } : {})
                     }
                   : {
@@ -638,6 +640,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                       user: session?.user?.name ?? null,
                       fileRowSet: fileData?.[fileName] ?? {},
                       ...(batchID ? { batchID } : {}),
+                      ...(firstRowOrdinal !== null ? { firstRowOrdinal } : {}),
                       ...(chunkSequence !== undefined ? { chunkSequence } : {})
                     }
               )
@@ -1006,6 +1009,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           transform,
           chunk(results: ParseResult<FileRow>, parser) {
             actualChunkCount += 1;
+            // Counts data rows as Papa delivers them (header excluded, empty lines skipped); chunks arrive in file order.
+            const chunkFirstRowOrdinal = uploadForm === FormType.measurements ? totalRows : null;
             // Captured synchronously, at this chunk's own callback invocation,
             // so the async work queued below (which runs later, interleaved
             // with other chunks) still reports THIS chunk's own 1-based
@@ -1146,6 +1151,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                         null,
                         file.name,
                         fileBatchID,
+                        chunkFirstRowOrdinal,
                         {
                           rawRows: rawChunkRows,
                           csvHeaders: serverCsvHeaders,
@@ -1164,7 +1170,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                         setMappingWarnings(prev => (prev.includes(warning) ? prev : [...prev, warning]));
                       }
                     } else {
-                      await uploadToSql(fileCollectionRowSet, file.name, fileBatchID, undefined, chunkSequence);
+                      await uploadToSql(fileCollectionRowSet, file.name, fileBatchID, chunkFirstRowOrdinal, undefined, chunkSequence);
                     }
                   } catch (error: unknown) {
                     const errorObj = error instanceof Error ? error : new Error(String(error));

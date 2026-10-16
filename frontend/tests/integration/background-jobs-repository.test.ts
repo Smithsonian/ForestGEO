@@ -493,6 +493,30 @@ describe('cancelBackgroundJob', () => {
 });
 
 describe('markBackgroundJobWaitingRetryAsWorker — fenced retry transitions', () => {
+  it('rolls back the guarded status update when the authoritative event insert fails', async () => {
+    const triggerName = 'test_fail_waiting_retry_event';
+    const { jobID } = await createAndClaimJob(WORKER_A);
+    await pool.query(`DROP TRIGGER IF EXISTS catalog.${triggerName}`);
+    await pool.query(
+      `CREATE TRIGGER catalog.${triggerName} BEFORE INSERT ON catalog.background_job_events
+       FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected event insert failure'`
+    );
+    try {
+      await expect(markBackgroundJobWaitingRetryAsWorker(pool, jobID, WORKER_A, new Error('retry after setup failure'), 30)).rejects.toThrow(
+        'injected event insert failure'
+      );
+
+      const job = await getBackgroundJob(pool, jobID);
+      expect(job?.status).toBe('running');
+      expect(job?.workerID).toBe(WORKER_A);
+      expect(job?.retryCount).toBe(0);
+      const [events] = await pool.query<RowDataPacket[]>(`SELECT EventType FROM catalog.background_job_events WHERE JobID = ? ORDER BY EventID`, [jobID]);
+      expect(events.some(event => event.EventType === 'waiting_retry')).toBe(false);
+    } finally {
+      await pool.query(`DROP TRIGGER IF EXISTS catalog.${triggerName}`);
+    }
+  });
+
   it('transitions directly to failed when retry budget is exhausted (budget arithmetic in SQL)', async () => {
     const job = await createUploadBackgroundJob(pool, makeJobInput(), TEST_USER_A);
 

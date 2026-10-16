@@ -443,6 +443,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
         storedMapping: undefined,
         uploadSessionID: null,
         transactionID: stagingTxn,
+        firstRowOrdinal: null,
         changedBy: TEST_USER,
         onInvalidRows: rows => {
           invalidRows = rows;
@@ -496,7 +497,7 @@ describe('upload pipeline equivalence — sync route vs background worker', () =
     console.log(`[sync] rejects recorded before ingest: ${JSON.stringify(rejectsBeforeIngest)}`);
 
     // Then the interactive pipeline's processing phase: ingest + collapse.
-    const ingestResult = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID });
+    const ingestResult = await ingestBatch(connectionManager, { schema, fileID: FILE_NAME, batchID, expectedScope: { plotID: plotA, censusID: censusA } });
     console.log(
       `[sync] ingest: subBatches=${ingestResult.processedSubBatches} totalRows=${ingestResult.totalRows} recovered=${ingestResult.recovered} ` +
         `failedSubBatches=${ingestResult.subBatchResults.filter(r => r.batchFailedButHandled).length}`
