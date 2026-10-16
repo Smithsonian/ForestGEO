@@ -567,7 +567,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     async (
       fileData: FileCollectionRowSet | null,
       fileName: string,
-      batchID?: string,
+      batchID: string | undefined,
+      firstRowOrdinal: number | null,
       rawPayload?: { rawRows: FileRow[]; csvHeaders: string[]; mapping: ColumnMapping | null; delimiter: string }
     ) => {
       if (!isMountedRef.current) {
@@ -613,7 +614,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                       csvHeaders: rawPayload.csvHeaders,
                       mapping: rawPayload.mapping,
                       delimiter: rawPayload.delimiter,
-                      ...(batchID ? { batchID } : {})
+                      ...(batchID ? { batchID } : {}),
+                      ...(firstRowOrdinal !== null ? { firstRowOrdinal } : {})
                     }
                   : {
                       schema,
@@ -626,7 +628,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                       census: currentCensus,
                       user: session?.user?.name ?? null,
                       fileRowSet: fileData?.[fileName] ?? {},
-                      ...(batchID ? { batchID } : {})
+                      ...(batchID ? { batchID } : {}),
+                      ...(firstRowOrdinal !== null ? { firstRowOrdinal } : {})
                     }
               )
             },
@@ -989,6 +992,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           transform,
           chunk(results: ParseResult<FileRow>, parser) {
             actualChunkCount += 1;
+            // Counts data rows as Papa delivers them (header excluded, empty lines skipped); chunks arrive in file order.
+            const chunkFirstRowOrdinal = uploadForm === FormType.measurements ? totalRows : null;
             totalRows += results.data.length;
             const rowLimitError = uploadsWholeFileInOneRequest(uploadForm) ? referenceUploadRowLimitError(totalRows) : null;
             if (rowLimitError) {
@@ -1119,7 +1124,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
                   try {
                     if (serverResolves) {
-                      const data = await uploadToSql(null, file.name, fileBatchID, {
+                      const data = await uploadToSql(null, file.name, fileBatchID, chunkFirstRowOrdinal, {
                         rawRows: rawChunkRows,
                         csvHeaders: serverCsvHeaders,
                         mapping: columnMappings?.[file.name] ?? null,
@@ -1135,7 +1140,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                         setMappingWarnings(prev => (prev.includes(warning) ? prev : [...prev, warning]));
                       }
                     } else {
-                      await uploadToSql(fileCollectionRowSet, file.name, fileBatchID);
+                      await uploadToSql(fileCollectionRowSet, file.name, fileBatchID, chunkFirstRowOrdinal);
                     }
                   } catch (error: unknown) {
                     const errorObj = error instanceof Error ? error : new Error(String(error));
