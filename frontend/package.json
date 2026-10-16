@@ -22,6 +22,7 @@
     "test:unit": "node ./scripts/run-vitest-unit.mjs",
     "test:unit:ci": "node ./scripts/run-vitest-unit.mjs app components config lib testing tests/loading-duplicate-prevention.test.tsx tests/upload-procedure-regressions.test.ts tests/column-mapping-contract.test.ts tests/ddl-environment-neutrality.test.ts",
     "test:unit:raw": "node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run",
+    "bench:setup-split": "node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run --config vitest.benchmark.config.mts",
     "test:integration": "node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run --config vitest.integration.config.mts",
     "test:integration:azure": "dotenv -e .env.testing.azure -- node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run --config vitest.integration.config.mts",
     "test:component": "cypress run --component",
