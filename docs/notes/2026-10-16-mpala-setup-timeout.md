@@ -62,13 +62,23 @@ Browser chunks are serial (`connectionLimit = 1`), not concurrent. Out-of-order 
 
 ## Azure acceptance
 
-Pending: results appended after the approved off-hours run.
+Run 2026-10-15 19:00 PDT on 8.0.46-azure: the 412,421 Mpala rows were copied into a scratch schema and every trial was rolled back (`mpala-setup-acceptance.mjs` in the archive).
 
 | Path | Target | Result |
 |---|---|---|
-| Pre-partitioned setup (lock, discovery, verification) | < 10 s, zero `BatchID` UPDATEs | |
-| Fallback split, hinted | < 100 s, SELECT and UPDATE plans recorded | |
-| Staging insert cost | recorded as baseline (scratch copy took 30.7-36.6 s) | |
+| Pre-partitioned setup (lock, discovery, recovery and cleanup probes) | < 10 s, zero `BatchID` UPDATEs | **3.8 s**, 0 UPDATEs. Discovery `FOR UPDATE` 2.8 s (1.4 s non-locking), 42 members, the largest 10,000 rows |
+| Fallback split, hinted | < 100 s | **96.2 s** (selects 35.9 s, updates 59.6 s), rollback 40 s |
+| Staging insert cost | baseline | 30.8 s for a single-statement copy; 45.8 s with the ordinal `ROW_NUMBER()` |
+
+Plans:
+- Discovery, the bound and the keyset select are covering FBPC range scans.
+- The fallback UPDATE is a PRIMARY range, so no hint is needed.
+- Recovery and cleanup probes estimate 1 row each.
+- The harness session ran REPEATABLE-READ; the app sets READ COMMITTED.
+
+The fallback margin is thin, so no large file should depend on it.
+
+Follow-up: the stale-cleanup DELETE scanned the whole scratch table (`ALL`), because `FileID` matched every row. A re-upload of a file whose earlier staging is still present pays that scan in its first chunk.
 
 ## Decisions
 
