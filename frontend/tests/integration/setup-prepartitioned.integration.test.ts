@@ -22,7 +22,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 import ailogger from '@/ailogger';
 import ConnectionManager from '../../lib/db/connectionmanager';
-import { FALLBACK_SPLIT_INDEX, ingestBatch, IngestBatchAbortedError, OversizedSubBatchError, type SetupDiagnostic } from '../../lib/uploads/ingest-batch';
+import { FAMILY_SCAN_INDEX } from '../../lib/uploads/batch-family';
+import { ingestBatch, IngestBatchAbortedError, OversizedSubBatchError, type SetupDiagnostic } from '../../lib/uploads/ingest-batch';
 import { SETUP_FAILURE_CODES } from '../../lib/uploads/setup-failure';
 import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
 
@@ -192,6 +193,7 @@ describe('ingestBatch setup on pre-partitioned and legacy families (real local M
 
     expect(rewrites).toEqual([]);
     expect(discoveries).toHaveLength(1);
+    expect(discoveries[0]).toContain(`/*+ INDEX(tm ${FAMILY_SCAN_INDEX}) */`);
     expect(setupWarnings).toEqual([]);
     expect(result.subBatchResults.map(r => r.subBatchID)).toEqual(members);
     expect(await memberships(family.fileID)).toEqual([]);
@@ -212,14 +214,15 @@ describe('ingestBatch setup on pre-partitioned and legacy families (real local M
       batchID: family.batchID,
       expectedScope: expectedScope()
     });
-    // The hint rides on the frozen-bound aggregate and on every keyset pass, so count them apart.
-    const hinted = statements().filter(sql => sql.includes(`INDEX(tm ${FALLBACK_SPLIT_INDEX})`));
+    // The hint rides on the family discovery, the frozen-bound aggregate and every keyset pass, so count them apart.
+    const hinted = statements().filter(sql => sql.includes(`INDEX(tm ${FAMILY_SCAN_INDEX})`));
+    const hintedDiscoveries = hinted.filter(sql => FAMILY_DISCOVERY.test(sql));
     const hintedKeysetSelects = hinted.filter(sql => sql.includes(KEYSET_SELECT_MARKER));
-    const hintedBoundQueries = hinted.filter(sql => !sql.includes(KEYSET_SELECT_MARKER));
+    const hintedBoundQueries = hinted.filter(sql => !sql.includes(KEYSET_SELECT_MARKER) && !FAMILY_DISCOVERY.test(sql));
     const rewrites = statements().filter(sql => BATCH_ID_REWRITE.test(sql));
     const fallbackWarnings = warnSpy.mock.calls.map(([message]) => String(message)).filter(message => message.includes(FALLBACK_WARNING_MARKER));
     console.log(
-      `[legacy] hinted=${hinted.length} keysetSelects=${hintedKeysetSelects.length} boundQueries=${hintedBoundQueries.length} rewrites=${rewrites.length}`,
+      `[legacy] hinted=${hinted.length} discoveries=${hintedDiscoveries.length} keysetSelects=${hintedKeysetSelects.length} boundQueries=${hintedBoundQueries.length} rewrites=${rewrites.length}`,
       'warnings=',
       fallbackWarnings,
       'members=',
@@ -228,6 +231,7 @@ describe('ingestBatch setup on pre-partitioned and legacy families (real local M
     executeQuerySpy.mockRestore();
     warnSpy.mockRestore();
 
+    expect(hintedDiscoveries).toHaveLength(1);
     expect(hintedKeysetSelects).toHaveLength(EXPECTED_KEYSET_PASSES);
     expect(hintedBoundQueries).toHaveLength(EXPECTED_BOUND_QUERIES);
     expect(rewrites).toHaveLength(EXPECTED_KEYSET_PASSES);

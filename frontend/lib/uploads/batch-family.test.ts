@@ -5,6 +5,7 @@ import {
   buildSubBatchID,
   buildSubBatchPattern,
   discoverBatchFamily,
+  FAMILY_SCAN_INDEX,
   escapeLikePattern,
   familyRootOf,
   getIngestionBatchSize,
@@ -91,6 +92,8 @@ describe('discoverBatchFamily', () => {
     expect(String(sql)).toContain('BatchID = ? OR BatchID LIKE ?');
     expect(String(sql)).toContain("ESCAPE '\\\\'");
     expect(params).toEqual([FILE_ID, BATCH_ID, `${escapeLikePattern(BATCH_ID)}\\_\\_sub%`]);
+    expect(String(sql)).toContain(`/*+ INDEX(tm ${FAMILY_SCAN_INDEX}) */`);
+    expect(String(sql)).toContain('temporarymeasurements tm');
   });
 
   it('returns null only when the family is genuinely empty', async () => {

@@ -36,11 +36,13 @@ import {
   buildSubBatchID,
   buildSubBatchPattern,
   discoverBatchFamily,
+  FAMILY_SCAN_INDEX,
   getIngestionBatchSize,
   highestSubBatchOrdinal,
   LIKE_ESCAPE_CLAUSE,
   MAX_SUB_BATCH_ORDINAL,
   SubBatchOrdinalOverflowError,
+  toCount,
   type BatchFamilyMember,
   type BatchFamilyScope
 } from '@/lib/uploads/batch-family';
@@ -179,8 +181,6 @@ export class SetupCallbackTimeoutError extends Error {
   }
 }
 
-export const FALLBACK_SPLIT_INDEX = 'ingest_temporarymeasurements_FBPC_index';
-
 export class OversizedSubBatchError extends Error {
   readonly code = SETUP_FAILURE_CODES.oversizedSubBatch;
   constructor(fileID: string, member: BatchFamilyMember, batchSize: number) {
@@ -191,16 +191,31 @@ export class OversizedSubBatchError extends Error {
   }
 }
 
+export class SetupMembershipChangedError extends Error {
+  readonly code = SETUP_FAILURE_CODES.membershipChanged;
+  constructor(message: string) {
+    super(message);
+    this.name = 'SetupMembershipChangedError';
+  }
+}
+
+export class SetupLockUnavailableError extends Error {
+  readonly code = SETUP_FAILURE_CODES.lockUnavailable;
+  constructor(fileID: string) {
+    super(`Failed to acquire application lock for file ${fileID}. Another upload may be in progress.`);
+    this.name = 'SetupLockUnavailableError';
+  }
+}
+
 /**
  * Pinned to FBPC: on Azure (2026-10-16) the optimizer chose
  * idx_cid_md_dbh_hom_qn_tt, scanned and sorted every remaining row, and spent
- * 2.7 s per pass; the FBPC range scan returns the same rows in 20 ms. A hint,
- * not FORCE INDEX, so a schema missing the index degrades to a warning.
+ * 2.7 s per pass; the FBPC range scan returns the same rows in 20 ms.
  */
 export function buildFallbackSplitSelectSQL(schema: string, batchSize: number): string {
   return safeFormatQuery(
     schema,
-    `SELECT /*+ INDEX(tm ${FALLBACK_SPLIT_INDEX}) */ CAST(tm.id AS CHAR) AS rowID
+    `SELECT /*+ INDEX(tm ${FAMILY_SCAN_INDEX}) */ CAST(tm.id AS CHAR) AS rowID
      FROM ??.temporarymeasurements tm
      WHERE tm.FileID = ? AND tm.BatchID = ? AND tm.PlotID = ? AND tm.CensusID = ?
        AND tm.id > CAST(? AS UNSIGNED) AND tm.id <= CAST(? AS UNSIGNED)
@@ -254,28 +269,10 @@ export interface IngestBatchResult {
 }
 
 interface SetupResult {
-  plotID: number | null;
-  censusID: number | null;
   totalRows: number;
   subBatchIDs: string[];
   recovered: boolean;
   resumedSubBatchCount: number;
-}
-
-const EMPTY_SETUP_RESULT: Readonly<SetupResult> = Object.freeze({
-  plotID: null,
-  censusID: null,
-  totalRows: 0,
-  subBatchIDs: [],
-  recovered: false,
-  resumedSubBatchCount: 0
-});
-
-function toCount(value: unknown): number {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'bigint') return Number(value);
-  if (typeof value === 'string') return Number(value) || 0;
-  return 0;
 }
 
 /**
@@ -494,7 +491,9 @@ async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
  * client, re-ingestion, or an orphaned remainder). Pre-partitioned staging never
  * reaches it. It freezes its own upper bound, so rows staged after the bound
  * read stay under the original BatchID for the next setup instead of joining
- * a sub-batch this run already sized.
+ * a sub-batch this run already sized. Likewise a member first staged after the
+ * locked discovery stays staged and is ingested by the next setup of the
+ * family; staging completes before setup in both the worker and the browser.
  */
 async function splitOriginalRowsIntoSubBatches(
   connectionManager: ConnectionManager,
@@ -511,7 +510,7 @@ async function splitOriginalRowsIntoSubBatches(
   const batchSize = getIngestionBatchSize();
   const boundSQL = safeFormatQuery(
     schema,
-    `SELECT /*+ INDEX(tm ${FALLBACK_SPLIT_INDEX}) */ COUNT(*) AS rowCount, CAST(MAX(tm.id) AS CHAR) AS upperID
+    `SELECT /*+ INDEX(tm ${FAMILY_SCAN_INDEX}) */ COUNT(*) AS rowCount, CAST(MAX(tm.id) AS CHAR) AS upperID
      FROM ??.temporarymeasurements tm
      WHERE tm.FileID = ? AND tm.BatchID = ? AND tm.PlotID = ? AND tm.CensusID = ?`
   );
@@ -520,11 +519,14 @@ async function splitOriginalRowsIntoSubBatches(
     upperID: string | null;
   }>;
   if (toCount(bound?.rowCount) !== expectedRows || !bound?.upperID) {
-    throw new Error(`Batch ${fileID}-${originalBatchID} changed during setup: discovered ${expectedRows} original row(s), found ${toCount(bound?.rowCount)}`);
+    throw new SetupMembershipChangedError(
+      `Batch ${fileID}-${originalBatchID} changed during setup: discovered ${expectedRows} original row(s), found ${toCount(bound?.rowCount)}`
+    );
   }
   const subBatchCount = Math.ceil(expectedRows / batchSize);
   if (startOrdinal + subBatchCount > MAX_SUB_BATCH_ORDINAL) {
-    throw new SubBatchOrdinalOverflowError(originalBatchID, expectedRows, startOrdinal + subBatchCount);
+    const lastOriginalRowOrdinal = expectedRows - 1;
+    throw new SubBatchOrdinalOverflowError(originalBatchID, lastOriginalRowOrdinal, startOrdinal + subBatchCount);
   }
 
   const selectSQL = buildFallbackSplitSelectSQL(schema, batchSize);
@@ -544,7 +546,8 @@ async function splitOriginalRowsIntoSubBatches(
       [fileID, originalBatchID, scope.plotID, scope.censusID, cursor, bound.upperID],
       transactionID
     )) as Array<{ rowID: string }>;
-    if (selected.length === 0) throw new Error(`Fallback split selected no rows while ${expectedRows - assigned} remain for ${fileID}-${originalBatchID}`);
+    if (selected.length === 0)
+      throw new SetupMembershipChangedError(`Fallback split selected no rows while ${expectedRows - assigned} remain for ${fileID}-${originalBatchID}`);
     const lastID = String(selected[selected.length - 1].rowID);
     const updateResult = await connectionManager.executeQuery(
       updateSQL,
@@ -552,13 +555,15 @@ async function splitOriginalRowsIntoSubBatches(
       transactionID
     );
     const affectedRows = toCount(updateResult?.affectedRows);
-    if (affectedRows !== selected.length) throw new Error(`Fallback split selected ${selected.length} rows but assigned ${affectedRows} for ${subBatchID}`);
+    if (affectedRows !== selected.length)
+      throw new SetupMembershipChangedError(`Fallback split selected ${selected.length} rows but assigned ${affectedRows} for ${subBatchID}`);
     subBatchIDs.push(subBatchID);
     assigned += affectedRows;
     cursor = lastID;
     onProgress(assigned, index + 1);
   }
-  if (assigned !== expectedRows) throw new Error(`Fallback split assigned ${assigned} of ${expectedRows} rows for ${fileID}-${originalBatchID}`);
+  if (assigned !== expectedRows)
+    throw new SetupMembershipChangedError(`Fallback split assigned ${assigned} of ${expectedRows} rows for ${fileID}-${originalBatchID}`);
   return subBatchIDs;
 }
 
@@ -773,15 +778,15 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
   const procedureSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
 
   // --- Phase 1: Setup (lock, discover the family, recovery, cleanup, fallback split) ---
-  let setupResult: SetupResult;
+  let setupResult: SetupResult | null;
   try {
-    setupResult = await connectionManager.withTransaction<SetupResult>(
+    setupResult = await connectionManager.withTransaction<SetupResult | null>(
       async tx => {
         activeStep = 'lock_wait';
         emit({ outcome: 'started' });
         const lockKey = buildIngestionLockName(schema, fileID, expectedPlotID, expectedCensusID);
         if (!(await connectionManager.acquireApplicationLock(lockKey, tx.id, SETUP_PHASE_TIMEOUT_MS))) {
-          throw new Error(`Failed to acquire application lock for file ${fileID}. Another upload may be in progress.`);
+          throw new SetupLockUnavailableError(fileID);
         }
 
         // One current-read discovery under the lock. Recovery and the unresolved-row
@@ -789,7 +794,7 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
         activeStep = 'discovery';
         emit({ outcome: 'started' });
         const family = await discoverBatchFamily((sql, sqlParams) => tx.query(sql, sqlParams), schema, fileID, batchID, { currentRead: true });
-        if (!family) return EMPTY_SETUP_RESULT;
+        if (!family) return null;
         assertExpectedScope(family, expectedPlotID, expectedCensusID, fileID, batchID);
         const batchSize = getIngestionBatchSize();
         assertMembersWithinBatchSize(family, fileID, batchID, batchSize);
@@ -843,8 +848,6 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
           `Setup complete for ${fileID}: ${family.totalRows} rows → ${subBatchIDs.length} batch(es), plot=${expectedPlotID}, census=${expectedCensusID}`
         );
         return {
-          plotID: expectedPlotID,
-          censusID: expectedCensusID,
           totalRows: family.totalRows,
           subBatchIDs,
           recovered,
@@ -853,20 +856,19 @@ export async function ingestBatch(connectionManager: ConnectionManager, params: 
       },
       { timeoutMs: SETUP_PHASE_TIMEOUT_MS }
     );
-    emit({ outcome: 'committed', rowCount: setupResult.totalRows, terminal: true });
+    emit({ outcome: 'committed', rowCount: setupResult?.totalRows ?? 0, terminal: true });
   } catch (error: unknown) {
     const setupError = error instanceof TransactionCallbackTimeoutError ? new SetupCallbackTimeoutError(error) : error;
     emit({ outcome: 'failed', errorCode: errorCodeOf(setupError), terminal: true });
     throw setupError;
   }
 
-  if (setupResult.plotID === null || setupResult.subBatchIDs.length === 0) {
+  if (setupResult === null) {
     ailogger.warn(`No temporary rows found for ${fileID}-${batchID}`);
-    emit({ outcome: 'committed', rowCount: 0, terminal: true });
     return {
       processedSubBatches: 0,
-      totalRows: setupResult.totalRows,
-      recovered: setupResult.recovered,
+      totalRows: 0,
+      recovered: false,
       noDataFound: true,
       totalDurationMs: 0,
       subBatchResults: [],

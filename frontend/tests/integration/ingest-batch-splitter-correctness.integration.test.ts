@@ -2,7 +2,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createConnection, type Connection, type RowDataPacket } from 'mysql2/promise';
 import ConnectionManager from '../../lib/db/connectionmanager';
-import { buildIngestionLockName, ingestBatch, IngestBatchAbortedError, type SetupDiagnostic } from '../../lib/uploads/ingest-batch';
+import {
+  buildIngestionLockName,
+  ingestBatch,
+  IngestBatchAbortedError,
+  SetupMembershipChangedError,
+  type SetupDiagnostic
+} from '../../lib/uploads/ingest-batch';
+import { MAX_SUB_BATCH_ORDINAL, buildSubBatchID, SubBatchOrdinalOverflowError } from '../../lib/uploads/batch-family';
+import { SETUP_FAILURE_CODES } from '../../lib/uploads/setup-failure';
 import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
 
 const LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1'];
@@ -58,7 +66,10 @@ const FAMILY_DISCOVERY = /GROUP BY BatchID[\s\S]*ORDER BY BatchID/i;
 
 type QueryExecutor = (sql: string, params?: unknown[], transactionID?: string) => Promise<unknown>;
 
-/** Stages one more original-batch row inside setup's own transaction, as a concurrent stager would. */
+/**
+ * Inserts one more original-batch row through setup's own transaction at a chosen point, so the row is visible to
+ * setup's later reads exactly as if staging had added it between two of setup's statements.
+ */
 async function insertLateRow(runQuery: QueryExecutor, fileID: string, batchID: string, treeTag: string, transactionID?: string): Promise<void> {
   await runQuery(
     `INSERT INTO \`${config.database}\`.temporarymeasurements
@@ -280,7 +291,11 @@ describe('ingestBatch scoped keyset splitter (real local MySQL)', () => {
       return result;
     };
     try {
-      await expect(runSetupOnly(family.fileID, family.batchID)).rejects.toThrow(/selected 4 rows but assigned 3/);
+      const failure = await runSetupOnly(family.fileID, family.batchID).catch((error: unknown) => error);
+      console.log('[affected] failure:', failure);
+      expect(failure).toBeInstanceOf(SetupMembershipChangedError);
+      expect((failure as SetupMembershipChangedError).code).toBe(SETUP_FAILURE_CODES.membershipChanged);
+      expect((failure as Error).message).toMatch(/selected 4 rows but assigned 3/);
     } finally {
       manager.executeQuery = originalQuery;
     }
@@ -344,7 +359,11 @@ describe('ingestBatch scoped keyset splitter (real local MySQL)', () => {
       return result;
     };
     try {
-      await expect(runSetupOnly(family.fileID, family.batchID)).rejects.toThrow(/changed during setup: discovered 9 original row\(s\), found 10/);
+      const failure = await runSetupOnly(family.fileID, family.batchID).catch((error: unknown) => error);
+      console.log('[new_row] failure:', failure);
+      expect(failure).toBeInstanceOf(SetupMembershipChangedError);
+      expect((failure as SetupMembershipChangedError).code).toBe(SETUP_FAILURE_CODES.membershipChanged);
+      expect((failure as Error).message).toMatch(/changed during setup: discovered 9 original row\(s\), found 10/);
     } finally {
       manager.executeQuery = originalQuery;
     }
@@ -378,6 +397,21 @@ describe('ingestBatch scoped keyset splitter (real local MySQL)', () => {
     const expectedSplit = discovered.map((row, index) => ({ ...row, BatchID: `${family.batchID}__sub${String(Math.floor(index / 4) + 1).padStart(3, '0')}` }));
     expect(final.slice(0, discovered.length)).toEqual(expectedSplit);
     expect(final.slice(discovered.length).map(row => row.BatchID)).toEqual([family.batchID]);
+  });
+
+  it('rejects a fallback split that would need a sub-batch ordinal beyond the suffix width', async () => {
+    const family = newFamily('overflow');
+    await insertRow(family.fileID, buildSubBatchID(family.batchID, MAX_SUB_BATCH_ORDINAL), 1);
+    await insertRow(family.fileID, family.batchID, 2);
+    const before = await memberships(family.fileID);
+    const failure = await runSetupOnly(family.fileID, family.batchID).catch((error: unknown) => error);
+    console.log('[overflow] failure:', failure);
+
+    expect(failure).toBeInstanceOf(SubBatchOrdinalOverflowError);
+    expect((failure as Error).message).toBe(
+      `Row 0 of batch ${family.batchID} needs sub-batch ${MAX_SUB_BATCH_ORDINAL + 1}, beyond the ${MAX_SUB_BATCH_ORDINAL} the suffix can name`
+    );
+    expect(await memberships(family.fileID)).toEqual(before);
   });
 
   it('validates scope after waiting on a lock acquired by a separate session', async () => {

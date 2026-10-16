@@ -105,12 +105,22 @@ interface BatchFamilyRow {
   censusCount: number | string;
 }
 
-function toCount(value: unknown): number {
+/** Normalizes a MySQL count/aggregate value (number, bigint or numeric string) to a number; anything else is 0. */
+export function toCount(value: unknown): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'bigint') return Number(value);
   if (typeof value === 'string') return Number(value) || 0;
   return 0;
 }
+
+/**
+ * Every family-scoped read of temporarymeasurements (discovery and the setup
+ * fallback split) pins this (FileID, BatchID, PlotID, CensusID) index. On Azure
+ * (2026-10-16) the optimizer otherwise chose idx_cid_md_dbh_hom_qn_tt and
+ * scanned every remaining row. A hint, not FORCE INDEX, so a schema missing the
+ * index degrades to a warning.
+ */
+export const FAMILY_SCAN_INDEX = 'ingest_temporarymeasurements_FBPC_index';
 
 /**
  * Resolves every staged row belonging to `batchID` — under the original ID and
@@ -128,13 +138,13 @@ export async function discoverBatchFamily(
 ): Promise<BatchFamilyScope | null> {
   const familySQL = safeFormatQuery(
     schema,
-    `SELECT BatchID AS BatchID,
+    `SELECT /*+ INDEX(tm ${FAMILY_SCAN_INDEX}) */ BatchID AS BatchID,
             MIN(PlotID) AS PlotID,
             MIN(CensusID) AS CensusID,
             COUNT(*) AS rowCount,
             COUNT(DISTINCT PlotID) AS plotCount,
             COUNT(DISTINCT CensusID) AS censusCount
-     FROM ??.temporarymeasurements
+     FROM ??.temporarymeasurements tm
      WHERE FileID = ?
        AND (BatchID = ? OR BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE})
      GROUP BY BatchID
