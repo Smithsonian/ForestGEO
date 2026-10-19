@@ -8,8 +8,6 @@ import {
   buildEditableFieldsDiffWithMetaForSurface,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
-  createResetValidationErrorsQuery,
-  createResetValidationStatesQuery,
   mergeMeasurementFilterModel,
   PENDING_VALIDATION_SNACKBAR_MESSAGE,
   RESET_THEN_VALIDATE_SNACKBAR_MESSAGE,
@@ -192,24 +190,6 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
       // format('DELETE FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND StemGUID IS NULL', [...])
       // See coreapifunctions.ts DELETE handler
       expect(true).toBe(true);
-    });
-  });
-
-  describe('Bug Fix: reset validation states should resolve errors for the active census', () => {
-    it('builds a parameterized query that resolves validation errors instead of deleting rows', () => {
-      expect(createResetValidationErrorsQuery('forestgeo_testing_mason', 22, 6)).toEqual({
-        query: expect.stringContaining('SET mel.IsResolved = TRUE'),
-        params: ['forestgeo_testing_mason', 'forestgeo_testing_mason', 'forestgeo_testing_mason', 'forestgeo_testing_mason', 6, 22],
-        format: true
-      });
-    });
-
-    it('builds a parameterized query that resets IsValidated to NULL for the active census', () => {
-      expect(createResetValidationStatesQuery('forestgeo_testing_mason', 22, 6)).toEqual({
-        query: expect.stringContaining('SET cm.IsValidated = NULL'),
-        params: ['forestgeo_testing_mason', 'forestgeo_testing_mason', 6, 22],
-        format: true
-      });
     });
   });
 

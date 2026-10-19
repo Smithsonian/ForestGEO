@@ -134,6 +134,10 @@ export const ROUTE_POLICIES = {
   'validations/procedures/shared-dbh': 'site-scoped',
   'validations/run': 'site-scoped',
   'validations/override': 'site-scoped',
+  // Reset/recheck: withRouteAuthz + fromBody('schema') gates site membership;
+  // requireAdmin inside the handler preserves the former /api/query admin gate.
+  'validations/reset': 'site-scoped',
+  'validations/recheck': 'site-scoped',
   'validations/updatepassedvalidations': 'site-scoped',
   'validations/validate-query': 'site-scoped',
   'validations/validationerrordisplay': 'site-scoped',
