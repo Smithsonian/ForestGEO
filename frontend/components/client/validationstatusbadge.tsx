@@ -11,6 +11,12 @@ import ailogger from '@/ailogger';
 
 const DB_POLL_INTERVAL_MS = 10_000;
 
+async function fetchPersistedRun(schema: string, plotID: number, censusID: number) {
+  const response = await fetch(`/api/validations/run?schema=${schema}&plotID=${plotID}&censusID=${censusID}`);
+  const { run } = await response.json();
+  return run;
+}
+
 /**
  * Persistent badge that shows background validation progress.
  *
@@ -21,34 +27,28 @@ const DB_POLL_INTERVAL_MS = 10_000;
  * module-level runner was lost (e.g. full page reload).
  */
 export default function ValidationStatusBadge({ schema, plotID, censusID }: { schema?: string; plotID?: number; censusID?: number }) {
-  const { status, progress, errors, notices, startValidationRun, updateValidationProgress, completeValidationRun } = useBackgroundValidationState();
+  const { status, runID, progress, errors, notices, startValidationRun, updateValidationProgress, completeValidationRun, clearValidationRun } =
+    useBackgroundValidationState();
   const [detailOpen, setDetailOpen] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const hasResumedRef = useRef(false);
+  const resumedScopeKeyRef = useRef<string | null>(null);
 
-  // On mount (or when context changes), check DB for an existing run and
-  // restore its state into Zustand.  This handles hard-refresh recovery.
+  // The store is not keyed by scope, so a switch must drop the previous scope's run before resuming the new one.
   useEffect(() => {
     if (!schema || !plotID || !censusID) return;
-    if (hasResumedRef.current) return;
-    // Don't resume if the module-level runner is already active
+    const scopeKey = `${schema}:${plotID}:${censusID}`;
+    if (resumedScopeKeyRef.current === scopeKey) return;
     if (ValidationRunner.isRunning()) return;
 
-    hasResumedRef.current = true;
+    const isScopeSwitch = resumedScopeKeyRef.current !== null;
+    resumedScopeKeyRef.current = scopeKey;
+    if (isScopeSwitch) clearValidationRun();
     ValidationRunner.resume({ schema, plotID, censusID }).catch((err: any) => {
       ailogger.error('[ValidationStatusBadge] Resume check failed:', err);
     });
-  }, [schema, plotID, censusID]);
+  }, [schema, plotID, censusID, clearValidationRun]);
 
-  // Reset resume flag when plot/census changes
-  useEffect(() => {
-    hasResumedRef.current = false;
-  }, [plotID, censusID]);
-
-  // Poll DB as a fallback while status is 'running' but the module-level
-  // runner is NOT active (i.e. the page was hard-refreshed and the runner
-  // died).  Writes the fetched state back into Zustand so the badge stays
-  // accurate.
+  // isRunning() is read per tick because the runner clears it outside React; runID ends the lifetime on a run handoff.
   useEffect(() => {
     if (status !== 'running' || !schema || !plotID || !censusID) {
       if (pollTimerRef.current) {
@@ -58,17 +58,17 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
       return;
     }
 
-    // If the runner is active in this tab, Zustand is already being updated
-    // directly — no need to poll.
-    if (ValidationRunner.isRunning()) return;
+    let cancelled = false;
+    let fetchInFlight = false;
 
     pollTimerRef.current = setInterval(async () => {
-      try {
-        const response = await fetch(`/api/validations/run?schema=${schema}&plotID=${plotID}&censusID=${censusID}`);
-        const { run } = await response.json();
-        if (!run) return;
+      if (ValidationRunner.isRunning() || fetchInFlight) return;
 
-        // Write DB state back into Zustand
+      fetchInFlight = true;
+      try {
+        const run = await fetchPersistedRun(schema, plotID, censusID);
+        if (cancelled || !run || ValidationRunner.isRunning()) return;
+
         if (run.Status === 'running') {
           updateValidationProgress({
             completed: run.CompletedSteps,
@@ -85,21 +85,26 @@ export default function ValidationStatusBadge({ schema, plotID, censusID }: { sc
             notices: run.Notices ?? []
           });
           completeValidationRun(run.Status, run.ErrorMessages ?? [], run.Notices ?? []);
-          clearInterval(pollTimerRef.current!);
-          pollTimerRef.current = null;
+          if (pollTimerRef.current) {
+            clearInterval(pollTimerRef.current);
+            pollTimerRef.current = null;
+          }
         }
       } catch {
         // Swallow polling errors
+      } finally {
+        fetchInFlight = false;
       }
     }, DB_POLL_INTERVAL_MS);
 
     return () => {
+      cancelled = true;
       if (pollTimerRef.current) {
         clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;
       }
     };
-  }, [status, schema, plotID, censusID, startValidationRun, updateValidationProgress, completeValidationRun]);
+  }, [status, schema, plotID, censusID, runID, startValidationRun, updateValidationProgress, completeValidationRun]);
 
   if (status === 'idle') return null;
 

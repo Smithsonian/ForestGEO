@@ -83,7 +83,7 @@ import ValidationOverrideModal from '@/components/client/modals/validationoverri
 import { MeasurementsSummaryResult } from '@/lib/db/definitions/views';
 import MapperFactory from '@/config/datamapper';
 import { AttributesRDS, AttributesResult } from '@/lib/db/definitions/core';
-import ValidationCore from '@/components/client/validationcore';
+import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 import { ArrowRightAlt, CallSplit, Forest, Grass } from '@mui/icons-material';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { EditToolbar } from '../client/datagridelements';
@@ -106,6 +106,7 @@ import {
   buildEditableFieldsDiffWithMetaForSurface,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
+  describeActiveValidationRunConflict,
   RECHECK_VALIDATION_SUCCESS_MESSAGE,
   RESET_VALIDATION_SUCCESS_MESSAGE,
   selectMeasurementStateSnackbar,
@@ -205,7 +206,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   });
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [pendingDeleteRow, setPendingDeleteRow] = useState<GridRowModel | null>(null);
-  const [isValidationModalOpen, setIsValidationModalOpen] = useState(false);
   const [isValidationOverrideModalOpen, setIsValidationOverrideModalOpen] = useState(false);
   const [isResetValidationModalOpen, setIsResetValidationModalOpen] = useState(false);
   const [isSingleCMVErrorOpen, setIsSingleCMVErrorOpen] = useState(false);
@@ -285,6 +285,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   // use the session
   const { data: session } = useSession();
   const { status: backgroundValidationStatus } = useBackgroundValidationState();
+  const { startValidation, getActiveParams: getActiveValidationRunParams } = useBackgroundValidation();
   // Track mounted state for safe state updates in deferred callbacks
   const { isMountedRef } = useIsMounted();
 
@@ -333,6 +334,27 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       throw new Error('Measurements Summary View Refresh failure');
     }
   }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName]);
+
+  // ValidationRunner.start aborts whatever run is active, so any active run — on this scope or another — blocks a new one.
+  const handleRunValidations = useCallback(() => {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) {
+      setSnackbar({ children: 'Active site, plot, or census selection is missing.', severity: 'error' });
+      return;
+    }
+
+    const requestedRun = { schema: currentSite.schemaName, plotID: currentPlot.plotID, censusID: activeCensusID };
+    const activeRunConflict = describeActiveValidationRunConflict(getActiveValidationRunParams(), requestedRun);
+    if (activeRunConflict) {
+      setSnackbar({ children: activeRunConflict, severity: 'info' });
+      return;
+    }
+
+    startValidation(requestedRun, { requirePersistedRun: true });
+    setSnackbar({
+      children: 'Starting validation run. Track its progress in the validation status badge in the sidebar.',
+      severity: 'info'
+    });
+  }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName, getActiveValidationRunParams, startValidation]);
 
   // Define refreshCounts early so it can be used in other hooks
   const refreshCounts = useCallback(async () => {
@@ -1674,7 +1696,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                     dynamicButtons: dynamicButtons,
                     validationMenu: (
                       <ValidationActionsMenu
-                        onRunValidations={() => setIsValidationModalOpen(true)}
+                        onRunValidations={handleRunValidations}
                         onOverrideValidations={() => setIsValidationOverrideModalOpen(true)}
                         onResetValidations={() => setIsResetValidationModalOpen(true)}
                         onRefreshView={async () => {
@@ -1785,24 +1807,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             title="Confirm Deletion"
             content={`Delete ${describeMeasurementRow(pendingDeleteRow)}? This action cannot be undone.`}
           />
-        )}
-        {isValidationModalOpen && (
-          <Modal open={isValidationModalOpen} onClose={async () => await handleCloseModal(setIsValidationModalOpen, false)}>
-            <ModalDialog
-              sx={{
-                width: '80%',
-                borderRadius: 'md',
-                p: 2,
-                boxShadow: 'lg',
-                display: 'flex',
-                flex: 1,
-                flexDirection: 'column',
-                alignItems: 'center'
-              }}
-            >
-              <ValidationCore onValidationComplete={() => handleCloseModal(setIsValidationModalOpen, true)} />
-            </ModalDialog>
-          </Modal>
         )}
         {isValidationOverrideModalOpen && (
           <ValidationOverrideModal

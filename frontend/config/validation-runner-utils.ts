@@ -24,6 +24,12 @@ function normalizeNumericID(value: unknown): number | null {
   return null;
 }
 
+function normalizePositiveSafeInteger(value: unknown): number | null {
+  const normalized = normalizeNumericID(value);
+  if (normalized === null) return null;
+  return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null;
+}
+
 export function getValidationTaskTimeoutMs(taskName: string): number {
   return taskName === SHARED_CROSS_CENSUS_TASK_NAME ? SHARED_CROSS_CENSUS_TASK_TIMEOUT_MS : DEFAULT_VALIDATION_TASK_TIMEOUT_MS;
 }
@@ -34,13 +40,13 @@ export function resolveValidationRunPersistence(responseOK: boolean, payload: un
   if (data.conflict === true) {
     return {
       conflict: true,
-      existingRunID: normalizeNumericID(data.existingRunID),
+      existingRunID: normalizePositiveSafeInteger(data.existingRunID),
       persistenceEnabled: true,
       runID: null
     };
   }
 
-  const runID = normalizeNumericID(data.runID);
+  const runID = normalizePositiveSafeInteger(data.runID);
   if (responseOK && runID !== null) {
     return {
       conflict: false,

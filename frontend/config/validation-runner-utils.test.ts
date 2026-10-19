@@ -31,12 +31,51 @@ describe('validation-runner-utils', () => {
     });
   });
 
+  it.each([0, -3, 1.5, Number.MAX_SAFE_INTEGER + 1, 'abc', null])(
+    'treats a conflict with malformed existingRunID %s as having no run to follow, instead of following a nonexistent run',
+    existingRunID => {
+      expect(resolveValidationRunPersistence(false, { conflict: true, existingRunID })).toEqual({
+        conflict: true,
+        existingRunID: null,
+        persistenceEnabled: true,
+        runID: null
+      });
+    }
+  );
+
   it('enables persistence when a run id is returned', () => {
     expect(resolveValidationRunPersistence(true, { runID: 17 })).toEqual({
       conflict: false,
       existingRunID: null,
       persistenceEnabled: true,
       runID: 17
+    });
+  });
+
+  it('rejects nonpositive, non-integer, unsafe, or missing run ids even on an OK response', () => {
+    // A runID the caller intends to execute procedures/finalization against
+    // must be a genuine, usable row id. Each of these is a distinct way a
+    // 200 response could still be unusable: zero/negative, non-integer,
+    // outside the safe-integer range, a non-numeric string, or absent.
+    const malformedRunIDs: unknown[] = [0, -5, 1.5, Number.MAX_SAFE_INTEGER + 1, 'abc', undefined];
+
+    for (const runID of malformedRunIDs) {
+      expect(resolveValidationRunPersistence(true, { runID })).toEqual({
+        conflict: false,
+        existingRunID: null,
+        persistenceEnabled: false,
+        runID: null,
+        reason: 'Validation run API did not return a runID'
+      });
+    }
+  });
+
+  it('still accepts a positive integer runID delivered as a numeric string', () => {
+    expect(resolveValidationRunPersistence(true, { runID: '42' })).toEqual({
+      conflict: false,
+      existingRunID: null,
+      persistenceEnabled: true,
+      runID: 42
     });
   });
 });

@@ -11,12 +11,13 @@
  * component unmounts, route changes, and re-renders.
  */
 
-import { ValidationRunner, type ValidationRunParams } from '@/config/validation-runner';
+import { ValidationRunner, type ValidationRunOptions, type ValidationRunParams } from '@/config/validation-runner';
 
 export function useBackgroundValidation() {
   return {
-    startValidation: (params: ValidationRunParams) => ValidationRunner.start(params),
+    startValidation: (params: ValidationRunParams, options?: ValidationRunOptions) => ValidationRunner.start(params, options),
     resumeValidation: (params: ValidationRunParams) => ValidationRunner.resume(params),
-    isRunning: () => ValidationRunner.isRunning()
+    isRunning: () => ValidationRunner.isRunning(),
+    getActiveParams: () => ValidationRunner.getActiveParams()
   };
 }

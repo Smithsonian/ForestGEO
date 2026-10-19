@@ -31,6 +31,7 @@ export const EXPECTED_DEFAULT_SPECS = Object.freeze([
   'selection-persistence.cy.ts',
   'upload-file-management.cy.ts',
   'validation-invalid-codes.cy.ts',
+  'validation-rerun.cy.ts',
   'validations-management.cy.ts'
 ]);
 
