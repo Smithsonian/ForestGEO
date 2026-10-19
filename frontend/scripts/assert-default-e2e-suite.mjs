@@ -14,6 +14,7 @@ export const EXPECTED_DEFAULT_SPECS = Object.freeze([
   'column-mapping/csv-mapping-dialog.cy.ts',
   'column-mapping/mapping-negative-paths.cy.ts',
   'column-mapping/mapping-signature-persistence.cy.ts',
+  'column-mapping/measurement-replacement-confirmation.cy.ts',
   'complete-auth-and-selection-flow.cy.ts',
   'cross-feature-integration.cy.ts',
   'dashboard-visual-enhancements.cy.ts',
