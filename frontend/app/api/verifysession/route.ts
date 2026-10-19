@@ -5,13 +5,14 @@ import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
+import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
 function buildBatchPrefixPredicate(columnRef: string): string {
-  return `(${columnRef} = ? OR ${columnRef} LIKE CONCAT(?, '__sub%'))`;
+  return `(${columnRef} = ? OR ${columnRef} LIKE ? ${LIKE_ESCAPE_CLAUSE})`;
 }
 
 /**
@@ -68,6 +69,7 @@ async function handler(request: NextRequest, _context: RouteContext) {
 
   try {
     if (scope === 'batch') {
+      const subBatchPattern = buildSubBatchPattern(batchID!);
       // Fast path: use direct upload tracking columns written by the current ingest pipeline.
       processedSQL = safeFormatQuery(
         schema,
@@ -79,7 +81,7 @@ async function handler(request: NextRequest, _context: RouteContext) {
          AND cm.UploadFileID = ?
          AND ${buildBatchPrefixPredicate('cm.UploadBatchID')}`
       );
-      processedParams = [plotID, censusID, fileID, batchID, batchID];
+      processedParams = [plotID, censusID, fileID, batchID, subBatchPattern];
       legacyProbeSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.coremeasurements cm
@@ -118,7 +120,7 @@ async function handler(request: NextRequest, _context: RouteContext) {
            AND mel.IsResolved = FALSE
            AND me.ErrorSource = ?`
       );
-      failedParams = [plotID, censusID, fileID, batchID, batchID, INGESTION_ERROR_SOURCE];
+      failedParams = [plotID, censusID, fileID, batchID, subBatchPattern, INGESTION_ERROR_SOURCE];
       remainingSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.temporarymeasurements tm
@@ -127,7 +129,7 @@ async function handler(request: NextRequest, _context: RouteContext) {
            AND tm.FileID = ?
            AND ${buildBatchPrefixPredicate('tm.BatchID')}`
       );
-      remainingParams = [plotID, censusID, fileID, batchID, batchID];
+      remainingParams = [plotID, censusID, fileID, batchID, subBatchPattern];
     } else if (scope === 'file') {
       // Fast path: use direct upload tracking columns written by the current ingest pipeline.
       processedSQL = safeFormatQuery(
