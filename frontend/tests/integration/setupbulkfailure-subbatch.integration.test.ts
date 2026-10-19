@@ -38,7 +38,8 @@ const MEMBER_ROW_COUNTS = [4, 4, 1];
 /** Distinct tag ranges per test so no family collides with another's trees in the shared census. */
 const TAG_OFFSET = {
   fullFamily: 100,
-  neighbours: 200
+  neighbours: 200,
+  mixedFamily: 300
 } as const;
 
 let connection: Connection;
@@ -223,5 +224,23 @@ describe('GET /api/setupbulkfailure on a pre-partitioned family (real local MySQ
     expect([...new Set(remaining)]).toEqual([...neighbourTags.keys()]);
     expect(remaining).toHaveLength(MEMBER_ROW_COUNTS.reduce((sum, count) => sum + count, 0));
     expect(moved.every(row => row.UploadBatchID.startsWith(`${batchID}__sub`))).toBe(true);
+  });
+
+  it('moves the sub-batch members too when rows are also staged under the original BatchID', async () => {
+    const fileID = newFileID('mixed_family');
+    const batchID = `mixfam_${nextFileID}`;
+    const exactRowTag = treeTagFor(TAG_OFFSET.mixedFamily);
+    await stageRow(fileID, batchID, TAG_OFFSET.mixedFamily);
+    const expectedMemberTags = await stagePrepartitionedFamily(fileID, batchID, TAG_OFFSET.mixedFamily + 10);
+    const sessionID = await openProcessingSession(fileID);
+
+    const response = await callSetupBulkFailure(fileID, batchID, sessionID);
+    const remaining = await stagedBatchIDs(fileID);
+    const moved = await movedRows(fileID);
+    console.log(`[mixed-family] status=${response.status} remainingStaged=`, [...new Set(remaining)], 'movedByBatch=', Object.fromEntries(tagsByBatch(moved)));
+
+    expect(response.status).toBe(HTTP_OK);
+    expect(remaining).toEqual([]);
+    expect(tagsByBatch(moved)).toEqual(new Map([[batchID, [exactRowTag]], ...expectedMemberTags]));
   });
 });

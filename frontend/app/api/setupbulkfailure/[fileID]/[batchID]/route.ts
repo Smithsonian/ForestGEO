@@ -70,9 +70,21 @@ async function handler(request: NextRequest, context: RouteContext) {
     // were never judged, so they must not be recorded as ingestion SQL errors.
     const failureKind = inferSystemFailureKind(failureReason);
 
-    // The family is normally all sub-batches (batchID__sub001, ...); the exact-ID
-    // move covers legacy staging. Try it first, then move every sub-batch for this file.
-    let movedRows = await moveTemporaryBatchToFailedMeasurements(
+    // The family is normally all sub-batches (batchID__sub001, ...), but legacy staging
+    // wrote the exact ID, and a retried upload can leave both. Move each part
+    // regardless of what the other found, or the untouched part is stranded in
+    // temporarymeasurements.
+    const movedExactRows = await moveTemporaryBatchToFailedMeasurements(
+      connectionManager,
+      schema,
+      fileID,
+      batchID,
+      failureReason,
+      failureKind,
+      undefined,
+      auditContext
+    );
+    const movedSubBatchRows = await moveTemporarySubBatchesToFailedMeasurements(
       connectionManager,
       schema,
       fileID,
@@ -83,22 +95,11 @@ async function handler(request: NextRequest, context: RouteContext) {
       auditContext
     );
 
-    if (movedRows === 0) {
-      movedRows = await moveTemporarySubBatchesToFailedMeasurements(
-        connectionManager,
-        schema,
-        fileID,
-        batchID,
-        failureReason,
-        failureKind,
-        undefined,
-        auditContext
-      );
-      if (movedRows > 0) {
-        ailogger.warn(`Moved ${movedRows} sub-batched temporary rows to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`);
-      }
-    } else {
-      ailogger.warn(`Moved ${movedRows} temporary rows to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`);
+    if (movedExactRows > 0) {
+      ailogger.warn(`Moved ${movedExactRows} temporary rows to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`);
+    }
+    if (movedSubBatchRows > 0) {
+      ailogger.warn(`Moved ${movedSubBatchRows} sub-batched temporary rows to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`);
     }
   } catch (error: any) {
     operationError = error;
