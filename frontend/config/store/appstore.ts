@@ -155,6 +155,8 @@ type PersistedSelections = Partial<Pick<AppState, (typeof SELECTION_KEYS)[number
 
 const hasAnySelection = (state: PersistedSelections | undefined): boolean => SELECTION_KEYS.some(key => state?.[key] !== undefined && state?.[key] !== null);
 
+const siteIdentity = (site: Site | undefined): string => (site ? `${site.siteID ?? ''}|${site.schemaName ?? ''}` : '');
+
 let explicitSelectionClear = false;
 
 /**
@@ -319,11 +321,65 @@ export const useAppStore = create<AppState>()(
         },
 
         // ===== Selection Actions =====
-        setSite: site => set({ currentSite: site }, false, 'setSite'),
+        // Selection cascade (issue #517): a plot belongs to a site and a census belongs to
+        // a plot, so changing an ancestor must atomically drop its dependants in the SAME
+        // set() call. Otherwise a render (and any effect/request keyed off it) can observe
+        // the new site paired with the previous site's plot/census IDs. Persist rehydration
+        // writes state directly (not through these setters) and a first selection (previous
+        // value undefined) never clears anything, so restored selections are preserved.
+        setSite: site =>
+          set(
+            state => {
+              const previous = state.currentSite;
+              const changed = previous !== undefined && siteIdentity(previous) !== siteIdentity(site);
+              // The site's plot/census/quadrat LISTS belong to the previous site too, so they
+              // are dropped in the same update (R1: no render may pair a new site with old lists).
+              return changed
+                ? {
+                    currentSite: site,
+                    currentPlot: undefined,
+                    currentCensus: undefined,
+                    currentQuadrat: undefined,
+                    plotList: [] as PlotRDS[],
+                    censusList: [] as OrgCensus[],
+                    quadratList: [] as QuadratRDS[]
+                  }
+                : { currentSite: site };
+            },
+            false,
+            'setSite'
+          ),
 
-        setPlot: plot => set({ currentPlot: plot }, false, 'setPlot'),
+        setPlot: plot =>
+          set(
+            state => {
+              const previous = state.currentPlot;
+              const changed = previous !== undefined && previous?.plotID !== plot?.plotID;
+              return changed
+                ? {
+                    currentPlot: plot,
+                    currentCensus: undefined,
+                    currentQuadrat: undefined,
+                    censusList: [] as OrgCensus[],
+                    quadratList: [] as QuadratRDS[]
+                  }
+                : { currentPlot: plot };
+            },
+            false,
+            'setPlot'
+          ),
 
-        setCensus: census => set({ currentCensus: census }, false, 'setCensus'),
+        // A different plot census number means a different quadrat scope: drop the old list
+        // in the same update. Re-selecting/refreshing the same census keeps it.
+        setCensus: census =>
+          set(
+            state =>
+              state.currentCensus?.plotCensusNumber !== census?.plotCensusNumber
+                ? { currentCensus: census, quadratList: [] as QuadratRDS[] }
+                : { currentCensus: census },
+            false,
+            'setCensus'
+          ),
 
         setQuadrat: quadrat => set({ currentQuadrat: quadrat }, false, 'setQuadrat'),
 

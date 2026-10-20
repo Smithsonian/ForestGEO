@@ -225,9 +225,9 @@ export default function Sidebar(props: SidebarProps) {
     if (siteDispatch) {
       await siteDispatch({ site: selectedSite });
     }
-    if (selectedSite === undefined) {
-      await handlePlotSelection(undefined);
-    }
+    // Dependent plot/census/quadrat selections are cleared synchronously and atomically by the
+    // store (setSite) and their cookies by the dispatcher; clearing them here after the awaited
+    // cookie write could wipe a newer selection.
     // If on admin page and a site is selected, navigate to dashboard
     if (isAdminPage && selectedSite) {
       router.push('/dashboard');
@@ -238,9 +238,7 @@ export default function Sidebar(props: SidebarProps) {
     if (plotDispatch) {
       await plotDispatch({ plot: selectedPlot });
     }
-    if (selectedPlot === undefined) {
-      await handleCensusSelection(undefined);
-    }
+    // Census/quadrat are cleared by the store (setPlot) and dispatcher cascade, not here.
   };
 
   const handleCensusSelection = async (selectedCensus: OrgCensus) => {

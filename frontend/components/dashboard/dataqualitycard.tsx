@@ -1,16 +1,19 @@
 /**
  * Data Quality Card Component
  *
- * Displays post-census validation statistics in the dashboard.
- * Shows quality metrics, validation status, and quick summaries
- * from executed post-validation queries.
+ * Displays post-census statistics query status in the dashboard.
+ * The counts are post-census statistics QUERIES (rows of
+ * postvalidationqueries), not measurement rows and not validation-procedure
+ * pass/fail. Results are scoped to schema/plot/census: a response for a
+ * superseded scope is ignored and in-flight requests are aborted on scope
+ * change and unmount.
  *
  * Implements Option D: Card-Based Inline Integration
  */
 
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, LinearProgress, Tooltip, IconButton, Divider } from '@mui/joy';
 import { ContentSkeleton } from '@/components/loading';
 import { designTokens } from '@/config/design-tokens';
@@ -63,6 +66,13 @@ export interface DataQualityCardProps {
   defaultExpanded?: boolean;
   /** Compact mode for inline display */
   compact?: boolean;
+}
+
+interface QueryFetchResult {
+  /** Scope key the result belongs to; results for any other scope are never shown. */
+  key: string;
+  stats?: DataQualityStats;
+  error?: string;
 }
 
 export interface QueryStatusIndicatorProps {
@@ -118,34 +128,34 @@ function getOverallStatus(stats: DataQualityStats): 'excellent' | 'good' | 'warn
 
 const STATUS_CONFIG = {
   excellent: {
-    label: 'Excellent',
+    label: 'All Queries Ran',
     color: 'success' as const,
     icon: <VerifiedIcon />,
-    description: 'All validations passed'
+    description: 'All post-census statistics queries ran successfully'
   },
   good: {
-    label: 'Good',
+    label: 'Mostly Run',
     color: 'success' as const,
     icon: <CheckCircleIcon />,
-    description: 'Most validations passed'
+    description: 'Most post-census statistics queries ran successfully'
   },
   warning: {
     label: 'Attention Needed',
     color: 'warning' as const,
     icon: <WarningIcon />,
-    description: 'Some validations need review'
+    description: 'Some post-census statistics queries need review'
   },
   issues: {
-    label: 'Issues Found',
+    label: 'Query Errors',
     color: 'danger' as const,
     icon: <ErrorIcon />,
-    description: 'Validation failures detected'
+    description: 'Some post-census statistics queries failed to run'
   },
   pending: {
     label: 'Not Run',
     color: 'neutral' as const,
     icon: <PendingIcon />,
-    description: 'Validations have not been executed'
+    description: 'Post-census statistics queries have not been run for this census'
   }
 };
 
@@ -155,9 +165,9 @@ const STATUS_CONFIG = {
 
 function QueryStatusIndicator({ status, size = 'sm' }: QueryStatusIndicatorProps) {
   const config = {
-    success: { icon: <CheckCircleIcon />, color: 'success.500', label: 'Passed' },
-    failure: { icon: <ErrorIcon />, color: 'danger.500', label: 'Failed' },
-    pending: { icon: <PendingIcon />, color: 'neutral.400', label: 'Pending' }
+    success: { icon: <CheckCircleIcon />, color: 'success.500', label: 'Ran successfully' },
+    failure: { icon: <ErrorIcon />, color: 'danger.500', label: 'Failed to run' },
+    pending: { icon: <PendingIcon />, color: 'neutral.400', label: 'Not run yet' }
   };
 
   const { icon, color, label } = config[status];
@@ -223,22 +233,48 @@ export default function DataQualityCard({
   compact = false
 }: DataQualityCardProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const [localStats, setLocalStats] = useState<DataQualityStats | null>(preloadedStats || null);
+  const [result, setResult] = useState<QueryFetchResult | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Identity of the scope a response must belong to in order to be applied.
+  const scopeKey = schema ? `${schema}|${plotID ?? ''}|${censusID ?? ''}` : '';
+  const scopeKeyRef = useRef(scopeKey);
+  scopeKeyRef.current = scopeKey;
+  const requestRef = useRef<{ id: number; controller: AbortController } | null>(null);
+  const requestCounterRef = useRef(0);
+
+  const abortInFlight = useCallback(() => {
+    requestRef.current?.controller.abort();
+    requestRef.current = null;
+  }, []);
 
   const fetchStats = useCallback(async () => {
     if (!schema) return;
 
+    abortInFlight();
+    const controller = new AbortController();
+    const id = ++requestCounterRef.current;
+    requestRef.current = { id, controller };
+    const key = scopeKey;
+    // Stale when superseded, aborted, or the card has moved to another scope. This is
+    // checked rather than relying on fetch honouring the abort signal.
+    const isStale = () => requestRef.current?.id !== id || controller.signal.aborted || scopeKeyRef.current !== key;
+
+    // Keep same-scope stats visible during a refresh; anything else shows loading.
+    setResult(prev => (prev?.key === key && prev.stats ? prev : null));
     try {
-      setFetchError(null);
-      const response = await fetch(buildPostValidationQueriesUrl(schema, plotID, censusID), { method: 'GET' });
+      const response = await fetch(buildPostValidationQueriesUrl(schema, plotID, censusID), { method: 'GET', signal: controller.signal });
+      if (isStale()) return;
 
       if (!response.ok) {
         throw new Error(`Failed to fetch validation queries (HTTP ${response.status})`);
       }
 
       const queries: PostValidationQueriesRDS[] = await response.json();
+      if (isStale()) return;
+      if (!Array.isArray(queries)) {
+        throw new Error('Unexpected response while fetching post-census statistics queries');
+      }
 
       const enabledQueries = queries.filter(q => q.isEnabled);
       const passed = enabledQueries.filter(q => hasMatchingRunContext(q, plotID, censusID) && q.lastRunStatus === QUERY_RUN_SUCCESS).length;
@@ -249,39 +285,54 @@ export default function DataQualityCard({
         .filter(q => hasMatchingRunContext(q, plotID, censusID) && q.lastRunAt)
         .sort((a, b) => new Date(b.lastRunAt!).getTime() - new Date(a.lastRunAt!).getTime())[0];
 
-      setLocalStats({
-        totalQueries: enabledQueries.length,
-        passedQueries: passed,
-        failedQueries: failed,
-        pendingQueries: pending,
-        lastRunAt: lastRun?.lastRunAt,
-        queries: enabledQueries
+      setResult({
+        key,
+        stats: {
+          totalQueries: enabledQueries.length,
+          passedQueries: passed,
+          failedQueries: failed,
+          pendingQueries: pending,
+          lastRunAt: lastRun?.lastRunAt,
+          queries: enabledQueries
+        }
       });
     } catch (error) {
-      setFetchError(error instanceof Error ? error.message : String(error));
+      if (isStale() || (error instanceof Error && error.name === 'AbortError')) return;
+      setResult({ key, error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      if (requestRef.current?.id === id) requestRef.current = null;
     }
-  }, [schema, plotID, censusID]);
+  }, [schema, plotID, censusID, scopeKey, abortInFlight]);
 
   useEffect(() => {
     if (!preloadedStats && schema) {
       fetchStats();
     }
-  }, [preloadedStats, schema, fetchStats]);
+    // A scope change (or unmount) aborts the request for the scope being left.
+    return abortInFlight;
+  }, [preloadedStats, schema, fetchStats, abortInFlight]);
+
+  // Only a result for the CURRENT scope is ever displayed; anything else means loading.
+  const scopedResult = result && result.key === scopeKey ? result : null;
+  const localStats = scopedResult?.stats ?? null;
+  const fetchError = scopedResult?.error ?? null;
+  const isFetching = !preloadedStats && !!schema && scopedResult === null;
 
   const stats = preloadedStats || localStats;
   const status = stats ? getOverallStatus(stats) : 'pending';
   const statusConfig = STATUS_CONFIG[status];
 
   const handleRefresh = async () => {
+    const key = scopeKeyRef.current;
     setIsRefreshing(true);
     try {
-      setFetchError(null);
       if (onRefresh) {
         await onRefresh();
       }
-      await fetchStats();
+      // The scope may have changed while the refresh ran; its own effect already fetched.
+      if (scopeKeyRef.current === key) await fetchStats();
     } catch (error) {
-      setFetchError(error instanceof Error ? error.message : String(error));
+      if (scopeKeyRef.current === key) setResult({ key, error: error instanceof Error ? error.message : String(error) });
     } finally {
       setIsRefreshing(false);
     }
@@ -293,7 +344,7 @@ export default function DataQualityCard({
     return Math.round(((stats.passedQueries + stats.failedQueries) / stats.totalQueries) * 100);
   }, [stats]);
 
-  if (isLoading) {
+  if (isLoading || isFetching) {
     return <DataQualitySkeleton />;
   }
 
@@ -325,7 +376,20 @@ export default function DataQualityCard({
       <Card variant="outlined">
         <CardContent sx={{ p: 2, textAlign: 'center' }}>
           <Typography level="body-sm" color="neutral">
-            No validation data available
+            Select a site to see post-census statistics query status
+          </Typography>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (stats.totalQueries === 0) {
+    return (
+      <Card variant="outlined">
+        <CardContent sx={{ p: 2, textAlign: 'center' }}>
+          <Typography level="title-sm">No post-census statistics queries defined</Typography>
+          <Typography level="body-xs" color="neutral">
+            No enabled post-census statistics queries exist for this site, so there is nothing to run.
           </Typography>
         </CardContent>
       </Card>
@@ -365,8 +429,8 @@ export default function DataQualityCard({
           </Box>
 
           <Stack direction="row" spacing={0.5}>
-            <Tooltip title="Refresh validations">
-              <IconButton size="sm" variant="soft" color="neutral" onClick={handleRefresh} loading={isRefreshing} aria-label="Refresh validations">
+            <Tooltip title="Re-run post-census statistics queries">
+              <IconButton size="sm" variant="soft" color="neutral" onClick={handleRefresh} loading={isRefreshing} aria-label="Refresh post-census statistics">
                 <RefreshIcon />
               </IconButton>
             </Tooltip>
@@ -386,7 +450,7 @@ export default function DataQualityCard({
         <Box sx={{ mt: 2 }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.5 }}>
             <Typography level="body-xs" color="neutral">
-              Validation Progress
+              Queries Run
             </Typography>
             <Typography level="body-xs" sx={{ fontWeight: 600 }}>
               {progressPercent}%
@@ -397,33 +461,33 @@ export default function DataQualityCard({
             value={progressPercent}
             color={statusConfig.color}
             sx={{ '--LinearProgress-thickness': '6px' }}
-            aria-label={`Validation progress: ${progressPercent}%`}
+            aria-label={`Post-census statistics queries run: ${progressPercent}%`}
           />
         </Box>
 
         {/* Stats Summary */}
         <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
-          <Tooltip title="Validations that passed">
+          <Tooltip title="Post-census statistics queries that ran successfully (not measurement rows)">
             <Chip size="sm" variant="soft" color="success" startDecorator={<CheckCircleIcon sx={{ fontSize: 14 }} />}>
-              {stats.passedQueries} passed
+              {stats.passedQueries} ran successfully
             </Chip>
           </Tooltip>
           {stats.failedQueries > 0 && (
-            <Tooltip title="Validations that failed">
+            <Tooltip title="Post-census statistics queries that failed to run">
               <Chip size="sm" variant="soft" color="danger" startDecorator={<ErrorIcon sx={{ fontSize: 14 }} />}>
-                {stats.failedQueries} failed
+                {stats.failedQueries} failed to run
               </Chip>
             </Tooltip>
           )}
           {stats.pendingQueries > 0 && (
-            <Tooltip title="Validations not yet run">
+            <Tooltip title="Post-census statistics queries not yet run for this census">
               <Chip size="sm" variant="soft" color="neutral" startDecorator={<PendingIcon sx={{ fontSize: 14 }} />}>
-                {stats.pendingQueries} pending
+                {stats.pendingQueries} not run yet
               </Chip>
             </Tooltip>
           )}
           <Chip size="sm" variant="outlined" color="neutral">
-            {stats.totalQueries} total
+            {stats.totalQueries} statistics queries
           </Chip>
         </Stack>
 
@@ -439,7 +503,7 @@ export default function DataQualityCard({
           <Box sx={{ mt: 2 }}>
             <Divider sx={{ my: 1.5 }} />
             <Typography level="body-xs" sx={{ fontWeight: 600, mb: 1, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Validation Queries
+              Post-Census Statistics Queries
             </Typography>
             <Box sx={{ maxHeight: 200, overflowY: 'auto' }}>
               {stats.queries.map((query, index) => (

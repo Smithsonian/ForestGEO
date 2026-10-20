@@ -1,5 +1,5 @@
 'use client';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { title } from '@/config/primitives';
 import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
@@ -18,7 +18,7 @@ import {
   useQuadratListDispatch,
   useSiteListDispatch
 } from '@/app/contexts/compat-hooks';
-import { useHasHydrated } from '@/config/store/appstore';
+import { useAppStore, useHasHydrated } from '@/config/store/appstore';
 import { DOCUMENTATION_URL, getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import { LOGIN_FAILURE_REASONS } from '@/config/loginfailurereasons';
 import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
@@ -65,9 +65,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const hasHydrated = useHasHydrated();
   const censusDispatch = useOrgCensusDispatch();
   const { data: session } = useSession();
-  const previousSiteRef = useRef<string | undefined>(undefined);
-  const previousPlotRef = useRef<number | undefined>(undefined);
-  const previousCensusRef = useRef<number | undefined>(undefined);
 
   // Load states for each data resource - provides idle/loading/loaded/error states
   const siteListLoad = useLoadState();
@@ -119,105 +116,11 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     }
   }, [session, siteListDispatch, siteListLoad]);
 
-  const fetchPlotDataFn = useCallback(async () => {
-    if (!currentSite?.schemaName) return;
-    plotListLoad.setLoading();
-    try {
-      const response = await fetch(`/api/fetchall/plots/0/0?schema=${currentSite.schemaName}`);
-      if (!response.ok) throw new Error(`Failed to fetch plots: ${response.status}`);
-      const plotsData = await response.json();
-      if (plotListDispatch) plotListDispatch({ plotList: plotsData });
-      plotListLoad.setLoaded();
-    } catch (error) {
-      ailogger.error('Failed to fetch plot data:', error instanceof Error ? error : undefined);
-      plotListLoad.setError();
-    }
-  }, [currentSite?.schemaName, plotListDispatch, plotListLoad]);
-
-  const fetchCensusDataFn = useCallback(async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID) return;
-    censusListLoad.setLoading();
-    try {
-      const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}/0?schema=${currentSite.schemaName}&plotID=${currentPlot.plotID}`);
-      if (!response.ok) throw new Error(`Failed to fetch census: ${response.status}`);
-      const censusRDSLoad = await response.json();
-      const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
-      const censusList = await createAndUpdateCensusList(censusArray);
-      if (censusListDispatch) censusListDispatch({ censusList });
-
-      if (censusDispatch && currentCensus) {
-        const reconciledCensus = reconcileCurrentCensusSelection(currentCensus, censusList);
-        const persistedCensusID = currentCensus.dateRanges?.[0]?.censusID;
-        const reconciledCensusID = reconciledCensus?.dateRanges?.[0]?.censusID;
-
-        if (!reconciledCensus) {
-          ailogger.warn(
-            `Clearing stale census selection for schema ${currentSite.schemaName}, plot ${currentPlot.plotID}: persisted census ${persistedCensusID ?? 'unknown'} no longer exists`
-          );
-          await censusDispatch({ census: undefined });
-        } else if (persistedCensusID !== reconciledCensusID) {
-          ailogger.info(
-            `Reconciled stale census selection for schema ${currentSite.schemaName}, plot ${currentPlot.plotID}: ${persistedCensusID} -> ${reconciledCensusID}`
-          );
-          await censusDispatch({ census: reconciledCensus });
-        }
-      }
-
-      censusListLoad.setLoaded();
-    } catch (error) {
-      ailogger.error('Failed to fetch census data:', error instanceof Error ? error : undefined);
-      censusListLoad.setError();
-    }
-  }, [
-    currentSite?.schemaName,
-    currentPlot?.plotID,
-    currentCensus?.dateRanges?.[0]?.censusID,
-    currentCensus?.plotCensusNumber,
-    censusDispatch,
-    censusListDispatch,
-    censusListLoad
-  ]);
-
-  const fetchQuadratDataFn = useCallback(async () => {
-    // Note: plotCensusNumber can be 0, so use nullish check instead of falsy check
-    if (!currentSite?.schemaName || !currentPlot?.plotID || currentCensus?.plotCensusNumber == null) return;
-    quadratListLoad.setLoading();
-    try {
-      const response = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite.schemaName}`);
-      if (!response.ok) throw new Error(`Failed to fetch quadrats: ${response.status}`);
-      const quadratsData = await response.json();
-      if (quadratListDispatch) quadratListDispatch({ quadratList: quadratsData });
-      quadratListLoad.setLoaded();
-    } catch (error) {
-      ailogger.error('Failed to fetch quadrat data:', error instanceof Error ? error : undefined);
-      quadratListLoad.setError();
-    }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, quadratListDispatch, quadratListLoad]);
-
-  // Create async operations with stable function references
+  // The site list depends only on the session (not on a selection scope), so deduplication of
+  // identical calls is still appropriate here. Plot/census/quadrat lists are loaded by the
+  // scope-keyed effects below, which never deduplicate across different scopes.
   const { execute: executeFetchSiteList } = useAsyncOperation(fetchSiteListFn, {
     loadingMessage: 'Loading Sites...',
-    category: 'api',
-    suppressGlobalLoading: true,
-    preventDuplicates: true
-  });
-
-  const { execute: executeLoadPlotData } = useAsyncOperation(fetchPlotDataFn, {
-    loadingMessage: 'Loading plot data...',
-    category: 'api',
-    suppressGlobalLoading: true,
-    preventDuplicates: true
-  });
-
-  const { execute: executeLoadCensusData } = useAsyncOperation(fetchCensusDataFn, {
-    loadingMessage: 'Loading census data...',
-    category: 'api',
-    suppressGlobalLoading: true,
-    preventDuplicates: true
-  });
-
-  const { execute: executeLoadQuadratData } = useAsyncOperation(fetchQuadratDataFn, {
-    loadingMessage: 'Loading quadrat data...',
     category: 'api',
     suppressGlobalLoading: true,
     preventDuplicates: true
@@ -240,86 +143,153 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, siteListLoad.isIdle, hasHydrated]);
 
-  // Fetch plot data when currentSite is defined and plotList has not been loaded
+  // Scope-aware list loading (#517 R1). Each list is loaded by an effect keyed on the EXACT
+  // scope it depends on, so a scope change always starts a new request (nothing is deduplicated
+  // across different scopes). The effect cleanup aborts the superseded request and flips
+  // `cancelled`, so a late completion can never touch the lists, the selection or the load
+  // status of the newer scope. Dependent lists are cleared atomically in the store's
+  // setSite/setPlot/setCensus cascade, not here.
+  const siteSchema = currentSite?.schemaName;
+  const currentPlotID = currentPlot?.plotID;
+  const currentPlotCensusNumber = currentCensus?.plotCensusNumber;
+  const { setLoading: setPlotLoading, setLoaded: setPlotLoaded, setError: setPlotError, reset: resetPlotLoad } = plotListLoad;
+  const { setLoading: setCensusLoading, setLoaded: setCensusLoaded, setError: setCensusError, reset: resetCensusLoad } = censusListLoad;
+  const { setLoading: setQuadratLoading, setLoaded: setQuadratLoaded, setError: setQuadratError, reset: resetQuadratLoad } = quadratListLoad;
+  const [censusReloadNonce, setCensusReloadNonce] = useState(0);
+  const reloadCensusList = useCallback(() => setCensusReloadNonce(n => n + 1), []);
+
   useEffect(() => {
     if (!hasHydrated) return;
-    if (currentSite && plotListLoad.isIdle) {
-      executeLoadPlotData();
+    if (!siteSchema) {
+      resetPlotLoad();
+      return;
     }
-    // Intentionally exclude executeLoadPlotData from deps to prevent loops
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSite, plotListLoad.isIdle, hasHydrated]);
-
-  // Fetch census data when currentSite, currentPlot are defined and censusList has not been loaded
-  useEffect(() => {
-    if (!hasHydrated) return;
-    if (currentSite && currentPlot && censusListLoad.isIdle) {
-      executeLoadCensusData();
-    }
-    // Intentionally exclude executeLoadCensusData from deps to prevent loops
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSite, currentPlot, censusListLoad.isIdle, hasHydrated]);
-
-  // Fetch quadrat data when currentSite, currentPlot, currentCensus are defined and quadratList has not been loaded
-  useEffect(() => {
-    if (!hasHydrated) return;
-    if (currentSite && currentPlot && currentCensus && quadratListLoad.isIdle) {
-      executeLoadQuadratData();
-    }
-    // Intentionally exclude executeLoadQuadratData from deps to prevent loops
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSite, currentPlot, currentCensus, quadratListLoad.isIdle, hasHydrated]);
-
-  // Clear lists and reload data when site, plot, or census changes
-  useEffect(() => {
-    const hasSiteChanged = previousSiteRef.current !== currentSite?.siteName;
-    const hasPlotChanged = previousPlotRef.current !== currentPlot?.plotID;
-    const hasCensusChanged = previousCensusRef.current !== (currentCensus?.dateRanges?.[0]?.censusID ?? undefined);
-
-    const clearLists = async () => {
-      const promises = [];
-
-      if (hasSiteChanged) {
-        // Clear plot, census, and quadrat lists when a new site is selected
-        plotListLoad.reset();
-        censusListLoad.reset();
-        quadratListLoad.reset();
-        if (plotListDispatch) promises.push(plotListDispatch({ plotList: undefined }));
-        if (censusListDispatch) promises.push(censusListDispatch({ censusList: undefined }));
-        if (quadratListDispatch) promises.push(quadratListDispatch({ quadratList: undefined }));
-        previousSiteRef.current = currentSite?.siteName;
+    const controller = new AbortController();
+    let cancelled = false;
+    setPlotLoading();
+    (async () => {
+      try {
+        const response = await fetch(`/api/fetchall/plots/0/0?schema=${siteSchema}`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`Failed to fetch plots: ${response.status}`);
+        const plotsData = await response.json();
+        if (cancelled) return;
+        if (plotListDispatch) await plotListDispatch({ plotList: plotsData });
+        if (!cancelled) setPlotLoaded();
+      } catch (error) {
+        if (cancelled) return;
+        ailogger.error('Failed to fetch plot data:', error instanceof Error ? error : undefined);
+        setPlotError();
       }
-
-      if (hasPlotChanged) {
-        // Clear census and quadrat lists when a new plot is selected
-        censusListLoad.reset();
-        quadratListLoad.reset();
-        if (censusListDispatch) promises.push(censusListDispatch({ censusList: undefined }));
-        if (quadratListDispatch) promises.push(quadratListDispatch({ quadratList: undefined }));
-        previousPlotRef.current = currentPlot?.plotID;
-      }
-
-      if (hasCensusChanged) {
-        // Clear quadrat list when a new census is selected
-        quadratListLoad.reset();
-        if (quadratListDispatch) promises.push(quadratListDispatch({ quadratList: undefined }));
-        previousCensusRef.current = currentCensus?.dateRanges?.[0]?.censusID ?? undefined;
-      }
-
-      await Promise.all(promises);
+    })();
+    return () => {
+      cancelled = true;
+      controller.abort();
     };
+  }, [hasHydrated, siteSchema, plotListDispatch, setPlotLoading, setPlotLoaded, setPlotError, resetPlotLoad]);
 
-    if (hasSiteChanged || hasPlotChanged || hasCensusChanged) {
-      clearLists().catch(ailogger.error);
+  useEffect(() => {
+    if (!hasHydrated) return;
+    if (!siteSchema || !currentPlotID) {
+      resetCensusLoad();
+      return;
     }
+    const controller = new AbortController();
+    let cancelled = false;
+    setCensusLoading();
+    (async () => {
+      try {
+        const response = await fetch(`/api/fetchall/census/${currentPlotID}/0?schema=${siteSchema}&plotID=${currentPlotID}`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`Failed to fetch census: ${response.status}`);
+        const censusRDSLoad = await response.json();
+        const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
+        const censusList = await createAndUpdateCensusList(censusArray);
+        if (cancelled) return;
+        if (censusListDispatch) await censusListDispatch({ censusList });
+        if (cancelled) return;
+
+        // Read the selection at completion time, not from the render that started the request.
+        const selected = useAppStore.getState().currentCensus;
+        if (censusDispatch && selected) {
+          const reconciledCensus = reconcileCurrentCensusSelection(selected, censusList);
+          const persistedCensusID = selected.dateRanges?.[0]?.censusID;
+          const reconciledCensusID = reconciledCensus?.dateRanges?.[0]?.censusID;
+
+          if (!reconciledCensus) {
+            ailogger.warn(
+              `Clearing stale census selection for schema ${siteSchema}, plot ${currentPlotID}: persisted census ${persistedCensusID ?? 'unknown'} no longer exists`
+            );
+            await censusDispatch({ census: undefined });
+          } else if (persistedCensusID !== reconciledCensusID) {
+            ailogger.info(`Reconciled stale census selection for schema ${siteSchema}, plot ${currentPlotID}: ${persistedCensusID} -> ${reconciledCensusID}`);
+            await censusDispatch({ census: reconciledCensus });
+          } else if (JSON.stringify(selected) !== JSON.stringify(reconciledCensus)) {
+            // Same census ID, but the list carries newer metadata (e.g. the explicit window and
+            // measurement-span fields) than the persisted selection: refresh it from the list.
+            await censusDispatch({ census: reconciledCensus });
+          }
+        }
+        if (!cancelled) setCensusLoaded();
+      } catch (error) {
+        if (cancelled) return;
+        ailogger.error('Failed to fetch census data:', error instanceof Error ? error : undefined);
+        setCensusError();
+      }
+    })();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [
-    currentSite,
-    currentPlot,
-    currentCensus,
-    plotListDispatch,
+    hasHydrated,
+    siteSchema,
+    currentPlotID,
+    censusReloadNonce,
+    censusDispatch,
     censusListDispatch,
-    quadratListDispatch
-    // Note: execute functions intentionally excluded to prevent cascade effects
+    setCensusLoading,
+    setCensusLoaded,
+    setCensusError,
+    resetCensusLoad
+  ]);
+
+  useEffect(() => {
+    if (!hasHydrated) return;
+    // plotCensusNumber can be 0, so use a nullish check instead of a falsy check
+    if (!siteSchema || !currentPlotID || currentPlotCensusNumber == null) {
+      resetQuadratLoad();
+      return;
+    }
+    const controller = new AbortController();
+    let cancelled = false;
+    setQuadratLoading();
+    (async () => {
+      try {
+        const response = await fetch(`/api/fetchall/quadrats/${currentPlotID}/${currentPlotCensusNumber}?schema=${siteSchema}`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`Failed to fetch quadrats: ${response.status}`);
+        const quadratsData = await response.json();
+        if (cancelled) return;
+        if (quadratListDispatch) await quadratListDispatch({ quadratList: quadratsData });
+        if (!cancelled) setQuadratLoaded();
+      } catch (error) {
+        if (cancelled) return;
+        ailogger.error('Failed to fetch quadrat data:', error instanceof Error ? error : undefined);
+        setQuadratError();
+      }
+    })();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [
+    hasHydrated,
+    siteSchema,
+    currentPlotID,
+    currentPlotCensusNumber,
+    quadratListDispatch,
+    setQuadratLoading,
+    setQuadratLoaded,
+    setQuadratError,
+    resetQuadratLoad
   ]);
 
   // Handle redirection if contexts are reset (i.e., no site, plot, or census) and user is not on the dashboard
@@ -373,7 +343,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             className={`sidebar ${isSidebarVisible ? 'visible' : 'hidden'} ${isPulsing ? `animate-fade-blur-in` : ``}`}
             sx={{ position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 1000 }}
           >
-            <Sidebar setCensusListLoaded={censusListLoad.reset} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
+            <Sidebar setCensusListLoaded={reloadCensusList} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
           </Box>
         ) : (
           <Drawer
@@ -382,7 +352,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             size="sm"
             slotProps={{ content: { sx: { width: 'min(92vw, 360px)', maxWidth: '100vw', overflowX: 'hidden' } } }}
           >
-            <Sidebar setCensusListLoaded={censusListLoad.reset} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
+            <Sidebar setCensusListLoaded={reloadCensusList} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} />
           </Drawer>
         ))}
       <Header onOpenSidebar={() => setMobileSidebarOpen(true)} isSidebarOpen={mobileSidebarOpen} />
