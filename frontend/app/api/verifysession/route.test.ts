@@ -104,7 +104,10 @@ describe('verifysession route', () => {
     expect(String(mockExecuteQuery.mock.calls[0][0])).toContain(`cm.UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}`);
     expect(String(mockExecuteQuery.mock.calls[2][0])).toContain(`tm.BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}`);
     expect(String(mockExecuteQuery.mock.calls[3][0])).toContain('cm.UploadFileID IS NULL OR cm.UploadBatchID IS NULL');
-    expect(String(mockExecuteQuery.mock.calls[4][0])).toContain('JSON_UNQUOTE(JSON_EXTRACT');
+    const [legacyProcessedSQL, legacyProcessedParams] = mockExecuteQuery.mock.calls[4];
+    console.log('[legacy-batch] SQL=', legacyProcessedSQL, 'params=', legacyProcessedParams);
+    expect(String(legacyProcessedSQL)).toContain(`JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) LIKE ? ${LIKE_ESCAPE_CLAUSE}`);
+    expect(legacyProcessedParams).toEqual(['1', '2', 'file-a.csv', 'batch-1', buildSubBatchPattern('batch-1')]);
   });
 
   it('binds an escaped sub-batch pattern so a batchID containing LIKE wildcards cannot match another batch', async () => {

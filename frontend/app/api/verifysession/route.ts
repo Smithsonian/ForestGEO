@@ -101,9 +101,9 @@ async function handler(request: NextRequest, _context: RouteContext) {
          AND cm.StemGUID IS NOT NULL
          AND (cm.UploadFileID IS NULL OR cm.UploadBatchID IS NULL)
          AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID')) = ?
-         AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = ?`
+         AND ${buildBatchPrefixPredicate("JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID'))")}`
       );
-      legacyProcessedParams = [plotID, censusID, fileID, batchID];
+      legacyProcessedParams = [plotID, censusID, fileID, batchID, subBatchPattern];
 
       failedSQL = safeFormatQuery(
         schema,
