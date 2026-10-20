@@ -2,10 +2,9 @@
  * GET /api/setupbulkfailure on a pre-partitioned family — Integration Tests
  *
  * Pre-partitioned staging writes every row under `<batch>__subNNN`, so the
- * client's call with the original BatchID now always finds zero exact-match
- * rows and the route's sub-batch transfer is the only branch that moves
- * anything. A broken transfer leaves a failed upload's rows stranded in
- * temporarymeasurements. These tests run the real route, the real upload
+ * client's call with the original BatchID finds no exact-match rows; the route
+ * must move every member that family discovery returns. A broken transfer
+ * leaves a failed upload's rows stranded in temporarymeasurements. These tests run the real route, the real upload
  * session ownership check and the real transfer against local MySQL; only the
  * authenticated user is mocked.
  *

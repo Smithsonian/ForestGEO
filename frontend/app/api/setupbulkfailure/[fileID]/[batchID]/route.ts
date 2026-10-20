@@ -6,7 +6,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { toError } from '@/lib/errorhelpers';
-import { moveTemporaryBatchToFailedMeasurements, moveTemporarySubBatchesToFailedMeasurements } from '@/lib/batchfailuretransfer';
+import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { BatchFamilyScopeError, discoverBatchFamily } from '@/lib/uploads/batch-family';
@@ -70,37 +70,25 @@ async function handler(request: NextRequest, context: RouteContext) {
     // were never judged, so they must not be recorded as ingestion SQL errors.
     const failureKind = inferSystemFailureKind(failureReason);
 
-    // The family is normally all sub-batches (batchID__sub001, ...), but legacy staging
-    // wrote the exact ID, and a retried upload can leave both. Move each part
-    // regardless of what the other found, or the untouched part is stranded in
-    // temporarymeasurements.
-    const movedExactRows = await moveTemporaryBatchToFailedMeasurements(
-      connectionManager,
-      schema,
-      fileID,
-      batchID,
-      failureReason,
-      failureKind,
-      undefined,
-      auditContext
-    );
-    const movedSubBatchRows = await moveTemporarySubBatchesToFailedMeasurements(
-      connectionManager,
-      schema,
-      fileID,
-      batchID,
-      failureReason,
-      failureKind,
-      undefined,
-      auditContext
-    );
-
-    if (movedExactRows > 0) {
-      ailogger.warn(`Moved ${movedExactRows} temporary rows to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`);
+    // Each member commits on its own, like setup's per-sub-batch transactions, so a
+    // request cut off by the load balancer keeps the members already moved and a
+    // retry rediscovers only what is still staged.
+    let movedRows = 0;
+    for (const member of family.members) {
+      movedRows += await moveTemporaryBatchToFailedMeasurements(
+        connectionManager,
+        schema,
+        fileID,
+        member.batchID,
+        failureReason,
+        failureKind,
+        undefined,
+        auditContext
+      );
     }
-    if (movedSubBatchRows > 0) {
-      ailogger.warn(`Moved ${movedSubBatchRows} sub-batched temporary rows to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`);
-    }
+    ailogger.warn(
+      `Moved ${movedRows} temporary rows from ${family.members.length} family members to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`
+    );
   } catch (error: any) {
     operationError = error;
     if (error instanceof UploadSessionOwnershipError) {
