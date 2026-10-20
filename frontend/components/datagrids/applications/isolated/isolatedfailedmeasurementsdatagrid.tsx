@@ -12,6 +12,7 @@ import { failureErrorMapping } from '@/config/datagridhelpers';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { DatePicker } from '@mui/x-date-pickers';
 import moment from 'moment/moment';
+import { toCalendarDayString } from '@/config/dateformats';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { loadSelectableOptions, selectableAutocomplete, selectableOptionKeyForField } from '@/components/client/clientmacros';
 import ailogger from '@/ailogger';
@@ -26,6 +27,9 @@ import { buildEditableFieldsDiffWithMetaForSurface, revertEditAndRefresh } from 
 import { FIELD_ALIASES_BY_SURFACE, isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
 import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
 import { EditFlowPersistResult } from '@/config/datagridhelpers';
+
+// The date picker reads local fields, so a stored calendar day becomes local midnight of that day.
+export const dayToPickerMoment = (day: string | null) => (day ? moment(day, 'YYYY-MM-DD', true) : null);
 
 interface IsolatedFailedMeasurementsDataGridProps {
   onRowReingested?: () => void;
@@ -450,7 +454,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
                       }}
                     >
                       {column.field === 'date'
-                        ? moment(params.value).format('YYYY-MM-DD')
+                        ? (toCalendarDayString(params.value) ?? '')
                         : ['dbh', 'hom', 'x', 'y'].includes(column.field)
                           ? Number(params.value).toFixed(2)
                           : params.value === '' || params.value === null
@@ -471,8 +475,9 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
                   <DatePicker
                     sx={{ flex: 1 }}
                     label={column.headerName}
-                    value={moment(params.value, 'YYYY-MM-DD')}
+                    value={dayToPickerMoment(toCalendarDayString(params.value))}
                     onChange={newValue => {
+                      // The picker works in local fields; save the same calendar day it displays.
                       params.api.setEditCellValue({ id: params.id, field: params.field, value: newValue ? newValue.format('YYYY-MM-DD') : null });
                     }}
                     slotProps={{

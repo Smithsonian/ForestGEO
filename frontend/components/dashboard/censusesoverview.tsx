@@ -21,7 +21,14 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
-import moment from 'moment';
+import { formatCalendarDate, formatCalendarMonthYear } from '@/config/dateformats';
+import {
+  CensusStatus,
+  formatCensusWindowDuration,
+  getCensusStatus as getCensusWindowStatus,
+  getCensusWindowBounds,
+  getMeasurementBounds
+} from '@/config/censuswindow';
 
 // Gradient colors for census cards - time-based progression colors
 const CENSUS_GRADIENTS = [
@@ -56,66 +63,40 @@ function CensusCardSkeleton() {
   return <ContentSkeleton kind="dashboard-card" />;
 }
 
-// Determine census status based on date ranges
-function getCensusStatus(dateRanges: CensusDateRange[]): 'completed' | 'in-progress' | 'planned' {
+// Status and duration come from the census window (census start/end dates), not from
+// the measurement dates, so a planned census with a stray measurement is still planned.
+function getCensusStatus(dateRanges: CensusDateRange[]): CensusStatus {
   if (!dateRanges || dateRanges.length === 0) return 'planned';
-
-  const now = new Date();
-  const hasStarted = dateRanges.some(range => range.startDate && new Date(range.startDate) <= now);
-  const allCompleted = dateRanges.every(range => range.endDate && new Date(range.endDate) <= now);
-
-  if (allCompleted) return 'completed';
-  if (hasStarted) return 'in-progress';
-  return 'planned';
+  return getCensusWindowStatus(dateRanges);
 }
 
-// Format date range for display
+// Census window label, e.g. "Census window: Jan 2027 - Dec 2027". Calendar-day based, so
+// 2027-01-01 is January in every browser zone.
 function formatDateRange(dateRanges: CensusDateRange[]): string {
-  if (!dateRanges || dateRanges.length === 0) return 'Dates not set';
+  if (!dateRanges || dateRanges.length === 0) return 'Census window not set';
 
-  // Get earliest start and latest end across all ranges
-  const starts = dateRanges.filter(r => r.startDate).map(r => new Date(r.startDate!));
-  const ends = dateRanges.filter(r => r.endDate).map(r => new Date(r.endDate!));
-
-  const earliestStart = starts.length > 0 ? new Date(Math.min(...starts.map(d => d.getTime()))) : null;
-  const latestEnd = ends.length > 0 ? new Date(Math.max(...ends.map(d => d.getTime()))) : null;
-
-  if (earliestStart && latestEnd) {
-    return `${moment(earliestStart).format('MMM YYYY')} - ${moment(latestEnd).format('MMM YYYY')}`;
-  } else if (earliestStart) {
-    return `Started ${moment(earliestStart).format('MMM YYYY')}`;
+  const { start, end, endIsOpen } = getCensusWindowBounds(dateRanges);
+  if (start && endIsOpen) {
+    return `Census window: ${formatCalendarMonthYear(start)} - ongoing`;
+  } else if (start && end) {
+    return `Census window: ${formatCalendarMonthYear(start)} - ${formatCalendarMonthYear(end)}`;
   }
 
-  return 'Dates not set';
+  return 'Census window not set';
 }
 
-// Calculate duration in months
+// Observed measurement dates, shown separately from the window. Null when there is no data.
+function formatMeasurementSpan(dateRanges: CensusDateRange[]): string | null {
+  const { first, last } = getMeasurementBounds(dateRanges);
+  if (!first) return null;
+  const firstLabel = formatCalendarDate(first);
+  const lastLabel = last ? formatCalendarDate(last) : null;
+  return lastLabel && lastLabel !== firstLabel ? `Measurements: ${firstLabel} - ${lastLabel}` : `Measurements: ${firstLabel}`;
+}
+
 function calculateDuration(dateRanges: CensusDateRange[]): string | null {
   if (!dateRanges || dateRanges.length === 0) return null;
-
-  const starts = dateRanges.filter(r => r.startDate).map(r => new Date(r.startDate!));
-  const ends = dateRanges.filter(r => r.endDate).map(r => new Date(r.endDate!));
-
-  if (starts.length === 0) return null;
-
-  const earliestStart = new Date(Math.min(...starts.map(d => d.getTime())));
-  const latestEnd = ends.length > 0 ? new Date(Math.max(...ends.map(d => d.getTime()))) : new Date();
-
-  const months = moment(latestEnd).diff(moment(earliestStart), 'months');
-
-  if (months < 1) {
-    const days = moment(latestEnd).diff(moment(earliestStart), 'days');
-    return `${days} day${days !== 1 ? 's' : ''}`;
-  } else if (months < 12) {
-    return `${months} month${months !== 1 ? 's' : ''}`;
-  } else {
-    const years = Math.floor(months / 12);
-    const remainingMonths = months % 12;
-    if (remainingMonths === 0) {
-      return `${years} year${years !== 1 ? 's' : ''}`;
-    }
-    return `${years}y ${remainingMonths}m`;
-  }
+  return formatCensusWindowDuration(dateRanges);
 }
 
 interface CensusCardProps {
@@ -129,6 +110,7 @@ function CensusCard({ census, index, onDelete, onSelect }: CensusCardProps) {
   const gradient = CENSUS_GRADIENTS[index % CENSUS_GRADIENTS.length];
   const status = getCensusStatus(census.dateRanges);
   const duration = calculateDuration(census.dateRanges);
+  const measurementSpan = formatMeasurementSpan(census.dateRanges);
 
   // Cast to CensusWithStats to access optional extended properties
   const censusStats = census as CensusWithStats;
@@ -263,6 +245,11 @@ function CensusCard({ census, index, onDelete, onSelect }: CensusCardProps) {
             {formatDateRange(census.dateRanges)}
           </Typography>
         </Stack>
+        {measurementSpan && (
+          <Typography level="body-xs" sx={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.6875rem', mb: 1 }}>
+            {measurementSpan}
+          </Typography>
+        )}
 
         <Stack direction="row" alignItems="flex-start" spacing={0.5} sx={{ mb: 1 }}>
           <DescriptionIcon sx={{ fontSize: 10, opacity: census.description ? 0.8 : 0.5, mt: 0.25 }} />

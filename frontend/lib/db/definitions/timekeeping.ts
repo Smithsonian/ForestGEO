@@ -10,6 +10,10 @@ export type CensusRDS =
       plotCensusNumber?: number;
       startDate?: Date;
       endDate?: Date;
+      censusStartDate?: Date | null;
+      censusEndDate?: Date | null;
+      firstMeasurementDate?: Date | null;
+      lastMeasurementDate?: Date | null;
       description?: string;
     }
   | undefined;
@@ -17,8 +21,15 @@ export type CensusResult = ResultType<CensusRDS>;
 
 export interface CensusDateRange {
   censusID: number;
+  /** Legacy: measurement span when the census has data, census window otherwise. */
   startDate?: Date;
   endDate?: Date;
+  /** Census window (census.StartDate / EndDate). SQL DATE values; JSON delivers them as ISO strings. */
+  censusStartDate?: Date | null;
+  censusEndDate?: Date | null;
+  /** Observed measurement span; null when the census has no measurements. */
+  firstMeasurementDate?: Date | null;
+  lastMeasurementDate?: Date | null;
 }
 
 export interface OrgCensusRDS {
@@ -47,6 +58,12 @@ export class OrgCensusToCensusResultMapper {
       if (!censusRDS) throw new Error('censusRDS is undefined');
 
       const { plotCensusNumber, censusID, startDate, endDate, description } = censusRDS;
+      // Only carry the window/measurement fields when the row actually has them, so a
+      // payload from an older list keeps its original shape.
+      const extraDates: Partial<CensusDateRange> = {};
+      for (const key of ['censusStartDate', 'censusEndDate', 'firstMeasurementDate', 'lastMeasurementDate'] as const) {
+        if (censusRDS[key] !== undefined) extraDates[key] = censusRDS[key];
+      }
       let existingCensus = uniqueCensusMap.get(plotCensusNumber!);
 
       if (!existingCensus) {
@@ -54,13 +71,13 @@ export class OrgCensusToCensusResultMapper {
           plotID: censusRDS.plotID!,
           plotCensusNumber: plotCensusNumber!,
           censusIDs: [censusID!],
-          dateRanges: [{ censusID: censusID!, startDate, endDate }],
+          dateRanges: [{ censusID: censusID!, startDate, endDate, ...extraDates }],
           description: description || ''
         };
         uniqueCensusMap.set(plotCensusNumber!, existingCensus);
       } else {
         existingCensus.censusIDs.push(censusID!);
-        existingCensus.dateRanges.push({ censusID: censusID!, startDate, endDate });
+        existingCensus.dateRanges.push({ censusID: censusID!, startDate, endDate, ...extraDates });
         existingCensus.dateRanges.sort((a, b) => b.censusID - a.censusID);
       }
     });

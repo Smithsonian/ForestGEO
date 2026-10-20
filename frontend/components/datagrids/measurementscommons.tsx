@@ -67,6 +67,13 @@ import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/confi
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useRouter } from 'next/navigation';
 import moment from 'moment';
+import {
+  formatMeasurementDateCell,
+  formatMeasurementDateForCsv,
+  measurementDateToSaveString,
+  measurementDateValueGetter,
+  measurementDateValueSetter
+} from '@/components/datagrids/measurementdatecolumn';
 import CheckIcon from '@mui/icons-material/Check';
 import ErrorIcon from '@mui/icons-material/Error';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
@@ -881,7 +888,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
               : row[header as keyof MeasurementsSummaryResult];
           if (header === 'StemGUID' || header === 'TreeID') return Number(row[header]);
           if (header === 'IsValidated') return bitToBoolean(row[header]);
-          if (header === 'MeasurementDate') return moment(new Date(value as any)).format('YYYY-MM-DD');
+          if (header === 'MeasurementDate') return formatMeasurementDateForCsv(value);
           if (Object.prototype.toString.call(value) === '[object Object]') return `"${JSON.stringify(value).replace(/"/g, '""')}"`;
           if (typeof value === 'string' && value.includes(',')) return `"${value.replace(/"/g, '""')}"`;
           return value ?? 'NULL';
@@ -895,7 +902,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const createNewRowPost = async (gridType: string, schemaName: string | undefined, newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
     const gridID = getGridID(gridType);
     const fetchProcessQuery = createPostPatchQuery(schemaName ?? '', gridType, gridID);
-    newRow.measurementDate = moment(newRow.measurementDate).format('YYYY-MM-DD');
+    newRow.measurementDate = measurementDateToSaveString(newRow.measurementDate);
     newRow.userDefinedFields = JSON.stringify(newRow.userDefinedFields);
     try {
       const response = await fetch(fetchProcessQuery, {
@@ -1341,12 +1348,12 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           <Typography level="body-xs">YYYY-MM-DD</Typography>
         </Box>
       ),
-      valueFormatter: value => {
-        if (!value || !moment(value).utc().isValid()) {
-          return '';
-        }
-        return moment(value).utc().format('YYYY-MM-DD');
-      }
+      // Rows carry the database DATE (UTC-midnight Date / ISO string); the editor works on a
+      // local-midnight picker Date. The getter/setter pair is the only crossing, so the picked
+      // day is the day shown, diffed, previewed and saved in every browser zone.
+      valueGetter: value => measurementDateValueGetter(value),
+      valueSetter: (value, row) => measurementDateValueSetter(value, row),
+      valueFormatter: value => formatMeasurementDateCell(value)
     }),
     []
   );

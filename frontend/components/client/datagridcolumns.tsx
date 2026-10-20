@@ -7,6 +7,7 @@ import { renderAttributeStatusCell } from '@/components/client/attributestatusce
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { customNumericOperators } from '@/components/datagrids/filtrationsystem';
 import CloseIcon from '@mui/icons-material/Close';
+import { parseInstant } from '@/config/dateformats';
 import { FIELD_ALIASES_BY_SURFACE, isNegativeForNonNegativeField } from '@/config/editplan/fieldpolicy';
 
 export const formatHeader = (word1: string, word2: string) => (
@@ -283,6 +284,9 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'Last Validated',
     flex: 1,
     type: 'dateTime',
+    // An instant: the grid's dateTime type needs a Date, and a zone-less "YYYY-MM-DD HH:mm:ss"
+    // string must be read as UTC (pool timezone) before the grid shows it in local time.
+    valueGetter: (value: unknown) => parseInstant(value as string | Date | null | undefined) ?? null,
     editable: false,
     filterable: false
   }

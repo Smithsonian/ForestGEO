@@ -28,6 +28,7 @@ import VerifiedIcon from '@mui/icons-material/Verified';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import QueryStatsIcon from '@mui/icons-material/QueryStats';
 import moment from 'moment';
+import { formatInstant, parseInstant } from '@/config/dateformats';
 import { PostValidationQueriesRDS } from '@/lib/db/definitions/validations';
 
 // ============================================================================
@@ -207,7 +208,7 @@ function QueryListItem({ query, plotID, censusID }: { query: PostValidationQueri
       )}
       {isCurrentRun && query.lastRunAt && (
         <Typography level="body-xs" color="neutral" sx={{ fontSize: '0.6rem' }}>
-          {moment(query.lastRunAt).fromNow()}
+          {moment(parseInstant(query.lastRunAt)).fromNow()}
         </Typography>
       )}
     </Stack>
@@ -283,7 +284,7 @@ export default function DataQualityCard({
 
       const lastRun = enabledQueries
         .filter(q => hasMatchingRunContext(q, plotID, censusID) && q.lastRunAt)
-        .sort((a, b) => new Date(b.lastRunAt!).getTime() - new Date(a.lastRunAt!).getTime())[0];
+        .sort((a, b) => (parseInstant(b.lastRunAt)?.getTime() ?? 0) - (parseInstant(a.lastRunAt)?.getTime() ?? 0))[0];
 
       setResult({
         key,
@@ -494,7 +495,7 @@ export default function DataQualityCard({
         {/* Last Run Info */}
         {stats.lastRunAt && (
           <Typography level="body-xs" color="neutral" sx={{ mt: 1.5 }}>
-            Last run: {moment(stats.lastRunAt).format('MMM D, YYYY h:mm A')} ({moment(stats.lastRunAt).fromNow()})
+            Last run: {formatInstant(stats.lastRunAt)} ({moment(parseInstant(stats.lastRunAt)).fromNow()})
           </Typography>
         )}
 

@@ -5,6 +5,7 @@ import { preloadKey } from '@/lib/query/preload';
 import { queryKey } from '@/lib/query';
 import { createFetchQuery } from '@/config/servergridhelpers';
 import { formatDisplayDate } from '@/config/dateformats';
+import { getCensusWindow, getMeasurementSpan } from '@/config/censuswindow';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -327,18 +328,25 @@ export default function Sidebar(props: SidebarProps) {
       return <Typography className="sidebar-item">Select a Census</Typography>;
     }
 
-    const startDate = currentCensus?.dateRanges?.[0]?.startDate;
-    const endDate = currentCensus?.dateRanges?.[0]?.endDate;
+    const range = currentCensus?.dateRanges?.[0];
+    const censusWindow = range ? getCensusWindow(range) : { start: undefined, end: undefined };
+    const measurements = range ? getMeasurementSpan(range) : { first: undefined, last: undefined };
 
-    const hasStartDate = startDate !== undefined && startDate !== null;
-    const hasEndDate = endDate !== undefined && endDate !== null;
+    const hasWindowStart = !!censusWindow.start;
+    const hasWindowEnd = !!censusWindow.end;
+    const hasFirstMeasurement = !!measurements.first;
+    const hasLastMeasurement = !!measurements.last;
 
-    // Ensure dates are rendered in a block layout to stack them vertically
+    // "First/Last Record" are observed measurement dates only; a census with no data never
+    // presents its census window as a first record.
     const dateMessage = (
       <span aria-label={'census record information'} style={{ display: 'block' }}>
-        {hasStartDate && <Typography display="block">{`— First Record: ${formatDisplayDate(startDate)}`}</Typography>}
-        {hasEndDate && <Typography display="block">{`— Last Record: ${formatDisplayDate(endDate)}`}</Typography>}
-        {!hasStartDate && !hasEndDate && <Typography display="block">No Measurements</Typography>}
+        {(hasWindowStart || hasWindowEnd) && (
+          <Typography display="block">{`— Census window: ${hasWindowStart ? formatDisplayDate(censusWindow.start) : '—'} to ${hasWindowEnd ? formatDisplayDate(censusWindow.end) : 'open'}`}</Typography>
+        )}
+        {hasFirstMeasurement && <Typography display="block">{`— First Record: ${formatDisplayDate(measurements.first)}`}</Typography>}
+        {hasLastMeasurement && <Typography display="block">{`— Last Record: ${formatDisplayDate(measurements.last)}`}</Typography>}
+        {!hasFirstMeasurement && !hasLastMeasurement && <Typography display="block">No Measurements</Typography>}
       </span>
     );
 
@@ -404,7 +412,7 @@ export default function Sidebar(props: SidebarProps) {
           .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
           .map(item => (
             <Option
-              aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${item.dateRanges?.[0]?.startDate ? formatDisplayDate(item.dateRanges?.[0]?.startDate) : 'No measurements'}` : ''}`}
+              aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${getMeasurementSpan(item.dateRanges[0]).first ? formatDisplayDate(getMeasurementSpan(item.dateRanges[0]).first) : 'No measurements'}` : ''}`}
               data-testid={'census-selection-option'}
               key={item?.plotCensusNumber}
               value={item?.plotCensusNumber?.toString()}
@@ -427,15 +435,15 @@ export default function Sidebar(props: SidebarProps) {
                     item.dateRanges.map((dateRange, index) => (
                       <Stack key={index} direction={'row'}>
                         <Typography level="body-sm" color={'neutral'}>
-                          {`${dateRange.startDate ? `First Msmt: ${formatDisplayDate(dateRange.startDate)}` : 'No Measurements'}`}
+                          {`${getMeasurementSpan(dateRange).first ? `First Msmt: ${formatDisplayDate(getMeasurementSpan(dateRange).first)}` : 'No Measurements'}`}
                         </Typography>
-                        {dateRange.endDate && (
+                        {getMeasurementSpan(dateRange).last && (
                           <Typography level="body-sm" color={'neutral'} sx={{ whiteSpace: 'pre' }}>
                             {' — '}
                           </Typography>
                         )}
                         <Typography level="body-sm" color={'neutral'}>
-                          {`${dateRange.endDate ? `Last Msmt: ${formatDisplayDate(dateRange.endDate)}` : ''}`}
+                          {`${getMeasurementSpan(dateRange).last ? `Last Msmt: ${formatDisplayDate(getMeasurementSpan(dateRange).last)}` : ''}`}
                         </Typography>
                       </Stack>
                     ))}
