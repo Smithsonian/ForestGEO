@@ -115,7 +115,8 @@ import {
   shouldUseAutoMeasurementRowHeight,
   toServerMeasurementFilterModel
 } from './measurementscommonsutils';
-import { buildMeasurementStateCountsSql } from '@/config/measurementstatefilters';
+import { buildMeasurementStateCountsSql, getMeasurementRowStatus } from '@/config/measurementstatefilters';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 
 // Stable reference to prevent infinite resize observer loop in MUI DataGrid
 const AUTO_ROW_HEIGHT = () => 'auto' as const;
@@ -390,9 +391,10 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         // CountUnresolvedLogged + CountFailedNoLog — the badge must equal the rows the toggle shows.
         setInvalidCount(unresolvedLoggedCount + failedNoLogCount);
         setInvalidBreakdown({ unresolvedLogged: unresolvedLoggedCount, failedNoLog: failedNoLogCount });
-        // Feeds the override menu item — CountOverridable mirrors the override modal's
-        // UPDATE predicate (IsValidated = FALSE OR IS NULL) exactly, and the menu copy
-        // describes it as "failed or not-yet-validated" (never just "failed").
+        // Feeds the override menu item — CountOverridable uses the same shared eligibility
+        // predicate as the override modal's statements (resolved stem, no unresolved ingestion
+        // error, IsValidated FALSE or NULL), and the menu copy describes it as "failed or
+        // not-yet-validated" (never just "failed").
         setValidationErrorCount(overridableCount);
         // Feeds the Run Validations menu item — CountRevalidatable mirrors
         // prepareValidationRun's reset predicate, so the action stays disabled when
@@ -1260,6 +1262,14 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
               >
                 <ErrorIcon color="error" />
               </IconButton>
+            </Tooltip>
+          );
+        } else if (getMeasurementRowStatus(params.row) === 'ingestion-unresolved') {
+          // StemGUID NULL = ingestion failure. Takes precedence over IsValidated so a stale
+          // IsValidated = 1 (e.g. from an earlier override) can never render as passed.
+          validationIcon = (
+            <Tooltip title="Ingestion failed - unresolved" size="md">
+              <WarningAmberIcon color="warning" />
             </Tooltip>
           );
         } else if (params.row.isValidated === null) {
