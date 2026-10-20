@@ -18,6 +18,7 @@ import { POST } from './route';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros';
+import { BULKCRUD_REJECTION_MESSAGES } from '@/lib/bulkcrud/required-context';
 import { CALLER_OWNS_TRANSACTION_SQL, CLEAR_CALLER_TRANSACTION_SQL, FLAG_CLEAR_FAILED_REASON } from '@/lib/ingestion/bulk-ingestion-call';
 
 vi.mock('@/lib/db/connectionmanager', async () => {
@@ -129,34 +130,67 @@ describe('bulkcrud POST route', () => {
     normalizeConnectionManager();
   });
 
-  /**
-   * @test Validates that the endpoint returns HTTP 400 when required parameters are missing.
-   * Specifically tests for missing plot and census parameters in the request body.
-   * This ensures proper input validation before attempting database operations.
-   */
-  it('400 when dataType or plot or census missing', async () => {
-    // missing plot + census
-    const req = makeRequest({ gridType: 'trees', schema: 'myschema', fileRowSet: {} });
-    const res = await POST(req);
-    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
-    expect(await res.text()).toMatch(/No dataType or SLUGS provided/i);
+  it('rejects a census-scoped grid without a census with a JSON error and starts no transaction', async () => {
+    const instance = (ConnectionManager as any).getInstance();
+    const beginSpy = vi.spyOn(instance, 'beginTransaction');
+    const res = await POST(makeRequest({ gridType: 'measurementssummary', schema: 'forestgeo_testing', plot: { plotID: 1 }, fileRowSet: { r1: {} } }));
+
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    expect(await res.json()).toEqual({ error: BULKCRUD_REJECTION_MESSAGES.missingCensus });
+    expect(beginSpy, 'validation must reject before any DB work').not.toHaveBeenCalled();
   });
 
-  /**
-   * @test Verifies that the endpoint rejects requests with missing row data.
-   * Tests the validation logic that ensures fileRowSet contains actual data
-   * before proceeding with bulk operations.
-   */
-  it('400 when rows missing', async () => {
-    const req = makeRequest({
-      gridType: 'trees',
-      schema: 'myschema',
-      plot: { plotID: 1 },
-      census: { dateRanges: [{ censusID: 9 }] }
+  it.each([
+    { label: 'missing', fileRowSet: undefined },
+    { label: 'empty', fileRowSet: {} }
+  ])('rejects $label rows with a JSON error', async ({ fileRowSet }) => {
+    const res = await POST(makeRequest({ gridType: 'attributes', schema: 'forestgeo_testing', fileRowSet }));
+
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    expect(await res.json()).toEqual({ error: BULKCRUD_REJECTION_MESSAGES.missingRows });
+  });
+
+  it('rejects an unknown grid type with a JSON error naming it', async () => {
+    const res = await POST(
+      makeRequest({ gridType: 'trees', schema: 'forestgeo_testing', plot: { plotID: 1 }, census: { dateRanges: [{ censusID: 2 }] }, fileRowSet: { r1: {} } })
+    );
+
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    expect(await res.json()).toEqual({ error: 'Unsupported grid type: trees' });
+  });
+
+  it.each([
+    {
+      gridType: 'attributes',
+      rows: { r1: { code: 'A', description: 'alive', status: 'alive' }, r2: { code: 'D', description: 'dead', status: 'dead' } }
+    },
+    {
+      gridType: 'species',
+      rows: {
+        r1: { spcode: 'ACRU', family: 'Sapindaceae', genus: 'Acer', species: 'rubrum' },
+        r2: { spcode: 'ACSA', family: 'Sapindaceae', genus: 'Acer', species: 'saccharum' }
+      }
+    },
+    {
+      gridType: 'personnel',
+      rows: { r1: { firstname: 'Alex', lastname: 'Smith', role: 'technician' }, r2: { firstname: 'Sam', lastname: 'Jones', role: 'technician' } }
+    }
+  ])('accepts site-level $gridType rows with no plot or census selected (#502)', async ({ gridType, rows }) => {
+    const instance = (ConnectionManager as any).getInstance();
+    vi.spyOn(instance, 'beginTransaction').mockResolvedValueOnce('tx-site-level');
+    const commitSpy = vi.spyOn(instance, 'commitTransaction');
+    const res = await POST(makeRequest({ gridType, schema: 'forestgeo_testing', fileRowSet: rows }));
+
+    expect(res.status, `body: ${await res.clone().text()}`).toBe(HTTPResponses.OK);
+    expect(insertOrUpdate).toHaveBeenCalledTimes(2);
+    expect((insertOrUpdate as any).mock.calls[0][0]).toMatchObject({
+      formType: gridType,
+      rowData: rows.r1,
+      plot: undefined,
+      census: undefined,
+      transactionID: 'tx-site-level'
     });
-    const res = await POST(req);
-    expect(res.status).toBe(400);
-    expect(await res.text()).toMatch(/No rows provided/i);
+    expect(commitSpy).toHaveBeenCalledWith('tx-site-level');
   });
 
   /**
@@ -399,7 +433,7 @@ describe('bulkcrud POST route', () => {
     };
 
     const req = makeRequest({
-      gridType: 'trees', // anything not in ['measurementssummary','measurementssummaryview']
+      gridType: 'quadrats', // anything not in ['measurementssummary','measurementssummaryview']
       schema: 'forestgeo_testing',
       plot: { plotID: 99 },
       census: { dateRanges: [{ censusID: 5 }] },
@@ -422,7 +456,7 @@ describe('bulkcrud POST route', () => {
     const [firstProps] = (insertOrUpdate as any).mock.calls[0];
     expect(firstProps).toMatchObject({
       schema: 'forestgeo_testing',
-      formType: 'trees',
+      formType: 'quadrats',
       rowData: { foo: 1 },
       plot: { plotID: 99 },
       census: { dateRanges: [{ censusID: 5 }] },
