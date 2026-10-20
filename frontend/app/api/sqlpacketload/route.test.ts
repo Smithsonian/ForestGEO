@@ -705,13 +705,15 @@ describe('sqlpacketload measurement scope validation', () => {
 
     expect(res.status).toBe(200);
 
-    const cleanupCall = mockConnectionManager.executeQuery.mock.calls.find(
-      (call: any[]) => String(call[0]).includes('FROM `forestgeo_testing`.temporarymeasurements') && String(call[0]).includes('DELETE')
-    );
-    expect(cleanupCall).toBeDefined();
     // Pinned to the (PlotID, CensusID, FileID, BatchID) index: left to itself the planner can
     // pick an index led by FileID alone, or none, and scan every staged row.
-    expect(String(cleanupCall[0])).toContain(`/*+ INDEX(temporarymeasurements ${STALE_BATCH_SCAN_INDEX}) */`);
+    const staleBatchDeletePrefix = `DELETE /*+ INDEX(temporarymeasurements ${STALE_BATCH_SCAN_INDEX}) */ FROM \`forestgeo_testing\`.temporarymeasurements`;
+    const temporaryDeletes = mockConnectionManager.executeQuery.mock.calls
+      .map((call: any[]) => String(call[0]).trimStart())
+      .filter((sql: string) => sql.startsWith('DELETE') && sql.includes('temporarymeasurements'));
+    console.log('[stale-batch] temporarymeasurements DELETEs issued:', temporaryDeletes);
+    const cleanupCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) => String(call[0]).trimStart().startsWith(staleBatchDeletePrefix));
+    expect(cleanupCall).toBeDefined();
     // The incoming batch is spared as a FAMILY: its own `__subNNN` members are not stale.
     expect(String(cleanupCall[0])).toContain('NOT (BatchID <=> ?)');
     expect(String(cleanupCall[0])).not.toContain('BatchID <> ?');
