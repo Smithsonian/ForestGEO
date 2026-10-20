@@ -15,6 +15,7 @@ import { getGridTypeLabel } from '@/config/macros/siteconfigs';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { FileRow, FileRowSet, FormType, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { validateAttributesRow } from '@/lib/db/definitions/core';
+import { describeBulkcrudSubmitFailure } from '@/components/datagrids/bulkcrudsubmitfailure';
 
 export interface IsolatedDataGridCommonProps {
   gridType: string;
@@ -288,8 +289,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
       })
     });
     if (!response.ok) {
-      const responseBody = await response.json().catch(() => null);
-      setFormMessage(responseBody?.error ?? 'The rows could not be submitted. No completion was recorded.');
+      setFormMessage(await describeBulkcrudSubmitFailure(response));
       return;
     }
     setChangesSubmitted(true);
