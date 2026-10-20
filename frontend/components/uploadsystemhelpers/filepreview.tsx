@@ -153,12 +153,7 @@ export default function FilePreview({ file, expectedHeaders, onDelimiterChange, 
             {expectedHeaders && (
               <>
                 {' | '}
-                <strong>Expected columns:</strong> {expectedHeaders.length}
-                {previewData[0]?.length !== expectedHeaders.length && (
-                  <Typography component="span" sx={{ color: 'warning.400', ml: 1 }}>
-                    ⚠ Column count mismatch
-                  </Typography>
-                )}
+                <strong>Accepted fields:</strong> {expectedHeaders.length}
               </>
             )}
           </Typography>

@@ -13,6 +13,7 @@ import { auth } from '@/auth';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { ChangelogOperation, recordMutation } from '@/lib/changelog/record-mutation';
 import { safeEscapeId, safeFormatQuery } from '@/lib/db/sqlsecurity';
+import { trimReferenceTextFields } from '@/lib/reference-text';
 import type { TxExecutor } from '@/lib/db/connectionmanager';
 
 // Mapping from dataType to primary key column name
@@ -381,7 +382,14 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         beforeLookup.push({ column: 'IsActive', value: oldRowData.IsActive });
       }
       const persistedBefore = await loadSinglePersistedRow(tx, schema, dataType, beforeLookup, { forUpdate: true });
-      const requestedChanges = mapper.demapData([newRow])[0];
+      const rawRequestedChanges = mapper.demapData([newRow])[0];
+      const requestedChanges = trimReferenceTextFields(dataType, rawRequestedChanges);
+      if (dataType === 'attributes') {
+        // An untouched code is the row's primary key and may be referenced elsewhere; only a code the
+        // user actually edited is normalized, so re-saving a legacy row never silently renames its key.
+        if (rawRequestedChanges.Code === previousGridIDKey) requestedChanges.Code = rawRequestedChanges.Code;
+        else if (typeof requestedChanges.Code === 'string' && requestedChanges.Code === '') throw new MutationRequestError('Attribute code cannot be blank');
+      }
       const newRowData = { ...persistedBefore, ...requestedChanges };
       const { [demappedGridID]: updatedGridIDKey, ...remainingProperties } = newRowData;
 
@@ -557,7 +565,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       const submittedRow = { ...newRow };
       delete submittedRow.isNew;
 
-      const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([submittedRow])[0];
+      const newRowData = trimReferenceTextFields(params.dataType, MapperFactory.getMapper<any, any>(params.dataType).demapData([submittedRow])[0]);
+      if (params.dataType === 'attributes' && typeof newRowData.Code === 'string' && newRowData.Code === '') {
+        throw new MutationRequestError('Attribute code cannot be blank');
+      }
       const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
 
       if (params.dataType === 'alltaxonomiesview') {

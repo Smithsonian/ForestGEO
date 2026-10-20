@@ -396,7 +396,13 @@ function validateDelimiterContent(
       columnCounts.push(columns.length);
 
       if (columns.length !== headers.length) {
-        issues.push({ code: DelimiterIssueCode.ROW_COLUMN_COUNT_MISMATCH, message: `Row ${i + 1} has ${columns.length} columns, expected ${headers.length}` });
+        // `lines` comes from a plain split on '\n' and blank lines are skipped by index
+        // (not removed), so lines[i] is exactly physical source line i + 1 (header = line 1).
+        // No data-row ordinal is reported: blank lines would make it ambiguous.
+        issues.push({
+          code: DelimiterIssueCode.ROW_COLUMN_COUNT_MISMATCH,
+          message: `Line ${i + 1} has ${columns.length} columns, expected ${headers.length}`
+        });
       }
     }
   }
