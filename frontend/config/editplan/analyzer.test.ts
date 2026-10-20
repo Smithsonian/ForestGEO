@@ -5,6 +5,7 @@ import { applyDuplicateRules } from './rules/duplicates';
 import { SpeciesNotFoundError } from './rules/context';
 import { DuplicateDeletion, Effect, SpeciesCorrectionSummary } from './types';
 import { hashPlan } from './planhash';
+import { InvalidFieldValueError } from './fieldpolicy';
 
 vi.mock('./rules/species', () => ({
   applySpeciesRules: vi.fn(async () => ({ effects: [], errors: [] }))
@@ -186,6 +187,20 @@ describe('analyzeEdit', () => {
       })
     ).rejects.toBeInstanceOf(DisallowedFieldError);
     expect(cm.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects a negative DBH (any alias shape) with InvalidFieldValueError before loading or writing anything', async () => {
+    for (const newRow of [{ MeasuredDBH: -5 }, { measuredDBH: '-5' }]) {
+      const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+      await expect(analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, newRow)).rejects.toBeInstanceOf(InvalidFieldValueError);
+      expect(cm.executeQuery).not.toHaveBeenCalled();
+    }
+  });
+
+  it('keeps zero DBH and negative non-DBH values analyzable', async () => {
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+    const plan = await analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, { MeasuredDBH: 0, StemLocalX: -2 });
+    expect(plan.fieldChanges.map(c => c.field)).toEqual(['MeasuredDBH', 'StemLocalX']);
   });
 
   it('throws TargetNotFoundError when loadCurrentRow returns no row (unknown id or out of scope)', async () => {

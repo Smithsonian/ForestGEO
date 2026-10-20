@@ -103,7 +103,8 @@ import {
   areExtendedFilterModelsEqual,
   areGridSortModelsEqual,
   arePaginationModelsEqual,
-  buildEditableFieldsDiffWithMetaForSurface,
+  MeasurementEditValidationError,
+  runMeasurementEditSave,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
@@ -132,28 +133,46 @@ function describeMeasurementRow(row: GridRowModel | null): string {
   return identity ? `${identity}${value}` : `this measurement${value}`;
 }
 
+const NEGATIVE_DBH_INPUT_MESSAGE = 'DBH must be non-negative';
+
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
   const [value, setValue] = useState(initialValue);
   const { isMountedRef } = useIsMounted();
+  // DBH accepts a typed leading '-' (instead of silently dropping it and reverting to the old
+  // value) so the invalid entry is visible, flagged inline, and blocked from saving.
+  const isDbhField = params.field === 'measuredDBH';
+  const invalidMessage = isDbhField && Number(value) < 0 ? NEGATIVE_DBH_INPUT_MESSAGE : null;
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = event.target.value;
+    const pattern = isDbhField ? /^-?\d*\.?\d{0,2}$/ : /^\d*\.?\d{0,2}$/;
 
-    if (/^\d*\.?\d{0,2}$/.test(newValue) || newValue === '') {
+    if (pattern.test(newValue) || newValue === '') {
       setValue(newValue);
+      // Push an invalid value into the grid edit state immediately so the cell error set by the
+      // column preprocessor blocks Save even if the click lands before this input's blur is handled.
+      if (isDbhField && Number(newValue) < 0) {
+        params.api.setEditCellValue({ id: params.id, field: params.field, value: parseFloat(newValue) });
+      }
     }
   };
 
   const handleBlur = () => {
     if (!isMountedRef.current) return;
-    const formattedValue = parseFloat(value).toFixed(2);
-    params.api.setEditCellValue({ id: params.id, field: params.field, value: parseFloat(value) === 0 ? null : parseFloat(formattedValue) });
+    const parsed = parseFloat(value);
+    // '', '-' and '.' are not numbers: leave the edit value alone rather than writing NaN.
+    if (Number.isNaN(parsed)) return;
+    params.api.setEditCellValue({ id: params.id, field: params.field, value: parsed === 0 ? null : parseFloat(parsed.toFixed(2)) });
   };
 
   return (
     <Input
       aria-label={'edit measurements input'}
+      aria-invalid={invalidMessage ? true : undefined}
+      title={invalidMessage ?? undefined}
+      color={invalidMessage ? 'danger' : undefined}
+      error={invalidMessage !== null}
       value={value}
       onChange={handleChange}
       onBlur={handleBlur}
@@ -905,32 +924,27 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       setSnackbar({ children: 'Error: missing CoreMeasurementID for edit', severity: 'error' });
       return Promise.reject(new Error('missing CoreMeasurementID'));
     }
-    const { diff: editableDiff, roundedNoOpFields } = buildEditableFieldsDiffWithMetaForSurface(newRow, oldRow, 'measurementssummary');
-    if (Object.keys(editableDiff).length === 0) {
-      if (roundedNoOpFields.length > 0) {
-        setSnackbar({
-          children: `No change saved: ${roundedNoOpFields.join(', ')} rounded to the existing value (server stores at fixed precision).`,
-          severity: 'info'
-        });
-      }
-      return newRow;
-    }
-    if (roundedNoOpFields.length > 0) {
-      setSnackbar({
-        children: `${roundedNoOpFields.join(', ')} rounded to the existing value and was not changed; other edits applied.`,
-        severity: 'info'
-      });
-    }
-    const result = await editFlow.beginEdit(coreMeasurementID, editableDiff);
-    if (result.editOperationID !== null) {
-      setUndoToastOperationID(result.editOperationID);
-    }
-    setSnackbar({ children: 'Row updated!', severity: 'success' });
-    return newRow;
+    return runMeasurementEditSave({
+      coreMeasurementID,
+      newRow,
+      oldRow,
+      beginEdit: editFlow.beginEdit,
+      notify: (message, severity) => setSnackbar({ children: message, severity }),
+      onEditOperation: setUndoToastOperationID
+    });
   };
 
   const openConfirmationDialog = useCallback(
     (actionType: 'save' | 'delete', actionId: GridRowId) => {
+      if (actionType === 'save') {
+        // A cell editor flagged an invalid value (e.g. negative DBH). MUI refuses to leave edit mode
+        // while any cell has an error, so don't open a confirmation that can never complete.
+        const editingCells = Object.values(apiRef.current?.state?.editRows?.[actionId] ?? {});
+        if (editingCells.some(cell => cell?.error)) {
+          setSnackbar({ children: 'Error: fix the highlighted invalid value before saving (DBH must be non-negative).', severity: 'error' });
+          return;
+        }
+      }
       setPendingAction({ actionType, actionId });
       const row = rows.find(row => String(row.id) === String(actionId));
       if (row) {
@@ -1662,6 +1676,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 }}
                 onProcessRowUpdateError={(error: Error) => {
                   if (isMuiRowEditCancelled(error)) return;
+                  // Already reported inline with the specific field message; the row stays in edit mode.
+                  if (error instanceof MeasurementEditValidationError) return;
                   ailogger.error('Row update error:', error);
                   setSnackbar({
                     children: 'Error updating row',
