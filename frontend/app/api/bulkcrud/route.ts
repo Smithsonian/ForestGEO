@@ -14,6 +14,7 @@ import { assertSchemaAccess } from '@/lib/authz';
 import { callBulkIngestionInCallerTransaction, transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
 import { recordCommittedCoreMeasurementsAudit } from '@/lib/changelog/ingestion-audit';
 import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
+import { BULKCRUD_REJECTION_MESSAGES, findMissingBulkcrudContext } from '@/lib/bulkcrud/required-context';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -25,22 +26,23 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const dataType: string = body.gridType;
   const schema: string = body.schema;
-  const plot: Plot = body.plot;
-  const census: OrgCensus = body.census;
+  const plot: Plot | undefined = body.plot;
+  const census: OrgCensus | undefined = body.census;
   const rows: FileRowSet = body.fileRowSet;
-  if (!dataType || !plot || !census) {
-    return new NextResponse('No dataType or SLUGS provided', { status: HTTPResponses.INVALID_REQUEST });
+  const missingContext = findMissingBulkcrudContext(dataType, plot, census);
+  if (missingContext) {
+    return NextResponse.json({ error: missingContext }, { status: HTTPResponses.BAD_REQUEST });
   }
-  if (!rows) {
-    return new NextResponse('No rows provided', { status: 400 });
+  if (!rows || Object.keys(rows).length === 0) {
+    return NextResponse.json({ error: BULKCRUD_REJECTION_MESSAGES.missingRows }, { status: HTTPResponses.BAD_REQUEST });
   }
 
   // Scope required by recordCommittedCoreMeasurementsAudit (#507) — validated here, BEFORE
   // beginTransaction, so a missing plotID/censusID returns 400 without ever opening a
   // transaction that this early return would then leave uncommitted and un-rolled-back.
   const isMeasurementSummaryUpload = ['measurementssummary', 'measurementssummaryview'].includes(dataType);
-  const measurementPlotID = plot.plotID;
-  const measurementCensusID = census.dateRanges?.[0]?.censusID;
+  const measurementPlotID = plot?.plotID;
+  const measurementCensusID = census?.dateRanges?.[0]?.censusID;
   if (isMeasurementSummaryUpload && (measurementPlotID === undefined || measurementCensusID === undefined)) {
     return NextResponse.json(
       { error: 'plot.plotID and census.dateRanges[0].censusID are required for measurement bulk inserts', code: 'MEASUREMENT_SCOPE_REQUIRED' },
@@ -78,7 +80,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (error: any) {
     ailogger.error(`Invalid schema in bulkcrud: ${schema}`);
-    return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+    return NextResponse.json({ error: error.message }, { status: HTTPResponses.BAD_REQUEST });
   }
 
   const connectionManager = ConnectionManager.getInstance();
