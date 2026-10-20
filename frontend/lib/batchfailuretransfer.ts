@@ -10,81 +10,11 @@ import {
   type SystemFailureKind
 } from '@/config/measurementerrors';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
-import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 
 export interface FailureTransferAuditContext {
   changedBy: string | null;
   plotID: number;
   censusID: number;
-}
-
-/**
- * Moves all remaining sub-batches for a given file
- * to unresolved coremeasurements. Used when the client calls setupbulkfailure
- * with the original batchID but rows have been split into sub-batch IDs.
- */
-export async function moveTemporarySubBatchesToFailedMeasurements(
-  connectionManager: ConnectionManager,
-  schema: string,
-  fileID: string,
-  originalBatchID: string,
-  failureReason: string,
-  failureKind: SystemFailureKind,
-  transactionID?: string,
-  auditContext?: FailureTransferAuditContext
-): Promise<number> {
-  const managesOwnTransaction = !transactionID;
-  let activeTransactionID = transactionID ?? null;
-
-  try {
-    if (managesOwnTransaction) {
-      activeTransactionID = await connectionManager.beginTransaction();
-    }
-
-    const findSubBatchesSQL = safeFormatQuery(
-      schema,
-      `SELECT DISTINCT BatchID
-       FROM ??.temporarymeasurements
-      WHERE FileID = ?
-        AND BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}`
-    );
-    // Reuse the caller's transaction when provided so multi-batch cleanup can stay atomic.
-    const subBatchRows: any[] = await connectionManager.executeQuery(
-      findSubBatchesSQL,
-      [fileID, buildSubBatchPattern(originalBatchID)],
-      activeTransactionID ?? undefined
-    );
-
-    let totalMoved = 0;
-    for (const row of subBatchRows) {
-      const moved = await moveTemporaryBatchToFailedMeasurements(
-        connectionManager,
-        schema,
-        fileID,
-        row.BatchID,
-        failureReason,
-        failureKind,
-        activeTransactionID ?? undefined,
-        auditContext
-      );
-      totalMoved += moved;
-    }
-    if (managesOwnTransaction && activeTransactionID) {
-      await connectionManager.commitTransaction(activeTransactionID);
-    }
-    return totalMoved;
-  } catch (error) {
-    if (managesOwnTransaction && activeTransactionID) {
-      try {
-        await connectionManager.rollbackTransaction(activeTransactionID);
-      } catch (rollbackError) {
-        if (error instanceof Error) {
-          (error as Error & { rollbackError?: unknown }).rollbackError = rollbackError;
-        }
-      }
-    }
-    throw error;
-  }
 }
 
 export async function moveTemporaryBatchToFailedMeasurements(

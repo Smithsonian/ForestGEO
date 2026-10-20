@@ -251,6 +251,16 @@ export async function familyHasStagedRows(
   return rows.length > 0;
 }
 
+/**
+ * The stale-batch DELETE pins this (PlotID, CensusID, FileID, BatchID) index: all
+ * three equality predicates are leading columns, so it examines only the
+ * file's rows in one plot/census. Measured on 200k staged rows: pinned, a const
+ * range; FileID-led ingest_temporarymeasurements_FBPC_index, ~99k rows examined;
+ * neither, a full scan. A hint, not FORCE INDEX, so a schema missing the index
+ * degrades to a warning.
+ */
+export const STALE_BATCH_SCAN_INDEX = 'idx_tmpm_plot_census_file_batch';
+
 export async function cleanupStaleMeasurementBatchesForFile(
   connectionManager: ConnectionManager,
   schema: string,
@@ -261,7 +271,7 @@ export async function cleanupStaleMeasurementBatchesForFile(
   transactionID: string
 ): Promise<number> {
   const cleanupSQL = format(
-    `DELETE FROM ??.temporarymeasurements
+    `DELETE /*+ INDEX(temporarymeasurements ${STALE_BATCH_SCAN_INDEX}) */ FROM ??.temporarymeasurements
      WHERE FileID = ?
        AND PlotID = ?
        AND CensusID = ?

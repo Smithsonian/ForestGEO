@@ -5,6 +5,7 @@ import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import {
   CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   resetTemporaryMeasurementsSourceFormatColumnCacheForTests,
+  STALE_BATCH_SCAN_INDEX,
   TEMP_MEASUREMENT_INSERT_BATCH_SIZE,
   TEMPORARY_MEASUREMENT_INSERT_COLUMNS
 } from '@/lib/ingestion/temporary-measurements';
@@ -704,9 +705,14 @@ describe('sqlpacketload measurement scope validation', () => {
 
     expect(res.status).toBe(200);
 
-    const cleanupCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE FROM `forestgeo_testing`.temporarymeasurements')
-    );
+    // Pinned to the (PlotID, CensusID, FileID, BatchID) index: left to itself the planner can
+    // pick an index led by FileID alone, or none, and scan every staged row.
+    const staleBatchDeletePrefix = `DELETE /*+ INDEX(temporarymeasurements ${STALE_BATCH_SCAN_INDEX}) */ FROM \`forestgeo_testing\`.temporarymeasurements`;
+    const temporaryDeletes = mockConnectionManager.executeQuery.mock.calls
+      .map((call: any[]) => String(call[0]).trimStart())
+      .filter((sql: string) => sql.startsWith('DELETE') && sql.includes('temporarymeasurements'));
+    console.log('[stale-batch] temporarymeasurements DELETEs issued:', temporaryDeletes);
+    const cleanupCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) => String(call[0]).trimStart().startsWith(staleBatchDeletePrefix));
     expect(cleanupCall).toBeDefined();
     // The incoming batch is spared as a FAMILY: its own `__subNNN` members are not stale.
     expect(String(cleanupCall[0])).toContain('NOT (BatchID <=> ?)');
@@ -845,8 +851,9 @@ describe('sqlpacketload measurement scope validation', () => {
     );
     expect(cleanupCall).toBeUndefined();
 
-    const staleBatchCleanupCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE FROM `forestgeo_testing`.temporarymeasurements')
+    const staleBatchCleanupCall = mockConnectionManager.executeQuery.mock.calls.find(
+      (call: any[]) =>
+        String(call[0]).includes('DELETE /*+ INDEX(temporarymeasurements') && String(call[0]).includes('FROM `forestgeo_testing`.temporarymeasurements')
     );
     expect(staleBatchCleanupCall).toBeDefined();
   });
