@@ -31,6 +31,7 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
+import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { GET } from './route';
 
@@ -122,9 +123,11 @@ describe('verifysession route', () => {
     expect(response.status).toBe(200);
     const expectedPattern = buildSubBatchPattern(wildcardBatchID);
     expect(expectedPattern).toBe('batch\\_1\\%\\_\\_sub%');
-    const [processedParams, failedParams, remainingParams] = [0, 1, 2].map(callIndex => mockExecuteQuery.mock.calls[callIndex][1]);
-    expect(processedParams).toEqual(['1', '2', 'file-a.csv', wildcardBatchID, expectedPattern]);
-    expect(failedParams.slice(2, 5)).toEqual(['file-a.csv', wildcardBatchID, expectedPattern]);
-    expect(remainingParams).toEqual(['1', '2', 'file-a.csv', wildcardBatchID, expectedPattern]);
+    const [processedCall, failedCall, remainingCall] = [0, 1, 2].map(callIndex => mockExecuteQuery.mock.calls[callIndex]);
+    console.log('[wildcard-batch] failed SQL=', failedCall[0], 'params=', failedCall[1]);
+    for (const [sql] of [processedCall, failedCall, remainingCall]) expect(String(sql)).toContain(`LIKE ? ${LIKE_ESCAPE_CLAUSE}`);
+    expect(processedCall[1]).toEqual(['1', '2', 'file-a.csv', wildcardBatchID, expectedPattern]);
+    expect(failedCall[1]).toEqual(['1', '2', 'file-a.csv', wildcardBatchID, expectedPattern, INGESTION_ERROR_SOURCE]);
+    expect(remainingCall[1]).toEqual(['1', '2', 'file-a.csv', wildcardBatchID, expectedPattern]);
   });
 });
