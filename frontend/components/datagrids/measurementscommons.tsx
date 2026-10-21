@@ -109,7 +109,10 @@ import {
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
   describeMeasurementRow,
+  NEW_ROW_ADDED_MESSAGE,
   revertMeasurementEdit,
+  ROW_DELETED_MESSAGE,
+  ROW_UPDATED_MESSAGE,
   selectMeasurementStateSnackbar,
   shouldRefreshMeasurementsAfterValidationTransition,
   shouldUseAutoMeasurementRowHeight,
@@ -878,7 +881,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         setSnackbar({ children: `Error: ${responseJSON.message}`, severity: 'error' });
         return Promise.reject(responseJSON.row);
       }
-      setSnackbar({ children: 'New row added!', severity: 'success' });
+      setSnackbar({ children: NEW_ROW_ADDED_MESSAGE, severity: 'success' });
       setIsNewRowAdded(false);
       setShouldAddRowAfterFetch(false);
       await Promise.all([refetch(), fetchValidationErrors()]);
@@ -916,7 +919,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     if (result.editOperationID !== null) {
       setUndoToastOperationID(result.editOperationID);
     }
-    setSnackbar({ children: 'Row updated!', severity: 'success' });
+    setSnackbar({ children: ROW_UPDATED_MESSAGE, severity: 'success' });
     return newRow;
   };
 
@@ -1059,7 +1062,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     } else {
       if (handleSelectQuadrat) handleSelectQuadrat(null);
       setSnackbar({
-        children: 'Row successfully deleted',
+        children: ROW_DELETED_MESSAGE,
         severity: 'success'
       });
       setRows(rows.filter(row => String(row.id) !== String(id)));

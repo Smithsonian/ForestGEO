@@ -6,6 +6,8 @@ import { EditRevertRequest, requestEditRevert } from '@/lib/editplan/requestreve
 import type { UndoRevertOutcome } from '@/components/editplan/undotoast';
 import { formatMeasurementForDisplay } from '@/config/measurementdisplay';
 
+export { NEW_ROW_ADDED_MESSAGE, ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
+
 export function describeMeasurementRow(row: GridRowModel | null): string {
   if (!row) return 'this measurement';
   const treeTag = row.treeTag ?? row.TreeTag;

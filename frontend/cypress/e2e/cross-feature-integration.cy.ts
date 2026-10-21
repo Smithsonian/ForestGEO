@@ -3,6 +3,8 @@
 import { buildErrorsExplorerRow } from '../support/errors-explorer-helpers';
 import { buildMeasurementsSummaryRow, buildViewFullTableRow } from '../support/grid-api-helpers';
 import { mockMeasurementHubWorkflowApi } from '../support/measurement-hub-workflow-helpers';
+// The leaf module, not measurementscommonsutils: that one reaches config/macros.ts, which imports CSS the e2e bundler can't load.
+import { ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
 
 function selectDefaultCensusContext() {
   cy.visitAuthenticatedPage('/dashboard');
@@ -433,6 +435,8 @@ describe('Cross-Feature Integration', () => {
 
     cy.get('[data-testid="edit-preview-apply"]').click();
     cy.wait('@applyEdit').its('request.body.newRow.SpeciesCode').should('eq', NEW_SPECIES_CODE);
+    // #524 item 8: the measurements grids use the same success wording as the isolated grids.
+    cy.contains(ROW_UPDATED_MESSAGE).should('be.visible');
 
     // The View Data grid refetches via SWR cache invalidation
     // (`invalidateAfter('save-edit-plan', ...)`), which POSTs back to
