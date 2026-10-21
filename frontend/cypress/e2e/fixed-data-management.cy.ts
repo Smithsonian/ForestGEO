@@ -248,6 +248,7 @@ describe('Fixed Data Management', () => {
   });
 
   it('opens the Species List manual entry form and species-limits dialog from the current grid', () => {
+    cy.viewport(1280, 800);
     cy.intercept('GET', '**/api/specieslimits/1/5**', {
       statusCode: 200,
       body: [
@@ -289,6 +290,21 @@ describe('Fixed Data Management', () => {
 
     cy.contains('[role="dialog"]', 'Species Limits for berteriana').should('be.visible');
     cy.contains('[role="dialog"]', 'Modify Species Limit').should('be.visible');
+    // Item 4: the upper-limit Input must sit inside the dialog at a 1280px viewport (AccordionDetails clips overflow).
+    cy.contains('[role="dialog"]', 'Species Limits for berteriana').then($dialog => {
+      const dialogBox = $dialog[0].getBoundingClientRect();
+      cy.get('#set-species-upper-limit')
+        .closest('.MuiInput-root')
+        .then($upperInput => {
+          const upperBox = $upperInput[0].getBoundingClientRect();
+          cy.task(
+            'log',
+            `[species limits layout] dialog left=${dialogBox.left} right=${dialogBox.right}; upper input left=${upperBox.left} right=${upperBox.right}`
+          );
+          expect(upperBox.left, 'upper-limit input left edge').to.be.at.least(dialogBox.left);
+          expect(upperBox.right, 'upper-limit input right edge').to.be.at.most(dialogBox.right);
+        });
+    });
     cy.get('body').type('{esc}');
     cy.contains('[role="dialog"]', 'Species Limits for berteriana').should('not.exist');
   });

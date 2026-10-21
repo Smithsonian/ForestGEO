@@ -161,7 +161,7 @@ export default function SpeciesLimitsModal(props: {
 
   return (
     <Modal open={openSpeciesLimitsModal} onClose={handleCloseSpeciesLimitsModal}>
-      <ModalDialog sx={{ display: 'flex', flex: 1 }}>
+      <ModalDialog sx={{ width: 'min(640px, calc(100vw - 32px))' }}>
         <DialogTitle>
           <Stack direction="row" spacing={2} sx={{ width: '100%', height: '100%' }}>
             <FormControl orientation="horizontal" sx={{ width: '100%', height: '100%', justifyContent: 'space-between' }}>
@@ -198,29 +198,33 @@ export default function SpeciesLimitsModal(props: {
                   <Input aria-label={'species limits dbh input'} value={'DBH'} disabled />
                   <FormHelperText>Only DBH limits can be set!</FormHelperText>
                 </FormControl>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                  <FormControl id={'set-species-lower-limit'}>
-                    <FormLabel htmlFor={'set-species-lower-limit'}>Lower Limit</FormLabel>
+                <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, mb: 2 }}>
+                  <FormControl id={'set-species-lower-limit'} sx={{ flex: 1, minWidth: 0 }}>
+                    <FormLabel id={'set-species-lower-limit-label'} htmlFor={'set-species-lower-limit'}>
+                      Lower Limit
+                    </FormLabel>
                     <Input
-                      aria-labelledby={'set-species-lower-limit'}
+                      aria-labelledby={'set-species-lower-limit-label'}
                       type="number"
                       value={newSpeciesLimit?.lowerBound}
                       onChange={e => handleInputChange(e.target.value, 'lower')}
-                      sx={{ display: 'flex', flex: 1 }}
+                      fullWidth
                       startDecorator={<SouthIcon />}
                       endDecorator={<Typography level={'body-md'}>{currentPlot?.defaultDBHUnits}</Typography>}
                     />
                     <FormHelperText>All values BELOW this limit will be flagged!</FormHelperText>
                   </FormControl>
                   <Typography level="body-md">to</Typography>
-                  <FormControl id={'set-species-upper-limit'}>
-                    <FormLabel htmlFor={'set-species-upper-limit'}>Upper Limit</FormLabel>
+                  <FormControl id={'set-species-upper-limit'} sx={{ flex: 1, minWidth: 0 }}>
+                    <FormLabel id={'set-species-upper-limit-label'} htmlFor={'set-species-upper-limit'}>
+                      Upper Limit
+                    </FormLabel>
                     <Input
-                      aria-labelledby={'set-species-upper-limit'}
+                      aria-labelledby={'set-species-upper-limit-label'}
                       type="number"
                       value={newSpeciesLimit?.upperBound}
                       onChange={e => handleInputChange(e.target.value, 'upper')}
-                      sx={{ display: 'flex', flex: 1 }}
+                      fullWidth
                       startDecorator={<NorthIcon />}
                       endDecorator={<Typography level={'body-md'}>{currentPlot?.defaultDBHUnits}</Typography>}
                     />
