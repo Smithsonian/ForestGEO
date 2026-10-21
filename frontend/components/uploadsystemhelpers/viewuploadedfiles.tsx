@@ -16,9 +16,12 @@ import ailogger from '@/ailogger';
 import { getContainerName, SchemaContainerNameError } from '@/config/macros/containernames';
 import { useSiteContext } from '@/app/contexts/compat-hooks';
 import { formatDisplayDate } from '@/config/dateformats';
+import ConfirmationDialog from '@/components/client/modals/confirmationdialog';
 
 const CONTAINER_NAME_UNAVAILABLE = 'none';
 const CONTAINER_NAME_UNMAPPABLE = 'unavailable (schema cannot be mapped to a storage container)';
+const DELETE_FILE_DIALOG_TITLE = 'Delete file?';
+const describeFileDeletion = (filename: string) => `Delete “${filename}”? This action cannot be undone.`;
 
 export function containerDisplayName(schemaName: string | undefined, plotID: number | undefined, censusNumber: number | undefined): string {
   if (!schemaName || !plotID || !censusNumber) {
@@ -100,6 +103,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
   const [errorMessage, setErrorMessage] = useState('');
+  const [pendingDeleteFile, setPendingDeleteFile] = useState<string | null>(null);
   const listAbortRef = useRef<AbortController | null>(null);
 
   // Track mounted state to prevent state updates after unmount
@@ -148,8 +152,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
     }
   };
 
-  const handleDelete = async (filename: string) => {
-    if (!window.confirm(`Delete “${filename}”? This action cannot be undone.`)) return;
+  const deleteFile = async (filename: string) => {
     try {
       const params = buildScopedParams(filename);
       const response = await fetch(`/api/files/delete?${params.toString()}`, {
@@ -168,6 +171,12 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         setErrorMessage(error.message);
       }
     }
+  };
+
+  const confirmPendingDelete = () => {
+    const filename = pendingDeleteFile;
+    setPendingDeleteFile(null);
+    if (filename !== null) void deleteFile(filename);
   };
 
   const getListOfFiles = useCallback(async () => {
@@ -304,7 +313,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                               <Button startIcon={<DownloadIcon />} onClick={() => handleDownload(row.name)}>
                                 Download
                               </Button>
-                              <Button color="error" startIcon={<DeleteIcon />} onClick={() => handleDelete(row.name)}>
+                              <Button color="error" startIcon={<DeleteIcon />} onClick={() => setPendingDeleteFile(row.name)}>
                                 Delete
                               </Button>
                             </TableCell>
@@ -324,7 +333,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                               <Button startIcon={<DownloadIcon />} onClick={() => handleDownload(row.name)}>
                                 Download
                               </Button>
-                              <Button color="error" startIcon={<DeleteIcon />} onClick={() => handleDelete(row.name)}>
+                              <Button color="error" startIcon={<DeleteIcon />} onClick={() => setPendingDeleteFile(row.name)}>
                                 Delete
                               </Button>
                             </TableCell>
@@ -338,6 +347,13 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
             </TableContainer>
           </Box>
         </Box>
+        <ConfirmationDialog
+          open={pendingDeleteFile !== null}
+          onClose={() => setPendingDeleteFile(null)}
+          onConfirm={confirmPendingDelete}
+          title={DELETE_FILE_DIALOG_TITLE}
+          content={pendingDeleteFile !== null ? describeFileDeletion(pendingDeleteFile) : ''}
+        />
       </>
     );
   }
