@@ -18,6 +18,57 @@ function openStatusEditor() {
   return cy.get('[role="listbox"]:visible');
 }
 
+const MANUAL_ATTRIBUTES_FORM = '[role="alertdialog"]';
+const UNSPECIFIED_STATUS_OPTION = 'Unspecified (blank)';
+
+/**
+ * Opens the manual form's first-row Status cell editor (cell edit mode opens the select at once), picks an option and commits it
+ * by moving focus to the Code cell. The select stays in edit mode until focus leaves it, and the commit is asynchronous: clicking
+ * Save or re-opening the cell before it lands races the row update, which then re-marks the saved row as unsaved and keeps
+ * Finalize Changes disabled.
+ */
+function chooseManualFormStatus(optionLabel: string) {
+  const firstRowCell = (field: string) => cy.get(MANUAL_ATTRIBUTES_FORM).find('.MuiDataGrid-row').first().find(`[data-field="${field}"]`);
+  firstRowCell('status').dblclick();
+  cy.get('[role="listbox"]:visible').contains('[role="option"]', optionLabel).click();
+  firstRowCell('code').click();
+  firstRowCell('status').find('[role="combobox"]').should('not.exist');
+}
+
+function startManualStemCodeRow(code: string) {
+  cy.contains('button', /^Add record$/).click();
+  cy.contains(MANUAL_ATTRIBUTES_FORM, 'Manual Input Form - Attributes').should('be.visible');
+  cy.get(MANUAL_ATTRIBUTES_FORM).within(() => {
+    cy.contains('button', 'New Row').click();
+    cy.get('[data-field="code"] input', { timeout: 4000 }).should('be.focused').type(`${code}{enter}`);
+  });
+}
+
+function saveAndFinalizeManualForm() {
+  cy.get(MANUAL_ATTRIBUTES_FORM).within(() => {
+    cy.contains('button', 'Save').click();
+    cy.contains('Rows saved and ready to finalize.').should('be.visible');
+    cy.contains('button', 'Finalize Changes').should('not.be.disabled').click();
+  });
+}
+
+function interceptFinalizedStatus(alias: string, expectedCode: string, expectedStatus: string | null) {
+  cy.intercept('POST', '**/api/bulkcrud', req => {
+    const fileRows = Object.values(req.body.fileRowSet as Record<string, { code?: string; status?: unknown }>);
+    expect(fileRows, `submitted rows ${JSON.stringify(fileRows)}`).to.have.length(1);
+    expect(fileRows[0].code).to.equal(expectedCode);
+    expect(fileRows[0].status, `submitted status for ${expectedCode}`).to.equal(expectedStatus);
+    req.reply({ statusCode: 200, body: { success: true } });
+  }).as(alias);
+}
+
+/** Waits for the finalize request and logs the submitted rows (Cypress commands can't run inside an intercept handler). */
+function waitForFinalizedRows(alias: string) {
+  cy.wait(`@${alias}`).then(interception => {
+    cy.task('log', `[manual stem code finalize ${alias}] rows=${JSON.stringify(interception.request.body.fileRowSet)}`);
+  });
+}
+
 function selectDefaultCensusContext() {
   cy.visitAuthenticatedPage('/dashboard');
   cy.selectSitePlotAndCensus('Luquillo', 'Luquillo Main Plot', 5);
@@ -225,8 +276,9 @@ describe('Fixed Data Management', () => {
       const fileRows = Object.values(req.body.fileRowSet as Record<string, { code?: string; status?: unknown }>);
       expect(fileRows).to.have.length(1);
       expect(fileRows[0].code).to.equal('ATTR100');
-      expect(fileRows[0].status).to.not.equal('null');
-      expect([null, '']).to.include(fileRows[0].status);
+      // An untouched status can only serialise to SQL NULL (convertRowsToFileRowSet, isolatedmultilinedatagridcommons.tsx:224-225);
+      // '' and the string 'null' are both wrong.
+      expect(fileRows[0].status, 'an untouched status must be sent as SQL NULL').to.equal(null);
       req.reply({ statusCode: 200, body: { success: true } });
     }).as('finalizeAttributeRows');
 
@@ -245,6 +297,49 @@ describe('Fixed Data Management', () => {
 
     cy.wait('@finalizeAttributeRows');
     cy.contains('[role="alertdialog"]', 'Manual Input Form - Attributes').should('not.exist');
+  });
+
+  it('submits omitted when it is chosen in the manual form Status select (#524 item 9)', () => {
+    mockIsolatedGridApi({ gridType: 'attributes', rows: [] });
+    interceptFinalizedStatus('finalizeOmittedStatus', 'ATTR101', 'omitted');
+
+    openFixedDataGrid('Stem Codes');
+    startManualStemCodeRow('ATTR101');
+    chooseManualFormStatus('omitted');
+    saveAndFinalizeManualForm();
+
+    waitForFinalizedRows('finalizeOmittedStatus');
+  });
+
+  it('submits SQL NULL when omitted is replaced by Unspecified (blank) (#524 item 9)', () => {
+    mockIsolatedGridApi({ gridType: 'attributes', rows: [] });
+    interceptFinalizedStatus('finalizeUnspecifiedStatus', 'ATTR102', null);
+
+    openFixedDataGrid('Stem Codes');
+    startManualStemCodeRow('ATTR102');
+    chooseManualFormStatus('omitted');
+    chooseManualFormStatus(UNSPECIFIED_STATUS_OPTION);
+    saveAndFinalizeManualForm();
+
+    waitForFinalizedRows('finalizeUnspecifiedStatus');
+  });
+
+  it('keeps a saved alive status when another cell of the row is edited and saved again (#524 item 9)', () => {
+    mockIsolatedGridApi({ gridType: 'attributes', rows: [] });
+    interceptFinalizedStatus('finalizeKeptStatus', 'ATTR103', 'alive');
+
+    openFixedDataGrid('Stem Codes');
+    startManualStemCodeRow('ATTR103');
+    chooseManualFormStatus('alive');
+    cy.get(MANUAL_ATTRIBUTES_FORM).within(() => {
+      cy.contains('button', 'Save').click();
+      cy.contains('Rows saved and ready to finalize.').should('be.visible');
+      cy.get('.MuiDataGrid-row').first().find('[data-field="description"]').dblclick();
+      cy.get('[data-field="description"] input').type('Edited after save{enter}');
+    });
+    saveAndFinalizeManualForm();
+
+    waitForFinalizedRows('finalizeKeptStatus');
   });
 
   it('opens the Species List manual entry form and species-limits dialog from the current grid', () => {

@@ -2,7 +2,7 @@ import { HEADER_ALIGN } from '@/config/macros';
 import { Autocomplete, Box, Chip, IconButton, Stack, Typography } from '@mui/joy';
 import { GridColDef, GridPreProcessEditCellProps, GridRenderEditCellParams } from '@mui/x-data-grid';
 import React, { Dispatch, SetStateAction, useState } from 'react';
-import { ATTRIBUTE_STATUS_UNSPECIFIED_LABEL, AttributeStatusOptions } from '@/lib/db/definitions/core';
+import { AttributeStatusEditorOptions } from '@/lib/db/definitions/core';
 import { renderAttributeStatusCell } from '@/components/client/attributestatuscell';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { customNumericOperators } from '@/components/datagrids/filtrationsystem';
@@ -107,12 +107,6 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     editable: true
   }
 ]);
-
-// A null option value (not the string 'null') makes the singleSelect editor commit SQL NULL.
-const AttributeStatusEditorOptions: { value: string | null; label: string }[] = [
-  { value: null, label: ATTRIBUTE_STATUS_UNSPECIFIED_LABEL },
-  ...AttributeStatusOptions.map(status => ({ value: status, label: status }))
-];
 
 export const AttributeGridColumns: GridColDef[] = standardizeGridColumns([
   {
