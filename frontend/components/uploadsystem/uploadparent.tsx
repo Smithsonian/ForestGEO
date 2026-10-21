@@ -43,6 +43,9 @@ import { useAsyncUploadFeature } from '@/app/hooks/useasyncuploadfeature';
 // loading state forever.
 const REVISION_MATCH_TIMEOUT_MS = 120_000;
 
+// dataViewActive is 1-based: FileListEnhanced renders the tab at index dataViewActive - 1.
+const FIRST_FILE_VIEW_INDEX = 1;
+
 export interface CMIDRow {
   coreMeasurementID: number;
   fileName: string;
@@ -434,6 +437,12 @@ function UploadParentInner(props: UploadParentProps) {
     setServerQuadratOverlapSummaries([]);
     const removed = fileManagement.files[fileIndex];
     if (removed) dropColumnMapping(removed.name);
+    const remainingFileCount = fileManagement.files.length - 1;
+    uploadState.setDataViewActive(current => {
+      const selectedFileIndex = current - FIRST_FILE_VIEW_INDEX;
+      const selectionAfterShift = fileIndex < selectedFileIndex ? current - 1 : current;
+      return Math.max(FIRST_FILE_VIEW_INDEX, Math.min(selectionAfterShift, remainingFileCount));
+    });
     fileManagement.removeFile(fileIndex);
   };
 
