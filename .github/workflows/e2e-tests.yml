@@ -96,13 +96,33 @@ jobs:
             echo "Accessibility gate spec present and gated: $A11Y_SPEC"
           done
 
+      # Started here, not through the Cypress action's start/wait-on: since runner
+      # 2.338.0 the action's readiness ping fails at once with "Socket closed before
+      # the connection was established" and never retries.
+      - name: Start Next dev server
+        working-directory: frontend
+        run: npx next dev --turbo > "$DEV_SERVER_LOG" 2>&1 &
+        env:
+          NEXT_PUBLIC_E2E_TESTING: "true"
+          DEV_SERVER_LOG: ${{ runner.temp }}/next-dev.log
+
+      - name: Wait for Next dev server
+        timeout-minutes: 5
+        run: |
+          curl --fail --location --silent --show-error --output /dev/null \
+            --retry "$DEV_SERVER_READY_TIMEOUT_SECONDS" --retry-delay 1 --retry-all-errors \
+            --retry-max-time "$DEV_SERVER_READY_TIMEOUT_SECONDS" "$DEV_SERVER_URL"
+        env:
+          DEV_SERVER_URL: http://localhost:3000
+          DEV_SERVER_READY_TIMEOUT_SECONDS: "120"
+
       - name: Run E2E tests
         uses: cypress-io/github-action@v6
         with:
           working-directory: frontend
-          start: npx next dev --turbo
-          wait-on: "http://localhost:3000"
-          wait-on-timeout: 120
+          # Dependencies are installed above; the action's own `npm ci` would replace
+          # node_modules under the running dev server.
+          install: false
           browser: chrome
           headed: false
           # census-creation drives the REAL app against the seeded MySQL service
@@ -118,6 +138,12 @@ jobs:
           spec: cypress/e2e/census-creation.cy.ts,cypress/e2e/selection-persistence.cy.ts,cypress/e2e/validation-invalid-codes.cy.ts,cypress/e2e/data-viewing-comprehensive.cy.ts,cypress/e2e/cross-feature-integration.cy.ts,cypress/e2e/errors-explorer.cy.ts,cypress/e2e/accessibility-audit.cy.ts,cypress/e2e/a11y-responsive.cy.ts,cypress/e2e/column-mapping/csv-mapping-dialog.cy.ts,cypress/e2e/column-mapping/arcgis-preflight-mapping.cy.ts,cypress/e2e/column-mapping/mapping-signature-persistence.cy.ts,cypress/e2e/column-mapping/mapping-negative-paths.cy.ts
         env:
           NEXT_PUBLIC_E2E_TESTING: "true"
+
+      - name: Show Next dev server log on failure
+        if: failure()
+        run: cat "$DEV_SERVER_LOG"
+        env:
+          DEV_SERVER_LOG: ${{ runner.temp }}/next-dev.log
 
       - name: Upload Cypress screenshots on failure
         uses: actions/upload-artifact@v4
@@ -232,6 +258,30 @@ jobs:
           fi
           echo "Discovered $count real-DB spec file(s); gating $GATED_SPEC"
 
+      # Started here, not through the Cypress action's start/wait-on: since runner
+      # 2.338.0 the action's readiness ping fails at once with "Socket closed before
+      # the connection was established" and never retries.
+      - name: Start Next dev server
+        working-directory: frontend
+        run: npx next dev --turbo > "$DEV_SERVER_LOG" 2>&1 &
+        env:
+          NEXT_PUBLIC_E2E_TESTING: "true"
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_PORT: "3306"
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: testpassword
+          DEV_SERVER_LOG: ${{ runner.temp }}/next-dev.log
+
+      - name: Wait for Next dev server
+        timeout-minutes: 5
+        run: |
+          curl --fail --location --silent --show-error --output /dev/null \
+            --retry "$DEV_SERVER_READY_TIMEOUT_SECONDS" --retry-delay 1 --retry-all-errors \
+            --retry-max-time "$DEV_SERVER_READY_TIMEOUT_SECONDS" "$DEV_SERVER_URL"
+        env:
+          DEV_SERVER_URL: http://localhost:3000
+          DEV_SERVER_READY_TIMEOUT_SECONDS: "120"
+
       # The mysql service health-cmd gates this step until MySQL is reachable; the realdb
       # config's before() task then self-seeds forestgeo_testing via setupTestDatabase.
       # TEST_DB_* reach the cypress-side DB tasks (seed/reset/query); AZURE_SQL_* reach the
@@ -241,9 +291,9 @@ jobs:
         uses: cypress-io/github-action@v6
         with:
           working-directory: frontend
-          start: npx next dev --turbo
-          wait-on: "http://localhost:3000"
-          wait-on-timeout: 120
+          # Dependencies are installed above; the action's own `npm ci` would replace
+          # node_modules under the running dev server.
+          install: false
           browser: electron
           headed: false
           config-file: cypress.realdb.config.cjs
@@ -254,6 +304,12 @@ jobs:
           TEST_DB_PORT: "3306"
           TEST_DB_USER: root
           TEST_DB_PASSWORD: testpassword
+
+      - name: Show Next dev server log on failure
+        if: failure()
+        run: cat "$DEV_SERVER_LOG"
+        env:
+          DEV_SERVER_LOG: ${{ runner.temp }}/next-dev.log
 
       - name: Upload real-DB smoke screenshots on failure
         uses: actions/upload-artifact@v4
