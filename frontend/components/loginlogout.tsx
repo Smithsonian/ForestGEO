@@ -9,6 +9,7 @@ import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import LoginRoundedIcon from '@mui/icons-material/LoginRounded';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { Button, Menu, MenuItem, Skeleton } from '@mui/joy';
+import ClickAwayListener from '@mui/material/ClickAwayListener';
 import { signIn, signOut, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { AddCircleOutline, GroupAdd, ManageAccountsRounded, Public, Settings } from '@mui/icons-material';
@@ -16,6 +17,7 @@ import ailogger from '@/ailogger';
 import { useAppStore } from '@/config/store/appstore';
 
 const LAST_USER_STORAGE_KEY = 'forestgeo-last-user';
+const ESCAPE_KEY = 'Escape';
 const FIRST_LETTER_PATTERN = /\p{L}/u;
 const WORD_SEPARATOR_PATTERN = /\s+/;
 
@@ -63,13 +65,36 @@ export const LoginLogout = () => {
     localStorage.setItem(LAST_USER_STORAGE_KEY, email);
   }, [session?.user?.email, status]);
 
-  const closeMenu = () => {
-    // anchorSettings holds the trigger DOM node (set from event.currentTarget); it stays
-    // mounted when only the menu portal closes, so capture it before clearing state and
-    // refocus it to restore focus to the opener on Escape / click-away.
+  const isMenuTrigger = (target: EventTarget | null): boolean =>
+    target instanceof Node && [avatarButtonRef.current, settingsButtonRef.current].some(trigger => trigger?.contains(target) ?? false);
+
+  // Escape restores focus to the opener; a click-away or a blur never moves focus (matching Joy's Dropdown).
+  const closeMenuAndRestoreFocus = () => {
     const trigger = anchorSettings;
     setAnchorSettings(null);
     trigger?.focus();
+  };
+
+  const closeMenuWithoutMovingFocus = () => setAnchorSettings(null);
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== ESCAPE_KEY) return;
+    event.preventDefault();
+    closeMenuAndRestoreFocus();
+  };
+
+  const handleMenuClickAway = (event: MouseEvent | TouchEvent) => {
+    // Trigger clicks toggle the menu through their own onClick.
+    if (isMenuTrigger(event.target)) return;
+    closeMenuWithoutMovingFocus();
+  };
+
+  const handleMenuBlur = (event: React.FocusEvent<HTMLElement>) => {
+    const nextFocusTarget = event.relatedTarget;
+    // No destination (Safari trigger click, click on a non-focusable area): the click-away rule decides.
+    if (!(nextFocusTarget instanceof Node)) return;
+    if (menuRef.current?.contains(nextFocusTarget) || isMenuTrigger(nextFocusTarget)) return;
+    closeMenuWithoutMovingFocus();
   };
 
   const userName = session?.user?.name;
@@ -181,60 +206,66 @@ export const LoginLogout = () => {
         <IconButton size="sm" variant="plain" color="neutral" onClick={() => void handleLogout()} aria-label={'Logout button'}>
           {status == 'loading' ? <CircularProgress size={'lg'} aria-label="Loading user session" /> : <LogoutRoundedIcon />}
         </IconButton>
-        <Menu
-          ref={menuRef}
-          id={menuId}
-          anchorEl={anchorSettings}
-          open={isMenuOpen}
-          onClose={closeMenu}
-          placement={'top-end'}
-          disablePortal
-          sx={{ zIndex: 1500 }}
-        >
-          {canManageUsers && (
-            <MenuItem
-              onClick={() => {
-                router.push('/admin/users');
-                setAnchorSettings(null);
-              }}
+        {isMenuOpen && (
+          <ClickAwayListener onClickAway={handleMenuClickAway}>
+            {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the lint config maps Menu to ul, but Joy renders it with role="menu", which is interactive */}
+            <Menu
+              ref={menuRef}
+              id={menuId}
+              anchorEl={anchorSettings}
+              open={isMenuOpen}
+              onKeyDown={handleMenuKeyDown}
+              onBlur={handleMenuBlur}
+              placement={'top-end'}
+              disablePortal
+              sx={{ zIndex: 1500 }}
             >
-              User Settings
-              <ManageAccountsRounded />
-            </MenuItem>
-          )}
-          <MenuItem
-            onClick={() => {
-              router.push('/admin/sites');
-              setAnchorSettings(null);
-            }}
-          >
-            Site Settings
-            <Public />
-          </MenuItem>
+              {canManageUsers && (
+                <MenuItem
+                  onClick={() => {
+                    router.push('/admin/users');
+                    setAnchorSettings(null);
+                  }}
+                >
+                  User Settings
+                  <ManageAccountsRounded />
+                </MenuItem>
+              )}
+              <MenuItem
+                onClick={() => {
+                  router.push('/admin/sites');
+                  setAnchorSettings(null);
+                }}
+              >
+                Site Settings
+                <Public />
+              </MenuItem>
 
-          {canManageUsers && (
-            <MenuItem
-              onClick={() => {
-                router.push('/admin/userstosites');
-                setAnchorSettings(null);
-              }}
-            >
-              User-Site Assignments
-              <GroupAdd />
-            </MenuItem>
-          )}
-          {session?.user?.userStatus === 'global' && (
-            <MenuItem
-              onClick={() => {
-                router.push('/admin/provision');
-                setAnchorSettings(null);
-              }}
-            >
-              Provisioning
-              <AddCircleOutline />
-            </MenuItem>
-          )}
-        </Menu>
+              {canManageUsers && (
+                <MenuItem
+                  onClick={() => {
+                    router.push('/admin/userstosites');
+                    setAnchorSettings(null);
+                  }}
+                >
+                  User-Site Assignments
+                  <GroupAdd />
+                </MenuItem>
+              )}
+              {session?.user?.userStatus === 'global' && (
+                <MenuItem
+                  onClick={() => {
+                    router.push('/admin/provision');
+                    setAnchorSettings(null);
+                  }}
+                >
+                  Provisioning
+                  <AddCircleOutline />
+                </MenuItem>
+              )}
+            </Menu>
+          </ClickAwayListener>
+        )}
       </Box>
     );
   }

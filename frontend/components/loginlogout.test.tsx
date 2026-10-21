@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LoginLogout, getUserInitials } from './loginlogout';
 import { signIn, signOut, useSession } from 'next-auth/react';
@@ -15,6 +15,76 @@ vi.mock('@/ailogger');
 // (@mui/joy/utils/createSvgIcon.js).
 const AVATAR_ROOT_SELECTOR = '.MuiAvatar-root';
 const FALLBACK_PERSON_ICON_TEST_ID = 'PersonIcon';
+
+const OUTSIDE_FIELD_LABEL = 'outside field';
+const AFTER_MENU_BUTTON_LABEL = 'after menu';
+// The three document listeners MUI's ClickAwayListener registers.
+const CLICK_AWAY_EVENT_TYPES = new Set(['click', 'touchend', 'touchmove']);
+
+function describeFocusedElement(): string {
+  const active = document.activeElement;
+  if (!active || active === document.body) return 'document.body';
+  return `${active.tagName.toLowerCase()}[aria-label="${active.getAttribute('aria-label') ?? ''}"] "${active.textContent?.trim() ?? ''}"`;
+}
+
+interface DocumentListenerRegistration {
+  type: string;
+  listener: EventListenerOrEventListenerObject;
+  wrapper: EventListener;
+  runCount: number;
+  removed: boolean;
+}
+
+/** Records ClickAwayListener's document listeners by callback identity. Both spies still call through. */
+function recordClickAwayDocumentListeners(): { registrations: DocumentListenerRegistration[]; restore: () => void } {
+  const registrations: DocumentListenerRegistration[] = [];
+  const realAdd = document.addEventListener.bind(document);
+  const realRemove = document.removeEventListener.bind(document);
+  const addSpy = vi.spyOn(document, 'addEventListener').mockImplementation(((
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions
+  ) => {
+    if (!CLICK_AWAY_EVENT_TYPES.has(type)) return realAdd(type, listener, options);
+    const registration: DocumentListenerRegistration = {
+      type,
+      listener,
+      runCount: 0,
+      removed: false,
+      wrapper: (event: Event) => {
+        registration.runCount += 1;
+        if (typeof listener === 'function') listener.call(document, event);
+        else listener.handleEvent(event);
+      }
+    };
+    registrations.push(registration);
+    realAdd(type, registration.wrapper, options);
+  }) as typeof document.addEventListener);
+  const removeSpy = vi.spyOn(document, 'removeEventListener').mockImplementation(((
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | EventListenerOptions
+  ) => {
+    const registration = registrations.find(candidate => candidate.type === type && candidate.listener === listener && !candidate.removed);
+    if (!registration) return realRemove(type, listener, options);
+    registration.removed = true;
+    realRemove(type, registration.wrapper, options);
+  }) as typeof document.removeEventListener);
+  return {
+    registrations,
+    restore: () => {
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+    }
+  };
+}
+
+/** ClickAwayListener arms itself on a setTimeout(0) after mount. */
+async function waitForClickAwayActivation(): Promise<void> {
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+}
 
 const USER_INITIALS_CASES: Array<{ name: string; expected: string }> = [
   { name: 'Alice Bob Charlie', expected: 'AC' },
@@ -304,11 +374,6 @@ describe('LoginLogout - Functional Tests', () => {
     });
 
     it('MUST close the menu and not trap focus inside it when dismissed', async () => {
-      // Joy's Menu Escape/click-away dismissal does not fire in jsdom (disablePortal,
-      // no rendered backdrop), so the Escape-specific onClose path is not observable
-      // here. We assert the dismissal contract via the toggle path that does fire:
-      // the menu closes and focus returns to the trigger rather than staying trapped
-      // on a now-unmounted menu item.
       const user = userEvent.setup();
       render(<LoginLogout />);
       const trigger = screen.getByRole('button', { name: /open user menu/i });
@@ -318,6 +383,183 @@ describe('LoginLogout - Functional Tests', () => {
       await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
       expect(document.activeElement?.closest('[role="menu"]')).toBeNull();
       expect(trigger).toHaveFocus();
+    });
+  });
+
+  describe('Settings menu dismissal (#524 item 2)', () => {
+    const mockSessionWithStatus = (userStatus: string) => {
+      (useSession as any).mockReturnValue({
+        data: { user: { name: 'Dana Example', email: 'dana@example.com', userStatus } },
+        status: 'authenticated'
+      });
+    };
+
+    it('closes on Escape and returns focus to the avatar that opened it (admin)', async () => {
+      mockSessionWithStatus('global');
+      const user = userEvent.setup();
+      render(<LoginLogout />);
+      const avatarTrigger = screen.getByRole('button', { name: /open user menu/i });
+
+      await user.click(avatarTrigger);
+      await screen.findByRole('menu');
+      console.log(`[menu-escape avatar/admin] focus before Escape: ${describeFocusedElement()}`);
+      await user.keyboard('{Escape}');
+      console.log(`[menu-escape avatar/admin] focus after Escape: ${describeFocusedElement()}`);
+
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+      expect(avatarTrigger).toHaveFocus();
+    });
+
+    it('closes on Escape and returns focus to the Settings button that opened it (admin)', async () => {
+      mockSessionWithStatus('global');
+      const user = userEvent.setup();
+      render(<LoginLogout />);
+      const settingsTrigger = screen.getByRole('button', { name: /settings menu/i });
+
+      await user.click(settingsTrigger);
+      await screen.findByRole('menu');
+      await user.keyboard('{Escape}');
+      console.log(`[menu-escape settings/admin] focus after Escape: ${describeFocusedElement()}`);
+
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+      expect(settingsTrigger).toHaveFocus();
+    });
+
+    it('closes on Escape and returns focus to the avatar for a non-admin (Settings disabled)', async () => {
+      mockSessionWithStatus('user');
+      const user = userEvent.setup();
+      render(<LoginLogout />);
+      expect(screen.getByRole('button', { name: /settings menu/i })).toBeDisabled();
+      const avatarTrigger = screen.getByRole('button', { name: /open user menu/i });
+
+      await user.click(avatarTrigger);
+      await screen.findByRole('menu');
+      await user.keyboard('{Escape}');
+      console.log(`[menu-escape avatar/user] focus after Escape: ${describeFocusedElement()}`);
+
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+      expect(avatarTrigger).toHaveFocus();
+    });
+
+    it('closes when an outside input is clicked and leaves focus on that input', async () => {
+      mockSessionWithStatus('global');
+      const user = userEvent.setup();
+      render(
+        <>
+          <input aria-label={OUTSIDE_FIELD_LABEL} />
+          <LoginLogout />
+        </>
+      );
+
+      await user.click(screen.getByRole('button', { name: /open user menu/i }));
+      await screen.findByRole('menu');
+      await user.click(screen.getByLabelText(OUTSIDE_FIELD_LABEL));
+      console.log(`[menu-click-outside input] focus after click: ${describeFocusedElement()}`);
+
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+      expect(screen.getByLabelText(OUTSIDE_FIELD_LABEL)).toHaveFocus();
+    });
+
+    it('closes when document.body is clicked and does not move focus onto a trigger', async () => {
+      mockSessionWithStatus('global');
+      const user = userEvent.setup();
+      render(<LoginLogout />);
+      const avatarTrigger = screen.getByRole('button', { name: /open user menu/i });
+      const settingsTrigger = screen.getByRole('button', { name: /settings menu/i });
+
+      await user.click(avatarTrigger);
+      await screen.findByRole('menu');
+      await user.click(document.body);
+      console.log(`[menu-click-outside body] focus after click: ${describeFocusedElement()}`);
+
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+      expect(avatarTrigger).not.toHaveFocus();
+      expect(settingsTrigger).not.toHaveFocus();
+    });
+
+    it('closes when Tab moves focus out of the menu, leaving focus on the next focusable element', async () => {
+      // A non-admin sees a single menu item, so Tab from it must leave the menu.
+      mockSessionWithStatus('user');
+      const user = userEvent.setup();
+      render(
+        <>
+          <LoginLogout />
+          <button type="button">{AFTER_MENU_BUTTON_LABEL}</button>
+        </>
+      );
+
+      await user.click(screen.getByRole('button', { name: /open user menu/i }));
+      await screen.findByRole('menu');
+      console.log(`[menu-tab] focus before Tab: ${describeFocusedElement()}`);
+      await user.tab();
+      console.log(`[menu-tab] focus after Tab: ${describeFocusedElement()}`);
+
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+      expect(screen.getByRole('button', { name: AFTER_MENU_BUTTON_LABEL })).toHaveFocus();
+    });
+
+    it.each([
+      ['avatar', /open user menu/i],
+      ['Settings', /settings menu/i]
+    ])('a %s trigger click while the menu is open closes it and it stays closed', async (_label, triggerName) => {
+      mockSessionWithStatus('global');
+      const user = userEvent.setup();
+      render(<LoginLogout />);
+      const trigger = screen.getByRole('button', { name: triggerName });
+
+      await user.click(trigger);
+      await screen.findByRole('menu');
+      await user.click(trigger);
+      console.log(`[menu-trigger-toggle ${_label}] menu present after second click: ${screen.queryByRole('menu') !== null}`);
+
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+      // Give a click-away that wrongly re-toggled the menu a chance to reopen it.
+      await waitForClickAwayActivation();
+      expect(screen.queryByRole('menu'), 'the menu must not reopen after the trigger closed it').toBeNull();
+    });
+
+    it('removes every ClickAwayListener document listener on unmount, and none of them runs afterwards', async () => {
+      mockSessionWithStatus('global');
+      const recorder = recordClickAwayDocumentListeners();
+      try {
+        const { unmount } = render(<LoginLogout />);
+        const avatarTrigger = screen.getByRole('button', { name: /open user menu/i });
+
+        fireEvent.click(avatarTrigger);
+        await screen.findByRole('menu');
+        await waitForClickAwayActivation();
+        fireEvent.click(document.body);
+        console.log(
+          `[click-away listeners] after body click: ${JSON.stringify(recorder.registrations.map(r => ({ type: r.type, runs: r.runCount, removed: r.removed })))}`
+        );
+        expect(recorder.registrations.length, 'positive control: ClickAwayListener must register document listeners').toBeGreaterThan(0);
+        expect(
+          recorder.registrations.some(r => r.type === 'click' && r.runCount > 0),
+          'positive control: a body click must run a recorded listener'
+        ).toBe(true);
+        await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+
+        fireEvent.click(avatarTrigger);
+        await screen.findByRole('menu');
+        await waitForClickAwayActivation();
+        unmount();
+
+        const runCountsAtUnmount = recorder.registrations.map(r => r.runCount);
+        fireEvent.click(document.body);
+        console.log(
+          `[click-away listeners] after unmount: ${JSON.stringify(recorder.registrations.map(r => ({ type: r.type, runs: r.runCount, removed: r.removed })))}`
+        );
+        expect(
+          recorder.registrations.every(r => r.removed),
+          'every recorded registration must be removed with the same callback'
+        ).toBe(true);
+        expect(
+          recorder.registrations.map(r => r.runCount),
+          'no recorded listener may run after unmount'
+        ).toEqual(runCountsAtUnmount);
+      } finally {
+        recorder.restore();
+      }
     });
   });
 
