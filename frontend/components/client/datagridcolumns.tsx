@@ -6,6 +6,7 @@ import { AttributeStatusEditorOptions } from '@/lib/db/definitions/core';
 import { renderAttributeStatusCell } from '@/components/client/attributestatuscell';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { customNumericOperators } from '@/components/datagrids/filtrationsystem';
+import { formatMeasurementForDisplay } from '@/config/measurementdisplay';
 import CloseIcon from '@mui/icons-material/Close';
 
 export const formatHeader = (word1: string, word2: string) => (
@@ -736,7 +737,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     editable: true,
     type: 'number',
     filterOperators: customNumericOperators,
-    valueFormatter: (value: number | null | undefined) => parseFloat(Number(value ?? 0).toFixed(2)),
+    valueFormatter: (value: number | null | undefined) => formatMeasurementForDisplay(value ?? 0),
     preProcessEditCellProps: params => preprocessor(params)
   },
   {

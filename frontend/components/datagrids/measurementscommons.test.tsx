@@ -10,6 +10,7 @@ import {
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
+  describeMeasurementRow,
   EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE,
   EDIT_REVERTED_SNACKBAR_MESSAGE,
   mergeMeasurementFilterModel,
@@ -695,5 +696,22 @@ describe('revertMeasurementEdit: undo refresh orchestration (U3)', () => {
     expect(calls).toEqual(['invalidate', 'paginated', 'counts:start', 'infinite:reject', 'counts:internal-success', 'notify:success', 'notify:warning']);
     expect(notifyMock.mock.calls.map(([notification]) => notification.severity)).toEqual(['success', 'warning']);
     expect(notifyMock).toHaveBeenLastCalledWith({ message: EDIT_REVERTED_REFRESH_FAILED_SNACKBAR_MESSAGE, severity: 'warning' });
+  });
+});
+
+describe('describeMeasurementRow: delete-confirmation wording (#524 item 6)', () => {
+  it.each([
+    ['a mysql2 DECIMAL string with trailing zeros', '120.000000', 'tree T1, stem S1 (DBH 120)'],
+    ['a value that rounds at two decimals', '12.345000', 'tree T1, stem S1 (DBH 12.35)'],
+    ['a missing DBH', undefined, 'tree T1, stem S1'],
+    ['a non-numeric DBH (returned unchanged)', 'n/a', 'tree T1, stem S1 (DBH n/a)']
+  ])('formats %s like the grid column', (_label, measuredDBH, expected) => {
+    const description = describeMeasurementRow({ treeTag: 'T1', stemTag: 'S1', measuredDBH });
+    console.log(`[describeMeasurementRow] measuredDBH=${JSON.stringify(measuredDBH)} -> ${JSON.stringify(description)}`);
+    expect(description).toBe(expected);
+  });
+
+  it('describes a null row generically', () => {
+    expect(describeMeasurementRow(null)).toBe('this measurement');
   });
 });

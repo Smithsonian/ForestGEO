@@ -108,6 +108,7 @@ import {
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
+  describeMeasurementRow,
   revertMeasurementEdit,
   selectMeasurementStateSnackbar,
   shouldRefreshMeasurementsAfterValidationTransition,
@@ -121,16 +122,6 @@ const AUTO_ROW_HEIGHT = () => 'auto' as const;
 const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
 const FIREFOX_FIXED_ROW_HEIGHT = 112;
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
-
-function describeMeasurementRow(row: GridRowModel | null): string {
-  if (!row) return 'this measurement';
-  const treeTag = row.treeTag ?? row.TreeTag;
-  const stemTag = row.stemTag ?? row.StemTag;
-  const measuredValue = row.measuredDBH ?? row.MeasuredDBH ?? row.dbh ?? row.DBH;
-  const identity = [treeTag && `tree ${treeTag}`, stemTag && `stem ${stemTag}`].filter(Boolean).join(', ');
-  const value = measuredValue !== undefined && measuredValue !== null && measuredValue !== '' ? ` (DBH ${measuredValue})` : '';
-  return identity ? `${identity}${value}` : `this measurement${value}`;
-}
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';

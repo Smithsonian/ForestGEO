@@ -11,6 +11,7 @@ vi.mock('@/lib/db/definitions/core', async importOriginal => {
 
 import { AttributeGridColumns, MeasurementsSummaryViewGridColumns, ViewFullTableGridColumns, VIEW_FULL_TABLE_COLUMN_WIDTHS } from './datagridcolumns';
 import { AttributesFormGridColumns } from './formcolumns';
+import { formatMeasurementForDisplay } from '@/config/measurementdisplay';
 import {
   ATTRIBUTE_STATUS_UNSPECIFIED_LABEL,
   ATTRIBUTE_STATUS_UNSPECIFIED_HINT,
@@ -112,6 +113,28 @@ describe('MeasurementsSummaryViewGridColumns plot coordinates', () => {
     expect(format(undefined)).toBe('');
     expect(format(0)).toBe('0.00');
     expect(format(12.345)).toBe('12.35');
+  });
+});
+
+describe('MeasurementsSummaryViewGridColumns DBH display (#524 item 6)', () => {
+  const DECIMAL_STRING_FROM_MYSQL = '120.000000';
+  const FRACTIONAL_DECIMAL_STRING_FROM_MYSQL = '12.345000';
+
+  it.each([
+    [DECIMAL_STRING_FROM_MYSQL, '120'],
+    [FRACTIONAL_DECIMAL_STRING_FROM_MYSQL, '12.35'],
+    [null, '0']
+  ])('shows %j in the DBH column exactly as the delete confirmation does (%s)', (storedValue, expectedDisplay) => {
+    const dbhColumn = MeasurementsSummaryViewGridColumns.find(candidate => candidate.field === 'measuredDBH');
+    expect(dbhColumn?.valueFormatter).toBeTypeOf('function');
+    const formatInGrid = dbhColumn!.valueFormatter as (value: unknown) => unknown;
+
+    const gridDisplay = String(formatInGrid(storedValue));
+    const confirmationDisplay = formatMeasurementForDisplay(storedValue ?? 0);
+    console.log(`[DBH display] stored=${JSON.stringify(storedValue)} grid=${JSON.stringify(gridDisplay)} confirmation=${JSON.stringify(confirmationDisplay)}`);
+
+    expect(gridDisplay).toBe(expectedDisplay);
+    expect(confirmationDisplay).toBe(gridDisplay);
   });
 });
 
