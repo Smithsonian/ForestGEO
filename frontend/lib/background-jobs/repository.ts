@@ -171,8 +171,7 @@ function idempotentRequestMatches(existing: BackgroundJobRow, existingFiles: Bac
       (file.ByteSize === null ? null : Number(file.ByteSize)) === (requested.byteSize ?? null) &&
       (file.ChecksumSHA256 ?? null) === (requested.checksumSha256 ?? null) &&
       (file.SourceFormat ?? null) === (requested.sourceFormat ?? input.sourceFormat ?? null) &&
-      (file.FormType ?? null) === (requested.formType ?? input.formType ?? null) &&
-      (file.ExpectedRows === null ? null : Number(file.ExpectedRows)) === (requested.expectedRows ?? null)
+      (file.FormType ?? null) === (requested.formType ?? input.formType ?? null)
     );
   });
 }
@@ -1071,6 +1070,49 @@ export async function updateBackgroundJobFileStatus(
     if (fileRows.length === 0) throw new JobFileNotFoundError(jobID, jobFileID);
     // File exists and lease is intact — genuine no-op (only reachable if pool flags change).
   }
+}
+
+/**
+ * Records a file's parsed row count and recomputes the job's TotalRows from its files, inside the
+ * worker lease fence. The count is set, never added, so a retry that re-parses a file overwrites it.
+ * Files not parsed yet contribute their client value (NULL counts as 0). Status is never written.
+ */
+export async function updateBackgroundJobFileExpectedRows(
+  catalogPool: Pool,
+  jobID: number,
+  workerID: string,
+  jobFileID: number,
+  expectedRows: number
+): Promise<void> {
+  await ensureBackgroundJobCatalogTables(catalogPool);
+  await withCatalogTransition(catalogPool, async conn => {
+    // The fence every worker write uses, taken as a row lock (like finalizeJobAsSystem).
+    const [leaseRows] = await conn.query<RowDataPacket[]>(
+      `SELECT JobID FROM catalog.background_jobs
+       WHERE JobID = ? AND WorkerID = ? AND Status IN (${FENCED_WRITE_STATUSES.map(() => '?').join(', ')})
+       FOR UPDATE`,
+      [jobID, workerID, ...FENCED_WRITE_STATUSES]
+    );
+    if (leaseRows.length === 0) throw new WorkerLeaseLostError(jobID, workerID);
+
+    const [fileUpdate] = await conn.query<ResultSetHeader>(`UPDATE catalog.background_job_files SET ExpectedRows = ? WHERE JobFileID = ? AND JobID = ?`, [
+      expectedRows,
+      jobFileID,
+      jobID
+    ]);
+    if (fileUpdate.affectedRows === 0) {
+      const [fileRows] = await conn.query<RowDataPacket[]>(`SELECT 1 FROM catalog.background_job_files WHERE JobFileID = ? AND JobID = ?`, [jobFileID, jobID]);
+      if (fileRows.length === 0) throw new JobFileNotFoundError(jobID, jobFileID);
+    }
+
+    // TotalRows is INT NOT NULL (catalog migration 2026-07-27-01), hence the COALESCE.
+    await conn.query(
+      `UPDATE catalog.background_jobs
+       SET TotalRows = (SELECT COALESCE(SUM(ExpectedRows), 0) FROM catalog.background_job_files WHERE JobID = ?)
+       WHERE JobID = ?`,
+      [jobID, jobID]
+    );
+  });
 }
 
 /**

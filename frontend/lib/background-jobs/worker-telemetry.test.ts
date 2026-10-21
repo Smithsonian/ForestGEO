@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   setStatus: vi.fn(),
   assignBatch: vi.fn(),
   updateFile: vi.fn(),
+  updateExpectedRows: vi.fn(),
   complete: vi.fn(),
   fail: vi.fn(),
   retry: vi.fn(),
@@ -47,6 +48,7 @@ vi.mock('@/lib/background-jobs/repository', () => ({
   setBackgroundJobStatus: mocks.setStatus,
   assignFileBatchID: mocks.assignBatch,
   updateBackgroundJobFileStatus: mocks.updateFile,
+  updateBackgroundJobFileExpectedRows: mocks.updateExpectedRows,
   markBackgroundJobCompleted: mocks.complete,
   markBackgroundJobFailed: mocks.fail,
   markBackgroundJobWaitingRetryAsWorker: mocks.retry,
@@ -144,6 +146,7 @@ beforeEach(() => {
   mocks.updateSession.mockResolvedValue(undefined);
   mocks.setStatus.mockResolvedValue(undefined);
   mocks.updateFile.mockResolvedValue(undefined);
+  mocks.updateExpectedRows.mockResolvedValue(undefined);
   mocks.complete.mockResolvedValue(undefined);
   mocks.fail.mockResolvedValue(undefined);
   mocks.collapse.mockResolvedValue(undefined);

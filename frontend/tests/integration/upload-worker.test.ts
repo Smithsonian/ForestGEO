@@ -1909,4 +1909,86 @@ describe('runJobIfClaimable — integration', () => {
       );
     }, 180000);
   });
+
+  describe('issue #524 — TotalRows recorded from the parsed row count', () => {
+    const PARSED_ROW_COUNT = 20;
+    const COUNT_FILE_NAME = 'worker-parsed-count.csv';
+    const COUNT_QUADRATS = ['Q01', 'Q02', 'Q03'];
+    const COUNT_CSV = [
+      CSV_HEADER,
+      ...Array.from({ length: PARSED_ROW_COUNT }, (_, rowIndex) => {
+        const tag = `T524${String(rowIndex + 1).padStart(3, '0')}`;
+        const quadrat = COUNT_QUADRATS[rowIndex % COUNT_QUADRATS.length];
+        return `${tag},1,ACERRU,${quadrat},${rowIndex + 0.5},${rowIndex + 1.5},${10 + rowIndex},1.3,${MEASUREMENT_DATE},A`;
+      })
+    ].join('\n');
+
+    it('records TotalRows = 20 for a 20-row CSV whose job was created with expectedRows null', async () => {
+      const job = await createUploadBackgroundJob(
+        catalogPool,
+        {
+          schema,
+          plotID,
+          censusID,
+          uploadMode: UploadMode.CLEAN_REUPLOAD,
+          sourceFormat: SourceFormat.csv,
+          formType: FormType.measurements,
+          payload: { selectedDelimiters: { [COUNT_FILE_NAME]: ',' } },
+          files: [{ fileName: COUNT_FILE_NAME, blobContainer: BLOB_CONTAINER, blobName: `uploads/${COUNT_FILE_NAME}`, expectedRows: null }]
+        },
+        TEST_USER
+      );
+      const createdJob = await getBackgroundJob(catalogPool, job.jobID);
+
+      await runJobIfClaimable(job.jobID, { fetchFileText: async () => COUNT_CSV });
+
+      const finishedJob = await getBackgroundJobWithDetails(catalogPool, job.jobID);
+      const fileExpectedRows = finishedJob!.files[0].expectedRows;
+      console.log(
+        `[#524 TotalRows] created totalRows=${createdJob?.totalRows} -> status=${finishedJob?.status} lastError=${finishedJob?.lastError ?? 'none'} ` +
+          `totalRows=${finishedJob?.totalRows} processedRows=${finishedJob?.processedRows} file.expectedRows=${fileExpectedRows}`
+      );
+      expect(createdJob!.totalRows, 'precondition: the client sent no row count').toBe(0);
+      expect(finishedJob!.status).toBe('completed');
+      expect(finishedJob!.totalRows).toBe(PARSED_ROW_COUNT);
+      expect(finishedJob!.processedRows).toBe(PARSED_ROW_COUNT);
+      expect(fileExpectedRows).toBe(PARSED_ROW_COUNT);
+    }, 180000);
+
+    it('records ExpectedRows = 0 and TotalRows = 0 for a header-only CSV, which still fails the job under #504', async () => {
+      const HEADER_ONLY_FILE_NAME = 'worker-parsed-count-header-only.csv';
+      const CLIENT_CLAIMED_ROWS = 5;
+      const job = await createUploadBackgroundJob(
+        catalogPool,
+        {
+          schema,
+          plotID,
+          censusID,
+          uploadMode: UploadMode.CLEAN_REUPLOAD,
+          sourceFormat: SourceFormat.csv,
+          formType: FormType.measurements,
+          payload: { selectedDelimiters: { [HEADER_ONLY_FILE_NAME]: ',' } },
+          files: [
+            { fileName: HEADER_ONLY_FILE_NAME, blobContainer: BLOB_CONTAINER, blobName: `uploads/${HEADER_ONLY_FILE_NAME}`, expectedRows: CLIENT_CLAIMED_ROWS }
+          ]
+        },
+        TEST_USER
+      );
+      const createdJob = await getBackgroundJob(catalogPool, job.jobID);
+
+      await runJobIfClaimable(job.jobID, { fetchFileText: async () => `${CSV_HEADER}\n` });
+
+      const finishedJob = await getBackgroundJobWithDetails(catalogPool, job.jobID);
+      const fileExpectedRows = finishedJob!.files[0].expectedRows;
+      console.log(
+        `[#524 header-only] created totalRows=${createdJob?.totalRows} -> status=${finishedJob?.status} lastError=${finishedJob?.lastError ?? 'none'} ` +
+          `totalRows=${finishedJob?.totalRows} file.expectedRows=${fileExpectedRows}`
+      );
+      expect(createdJob!.totalRows, 'precondition: the client claimed a non-zero row count').toBe(CLIENT_CLAIMED_ROWS);
+      expect(finishedJob!.status).toBe('failed');
+      expect(finishedJob!.lastError).toMatch(/no data rows/i);
+      expect(fileExpectedRows).toBe(0);
+      expect(finishedJob!.totalRows).toBe(0);
+    }, 120000);
+  });
 });
