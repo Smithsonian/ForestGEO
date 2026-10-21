@@ -53,15 +53,19 @@ describe('Accessibility Audit', () => {
     });
 
     it('should support Escape key to close modals', () => {
-      cy.log('⎋ Testing Escape key functionality');
+      const HELP_BUTTON = 'button[aria-label="Help"]';
+      const HELP_MENU_ITEM = 'Documentation';
 
       cy.visit('/dashboard');
       cy.contains('Dashboard', { timeout: 10000 }).should('be.visible');
 
-      // Escape should close any open modals/dialogs
-      cy.get('body').type('{esc}');
+      cy.get(HELP_BUTTON).click();
+      cy.contains('[role="menuitem"]', HELP_MENU_ITEM).should('be.visible');
 
-      cy.log('✅ Escape key support verified');
+      cy.focused().type('{esc}');
+
+      cy.contains('[role="menuitem"]', HELP_MENU_ITEM).should('not.exist');
+      cy.focused().should('have.attr', 'aria-label', 'Help');
     });
 
     it('should support Enter/Space for button activation', () => {
