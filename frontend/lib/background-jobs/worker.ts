@@ -63,6 +63,7 @@ import {
   markBackgroundJobWaitingRetryAsWorker,
   setBackgroundJobStatus,
   updateBackgroundJobFileStatus,
+  updateBackgroundJobFileExpectedRows,
   recordSetupDiagnostic
 } from './repository';
 import type { BackgroundJobFileRecord, BackgroundJobWithDetails, UploadJobFailureContext, UploadJobPhase } from './types';
@@ -863,6 +864,11 @@ async function runMeasurementsPipeline(ctx: WorkerRunContext): Promise<void> {
     // made entirely of padding can't throw below after earlier chunks already
     // committed. Merely-invalid (non-blank) rows are untouched and still fail normally.
     const rawRows = parsed.data.filter(row => !isBlankMeasurementRow(row));
+
+    // Record the parsed count before the #504 empty-input guard, so a header-only file records 0 before
+    // the job fails. Committed before staging, so a batch completed on this build already has it when
+    // the recovery skip above runs on a later attempt.
+    await updateBackgroundJobFileExpectedRows(ctx.catalogPool, job.jobID, ctx.workerID, file.jobFileID, rawRows.length);
 
     // Issue #504: a header-only/blank CSV must never reach the chunk/staging loop —
     // for CLEAN_REUPLOAD, staging even one chunk triggers cleanupPreviousFileUploads'
