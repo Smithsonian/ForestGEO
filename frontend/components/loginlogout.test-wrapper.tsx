@@ -12,6 +12,7 @@ import LoginRoundedIcon from '@mui/icons-material/LoginRounded';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { Menu, MenuItem, Skeleton } from '@mui/joy';
 import { GroupAdd, ManageAccountsRounded, Public, Settings } from '@mui/icons-material';
+import { getUserInitials } from '@/components/loginlogout';
 
 interface LoginLogoutTestWrapperProps {
   session: any;
@@ -31,20 +32,12 @@ export const LoginLogoutTestWrapper: React.FC<LoginLogoutTestWrapperProps> = ({
   const [anchorSettings, setAnchorSettings] = useState<HTMLElement | null>(null);
 
   const userName = session?.user?.name;
-  const userInitials =
-    typeof userName === 'string'
-      ? (userName
-          .replace(/[^a-zA-Z- ]/g, '')
-          .match(/\b\w/g)
-          ?.join('') ?? '')
-      : '';
+  const userInitials = typeof userName === 'string' ? getUserInitials(userName) : '';
 
   if (status === 'unauthenticated') {
     return (
       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }} data-testid={'login-logout-component'}>
-        <Avatar variant="outlined" size="sm" alt={'unknown user (unauthenticated)'}>
-          UNK
-        </Avatar>
+        <Avatar variant="outlined" size="sm" alt="" />
         <Box sx={{ minWidth: 0, flex: 1 }}>
           <Typography level="title-sm">Login to access</Typography>
           <Typography level="body-xs">your information</Typography>

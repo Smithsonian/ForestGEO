@@ -63,8 +63,8 @@ describe('<LoginLogout />', () => {
     it('displays the user name, email, and initials avatar', () => {
       cy.contains('Jane Q. Public');
       cy.contains('jane.public@example.com');
-      // avatar shows initials "JQP"
-      cy.get('button').first().should('contain', 'JQP');
+      // first letter of the first and last name parts; the middle initial is dropped so the sm avatar never clips
+      cy.get('button').first().should('contain', 'JP').and('not.contain', 'JQP');
     });
 
     it('enables the settings button for a global user', () => {

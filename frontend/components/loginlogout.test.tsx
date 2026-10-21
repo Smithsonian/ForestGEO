@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { LoginLogout } from './loginlogout';
+import { LoginLogout, getUserInitials } from './loginlogout';
 import { signIn, signOut, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import ailogger from '@/ailogger';
@@ -10,6 +10,20 @@ import ailogger from '@/ailogger';
 vi.mock('next-auth/react');
 vi.mock('next/navigation');
 vi.mock('@/ailogger');
+
+// Joy's Avatar root class and the data-testid Joy's createSvgIcon stamps on its fallback Person icon
+// (@mui/joy/utils/createSvgIcon.js).
+const AVATAR_ROOT_SELECTOR = '.MuiAvatar-root';
+const FALLBACK_PERSON_ICON_TEST_ID = 'PersonIcon';
+
+const USER_INITIALS_CASES: Array<{ name: string; expected: string }> = [
+  { name: 'Alice Bob Charlie', expected: 'AC' },
+  { name: 'Mary-Jane Smith', expected: 'MS' },
+  { name: 'Stilwell, Mason S.', expected: 'SS' },
+  { name: 'José Álvarez', expected: 'JÁ' },
+  { name: 'Cher', expected: 'C' },
+  { name: '  ', expected: '' }
+];
 
 describe('LoginLogout - Functional Tests', () => {
   const mockPush = vi.fn();
@@ -57,11 +71,15 @@ describe('LoginLogout - Functional Tests', () => {
       expect(screen.getByText('your information')).toBeInTheDocument();
     });
 
-    it('MUST show UNK avatar for unknown user', () => {
-      render(<LoginLogout />);
+    it('MUST show the fallback person icon, and no text, for a signed-out user', () => {
+      const { container } = render(<LoginLogout />);
 
-      const avatar = screen.getByText('UNK');
-      expect(avatar).toBeInTheDocument();
+      const avatar = container.querySelector<HTMLElement>(AVATAR_ROOT_SELECTOR);
+      console.log(`[signed-out avatar] textContent=${JSON.stringify(avatar?.textContent)} innerHTML=${avatar?.innerHTML}`);
+      expect(avatar, 'the signed-out branch must render a Joy Avatar').not.toBeNull();
+      expect(within(avatar!).getByTestId(FALLBACK_PERSON_ICON_TEST_ID)).toBeInTheDocument();
+      // Asserting only that "UNK" is gone would pass with Joy's alt[0] fallback ("u").
+      expect(avatar!.textContent, 'neither "UNK" nor the alt-derived "u" may be rendered').toBe('');
     });
 
     it('MUST have accessible login button', () => {
@@ -486,7 +504,7 @@ describe('LoginLogout - Functional Tests', () => {
   });
 
   describe('Avatar Initials Extraction', () => {
-    it('MUST extract initials from full name', () => {
+    it('MUST use the first and last initials of a three-part name', () => {
       (useSession as any).mockReturnValue({
         data: {
           user: {
@@ -500,7 +518,7 @@ describe('LoginLogout - Functional Tests', () => {
 
       render(<LoginLogout />);
 
-      const avatar = screen.getByText('ABC');
+      const avatar = screen.getByText('AC');
       expect(avatar).toBeInTheDocument();
     });
 
@@ -572,7 +590,7 @@ describe('LoginLogout - Functional Tests', () => {
 
       render(<LoginLogout />);
 
-      const avatar = screen.getByText('MJW');
+      const avatar = screen.getByText('MW');
       expect(avatar).toBeInTheDocument();
     });
   });
@@ -728,6 +746,14 @@ describe('LoginLogout - Functional Tests', () => {
 
       localStorageClearSpy.mockRestore();
       sessionStorageClearSpy.mockRestore();
+    });
+  });
+
+  describe('getUserInitials', () => {
+    it.each(USER_INITIALS_CASES)('returns "$expected" for "$name"', ({ name, expected }) => {
+      const initials = getUserInitials(name);
+      console.log(`[getUserInitials] input=${JSON.stringify(name)} output=${JSON.stringify(initials)} expected=${JSON.stringify(expected)}`);
+      expect(initials).toBe(expected);
     });
   });
 });

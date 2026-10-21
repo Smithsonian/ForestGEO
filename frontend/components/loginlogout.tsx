@@ -16,6 +16,20 @@ import ailogger from '@/ailogger';
 import { useAppStore } from '@/config/store/appstore';
 
 const LAST_USER_STORAGE_KEY = 'forestgeo-last-user';
+const FIRST_LETTER_PATTERN = /\p{L}/u;
+const WORD_SEPARATOR_PATTERN = /\s+/;
+
+/** First letter of the first word plus first letter of the last word, so the sm Avatar never clips. */
+export function getUserInitials(name: string): string {
+  const wordInitials = name
+    .trim()
+    .split(WORD_SEPARATOR_PATTERN)
+    .map(word => word.match(FIRST_LETTER_PATTERN)?.[0])
+    .filter((letter): letter is string => letter !== undefined);
+  if (wordInitials.length === 0) return '';
+  const lastInitial = wordInitials.length > 1 ? wordInitials[wordInitials.length - 1] : '';
+  return `${wordInitials[0]}${lastInitial}`.toUpperCase();
+}
 
 export const LoginLogout = () => {
   const { data: session, status } = useSession();
@@ -59,13 +73,7 @@ export const LoginLogout = () => {
   };
 
   const userName = session?.user?.name;
-  const userInitials =
-    typeof userName === 'string'
-      ? (userName
-          .replace(/[^a-zA-Z- ]/g, '')
-          .match(/\b\w/g)
-          ?.join('') ?? '')
-      : '';
+  const userInitials = typeof userName === 'string' ? getUserInitials(userName) : '';
 
   const handleRetryLogin = () => {
     signIn('microsoft-entra-id', { redirectTo: '/dashboard' }).catch((error: any) => {
@@ -102,9 +110,7 @@ export const LoginLogout = () => {
     return (
       <Box sx={{ display: 'flex', width: '100%' }} data-testid={'login-logout-component'}>
         <Box sx={{ width: '100%' }}>
-          <Avatar variant="outlined" size="sm" alt="unknown user (unauthenticated)">
-            UNK
-          </Avatar>
+          <Avatar variant="outlined" size="sm" alt="" />
           <Typography level="title-sm">Login to access</Typography>
           <Typography level="body-xs" sx={{ mb: 1 }}>
             your information
