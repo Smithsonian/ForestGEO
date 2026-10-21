@@ -191,8 +191,12 @@ vi.mock('@/components/uploadsystem/segments/uploadstart', () => ({
 }));
 
 vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
-  default: ({ uploadForm, acceptedFiles, handleAddFile, handleRemoveFile, handleReplaceFile, handleInitialSubmit }: any) => (
+  default: ({ uploadForm, acceptedFiles, handleAddFile, handleRemoveFile, handleReplaceFile, handleInitialSubmit, dataViewActive, setDataViewActive }: any) => (
     <div data-testid="upload-parse-files">
+      <div data-testid="data-view-active">{dataViewActive}</div>
+      <div data-testid="selected-file-name">{acceptedFiles[dataViewActive - 1]?.name ?? 'none'}</div>
+      <button onClick={() => setDataViewActive(acceptedFiles.length)}>Select Last File</button>
+      <button onClick={() => setDataViewActive(2)}>Select Second File</button>
       <div data-testid="upload-parse-files-form-value">{uploadForm || 'none'}</div>
       <div data-testid="file-count">{acceptedFiles.length}</div>
       {acceptedFiles.map((file: any, index: number) => (
@@ -213,6 +217,17 @@ vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
         }}
       >
         Add File
+      </button>
+      <button
+        onClick={() => {
+          const numberedFile = new File(['tag,stemtag,quadrat,dbh,date\nT001,S1,Q1,10,2024-01-01\n'], `file-${acceptedFiles.length + 1}.csv`, {
+            type: 'text/csv'
+          });
+          Object.assign(numberedFile, { path: `/${numberedFile.name}` });
+          handleAddFile(numberedFile as any);
+        }}
+      >
+        Add Numbered File
       </button>
       <button
         onClick={() => {
@@ -443,6 +458,54 @@ describe('UploadParent - Hook Integration Tests', () => {
       await waitFor(() => {
         expect(screen.getByTestId('file-count')).toHaveTextContent('1');
       });
+    });
+
+    it.each([
+      ['the first file', 0],
+      ['the selected last file', 1]
+    ])('clamps the selected file to the remaining one after removing %s of two (#524 item 5)', async (_label, removedIndex) => {
+      const user = userEvent.setup();
+      const EXPECTED_SELECTED_FILE_VIEW = '1';
+      render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
+
+      await user.click(screen.getByText('Add File'));
+      await user.click(screen.getByText('Add File'));
+      await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('2'));
+      await user.click(screen.getByText('Select Last File'));
+      expect(screen.getByTestId('data-view-active')).toHaveTextContent('2');
+
+      await user.click(screen.getAllByText('Remove')[removedIndex]);
+      await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('1'));
+      console.log(`[remove ${_label}] data-view-active=${screen.getByTestId('data-view-active').textContent}`);
+
+      expect(screen.getByTestId('data-view-active'), 'the selected-file index must point at the one remaining file').toHaveTextContent(
+        EXPECTED_SELECTED_FILE_VIEW
+      );
+    });
+
+    it('keeps the same file selected when an earlier file is removed from three (#524 item 5)', async () => {
+      const user = userEvent.setup();
+      const SECOND_FILE_VIEW = '2';
+      const FIRST_FILE_VIEW = '1';
+      const SECOND_FILE_NAME = 'file-2.csv';
+      render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
+
+      await user.click(screen.getByText('Add Numbered File'));
+      await user.click(screen.getByText('Add Numbered File'));
+      await user.click(screen.getByText('Add Numbered File'));
+      await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('3'));
+      await user.click(screen.getByText('Select Second File'));
+      expect(screen.getByTestId('data-view-active')).toHaveTextContent(SECOND_FILE_VIEW);
+      expect(screen.getByTestId('selected-file-name')).toHaveTextContent(SECOND_FILE_NAME);
+
+      await user.click(screen.getAllByText('Remove')[0]);
+      await waitFor(() => expect(screen.getByTestId('file-count')).toHaveTextContent('2'));
+      console.log(
+        `[remove first of three] data-view-active=${screen.getByTestId('data-view-active').textContent} selected=${screen.getByTestId('selected-file-name').textContent}`
+      );
+
+      expect(screen.getByTestId('data-view-active'), 'the tab index must shift down with the removed earlier file').toHaveTextContent(FIRST_FILE_VIEW);
+      expect(screen.getByTestId('selected-file-name'), 'the previously selected file must still be the one shown').toHaveTextContent(SECOND_FILE_NAME);
     });
 
     it('should clear all files when returning to start', async () => {

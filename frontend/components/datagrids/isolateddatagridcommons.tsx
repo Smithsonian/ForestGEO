@@ -65,6 +65,7 @@ import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegri
 import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS, getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
+import { NEW_ROW_ADDED_MESSAGE, ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
   if (value === undefined || value === null || value === '') {
@@ -239,8 +240,7 @@ function withImmediateEditCellCommit(columns: GridColDef[]): GridColDef[] {
   });
 }
 
-export const ROW_UPDATED_MESSAGE = 'Row successfully updated!';
-export const NEW_ROW_ADDED_MESSAGE = 'New row added!';
+export { NEW_ROW_ADDED_MESSAGE, ROW_UPDATED_MESSAGE };
 export const NO_CHANGES_SAVED_MESSAGE = 'No changes were saved: the server recorded no update for this row.';
 export const GRID_REFRESH_FAILED_MESSAGE = 'The grid could not refresh';
 
@@ -1137,7 +1137,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           setRows(prevRows => prevRows.filter(row => row.id !== id));
           infinite.removeRow(id);
           setSnackbar({
-            children: 'Row successfully deleted',
+            children: ROW_DELETED_MESSAGE,
             severity: 'success'
           });
           triggerRefresh([gridType as keyof UnifiedValidityFlags]);
