@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { registerSubmittedUploadJob, resetUploadJobCompletionTrackerForTests, takeNewlyFinishedUploadJobIDs } from './uploadjobcompletiontracker';
+import { BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
+import {
+  ACTIVE_JOB_STATUSES,
+  TERMINAL_JOB_STATUSES,
+  registerSubmittedUploadJob,
+  resetUploadJobCompletionTrackerForTests,
+  takeNewlyFinishedUploadJobIDs
+} from './uploadjobcompletiontracker';
 
 const REGISTERED_JOB_ID = 101;
 const OBSERVED_JOB_ID = 202;
@@ -15,6 +22,20 @@ const TERMINAL_STATUS_CASES = [
 describe('uploadjobcompletiontracker (#525 item 6)', () => {
   beforeEach(() => {
     resetUploadJobCompletionTrackerForTests();
+  });
+
+  it.each(BACKGROUND_JOB_STATUSES)('classifies the shared job status "%s" as exactly one of active or terminal', status => {
+    const isActive = ACTIVE_JOB_STATUSES.has(status);
+    const isTerminal = TERMINAL_JOB_STATUSES.has(status);
+    console.log(`[#525 F5] shared status ${status}: active=${isActive} terminal=${isTerminal}`);
+    expect(isActive !== isTerminal, `status "${status}" must be in exactly one set`).toBe(true);
+  });
+
+  it('holds no status outside the shared job status list', () => {
+    const sharedStatuses = new Set<string>(BACKGROUND_JOB_STATUSES);
+    for (const status of [...ACTIVE_JOB_STATUSES, ...TERMINAL_JOB_STATUSES]) {
+      expect(sharedStatuses.has(status), `"${status}" is not a shared background job status`).toBe(true);
+    }
   });
 
   function poll(jobs: Array<{ jobID: number; status: string }>, label: string): number[] {

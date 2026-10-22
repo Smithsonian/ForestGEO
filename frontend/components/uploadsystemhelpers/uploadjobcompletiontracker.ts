@@ -1,3 +1,5 @@
+import { BACKGROUND_JOB_STATUSES, NON_TERMINAL_BACKGROUND_JOB_STATUSES, type BackgroundJobStatus } from '@/lib/background-jobs/types';
+
 /**
  * Tab-lifetime record of background upload jobs, so the job badge refreshes
  * the open grids once per finished job. Job IDs are unique across schemas
@@ -5,8 +7,10 @@
  * job counts if this tab submitted it or saw it active, and a finished job is
  * marked handled in the same synchronous call that returns it.
  */
-export const ACTIVE_JOB_STATUSES: ReadonlySet<string> = new Set(['queued', 'running', 'cancel_requested', 'waiting_retry']);
-export const TERMINAL_JOB_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled']);
+export const ACTIVE_JOB_STATUSES: ReadonlySet<string> = new Set<BackgroundJobStatus>(NON_TERMINAL_BACKGROUND_JOB_STATUSES);
+export const TERMINAL_JOB_STATUSES: ReadonlySet<string> = new Set<BackgroundJobStatus>(
+  BACKGROUND_JOB_STATUSES.filter(status => !ACTIVE_JOB_STATUSES.has(status))
+);
 
 interface PolledUploadJob {
   jobID: number;
