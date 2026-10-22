@@ -705,6 +705,7 @@ export default function DashboardPage() {
             plotName={currentPlot.plotName}
             siteName={currentSite.siteName}
             isLoading={false}
+            userRole={userRole}
             onCensusDelete={handleCensusDelete}
             onAddCensus={handleAddCensus}
             onSelectCensus={census => {
