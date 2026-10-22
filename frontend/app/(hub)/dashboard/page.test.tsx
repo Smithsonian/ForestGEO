@@ -15,6 +15,9 @@ import DashboardPage from './page';
 import { useSession } from 'next-auth/react';
 import { useOrgCensusContext, usePlotContext, useSiteContext, useSiteListContext } from '@/app/contexts/compat-hooks';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
+import { useAppStore } from '@/config/store/appstore';
+import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE } from '@/config/censusdeletion';
+import { HTTPResponses } from '@/config/macros';
 
 // Mock dependencies
 vi.mock('next-auth/react');
@@ -758,6 +761,71 @@ describe('Enhanced Dashboard Page', () => {
       });
       // Non-global users never inherit the catalog list.
       expect(screen.queryByText(catalogSites[0].siteName)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Census delete rejections (#525 items 2+3)', () => {
+    const CLEAR_CENSUS_URL = '/api/clearcensus';
+    const CLEAR_CENSUS_CONFLICT_MESSAGE = 'Only the latest census can be cleared. Delete newer censuses first.';
+    const SERVER_INTERNAL_DETAIL = 'ER_LOCK_DEADLOCK in clearcensusmsmts';
+    const DELETABLE_CENSUS = {
+      plotID: 1,
+      plotCensusNumber: 1,
+      censusIDs: [1],
+      dateRanges: [{ censusID: 1, startDate: new Date('2023-01-01'), endDate: new Date('2023-12-31') }],
+      description: 'Only census',
+      isActive: true
+    };
+
+    function routeClearCensusTo(clearCensusResponse: Response) {
+      vi.mocked(global.fetch).mockImplementation((url: any) =>
+        String(url) === CLEAR_CENSUS_URL ? Promise.resolve(clearCensusResponse) : Promise.resolve({ ok: true, json: () => Promise.resolve([]) } as Response)
+      );
+    }
+
+    async function deleteTheOnlyCensus() {
+      const user = userEvent.setup();
+      render(<DashboardPage />);
+      await user.click(await screen.findByRole('button', { name: 'More actions for census 1' }));
+      await user.click(await screen.findByRole('menuitem', { name: /Delete census/ }));
+      await user.click(await screen.findByRole('button', { name: 'Delete Census' }));
+    }
+
+    beforeEach(() => {
+      vi.mocked(useSession).mockReturnValue({
+        data: { ...mockSession, user: { ...mockSession.user, userStatus: 'global' } },
+        status: 'authenticated',
+        update: vi.fn()
+      } as any);
+      vi.mocked(useOrgCensusContext).mockReturnValue(undefined as any);
+      useAppStore.getState().setCensusList([DELETABLE_CENSUS]);
+    });
+
+    afterEach(() => {
+      useAppStore.getState().setCensusList([]);
+    });
+
+    it('shows a 409 body error verbatim', async () => {
+      routeClearCensusTo(new Response(JSON.stringify({ error: CLEAR_CENSUS_CONFLICT_MESSAGE }), { status: HTTPResponses.CONFLICT }));
+      await deleteTheOnlyCensus();
+
+      expect(await screen.findByText(CLEAR_CENSUS_CONFLICT_MESSAGE)).toBeInTheDocument();
+      expect(screen.queryByText(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE)).not.toBeInTheDocument();
+    });
+
+    it('shows the generic text for a 4xx whose body is not JSON', async () => {
+      routeClearCensusTo(new Response('<html>Not Found</html>', { status: HTTPResponses.NOT_FOUND }));
+      await deleteTheOnlyCensus();
+
+      expect(await screen.findByText(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE)).toBeInTheDocument();
+    });
+
+    it('shows the generic text for a 500 and never leaks its internal detail', async () => {
+      routeClearCensusTo(new Response(JSON.stringify({ error: SERVER_INTERNAL_DETAIL }), { status: HTTPResponses.INTERNAL_SERVER_ERROR }));
+      await deleteTheOnlyCensus();
+
+      expect(await screen.findByText(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE)).toBeInTheDocument();
+      expect(screen.queryByText(SERVER_INTERNAL_DETAIL)).not.toBeInTheDocument();
     });
   });
 

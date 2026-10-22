@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { CENSUS_DELETE_ADMIN_ONLY_REASON, CENSUS_DELETE_INACTIVE_REASON, CENSUS_DELETE_LATEST_ONLY_REASON, getCensusDeleteBlockReason } from './censusdeletion';
+import {
+  CENSUS_DELETE_ADMIN_ONLY_REASON,
+  CENSUS_DELETE_INACTIVE_REASON,
+  CENSUS_DELETE_LATEST_ONLY_REASON,
+  getCensusDeleteBlockReason,
+  readCensusDeleteRejectionMessage
+} from './censusdeletion';
+import { HTTPResponses } from '@/config/macros';
 import type { OrgCensusRDS } from '@/lib/db/definitions/timekeeping';
 
 const PLOT_ID = 1;
@@ -44,5 +51,43 @@ describe('getCensusDeleteBlockReason (#525 items 2+3)', () => {
     const reason = getCensusDeleteBlockReason(LATEST_ACTIVE, CENSUS_LIST, userStatus);
     console.log(`[#525 items 2+3] ${userStatus} deleting census ${LATEST_ACTIVE.plotCensusNumber}: ${reason}`);
     expect(reason).toBeNull();
+  });
+});
+
+describe('readCensusDeleteRejectionMessage (#525 items 2+3)', () => {
+  const CONFLICT_MESSAGE = 'Only the latest census can be cleared. Delete newer censuses first.';
+  const LOCK_MESSAGE = 'Another census clear is already running for this plot.';
+  const UNEXPECTED_READ_FAILURE = new TypeError('body stream already read');
+
+  it('returns the error field of a 4xx JSON body', async () => {
+    const response = new Response(JSON.stringify({ error: CONFLICT_MESSAGE }), { status: HTTPResponses.CONFLICT });
+    const message = await readCensusDeleteRejectionMessage(response);
+    console.log(`[#525 items 2+3] 409 error body -> ${message}`);
+    expect(message).toBe(CONFLICT_MESSAGE);
+  });
+
+  it('falls back to the message field when error is absent', async () => {
+    const response = new Response(JSON.stringify({ message: LOCK_MESSAGE }), { status: HTTPResponses.CONFLICT });
+    expect(await readCensusDeleteRejectionMessage(response)).toBe(LOCK_MESSAGE);
+  });
+
+  it('returns null for a 4xx body that is not JSON', async () => {
+    const response = new Response('<html>Not Found</html>', { status: HTTPResponses.NOT_FOUND });
+    expect(await readCensusDeleteRejectionMessage(response)).toBeNull();
+  });
+
+  it('returns null for a 4xx JSON body with neither field', async () => {
+    const response = new Response(JSON.stringify({ detail: 'nope' }), { status: HTTPResponses.FORBIDDEN });
+    expect(await readCensusDeleteRejectionMessage(response)).toBeNull();
+  });
+
+  it('returns null for a 5xx even when it carries an error field', async () => {
+    const response = new Response(JSON.stringify({ error: 'ER_LOCK_DEADLOCK in clearcensusmsmts' }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    expect(await readCensusDeleteRejectionMessage(response)).toBeNull();
+  });
+
+  it('rethrows a body-read failure that is not a JSON SyntaxError', async () => {
+    const response = { status: HTTPResponses.CONFLICT, json: async () => Promise.reject(UNEXPECTED_READ_FAILURE) } as unknown as Response;
+    await expect(readCensusDeleteRejectionMessage(response)).rejects.toBe(UNEXPECTED_READ_FAILURE);
   });
 });
