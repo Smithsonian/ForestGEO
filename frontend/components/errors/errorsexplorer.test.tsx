@@ -11,7 +11,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // row set, fixed in StyledDataGridMock.
 configure({ asyncUtilTimeout: 5000 });
 
-import { formatErrorComparison, formatOptionalMeasurement, getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorsexplorer';
+import {
+  ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS,
+  formatErrorComparison,
+  formatOptionalMeasurement,
+  getUploadedCodesValue,
+  hasCodesMismatch,
+  joinCodesArray,
+  parseCodesString
+} from './errorsexplorer';
 import type { ApplyResult, EditPlan } from '@/config/editplan/types';
 import type { UseEditPreviewFlowReturn } from '@/app/hooks/useEditPreviewFlow';
 import type { UndoRevertOutcome } from '@/components/editplan/undotoast';
@@ -217,6 +225,7 @@ interface RenderedGridProps {
   columns: any[];
   processRowUpdate?: (newRow: Record<string, unknown>, oldRow: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
   slots?: any;
+  initialState?: { columns?: { columnVisibilityModel?: Record<string, boolean> } };
 }
 
 // What the mocked grid most recently committed. Updated from a layout effect so
@@ -378,7 +387,7 @@ vi.mock('@/config/styleddatagrid', async () => {
       // Layout effects run in the same commit as the DOM mutation. Unlike the old
       // passive effect they are visible before waitFor can react to that commit;
       // unlike a render-time assignment they never publish speculative props.
-      const committedProps = { rows, columns, processRowUpdate: props.processRowUpdate, slots: props.slots };
+      const committedProps = { rows, columns, processRowUpdate: props.processRowUpdate, slots: props.slots, initialState: props.initialState };
       latestGridProps = committedProps;
 
       // Expose test hooks for both direct processRowUpdate coverage and the
@@ -413,7 +422,7 @@ vi.mock('@/config/styleddatagrid', async () => {
       return () => {
         if (latestGridProps === committedProps) latestGridProps = null;
       };
-    }, [rows, columns, props.processRowUpdate, props.slots]);
+    }, [rows, columns, props.processRowUpdate, props.slots, props.initialState]);
 
     return (
       <div data-testid="styled-grid">
@@ -992,6 +1001,34 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
   // response for this file, so driving those responses through the real
   // HTTP-status/body contract (409 + freshPlan, vs. a plain error body)
   // exercises requestEditRevert's actual parsing instead of assuming it.
+  it('puts Codes right after Actions for an editor, and first for a user who cannot edit (#525 item 7)', async () => {
+    mockSessionUserStatus = 'field crew';
+    const editorView = await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    const editorFields = (latestGridProps?.columns ?? []).map((column: { field: string }) => column.field);
+    editorView.unmount();
+
+    mockSessionUserStatus = 'pending';
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    const readOnlyFields = (latestGridProps?.columns ?? []).map((column: { field: string }) => column.field);
+
+    console.log(`[#525 item 7] editor columns: ${editorFields.join(', ')} | read-only columns: ${readOnlyFields.join(', ')}`);
+    expect(editorFields.slice(0, 2)).toEqual(['actions', 'attributes']);
+    expect(readOnlyFields[0]).toBe('attributes');
+    expect(readOnlyFields).not.toContain('actions');
+  });
+
+  it('starts with the plot-coordinate and prior-census columns hidden through the grid initial state (#525 item 7)', async () => {
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    const visibilityModel = latestGridProps?.initialState?.columns?.columnVisibilityModel;
+
+    console.log(`[#525 item 7] initial columnVisibilityModel: ${JSON.stringify(visibilityModel)}`);
+    expect(ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS).toEqual({ stemPlotX: false, stemPlotY: false, priorDBH: false, priorHOM: false, homChanged: false });
+    expect(visibilityModel).toEqual(ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS);
+  });
+
   describe('undo revert outcome handling (#427)', () => {
     async function mountExplorerWithUndoToast() {
       mockBeginEdit.mockResolvedValueOnce({
