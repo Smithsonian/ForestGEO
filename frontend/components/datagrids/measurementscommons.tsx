@@ -90,6 +90,7 @@ import { EditToolbar } from '../client/datagridelements';
 import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
+import { useDeleteAfterCancelGuard } from '@/components/datagrids/hooks/usedeleteaftercancelguard';
 import { getSelectableOptionsForField, loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
@@ -283,6 +284,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const { isMountedRef } = useIsMounted();
 
   const apiRef = useGridApiRef();
+  const { markCancelled, isDeleteGuarded } = useDeleteAfterCancelGuard();
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
   const useAutoMeasurementRowHeight = useMemo(() => shouldUseAutoMeasurementRowHeight(typeof navigator === 'undefined' ? undefined : navigator.userAgent), []);
 
@@ -1091,10 +1093,10 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const handleDeleteClick = useCallback(
     (id: GridRowId) => () => {
-      if (locked) return;
+      if (locked || isDeleteGuarded(id)) return;
       openConfirmationDialog('delete', id);
     },
-    [locked, openConfirmationDialog]
+    [locked, openConfirmationDialog, isDeleteGuarded]
   );
 
   useEffect(() => {
@@ -1150,6 +1152,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const handleCancelClick = useCallback(
     (id: GridRowId, event?: React.MouseEvent) => {
       if (locked) return;
+      markCancelled(id);
       event?.preventDefault();
       const row = rows.find(r => r.id === id);
       if (row?.isNew) {
@@ -1167,11 +1170,23 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       }
       if (handleSelectQuadrat) handleSelectQuadrat(null);
     },
-    [locked, rows, rowCount, paginationModel, isNewRowAdded, handleSelectQuadrat, setRows, setIsNewRowAdded, setPaginationModel, setRowModesModel]
+    [
+      locked,
+      rows,
+      rowCount,
+      paginationModel,
+      isNewRowAdded,
+      handleSelectQuadrat,
+      setRows,
+      setIsNewRowAdded,
+      setPaginationModel,
+      setRowModesModel,
+      markCancelled
+    ]
   );
 
   const getEnhancedCellAction = useCallback(
-    (type: string, icon: React.ReactElement, onClick: React.MouseEventHandler<HTMLButtonElement>) => (
+    (type: string, icon: React.ReactElement, onClick: React.MouseEventHandler<HTMLButtonElement>, disabled = false) => (
       <CellItemContainer>
         <Tooltip
           disableInteractive
@@ -1189,7 +1204,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           arrow
           placement="top"
         >
-          <GridActionsCellItem icon={icon} label={type} onClick={onClick} />
+          <GridActionsCellItem icon={icon} label={type} onClick={onClick} disabled={disabled} />
         </Tooltip>
       </CellItemContainer>
     ),
@@ -1213,10 +1228,13 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           ];
         }
 
-        return [getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id)), getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id))];
+        return [
+          getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id)),
+          getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id), isDeleteGuarded(id))
+        ];
       }
     };
-  }, [rowModesModel, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, handleDeleteClick]);
+  }, [rowModesModel, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, handleDeleteClick, isDeleteGuarded]);
 
   const validationStatusColumn: GridColDef = useMemo(
     () => ({
