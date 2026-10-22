@@ -119,3 +119,23 @@ describe('UploadParentModal ArcGIS mode (unchanged by the reorder)', () => {
     expect(receivedProps[0].overrideSourceFormat).toBe(SourceFormat.arcgis_xlsx);
   });
 });
+
+describe('UploadParentModal Revisions description (#525 item 5)', () => {
+  const MEASUREMENTS_REVISION_DESCRIPTION =
+    'Updates measurements that match an existing stem (by Stem ID, or by Tree Tag + Stem Tag, case-insensitive) and adds any new rows from the file.';
+  const SPECIES_REVISION_DESCRIPTION = 'Updates existing records matched by SpeciesCode (case-insensitive) and adds any new rows from the file.';
+
+  it('describes measurement matching by Stem ID or Tree Tag + Stem Tag, never by StemGUID', () => {
+    renderModal({ formType: FormType.measurements, sourceFormat: SourceFormat.csv });
+    const dialogText = document.body.textContent ?? '';
+    console.log(`[#525 item 5] measurements chooser mentions StemGUID: ${dialogText.includes('StemGUID')}`);
+
+    expect(screen.getByText(MEASUREMENTS_REVISION_DESCRIPTION)).toBeInTheDocument();
+    expect(dialogText).not.toContain('StemGUID');
+  });
+
+  it('keeps the species sentence exactly as it was', () => {
+    renderModal({ formType: FormType.species, sourceFormat: SourceFormat.csv });
+    expect(screen.getByText(SPECIES_REVISION_DESCRIPTION)).toBeInTheDocument();
+  });
+});
