@@ -756,8 +756,7 @@ function UploadParentInner(props: UploadParentProps) {
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
             schema={currentSite?.schemaName || ''}
-            uploadCompleteMessage={uploadState.state.uploadCompleteMessage}
-            setUploadCompleteMessage={uploadState.setUploadCompleteMessage}
+            setUploadOutcome={uploadState.setUploadOutcome}
             setUploadError={(error: any) => errorHandling.setError(error)}
             setErrorComponent={errorHandling.setErrorComponent}
             setAllRowToCMID={setAllRowToCMID}

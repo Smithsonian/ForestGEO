@@ -91,6 +91,31 @@ export interface UploadReviewFilesProps {
   handleReplaceFile: (fileIndex: number, newFile: FileWithPath) => Promise<void>;
 }
 
+/** Counts a revisions apply reports; shared by the apply screen and the completion screen. */
+export interface RevisionApplyOutcomeCounts {
+  updatedCount: number;
+  deletedDuplicateCount: number;
+  insertedCount: number;
+  failedRowCount: number;
+  skippedCount: number;
+  applyErrorCount: number;
+  hasDuplicateCleanupOnlyRows: boolean;
+}
+
+/** Reconciled totals: insertedRows + failedRows === sourceRows, read back from the database. */
+export interface IngestionUploadOutcome {
+  kind: 'ingestion';
+  sourceRows: number;
+  insertedRows: number;
+  failedRows: number;
+}
+
+export interface RevisionsUploadOutcome extends RevisionApplyOutcomeCounts {
+  kind: 'revisions';
+}
+
+export type UploadOutcome = IngestionUploadOutcome | RevisionsUploadOutcome;
+
 export interface UploadFireProps {
   // contexts
   schema: string;
@@ -102,7 +127,6 @@ export interface UploadFireProps {
   acceptedFiles: FileWithStream[];
   parsedData: FileCollectionRowSet;
   arcgisImportSession?: ArcgisImportReference | null;
-  uploadCompleteMessage: string;
   selectedDelimiters: Record<string, string>;
   // Per-file confirmed column mappings from the parse step. When omitted, falls back to legacy header aliasing.
   columnMappings?: Record<string, ColumnMapping>;
@@ -110,7 +134,7 @@ export interface UploadFireProps {
   quadratOverlapAcknowledgment: QuadratOverlapAcknowledgment | null;
   onQuadratOverlapAcknowledgmentRequired: (summaries: QuadratOverlapSummary[]) => void;
   // state setters
-  setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
+  setUploadOutcome: Dispatch<SetStateAction<UploadOutcome | undefined>>;
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
   setUploadError: React.Dispatch<React.SetStateAction<any>>;
   setErrorComponent: React.Dispatch<React.SetStateAction<string>>;

@@ -121,6 +121,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   uploadForm,
   uploadMode,
   sourceFormat,
+  setUploadOutcome,
   setIsDataUnsaved,
   schema,
   setUploadError,
@@ -1349,6 +1350,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       processedChunks === 0;
 
     if (!hasFiles) {
+      setUploadOutcome(undefined);
       if (lastPreparedUploadAttemptRef.current || uploadStartedRef.current || batchProcessingStartedRef.current) {
         ailogger.info('Upload queue cleared; resetting upload lifecycle guards');
       }
@@ -1363,6 +1365,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     }
 
     if (isFreshAttempt) {
+      setUploadOutcome(undefined);
       lastPreparedUploadAttemptRef.current = uploadAttemptKey;
       uploadStartedRef.current = false;
       batchProcessingStartedRef.current = false;
@@ -1396,7 +1399,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       uploadStartedRef.current = false;
       batchProcessingStartedRef.current = false;
     }
-  }, [acceptedFiles.length, completedChunks, processed, processedChunks, totalChunks, uploadAttemptKey, uploaded]);
+  }, [acceptedFiles.length, completedChunks, processed, processedChunks, setUploadOutcome, totalChunks, uploadAttemptKey, uploaded]);
 
   useEffect(() => {
     // Use ref-based mount tracking to survive Fast Refresh during development
@@ -2211,6 +2214,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               );
             }
 
+            setUploadOutcome({ kind: 'ingestion', sourceRows: totalExpectedRows, insertedRows: totalSessionProcessed, failedRows: totalSessionFailed });
+
             setVerificationStatus(
               `✓ Verification complete: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed (${totalSessionAccounted} total - matches ${totalExpectedRows} source rows)`
             );
@@ -2292,6 +2297,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     queue,
     setReviewState,
     setUploadError,
+    setUploadOutcome,
     fetchWithTimeout,
     buildClientResponseError,
     getRequiredUploadSessionId,
