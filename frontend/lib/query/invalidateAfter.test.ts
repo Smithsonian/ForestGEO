@@ -123,7 +123,7 @@ describe('invalidateAfter', () => {
     expect(fired.has('dashboard:progress')).toBe(true);
   });
 
-  it('upload-job fans out to every reingest namespace plus summary, quadrats, trees, stems and progress (#525 item 6)', async () => {
+  it('upload-job fans out to every reingest namespace plus summary, quadrats, trees, stems, the stem taxonomies view and progress (#525 item 6)', async () => {
     await invalidateAfter('reingest', scope);
     const reingestPrefixes = calls.map(c => c.prefix);
     calls.length = 0;
@@ -134,7 +134,7 @@ describe('invalidateAfter', () => {
     console.log(`[#525 item 6] reingest=${reingestPrefixes.join(',')} upload-job=${uploadJobPrefixes.join(',')}`);
     for (const prefix of reingestPrefixes) expect(uploadJobPrefixes, `upload-job must include reingest's ${prefix}`).toContain(prefix);
     expect(new Set(uploadJobPrefixes)).toEqual(
-      new Set([...reingestPrefixes, 'grid:summary', 'grid:quadrats', 'grid:trees', 'grid:stems', 'dashboard:progress'])
+      new Set([...reingestPrefixes, 'grid:summary', 'grid:quadrats', 'grid:trees', 'grid:stems', 'grid:stemtaxonomiesview', 'dashboard:progress'])
     );
     expect(uploadJobPrefixes).toHaveLength(new Set(uploadJobPrefixes).size);
   });

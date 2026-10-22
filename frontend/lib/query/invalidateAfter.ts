@@ -48,6 +48,7 @@ const FAN_OUT: Record<MutationKind, readonly QueryNamespace[]> = {
     'grid:quadrats',
     'grid:trees',
     'grid:stems',
+    'grid:stemtaxonomiesview',
     'dashboard:metrics',
     'dashboard:dataquality',
     'dashboard:progress'
