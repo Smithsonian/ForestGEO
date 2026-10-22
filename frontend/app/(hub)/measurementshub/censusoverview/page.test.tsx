@@ -67,6 +67,14 @@ const LATEST_CENSUS = {
   description: 'Census 2',
   isActive: true
 };
+const INACTIVE_NEWER_CENSUS = {
+  plotID: 1,
+  plotCensusNumber: 3,
+  censusIDs: [103],
+  dateRanges: [{ censusID: 103, startDate: new Date('2026-01-01'), endDate: new Date('2026-12-31') }],
+  description: 'Census 3 (inactive)',
+  isActive: false
+};
 const CENSUS_LIST = [EARLIER_CENSUS, LATEST_CENSUS];
 
 function seedSelection(currentCensus: typeof LATEST_CENSUS) {
@@ -107,6 +115,18 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
     render(<CensusOverviewPage />);
 
     expect(screen.getByTestId(DELETE_BUTTON_TESTID)).not.toBeDisabled();
+  });
+
+  it('MUST enable the delete action for the latest ACTIVE census even when a higher-numbered inactive census exists (#525)', () => {
+    useAppStore.getState().setSite(TEST_SITE);
+    useAppStore.getState().setPlot(TEST_PLOT);
+    useAppStore.getState().setCensusList([EARLIER_CENSUS, LATEST_CENSUS, INACTIVE_NEWER_CENSUS]);
+    useAppStore.getState().setCensus(LATEST_CENSUS);
+    render(<CensusOverviewPage />);
+
+    const deleteButton = screen.getByTestId(DELETE_BUTTON_TESTID);
+    console.log(`[#525 items 2+3] Census Hub delete disabled with an inactive census 3 present: ${(deleteButton as HTMLButtonElement).disabled}`);
+    expect(deleteButton).not.toBeDisabled();
   });
 
   it('MUST disable the delete action (with explanatory tooltip) for a non-latest census', async () => {
