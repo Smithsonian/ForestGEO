@@ -646,6 +646,32 @@ describe('one confirmation (#525 item 9)', () => {
     expect(onApply).toHaveBeenCalledWith(false);
   });
 
+  it('starts every opening of the dialog with the new rows unticked, and applies without them after a cancelled tick', async () => {
+    const user = userEvent.setup();
+    const { onApply } = renderMatch({
+      matchedRows: CHANGED_ROWS,
+      newRows: NEW_ROWS,
+      counts: { ...EMPTY_REVISION_MATCH_COUNTS, matched: 2, matchedWithChanges: 2, new: 2, total: 4 },
+      bulkPlan: buildBulkPlan({ rowCount: 4 })
+    });
+    const newRowsCheckboxName = 'Also insert 2 new rows';
+
+    await user.click(screen.getByTestId('revision-match-apply'));
+    await user.click(screen.getByRole('checkbox', { name: newRowsCheckboxName }));
+    expect(screen.getByRole('checkbox', { name: newRowsCheckboxName })).toBeChecked();
+    await user.click(screen.getByTestId('impact-summary-cancel'));
+
+    await user.click(screen.getByTestId('revision-match-apply'));
+    const checkedOnReopen = (screen.getByRole('checkbox', { name: newRowsCheckboxName }) as HTMLInputElement).checked;
+    console.log(`[#525 F3] new rows ticked after cancel and reopen: ${checkedOnReopen}`);
+    expect(checkedOnReopen).toBe(false);
+    expect(screen.getByTestId('impact-summary-apply-row-count')).toHaveTextContent('This apply will write 2 rows.');
+
+    await user.click(screen.getByTestId('impact-summary-apply'));
+    expect(onApply).toHaveBeenCalledTimes(1);
+    expect(onApply).toHaveBeenCalledWith(false);
+  });
+
   it('keeps confirm disabled for a new-only upload until the box is checked', async () => {
     const user = userEvent.setup();
     const { onApply } = renderMatch({

@@ -118,6 +118,11 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
   const [includeNewRows, setIncludeNewRows] = useState(false);
   const [impactSummaryOpen, setImpactSummaryOpen] = useState(false);
 
+  const openImpactSummary = () => {
+    setIncludeNewRows(false);
+    setImpactSummaryOpen(true);
+  };
+
   const rowsWithChanges = matchedRows.filter(r => Object.keys(r.changes).length > 0);
   const rowsWithDuplicateCleanupOnly = matchedRows.filter(r => Object.keys(r.changes).length === 0 && hasDuplicateCleanup(r));
   const rowsNoChanges = matchedRows.filter(r => Object.keys(r.changes).length === 0 && !hasDuplicateCleanup(r));
@@ -474,7 +479,7 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
           variant="solid"
           color="primary"
           disabled={!canApply}
-          onClick={() => (bulkPlan ? setImpactSummaryOpen(true) : onApply(false))}
+          onClick={() => (bulkPlan ? openImpactSummary() : onApply(false))}
           data-testid="revision-match-apply"
         >
           {applyButtonLabel}
