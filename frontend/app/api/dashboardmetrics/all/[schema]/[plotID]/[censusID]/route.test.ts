@@ -455,8 +455,8 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       exec.mockResolvedValueOnce([{ CountTrees: 10 }]);
       exec.mockResolvedValueOnce([{ CountStems: 15 }]);
 
-      // First-census classification query (multi-stems + new recruits, current census only)
-      exec.mockResolvedValueOnce([{ CountMultiStems: 5, CountNewRecruits: 15 }]);
+      // First-census classification query (multi-stems, current census only)
+      exec.mockResolvedValueOnce([{ CountMultiStems: 5 }]);
 
       await callGET('testschema', '1', '1');
 
@@ -488,7 +488,7 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       exec.mockResolvedValueOnce([{ PersonnelCount: 1 }]);
       exec.mockResolvedValueOnce([{ CountTrees: 52 }]);
       exec.mockResolvedValueOnce([{ CountStems: 52 }]);
-      exec.mockResolvedValueOnce([{ CountMultiStems: 0, CountNewRecruits: 52 }]);
+      exec.mockResolvedValueOnce([{ CountMultiStems: 0 }]);
 
       await callGET('testschema', '7', '9');
 
@@ -533,7 +533,7 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       exec.mockResolvedValueOnce([{ PersonnelCount: 1 }]);
       exec.mockResolvedValueOnce([{ CountTrees: 1 }]);
       exec.mockResolvedValueOnce([{ CountStems: 1 }]);
-      exec.mockResolvedValueOnce([{ CountMultiStems: 0, CountNewRecruits: 1 }]);
+      exec.mockResolvedValueOnce([{ CountMultiStems: 0 }]);
 
       await callGET('testschema', '7', '9');
 
@@ -598,7 +598,7 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       exec.mockResolvedValueOnce([{ PersonnelCount: 2 }]);
       exec.mockResolvedValueOnce([{ CountTrees: 50 }]);
       exec.mockResolvedValueOnce([{ CountStems: 80 }]);
-      exec.mockResolvedValueOnce([{ CountNewRecruits: 80 }]);
+      exec.mockResolvedValueOnce([{ CountMultiStems: 0 }]);
 
       const res = await callGET('testschema', '2', '3');
 
