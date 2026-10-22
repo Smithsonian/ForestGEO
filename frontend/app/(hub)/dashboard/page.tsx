@@ -45,7 +45,7 @@ import DatasetIcon from '@mui/icons-material/Dataset';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/config/store/appstore';
-import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE, readCensusDeleteRejectionMessage } from '@/config/censusdeletion';
+import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE, CENSUS_DELETE_STALE_LIST_STATUSES, readCensusDeleteRejectionMessage } from '@/config/censusdeletion';
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
 import CensusCreationModal, { CensusCreationDetails } from '@/components/client/modals/censuscreationmodal';
@@ -385,6 +385,13 @@ export default function DashboardPage() {
           if (rejectionMessage) {
             ailogger.warn(`Census delete refused by the server (HTTP ${response.status}): ${rejectionMessage}`);
             setError(rejectionMessage);
+            if (CENSUS_DELETE_STALE_LIST_STATUSES.includes(response.status)) {
+              try {
+                await refreshCensusList();
+              } catch (refreshError) {
+                ailogger.warn(`Census list refresh after a refused delete failed: ${refreshError instanceof Error ? refreshError.message : refreshError}`);
+              }
+            }
             return;
           }
           throw new Error(`Failed to clear census: ${response.status}`);

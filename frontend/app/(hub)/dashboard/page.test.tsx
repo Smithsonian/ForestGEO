@@ -813,6 +813,57 @@ describe('Enhanced Dashboard Page', () => {
       expect(screen.queryByText(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE)).not.toBeInTheDocument();
     });
 
+    describe('refreshing the census list after a refusal', () => {
+      const CENSUS_LIST_URL_FRAGMENT = '/api/fetchall/census/';
+
+      function censusListFetchesAfterTheDeleteRequest() {
+        const urls = vi.mocked(global.fetch).mock.calls.map(([url]) => String(url));
+        const deleteRequestIndex = urls.indexOf(CLEAR_CENSUS_URL);
+        return urls.slice(deleteRequestIndex + 1).filter(url => url.includes(CENSUS_LIST_URL_FRAGMENT));
+      }
+
+      it('refreshes the census list once after a 409 and still shows the server text', async () => {
+        routeClearCensusTo(new Response(JSON.stringify({ error: CLEAR_CENSUS_CONFLICT_MESSAGE }), { status: HTTPResponses.CONFLICT }));
+        await deleteTheOnlyCensus();
+
+        expect(await screen.findByText(CLEAR_CENSUS_CONFLICT_MESSAGE)).toBeInTheDocument();
+        const refreshes = censusListFetchesAfterTheDeleteRequest();
+        console.log(`[#525 refused delete] census list fetches after the 409: ${JSON.stringify(refreshes)}`);
+        expect(refreshes).toHaveLength(1);
+      });
+
+      it('refreshes the census list after a 404 refusal', async () => {
+        routeClearCensusTo(new Response(JSON.stringify({ error: 'Census not found' }), { status: HTTPResponses.NOT_FOUND }));
+        await deleteTheOnlyCensus();
+
+        expect(await screen.findByText('Census not found')).toBeInTheDocument();
+        expect(censusListFetchesAfterTheDeleteRequest()).toHaveLength(1);
+      });
+
+      it('does not refresh the census list after a 500', async () => {
+        routeClearCensusTo(new Response(JSON.stringify({ error: SERVER_INTERNAL_DETAIL }), { status: HTTPResponses.INTERNAL_SERVER_ERROR }));
+        await deleteTheOnlyCensus();
+
+        expect(await screen.findByText(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE)).toBeInTheDocument();
+        expect(censusListFetchesAfterTheDeleteRequest()).toHaveLength(0);
+      });
+
+      it('still shows the server text when the refresh itself fails', async () => {
+        vi.mocked(global.fetch).mockImplementation((url: any) =>
+          String(url) === CLEAR_CENSUS_URL
+            ? Promise.resolve(new Response(JSON.stringify({ error: CLEAR_CENSUS_CONFLICT_MESSAGE }), { status: HTTPResponses.CONFLICT }))
+            : String(url).includes(CENSUS_LIST_URL_FRAGMENT)
+              ? Promise.reject(new TypeError('network down'))
+              : Promise.resolve({ ok: true, json: () => Promise.resolve([]) } as Response)
+        );
+        await deleteTheOnlyCensus();
+
+        expect(await screen.findByText(CLEAR_CENSUS_CONFLICT_MESSAGE)).toBeInTheDocument();
+        expect(screen.queryByText(/refreshing the census list failed/)).not.toBeInTheDocument();
+        expect(censusListFetchesAfterTheDeleteRequest()).toHaveLength(1);
+      });
+    });
+
     it('shows the generic text for a 4xx whose body is not JSON', async () => {
       routeClearCensusTo(new Response('<html>Not Found</html>', { status: HTTPResponses.NOT_FOUND }));
       await deleteTheOnlyCensus();

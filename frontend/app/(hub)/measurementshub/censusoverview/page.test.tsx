@@ -234,4 +234,71 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
     expect(errorBanner).toHaveTextContent(LATEST_ONLY_REFUSAL);
     expect(errorBanner).not.toHaveTextContent(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE);
   });
+
+  describe('refreshing the census list after a refusal', () => {
+    const CENSUS_LIST_URL_FRAGMENT = '/api/fetchall/census/';
+
+    function censusListFetchUrls() {
+      return vi
+        .mocked(global.fetch)
+        .mock.calls.map(([url]) => String(url))
+        .filter(url => url.includes(CENSUS_LIST_URL_FRAGMENT));
+    }
+
+    async function confirmDeleteWithClearCensusAnswering(clearCensusAnswer: object, censusListAnswer: () => Promise<object>) {
+      const user = userEvent.setup();
+      seedSelection(LATEST_CENSUS);
+      (global.fetch as any).mockImplementation(async (url: string) => {
+        if (url === CLEAR_CENSUS_ENDPOINT) return clearCensusAnswer;
+        if (String(url).includes(CENSUS_LIST_URL_FRAGMENT)) return censusListAnswer();
+        return { ok: false, status: 503, json: async () => ({}) };
+      });
+      render(<CensusOverviewPage />);
+      await user.click(screen.getByTestId(DELETE_BUTTON_TESTID));
+      const dialog = await screen.findByRole('alertdialog');
+      await user.click(within(dialog).getByRole('button', { name: MODAL_CONFIRM_LABEL }));
+      return screen.findByTestId(DELETE_ERROR_TESTID);
+    }
+
+    it('refreshes the census list once after a 409 and still shows the server text', async () => {
+      const errorBanner = await confirmDeleteWithClearCensusAnswering(
+        { ok: false, status: 409, json: async () => ({ error: LATEST_ONLY_REFUSAL }) },
+        async () => ({
+          ok: true,
+          status: 200,
+          json: async () => [{ ...LATEST_CENSUS }]
+        })
+      );
+
+      expect(errorBanner).toHaveTextContent(LATEST_ONLY_REFUSAL);
+      console.log(`[#525 hub refused delete] census list fetches: ${JSON.stringify(censusListFetchUrls())}`);
+      expect(censusListFetchUrls()).toHaveLength(1);
+    });
+
+    it('still shows the server text when the refresh itself fails', async () => {
+      const errorBanner = await confirmDeleteWithClearCensusAnswering(
+        { ok: false, status: 409, json: async () => ({ error: LATEST_ONLY_REFUSAL }) },
+        async () => {
+          throw new TypeError('network down');
+        }
+      );
+
+      expect(errorBanner).toHaveTextContent(LATEST_ONLY_REFUSAL);
+      expect(censusListFetchUrls()).toHaveLength(1);
+    });
+
+    it('does not refresh the census list after a 500', async () => {
+      const errorBanner = await confirmDeleteWithClearCensusAnswering(
+        { ok: false, status: 500, json: async () => ({ error: 'ER_LOCK_DEADLOCK' }) },
+        async () => ({
+          ok: true,
+          status: 200,
+          json: async () => []
+        })
+      );
+
+      expect(errorBanner).toHaveTextContent(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE);
+      expect(censusListFetchUrls()).toHaveLength(0);
+    });
+  });
 });

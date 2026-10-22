@@ -6,6 +6,8 @@ export const CENSUS_DELETE_LATEST_ONLY_REASON = 'Only the latest census can be d
 export const CENSUS_DELETE_INACTIVE_REASON = "This census is inactive, so it can't be deleted.";
 export const CENSUS_DELETE_GENERIC_FAILURE_MESSAGE = 'Failed to delete census. Please try again.';
 
+export const CENSUS_DELETE_STALE_LIST_STATUSES: readonly number[] = [HTTPResponses.NOT_FOUND, HTTPResponses.CONFLICT];
+
 const CENSUS_DELETE_ROLES: ReadonlySet<UserAuthRoles> = new Set<UserAuthRoles>(['global', 'db admin']);
 
 function isActiveCensus(census: OrgCensus): census is OrgCensusRDS {
