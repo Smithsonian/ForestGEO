@@ -122,10 +122,10 @@ describe('UploadParentModal ArcGIS mode (unchanged by the reorder)', () => {
 
 describe('UploadParentModal Revisions description (#525 item 5)', () => {
   const MEASUREMENTS_REVISION_DESCRIPTION =
-    'Updates measurements that match an existing stem (by Stem ID, or by Tree Tag + Stem Tag, case-insensitive) and adds any new rows from the file.';
+    'Updates measurements matched by the Stem ID column from a ForestGEO export (or, if the file has no Stem IDs, by Tree Tag + Stem Tag, case-insensitive) and adds any new rows from the file.';
   const SPECIES_REVISION_DESCRIPTION = 'Updates existing records matched by SpeciesCode (case-insensitive) and adds any new rows from the file.';
 
-  it('describes measurement matching by Stem ID or Tree Tag + Stem Tag, never by StemGUID', () => {
+  it('describes measurement matching by the Stem ID column of an export or Tree Tag + Stem Tag, never by StemGUID', () => {
     renderModal({ formType: FormType.measurements, sourceFormat: SourceFormat.csv });
     const dialogText = document.body.textContent ?? '';
     console.log(`[#525 item 5] measurements chooser mentions StemGUID: ${dialogText.includes('StemGUID')}`);

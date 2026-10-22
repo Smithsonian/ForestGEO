@@ -19,7 +19,7 @@ interface UPMProps {
 }
 
 const MEASUREMENTS_REVISION_DESCRIPTION =
-  'Updates measurements that match an existing stem (by Stem ID, or by Tree Tag + Stem Tag, case-insensitive) and adds any new rows from the file.';
+  'Updates measurements matched by the Stem ID column from a ForestGEO export (or, if the file has no Stem IDs, by Tree Tag + Stem Tag, case-insensitive) and adds any new rows from the file.';
 
 function describeKeyedRevision(matchLabel: string): string {
   return `Updates existing records matched by ${matchLabel} (case-insensitive) and adds any new rows from the file.`;
