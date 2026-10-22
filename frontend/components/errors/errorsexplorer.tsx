@@ -352,6 +352,7 @@ export default function ErrorsExplorer() {
   const [isExportingCsv, setIsExportingCsv] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
+  const [columnVisibilityModel, setColumnVisibilityModel] = useState<GridColumnVisibilityModel>(ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS);
   const [selectableOpts, setSelectableOpts] = useState<{ codes: string[] }>({ codes: [] });
   const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
   const infiniteRef = useRef<UseInfiniteGridRowsResult<GridRowModel> | null>(null);
@@ -1437,7 +1438,8 @@ export default function ErrorsExplorer() {
               onRowClick={params => setSelectedMeasurementID(Number(params.row.coreMeasurementID))}
               slots={explorerGridSlots}
               rowHeight={68}
-              initialState={{ columns: { columnVisibilityModel: ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS } }}
+              columnVisibilityModel={columnVisibilityModel}
+              onColumnVisibilityModelChange={setColumnVisibilityModel}
               sx={{
                 minHeight: 640,
                 '& .MuiDataGrid-cell': {

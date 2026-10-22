@@ -225,7 +225,8 @@ interface RenderedGridProps {
   columns: any[];
   processRowUpdate?: (newRow: Record<string, unknown>, oldRow: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
   slots?: any;
-  initialState?: { columns?: { columnVisibilityModel?: Record<string, boolean> } };
+  columnVisibilityModel?: Record<string, boolean>;
+  onColumnVisibilityModelChange?: (model: Record<string, boolean>) => void;
 }
 
 // What the mocked grid most recently committed. Updated from a layout effect so
@@ -387,7 +388,14 @@ vi.mock('@/config/styleddatagrid', async () => {
       // Layout effects run in the same commit as the DOM mutation. Unlike the old
       // passive effect they are visible before waitFor can react to that commit;
       // unlike a render-time assignment they never publish speculative props.
-      const committedProps = { rows, columns, processRowUpdate: props.processRowUpdate, slots: props.slots, initialState: props.initialState };
+      const committedProps = {
+        rows,
+        columns,
+        processRowUpdate: props.processRowUpdate,
+        slots: props.slots,
+        columnVisibilityModel: props.columnVisibilityModel,
+        onColumnVisibilityModelChange: props.onColumnVisibilityModelChange
+      };
       latestGridProps = committedProps;
 
       // Expose test hooks for both direct processRowUpdate coverage and the
@@ -422,7 +430,7 @@ vi.mock('@/config/styleddatagrid', async () => {
       return () => {
         if (latestGridProps === committedProps) latestGridProps = null;
       };
-    }, [rows, columns, props.processRowUpdate, props.slots, props.initialState]);
+    }, [rows, columns, props.processRowUpdate, props.slots, props.columnVisibilityModel, props.onColumnVisibilityModelChange]);
 
     return (
       <div data-testid="styled-grid">
@@ -1019,14 +1027,57 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     expect(readOnlyFields).not.toContain('actions');
   });
 
-  it('starts with the plot-coordinate and prior-census columns hidden through the grid initial state (#525 item 7)', async () => {
+  it('starts with the plot-coordinate and prior-census columns hidden through the controlled column visibility model (#525 item 7)', async () => {
     await mountExplorer();
     await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
-    const visibilityModel = latestGridProps?.initialState?.columns?.columnVisibilityModel;
+    const visibilityModel = latestGridProps?.columnVisibilityModel;
 
-    console.log(`[#525 item 7] initial columnVisibilityModel: ${JSON.stringify(visibilityModel)}`);
-    expect(ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS).toEqual({ stemPlotX: false, stemPlotY: false, priorDBH: false, priorHOM: false, homChanged: false });
+    console.log(`[#525 item 7] controlled columnVisibilityModel: ${JSON.stringify(visibilityModel)}`);
     expect(visibilityModel).toEqual(ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS);
+  });
+
+  it('keeps a column the user turned on after the list empties and refills while the page stays open (#525 item 7)', async () => {
+    const NO_MATCH_QUICK_SEARCH = 'no-such-measurement';
+    const SHOWN_COLUMN = 'priorDBH';
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/errors/explorer/query')) {
+        const matchesNothing = JSON.parse(String(init?.body)).filters.quickSearch === NO_MATCH_QUICK_SEARCH;
+        return {
+          ok: true,
+          json: async () => ({
+            rows: matchesNothing ? [] : [GRID_ROW],
+            totalRows: matchesNothing ? 0 : 1,
+            summary: {
+              total: matchesNothing ? 0 : 1,
+              validation: matchesNothing ? 0 : 1,
+              ingestion: 0,
+              contradictions: 0,
+              duplicateTagStem: 0,
+              sameBatchConflict: 0
+            }
+          })
+        } as Response;
+      }
+      return { ok: true, json: async () => ({ messages: [], fields: [], sourceCounts: { validation: 1, ingestion: 0 }, contradictionCounts: {} }) } as Response;
+    });
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+
+    act(() => {
+      latestGridProps?.onColumnVisibilityModelChange?.({ ...ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS, [SHOWN_COLUMN]: true });
+    });
+    await waitFor(() => expect(latestGridProps?.columnVisibilityModel?.[SHOWN_COLUMN]).toBe(true));
+
+    fireEvent.change(screen.getByLabelText('Quick Search'), { target: { value: NO_MATCH_QUICK_SEARCH } });
+    await waitFor(() => expect(screen.getByTestId('errors-explorer-empty-success')).toBeInTheDocument());
+    expect(screen.queryByTestId('styled-grid')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Quick Search'), { target: { value: '' } });
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+
+    console.log(`[#525 item 7] columnVisibilityModel after empty and refill: ${JSON.stringify(latestGridProps?.columnVisibilityModel)}`);
+    expect(latestGridProps?.columnVisibilityModel).toEqual({ ...ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS, [SHOWN_COLUMN]: true });
   });
 
   describe('undo revert outcome handling (#427)', () => {
