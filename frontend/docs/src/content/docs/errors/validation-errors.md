@@ -86,7 +86,7 @@ the earlier census, and an **HOM Changed** chip when the height of measurement d
 two — a changed HOM is a common, legitimate explanation for an apparent shrinkage or growth
 finding, not necessarily a measurement error. These comparison columns, together with **Plot X**
 and **Plot Y**, start hidden each time you open View Errors so that **Codes** and the edit buttons
-fit on screen; to show them, open any column header's menu, choose **Manage columns**, and tick
+fit on screen; to show them, open the menu on the **Codes** (or any other data) column header, choose **Manage columns**, and tick
 **Prior DBH**, **Prior HOM** and **HOM Changed**. An **Export CSV** button on the errors screen
 exports every flagged occurrence, including the prior-census columns, for review outside the
 application, whichever columns are showing.
