@@ -45,6 +45,16 @@ export function formatIncludeNewRowsLabel(newRowCount: number): string {
   return `Also insert ${newRowCount} new row${newRowCount === 1 ? '' : 's'}`;
 }
 
+function formatApplyRowCountLabel(selectedRowCount: number): string {
+  return `This apply will write ${selectedRowCount} row${selectedRowCount === 1 ? '' : 's'}.`;
+}
+
+function formatNothingSelectedHint(newRowCount: number): string {
+  return newRowCount > 0
+    ? `Nothing is selected yet. Tick "${formatIncludeNewRowsLabel(newRowCount)}" to include the new rows.`
+    : 'Nothing is selected yet, so there is nothing to apply.';
+}
+
 function sortEffectsBySeverity(effects: Effect[]): Effect[] {
   return [...effects].sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]);
 }
@@ -266,6 +276,16 @@ export default function ImpactSummary({
               />
             ) : null}
 
+            <Stack spacing={0.25} data-testid="impact-summary-apply-row-count">
+              <Typography level="body-sm" fontWeight="lg">
+                {formatApplyRowCountLabel(selectedRowCount)}
+              </Typography>
+              {selectedRowCount === 0 ? <Typography level="body-sm">{formatNothingSelectedHint(newRowCount)}</Typography> : null}
+              <Typography level="body-xs" data-testid="impact-summary-selected-count-explanation">
+                {SELECTED_ROW_COUNT_EXPLANATION}
+              </Typography>
+            </Stack>
+
             {typedConfirmRequired ? (
               <FormControl data-testid="impact-summary-typed-confirm">
                 <FormLabel htmlFor="impact-summary-typed-confirm-input">Confirm destructive apply</FormLabel>
@@ -279,9 +299,6 @@ export default function ImpactSummary({
                   data-testid="impact-summary-typed-confirm-input"
                 />
                 <FormHelperText>Type {expectedConfirmPhrase} to enable the apply button.</FormHelperText>
-                <Typography level="body-xs" data-testid="impact-summary-selected-count-explanation">
-                  {SELECTED_ROW_COUNT_EXPLANATION}
-                </Typography>
               </FormControl>
             ) : null}
           </Stack>

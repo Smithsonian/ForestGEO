@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import ImpactSummary, { SELECTED_ROW_COUNT_EXPLANATION } from './impactsummary';
+import ImpactSummary, { SELECTED_ROW_COUNT_EXPLANATION, formatIncludeNewRowsLabel } from './impactsummary';
 import {
   BulkEditPlan,
   RoleForbiddenFieldPreviewError,
@@ -397,7 +397,7 @@ describe('ImpactSummary', () => {
       expect(onIncludeNewRowsChange).toHaveBeenCalledWith(true);
     });
 
-    it('explains what the typed number counts next to the typed phrase', () => {
+    it('explains what the typed number counts on a destructive plan', () => {
       render(
         <ImpactSummary
           bulkPlan={buildBulkPlan({ maxSeverity: 'destructive' })}
@@ -408,6 +408,57 @@ describe('ImpactSummary', () => {
         />
       );
       expect(screen.getByTestId('impact-summary-selected-count-explanation')).toHaveTextContent(SELECTED_ROW_COUNT_EXPLANATION);
+    });
+
+    it.each([
+      { planKind: 'destructive', maxSeverity: 'destructive' as const },
+      { planKind: 'non-destructive', maxSeverity: 'info' as const }
+    ])('always shows how many rows a $planKind apply will write, with what the number counts', ({ planKind, maxSeverity }) => {
+      render(
+        <ImpactSummary bulkPlan={buildBulkPlan({ maxSeverity })} selectedRowCount={ROWS_TO_WRITE} onConfirm={onConfirm} onCancel={onCancel} busy={false} />
+      );
+
+      const countLine = screen.getByTestId('impact-summary-apply-row-count');
+      console.log(`[#525 F2] ${planKind} plan, count line: "${countLine.textContent}"`);
+      expect(countLine).toHaveTextContent(`This apply will write ${ROWS_TO_WRITE} rows.`);
+      expect(countLine).toHaveTextContent(SELECTED_ROW_COUNT_EXPLANATION);
+    });
+
+    it('says "1 row" in the singular when exactly one row will be written', () => {
+      render(<ImpactSummary bulkPlan={buildBulkPlan()} selectedRowCount={1} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      expect(screen.getByTestId('impact-summary-apply-row-count')).toHaveTextContent('This apply will write 1 row.');
+    });
+
+    it('explains why Apply is greyed on a new-rows-only plan until the new rows are ticked', () => {
+      render(
+        <ImpactSummary
+          bulkPlan={buildBulkPlan()}
+          selectedRowCount={0}
+          newRowCount={NEW_ROW_COUNT}
+          includeNewRows={false}
+          onIncludeNewRowsChange={vi.fn()}
+          onConfirm={onConfirm}
+          onCancel={onCancel}
+          busy={false}
+        />
+      );
+
+      const countLine = screen.getByTestId('impact-summary-apply-row-count');
+      console.log(`[#525 F2] new-only plan, nothing ticked, count line: "${countLine.textContent}"`);
+      expect(screen.getByTestId('impact-summary-apply')).toBeDisabled();
+      expect(countLine).toHaveTextContent('This apply will write 0 rows.');
+      expect(countLine).toHaveTextContent('Nothing is selected yet');
+      expect(countLine).toHaveTextContent(formatIncludeNewRowsLabel(NEW_ROW_COUNT));
+    });
+
+    it('does not suggest ticking new rows when the plan has none and nothing is selected', () => {
+      render(<ImpactSummary bulkPlan={buildBulkPlan()} selectedRowCount={0} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      const countLine = screen.getByTestId('impact-summary-apply-row-count');
+      expect(countLine).toHaveTextContent('This apply will write 0 rows.');
+      expect(countLine).toHaveTextContent('Nothing is selected yet');
+      expect(countLine).not.toHaveTextContent('Also insert');
     });
   });
 });
