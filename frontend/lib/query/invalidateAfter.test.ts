@@ -123,6 +123,22 @@ describe('invalidateAfter', () => {
     expect(fired.has('dashboard:progress')).toBe(true);
   });
 
+  it('upload-job fans out to every reingest namespace plus summary, quadrats, trees, stems and progress (#525 item 6)', async () => {
+    await invalidateAfter('reingest', scope);
+    const reingestPrefixes = calls.map(c => c.prefix);
+    calls.length = 0;
+
+    await invalidateAfter('upload-job', scope);
+    const uploadJobPrefixes = calls.map(c => c.prefix);
+
+    console.log(`[#525 item 6] reingest=${reingestPrefixes.join(',')} upload-job=${uploadJobPrefixes.join(',')}`);
+    for (const prefix of reingestPrefixes) expect(uploadJobPrefixes, `upload-job must include reingest's ${prefix}`).toContain(prefix);
+    expect(new Set(uploadJobPrefixes)).toEqual(
+      new Set([...reingestPrefixes, 'grid:summary', 'grid:quadrats', 'grid:trees', 'grid:stems', 'dashboard:progress'])
+    );
+    expect(uploadJobPrefixes).toHaveLength(new Set(uploadJobPrefixes).size);
+  });
+
   it('passes scope through to mutateKey unchanged', async () => {
     await invalidateAfter('delete-measurement', scope);
     for (const call of calls) expect(call.scope).toBe(scope);
