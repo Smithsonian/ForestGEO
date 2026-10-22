@@ -23,6 +23,7 @@ describe('UploadRevisionApply', () => {
   const setReviewState = vi.fn();
   const setIsDataUnsaved = vi.fn();
   const onPlanConflict = vi.fn();
+  const setUploadOutcome = vi.fn();
 
   const DEFAULT_UPLOAD_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
   const DEFAULT_INVALID_ROWS_INTEGRITY_HASH = 'a'.repeat(64);
@@ -41,6 +42,7 @@ describe('UploadRevisionApply', () => {
         setReviewState={setReviewState}
         setIsDataUnsaved={setIsDataUnsaved}
         onPlanConflict={onPlanConflict}
+        setUploadOutcome={setUploadOutcome}
         {...overrides}
       />
     );
@@ -51,6 +53,7 @@ describe('UploadRevisionApply', () => {
     setReviewState.mockReset();
     setIsDataUnsaved.mockReset();
     onPlanConflict.mockReset();
+    setUploadOutcome.mockReset();
     startValidation.mockReset();
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -150,6 +153,7 @@ describe('UploadRevisionApply', () => {
         setReviewState={setReviewState}
         setIsDataUnsaved={setIsDataUnsaved}
         onPlanConflict={onPlanConflict}
+        setUploadOutcome={setUploadOutcome}
       />
     );
 
@@ -317,5 +321,131 @@ describe('UploadRevisionApply', () => {
 
     await screen.findByText('Revisions Applied');
     expect(screen.queryByTestId('revision-apply-failed-count')).not.toBeInTheDocument();
+  });
+});
+
+describe('upload outcome (#525 item 4)', () => {
+  const fetchMock = vi.fn();
+  const setReviewState = vi.fn();
+  const setIsDataUnsaved = vi.fn();
+  const onPlanConflict = vi.fn();
+  const setUploadOutcome = vi.fn();
+  const UPLOAD_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
+  const INVALID_ROWS_INTEGRITY_HASH = 'a'.repeat(64);
+  const HTTP_CONFLICT = 409;
+
+  const APPLY_RESPONSE_WITH_EVERY_CATEGORY = {
+    updatedCount: 2,
+    skippedCount: 1,
+    insertedCount: 3,
+    deletedDuplicateCount: 1,
+    failedRowCount: 4,
+    applyErrors: [{ coreMeasurementID: 909, error: 'Row locked by another edit' }],
+    validationPending: false
+  };
+  const DUPLICATE_ONLY_MATCHED_ROW: RevisionApplyMatchedRow = { coreMeasurementID: 101, csvRow: {}, duplicateMeasurementIDsToDelete: [55] };
+
+  function renderComponent(overrides?: Partial<ComponentProps<typeof UploadRevisionApply>>) {
+    return render(
+      <UploadRevisionApply
+        matchedRows={[]}
+        newRows={[]}
+        invalidRows={[]}
+        confirmNewRows={false}
+        schema="forestgeo_testing"
+        bulkPlanHash="plan-hash-test"
+        uploadAttemptID={UPLOAD_ATTEMPT_ID}
+        invalidRowsIntegrityHash={INVALID_ROWS_INTEGRITY_HASH}
+        setReviewState={setReviewState}
+        setIsDataUnsaved={setIsDataUnsaved}
+        onPlanConflict={onPlanConflict}
+        setUploadOutcome={setUploadOutcome}
+        {...overrides}
+      />
+    );
+  }
+
+  beforeEach(() => {
+    for (const mock of [fetchMock, setReviewState, setIsDataUnsaved, onPlanConflict, setUploadOutcome, startValidation]) mock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('clears the outcome when the attempt starts, then records all six counts once on success', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => APPLY_RESPONSE_WITH_EVERY_CATEGORY });
+    renderComponent({ matchedRows: [DUPLICATE_ONLY_MATCHED_ROW] });
+
+    await screen.findByText('Revisions Applied');
+    console.log(`[#525 item 4] revisions setUploadOutcome calls: ${JSON.stringify(setUploadOutcome.mock.calls)}`);
+    expect(setUploadOutcome.mock.calls).toEqual([
+      [undefined],
+      [
+        {
+          kind: 'revisions',
+          updatedCount: 2,
+          deletedDuplicateCount: 1,
+          insertedCount: 3,
+          failedRowCount: 4,
+          skippedCount: 1,
+          applyErrorCount: 1,
+          hasDuplicateCleanupOnlyRows: true
+        }
+      ]
+    ]);
+    expect(screen.getByText('2 measurement(s) updated')).toBeInTheDocument();
+    expect(screen.getByText('1 duplicate(s) deleted')).toBeInTheDocument();
+    expect(screen.getByText('3 new measurement(s) inserted')).toBeInTheDocument();
+    expect(screen.getByTestId('revision-apply-failed-count')).toHaveTextContent('4 rejected row(s) recorded as failed measurements');
+    expect(screen.getByText('1 matched row(s) required no field updates')).toBeInTheDocument();
+    expect(screen.getByText('1 row(s) had errors and were skipped')).toBeInTheDocument();
+  });
+
+  it('records 0 rejected rows when an older server omits failedRowCount', async () => {
+    const responseWithoutFailedRowCount: Partial<typeof APPLY_RESPONSE_WITH_EVERY_CATEGORY> = { ...APPLY_RESPONSE_WITH_EVERY_CATEGORY };
+    delete responseWithoutFailedRowCount.failedRowCount;
+    fetchMock.mockResolvedValue({ ok: true, json: async () => responseWithoutFailedRowCount });
+    renderComponent();
+
+    await screen.findByText('Revisions Applied');
+    expect(setUploadOutcome).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'revisions', failedRowCount: 0 }));
+  });
+
+  it('never records an outcome when the apply fails, and clears again on Retry Apply', async () => {
+    fetchMock.mockResolvedValue({ ok: false, json: async () => ({ error: 'Apply conflict' }) });
+    renderComponent();
+    await screen.findByText('Failed to Apply Revisions');
+    expect(setUploadOutcome.mock.calls).toEqual([[undefined]]);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry Apply' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await screen.findByText('Failed to Apply Revisions');
+    console.log(`[#525 item 4] calls after a failed retry: ${JSON.stringify(setUploadOutcome.mock.calls)}`);
+    expect(setUploadOutcome.mock.calls).toEqual([[undefined], [undefined]]);
+  });
+
+  it('never records an outcome on a 409 plan conflict', async () => {
+    const freshPlan: BulkEditPlan = {
+      dataType: 'measurementssummary',
+      rowCount: 1,
+      rowPlans: [],
+      aggregateEffects: [],
+      maxSeverity: 'warn',
+      planHash: 'fresh-hash',
+      generatedAt: '2026-04-21T00:00:00Z',
+      duplicateDeletions: []
+    };
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: HTTP_CONFLICT,
+      json: async () => ({ error: 'plan hash mismatch', freshPlan, freshInvalidRows: [], freshInvalidRowsIntegrityHash: 'c'.repeat(64) })
+    });
+    renderComponent();
+
+    await waitFor(() => expect(onPlanConflict).toHaveBeenCalledTimes(1));
+    expect(setUploadOutcome.mock.calls).toEqual([[undefined]]);
   });
 });

@@ -828,6 +828,7 @@ function UploadParentInner(props: UploadParentProps) {
             invalidRowsIntegrityHash={revisionMatchResult?.invalidRowsIntegrityHash ?? ''}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
+            setUploadOutcome={uploadState.setUploadOutcome}
             onPlanConflict={(freshPlan, freshInvalidRows, freshInvalidRowsIntegrityHash) => {
               setRevisionMatchResult(current =>
                 current ? mergeFreshRevisionPlan(current, freshPlan, freshInvalidRows, freshInvalidRowsIntegrityHash) : current
