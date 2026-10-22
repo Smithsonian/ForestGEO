@@ -857,7 +857,7 @@ function UploadParentInner(props: UploadParentProps) {
           />
         );
       case ReviewStates.COMPLETE:
-        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadState.state.uploadForm} />;
+        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadState.state.uploadForm} uploadOutcome={uploadState.state.uploadOutcome} />;
       default:
         return (
           <UploadError
