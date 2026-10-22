@@ -108,8 +108,8 @@ export function resolveDefaultTabValue(counts: RevisionRowCounts): RevisionTabVa
   return 'changes';
 }
 
-const REVIEW_AND_APPLY_LABEL = 'Review and apply…';
-const NEW_ROWS_TAB_EXPLANATION =
+export const REVIEW_AND_APPLY_LABEL = 'Review and apply…';
+export const NEW_ROWS_TAB_EXPLANATION =
   'These rows did not match an existing measurement in the active census and will be inserted as new measurements if you include them when applying.';
 
 export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchProps>) {

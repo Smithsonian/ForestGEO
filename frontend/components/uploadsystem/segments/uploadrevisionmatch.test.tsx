@@ -2,7 +2,7 @@ import type React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import UploadRevisionMatch from './uploadrevisionmatch';
+import UploadRevisionMatch, { NEW_ROWS_TAB_EXPLANATION, REVIEW_AND_APPLY_LABEL } from './uploadrevisionmatch';
 import { EMPTY_REVISION_MATCH_COUNTS, RevisionCollapsedRow, RevisionMatchedRow, RevisionNewRowCandidate } from '@/config/revisionuploadtypes';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import type { BulkEditPlan, Effect } from '@/config/editplan/types';
@@ -520,9 +520,6 @@ describe('UploadRevisionMatch', () => {
 });
 
 describe('one confirmation (#525 item 9)', () => {
-  const NEW_ROWS_TAB_EXPLANATION =
-    'These rows did not match an existing measurement in the active census and will be inserted as new measurements if you include them when applying.';
-  const REVIEW_AND_APPLY_LABEL = 'Review and apply…';
   const EXISTING_VALUES = { measuredDBH: 10.2, measuredHOM: 1.3, measurementDate: '2025-01-01', rawCodes: null, description: null };
   const CHANGED_ROWS: RevisionMatchedRow[] = [101, 102].map((coreMeasurementID, csvIndex) => ({
     csvIndex,
