@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
+import userEvent from '@testing-library/user-event';
 import IsolatedDataGridCommons, {
   FILTER_APPLY_DEBOUNCE_MS,
   gridLayoutStorageKey,
@@ -12,6 +13,7 @@ import IsolatedDataGridCommons, {
   NO_CHANGES_SAVED_MESSAGE
 } from './isolateddatagridcommons';
 import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
+import { DELETE_AFTER_CANCEL_GUARD_MS } from '@/components/datagrids/hooks/usedeleteaftercancelguard';
 import { LOADING_BAR_VISIBLE_DELAY_MS } from '@/components/loading';
 import { HTTPResponses } from '@/config/macros';
 
@@ -111,8 +113,10 @@ vi.mock('@mui/x-data-grid-generator', () => ({
 }));
 
 vi.mock('@mui/x-data-grid', () => ({
-  GridActionsCellItem: ({ label, onClick }: { label: string; onClick: () => void }) => (
-    <button type="button" onClick={onClick}>
+  // `disabled` is rendered as data-disabled, not the DOM attribute, so a click
+  // still reaches onClick and the handler's own guard is what the test exercises.
+  GridActionsCellItem: ({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) => (
+    <button type="button" data-disabled={String(Boolean(disabled))} onClick={onClick}>
       {label}
     </button>
   ),
@@ -1878,6 +1882,91 @@ describe('IsolatedDataGridCommons', () => {
       renderGrid(PERSISTED_GRID_TYPE);
       await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
       expect(screen.getByTestId('column-selector-disabled').textContent).toBe('true');
+    });
+  });
+
+  describe('Delete right after Cancel (#525 item 1)', () => {
+    const GUARD_TEST_GRID_TYPE = 'attributes';
+    const GUARD_TEST_ROW = { id: 1, code: 'GUARD_ATTR_A', description: 'Guarded row', status: 'alive' };
+    const GUARD_TEST_COLUMNS = [
+      { field: 'id', editable: false },
+      { field: 'description', editable: true }
+    ];
+    const DELETE_DIALOG_CONFIRM_LABEL = 'Confirm';
+
+    function renderGuardTestGrid() {
+      mockFetch.mockImplementation(
+        async () =>
+          ({
+            ok: true,
+            json: async () => ({ output: [GUARD_TEST_ROW], totalCount: 1, finishedQuery: 'SELECT guard' })
+          }) as Response
+      );
+      return render(
+        <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+          <IsolatedDataGridCommons
+            gridType={GUARD_TEST_GRID_TYPE}
+            gridColumns={GUARD_TEST_COLUMNS}
+            refresh={false}
+            setRefresh={vi.fn()}
+            dynamicButtons={[]}
+            initialRow={GUARD_TEST_ROW}
+            onDataUpdate={vi.fn().mockResolvedValue(undefined)}
+          />
+        </SWRConfig>
+      );
+    }
+
+    async function enterEditModeAndFindCancel(): Promise<HTMLElement> {
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      return screen.findByRole('button', { name: 'Cancel' });
+    }
+
+    it('(a) disables Delete straight after Cancel and re-enables it when the guard window ends', async () => {
+      renderGuardTestGrid();
+      const cancelButton = await enterEditModeAndFindCancel();
+      vi.useFakeTimers();
+
+      fireEvent.click(cancelButton);
+      const disabledRightAfterCancel = screen.getByRole('button', { name: 'Delete' }).getAttribute('data-disabled');
+      act(() => vi.advanceTimersByTime(DELETE_AFTER_CANCEL_GUARD_MS - 1));
+      const disabledJustBeforeExpiry = screen.getByRole('button', { name: 'Delete' }).getAttribute('data-disabled');
+      act(() => vi.advanceTimersByTime(1));
+      const disabledAtExpiry = screen.getByRole('button', { name: 'Delete' }).getAttribute('data-disabled');
+
+      console.log(
+        `[#525 item 1] Delete data-disabled: after Cancel=${disabledRightAfterCancel}, at ${DELETE_AFTER_CANCEL_GUARD_MS - 1}ms=${disabledJustBeforeExpiry}, at ${DELETE_AFTER_CANCEL_GUARD_MS}ms=${disabledAtExpiry}`
+      );
+      expect(disabledRightAfterCancel).toBe('true');
+      expect(disabledJustBeforeExpiry).toBe('true');
+      expect(disabledAtExpiry).toBe('false');
+    });
+
+    it('(b) swallows the second click of a double-click on Cancel even though it lands on Delete', async () => {
+      const user = userEvent.setup();
+      renderGuardTestGrid();
+      const cancelButton = await enterEditModeAndFindCancel();
+
+      await user.dblClick(cancelButton);
+
+      console.log(
+        `[#525 item 1] slot-2 action after the double-click: "${cancelButton.textContent}"; delete dialog open: ${Boolean(screen.queryByRole('button', { name: DELETE_DIALOG_CONFIRM_LABEL }))}`
+      );
+      // The same DOM node now reads Delete, so the second click really reached the Delete handler.
+      expect(cancelButton).toHaveTextContent('Delete');
+      expect(screen.queryByRole('button', { name: DELETE_DIALOG_CONFIRM_LABEL })).not.toBeInTheDocument();
+    });
+
+    it('(c) opens the delete dialog for a deliberate click once the guard window has passed', async () => {
+      renderGuardTestGrid();
+      const cancelButton = await enterEditModeAndFindCancel();
+      vi.useFakeTimers();
+
+      fireEvent.click(cancelButton);
+      act(() => vi.advanceTimersByTime(DELETE_AFTER_CANCEL_GUARD_MS));
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+      expect(screen.getByRole('button', { name: DELETE_DIALOG_CONFIRM_LABEL })).toBeInTheDocument();
     });
   });
 });
