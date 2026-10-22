@@ -3,6 +3,7 @@ import {
   CENSUS_DELETE_ADMIN_ONLY_REASON,
   CENSUS_DELETE_INACTIVE_REASON,
   CENSUS_DELETE_LATEST_ONLY_REASON,
+  CENSUS_DELETE_LIST_UNAVAILABLE_REASON,
   getCensusDeleteBlockReason,
   readCensusDeleteRejectionMessage
 } from './censusdeletion';
@@ -30,8 +31,21 @@ describe('getCensusDeleteBlockReason (#525 items 2+3)', () => {
     }
   );
 
-  it('blocks a census missing from the list with the inactive reason', () => {
-    expect(getCensusDeleteBlockReason(NOT_IN_LIST, CENSUS_LIST, 'global')).toBe(CENSUS_DELETE_INACTIVE_REASON);
+  it('blocks a census missing from the list with the list-unavailable reason, never claiming it is inactive', () => {
+    const reason = getCensusDeleteBlockReason(NOT_IN_LIST, CENSUS_LIST, 'global');
+    console.log(`[#525 F4] census ${NOT_IN_LIST.plotCensusNumber} absent from the list -> ${reason}`);
+    expect(reason).toBe(CENSUS_DELETE_LIST_UNAVAILABLE_REASON);
+  });
+
+  it.each([
+    ['an empty list', []],
+    ['an undefined list', undefined]
+  ])('blocks with the list-unavailable reason when the census list is %s (still loading or failed to load)', (_label, censusList) => {
+    expect(getCensusDeleteBlockReason(LATEST_ACTIVE, censusList, 'global')).toBe(CENSUS_DELETE_LIST_UNAVAILABLE_REASON);
+  });
+
+  it('keeps the admin-only reason ahead of the list-unavailable reason', () => {
+    expect(getCensusDeleteBlockReason(LATEST_ACTIVE, undefined, 'pending')).toBe(CENSUS_DELETE_ADMIN_ONLY_REASON);
   });
 
   it('reads activity from the list entry, not from the census passed in (a persisted selection can predate the flag)', () => {

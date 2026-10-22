@@ -4,6 +4,7 @@ import type { OrgCensus, OrgCensusRDS } from '@/lib/db/definitions/timekeeping';
 export const CENSUS_DELETE_ADMIN_ONLY_REASON = 'Only global and database administrators can delete census measurements.';
 export const CENSUS_DELETE_LATEST_ONLY_REASON = 'Only the latest census can be deleted. Delete newer censuses first.';
 export const CENSUS_DELETE_INACTIVE_REASON = "This census is inactive, so it can't be deleted.";
+export const CENSUS_DELETE_LIST_UNAVAILABLE_REASON = "The census list hasn't loaded yet, so this census can't be deleted right now.";
 export const CENSUS_DELETE_GENERIC_FAILURE_MESSAGE = 'Failed to delete census. Please try again.';
 
 export const CENSUS_DELETE_STALE_LIST_STATUSES: readonly number[] = [HTTPResponses.NOT_FOUND, HTTPResponses.CONFLICT];
@@ -29,9 +30,10 @@ export function getCensusDeleteBlockReason(
   if (!userStatus || !CENSUS_DELETE_ROLES.has(userStatus)) return CENSUS_DELETE_ADMIN_ONLY_REASON;
   const knownCensuses = censusList ?? [];
   const listEntry = knownCensuses.find(entry => entry?.plotCensusNumber === census?.plotCensusNumber);
-  if (!census || !isActiveCensus(listEntry)) return CENSUS_DELETE_INACTIVE_REASON;
+  if (!listEntry) return CENSUS_DELETE_LIST_UNAVAILABLE_REASON;
+  if (!isActiveCensus(listEntry)) return CENSUS_DELETE_INACTIVE_REASON;
   const latestActivePlotCensusNumber = Math.max(...knownCensuses.filter(isActiveCensus).map(entry => entry.plotCensusNumber));
-  return census.plotCensusNumber === latestActivePlotCensusNumber ? null : CENSUS_DELETE_LATEST_ONLY_REASON;
+  return listEntry.plotCensusNumber === latestActivePlotCensusNumber ? null : CENSUS_DELETE_LATEST_ONLY_REASON;
 }
 
 /**
