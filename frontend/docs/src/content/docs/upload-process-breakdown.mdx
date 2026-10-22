@@ -413,7 +413,7 @@ Review match screen (tabs) → Apply
 | **Duplicate Cleanup** | Rows that match multiple measurements for the same stem (typically legacy) | Highest-ID row wins; others deleted |
 | **New Rows** | Rows that don't match anything in the census | Inserted **only if you tick "Also insert N new rows"** in the review dialog |
 | **Unchanged** | Matched rows with no field differences | Skipped on Apply |
-| **Invalid** | Rows the app can't safely handle (missing match key, stem in a different plot, etc.) | Not touched |
+| **Invalid** | Rows the app can't safely handle (missing match key, stem in a different plot, etc.) | Recorded as failed measurements |
 
 Only **Changes** is always present. The other tabs appear only when they have something in them,
 so a clean revision file will show fewer tabs than this table lists.
