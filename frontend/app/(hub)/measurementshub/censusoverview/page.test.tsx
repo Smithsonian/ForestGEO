@@ -18,14 +18,16 @@ import userEvent from '@testing-library/user-event';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { useAppStore } from '@/config/store/appstore';
+import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE } from '@/config/censusdeletion';
 import CensusOverviewPage from './page';
 
 const DELETE_BUTTON_TESTID = 'census-overview-delete-button';
 const DELETE_ERROR_TESTID = 'census-overview-delete-error';
 const DISABLED_TOOLTIP_MATCHER = /only the latest census can be deleted/i;
 const UNAUTHORIZED_TOOLTIP_MATCHER = /only global and database administrators can delete census measurements/i;
-const DELETE_FAILURE_MESSAGE = 'Failed to delete census. Please try again.';
 const MODAL_CONFIRM_LABEL = 'Delete Census';
+const CLEAR_CENSUS_ENDPOINT = '/api/clearcensus';
+const LATEST_ONLY_REFUSAL = 'Only the latest census can be deleted. Delete newer censuses first.';
 
 vi.mock('next/navigation');
 vi.mock('next-auth/react');
@@ -210,6 +212,26 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
     await user.click(within(dialog).getByRole('button', { name: MODAL_CONFIRM_LABEL }));
 
     const errorBanner = await screen.findByTestId(DELETE_ERROR_TESTID);
-    expect(errorBanner).toHaveTextContent(DELETE_FAILURE_MESSAGE);
+    expect(errorBanner).toHaveTextContent(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE);
+  });
+
+  it("MUST show the server's refusal reason verbatim when /api/clearcensus answers 409", async () => {
+    const user = userEvent.setup();
+    seedSelection(LATEST_CENSUS);
+    (global.fetch as any).mockImplementation(async (url: string) =>
+      url === CLEAR_CENSUS_ENDPOINT
+        ? { ok: false, status: 409, json: async () => ({ error: LATEST_ONLY_REFUSAL }) }
+        : { ok: false, status: 503, json: async () => ({}) }
+    );
+    render(<CensusOverviewPage />);
+
+    await user.click(screen.getByTestId(DELETE_BUTTON_TESTID));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: MODAL_CONFIRM_LABEL }));
+
+    const errorBanner = await screen.findByTestId(DELETE_ERROR_TESTID);
+    console.log(`[#525 hub refusal] banner text: ${errorBanner.textContent}`);
+    expect(errorBanner).toHaveTextContent(LATEST_ONLY_REFUSAL);
+    expect(errorBanner).not.toHaveTextContent(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE);
   });
 });

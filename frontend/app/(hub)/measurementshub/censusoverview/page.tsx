@@ -31,7 +31,7 @@ import { createAndUpdateCensusList, OrgCensusRDS, reconcileCurrentCensusSelectio
 import ailogger from '@/ailogger';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { useSession } from 'next-auth/react';
-import { getCensusDeleteBlockReason } from '@/config/censusdeletion';
+import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE, getCensusDeleteBlockReason, readCensusDeleteRejectionMessage } from '@/config/censusdeletion';
 import { formatDisplayDate } from '@/config/dateformats';
 
 interface ProgressTachoType {
@@ -201,6 +201,12 @@ export default function CensusOverviewPage() {
           body: JSON.stringify({ schema: currentSite.schemaName, censusID: targetCensusID, type: deleteType })
         });
         if (!response.ok) {
+          const rejectionMessage = await readCensusDeleteRejectionMessage(response);
+          if (rejectionMessage) {
+            ailogger.warn(`Census delete refused by the server (HTTP ${response.status}): ${rejectionMessage}`);
+            setDeleteError(rejectionMessage);
+            return;
+          }
           throw new Error(`Failed to clear census: ${response.status}`);
         }
         setCensusToDelete(null);
@@ -214,7 +220,7 @@ export default function CensusOverviewPage() {
         }
       } catch (error) {
         ailogger.error('Failed to delete census', error instanceof Error ? error : undefined);
-        setDeleteError('Failed to delete census. Please try again.');
+        setDeleteError(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE);
       } finally {
         setLoading(false);
         setIsDeletingCensus(false);
