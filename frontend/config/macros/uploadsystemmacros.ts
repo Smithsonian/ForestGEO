@@ -7,6 +7,7 @@ import type { ArcgisImportReference } from '@/lib/arcgis/types';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import type { QuadratOverlapAcknowledgment } from '@/lib/provisioning/types';
 import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
+import type { UploadOutcome } from './uploadoutcome';
 
 // File upload constraints
 export { MAX_UPLOAD_FILE_BYTES as MAX_FILE_SIZE_BYTES, MAX_UPLOAD_FILE_MB as MAX_FILE_SIZE_MB } from '@/lib/uploads/upload-request-limits';
@@ -91,30 +92,7 @@ export interface UploadReviewFilesProps {
   handleReplaceFile: (fileIndex: number, newFile: FileWithPath) => Promise<void>;
 }
 
-/** Counts a revisions apply reports; shared by the apply screen and the completion screen. */
-export interface RevisionApplyOutcomeCounts {
-  updatedCount: number;
-  deletedDuplicateCount: number;
-  insertedCount: number;
-  failedRowCount: number;
-  skippedCount: number;
-  applyErrorCount: number;
-  hasDuplicateCleanupOnlyRows: boolean;
-}
-
-/** Reconciled totals: insertedRows + failedRows === sourceRows, read back from the database. */
-export interface IngestionUploadOutcome {
-  kind: 'ingestion';
-  sourceRows: number;
-  insertedRows: number;
-  failedRows: number;
-}
-
-export interface RevisionsUploadOutcome extends RevisionApplyOutcomeCounts {
-  kind: 'revisions';
-}
-
-export type UploadOutcome = IngestionUploadOutcome | RevisionsUploadOutcome;
+export type { RevisionApplyOutcomeCounts, IngestionUploadOutcome, RevisionsUploadOutcome, UploadOutcome } from './uploadoutcome';
 
 export interface UploadFireProps {
   // contexts

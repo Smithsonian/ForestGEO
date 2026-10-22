@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Box, Typography } from '@mui/joy';
-import type { RevisionApplyOutcomeCounts } from '@/config/macros/uploadsystemmacros';
+import type { RevisionApplyOutcomeCounts } from '@/config/macros/uploadoutcome';
 
 export const DUPLICATE_CLEANUP_SURVIVOR_NOTE = 'Duplicate cleanup can still use a matched survivor row even when its field values were unchanged.';
 
