@@ -45,7 +45,8 @@ const HARNESS_CENSUS: OrgCensusRDS = {
   plotCensusNumber: 1,
   censusIDs: [1],
   dateRanges: [{ censusID: 1, startDate: new Date('2024-01-01'), endDate: new Date('2024-12-31') }],
-  description: 'E2E harness census'
+  description: 'E2E harness census',
+  isActive: true
 };
 
 function E2EUploadHarness() {

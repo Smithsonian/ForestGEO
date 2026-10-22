@@ -56,14 +56,16 @@ const EARLIER_CENSUS = {
   plotCensusNumber: 1,
   censusIDs: [101],
   dateRanges: [{ censusID: 101, startDate: new Date('2024-01-01'), endDate: new Date('2024-12-31') }],
-  description: 'Census 1'
+  description: 'Census 1',
+  isActive: true
 };
 const LATEST_CENSUS = {
   plotID: 1,
   plotCensusNumber: 2,
   censusIDs: [102],
   dateRanges: [{ censusID: 102, startDate: new Date('2025-01-01'), endDate: new Date('2025-12-31') }],
-  description: 'Census 2'
+  description: 'Census 2',
+  isActive: true
 };
 const CENSUS_LIST = [EARLIER_CENSUS, LATEST_CENSUS];
 
@@ -156,7 +158,8 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
       plotCensusNumber: 2,
       censusIDs: [102],
       dateRanges: [{ censusID: 102, startDate: new Date(2025, 0, 1), endDate: new Date(2025, 11, 31) }],
-      description: 'Census 2'
+      description: 'Census 2',
+      isActive: true
     };
     seedSelection(headerCensus as any);
     render(<CensusOverviewPage />);

@@ -26,7 +26,8 @@ const testCensus: OrgCensus = {
   plotCensusNumber: 1,
   censusIDs: [1],
   dateRanges: [],
-  description: 'First census'
+  description: 'First census',
+  isActive: true
 };
 
 const readPersistedSelections = (): Record<string, unknown> => {
