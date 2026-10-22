@@ -205,6 +205,34 @@ describe('UploadComplete', () => {
       expect(screen.getByText('3 rows were sent to Failed Measurements for review.')).toBeInTheDocument();
     });
 
+    it('uses the singular when the only row was inserted', async () => {
+      await renderCompleted({ kind: 'ingestion', sourceRows: 1, insertedRows: 1, failedRows: 0 });
+
+      expect(screen.getByText('The row was inserted.')).toBeInTheDocument();
+      expect(screen.queryByText(/1 rows/)).not.toBeInTheDocument();
+    });
+
+    it('uses the singular when exactly one row went to Failed Measurements', async () => {
+      await renderCompleted({ kind: 'ingestion', sourceRows: 12, insertedRows: 11, failedRows: 1 });
+
+      expect(screen.getByText('11 of 12 rows inserted.')).toBeInTheDocument();
+      expect(screen.getByText('1 row was sent to Failed Measurements for review.')).toBeInTheDocument();
+    });
+
+    it('uses the singular when the only source row failed', async () => {
+      await renderCompleted({ kind: 'ingestion', sourceRows: 1, insertedRows: 0, failedRows: 1 });
+
+      expect(screen.getByText('0 of 1 row inserted.')).toBeInTheDocument();
+      expect(screen.getByText('1 row was sent to Failed Measurements for review.')).toBeInTheDocument();
+    });
+
+    it('says the file had no rows instead of "All 0 rows were inserted"', async () => {
+      await renderCompleted({ kind: 'ingestion', sourceRows: 0, insertedRows: 0, failedRows: 0 });
+
+      expect(screen.getByText('The file contained no rows to insert.')).toBeInTheDocument();
+      expect(screen.queryByText(/All 0 rows/)).not.toBeInTheDocument();
+    });
+
     it('renders every revision apply category', async () => {
       await renderCompleted({
         kind: 'revisions',

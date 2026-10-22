@@ -21,14 +21,28 @@ const REFRESH_TIMEOUT_MS = 15000;
 const GENERIC_UPLOAD_SUCCESS_TEXT = 'Your data has been processed and uploaded successfully.';
 const UPLOAD_SUCCESS_WITH_REFRESH_ISSUES_TEXT = 'Your data has been uploaded, but some background refreshes encountered issues.';
 
+const SINGLE_ROW = 1;
+
+function pluralizeRows(rowCount: number): string {
+  return rowCount === SINGLE_ROW ? 'row' : 'rows';
+}
+
 function IngestionOutcomeSummary({ outcome }: Readonly<{ outcome: IngestionUploadOutcome }>) {
-  if (outcome.failedRows === 0) {
-    return <Typography level="body-md">{`All ${outcome.sourceRows} rows were inserted.`}</Typography>;
+  if (outcome.sourceRows === 0) {
+    return <Typography level="body-md">The file contained no rows to insert.</Typography>;
   }
+  if (outcome.failedRows === 0) {
+    const insertedSentence = outcome.sourceRows === SINGLE_ROW ? 'The row was inserted.' : `All ${outcome.sourceRows} rows were inserted.`;
+    return <Typography level="body-md">{insertedSentence}</Typography>;
+  }
+  const failedVerb = outcome.failedRows === SINGLE_ROW ? 'was' : 'were';
   return (
     <>
-      <Typography level="body-md">{`${outcome.insertedRows} of ${outcome.sourceRows} rows inserted.`}</Typography>
-      <Typography level="body-md" color="warning">{`${outcome.failedRows} rows were sent to Failed Measurements for review.`}</Typography>
+      <Typography level="body-md">{`${outcome.insertedRows} of ${outcome.sourceRows} ${pluralizeRows(outcome.sourceRows)} inserted.`}</Typography>
+      <Typography
+        level="body-md"
+        color="warning"
+      >{`${outcome.failedRows} ${pluralizeRows(outcome.failedRows)} ${failedVerb} sent to Failed Measurements for review.`}</Typography>
     </>
   );
 }
