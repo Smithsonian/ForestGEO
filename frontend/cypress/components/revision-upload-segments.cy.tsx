@@ -32,33 +32,26 @@ describe('Revision Upload Segments', () => {
     expect(useAppStore.getState().currentCensus).to.deep.equal(TEST_CENSUS);
   });
 
-  it('requires explicit confirmation before new rows can be applied', () => {
+  it('inserts new rows only when they are included in the confirmation dialog', () => {
     const onApply = cy.stub().as('onApply');
+    const newOnlyBulkPlan = {
+      dataType: 'measurementssummary' as const,
+      rowCount: 1,
+      rowPlans: [{ rowIndex: 0, status: 'new' as const }],
+      aggregateEffects: [],
+      maxSeverity: 'info' as const,
+      planHash: 'cypress-new-only-plan',
+      generatedAt: '2026-10-21T00:00:00Z',
+      duplicateDeletions: []
+    };
 
     cy.mount(
       <UploadRevisionMatch
         matchedRows={[]}
-        newRows={[
-          {
-            csvIndex: 0,
-            csvRow: {
-              tag: 'T200',
-              stemtag: '1',
-              spcode: 'ACACDR',
-              quadrat: '0102',
-              dbh: '9.4',
-              date: '2024-02-05'
-            }
-          }
-        ]}
+        newRows={[{ csvIndex: 0, csvRow: { tag: 'T200', stemtag: '1', spcode: 'ACACDR', quadrat: '0102', dbh: '9.4', date: '2024-02-05' } }]}
         invalidRows={[]}
-        counts={{
-          matched: 0,
-          matchedWithChanges: 0,
-          new: 1,
-          invalid: 0,
-          total: 1
-        }}
+        counts={{ matched: 0, matchedWithChanges: 0, new: 1, invalid: 0, total: 1 }}
+        bulkPlan={newOnlyBulkPlan}
         schema="forestgeo_testing"
         plotID={1}
         censusID={2}
@@ -68,9 +61,13 @@ describe('Revision Upload Segments', () => {
       />
     );
 
-    cy.contains('Apply 0 Revisions').should('be.disabled');
-    cy.contains('Confirm new row insertion').click();
-    cy.contains('Apply 1 Revisions').should('not.be.disabled').click();
+    cy.contains('Confirm new row insertion').should('not.exist');
+    cy.get('[data-testid="revision-match-apply"]').should('contain', 'Review and apply…').and('not.be.disabled').click();
+    cy.get('[data-testid="impact-summary-apply"]').should('be.disabled');
+    cy.contains('label', 'Also insert 1 new row').should('exist');
+    // Joy's visually-hidden input overlays its label, so Cypress can only click the input itself.
+    cy.get('[data-testid="impact-summary-include-new-rows"] input[type="checkbox"]').check();
+    cy.get('[data-testid="impact-summary-apply"]').should('not.be.disabled').click();
     cy.get('@onApply').should('have.been.calledOnceWith', true);
   });
 

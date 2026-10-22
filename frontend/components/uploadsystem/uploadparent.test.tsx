@@ -749,7 +749,7 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     return renderResult;
   }
 
-  it('opens on the New Rows tab for a new-only revision upload, and requires explicit confirmation before applying', async () => {
+  it('opens on the New Rows tab for a new-only revision upload, and inserts new rows only when the box in the confirmation dialog is checked', async () => {
     const user = userEvent.setup();
 
     const newRowCsvRow = { tag: 'T001', stemtag: 'S1', quadrat: 'Q1', dbh: '10', date: '2024-01-01', spcode: null };
@@ -757,7 +757,17 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
       matchedRows: [],
       newRows: [{ csvRow: newRowCsvRow, csvIndex: 0, reason: 'no-match-key-in-db' }],
       invalidRows: [],
-      counts: { matched: 0, matchedWithChanges: 0, new: 1, invalid: 0, total: 1 }
+      counts: { matched: 0, matchedWithChanges: 0, new: 1, invalid: 0, total: 1 },
+      bulkPlan: {
+        dataType: 'measurementssummary',
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, status: 'new' }],
+        aggregateEffects: [],
+        maxSeverity: 'info',
+        planHash: 'new-only-plan-hash',
+        generatedAt: '2026-10-21T00:00:00Z',
+        duplicateDeletions: []
+      }
     };
     const applyResponse = {
       updatedCount: 0,
@@ -768,13 +778,14 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
       validationPending: false
     };
     const { applyRequestBodies, resolveMatch } = mockRevisionUploadFetch({ matchResponse, applyResponse, deferMatch: true });
+    const NEW_ROWS_TAB_TEXT = /will be inserted as new measurements if you include them when applying/;
 
     await driveToRevisionMatch(user);
 
     // UploadRevisionMatch must not mount until the match response exists -- while the
     // request is in flight, a matching-in-progress state should be visible instead.
     await waitFor(() => expect(screen.getByText(/matching revision rows/i)).toBeInTheDocument());
-    expect(screen.queryByText('Confirm new row insertion')).not.toBeInTheDocument();
+    expect(screen.queryByText(NEW_ROWS_TAB_TEXT)).not.toBeInTheDocument();
 
     resolveMatch();
 
@@ -786,17 +797,20 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     // real newRows-only response lands, the New Rows tab exists in the TabList but its
     // panel is never the selected one, so this text never renders and the wait below
     // times out.
-    await waitFor(() => expect(screen.getByText('Confirm new row insertion')).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByText(NEW_ROWS_TAB_TEXT)).toBeInTheDocument(), { timeout: 3000 });
 
-    const applyButton = screen.getByTestId('revision-match-apply');
-    expect(applyButton).toBeDisabled();
+    const reviewButton = screen.getByTestId('revision-match-apply');
+    expect(reviewButton).toHaveTextContent('Review and apply…');
+    await user.click(reviewButton);
+    const confirmButton = await screen.findByTestId('impact-summary-apply');
+    expect(confirmButton).toBeDisabled();
 
-    await user.click(screen.getByText('Confirm new row insertion'));
-    expect(applyButton).not.toBeDisabled();
-
-    await user.click(applyButton);
+    await user.click(screen.getByRole('checkbox', { name: 'Also insert 1 new row' }));
+    expect(confirmButton).not.toBeDisabled();
+    await user.click(confirmButton);
 
     await waitFor(() => expect(applyRequestBodies).toHaveLength(1));
+    console.log(`[#525 item 9] apply body confirmNewRows=${String(applyRequestBodies[0].confirmNewRows)}`);
     expect(applyRequestBodies[0].confirmNewRows).toBe(true);
     expect(applyRequestBodies[0].newRows).toHaveLength(1);
 
@@ -1058,7 +1072,8 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     }) as unknown as typeof global.fetch;
 
     await driveToRevisionMatch(user);
-    await waitFor(() => expect(screen.getByText('Confirm new row insertion')).toBeInTheDocument());
+    // UploadRevisionMatch mounts only once the match response exists (uploadparent.tsx REVISION_MATCH case), with or without a toggle.
+    await waitFor(() => expect(screen.getByTestId('revision-match-apply')).toBeInTheDocument());
 
     expect(matchRequestBodies).toHaveLength(1);
     expect(matchRequestBodies[0].previousUploadAttemptID, 'the first match of a new upload must never send a prior attempt identity').toBeUndefined();
@@ -1109,7 +1124,8 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
 
     // Upload #1: establishes attempt A.
     await addFileAndContinueUpload(user);
-    await waitFor(() => expect(screen.getByText('Confirm new row insertion')).toBeInTheDocument());
+    // UploadRevisionMatch mounts only once the match response exists (uploadparent.tsx REVISION_MATCH case), with or without a toggle.
+    await waitFor(() => expect(screen.getByTestId('revision-match-apply')).toBeInTheDocument());
     expect(matchRequestBodies).toHaveLength(1);
     expect(matchRequestBodies[0].previousUploadAttemptID).toBeUndefined();
 

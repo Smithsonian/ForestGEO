@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react';
 import {
   Box,
   Button,
+  Checkbox,
   Chip,
   DialogActions,
   DialogContent,
@@ -24,6 +25,11 @@ import EditEffectRow from './editeffectrow';
 
 interface ImpactSummaryProps {
   bulkPlan: BulkEditPlan;
+  /** Rows the confirm will write: actionable matched + included new + invalid (recorded as failed). */
+  selectedRowCount: number;
+  newRowCount?: number;
+  includeNewRows?: boolean;
+  onIncludeNewRowsChange?: (includeNewRows: boolean) => void;
   onConfirm: () => Promise<void>;
   onCancel: () => void;
   busy: boolean;
@@ -31,6 +37,13 @@ interface ImpactSummaryProps {
 
 const SEVERITY_GROUP_ORDER: Severity[] = ['destructive', 'warn', 'info'];
 const MAX_DISPLAYED_BLOCKING_ERRORS = 5;
+
+export const SELECTED_ROW_COUNT_EXPLANATION =
+  'This number counts the updates and deduplications, the new rows if you include them, and the invalid rows that will be recorded as failed measurements.';
+
+export function formatIncludeNewRowsLabel(newRowCount: number): string {
+  return `Also insert ${newRowCount} new row${newRowCount === 1 ? '' : 's'}`;
+}
 
 function sortEffectsBySeverity(effects: Effect[]): Effect[] {
   return [...effects].sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]);
@@ -76,7 +89,16 @@ function isRoleForbiddenError(error: PreviewError): boolean {
   return error.kind === 'RoleForbiddenField';
 }
 
-export default function ImpactSummary({ bulkPlan, onConfirm, onCancel, busy }: ImpactSummaryProps) {
+export default function ImpactSummary({
+  bulkPlan,
+  selectedRowCount,
+  newRowCount = 0,
+  includeNewRows = false,
+  onIncludeNewRowsChange,
+  onConfirm,
+  onCancel,
+  busy
+}: ImpactSummaryProps) {
   const stats = useMemo(() => tallyRowStatuses(bulkPlan), [bulkPlan]);
   const orderedEffects = useMemo(() => sortEffectsBySeverity(bulkPlan.aggregateEffects), [bulkPlan.aggregateEffects]);
 
@@ -93,7 +115,7 @@ export default function ImpactSummary({ bulkPlan, onConfirm, onCancel, busy }: I
   const speciesCorrectionMemberCounts = useMemo(() => speciesCorrectionGroups.map(summarizeSpeciesCorrectionGroupMembers), [speciesCorrectionGroups]);
 
   const typedConfirmRequired = bulkPlan.maxSeverity === 'destructive';
-  const expectedConfirmPhrase = `APPLY ${bulkPlan.rowCount}`;
+  const expectedConfirmPhrase = `APPLY ${selectedRowCount}`;
   const [confirmInput, setConfirmInput] = useState('');
   const typedConfirmPassed = !typedConfirmRequired || confirmInput.trim() === expectedConfirmPhrase;
   const isBlocked = bulkPlan.canApply === false || blockingErrors.length > 0;
@@ -103,7 +125,7 @@ export default function ImpactSummary({ bulkPlan, onConfirm, onCancel, busy }: I
   // fabricated role claim.
   const hasUnexplainedBlock = isBlocked && otherBlockingErrors.length === 0 && roleBlockingErrors.length === 0;
 
-  const applyDisabled = busy || !typedConfirmPassed || isBlocked;
+  const applyDisabled = busy || !typedConfirmPassed || isBlocked || selectedRowCount === 0;
 
   return (
     <Modal open={true} onClose={busy ? undefined : onCancel}>
@@ -233,6 +255,17 @@ export default function ImpactSummary({ bulkPlan, onConfirm, onCancel, busy }: I
               </Stack>
             ) : null}
 
+            {newRowCount > 0 ? (
+              // eslint-disable-next-line jsx-a11y/control-has-associated-label -- Joy UI Checkbox `label` prop renders an associated <label> at runtime
+              <Checkbox
+                label={formatIncludeNewRowsLabel(newRowCount)}
+                checked={includeNewRows}
+                onChange={event => onIncludeNewRowsChange?.(event.target.checked)}
+                disabled={busy}
+                data-testid="impact-summary-include-new-rows"
+              />
+            ) : null}
+
             {typedConfirmRequired ? (
               <FormControl data-testid="impact-summary-typed-confirm">
                 <FormLabel htmlFor="impact-summary-typed-confirm-input">Confirm destructive apply</FormLabel>
@@ -246,6 +279,9 @@ export default function ImpactSummary({ bulkPlan, onConfirm, onCancel, busy }: I
                   data-testid="impact-summary-typed-confirm-input"
                 />
                 <FormHelperText>Type {expectedConfirmPhrase} to enable the apply button.</FormHelperText>
+                <Typography level="body-xs" data-testid="impact-summary-selected-count-explanation">
+                  {SELECTED_ROW_COUNT_EXPLANATION}
+                </Typography>
               </FormControl>
             ) : null}
           </Stack>
