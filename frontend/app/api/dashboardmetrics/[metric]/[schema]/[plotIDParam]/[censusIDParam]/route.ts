@@ -167,8 +167,8 @@ async function processMetrics(metric: string, schema: SchemaName, plotID: number
 
         if (!previousCensusID) {
           // First census: there is no previous census, so "old stems" is undefined
-          // (null), not zero. Multi-stem trees and new recruits are real properties
-          // of the CURRENT census and must be computed here, not hardcoded.
+          // (null), not zero. Multi-stem trees are a property of the CURRENT census
+          // and are computed here, not hardcoded.
           const firstCensusQuery = `
             WITH measured_stems AS (
               SELECT DISTINCT s.StemGUID, t.TreeTag, s.StemTag
@@ -179,18 +179,17 @@ async function processMetrics(metric: string, schema: SchemaName, plotID: number
                 AND cm.IsActive = 1 AND s.IsActive = 1 AND t.IsActive = 1
             )
             SELECT
-              ${MULTI_STEM_TREES_SUBQUERY} AS CountMultiStems,
-              -- Every measured stem is a recruit on a first census. Count rows the
-              -- same way the comparison branch does (one per distinct StemGUID):
-              -- concatenating tag pairs would yield NULL for NULL TreeTags and drop
-              -- those stems, contradicting the Stems tile.
-              (SELECT COUNT(*) FROM measured_stems) AS CountNewRecruits`;
-          const firstCensusResult = await connectionManager.executeQuery(firstCensusQuery, [censusID, censusID]);
+              ${MULTI_STEM_TREES_SUBQUERY} AS CountMultiStems`;
+          // Same definition as the CountStems metric, so New Recruits equals Total Stems on a first census.
+          const [firstCensusResult, measuredStemResult] = await Promise.all([
+            connectionManager.executeQuery(firstCensusQuery, [censusID, censusID]),
+            connectionManager.executeQuery(buildMeasuredStemCountSql(schema), [censusID, plotID])
+          ]);
           return NextResponse.json(
             {
               CountOldStems: null,
               CountMultiStems: firstCensusResult[0]?.CountMultiStems ?? 0,
-              CountNewRecruits: firstCensusResult[0]?.CountNewRecruits ?? 0,
+              CountNewRecruits: measuredStemResult[0]?.CountStems ?? 0,
               isFirstCensus: true
             },
             { status: HTTPResponses.OK }

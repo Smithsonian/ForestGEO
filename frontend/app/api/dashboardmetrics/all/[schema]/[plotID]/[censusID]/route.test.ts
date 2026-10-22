@@ -155,7 +155,7 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
 
       // Query 6: First-census stem classification. The DB grouping identifies 40
       // trees carrying more than one measured stem — consistent with 1.5 stems/tree.
-      exec.mockResolvedValueOnce([{ CountMultiStems: 40, CountNewRecruits: 150 }]);
+      exec.mockResolvedValueOnce([{ CountMultiStems: 40 }]);
 
       const res = await callGET('testschema', '1', '1');
 
@@ -178,12 +178,9 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       expect(String(classificationCall![0])).toMatch(/GROUP BY TreeTag HAVING COUNT\(DISTINCT StemTag\) > 1/i);
       expect(String(classificationCall![0])).not.toMatch(/previous_stems/i);
 
-      // Recruits on a first census must count EVERY measured stem, the same way
-      // the comparison branch counts measured_stems rows. Tag-pair concatenation
-      // would return NULL for NULL TreeTags (dropping those stems) and collapse
-      // duplicate tag pairs, undercounting recruits below the Stems tile.
-      expect(String(classificationCall![0])).toMatch(/SELECT COUNT\(\*\) FROM measured_stems\) AS CountNewRecruits/i);
-      expect(String(classificationCall![0])).not.toMatch(/CONCAT\(TreeTag/i);
+      // Recruits on a first census are the Total Stems result (150 above), not a second
+      // count with its own filters, so the two tiles cannot drift apart.
+      expect(String(classificationCall![0])).not.toMatch(/CountNewRecruits/i);
 
       // Verify other metrics are present
       expect(body.progressTachometer).toBeDefined();

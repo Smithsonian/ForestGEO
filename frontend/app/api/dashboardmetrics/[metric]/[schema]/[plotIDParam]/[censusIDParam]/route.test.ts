@@ -339,7 +339,9 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       // First query: check for previous census - returns NULL (no previous)
       exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
       // Second query: first-census classification (one tree with two measured stems => 30 multi)
-      exec.mockResolvedValueOnce([{ CountMultiStems: 30, CountNewRecruits: 100 }]);
+      exec.mockResolvedValueOnce([{ CountMultiStems: 30 }]);
+      // Third query: the shared measured-stem count, reused as the first-census recruit count
+      exec.mockResolvedValueOnce([{ CountStems: 100 }]);
 
       const res = await callGET('StemTypes', 'testschema', '1', '1', 'TestPlot');
 
@@ -355,8 +357,8 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
         isFirstCensus: true
       });
 
-      // Verify only 2 queries ran (previous-census probe + first-census classification)
-      expect(exec).toHaveBeenCalledTimes(2);
+      // Verify only 3 queries ran (previous-census probe, first-census classification, measured-stem count)
+      expect(exec).toHaveBeenCalledTimes(3);
 
       // First query checks for previous census
       const [sql1, params1] = exec.mock.calls[0];
@@ -371,6 +373,12 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       // stem, or tree must not inflate CountMultiStems/CountNewRecruits above them.
       expect(String(sql2)).toMatch(/cm\.IsActive = 1 AND s\.IsActive = 1 AND t\.IsActive = 1/i);
       expect(params2).toEqual([1, 1]); // censusID, censusID
+      expect(String(sql2)).not.toMatch(/CountNewRecruits/i);
+
+      // Recruits come from the same query as the Total Stems tile, so the two are equal by construction
+      const [sql3, params3] = exec.mock.calls[2];
+      expect(String(sql3)).toBe(buildMeasuredStemCountSql('testschema'));
+      expect(params3).toEqual([1, 1]); // censusID, plotID
     });
 
     it('subsequent census: correctly classifies old stems, multi-stems, and new recruits', async () => {
@@ -504,7 +512,9 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
       // First query: no previous census
       exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
       // Second query: classification returns 0 for an empty first census
-      exec.mockResolvedValueOnce([{ CountMultiStems: 0, CountNewRecruits: 0 }]);
+      exec.mockResolvedValueOnce([{ CountMultiStems: 0 }]);
+      // Third query: no measured stems
+      exec.mockResolvedValueOnce([{ CountStems: 0 }]);
 
       const res = await callGET('StemTypes', 'testschema', '1', '1', 'EmptyFirstCensus');
 
