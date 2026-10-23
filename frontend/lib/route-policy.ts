@@ -103,6 +103,8 @@ export const ROUTE_POLICIES = {
   // Dashboard metrics
   'dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDParam]': 'site-scoped',
   'dashboardmetrics/all/[schema]/[plotID]/[censusID]': 'site-scoped',
+  // Census overview (read-only publish facts; any site member)
+  'censusoverview/summary/[schema]/[plotID]/[censusID]': 'site-scoped',
   // Data fetch / paged data views
   'fetchall/[[...slugs]]': 'site-scoped',
   'fixeddata/[dataType]/[[...slugs]]': 'site-scoped',

@@ -239,4 +239,14 @@ describe('Route authorization policy matrix', () => {
     const totalClassified = Object.values(counts).reduce((a, b) => a + b, 0);
     expect(totalClassified).toBe(allRouteKeys.length);
   });
+
+  it('registers the census overview summary as a protected site-scoped route (#547)', () => {
+    const censusOverviewSummaryRouteKey = 'censusoverview/summary/[schema]/[plotID]/[censusID]';
+    const routeFile = allRouteFiles.find(file => routeFileToKey(file) === censusOverviewSummaryRouteKey);
+
+    expect(routeFile, 'route.ts must exist at app/api/censusoverview/summary/[schema]/[plotID]/[censusID]').toBeDefined();
+    expect(ROUTE_POLICY_BY_KEY[censusOverviewSummaryRouteKey]).toBe('site-scoped');
+    expect(UNVERIFIED_SCHEMA_ACCESS.has(censusOverviewSummaryRouteKey), 'must enforce per-site access, not be tracked debt').toBe(false);
+    expect(routeSourceIsProtected(routeFile as string)).toEqual({ protected: true });
+  });
 });
