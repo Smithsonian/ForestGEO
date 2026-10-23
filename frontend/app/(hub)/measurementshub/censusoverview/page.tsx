@@ -228,6 +228,7 @@ export default function CensusOverviewPage() {
           throw new Error(`Failed to clear census: ${response.status}`);
         }
         setCensusToDelete(null);
+        censusSummary.refetch();
         // The deletion has already committed; a refresh failure must not be
         // reported as a failed delete (retrying the delete would 404).
         try {
@@ -244,7 +245,7 @@ export default function CensusOverviewPage() {
         setIsDeletingCensus(false);
       }
     },
-    [censusToDelete, currentSite?.schemaName, refreshCensusList, setLoading]
+    [censusToDelete, currentSite?.schemaName, refreshCensusList, setLoading, censusSummary.refetch]
   );
 
   const deleteErrorAlert = deleteError && (

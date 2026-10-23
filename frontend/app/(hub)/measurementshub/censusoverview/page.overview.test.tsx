@@ -3,7 +3,7 @@
  * state, the Data Quality refresh refetch and the Census Tools row. The cards
  * render for real; only widgets with their own fetches are stubbed.
  */
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useRouter } from 'next/navigation';
@@ -31,6 +31,11 @@ const URL_BASE = 'http://localhost';
 const METRICS_URL_FRAGMENT = '/api/dashboardmetrics/all/';
 const SUMMARY_URL_FRAGMENT = '/api/censusoverview/summary/';
 const REFRESH_URL_FRAGMENT = '/api/refreshviews/measurementssummary/';
+const CLEAR_CENSUS_URL_FRAGMENT = '/api/clearcensus';
+const DELETE_BUTTON_TEST_ID = 'census-overview-delete-button';
+const DELETE_ERROR_TEST_ID = 'census-overview-delete-error';
+const MODAL_CONFIRM_LABEL = 'Delete Census';
+const CENSUS_LIST_REFRESH_FAILED_MESSAGE = 'Census deleted, but refreshing the census list failed. Reload the page to see the updated list.';
 const CENSUS_NOT_FOUND_MESSAGE = 'Census not found';
 const PERSONNEL_BOX_TITLE = 'Active Personnel';
 const DATA_QUALITY_HEADING = 'Data Quality';
@@ -121,6 +126,7 @@ function installFetch(): void {
       return { ok: answer.ok, status: answer.status, json: async () => answer.body } as Response;
     }
     if (url.includes(REFRESH_URL_FRAGMENT)) return refreshResponse;
+    if (url.includes(CLEAR_CENSUS_URL_FRAGMENT)) return { ok: true, status: HTTPResponses.OK, json: async () => ({}) } as Response;
     return { ok: false, status: HTTPResponses.NOT_FOUND, json: async () => ({}) } as Response;
   }) as unknown as typeof fetch;
 }
@@ -227,6 +233,27 @@ describe('CensusOverviewPage — census overview redesign (#547)', () => {
     await act(async () => {
       groupedCensusSummary.resolve();
     });
+  });
+
+  it("refetches the same scope's summary after a census delete, even though the census list refresh fails", async () => {
+    const user = userEvent.setup();
+    seedSelection(SINGLE_RANGE_CENSUS);
+    render(<CensusOverviewPage />);
+    await screen.findByText(CENSUS_OVERVIEW_TEXT.exportPreviewHeading);
+    expect(fetchedUrls(SUMMARY_URL_FRAGMENT)).toHaveLength(1);
+
+    await user.click(screen.getByTestId(DELETE_BUTTON_TEST_ID));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: MODAL_CONFIRM_LABEL }));
+
+    await waitFor(() => expect(fetchedUrls(CLEAR_CENSUS_URL_FRAGMENT)).toHaveLength(1));
+    await waitFor(() => expect(fetchedUrls(SUMMARY_URL_FRAGMENT)).toHaveLength(2));
+    await act(async () => {});
+    const summaryUrls = fetchedUrls(SUMMARY_URL_FRAGMENT);
+    console.log('[#547 delete refetch] summary requests:', JSON.stringify(summaryUrls));
+    expect(await screen.findByTestId(DELETE_ERROR_TEST_ID)).toHaveTextContent(CENSUS_LIST_REFRESH_FAILED_MESSAGE);
+    expect(summaryUrls, 'a delete must not leave the card showing counts for the deleted measurements').toHaveLength(2);
+    expect(summaryUrls[1]).toBe(summaryUrls[0]);
   });
 
   it('no longer shows the Personnel box', async () => {
