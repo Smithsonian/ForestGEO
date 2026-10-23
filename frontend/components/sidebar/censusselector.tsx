@@ -10,6 +10,8 @@
 import { Select, Option, Typography, Stack, SelectOption, Box } from '@mui/joy';
 import { useAppStore } from '@/config/store/appstore';
 import { submitCookie } from '@/app/actions/cookiemanager';
+import { formatDisplayDate } from '@/config/dateformats';
+import { getCensusWindow, getMeasurementSpan } from '@/config/censuswindow';
 
 export default function CensusSelector() {
   const currentCensus = useAppStore(state => state.currentCensus);
@@ -36,18 +38,28 @@ export default function CensusSelector() {
       );
     }
 
-    const startDate = currentCensus?.dateRanges?.[0]?.startDate;
-    const endDate = currentCensus?.dateRanges?.[0]?.endDate;
+    const range = currentCensus?.dateRanges?.[0];
+    const censusWindow = range ? getCensusWindow(range) : { start: undefined, end: undefined };
+    const measurements = range ? getMeasurementSpan(range) : { first: undefined, last: undefined };
 
-    const hasStartDate = startDate !== undefined && startDate !== null;
-    const hasEndDate = endDate !== undefined && endDate !== null;
+    const hasWindowStart = !!censusWindow.start;
+    const hasWindowEnd = !!censusWindow.end;
+    const hasFirstMeasurement = !!measurements.first;
+    const hasLastMeasurement = !!measurements.last;
 
-    // Ensure dates are rendered in a block layout to stack them vertically
+    // "First/Last Record" are observed measurement dates only; a census with no data never
+    // presents its census window as a first record.
     const dateMessage = (
       <span aria-label="census record information" style={{ display: 'block' }}>
-        {hasStartDate && <Typography display="block">&mdash;{` First Record: ${new Date(startDate).toDateString()}`}</Typography>}
-        {hasEndDate && <Typography display="block">&mdash;{` Last Record: ${new Date(endDate).toDateString()}`}</Typography>}
-        {!hasStartDate && !hasEndDate && <Typography display="block">No Measurements</Typography>}
+        {(hasWindowStart || hasWindowEnd) && (
+          <Typography display="block">
+            &mdash;
+            {` Census window: ${hasWindowStart ? formatDisplayDate(censusWindow.start) : '—'} to ${hasWindowEnd ? formatDisplayDate(censusWindow.end) : 'open'}`}
+          </Typography>
+        )}
+        {hasFirstMeasurement && <Typography display="block">&mdash;{` First Record: ${formatDisplayDate(measurements.first)}`}</Typography>}
+        {hasLastMeasurement && <Typography display="block">&mdash;{` Last Record: ${formatDisplayDate(measurements.last)}`}</Typography>}
+        {!hasFirstMeasurement && !hasLastMeasurement && <Typography display="block">No Measurements</Typography>}
       </span>
     );
 
@@ -105,7 +117,7 @@ export default function CensusSelector() {
             <Option
               aria-label={`Census ${item?.plotCensusNumber}${
                 item?.dateRanges?.length
-                  ? `, first measurement: ${item.dateRanges?.[0]?.startDate ? new Date(item.dateRanges?.[0]?.startDate).toDateString() : 'No measurements'}`
+                  ? `, first measurement: ${getMeasurementSpan(item.dateRanges[0]).first ? formatDisplayDate(getMeasurementSpan(item.dateRanges[0]).first) : 'No measurements'}`
                   : ''
               }`}
               data-testid="census-selection-option"
@@ -131,12 +143,12 @@ export default function CensusSelector() {
                       <Box key={index}>
                         <Stack direction="row">
                           <Typography level="body-sm" color="neutral">
-                            {dateRange?.startDate ? `First: ${new Date(dateRange.startDate).toDateString()}` : 'No Start Date'}
+                            {getMeasurementSpan(dateRange).first ? `First: ${formatDisplayDate(getMeasurementSpan(dateRange).first)}` : 'No Measurements'}
                           </Typography>
                         </Stack>
                         <Stack direction="row">
                           <Typography level="body-sm" color="neutral">
-                            {dateRange?.endDate ? `Last: ${new Date(dateRange.endDate).toDateString()}` : 'No End Date'}
+                            {getMeasurementSpan(dateRange).last ? `Last: ${formatDisplayDate(getMeasurementSpan(dateRange).last)}` : 'No End Date'}
                           </Typography>
                         </Stack>
                       </Box>
