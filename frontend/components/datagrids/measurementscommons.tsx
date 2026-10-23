@@ -116,7 +116,10 @@ import {
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
+  describeMeasurementRow,
+  NEW_ROW_ADDED_MESSAGE,
   revertMeasurementEdit,
+  ROW_DELETED_MESSAGE,
   selectMeasurementStateSnackbar,
   shouldRefreshMeasurementsAfterValidationTransition,
   shouldUseAutoMeasurementRowHeight,
@@ -130,16 +133,6 @@ const AUTO_ROW_HEIGHT = () => 'auto' as const;
 const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
 const FIREFOX_FIXED_ROW_HEIGHT = 112;
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
-
-function describeMeasurementRow(row: GridRowModel | null): string {
-  if (!row) return 'this measurement';
-  const treeTag = row.treeTag ?? row.TreeTag;
-  const stemTag = row.stemTag ?? row.StemTag;
-  const measuredValue = row.measuredDBH ?? row.MeasuredDBH ?? row.dbh ?? row.DBH;
-  const identity = [treeTag && `tree ${treeTag}`, stemTag && `stem ${stemTag}`].filter(Boolean).join(', ');
-  const value = measuredValue !== undefined && measuredValue !== null && measuredValue !== '' ? ` (DBH ${measuredValue})` : '';
-  return identity ? `${identity}${value}` : `this measurement${value}`;
-}
 
 const NEGATIVE_DBH_INPUT_MESSAGE = 'DBH must be non-negative';
 
@@ -915,7 +908,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         setSnackbar({ children: `Error: ${responseJSON.message}`, severity: 'error' });
         return Promise.reject(responseJSON.row);
       }
-      setSnackbar({ children: 'New row added!', severity: 'success' });
+      setSnackbar({ children: NEW_ROW_ADDED_MESSAGE, severity: 'success' });
       setIsNewRowAdded(false);
       setShouldAddRowAfterFetch(false);
       await Promise.all([refetch(), fetchValidationErrors()]);
@@ -1091,7 +1084,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     } else {
       if (handleSelectQuadrat) handleSelectQuadrat(null);
       setSnackbar({
-        children: 'Row successfully deleted',
+        children: ROW_DELETED_MESSAGE,
         severity: 'success'
       });
       setRows(rows.filter(row => String(row.id) !== String(id)));

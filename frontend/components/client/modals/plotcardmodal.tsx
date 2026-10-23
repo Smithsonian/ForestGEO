@@ -35,6 +35,8 @@ import Filter3Icon from '@mui/icons-material/Filter3';
 import Filter2Icon from '@mui/icons-material/Filter2';
 import Filter1Icon from '@mui/icons-material/Filter1';
 
+const BACKDROP_CLICK_CLOSE_REASON = 'backdropClick';
+
 export default function PlotCardModal(props: {
   plot?: PlotRDS;
   openPlotCardModal: boolean;
@@ -177,12 +179,17 @@ export default function PlotCardModal(props: {
     }
   };
 
+  const handleRequestClose = (_event: unknown, reason?: string) => {
+    if (submitting || reason === BACKDROP_CLICK_CLOSE_REASON) return;
+    setOpenPlotCardModal(false);
+  };
+
   return (
     <>
-      <Modal open={openPlotCardModal}>
+      <Modal open={openPlotCardModal} onClose={handleRequestClose}>
         <ModalDialog variant={'plain'}>
           <DialogContent>
-            <ModalClose onClick={() => setOpenPlotCardModal(false)} />
+            <ModalClose />
             <Card sx={{ width: '100%', height: '100%', display: 'flex', flex: 1, flexDirection: 'column' }} variant={'plain'}>
               <CardContent>
                 <Grid container spacing={1} sx={{ flexGrow: 1 }}>

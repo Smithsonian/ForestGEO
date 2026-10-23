@@ -14,6 +14,21 @@ import { areArraysEqual, areFilterItemsEqual, isActiveFilterItem, sanitizeQuickF
 import { EditRevertRequest, requestEditRevert } from '@/lib/editplan/requestrevert';
 import type { UndoRevertOutcome } from '@/components/editplan/undotoast';
 import type { ApplyResult } from '@/config/editplan/types';
+import { formatMeasurementForDisplay } from '@/config/measurementdisplay';
+
+import { ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
+
+export { NEW_ROW_ADDED_MESSAGE, ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
+
+export function describeMeasurementRow(row: GridRowModel | null): string {
+  if (!row) return 'this measurement';
+  const treeTag = row.treeTag ?? row.TreeTag;
+  const stemTag = row.stemTag ?? row.StemTag;
+  const measuredValue = row.measuredDBH ?? row.MeasuredDBH ?? row.dbh ?? row.DBH;
+  const identity = [treeTag && `tree ${treeTag}`, stemTag && `stem ${stemTag}`].filter(Boolean).join(', ');
+  const value = measuredValue !== undefined && measuredValue !== null && measuredValue !== '' ? ` (DBH ${formatMeasurementForDisplay(measuredValue)})` : '';
+  return identity ? `${identity}${value}` : `this measurement${value}`;
+}
 
 // Detects edits that round to the existing server-precision value, so typing
 // 1.234 over 1.23 in a DBH cell isn't silently dropped as a no-op elsewhere.
@@ -186,7 +201,7 @@ export async function runMeasurementEditSave(args: RunMeasurementEditSaveArgs): 
   // One message, only after the apply succeeded (the grid shows a single snackbar, so a second
   // call would overwrite the rounding information).
   if (roundedNoOpFields.length > 0) notify(PARTIAL_ROUNDED_MESSAGE(roundedNoOpFields), 'info');
-  else notify('Row updated!', 'success');
+  else notify(ROW_UPDATED_MESSAGE, 'success');
   return restorePersistedEditableFields(newRow, oldRow, 'measurementssummary', Object.keys(decision.diff));
 }
 

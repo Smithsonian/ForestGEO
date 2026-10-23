@@ -11,7 +11,13 @@ vi.mock('@/lib/db/definitions/core', async importOriginal => {
 
 import { AttributeGridColumns, MeasurementsSummaryViewGridColumns, ViewFullTableGridColumns, VIEW_FULL_TABLE_COLUMN_WIDTHS } from './datagridcolumns';
 import { AttributesFormGridColumns } from './formcolumns';
-import { ATTRIBUTE_STATUS_UNSPECIFIED_LABEL, ATTRIBUTE_STATUS_UNSPECIFIED_HINT, AttributeStatusOptions } from '@/lib/db/definitions/core';
+import { formatMeasurementForDisplay } from '@/config/measurementdisplay';
+import {
+  ATTRIBUTE_STATUS_UNSPECIFIED_LABEL,
+  ATTRIBUTE_STATUS_UNSPECIFIED_HINT,
+  AttributeStatusEditorOptions,
+  AttributeStatusOptions
+} from '@/lib/db/definitions/core';
 
 // GridCellParams is generic over the grid's row/value types, but every field is still required at
 // the type level (GridRenderCellParams in @mui/x-data-grid/models/params/gridCellParams.d.ts);
@@ -110,6 +116,28 @@ describe('MeasurementsSummaryViewGridColumns plot coordinates', () => {
   });
 });
 
+describe('MeasurementsSummaryViewGridColumns DBH display (#524 item 6)', () => {
+  const DECIMAL_STRING_FROM_MYSQL = '120.000000';
+  const FRACTIONAL_DECIMAL_STRING_FROM_MYSQL = '12.345000';
+
+  it.each([
+    [DECIMAL_STRING_FROM_MYSQL, '120'],
+    [FRACTIONAL_DECIMAL_STRING_FROM_MYSQL, '12.35'],
+    [null, '0']
+  ])('shows %j in the DBH column exactly as the delete confirmation does (%s)', (storedValue, expectedDisplay) => {
+    const dbhColumn = MeasurementsSummaryViewGridColumns.find(candidate => candidate.field === 'measuredDBH');
+    expect(dbhColumn?.valueFormatter).toBeTypeOf('function');
+    const formatInGrid = dbhColumn!.valueFormatter as (value: unknown) => unknown;
+
+    const gridDisplay = String(formatInGrid(storedValue));
+    const confirmationDisplay = formatMeasurementForDisplay(storedValue ?? 0);
+    console.log(`[DBH display] stored=${JSON.stringify(storedValue)} grid=${JSON.stringify(gridDisplay)} confirmation=${JSON.stringify(confirmationDisplay)}`);
+
+    expect(gridDisplay).toBe(expectedDisplay);
+    expect(confirmationDisplay).toBe(gridDisplay);
+  });
+});
+
 describe('AttributeGridColumns status column (#425 null-status editing)', () => {
   // GridColDef is a union (GridBaseColDef | GridActionsColDef | GridSingleSelectColDef); the base
   // member's `type` is widened to GridColType, so `=== 'singleSelect'` alone does not let TypeScript
@@ -176,5 +204,14 @@ describe('AttributesFormGridColumns status column (#425 null-status editing)', (
 
     render(renderCell(buildBlankStatusCellParams(-1)));
     expect(screen.getByLabelText(ATTRIBUTE_STATUS_UNSPECIFIED_HINT)).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('is the same singleSelect as the inline grid, sharing AttributeStatusEditorOptions (#524 item 9)', () => {
+    const column = formStatusColumn() as GridSingleSelectColDef;
+    console.log(`[form status column] type=${column.type} valueOptions=${JSON.stringify(column.valueOptions)}`);
+
+    expect(column.type).toBe('singleSelect');
+    expect(column.valueOptions).toBe(AttributeStatusEditorOptions);
+    expect((column.valueFormatter as (value: string | null) => string)(null)).toBe('');
   });
 });

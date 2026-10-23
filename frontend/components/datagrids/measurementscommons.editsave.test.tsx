@@ -24,6 +24,7 @@ import {
   MeasurementEditValidationError,
   NO_CHANGE_SAVED_MESSAGE,
   PARTIAL_ROUNDED_MESSAGE,
+  ROW_UPDATED_MESSAGE,
   runMeasurementEditSave
 } from './measurementscommonsutils';
 import { assertNonNegativeFields, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
@@ -139,7 +140,7 @@ describe('runMeasurementEditSave through the real edit preview flow (mocked fetc
     expect(onEditOperation).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith(NO_CHANGE_SAVED_MESSAGE(['MeasuredDBH']), 'info');
-    expect(notify).not.toHaveBeenCalledWith('Row updated!', 'success');
+    expect(notify).not.toHaveBeenCalledWith(ROW_UPDATED_MESSAGE, 'success');
     expect(saved.measuredDBH).toBe('12.340000');
   });
 
@@ -148,7 +149,7 @@ describe('runMeasurementEditSave through the real edit preview flow (mocked fetc
     await save({ ...STORED_ROW, stemLocalX: 3.5, stemLocalY: 4.25, measuredHOM: null });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(onEditOperation).not.toHaveBeenCalled();
-    expect(notify).not.toHaveBeenCalledWith('Row updated!', 'success');
+    expect(notify).not.toHaveBeenCalledWith(ROW_UPDATED_MESSAGE, 'success');
   });
 
   it('negative DBH: rejected with an inline error, never persisted, no toast of success, no edit op', async () => {
@@ -157,7 +158,7 @@ describe('runMeasurementEditSave through the real edit preview flow (mocked fetc
     expect(fetchMock).not.toHaveBeenCalled();
     expect(onEditOperation).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledWith('Error: DBH must be non-negative', 'error');
-    expect(notify).not.toHaveBeenCalledWith('Row updated!', 'success');
+    expect(notify).not.toHaveBeenCalledWith(ROW_UPDATED_MESSAGE, 'success');
   });
 
   it('genuine DBH edit alongside shape-only fields sends only the real change and offers Undo', async () => {
@@ -168,7 +169,7 @@ describe('runMeasurementEditSave through the real edit preview flow (mocked fetc
     const previewBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(previewBody.newRow).toEqual({ MeasuredDBH: 15 });
     expect(onEditOperation).toHaveBeenCalledWith(77);
-    expect(notify).toHaveBeenCalledWith('Row updated!', 'success');
+    expect(notify).toHaveBeenCalledWith(ROW_UPDATED_MESSAGE, 'success');
   });
 
   it('mixed rounded + real edit saves the real part and tells the user the rounded part was kept', async () => {
@@ -180,7 +181,7 @@ describe('runMeasurementEditSave through the real edit preview flow (mocked fetc
     expect(saved.measuredDBH).toBe('12.340000');
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith(PARTIAL_ROUNDED_MESSAGE(['MeasuredDBH']), 'info');
-    expect(notify).not.toHaveBeenCalledWith('Row updated!', 'success');
+    expect(notify).not.toHaveBeenCalledWith(ROW_UPDATED_MESSAGE, 'success');
     expect(saved.measuredHOM).toBe(2);
   });
 
@@ -229,7 +230,7 @@ describe('runMeasurementEditSave through the real edit preview flow (mocked fetc
     const save = setup();
     await expect(save({ ...STORED_ROW, measuredDBH: 15 })).rejects.toThrow();
     expect(onEditOperation).not.toHaveBeenCalled();
-    expect(notify).not.toHaveBeenCalledWith('Row updated!', 'success');
+    expect(notify).not.toHaveBeenCalledWith(ROW_UPDATED_MESSAGE, 'success');
   });
 });
 

@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { title } from '@/config/primitives';
 import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
-import { Box, Drawer, IconButton, Menu, MenuItem, Stack, Typography, useTheme } from '@mui/joy';
+import { Box, Drawer, Dropdown, IconButton, Menu, MenuButton, MenuItem, Stack, Typography, useTheme } from '@mui/joy';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import Divider from '@mui/joy/Divider';
 import { useAsyncOperation } from '@/app/hooks/useAsyncOperation';
@@ -79,7 +79,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
-  const [helpMenuAnchor, setHelpMenuAnchor] = useState<HTMLElement | null>(null);
   const pathname = usePathname() ?? '';
   const { isPulsing } = useLockAnimation();
 
@@ -458,46 +457,43 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
               {siteConfig.name}
             </Typography>
           </Stack>
-          <IconButton
-            aria-label="Help"
-            aria-haspopup="menu"
-            aria-expanded={Boolean(helpMenuAnchor)}
-            onClick={event => setHelpMenuAnchor(event.currentTarget)}
-            className={isPulsing ? 'animate-pulse-no-opacity' : ''}
-            sx={{
-              position: 'fixed',
-              bottom: 20,
-              right: 20,
-              zIndex: 2000,
-              backgroundColor: 'transparent', // Remove background color
-              boxShadow: 'none', // Remove shadow if present
-              color: theme.vars.palette.primary.solidColor, // Text/icon color
-              opacity: 0.5, // Initial opacity
-              transition: 'opacity 0.3s ease',
-              '&:hover': {
-                opacity: 1,
-                backgroundColor: 'transparent' // Ensure no hover background
-              },
-              '&:focus-visible': {
-                outline: `2px solid ${theme.vars.palette.primary.solidColor}` // Add focus ring for accessibility if needed
-              }
-            }}
-          >
-            <HelpOutlineOutlinedIcon fontSize="large" />
-          </IconButton>
-          <Menu anchorEl={helpMenuAnchor} open={Boolean(helpMenuAnchor)} onClose={() => setHelpMenuAnchor(null)} placement="top-end">
-            <MenuItem component="a" href={DOCUMENTATION_URL} target="_blank" rel="noreferrer" onClick={() => setHelpMenuAnchor(null)}>
-              Documentation
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                setHelpMenuAnchor(null);
-                setIsFeedbackModalOpen(true);
+          <Dropdown>
+            <MenuButton
+              slots={{ root: IconButton }}
+              slotProps={{
+                root: {
+                  'aria-label': 'Help',
+                  className: isPulsing ? 'animate-pulse-no-opacity' : '',
+                  sx: {
+                    position: 'fixed',
+                    bottom: 20,
+                    right: 20,
+                    zIndex: 2000,
+                    backgroundColor: 'transparent', // Remove background color
+                    boxShadow: 'none', // Remove shadow if present
+                    color: theme.vars.palette.primary.solidColor, // Text/icon color
+                    opacity: 0.5, // Initial opacity
+                    transition: 'opacity 0.3s ease',
+                    '&:hover': {
+                      opacity: 1,
+                      backgroundColor: 'transparent' // Ensure no hover background
+                    },
+                    '&:focus-visible': {
+                      outline: `2px solid ${theme.vars.palette.primary.solidColor}` // Add focus ring for accessibility if needed
+                    }
+                  }
+                }
               }}
             >
-              Report an issue
-            </MenuItem>
-          </Menu>
+              <HelpOutlineOutlinedIcon fontSize="large" />
+            </MenuButton>
+            <Menu placement="top-end">
+              <MenuItem component="a" href={DOCUMENTATION_URL} target="_blank" rel="noreferrer">
+                Documentation
+              </MenuItem>
+              <MenuItem onClick={() => setIsFeedbackModalOpen(true)}>Report an issue</MenuItem>
+            </Menu>
+          </Dropdown>
         </Box>
       </Box>
       <GithubFeedbackModal open={isFeedbackModalOpen} onClose={() => setIsFeedbackModalOpen(false)} />

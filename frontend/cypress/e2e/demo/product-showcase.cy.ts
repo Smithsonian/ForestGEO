@@ -198,6 +198,9 @@ describe('ForestGEO Product Showcase Demo', () => {
     cy.contains('tr', 'species-update-2024-06-16.csv').within(() => {
       cy.get('button').eq(1).click({ force: true });
     });
+    cy.contains('[role="dialog"]', 'species-update-2024-06-16.csv').within(() => {
+      cy.contains('button', 'Confirm').click();
+    });
     cy.wait('@deleteUploadedFile');
     cy.wait('@fetchUploadedFiles');
 

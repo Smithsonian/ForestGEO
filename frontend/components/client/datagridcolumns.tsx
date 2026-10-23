@@ -2,10 +2,11 @@ import { HEADER_ALIGN } from '@/config/macros';
 import { Autocomplete, Box, Chip, IconButton, Stack, Typography } from '@mui/joy';
 import { GridColDef, GridPreProcessEditCellProps, GridRenderEditCellParams } from '@mui/x-data-grid';
 import React, { Dispatch, SetStateAction, useState } from 'react';
-import { ATTRIBUTE_STATUS_UNSPECIFIED_LABEL, AttributeStatusOptions } from '@/lib/db/definitions/core';
+import { AttributeStatusEditorOptions } from '@/lib/db/definitions/core';
 import { renderAttributeStatusCell } from '@/components/client/attributestatuscell';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { customNumericOperators } from '@/components/datagrids/filtrationsystem';
+import { formatMeasurementForDisplay } from '@/config/measurementdisplay';
 import CloseIcon from '@mui/icons-material/Close';
 import { parseInstant } from '@/config/dateformats';
 import { FIELD_ALIASES_BY_SURFACE, isNegativeForNonNegativeField } from '@/config/editplan/fieldpolicy';
@@ -109,12 +110,6 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     editable: true
   }
 ]);
-
-// A null option value (not the string 'null') makes the singleSelect editor commit SQL NULL.
-const AttributeStatusEditorOptions: { value: string | null; label: string }[] = [
-  { value: null, label: ATTRIBUTE_STATUS_UNSPECIFIED_LABEL },
-  ...AttributeStatusOptions.map(status => ({ value: status, label: status }))
-];
 
 export const AttributeGridColumns: GridColDef[] = standardizeGridColumns([
   {
@@ -757,7 +752,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     editable: true,
     type: 'number',
     filterOperators: customNumericOperators,
-    valueFormatter: (value: number | null | undefined) => parseFloat(Number(value ?? 0).toFixed(2)),
+    valueFormatter: (value: number | null | undefined) => formatMeasurementForDisplay(value ?? 0),
     preProcessEditCellProps: params => preprocessor(params, 'measuredDBH')
   },
   {
