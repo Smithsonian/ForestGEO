@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
+import { useSearchParams } from 'next/navigation';
 import {
   Alert,
   Autocomplete,
@@ -51,9 +52,11 @@ import {
   ErrorExplorerFilters,
   ErrorExplorerQueryResponse,
   ErrorExplorerRow,
-  ERROR_EXPLORER_PRESETS
+  ERROR_EXPLORER_PRESETS,
+  resolveErrorsExplorerDeepLinkFilters
 } from '@/config/errorsexplorer';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
+import { getDateRangeCensusIDs } from '@/lib/censusscope';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import CustomGridPagination from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
@@ -145,7 +148,7 @@ interface ExplorerScope {
   censusIDs: number[];
 }
 
-function getFilterStorageKey(schema?: string, plotID?: number, censusID?: number) {
+export function getFilterStorageKey(schema?: string, plotID?: number, censusID?: number) {
   if (!schema || !plotID || !censusID) return null;
   return `errors-explorer-filters:${schema}:${plotID}:${censusID}`;
 }
@@ -302,7 +305,7 @@ export default function ErrorsExplorer() {
   const currentCensus = useOrgCensusContext();
   const { data: session } = useSession();
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
-  const activeCensusIDsKey = Array.from(new Set((currentCensus?.dateRanges ?? []).map(range => range.censusID).filter(censusID => censusID > 0))).join(',');
+  const activeCensusIDsKey = getDateRangeCensusIDs(currentCensus).join(',');
   const activeCensusIDs = useMemo(
     () =>
       activeCensusIDsKey
@@ -368,8 +371,27 @@ export default function ErrorsExplorer() {
     }
   });
 
+  const searchParams = useSearchParams();
+  // A ?message= / ?view=all link applies once per visit, on the first restore run
+  // that has a storage key. It stays pending for THAT key (StrictMode re-runs the
+  // effect for the same key) and is dropped the first time the key changes, after
+  // which the page restores saved filters like a plain visit.
+  const deepLinkRef = useRef<{ filters: ErrorExplorerFilters | null; appliedStorageKey: string | null } | null>(null);
+  if (deepLinkRef.current === null) {
+    deepLinkRef.current = { filters: resolveErrorsExplorerDeepLinkFilters(searchParams), appliedStorageKey: null };
+  }
+
   useEffect(() => {
     if (!storageKey) return;
+    const deepLink = deepLinkRef.current;
+    if (deepLink?.filters) {
+      if (deepLink.appliedStorageKey === null || deepLink.appliedStorageKey === storageKey) {
+        deepLink.appliedStorageKey = storageKey;
+        setFilters(deepLink.filters);
+        return;
+      }
+      deepLink.filters = null;
+    }
     try {
       const stored = window.localStorage.getItem(storageKey);
       if (!stored) return;
