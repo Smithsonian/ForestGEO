@@ -345,20 +345,19 @@ function buildPreconditionRowChecks(s: string): readonly PreconditionRowCheck[] 
  * subquery, i.e. the same full join graph and WHERE clause as selectMeasurements)
  * and active measurements in the census, exportable or not.
  */
-async function countExportableAndActiveMeasurements(
-  conn: Connection,
-  input: PreconditionInput,
-  quotedSchema: string
-): Promise<{ count: number; totalActiveCount: number }> {
+async function countExportableAndActiveMeasurements(conn: Connection, input: PreconditionInput): Promise<{ count: number; totalActiveCount: number }> {
   const [exportableRows] = await conn.query<RowDataPacket[]>(
     safeFormatQuery(input.schema, `SELECT COUNT(*) AS n FROM (${exportableMeasurementIdSelect()}) AS exportable`),
     [input.censusId, input.plotId]
   );
   const [activeRows] = await conn.query<RowDataPacket[]>(
-    `SELECT COUNT(*) AS n
-       FROM ${quotedSchema}.coremeasurements cm
-       JOIN ${quotedSchema}.census c ON c.CensusID = cm.CensusID
-      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1`,
+    safeFormatQuery(
+      input.schema,
+      `SELECT COUNT(*) AS n
+       FROM ??.coremeasurements cm
+       JOIN ??.census c ON c.CensusID = cm.CensusID
+      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1`
+    ),
     [input.plotId, input.censusId]
   );
   return { count: Number(exportableRows[0].n), totalActiveCount: Number(activeRows[0].n) };
@@ -394,7 +393,7 @@ export async function countPublishBlockers(conn: Connection, input: Precondition
     if (flaggedMeasurements > 0) blockers.push({ kind, count: flaggedMeasurements });
   }
 
-  const { count, totalActiveCount } = await countExportableAndActiveMeasurements(conn, input, s);
+  const { count, totalActiveCount } = await countExportableAndActiveMeasurements(conn, input);
   const shortfallKind = exportableShortfallKind(count, totalActiveCount);
   if (shortfallKind !== null && isBlocking(shortfallKind)) blockers.push({ kind: shortfallKind, count: null });
 
@@ -441,7 +440,7 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
   // beyond stems/trees matter because their foreign keys are nullable: counting a
   // validated row with no quadrat/species/taxonomy join would otherwise let the gate
   // pass even though the actual export silently drops that row.
-  const { count, totalActiveCount } = await countExportableAndActiveMeasurements(conn, input, s);
+  const { count, totalActiveCount } = await countExportableAndActiveMeasurements(conn, input);
   const shortfallKind = exportableShortfallKind(count, totalActiveCount);
 
   if (shortfallKind === 'zero-exportable-rows') {

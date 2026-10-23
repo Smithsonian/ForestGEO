@@ -65,10 +65,12 @@ export function exportableMeasurementSelect(extraColumns: string): string {
 }
 
 /**
- * `SELECT cm.CoreMeasurementID` for every exportable measurement — the one
- * definition of "exportable" shared by selectMeasurements, the gate's check-8
- * count, the export-preview skip anti-join and the exported-with-unresolved-error
- * count. Same `??` and `[censusId, plotId]` contract as exportableMeasurementSelect.
+ * `SELECT cm.CoreMeasurementID` for every exportable measurement, for the gate's
+ * check-8 count, the export-preview skip anti-join and the exported-with-unresolved-error
+ * count. selectMeasurements uses exportableMeasurementSelect instead; both are built
+ * from exportableMeasurementJoinGraph and exportableMeasurementBaseWhere, so a change
+ * to what counts as exportable belongs in those two shared constants. Same `??` and
+ * `[censusId, plotId]` contract as exportableMeasurementSelect.
  * Used as a subquery, its aliases shadow the outer query's, so it never correlates.
  */
 export function exportableMeasurementIdSelect(): string {
