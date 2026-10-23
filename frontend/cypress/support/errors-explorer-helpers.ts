@@ -99,7 +99,8 @@ function deriveFacets(rows: ErrorExplorerRow[]): ErrorExplorerFacetsResponse {
     contradictionCounts: {
       duplicateTagStem: rows.filter(row => getContradictionTypes(row).includes('duplicate_tag_stem')).length,
       sameBatchConflict: rows.filter(row => getContradictionTypes(row).includes('same_batch_conflict')).length
-    }
+    },
+    totalMeasurements: rows.length
   };
 }
 

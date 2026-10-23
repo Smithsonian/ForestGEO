@@ -638,7 +638,8 @@ export async function buildErrorExplorerFacets(
     contradictionCounts: {
       duplicateTagStem: scopedRows.filter(row => row.baseRow.contradictionTypes.includes('duplicate_tag_stem')).length,
       sameBatchConflict: scopedRows.filter(row => row.baseRow.contradictionTypes.includes('same_batch_conflict')).length
-    }
+    },
+    totalMeasurements: scopedRows.length
   };
 }
 

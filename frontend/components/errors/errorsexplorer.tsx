@@ -92,7 +92,8 @@ const DEFAULT_FACETS: ErrorExplorerFacetsResponse = {
   contradictionCounts: {
     duplicateTagStem: 0,
     sameBatchConflict: 0
-  }
+  },
+  totalMeasurements: 0
 };
 
 const DEFAULT_RESULTS: ErrorExplorerQueryResponse = {

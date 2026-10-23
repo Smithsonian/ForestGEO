@@ -107,6 +107,8 @@ export interface ErrorExplorerFacetsResponse {
     duplicateTagStem: number;
     sameBatchConflict: number;
   };
+  /** Distinct measurements in scope after the facet filters; sourceCounts can overlap. */
+  totalMeasurements: number;
 }
 
 export interface RelatedContradictionRow {

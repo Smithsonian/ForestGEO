@@ -137,4 +137,69 @@ describe('POST /api/errors/explorer/facets', () => {
     );
     expect(body.fields).toEqual(expect.arrayContaining([expect.objectContaining({ value: 'treeTag', count: 2 })]));
   });
+
+  it('reports one distinct measurement when a row carries two error messages (#547)', async () => {
+    const MEASUREMENT_WITH_TWO_ERRORS = 201;
+    const FIRST_MESSAGE = 'Invalid species reference';
+    const SECOND_MESSAGE = 'Coordinate drift exceeds allowed threshold';
+    const ERROR_LOG_QUERY_FRAGMENT = 'measurement_error_log';
+    const rawRow = {
+      CoreMeasurementID: MEASUREMENT_WITH_TWO_ERRORS,
+      PlotID: 5,
+      CensusID: 7,
+      QuadratID: 1,
+      TreeID: 11,
+      StemGUID: 21,
+      CoreStemGUID: 21,
+      SpeciesID: 31,
+      TreeTag: 'TREE-201',
+      StemTag: 'A',
+      SpeciesName: 'Species 1',
+      SubspeciesName: null,
+      SpeciesCode: 'SP1',
+      QuadratName: 'Q1',
+      StemLocalX: 10,
+      StemLocalY: 20,
+      MeasurementDate: '2026-01-01',
+      MeasuredDBH: 5.1,
+      MeasuredHOM: 1.3,
+      IsValidated: false,
+      MeasurementDescription: null,
+      Attributes: null,
+      UserDefinedFields: '{}',
+      UploadFileID: 'file-1',
+      UploadBatchID: 'batch-1',
+      ErrorSource: 'ingestion',
+      ValidationCriteria: '',
+      ProcedureName: ''
+    };
+    const cm = (ConnectionManager as any).getInstance();
+    vi.spyOn(cm, 'executeQuery').mockImplementation(async (query: unknown) =>
+      String(query).includes(ERROR_LOG_QUERY_FRAGMENT)
+        ? [
+            { ...rawRow, ErrorCode: 'INVALID_SPECIES', DisplayMessage: FIRST_MESSAGE },
+            { ...rawRow, ErrorCode: 'COORDINATE_DRIFT', DisplayMessage: SECOND_MESSAGE }
+          ]
+        : []
+    );
+
+    const response = await POST(
+      new Request('http://localhost/api/errors/explorer/facets', {
+        method: 'POST',
+        body: JSON.stringify({
+          schema: 'forestgeo_testing',
+          plotID: 5,
+          censusID: 7,
+          filters: { source: 'all', exactMessages: [], affectedFields: [], contradictionOnly: false, contradictionTypes: [], quickSearch: '' }
+        })
+      }) as any,
+      ROUTE_CONTEXT
+    );
+
+    expect(response.status).toBe(HTTPResponses.OK);
+    const body = await response.json();
+    console.log('[#547 facets total]', JSON.stringify({ totalMeasurements: body.totalMeasurements, messages: body.messages }));
+    expect(body.messages.map((option: { value: string }) => option.value).sort()).toEqual([SECOND_MESSAGE, FIRST_MESSAGE].sort());
+    expect(body.totalMeasurements, 'two messages on one measurement are one affected measurement').toBe(1);
+  });
 });
