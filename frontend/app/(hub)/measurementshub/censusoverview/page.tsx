@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Box, Button, Card, CardContent, Divider, Stack, Tooltip, Typography, Avatar } from '@mui/joy';
+import { Alert, Box, Button, Stack, Tooltip, Typography, Avatar } from '@mui/joy';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -11,7 +11,6 @@ import TrackChangesIcon from '@mui/icons-material/TrackChanges';
 import CloudCircleIcon from '@mui/icons-material/CloudCircle';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 import HistoryIcon from '@mui/icons-material/History';
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import {
   useOrgCensusContext,
   useOrgCensusDispatch,
@@ -21,8 +20,12 @@ import {
   useSiteContext
 } from '@/app/contexts/compat-hooks';
 import { useLoading } from '@/app/contexts/loadingprovider';
-import { useRouter } from 'next/navigation';
-import CensusStatsView from '@/components/dashboard/censusstatsview';
+import Link from 'next/link';
+import QuadratCoverageCard from '@/components/dashboard/quadratcoveragecard';
+import TreesAndStemsCard from '@/components/dashboard/treesandstemscard';
+import ErrorsExportPreviewCard from '@/components/dashboard/errorsexportpreviewcard';
+import { useCensusOverviewSummary } from '@/app/hooks/usecensusoverviewsummary';
+import { getDateRangeCensusIDs } from '@/lib/censusscope';
 import DataQualityCard from '@/components/dashboard/dataqualitycard';
 import PublishCensusButton from '@/components/dashboard/publishcensusbutton';
 import RebuildViewFullTableButton from '@/components/dashboard/rebuildviewfulltablebutton';
@@ -66,7 +69,6 @@ const CENSUS_HUB_LINKS = [
 ];
 
 export default function CensusOverviewPage() {
-  const router = useRouter();
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -85,7 +87,6 @@ export default function CensusOverviewPage() {
 
   const [countTrees, setCountTrees] = useState(0);
   const [countStems, setCountStems] = useState(0);
-  const [activeUsers, setActiveUsers] = useState(0);
   // CountOldStems starts null so the tile shows the "no comparison" placeholder
   // instead of a confident 0 until real data arrives.
   const [stemTypes, setStemTypes] = useState<StemTypesType>({ CountOldStems: null, CountMultiStems: 0, CountNewRecruits: 0, isFirstCensus: false });
@@ -96,6 +97,12 @@ export default function CensusOverviewPage() {
     UnpopulatedQuadrats: []
   });
   const [isLoading, setIsLoading] = useState(false);
+  const censusSummary = useCensusOverviewSummary({
+    schema: currentSite?.schemaName,
+    plotID: currentPlot?.plotID,
+    censusID: currentCensus?.dateRanges?.[0]?.censusID,
+    errorCensusIDs: getDateRangeCensusIDs(currentCensus)
+  });
 
   useEffect(() => {
     return () => {
@@ -127,7 +134,6 @@ export default function CensusOverviewPage() {
         PopulatedPercent: data.progressTachometer.PopulatedPercent,
         UnpopulatedQuadrats: data.progressTachometer.UnpopulatedQuadrats ? data.progressTachometer.UnpopulatedQuadrats.split(';') : []
       });
-      setActiveUsers(data.activeUsers.CountActiveUsers);
       setCountTrees(data.countTrees.CountTrees);
       setCountStems(data.countStems.CountStems);
       setStemTypes({
@@ -314,14 +320,23 @@ export default function CensusOverviewPage() {
         )}
       </Stack>
 
-      {/* Census Stats */}
-      <CensusStatsView
-        countTrees={countTrees}
-        countStems={countStems}
-        stemTypes={stemTypes}
-        progressTacho={progressTacho}
-        activeUsers={activeUsers}
-        isLoading={isLoading}
+      {/* Trees & Stems | Quadrat Coverage (stacked below md) */}
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' }, gap: 3 }}>
+        <TreesAndStemsCard countTrees={countTrees} countStems={countStems} stemTypes={stemTypes} isLoading={isLoading} />
+        <QuadratCoverageCard
+          total={progressTacho.TotalQuadrats}
+          populated={progressTacho.PopulatedQuadrats}
+          percent={progressTacho.PopulatedPercent}
+          unpopulated={progressTacho.UnpopulatedQuadrats}
+        />
+      </Box>
+
+      {/* Errors & Export Preview — its own request and loading state */}
+      <ErrorsExportPreviewCard
+        summary={censusSummary.summary}
+        isLoading={censusSummary.isLoading}
+        errorMessage={censusSummary.errorMessage}
+        onRetry={censusSummary.refetch}
       />
 
       {/* Data Quality */}
@@ -348,66 +363,31 @@ export default function CensusOverviewPage() {
               if (!response.ok) {
                 throw new Error(`Failed to refresh validations (HTTP ${response.status})`);
               }
+              // The refresh rebuilt measurementssummary. This refetch is bound to the scope this
+              // render saw; if the census changed meanwhile it is a no-op (the new scope fetched itself).
+              censusSummary.refetch();
             }
           }}
         />
       </Box>
 
-      {/* Quick Navigation */}
+      {/* Census Tools */}
       <Box>
         <Typography level="title-lg" sx={{ fontWeight: 600, mb: 2 }}>
           Census Tools
         </Typography>
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' },
-            gap: 2
-          }}
-        >
+        <Stack direction="row" useFlexGap spacing={1} sx={{ flexWrap: 'wrap' }}>
           {CENSUS_HUB_LINKS.map(link => {
             const LinkIcon = link.icon;
             return (
-              <Card
-                key={link.href}
-                variant="outlined"
-                role="button"
-                tabIndex={0}
-                sx={{
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  '&:hover': {
-                    borderColor: 'primary.outlinedBorder',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                    transform: 'translateY(-2px)'
-                  }
-                }}
-                onClick={() => router.push(link.href)}
-                onKeyDown={(e: React.KeyboardEvent) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    router.push(link.href);
-                  }
-                }}
-              >
-                <CardContent sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                  <Avatar alt="" size="sm" sx={{ bgcolor: 'primary.softBg', color: 'primary.500' }}>
-                    <LinkIcon sx={{ fontSize: 18 }} />
-                  </Avatar>
-                  <Box sx={{ flex: 1 }}>
-                    <Typography level="title-sm" sx={{ fontWeight: 600 }}>
-                      {link.label}
-                    </Typography>
-                    <Typography level="body-xs" color="neutral">
-                      {link.description}
-                    </Typography>
-                  </Box>
-                  <ArrowForwardIcon sx={{ fontSize: 16, color: 'neutral.400' }} />
-                </CardContent>
-              </Card>
+              <Tooltip key={link.href} title={link.description} placement="top" describeChild>
+                <Button component={Link} href={link.href} variant="outlined" size="sm" startDecorator={<LinkIcon />}>
+                  {link.label}
+                </Button>
+              </Tooltip>
             );
           })}
-        </Box>
+        </Stack>
       </Box>
 
       {/* Census Delete Confirmation Modal */}
