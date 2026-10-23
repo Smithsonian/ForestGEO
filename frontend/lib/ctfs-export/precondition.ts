@@ -111,6 +111,27 @@ export type PreconditionResult =
   | { ok: false; reasons: PreconditionFailure[]; count: number; totalActiveCount: number };
 
 /**
+ * Classifier injected into countPublishBlockers. It also narrows the kind, so a
+ * caller can swap the policy (e.g. #545's, where the 50% rule only warns)
+ * without casts. Production passes isBlockingPreconditionKind.
+ */
+export type BlockingKindClassifier = (kind: PreconditionFailureKind) => kind is BlockingPreconditionKind;
+
+export interface PublishBlockerCount {
+  kind: BlockingPreconditionKind;
+  /** Distinct flagged measurements; null for the census-level shortfall kind. */
+  count: number | null;
+}
+
+export interface PublishBlockerCounts {
+  blockers: PublishBlockerCount[];
+  /** Exportable measurements, exactly as check 8 counts them. */
+  count: number;
+  /** Active measurements in the census, exactly as check 8 counts them. */
+  totalActiveCount: number;
+}
+
+/**
  * Publish-gate policy (Task 10C, ratified 2026-07-20: "warn on quality, keep structural
  * blocking"). Two kinds of precondition failure:
  *
@@ -352,6 +373,32 @@ export function exportableShortfallKind(count: number, totalActiveCount: number)
   if (count === 0) return 'zero-exportable-rows';
   if (count < totalActiveCount * MIN_EXPORTABLE_FRACTION) return 'insufficient-exportable-rows';
   return null;
+}
+
+/**
+ * Uncapped counterpart of checkFinishedCensus for the census overview: the
+ * number of distinct measurements each blocking row check flags, then the
+ * census-level shortfall kind when `isBlocking` classifies it as blocking.
+ * Shares checkFinishedCensus's fragments and check-8 counts, so the two cannot
+ * drift. COUNT(DISTINCT) matters: one measurement can carry several unknown codes.
+ */
+export async function countPublishBlockers(conn: Connection, input: PreconditionInput, isBlocking: BlockingKindClassifier): Promise<PublishBlockerCounts> {
+  const s = quoteSchema(input.schema);
+  const blockers: PublishBlockerCount[] = [];
+
+  for (const check of buildPreconditionRowChecks(s)) {
+    const { kind } = check;
+    if (!isBlocking(kind)) continue;
+    const [rows] = await conn.query<RowDataPacket[]>(`SELECT COUNT(DISTINCT cm.CoreMeasurementID) AS n ${check.fromWhereSql}`, [input.plotId, input.censusId]);
+    const flaggedMeasurements = Number(rows[0].n);
+    if (flaggedMeasurements > 0) blockers.push({ kind, count: flaggedMeasurements });
+  }
+
+  const { count, totalActiveCount } = await countExportableAndActiveMeasurements(conn, input, s);
+  const shortfallKind = exportableShortfallKind(count, totalActiveCount);
+  if (shortfallKind !== null && isBlocking(shortfallKind)) blockers.push({ kind: shortfallKind, count: null });
+
+  return { blockers, count, totalActiveCount };
 }
 
 // ---------------------------------------------------------------------------

@@ -7,13 +7,19 @@
 
 export {
   checkFinishedCensus,
+  countPublishBlockers,
+  exportableShortfallKind,
   partitionPreconditionFailures,
   isBlockingPreconditionKind,
   WARNING_PRECONDITION_KINDS,
   MIN_EXPORTABLE_FRACTION,
+  type BlockingKindClassifier,
+  type BlockingPreconditionKind,
   type PreconditionResult,
   type PreconditionFailure,
-  type PreconditionFailureKind
+  type PreconditionFailureKind,
+  type PublishBlockerCount,
+  type PublishBlockerCounts
 } from './precondition';
 export { selectMeasurements, type SelectResult, type SelectInput } from './select-measurements';
 export { renderArtifact, renderRebuildViewFullTableArtifact, type RenderArtifactInput, type RenderArtifactResult } from './render-procedure';
