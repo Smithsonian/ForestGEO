@@ -32,6 +32,7 @@ const METRICS_URL_FRAGMENT = '/api/dashboardmetrics/all/';
 const SUMMARY_URL_FRAGMENT = '/api/censusoverview/summary/';
 const REFRESH_URL_FRAGMENT = '/api/refreshviews/measurementssummary/';
 const CLEAR_CENSUS_URL_FRAGMENT = '/api/clearcensus';
+const ERRORS_EXPORT_PREVIEW_CARD_TEST_ID = 'errors-export-preview-card';
 const DELETE_BUTTON_TEST_ID = 'census-overview-delete-button';
 const DELETE_ERROR_TEST_ID = 'census-overview-delete-error';
 const MODAL_CONFIRM_LABEL = 'Delete Census';
@@ -51,6 +52,13 @@ const SINGLE_RANGE_CENSUS = {
   censusIDs: [102],
   dateRanges: [{ censusID: 102, startDate: new Date('2025-01-01'), endDate: new Date('2025-12-31') }],
   description: 'Census 2'
+};
+const CENSUS_BEING_CREATED = {
+  plotID: 1,
+  plotCensusNumber: 4,
+  censusIDs: [0],
+  dateRanges: [{ censusID: 0, startDate: new Date('2027-01-01'), endDate: undefined }],
+  description: 'Census 4'
 };
 const GROUPED_CENSUS = {
   plotID: 1,
@@ -145,7 +153,7 @@ function summaryRequestLog(): { url: string; aborted: boolean }[] {
     .map(([input, init]) => ({ url: String(input), aborted: init?.signal?.aborted ?? false }));
 }
 
-function seedSelection(census: typeof SINGLE_RANGE_CENSUS) {
+function seedSelection(census: typeof SINGLE_RANGE_CENSUS | typeof CENSUS_BEING_CREATED) {
   useAppStore.getState().setSite(TEST_SITE);
   useAppStore.getState().setPlot(TEST_PLOT);
   useAppStore.getState().setCensusList([census]);
@@ -254,6 +262,18 @@ describe('CensusOverviewPage — census overview redesign (#547)', () => {
     expect(await screen.findByTestId(DELETE_ERROR_TEST_ID)).toHaveTextContent(CENSUS_LIST_REFRESH_FAILED_MESSAGE);
     expect(summaryUrls, 'a delete must not leave the card showing counts for the deleted measurements').toHaveLength(2);
     expect(summaryUrls[1]).toBe(summaryUrls[0]);
+  });
+
+  it('renders no Errors & Export Preview card and sends no summary request while the census has no ID yet', async () => {
+    seedSelection(CENSUS_BEING_CREATED);
+    render(<CensusOverviewPage />);
+    await screen.findByText(CENSUS_OVERVIEW_TEXT.treesAndStemsTitle);
+    await act(async () => {});
+
+    console.log(`[#547 census without ID] summary requests ${JSON.stringify(fetchedUrls(SUMMARY_URL_FRAGMENT))}`);
+    expect(fetchedUrls(SUMMARY_URL_FRAGMENT)).toHaveLength(0);
+    expect(screen.queryByText(CENSUS_OVERVIEW_TEXT.errorsBoxTitle), 'a card with no scope would show its skeleton forever').toBeNull();
+    expect(screen.queryByTestId(ERRORS_EXPORT_PREVIEW_CARD_TEST_ID)).toBeNull();
   });
 
   it('no longer shows the Personnel box', async () => {

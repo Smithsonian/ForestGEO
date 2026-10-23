@@ -332,13 +332,15 @@ export default function CensusOverviewPage() {
         />
       </Box>
 
-      {/* Errors & Export Preview — its own request and loading state */}
-      <ErrorsExportPreviewCard
-        summary={censusSummary.summary}
-        isLoading={censusSummary.isLoading}
-        errorMessage={censusSummary.errorMessage}
-        onRetry={censusSummary.refetch}
-      />
+      {/* Errors & Export Preview — its own request and loading state; needs a census ID to scope the request */}
+      {censusID ? (
+        <ErrorsExportPreviewCard
+          summary={censusSummary.summary}
+          isLoading={censusSummary.isLoading}
+          errorMessage={censusSummary.errorMessage}
+          onRetry={censusSummary.refetch}
+        />
+      ) : null}
 
       {/* Data Quality */}
       <Box>
