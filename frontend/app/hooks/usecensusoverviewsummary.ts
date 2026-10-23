@@ -57,6 +57,7 @@ export function useCensusOverviewSummary({ schema, plotID, censusID, errorCensus
   scopeKeyRef.current = scopeKey;
   const requestRef = useRef<{ id: number; controller: AbortController } | null>(null);
   const requestCounterRef = useRef(0);
+  const isMountedRef = useRef(false);
   const [result, setResult] = useState<ScopedSummaryResult | null>(null);
 
   const abortInFlight = useCallback(() => {
@@ -109,9 +110,16 @@ export function useCensusOverviewSummary({ schema, plotID, censusID, errorCensus
     return abortInFlight;
   }, [scopeKey, fetchSummary, abortInFlight]);
 
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const refetch = useCallback(() => {
     // Checked before anything is aborted, so a stale caller cannot cancel the current scope's request.
-    if (scopeKey === NO_SCOPE_KEY || scopeKeyRef.current !== scopeKey) return;
+    if (!isMountedRef.current || scopeKey === NO_SCOPE_KEY || scopeKeyRef.current !== scopeKey) return;
     void fetchSummary();
   }, [scopeKey, fetchSummary]);
 

@@ -154,6 +154,21 @@ describe('useCensusOverviewSummary', () => {
     expect(pendingRequests[0].signal.aborted).toBe(true);
   });
 
+  it('starts no request when a refetch captured before unmount is called afterwards', async () => {
+    const { result, unmount } = renderHook(scope => useCensusOverviewSummary(scope), { initialProps: SCOPE_A });
+    await resolveRequest(pendingRequests[0], okResponse(Promise.resolve(summaryLabelled(1))));
+    const refetchCapturedWhileMounted = result.current.refetch;
+    const requestCountBeforeUnmount = pendingRequests.length;
+
+    unmount();
+    act(() => {
+      refetchCapturedWhileMounted();
+    });
+    console.log(`[#547 refetch after unmount] requests before unmount ${requestCountBeforeUnmount}, after ${pendingRequests.length}, ${describeRequests()}`);
+
+    expect(pendingRequests, 'a refetch called after unmount must not start a summary request nobody will abort').toHaveLength(requestCountBeforeUnmount);
+  });
+
   it("reports the server's error message, and Retry clears it to loading", async () => {
     const { result } = renderHook(scope => useCensusOverviewSummary(scope), { initialProps: SCOPE_A });
     await resolveRequest(pendingRequests[0], errorResponse(HTTPResponses.NOT_FOUND, { error: CENSUS_NOT_FOUND_MESSAGE }));
