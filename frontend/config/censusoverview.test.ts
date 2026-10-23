@@ -29,6 +29,19 @@ describe('census overview formatters', () => {
   });
 
   it.each([
+    [5, 3],
+    [3, 0]
+  ])('omits the percent when %i affected exceed %i active (counts come from different sources)', (affected, total) => {
+    const line = formatAffectedMeasurementsLine(affected, total);
+    console.log(`[#547 affected line] ${affected} of ${total}: ${line}`);
+    expect(line).toBe(`${affected} of ${total} active measurements have unresolved errors`);
+  });
+
+  it('still shows 100% when every active measurement is affected', () => {
+    expect(formatAffectedMeasurementsLine(20, 20)).toBe('20 of 20 active measurements have unresolved errors (100.0%)');
+  });
+
+  it.each([
     [1, '+ 1 more type'],
     [6, '+ 6 more types']
   ])('pluralizes the remaining error types (%i)', (remaining, expected) => {

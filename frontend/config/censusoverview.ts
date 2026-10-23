@@ -116,8 +116,11 @@ export function formatCount(value: number): string {
 }
 
 export function formatAffectedMeasurementsLine(affectedMeasurements: number, totalActiveMeasurements: number): string {
+  const counts = `${formatCount(affectedMeasurements)} of ${formatCount(totalActiveMeasurements)} active measurements have unresolved errors`;
+  const affectedExceedsActive = affectedMeasurements > totalActiveMeasurements;
+  if (affectedExceedsActive) return counts;
   const percent = ((affectedMeasurements / totalActiveMeasurements) * PERCENT_SCALE).toFixed(AFFECTED_PERCENT_FRACTION_DIGITS);
-  return `${formatCount(affectedMeasurements)} of ${formatCount(totalActiveMeasurements)} active measurements have unresolved errors (${percent}%)`;
+  return `${counts} (${percent}%)`;
 }
 
 export function formatRemainingErrorTypes(remainingErrorTypeCount: number): string {

@@ -136,6 +136,30 @@ describe('ErrorsExportPreviewCard', () => {
     expect(within(screen.getByTestId(CALLOUT_TEST_ID)).getByText(BLOCKER_FIX_HINTS['zero-exportable-rows'].label)).toBeInTheDocument();
   });
 
+  it('still lists the error types, with counts but no percentage, when the facets report affected rows and the active total is 0', () => {
+    renderCard({
+      summary: buildSummary({
+        errorOverview: { affectedMeasurements: 3, totalActiveMeasurements: 0, topErrorTypes: errorTypes(2), remainingErrorTypeCount: 0 }
+      })
+    });
+
+    const overview = screen.getByTestId(ERROR_OVERVIEW_TEST_ID);
+    console.log('[#547 affected > total]', overview.textContent);
+    expect(screen.queryByText(CENSUS_OVERVIEW_TEXT.noMeasurementsYet)).toBeNull();
+    expect(screen.getAllByTestId(ERROR_TYPE_ROW_TEST_ID)).toHaveLength(2);
+    expect(overview).toHaveTextContent('3 of 0 active measurements have unresolved errors');
+    expect(overview.textContent).not.toMatch(/%/);
+  });
+
+  it('never shows a percentage above 100 when more rows are affected than are active', () => {
+    renderCard({ summary: buildSummary({ errorOverview: { affectedMeasurements: 30, totalActiveMeasurements: 20 } }) });
+
+    const overview = screen.getByTestId(ERROR_OVERVIEW_TEST_ID);
+    console.log('[#547 affected > total]', overview.textContent);
+    expect(overview).toHaveTextContent('30 of 20 active measurements have unresolved errors');
+    expect(overview.textContent).not.toMatch(/%/);
+  });
+
   it('shows five error types and "+ 2 more types" when there are seven', () => {
     renderCard({ summary: buildSummary({ errorOverview: { topErrorTypes: errorTypes(5), remainingErrorTypeCount: 2 } }) });
 

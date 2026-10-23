@@ -62,7 +62,7 @@ function PublishBlockerCallout({ blockers }: { blockers: CensusOverviewSummary['
 
 function ErrorOverviewSection({ errorOverview }: { errorOverview: CensusOverviewSummary['errorOverview'] }) {
   const { affectedMeasurements, totalActiveMeasurements, topErrorTypes, remainingErrorTypeCount } = errorOverview;
-  if (totalActiveMeasurements === 0 || affectedMeasurements === 0) {
+  if (affectedMeasurements === 0) {
     return (
       <Typography level="body-md" color="neutral" data-testid="census-overview-error-overview">
         {totalActiveMeasurements === 0 ? CENSUS_OVERVIEW_TEXT.noMeasurementsYet : CENSUS_OVERVIEW_TEXT.noUnresolvedErrors}
