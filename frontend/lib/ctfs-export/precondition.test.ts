@@ -15,7 +15,15 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTestDatabase, teardownTestDatabase, loadSchema, DEFAULT_TEST_CONFIG } from '../../tests/setup/local-db-setup';
-import { checkFinishedCensus, MAX_DISPLAY_FAILURES, partitionPreconditionFailures, isBlockingPreconditionKind, type PreconditionFailure } from './precondition';
+import {
+  checkFinishedCensus,
+  exportableShortfallKind,
+  MAX_DISPLAY_FAILURES,
+  MIN_EXPORTABLE_FRACTION,
+  partitionPreconditionFailures,
+  isBlockingPreconditionKind,
+  type PreconditionFailure
+} from './precondition';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -648,5 +656,27 @@ describe('checkFinishedCensus', () => {
     );
 
     await expect(checkFinishedCensus(conn, { schema: 'bad`name', plotId: PLOT_ID, censusId: CENSUS_ID })).rejects.toThrow('Invalid schema name');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// exportableShortfallKind (#547): the zero / 50% detection, shared by the gate
+// and countPublishBlockers. Pure — no database.
+// ---------------------------------------------------------------------------
+
+describe('exportableShortfallKind', () => {
+  const TOTAL_ACTIVE_ROWS = 100;
+  const HALF_OF_TOTAL = TOTAL_ACTIVE_ROWS * MIN_EXPORTABLE_FRACTION;
+
+  it.each([
+    { label: 'an empty census', count: 0, totalActiveCount: 0, expected: 'zero-exportable-rows' },
+    { label: 'a census with nothing exportable', count: 0, totalActiveCount: TOTAL_ACTIVE_ROWS, expected: 'zero-exportable-rows' },
+    { label: 'one row under half', count: HALF_OF_TOTAL - 1, totalActiveCount: TOTAL_ACTIVE_ROWS, expected: 'insufficient-exportable-rows' },
+    { label: 'exactly half', count: HALF_OF_TOTAL, totalActiveCount: TOTAL_ACTIVE_ROWS, expected: null },
+    { label: 'every row', count: TOTAL_ACTIVE_ROWS, totalActiveCount: TOTAL_ACTIVE_ROWS, expected: null }
+  ])('returns $expected for $label ($count of $totalActiveCount)', ({ count, totalActiveCount, expected }) => {
+    const actual = exportableShortfallKind(count, totalActiveCount);
+    console.log(`[#547 shortfall] ${count} of ${totalActiveCount} exportable -> ${actual}`);
+    expect(actual, `shortfall kind for ${count} of ${totalActiveCount}`).toBe(expected);
   });
 });
