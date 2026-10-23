@@ -27,7 +27,10 @@ const OUT_OF_SCOPE_SCHEMA = 'forestgeo_panama';
 const CENSUS_NOT_FOUND_MESSAGE = 'Census not found';
 const REPEATABLE_READ_STATEMENT = /SET TRANSACTION ISOLATION LEVEL REPEATABLE READ/;
 const CENSUS_CHECK_STATEMENT = /SELECT CensusID FROM `[a-z0-9_]+`\.census WHERE PlotID = \?/;
+const SNAPSHOT_QUERY_EVENT_PREFIX = 'snapshot-query: ';
+const SNAPSHOT_BEGIN_EVENT = 'snapshot-begin';
 const SNAPSHOT_ROLLBACK_EVENT = 'snapshot-rollback';
+const SNAPSHOT_RELEASE_EVENT = 'snapshot-release';
 const FACETS_QUERY_EVENT = 'facets-query';
 
 const PLOT_ID = 1;
@@ -111,15 +114,27 @@ interface SnapshotConnectionDouble {
 
 function buildSnapshotDouble(real: Connection): SnapshotConnectionDouble {
   return {
-    query: vi.fn((sql: string, params?: unknown[]) => real.query(sql, params as any[])),
-    beginTransaction: vi.fn(() => real.beginTransaction()),
+    query: vi.fn((sql: string, params?: unknown[]) => {
+      shared.events.push(`${SNAPSHOT_QUERY_EVENT_PREFIX}${sql}`);
+      return real.query(sql, params as any[]);
+    }),
+    beginTransaction: vi.fn(() => {
+      shared.events.push(SNAPSHOT_BEGIN_EVENT);
+      return real.beginTransaction();
+    }),
     rollback: vi.fn(async () => {
       shared.events.push(SNAPSHOT_ROLLBACK_EVENT);
       await real.rollback();
     }),
-    release: vi.fn(),
+    release: vi.fn(() => {
+      shared.events.push(SNAPSHOT_RELEASE_EVENT);
+    }),
     destroy: vi.fn()
   };
+}
+
+function isSnapshotQueryEvent(event: string): boolean {
+  return event.startsWith(SNAPSHOT_QUERY_EVENT_PREFIX);
 }
 
 async function insertRouteFixture(conn: Connection): Promise<void> {
@@ -316,14 +331,21 @@ describe('GET /api/censusoverview/summary (#547)', () => {
     });
 
     const snapshot = lastSnapshotDouble as SnapshotConnectionDouble;
-    const statements = snapshot.query.mock.calls.map(([sql]) => String(sql));
-    expect(statements[0], 'the isolation level is set before the transaction begins').toMatch(REPEATABLE_READ_STATEMENT);
-    expect(statements[1], 'the census check is the first query inside the snapshot').toMatch(CENSUS_CHECK_STATEMENT);
     expect(snapshot.beginTransaction).toHaveBeenCalledTimes(1);
     expect(snapshot.rollback).toHaveBeenCalledTimes(1);
     expect(snapshot.release).toHaveBeenCalledTimes(1);
     expect(snapshot.destroy).not.toHaveBeenCalled();
-    expect(shared.events.indexOf(FACETS_QUERY_EVENT), 'facets run outside the snapshot').toBeGreaterThan(shared.events.indexOf(SNAPSHOT_ROLLBACK_EVENT));
+
+    const events = shared.events;
+    const rollbackIndex = events.indexOf(SNAPSHOT_ROLLBACK_EVENT);
+    const countQueryEvents = events.slice(3, rollbackIndex);
+    expect(events[0], 'the isolation level is set first').toMatch(REPEATABLE_READ_STATEMENT);
+    expect(events[1], 'the transaction begins immediately after the isolation level, before any read').toBe(SNAPSHOT_BEGIN_EVENT);
+    expect(events[2], 'the census check is the first read inside the snapshot').toMatch(CENSUS_CHECK_STATEMENT);
+    expect(countQueryEvents.length, 'the count queries run between the census check and the rollback').toBeGreaterThan(0);
+    expect(countQueryEvents.every(isSnapshotQueryEvent), 'only snapshot queries run inside the transaction').toBe(true);
+    expect(events[rollbackIndex + 1], 'the connection is released right after the rollback').toBe(SNAPSHOT_RELEASE_EVENT);
+    expect(events.indexOf(FACETS_QUERY_EVENT), 'facets run outside the snapshot').toBeGreaterThan(rollbackIndex);
   });
 
   it('serves an in-scope field-crew member, who has no export permission, the same publish-scope summary', async () => {
