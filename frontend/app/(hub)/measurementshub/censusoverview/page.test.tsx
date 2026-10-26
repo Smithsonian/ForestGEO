@@ -28,8 +28,16 @@ const UNAUTHORIZED_TOOLTIP_MATCHER = /only global and database administrators ca
 const MODAL_CONFIRM_LABEL = 'Delete Census';
 const CLEAR_CENSUS_ENDPOINT = '/api/clearcensus';
 const LATEST_ONLY_REFUSAL = 'Only the latest census can be deleted. Delete newer censuses first.';
+const CENSUS_ALREADY_DELETED_REFUSAL = 'That census no longer exists. It may have been deleted by someone else.';
+const EMPTY_SELECTION_PROMPT_MATCHER = /please select a site, plot, and census/i;
 
 vi.mock('next/navigation');
+// setup.ts stubs this module and its mapper factory. Keep the real selection reconciler and
+// hand the fetched census list through unmapped, as the test already serves OrgCensus-shaped rows.
+vi.mock('@/lib/db/definitions/timekeeping', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/db/definitions/timekeeping')>()),
+  createAndUpdateCensusList: async (censusList: unknown[]) => censusList
+}));
 vi.mock('next-auth/react');
 vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() }
@@ -273,6 +281,19 @@ describe('CensusOverviewPage - F2 census deletion action', () => {
       expect(errorBanner).toHaveTextContent(LATEST_ONLY_REFUSAL);
       console.log(`[#525 hub refused delete] census list fetches: ${JSON.stringify(censusListFetchUrls())}`);
       expect(censusListFetchUrls()).toHaveLength(1);
+    });
+
+    it('still shows the server text after a 404 whose refreshed list no longer contains the selected census', async () => {
+      await confirmDeleteWithClearCensusAnswering({ ok: false, status: 404, json: async () => ({ error: CENSUS_ALREADY_DELETED_REFUSAL }) }, async () => ({
+        ok: true,
+        status: 200,
+        json: async () => [{ ...EARLIER_CENSUS }]
+      }));
+
+      await screen.findByText(EMPTY_SELECTION_PROMPT_MATCHER);
+      const errorBanner = screen.queryByTestId(DELETE_ERROR_TESTID);
+      console.log(`[#525 hub refused delete] selection emptied; banner text: ${errorBanner?.textContent ?? 'no banner rendered'}`);
+      expect(errorBanner).toHaveTextContent(CENSUS_ALREADY_DELETED_REFUSAL);
     });
 
     it('still shows the server text when the refresh itself fails', async () => {

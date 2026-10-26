@@ -241,9 +241,16 @@ export default function CensusOverviewPage() {
     [censusToDelete, currentSite?.schemaName, refreshCensusList, setLoading]
   );
 
+  const deleteErrorAlert = deleteError && (
+    <Alert color="danger" variant="soft" data-testid="census-overview-delete-error">
+      {deleteError}
+    </Alert>
+  );
+
   if (!currentSite || !currentPlot || !currentCensus) {
     return (
       <Box sx={{ p: 3 }}>
+        {deleteErrorAlert}
         <Typography level="h4" color="neutral">
           Please select a site, plot, and census to view the census overview.
         </Typography>
@@ -260,11 +267,7 @@ export default function CensusOverviewPage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      {deleteError && (
-        <Alert color="danger" variant="soft" data-testid="census-overview-delete-error">
-          {deleteError}
-        </Alert>
-      )}
+      {deleteErrorAlert}
 
       {/* Header */}
       <Stack direction="row" alignItems="center" spacing={2} sx={{ justifyContent: 'space-between' }}>
