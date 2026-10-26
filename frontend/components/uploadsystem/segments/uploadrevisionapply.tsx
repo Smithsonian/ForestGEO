@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { Box, Button, CircularProgress, Stack, Typography } from '@mui/joy';
-import { ReviewStates } from '@/config/macros/uploadsystemmacros';
+import React, { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { Button, CircularProgress, Stack, Typography } from '@mui/joy';
+import { ReviewStates, type RevisionApplyOutcomeCounts, type UploadOutcome } from '@/config/macros/uploadsystemmacros';
 import { FileRow } from '@/config/macros/formdetails';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import { invalidateAfter } from '@/lib/query';
 import { BulkEditPlan } from '@/config/editplan/types';
+import RevisionApplyCounts from './revisionapplycounts';
 import {
   RevisionApplyMatchedRow,
   RevisionApplyNewRow,
@@ -31,6 +32,7 @@ interface UploadRevisionApplyProps {
   invalidRowsIntegrityHash: string;
   setReviewState: (state: ReviewStates) => void;
   setIsDataUnsaved: (unsaved: boolean) => void;
+  setUploadOutcome: Dispatch<SetStateAction<UploadOutcome | undefined>>;
   /**
    * Fired on a 409 plan-hash mismatch. freshInvalidRows/freshInvalidRowsIntegrityHash
    * are the apply route's AUTHORITATIVE replacement for the whole invalidRows
@@ -71,6 +73,23 @@ function hasRevisionFieldValues(csvRow: FileRow): boolean {
   });
 }
 
+function hasDuplicateCleanupOnlyMatchedRows(matchedRows: RevisionApplyMatchedRow[]): boolean {
+  return matchedRows.some(row => (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0 && !hasRevisionFieldValues(row.csvRow));
+}
+
+function toRevisionApplyOutcomeCounts(result: RevisionApplyResponse, hasDuplicateCleanupOnlyRows: boolean): RevisionApplyOutcomeCounts {
+  return {
+    updatedCount: result.updatedCount,
+    deletedDuplicateCount: result.deletedDuplicateCount,
+    insertedCount: result.insertedCount,
+    // Older servers omit failedRowCount; absent means none were recorded.
+    failedRowCount: result.failedRowCount ?? 0,
+    skippedCount: result.skippedCount,
+    applyErrorCount: result.applyErrors.length,
+    hasDuplicateCleanupOnlyRows
+  };
+}
+
 export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyProps>) {
   const {
     matchedRows,
@@ -83,6 +102,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
     invalidRowsIntegrityHash,
     setReviewState,
     setIsDataUnsaved,
+    setUploadOutcome,
     onPlanConflict
   } = props;
 
@@ -98,7 +118,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
   const [applyAttempt, setApplyAttempt] = useState(0);
   const startedAttemptsRef = useRef<Set<number>>(new Set());
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasDuplicateCleanupOnlyRows = matchedRows.some(row => (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0 && !hasRevisionFieldValues(row.csvRow));
+  const hasDuplicateCleanupOnlyRows = hasDuplicateCleanupOnlyMatchedRows(matchedRows);
   const requestPayloadRef = useRef({
     matchedRows,
     newRows,
@@ -137,6 +157,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
 
     async function runApply() {
       try {
+        setUploadOutcome(undefined);
         const response = await fetch('/api/revisionupload/apply', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -172,6 +193,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
 
         const result: RevisionApplyResponse = await response.json();
         setApplyResult(result);
+        setUploadOutcome({ kind: 'revisions', ...toRevisionApplyOutcomeCounts(result, hasDuplicateCleanupOnlyMatchedRows(currentRequestPayload.matchedRows)) });
         setApplyStatus('success');
         setIsDataUnsaved(false);
 
@@ -207,6 +229,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
     schema,
     setIsDataUnsaved,
     setReviewState,
+    setUploadOutcome,
     startValidation,
     uploadAttemptID
   ]);
@@ -254,33 +277,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
         Revisions Applied
       </Typography>
 
-      {applyResult && (
-        <Box>
-          <Typography level="body-md">{applyResult.updatedCount} measurement(s) updated</Typography>
-          {applyResult.deletedDuplicateCount > 0 && <Typography level="body-md">{applyResult.deletedDuplicateCount} duplicate(s) deleted</Typography>}
-          {applyResult.insertedCount > 0 && <Typography level="body-md">{applyResult.insertedCount} new measurement(s) inserted</Typography>}
-          {(applyResult.failedRowCount ?? 0) > 0 && (
-            <Typography level="body-md" color="warning" data-testid="revision-apply-failed-count">
-              {applyResult.failedRowCount} rejected row(s) recorded as failed measurements
-            </Typography>
-          )}
-          {applyResult.skippedCount > 0 && (
-            <Typography level="body-md" color="neutral">
-              {applyResult.skippedCount} matched row(s) required no field updates
-            </Typography>
-          )}
-          {applyResult.deletedDuplicateCount > 0 && hasDuplicateCleanupOnlyRows && (
-            <Typography level="body-sm" color="neutral">
-              Duplicate cleanup can still use a matched survivor row even when its field values were unchanged.
-            </Typography>
-          )}
-          {applyResult.applyErrors.length > 0 && (
-            <Typography level="body-md" color="warning">
-              {applyResult.applyErrors.length} row(s) had errors and were skipped
-            </Typography>
-          )}
-        </Box>
-      )}
+      {applyResult && <RevisionApplyCounts {...toRevisionApplyOutcomeCounts(applyResult, hasDuplicateCleanupOnlyRows)} />}
 
       <Typography level="body-sm" color="neutral">
         Running validations...

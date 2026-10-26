@@ -263,12 +263,13 @@ vi.mock('@/components/uploadsystem/segments/uploadarcgispreflight', () => ({
 // because `vi.mock` factories are hoisted above the rest of the module: a plain
 // module-scope `const` referenced inside the factory below would still be in its
 // temporal dead zone when the factory actually runs.
-const { mockUploadFireSqlBehavior } = vi.hoisted(() => ({
+const { mockUploadFireSqlBehavior, mockUploadFireAzureBehavior } = vi.hoisted(() => ({
   mockUploadFireSqlBehavior: {
     mode: 'complete' as 'complete' | 'error',
     errorMessage: 'Upload failed',
     errorComponent: 'UploadFireSQL'
-  }
+  },
+  mockUploadFireAzureBehavior: { advanceToComplete: false }
 }));
 
 vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => {
@@ -309,9 +310,10 @@ vi.mock('@/components/uploadsystem/segments/uploaderror', () => ({
 }));
 
 vi.mock('@/components/uploadsystem/segments/uploadcomplete', () => ({
-  default: ({ handleCloseUploadModal }: any) => (
+  default: ({ handleCloseUploadModal, uploadOutcome }: any) => (
     <div data-testid="upload-complete">
       <div>Upload Complete!</div>
+      <div data-testid="upload-complete-outcome">{JSON.stringify(uploadOutcome ?? null)}</div>
       <button onClick={() => handleCloseUploadModal()}>Close</button>
     </div>
   )
@@ -325,9 +327,15 @@ vi.mock('@/components/uploadsystem/segments/uploadupdatevalidations', () => ({
   default: () => <div data-testid="upload-update-validations">Update Validations</div>
 }));
 
-vi.mock('@/components/uploadsystem/segments/uploadfireazure', () => ({
-  default: () => <div data-testid="upload-fire-azure">Fire Azure</div>
-}));
+vi.mock('@/components/uploadsystem/segments/uploadfireazure', () => {
+  const MockUploadFireAzure = ({ setReviewState }: any) => {
+    React.useEffect(() => {
+      if (mockUploadFireAzureBehavior.advanceToComplete) setReviewState(ReviewStates.COMPLETE);
+    }, [setReviewState]);
+    return <div data-testid="upload-fire-azure">Fire Azure</div>;
+  };
+  return { default: MockUploadFireAzure };
+});
 
 vi.mock('@/components/uploadsystem/segments/uploadreingestion', () => ({
   default: () => <div data-testid="upload-reingestion">Reingestion</div>
@@ -342,6 +350,7 @@ describe('UploadParent - Hook Integration Tests', () => {
     mockUploadFireSqlBehavior.mode = 'complete';
     mockUploadFireSqlBehavior.errorMessage = 'Upload failed';
     mockUploadFireSqlBehavior.errorComponent = 'UploadFireSQL';
+    mockUploadFireAzureBehavior.advanceToComplete = false;
   });
 
   describe('Hook Integration - useUploadState', () => {
@@ -654,6 +663,7 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUploadFireAzureBehavior.advanceToComplete = false;
     originalFetch = global.fetch;
   });
 
@@ -1149,6 +1159,56 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
       matchRequestBodies[1].previousUploadAttemptID,
       "a new upload started via the real reset path must never echo back the previous upload's attempt identity"
     ).toBeUndefined();
+  });
+
+  it('hands the revision apply counts, failedRowCount included, to the completion screen (#525 item 4)', async () => {
+    const REVISION_APPLY_TO_COMPLETE_TIMEOUT_MS = 6000;
+    mockUploadFireAzureBehavior.advanceToComplete = true;
+    const user = userEvent.setup();
+    const changedRow = { tag: 'T525', stemtag: 'S1', quadrat: 'Q1', dbh: '12.5', date: '2024-01-01' };
+    const matchResponse = {
+      matchedRows: [
+        {
+          csvIndex: 0,
+          csvRow: changedRow,
+          coreMeasurementID: 525,
+          changes: { dbh: { from: '10', to: '12.5' } },
+          existingValues: { measuredDBH: 10, measuredHOM: null, measurementDate: '2024-01-01', rawCodes: null, description: null }
+        }
+      ],
+      newRows: [],
+      invalidRows: [{ csvRow: { tag: 'T404', stemtag: 'S1' }, csvIndex: 1, reason: 'No matching identity found in the active census' }],
+      counts: { matched: 1, matchedWithChanges: 1, new: 0, invalid: 1, total: 2 }
+    };
+    const applyResponse = {
+      updatedCount: 1,
+      skippedCount: 0,
+      insertedCount: 0,
+      deletedDuplicateCount: 0,
+      failedRowCount: 1,
+      applyErrors: [],
+      validationPending: false
+    };
+    mockRevisionUploadFetch({ matchResponse, applyResponse });
+
+    await driveToRevisionMatch(user);
+    await waitFor(() => expect(screen.getByText('1 rows to update')).toBeInTheDocument(), { timeout: 3000 });
+    // No bulkPlan in this response, so Apply calls onApply directly (still true after PR C).
+    await user.click(screen.getByTestId('revision-match-apply'));
+
+    const outcomeNode = await screen.findByTestId('upload-complete-outcome', {}, { timeout: REVISION_APPLY_TO_COMPLETE_TIMEOUT_MS });
+    const receivedOutcome = JSON.parse(outcomeNode.textContent ?? 'null');
+    console.log(`[#525 item 4] outcome UploadComplete received: ${JSON.stringify(receivedOutcome)}`);
+    expect(receivedOutcome).toEqual({
+      kind: 'revisions',
+      updatedCount: 1,
+      deletedDuplicateCount: 0,
+      insertedCount: 0,
+      failedRowCount: 1,
+      skippedCount: 0,
+      applyErrorCount: 0,
+      hasDuplicateCleanupOnlyRows: false
+    });
   });
 });
 

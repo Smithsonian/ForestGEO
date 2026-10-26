@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
+import userEvent from '@testing-library/user-event';
 import IsolatedDataGridCommons, {
   FILTER_APPLY_DEBOUNCE_MS,
   gridLayoutStorageKey,
@@ -12,8 +13,11 @@ import IsolatedDataGridCommons, {
   NO_CHANGES_SAVED_MESSAGE
 } from './isolateddatagridcommons';
 import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
+import { DELETE_AFTER_CANCEL_GUARD_MS } from '@/components/datagrids/hooks/usedeleteaftercancelguard';
 import { LOADING_BAR_VISIBLE_DELAY_MS } from '@/components/loading';
 import { HTTPResponses } from '@/config/macros';
+import UploadJobStatusBadge from '@/components/client/uploadjobstatusbadge';
+import { registerSubmittedUploadJob, resetUploadJobCompletionTrackerForTests } from '@/components/uploadsystemhelpers/uploadjobcompletiontracker';
 
 const mockFetch = vi.fn();
 const mockGetRowWithUpdatedValues = vi.fn();
@@ -111,8 +115,10 @@ vi.mock('@mui/x-data-grid-generator', () => ({
 }));
 
 vi.mock('@mui/x-data-grid', () => ({
-  GridActionsCellItem: ({ label, onClick }: { label: string; onClick: () => void }) => (
-    <button type="button" onClick={onClick}>
+  // `disabled` is rendered as data-disabled, not the DOM attribute, so a click
+  // still reaches onClick and the handler's own guard is what the test exercises.
+  GridActionsCellItem: ({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) => (
+    <button type="button" data-disabled={String(Boolean(disabled))} onClick={onClick}>
       {label}
     </button>
   ),
@@ -1878,6 +1884,193 @@ describe('IsolatedDataGridCommons', () => {
       renderGrid(PERSISTED_GRID_TYPE);
       await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
       expect(screen.getByTestId('column-selector-disabled').textContent).toBe('true');
+    });
+  });
+
+  describe('Delete right after Cancel (#525 item 1)', () => {
+    const GUARD_TEST_GRID_TYPE = 'attributes';
+    const GUARD_TEST_ROW = { id: 1, code: 'GUARD_ATTR_A', description: 'Guarded row', status: 'alive' };
+    const GUARD_TEST_COLUMNS = [
+      { field: 'id', editable: false },
+      { field: 'description', editable: true }
+    ];
+    const DELETE_DIALOG_CONFIRM_LABEL = 'Confirm';
+
+    function renderGuardTestGrid() {
+      mockFetch.mockImplementation(
+        async () =>
+          ({
+            ok: true,
+            json: async () => ({ output: [GUARD_TEST_ROW], totalCount: 1, finishedQuery: 'SELECT guard' })
+          }) as Response
+      );
+      return render(
+        <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+          <IsolatedDataGridCommons
+            gridType={GUARD_TEST_GRID_TYPE}
+            gridColumns={GUARD_TEST_COLUMNS}
+            refresh={false}
+            setRefresh={vi.fn()}
+            dynamicButtons={[]}
+            initialRow={GUARD_TEST_ROW}
+            onDataUpdate={vi.fn().mockResolvedValue(undefined)}
+          />
+        </SWRConfig>
+      );
+    }
+
+    async function enterEditModeAndFindCancel(): Promise<HTMLElement> {
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      return screen.findByRole('button', { name: 'Cancel' });
+    }
+
+    it('(a) disables Delete straight after Cancel and re-enables it when the guard window ends', async () => {
+      renderGuardTestGrid();
+      const cancelButton = await enterEditModeAndFindCancel();
+      vi.useFakeTimers();
+
+      fireEvent.click(cancelButton);
+      const disabledRightAfterCancel = screen.getByRole('button', { name: 'Delete' }).getAttribute('data-disabled');
+      act(() => vi.advanceTimersByTime(DELETE_AFTER_CANCEL_GUARD_MS - 1));
+      const disabledJustBeforeExpiry = screen.getByRole('button', { name: 'Delete' }).getAttribute('data-disabled');
+      act(() => vi.advanceTimersByTime(1));
+      const disabledAtExpiry = screen.getByRole('button', { name: 'Delete' }).getAttribute('data-disabled');
+
+      console.log(
+        `[#525 item 1] Delete data-disabled: after Cancel=${disabledRightAfterCancel}, at ${DELETE_AFTER_CANCEL_GUARD_MS - 1}ms=${disabledJustBeforeExpiry}, at ${DELETE_AFTER_CANCEL_GUARD_MS}ms=${disabledAtExpiry}`
+      );
+      expect(disabledRightAfterCancel).toBe('true');
+      expect(disabledJustBeforeExpiry).toBe('true');
+      expect(disabledAtExpiry).toBe('false');
+    });
+
+    it('(b) swallows the second click of a double-click on Cancel even though it lands on Delete', async () => {
+      const user = userEvent.setup();
+      renderGuardTestGrid();
+      const cancelButton = await enterEditModeAndFindCancel();
+
+      await user.dblClick(cancelButton);
+
+      console.log(
+        `[#525 item 1] slot-2 action after the double-click: "${cancelButton.textContent}"; delete dialog open: ${Boolean(screen.queryByRole('button', { name: DELETE_DIALOG_CONFIRM_LABEL }))}`
+      );
+      // The same DOM node now reads Delete, so the second click really reached the Delete handler.
+      expect(cancelButton).toHaveTextContent('Delete');
+      expect(screen.queryByRole('button', { name: DELETE_DIALOG_CONFIRM_LABEL })).not.toBeInTheDocument();
+    });
+
+    it('(c) opens the delete dialog for a deliberate click once the guard window has passed', async () => {
+      renderGuardTestGrid();
+      const cancelButton = await enterEditModeAndFindCancel();
+      vi.useFakeTimers();
+
+      fireEvent.click(cancelButton);
+      act(() => vi.advanceTimersByTime(DELETE_AFTER_CANCEL_GUARD_MS));
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+      expect(screen.getByRole('button', { name: DELETE_DIALOG_CONFIRM_LABEL })).toBeInTheDocument();
+    });
+  });
+
+  describe('refresh after a background upload job finishes (#525 item 6)', () => {
+    const JOB_REFRESH_GRID_TYPE = 'failedmeasurements';
+    const JOB_REFRESH_BADGE_PLOT_ID = 1;
+    const JOB_REFRESH_BADGE_CENSUS_ID = 1;
+    const FINISHED_JOB_ID = 9001;
+    const ROW_BEFORE_JOB = { id: 1, failedMeasurementID: 1, spCode: 'ROW_BEFORE_UPLOAD_JOB' };
+    const ROW_ADDED_BY_JOB = { id: 2, failedMeasurementID: 2, spCode: 'ROW_ADDED_BY_UPLOAD_JOB' };
+    const JOB_REFRESH_COLUMNS = [
+      { field: 'id', editable: false },
+      { field: 'spCode', editable: true }
+    ];
+
+    function serveGridRowsAndFinishedJob(serverRows: () => Record<string, unknown>[]) {
+      mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+        if (String(input).includes('/api/uploadjobs')) {
+          return {
+            ok: true,
+            json: async () => ({
+              jobs: [
+                {
+                  jobID: FINISHED_JOB_ID,
+                  status: 'completed',
+                  phase: 'completed',
+                  percentComplete: 100,
+                  totalFiles: 1,
+                  processedRows: 1,
+                  failedRows: 0,
+                  lastError: null,
+                  updatedAt: new Date().toISOString()
+                }
+              ]
+            })
+          } as Response;
+        }
+        const rows = serverRows();
+        return { ok: true, json: async () => ({ output: rows, totalCount: rows.length, finishedQuery: 'SELECT 1' }) } as Response;
+      });
+    }
+
+    function GridWithOptionalBadge({ showBadge }: { showBadge: boolean }) {
+      return (
+        <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+          {showBadge && <UploadJobStatusBadge schema={TEST_SCHEMA} plotID={JOB_REFRESH_BADGE_PLOT_ID} censusID={JOB_REFRESH_BADGE_CENSUS_ID} />}
+          <IsolatedDataGridCommons
+            gridType={JOB_REFRESH_GRID_TYPE}
+            gridColumns={JOB_REFRESH_COLUMNS}
+            refresh={false}
+            setRefresh={vi.fn()}
+            dynamicButtons={[]}
+            initialRow={ROW_BEFORE_JOB}
+            enablePageJump
+            enableInfiniteScroll
+          />
+        </SWRConfig>
+      );
+    }
+
+    beforeEach(() => resetUploadJobCompletionTrackerForTests());
+    afterEach(() => resetUploadJobCompletionTrackerForTests());
+
+    it('reloads the rows an infinite-mode grid is showing when a submitted job finishes', async () => {
+      let serverRows: Record<string, unknown>[] = [ROW_BEFORE_JOB];
+      serveGridRowsAndFinishedJob(() => serverRows);
+      const { rerender } = render(<GridWithOptionalBadge showBadge={false} />);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ROW_BEFORE_JOB.spCode));
+      fireEvent.click(screen.getByRole('button', { name: 'Test Toggle Infinite On' }));
+      await waitFor(() => expect(screen.getByTestId('infinite-scroll-enabled').textContent).toBe('true'));
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ROW_BEFORE_JOB.spCode));
+
+      serverRows = [ROW_ADDED_BY_JOB, ROW_BEFORE_JOB];
+      registerSubmittedUploadJob(FINISHED_JOB_ID);
+      rerender(<GridWithOptionalBadge showBadge />);
+
+      await waitFor(() => {
+        console.log(`[#525 item 6] infinite grid rows after job ${FINISHED_JOB_ID} finished: ${screen.getByTestId('row-state').textContent}`);
+        expect(screen.getByTestId('row-state').textContent).toContain(ROW_ADDED_BY_JOB.spCode);
+      });
+      expect(screen.getByTestId('row-state').textContent).toContain(ROW_BEFORE_JOB.spCode);
+    });
+
+    it('does not reload an infinite-mode grid when no job finished', async () => {
+      const serverRows: Record<string, unknown>[] = [ROW_BEFORE_JOB];
+      serveGridRowsAndFinishedJob(() => serverRows);
+      const { rerender } = render(<GridWithOptionalBadge showBadge={false} />);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ROW_BEFORE_JOB.spCode));
+      fireEvent.click(screen.getByRole('button', { name: 'Test Toggle Infinite On' }));
+      await waitFor(() => expect(screen.getByTestId('infinite-scroll-enabled').textContent).toBe('true'));
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ROW_BEFORE_JOB.spCode));
+      const gridFetchCountBeforeBadge = mockFetch.mock.calls.filter(([input]) => !String(input).includes('/api/uploadjobs')).length;
+
+      rerender(<GridWithOptionalBadge showBadge />);
+      await waitFor(() => expect(mockFetch.mock.calls.some(([input]) => String(input).includes('/api/uploadjobs'))).toBe(true));
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      });
+
+      const gridFetchCountAfterBadge = mockFetch.mock.calls.filter(([input]) => !String(input).includes('/api/uploadjobs')).length;
+      console.log(`[#525 item 6] grid fetches before/after an unregistered finished job: ${gridFetchCountBeforeBadge}/${gridFetchCountAfterBadge}`);
+      expect(gridFetchCountAfterBadge).toBe(gridFetchCountBeforeBadge);
     });
   });
 });

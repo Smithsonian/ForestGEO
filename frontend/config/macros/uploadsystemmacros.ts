@@ -7,6 +7,7 @@ import type { ArcgisImportReference } from '@/lib/arcgis/types';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import type { QuadratOverlapAcknowledgment } from '@/lib/provisioning/types';
 import type { QuadratOverlapSummary } from '@/lib/provisioning/quadrat-collection-validation';
+import type { UploadOutcome } from './uploadoutcome';
 
 // File upload constraints
 export { MAX_UPLOAD_FILE_BYTES as MAX_FILE_SIZE_BYTES, MAX_UPLOAD_FILE_MB as MAX_FILE_SIZE_MB } from '@/lib/uploads/upload-request-limits';
@@ -91,6 +92,8 @@ export interface UploadReviewFilesProps {
   handleReplaceFile: (fileIndex: number, newFile: FileWithPath) => Promise<void>;
 }
 
+export type { RevisionApplyOutcomeCounts, IngestionUploadOutcome, RevisionsUploadOutcome, UploadOutcome } from './uploadoutcome';
+
 export interface UploadFireProps {
   // contexts
   schema: string;
@@ -102,7 +105,6 @@ export interface UploadFireProps {
   acceptedFiles: FileWithStream[];
   parsedData: FileCollectionRowSet;
   arcgisImportSession?: ArcgisImportReference | null;
-  uploadCompleteMessage: string;
   selectedDelimiters: Record<string, string>;
   // Per-file confirmed column mappings from the parse step. When omitted, falls back to legacy header aliasing.
   columnMappings?: Record<string, ColumnMapping>;
@@ -110,7 +112,7 @@ export interface UploadFireProps {
   quadratOverlapAcknowledgment: QuadratOverlapAcknowledgment | null;
   onQuadratOverlapAcknowledgmentRequired: (summaries: QuadratOverlapSummary[]) => void;
   // state setters
-  setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
+  setUploadOutcome: Dispatch<SetStateAction<UploadOutcome | undefined>>;
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
   setUploadError: React.Dispatch<React.SetStateAction<any>>;
   setErrorComponent: React.Dispatch<React.SetStateAction<string>>;
@@ -162,6 +164,7 @@ export interface UploadUpdateValidationsProps {
 export interface UploadCompleteProps {
   // state vars
   uploadForm: FormType | undefined;
+  uploadOutcome?: UploadOutcome;
   // state setters
   handleCloseUploadModal: () => void;
 }

@@ -756,8 +756,7 @@ function UploadParentInner(props: UploadParentProps) {
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
             schema={currentSite?.schemaName || ''}
-            uploadCompleteMessage={uploadState.state.uploadCompleteMessage}
-            setUploadCompleteMessage={uploadState.setUploadCompleteMessage}
+            setUploadOutcome={uploadState.setUploadOutcome}
             setUploadError={(error: any) => errorHandling.setError(error)}
             setErrorComponent={errorHandling.setErrorComponent}
             setAllRowToCMID={setAllRowToCMID}
@@ -829,6 +828,7 @@ function UploadParentInner(props: UploadParentProps) {
             invalidRowsIntegrityHash={revisionMatchResult?.invalidRowsIntegrityHash ?? ''}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
+            setUploadOutcome={uploadState.setUploadOutcome}
             onPlanConflict={(freshPlan, freshInvalidRows, freshInvalidRowsIntegrityHash) => {
               setRevisionMatchResult(current =>
                 current ? mergeFreshRevisionPlan(current, freshPlan, freshInvalidRows, freshInvalidRowsIntegrityHash) : current
@@ -857,7 +857,7 @@ function UploadParentInner(props: UploadParentProps) {
           />
         );
       case ReviewStates.COMPLETE:
-        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadState.state.uploadForm} />;
+        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadState.state.uploadForm} uploadOutcome={uploadState.state.uploadOutcome} />;
       default:
         return (
           <UploadError

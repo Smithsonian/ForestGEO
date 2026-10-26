@@ -7,13 +7,15 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useUploadState } from './useuploadstate';
-import { ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { ReviewStates, type UploadOutcome } from '@/config/macros/uploadsystemmacros';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
 
 // Mock the AttributeStatusOptions export from core
 vi.mock('@/lib/db/definitions/core', () => ({
   AttributeStatusOptions: ['alive', 'dead', 'stem dead', 'broken below', 'omitted', 'missing']
 }));
+
+const COMPLETED_INGESTION_OUTCOME: UploadOutcome = { kind: 'ingestion', sourceRows: 1, insertedRows: 1, failedRows: 0 };
 
 describe('useUploadState', () => {
   describe('Initial State', () => {
@@ -26,7 +28,6 @@ describe('useUploadState', () => {
         reviewState: ReviewStates.START,
         personnelRecording: '',
         isDataUnsaved: false,
-        uploadCompleteMessage: '',
         dataViewActive: 1
       });
     });
@@ -247,26 +248,36 @@ describe('useUploadState', () => {
     });
   });
 
-  describe('Upload Complete Message', () => {
-    it('should set completion message', () => {
+  describe('Upload Outcome (#525 item 4)', () => {
+    const INGESTION_OUTCOME: UploadOutcome = { kind: 'ingestion', sourceRows: 10, insertedRows: 8, failedRows: 2 };
+
+    it('stores the outcome it is given', () => {
       const { result } = renderHook(() => useUploadState());
-
-      act(() => {
-        result.current.setUploadCompleteMessage('Upload successful!');
-      });
-
-      expect(result.current.state.uploadCompleteMessage).toBe('Upload successful!');
+      act(() => result.current.setUploadOutcome(INGESTION_OUTCOME));
+      expect(result.current.state.uploadOutcome).toEqual(INGESTION_OUTCOME);
     });
 
-    it('should clear completion message', () => {
+    it('clears the outcome when set to undefined', () => {
       const { result } = renderHook(() => useUploadState());
-
       act(() => {
-        result.current.setUploadCompleteMessage('Upload successful!');
-        result.current.setUploadCompleteMessage('');
+        result.current.setUploadOutcome(INGESTION_OUTCOME);
+        result.current.setUploadOutcome(undefined);
       });
+      expect(result.current.state.uploadOutcome).toBeUndefined();
+    });
 
-      expect(result.current.state.uploadCompleteMessage).toBe('');
+    it('resetToStart clears a stored outcome', () => {
+      const { result } = renderHook(() => useUploadState());
+      act(() => result.current.setUploadOutcome(INGESTION_OUTCOME));
+      act(() => result.current.resetToStart());
+      expect(result.current.state.uploadOutcome).toBeUndefined();
+    });
+
+    it('initialize clears a stored outcome', () => {
+      const { result } = renderHook(() => useUploadState());
+      act(() => result.current.setUploadOutcome(INGESTION_OUTCOME));
+      act(() => result.current.initialize(FormType.measurements));
+      expect(result.current.state.uploadOutcome).toBeUndefined();
     });
   });
 
@@ -301,7 +312,7 @@ describe('useUploadState', () => {
         result.current.setPersonnelRecording('John Doe');
         result.current.setReviewState(ReviewStates.UPLOAD_SQL);
         result.current.setIsDataUnsaved(true);
-        result.current.setUploadCompleteMessage('Complete!');
+        result.current.setUploadOutcome(COMPLETED_INGESTION_OUTCOME);
         result.current.setDataViewActive(3);
       });
 
@@ -323,7 +334,6 @@ describe('useUploadState', () => {
         reviewState: ReviewStates.START,
         personnelRecording: '',
         isDataUnsaved: false,
-        uploadCompleteMessage: '',
         dataViewActive: 1
       });
     });
@@ -519,12 +529,12 @@ describe('useUploadState', () => {
       act(() => {
         result.current.setReviewState(ReviewStates.COMPLETE);
         result.current.setIsDataUnsaved(false);
-        result.current.setUploadCompleteMessage('Upload successful!');
+        result.current.setUploadOutcome(COMPLETED_INGESTION_OUTCOME);
       });
 
       expect(result.current.isComplete).toBe(true);
       expect(result.current.state.isDataUnsaved).toBe(false);
-      expect(result.current.state.uploadCompleteMessage).toBe('Upload successful!');
+      expect(result.current.state.uploadOutcome).toEqual(COMPLETED_INGESTION_OUTCOME);
     });
 
     it('should handle error recovery workflow', () => {
