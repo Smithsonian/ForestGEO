@@ -902,8 +902,8 @@ export default function ErrorsExplorer() {
       {
         field: 'hasContradiction',
         headerName: 'Conflict',
-        minWidth: 110,
-        width: 110,
+        minWidth: 120,
+        width: 120,
         sortable: false,
         headerAlign: 'left',
         align: 'left',
