@@ -62,9 +62,12 @@ import { LoadingBar, ContentSkeleton } from '@/components/loading';
 import { areGridFilterModelsEqual, hasServerFilter, toServerFilterModel } from '@/lib/datagrid/filterModel';
 import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel';
 import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
+import { useReloadOnFinishedUploadJob } from '@/components/datagrids/hooks/usereloadonfinisheduploadjob';
+import { useDeleteAfterCancelGuard } from '@/components/datagrids/hooks/usedeleteaftercancelguard';
 import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS, getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
+import { NEW_ROW_ADDED_MESSAGE, ROW_DELETED_MESSAGE, ROW_UPDATED_MESSAGE } from '@/components/datagrids/rowmutationmessages';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
   if (value === undefined || value === null || value === '') {
@@ -239,8 +242,7 @@ function withImmediateEditCellCommit(columns: GridColDef[]): GridColDef[] {
   });
 }
 
-export const ROW_UPDATED_MESSAGE = 'Row successfully updated!';
-export const NEW_ROW_ADDED_MESSAGE = 'New row added!';
+export { NEW_ROW_ADDED_MESSAGE, ROW_UPDATED_MESSAGE };
 export const NO_CHANGES_SAVED_MESSAGE = 'No changes were saved: the server recorded no update for this row.';
 export const GRID_REFRESH_FAILED_MESSAGE = 'The grid could not refresh';
 
@@ -626,6 +628,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   });
 
   const isInfiniteOn = enableInfiniteScroll && infinite.mode === 'infinite';
+  useReloadOnFinishedUploadJob(queryScope, isInfiniteOn, infinite.refresh);
   const gridRows = isInfiniteOn ? infinite.rows : rows;
   const gridRowCount = isInfiniteOn ? infinite.rows.length : rowCount;
 
@@ -643,6 +646,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   // Timer ref for edit click focus delay - cleaned up on unmount
   const editClickTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const { markCancelled, isDeleteGuarded } = useDeleteAfterCancelGuard();
 
   useEffect(() => {
     // Only refresh when transitioning from false to true
@@ -1137,7 +1141,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           setRows(prevRows => prevRows.filter(row => row.id !== id));
           infinite.removeRow(id);
           setSnackbar({
-            children: 'Row successfully deleted',
+            children: ROW_DELETED_MESSAGE,
             severity: 'success'
           });
           triggerRefresh([gridType as keyof UnifiedValidityFlags]);
@@ -1240,6 +1244,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const handleDeleteClick = useCallback(
     (id: GridRowId) => () => {
       if (locked || isSavingRef.current || pendingSaveRef.current) return;
+      if (isDeleteGuarded(id)) return;
       if (gridType === 'census') {
         const rowToDelete = gridRows.find(row => String(row.id) === String(id));
         if (currentCensus && rowToDelete && rowToDelete.censusID === currentCensus.dateRanges?.[0]?.censusID) {
@@ -1249,7 +1254,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       }
       openConfirmationDialog('delete', id);
     },
-    [locked, gridType, currentCensus, gridRows, openConfirmationDialog]
+    [locked, gridType, currentCensus, gridRows, openConfirmationDialog, isDeleteGuarded]
   );
 
   const handleAddNewRow = useCallback(async () => {
@@ -1418,6 +1423,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const handleCancelClick = useCallback(
     (id: GridRowId, event?: React.MouseEvent | React.KeyboardEvent) => {
       if (locked || isSavingRef.current || saveInFlightRef.current.has(rowKey(id))) return;
+      markCancelled(id);
       event?.preventDefault();
 
       const row = gridRows.find(row => String(row.id) === String(id));
@@ -1439,7 +1445,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         }));
       }
     },
-    [locked, gridRows]
+    [locked, gridRows, markCancelled]
   );
 
   // Cleanup timers on unmount to prevent memory leaks
@@ -1528,7 +1534,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const gridLoading = isInfiniteOn ? infinite.isLoading : showGridLoading;
 
   const getEnhancedCellAction = useCallback(
-    (type: string, icon: React.ReactElement, onClick: React.MouseEventHandler<HTMLButtonElement>) => (
+    (type: string, icon: React.ReactElement, onClick: React.MouseEventHandler<HTMLButtonElement>, disabled = false) => (
       <CellItemContainer>
         <Tooltip
           disableInteractive
@@ -1548,7 +1554,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           arrow
           placement="top"
         >
-          <GridActionsCellItem icon={icon} label={type} onClick={onClick} />
+          <GridActionsCellItem icon={icon} label={type} onClick={onClick} disabled={disabled} />
         </Tooltip>
       </CellItemContainer>
     ),
@@ -1572,10 +1578,13 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             getEnhancedCellAction('Cancel', <CancelIcon />, (e: React.MouseEvent<HTMLButtonElement>) => handleCancelClick(id, e))
           ];
         }
-        return [getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id, row)), getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id))];
+        return [
+          getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id, row)),
+          getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id), isDeleteGuarded(id))
+        ];
       }
     }),
-    [rowModesModel, locked, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, handleDeleteClick]
+    [rowModesModel, locked, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, handleDeleteClick, isDeleteGuarded]
   );
 
   const columns = useMemo(() => {

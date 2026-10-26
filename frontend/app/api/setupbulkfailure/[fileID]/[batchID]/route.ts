@@ -1,14 +1,17 @@
+import { auth } from '@/auth';
+import { authenticatedSessionIdentity } from '@/lib/changelog/identity';
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import { validateSchemaOrThrow } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { toError } from '@/lib/errorhelpers';
-import { moveTemporaryBatchToFailedMeasurements, moveTemporarySubBatchesToFailedMeasurements } from '@/lib/batchfailuretransfer';
+import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
 import { fromQuery, withRouteAuthz, type RouteContext } from '@/lib/route-authz';
 import { BatchFamilyScopeError, discoverBatchFamily } from '@/lib/uploads/batch-family';
 import { inferSystemFailureKind } from '@/config/measurementerrors';
+import { ChangelogWriteError } from '@/lib/changelog/record-mutation';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -55,23 +58,37 @@ async function handler(request: NextRequest, context: RouteContext) {
       });
     }
 
+    if (!family) return NextResponse.json({ temp: true }, { status: HTTPResponses.OK });
+    const auditContext = {
+      changedBy: authenticatedSessionIdentity((await auth())?.user),
+      plotID: family.plotID,
+      censusID: family.censusID
+    };
+
     // The client reports whatever killed its setupbulkprocedure request as free
     // text. A transport failure (front-end 504, aborted fetch) means these rows
     // were never judged, so they must not be recorded as ingestion SQL errors.
     const failureKind = inferSystemFailureKind(failureReason);
 
-    // After sub-batching, remaining rows may have sub-batch IDs (e.g. batchID__sub001).
-    // Try exact match first, then fall back to moving all sub-batches for this file.
-    let movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, batchID, failureReason, failureKind);
-
-    if (movedRows === 0) {
-      movedRows = await moveTemporarySubBatchesToFailedMeasurements(connectionManager, schema, fileID, batchID, failureReason, failureKind);
-      if (movedRows > 0) {
-        ailogger.warn(`Moved ${movedRows} sub-batched temporary rows to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`);
-      }
-    } else {
-      ailogger.warn(`Moved ${movedRows} temporary rows to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`);
+    // Each member commits on its own, like setup's per-sub-batch transactions, so a
+    // request cut off by the load balancer keeps the members already moved and a
+    // retry rediscovers only what is still staged.
+    let movedRows = 0;
+    for (const member of family.members) {
+      movedRows += await moveTemporaryBatchToFailedMeasurements(
+        connectionManager,
+        schema,
+        fileID,
+        member.batchID,
+        failureReason,
+        failureKind,
+        undefined,
+        auditContext
+      );
     }
+    ailogger.warn(
+      `Moved ${movedRows} temporary rows from ${family.members.length} family members to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`
+    );
   } catch (error: any) {
     operationError = error;
     if (error instanceof UploadSessionOwnershipError) {
@@ -84,7 +101,7 @@ async function handler(request: NextRequest, context: RouteContext) {
     return new NextResponse(
       JSON.stringify({
         error: 'Failure transfer to unresolved coremeasurements detected.',
-        details: error.message
+        details: error instanceof ChangelogWriteError ? 'Unable to record failure history. Please retry.' : error.message
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );

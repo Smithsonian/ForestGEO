@@ -429,6 +429,68 @@ describe('resolveMeasurementChunk', () => {
     });
   });
 
+  describe('source indexes of accepted rows (staging ordinals)', () => {
+    const SOURCE_INDEX_HEADERS = ['tag', 'spcode', 'quadrat', 'dbh'];
+    const validRawRow = (tag: string) => ({ tag, spcode: 'abc', quadrat: 'q1', dbh: '12.5' });
+    const rowMissingTag = () => ({ tag: '', spcode: 'abc', quadrat: 'q1', dbh: '12.5' });
+    const rowWithTooFewColumns = (tag: string) => ({ tag, spcode: 'abc' });
+
+    function resolveWithMode(rawRows: Record<string, string>[], uploadMode: 'revisions' | 'other', parsedFieldCount = SOURCE_INDEX_HEADERS.length) {
+      return resolveMeasurementChunk(rawRows, parsedFieldCount, {
+        formType: FormType.measurements,
+        uploadMode,
+        delimiter: DEFAULT_DELIMITER,
+        requiredHeaders: MEASUREMENTS_REQUIRED,
+        csvHeaders: SOURCE_INDEX_HEADERS
+      });
+    }
+
+    it('reports the chunk-relative source index of every accepted row so staging can keep file ordinals', () => {
+      const rows = [validRawRow('T1'), rowMissingTag(), validRawRow('T3')];
+      const result = resolveWithMode(rows, 'other');
+      console.log(
+        '[source-index] plan path',
+        result.validRowSourceIndexes,
+        result.invalidRows.map(row => row.failureReason)
+      );
+      expect(result.plan).not.toBeNull();
+      expect(result.validRows.map(row => row.tag)).toEqual(['T1', 'T3']);
+      expect(result.validRowSourceIndexes).toEqual([0, 2]);
+    });
+
+    it('skips a ragged row the plan rejects before validation without shifting later indexes', () => {
+      const rows = [rowWithTooFewColumns('T0'), validRawRow('T1'), rowMissingTag(), rowWithTooFewColumns('T3'), validRawRow('T4')];
+      const result = resolveWithMode(rows, 'other');
+      console.log(
+        '[source-index] ragged rows',
+        result.validRowSourceIndexes,
+        result.invalidRows.map(row => row.failureReason)
+      );
+      expect(result.validRows.map(row => row.tag)).toEqual(['T1', 'T4']);
+      expect(result.validRowSourceIndexes).toEqual([1, 4]);
+    });
+
+    it('reports source indexes on the plan-less revisions path too', () => {
+      const rows = [rowMissingTag(), validRawRow('T1'), validRawRow('T2')];
+      const result = resolveWithMode(rows, 'revisions');
+      console.log(
+        '[source-index] plan-less path',
+        result.validRowSourceIndexes,
+        result.invalidRows.map(row => row.failureReason)
+      );
+      expect(result.plan).toBeNull();
+      expect(result.validRows.map(row => row.tag)).toEqual(['T1', 'T2']);
+      expect(result.validRowSourceIndexes).toEqual([1, 2]);
+    });
+
+    it('reports no source indexes when the whole chunk is rejected for a column-count mismatch', () => {
+      const result = resolveWithMode([validRawRow('T1')], 'other', SOURCE_INDEX_HEADERS.length + 1);
+      console.log('[source-index] column-count mismatch', result.columnCountMismatch, result.validRowSourceIndexes);
+      expect(result.columnCountMismatch).toBe(true);
+      expect(result.validRowSourceIndexes).toEqual([]);
+    });
+  });
+
   describe('ignored/dropped-column diagnostics (M4)', () => {
     it('reports the count of columns the plan dropped (so a mis-mapped column is not silent)', () => {
       // 'lx' is sourced from 'MyX'; the literal 'lx' header is unclaimed and diverted to an inert

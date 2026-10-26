@@ -136,6 +136,10 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
                             c.PlotCensusNumber,
                             COALESCE(m.FirstMeasurementDate, c.StartDate) AS StartDate,
                             COALESCE(m.LastMeasurementDate, c.EndDate) AS EndDate,
+                            c.StartDate AS CensusStartDate,
+                            c.EndDate AS CensusEndDate,
+                            m.FirstMeasurementDate,
+                            m.LastMeasurementDate,
                             c.Description,
                             c.IsActive
                      FROM ${schema}.census c

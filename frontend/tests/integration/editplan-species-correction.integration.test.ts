@@ -32,6 +32,14 @@ import type { AppliedSpeciesCorrectionBatchSummary } from '@/config/editplan/typ
 import type { FileRow } from '@/config/macros/formdetails';
 
 import { setupTestDatabase, teardownTestDatabase, createAdditionalCensus, type TestData, type TestDatabaseConfig } from '../setup/local-db-setup';
+import { computeInvalidRowsIntegrityHash, REVISION_UPLOAD_FILE_ID } from '@/app/api/revisionupload/shared/invalidrowintegrity';
+
+// computeInvalidRowsIntegrityHash signs with AUTH_SECRET and fails closed
+// without it. The unit suite gets this for free from setup.ts ->
+// tests/mocks/auth-mocks.ts, but vitest.integration.config.mts's setupFiles
+// do not set it. The exact value is irrelevant — only that it stays constant
+// across this suite's match+apply call pairs.
+process.env.AUTH_SECRET ??= 'test_secret';
 
 // ---------------------------------------------------------------------------
 // Shared state bridge — same pattern as editplan-revert.integration.test.ts.
@@ -1063,6 +1071,14 @@ interface BulkApplyRequestInput {
 // ConnectionManager above) when this suite actually opened it.
 let usedActualRevisionApplyPostHelper = false;
 
+// This suite never exercises invalidRows — every `performRevisionApplyPost`
+// call omits it, so the route normalizes it to []. A fixed, well-formed
+// uploadAttemptID paired with the real computeInvalidRowsIntegrityHash over
+// that same empty array is therefore valid for every call here; it is NOT a
+// stand-in for the #505 contract itself, which is covered by
+// apply/route.test.ts and route.test.ts.
+const SYNTHETIC_UPLOAD_ATTEMPT_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
 // Issues one real POST against the actual `applyRevisionPOST` handler.
 async function performRevisionApplyPost(input: BulkApplyRequestInput): Promise<NextResponse> {
   seedSyntheticAdminSession();
@@ -1074,7 +1090,16 @@ async function performRevisionApplyPost(input: BulkApplyRequestInput): Promise<N
     matchedRows: input.matchedRows,
     newRows: input.newRows ?? [],
     confirmNewRows: input.confirmNewRows ?? false,
-    bulkPlanHash: input.bulkPlanHash
+    bulkPlanHash: input.bulkPlanHash,
+    uploadAttemptID: SYNTHETIC_UPLOAD_ATTEMPT_ID,
+    invalidRowsIntegrityHash: computeInvalidRowsIntegrityHash(
+      input.schema,
+      input.plotID,
+      input.censusID,
+      SYNTHETIC_UPLOAD_ATTEMPT_ID,
+      REVISION_UPLOAD_FILE_ID,
+      []
+    )
   };
   const request = new NextRequest(SYNTHETIC_REVISION_APPLY_REQUEST_URL, {
     method: 'POST',

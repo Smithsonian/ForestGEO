@@ -81,11 +81,15 @@ Trees rarely shrink significantly. Large shrinkage usually indicates measurement
 ### Reviewing growth and shrinkage findings in View Errors
 
 Both checks compare the current measurement against the same tag/stem in the previous census, so
-View Errors shows that comparison alongside each finding: the **Prior DBH** and **Prior HOM** from
+View Errors can show that comparison alongside each finding: the **Prior DBH** and **Prior HOM** from
 the earlier census, and an **HOM Changed** chip when the height of measurement differs between the
 two — a changed HOM is a common, legitimate explanation for an apparent shrinkage or growth
-finding, not necessarily a measurement error. An **Export CSV** button on the errors screen exports
-every flagged occurrence, including the prior-census columns, for review outside the application.
+finding, not necessarily a measurement error. These comparison columns, together with **Plot X**
+and **Plot Y**, start hidden each time you open View Errors so that **Codes** and the edit buttons
+fit on screen; to show them, open the menu on the **Codes** (or any other data) column header, choose **Manage columns**, and tick
+**Prior DBH**, **Prior HOM** and **HOM Changed**. An **Export CSV** button on the errors screen
+exports every flagged occurrence, including the prior-census columns, for review outside the
+application, whichever columns are showing.
 
 Neither check runs at all when the DBH it needs from either census is missing — there is nothing
 to compare, so the row is silently skipped rather than flagged in either direction.

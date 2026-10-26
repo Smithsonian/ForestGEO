@@ -32,6 +32,14 @@
  *   7. Crash recovery mid-ingestion — file 1's uploadmetrics row stuck at
  *      'processing' with stale staged temp rows and already-written ingested/
  *      reject rows; the re-run produces exactly one clean row set.
+ *   8. Issue #504 — a header-only or otherwise entirely blank CSV must fail
+ *      the job permanently (NonRetryableJobError) instead of completing.
+ *      CLEAN_REUPLOAD stages a census-wide coremeasurements DELETE on the
+ *      first successfully-staged chunk, so this has to be caught BEFORE the
+ *      chunk/staging loop runs at all: pre-existing rows in both the job's
+ *      own target census and a wholly unrelated census must survive comma,
+ *      tab, BOM+CRLF, and delimiter-only/blank-cell variants, and a header-
+ *      only second file must fail the job even when the first file is valid.
  *
  * Prerequisites: docker compose up -d mysql
  *
@@ -40,7 +48,14 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import mysql, { type Connection, type Pool, type RowDataPacket } from 'mysql2/promise';
-import { cleanupTestMeasurements, setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
+import {
+  cleanupTestMeasurements,
+  createAdditionalCensus,
+  insertDirectMeasurements,
+  setupTestDatabase,
+  teardownTestDatabase,
+  type TestData
+} from '../setup/local-db-setup';
 
 // ---------------------------------------------------------------------------
 // Safety guard — setupTestDatabase DROPs/CREATEs its schema and this suite
@@ -67,6 +82,7 @@ const sharedState = vi.hoisted(() => ({
   connection: null as import('mysql2/promise').Connection | null,
   activeTransactionID: null as string | null,
   transactionCounter: 0,
+  heldLocks: new Set<string>(),
   catalogPool: null as import('mysql2/promise').Pool | null,
   // Test hook: awaited before every schema-side query so a test can inject
   // state changes (e.g. flip the job to cancel_requested) at a deterministic
@@ -77,6 +93,10 @@ const sharedState = vi.hoisted(() => ({
 // ConnectionManager mock — mirrors the ingest-batch/collapse-census pattern.
 // Routes every schema-side DB call to the shared real MySQL connection.
 vi.mock('@/lib/db/connectionmanager', () => {
+  const releaseLocks = async () => {
+    for (const name of sharedState.heldLocks) await sharedState.connection!.query('SELECT RELEASE_LOCK(?)', [name]);
+    sharedState.heldLocks.clear();
+  };
   const manager = {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
@@ -100,12 +120,14 @@ vi.mock('@/lib/db/connectionmanager', () => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: commit transactionID mismatch');
       await sharedState.connection.commit();
+      await releaseLocks();
       sharedState.activeTransactionID = null;
     },
     rollbackTransaction: async (transactionID: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       if (transactionID !== sharedState.activeTransactionID) throw new Error('ConnectionManager mock: rollback transactionID mismatch');
       await sharedState.connection.rollback();
+      await releaseLocks();
       sharedState.activeTransactionID = null;
     },
     withTransaction: async <T>(fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<any>; readonly id: string }) => Promise<T>): Promise<T> => {
@@ -125,11 +147,15 @@ vi.mock('@/lib/db/connectionmanager', () => {
     },
     acquireApplicationLock: async (lockName: string, _transactionID: string, timeoutMs: number) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
+      if (_transactionID !== sharedState.activeTransactionID) throw new Error('Unknown lock transaction');
+      if (sharedState.heldLocks.has(lockName)) return true;
       const [rows] = await sharedState.connection.query<import('mysql2/promise').RowDataPacket[]>('SELECT GET_LOCK(?, ?) as acquired', [
         lockName,
         Math.ceil(timeoutMs / 1000)
       ]);
-      return (rows as import('mysql2/promise').RowDataPacket[])[0]?.acquired === 1;
+      const acquired = (rows as import('mysql2/promise').RowDataPacket[])[0]?.acquired === 1;
+      if (acquired) sharedState.heldLocks.add(lockName);
+      return acquired;
     },
     cleanupStaleTransactions: async () => undefined,
     closeConnection: async () => undefined
@@ -170,7 +196,8 @@ import {
   createUploadBackgroundJob,
   finalizeJobAsSystem,
   getBackgroundJob,
-  getBackgroundJobWithDetails
+  getBackgroundJobWithDetails,
+  selectFailureContext
 } from '@/lib/background-jobs/repository';
 import { cleanupCancelledUnclaimedJobArtifacts, runJobIfClaimable, SESSION_CONFLICT_RETRY_DELAY_SECONDS, type WorkerDeps } from '@/lib/background-jobs/worker';
 import { UPLOAD_JOB_MAX_RETRIES, type BackgroundJobFileRecord } from '@/lib/background-jobs/types';
@@ -178,7 +205,9 @@ import { createUploadSession, ensureUploadSessionsTable } from '@/config/uploads
 import { FormType, SourceFormat, type FileRow } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import ConnectionManager from '@/lib/db/connectionmanager';
+import { TransactionCallbackTimeoutError } from '@/lib/db/transactionerrors';
 import { recordInvalidRows } from '@/lib/uploads/record-invalid-rows';
+import { buildSubBatchID, buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { testDbServerOptions } from '../setup/test-db-connection';
 
 // ---------------------------------------------------------------------------
@@ -228,6 +257,8 @@ const FIXTURE_TEXTS: Record<string, string> = {
 };
 
 const UPLOADMETRICS_STATUS_COMPLETED = 'completed';
+/** Fixture files are far below the sub-batch size, so each stages as one `__sub001` member. */
+const SINGLE_MEMBER_ORDINAL = 1;
 
 // ---------------------------------------------------------------------------
 // Suite lifecycle
@@ -371,8 +402,12 @@ describe('runJobIfClaimable — integration', () => {
     return Number(rows[0].count);
   }
 
+  /** Metric statuses for the whole batch family; staging pre-partitions, so a small file's metric lives under `__sub001`. */
   async function fetchUploadMetricsStatus(batchID: string): Promise<string[]> {
-    const [rows] = await connection.query<RowDataPacket[]>(`SELECT status FROM uploadmetrics WHERE batchID = ?`, [batchID]);
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT status FROM uploadmetrics WHERE batchID = ? OR batchID LIKE ? ${LIKE_ESCAPE_CLAUSE} ORDER BY batchID`,
+      [batchID, buildSubBatchPattern(batchID)]
+    );
     return rows.map(row => String(row.status));
   }
 
@@ -394,6 +429,91 @@ describe('runJobIfClaimable — integration', () => {
   // -------------------------------------------------------------------------
   // 1. Happy path
   // -------------------------------------------------------------------------
+
+  it('attributes deferred rejects from an all-invalid first file to the job creator', async () => {
+    const jobID = await createTwoFileJob();
+    await runJobIfClaimable(jobID, {
+      fetchFileText: async file => (file.fileName === FILE1_NAME ? [CSV_HEADER, `DEFERRED,1,ACERRU,,1,2,10,1.3,${MEASUREMENT_DATE},A`].join('\n') : FILE2_CSV)
+    });
+    expect((await getBackgroundJob(catalogPool, jobID))!.status).toBe('completed');
+    expect(await fetchIngestedIDs(FILE2_NAME)).toHaveLength(FILE2_VALID_ROW_COUNT);
+    const rejects = await fetchRejectIDs(FILE1_NAME);
+    expect(rejects).toHaveLength(1);
+    const [audit] = await connection.query<RowDataPacket[]>(
+      "SELECT Operation, ChangedBy, NewRowState FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND RecordID = ?",
+      [rejects[0]]
+    );
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ Operation: 'INSERT', ChangedBy: TEST_USER });
+    expect(audit[0].NewRowState.RawTreeTag).toBe('DEFERRED');
+  });
+
+  it('rolls back a parse-reject audit failure while preserving earlier committed ingestion and leaving the job retryable', async () => {
+    const jobID = await createTwoFileJob();
+    let faultReached = false;
+    let failedRowExisted = false;
+    const sentinel = new Error('parse-reject audit unavailable');
+    sharedState.onSchemaQuery = async (sql, params) => {
+      if (!sql.includes('INSERT INTO') || !sql.includes('unifiedchangelog') || params[0] !== 'coremeasurements' || params[2] !== 'INSERT') return;
+      const state = typeof params[4] === 'string' ? JSON.parse(params[4]) : null;
+      if (!state || state.SourceRowIndex >= 0) return;
+      const [rows] = await connection.query<RowDataPacket[]>('SELECT CoreMeasurementID FROM coremeasurements WHERE CoreMeasurementID = ?', [
+        state.CoreMeasurementID
+      ]);
+      failedRowExisted = rows.length === 1;
+      faultReached = true;
+      throw sentinel;
+    };
+    try {
+      await runJobIfClaimable(jobID, healthyDeps());
+    } finally {
+      sharedState.onSchemaQuery = null;
+    }
+    expect(faultReached).toBe(true);
+    expect(failedRowExisted).toBe(true);
+    expect(await fetchIngestedIDs(FILE1_NAME)).toHaveLength(FILE1_VALID_ROW_COUNT);
+    expect(await fetchRejectIDs(FILE1_NAME)).toHaveLength(0);
+    const job = await getBackgroundJob(catalogPool, jobID);
+    expect(job!.status).toBe('waiting_retry');
+    expect(job!.lastError).toContain(sentinel.message);
+    const [audits] = await connection.query<RowDataPacket[]>(
+      "SELECT NewRowState FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND Operation = 'INSERT'"
+    );
+    expect(audits.some(row => row.NewRowState?.RawTreeTag === 'W1006')).toBe(false);
+  });
+
+  it('does not attach a prior setup timeout to a later blob failure', async () => {
+    const jobID = await createTwoFileJob();
+    await insertStagedTempRow(FILE1_NAME, await batchIDForFile(jobID, FILE1_NAME), 'timeout-row', '1-1', 12.3);
+    let injected = false;
+    sharedState.onSchemaQuery = async query => {
+      if (injected || !query.includes('GROUP BY BatchID')) return;
+      injected = true;
+      throw new TransactionCallbackTimeoutError('test-setup-timeout', 1000);
+    };
+    try {
+      await runJobIfClaimable(jobID, healthyDeps());
+    } finally {
+      sharedState.onSchemaQuery = null;
+    }
+    const first = await getBackgroundJobWithDetails(catalogPool, jobID);
+    expect(first?.status).toBe('waiting_retry');
+    const firstContext = selectFailureContext(first!, first!.events);
+    expect(firstContext?.code).toBe('SETUP_CALLBACK_TIMEOUT');
+    expect(firstContext?.step).toBe('discovery');
+
+    await setNextAttemptPast(jobID);
+    await runJobIfClaimable(jobID, {
+      fetchFileText: async () => {
+        throw new Error('later blob outage');
+      }
+    });
+    const second = await getBackgroundJobWithDetails(catalogPool, jobID);
+    expect(second?.status).toBe('waiting_retry');
+    expect(selectFailureContext(second!, second!.events)?.step).toBeUndefined();
+    expect(selectFailureContext(second!, second!.events)?.code).toBeUndefined();
+    expect(second?.lastError).toContain('later blob outage');
+  }, 120000);
 
   it('completes a 2-file job: rows ingested, reject recorded, validations run, session released', async () => {
     const jobID = await createTwoFileJob();
@@ -421,6 +541,14 @@ describe('runJobIfClaimable — integration', () => {
     expect(file1IDs).toHaveLength(FILE1_VALID_ROW_COUNT);
     expect(file2IDs).toHaveLength(FILE2_VALID_ROW_COUNT);
     expect(file1Rejects).toHaveLength(FILE1_REJECT_ROW_COUNT);
+    const [rejectAudit] = await connection.query<RowDataPacket[]>(
+      "SELECT Operation, ChangedBy, OldRowState, NewRowState FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND RecordID = ?",
+      [file1Rejects[0]]
+    );
+    expect(rejectAudit).toHaveLength(1);
+    expect(rejectAudit[0]).toMatchObject({ Operation: 'INSERT', ChangedBy: TEST_USER, OldRowState: null });
+    expect(rejectAudit[0].NewRowState.RawTreeTag).toBe('W1006');
+
     expect(await countTempRows()).toBe(0);
 
     // Per-file catalog records carry processed/failed counts.
@@ -520,6 +648,25 @@ describe('runJobIfClaimable — integration', () => {
 
     // uploadmetrics still has exactly one completed row per batch (no re-ingest).
     expect(await fetchUploadMetricsStatus(batch1)).toEqual([UPLOADMETRICS_STATUS_COMPLETED]);
+  }, 180000);
+
+  it('preserves six parser rejects through an interrupted worker attempt and retry', async () => {
+    const jobID = await createTwoFileJob();
+    const rejectedRows = Array.from({ length: 5 }, (_, i) => `R${i + 1},1,ACERRU,,${i + 1}.5,2.5,10.5,1.3,${MEASUREMENT_DATE},A`);
+    const csv = `${FILE1_CSV}\n${rejectedRows.join('\n')}`;
+    await runJobIfClaimable(jobID, {
+      fetchFileText: async file => {
+        if (file.fileName === FILE2_NAME) throw new Error('interrupt after file one');
+        return csv;
+      }
+    });
+    expect((await getBackgroundJob(catalogPool, jobID))?.status).toBe('waiting_retry');
+    expect(await fetchRejectIDs(FILE1_NAME)).toHaveLength(6);
+    await setNextAttemptPast(jobID);
+    await runJobIfClaimable(jobID, {
+      fetchFileText: async file => (file.fileName === FILE1_NAME ? csv : FIXTURE_TEXTS[file.fileName])
+    });
+    expect(await fetchRejectIDs(FILE1_NAME)).toHaveLength(6);
   }, 180000);
 
   // -------------------------------------------------------------------------
@@ -644,6 +791,48 @@ describe('runJobIfClaimable — integration', () => {
     expect(await countTempRows()).toBe(0);
     expect(await fetchIngestedIDs(FILE1_NAME)).toHaveLength(0);
     expect(await fetchIngestedIDs(FILE2_NAME)).toHaveLength(0);
+  }, 180000);
+
+  /**
+   * #507: every chunk of FILE1 shares ONE batchID (assigned once per file,
+   * not per chunk — see createSingleFileJob's batchID reuse above and
+   * worker.ts's chunkIndex loop). stageMeasurementChunk's file_upload
+   * changelog running totals used to be keyed by batchID alone, which
+   * collapsed every chunk but the last into nothing. BACKGROUND_UPLOAD_CHUNK_ROWS=2
+   * forces FILE1's 6 rows (5 valid + 1 reject, all staged regardless of later
+   * validation) into 3 real staging chunks; the changelog's rowCount must sum
+   * across all of them and batchCount must equal the chunk count, proving the
+   * worker's `chunkIdentity: \`${batchID}:chunk${chunkIndex}\`` produced a
+   * DISTINCT identity per chunk rather than every chunk overwriting one slot.
+   */
+  it('passes a distinct chunkIdentity per chunkIndex so all chunks of one batchID accumulate in the file_upload changelog (#507)', async () => {
+    const originalChunkRows = process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+    process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = '2';
+
+    const jobID = await createTwoFileJob();
+    try {
+      await runJobIfClaimable(jobID, healthyDeps());
+    } finally {
+      if (originalChunkRows === undefined) delete process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+      else process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = originalChunkRows;
+    }
+
+    const job = await getBackgroundJob(catalogPool, jobID);
+    expect(job!.status).toBe('completed');
+    expect(await fetchIngestedIDs(FILE1_NAME)).toHaveLength(FILE1_VALID_ROW_COUNT);
+
+    const [changelogRows] = await connection.query<RowDataPacket[]>(
+      `SELECT RecordID, NewRowState FROM unifiedchangelog WHERE TableName = 'file_upload' AND RecordID LIKE ? ORDER BY ChangeID`,
+      [`${FILE1_NAME}::%`]
+    );
+    expect(changelogRows, 'exactly one file_upload row for this attempt, not one per chunk').toHaveLength(1);
+    const metadata = typeof changelogRows[0].NewRowState === 'string' ? JSON.parse(changelogRows[0].NewRowState) : changelogRows[0].NewRowState;
+    console.log(`[chunk-identity] FILE1 (6 rows / 2 per chunk = 3 chunks) metadata: ${JSON.stringify(metadata)}`);
+    // 6 raw rows (5 valid + 1 parse reject that never reaches staging) split
+    // into 3 chunks of 2 — the valid rows actually staged must sum across all
+    // 3 chunks, not just reflect whichever chunk happened to run last.
+    expect(metadata.rowCount, 'all 3 chunks worth of staged rows must be summed, not just the last chunk').toBe(FILE1_VALID_ROW_COUNT);
+    expect(metadata.batchCount, 'one distinct chunk identity per chunkIndex under the SAME batchID').toBe(3);
   }, 180000);
 
   it('cancel during a retry attempt also cleans prior-attempt batches the attempt never reached', async () => {
@@ -823,14 +1012,17 @@ describe('runJobIfClaimable — integration', () => {
     // uploadmetrics row never reached 'completed', undrained staged temp rows
     // linger, and rows the interrupted run already wrote (ingested rows and
     // the recorded reject) are still present.
-    await connection.query(`UPDATE uploadmetrics SET status = 'processing' WHERE batchID = ?`, [batch1]);
-    await insertStagedTempRow(FILE1_NAME, batch1, 'W1004', 'Q02', 15.2);
-    await insertStagedTempRow(FILE1_NAME, batch1, 'W1005', 'Q03', 25.8);
+    // File 1 fits in one sub-batch, so its metric and any re-staged rows live
+    // under the family's first member.
+    const batch1Member = buildSubBatchID(batch1, SINGLE_MEMBER_ORDINAL);
+    await connection.query(`UPDATE uploadmetrics SET status = 'processing' WHERE batchID = ?`, [batch1Member]);
+    await insertStagedTempRow(FILE1_NAME, batch1Member, 'W1004', 'Q02', 15.2);
+    await insertStagedTempRow(FILE1_NAME, batch1Member, 'W1005', 'Q03', 25.8);
     await catalogPool.query(
       `UPDATE catalog.background_jobs SET Status = 'queued', NextAttemptAt = NULL, WorkerID = NULL, WorkerHeartbeatAt = NULL WHERE JobID = ?`,
       [jobID]
     );
-    console.log(`[crash-recovery] simulated mid-ingestion crash: batch1=${batch1} → status=processing, 2 stale temp rows re-staged`);
+    console.log(`[crash-recovery] simulated mid-ingestion crash: ${batch1Member} → status=processing, 2 stale temp rows re-staged`);
 
     // Phase 3: re-run the worker with healthy deps.
     await runJobIfClaimable(jobID, healthyDeps());
@@ -874,16 +1066,348 @@ describe('runJobIfClaimable — integration', () => {
   }, 180000);
 
   // -------------------------------------------------------------------------
-  // 9. Split-batch recycle recovery (2026-07-27 Harvard Forest incident)
+  // 8. Issue #504 — header-only / entirely blank CSV guard
   //
-  // A file large enough to split is ingested as `<batchID>__subNNN`. Everything
-  // keyed on the unsuffixed BatchID — the uploadmetrics completion probe and the
-  // retry cleanup — then looks at an ID that owns no rows and no metrics. These
-  // tests force a split with a low threshold and prove the worker reasons about
-  // the whole family.
+  // The guard lives in runMeasurementsPipeline (lib/background-jobs/worker.ts),
+  // applied to the FULL rawRows array Papa Parse produced for a file, BEFORE
+  // the chunk/staging loop — and therefore before cleanupPreviousFileUploads'
+  // CensusID-wide DELETE (triggered by the first successfully staged chunk of
+  // a CLEAN_REUPLOAD) can ever run for that file. Every scenario below seeds a
+  // pre-existing row in the job's own target census AND in a completely
+  // unrelated census, so "nothing was deleted" is verified directly against
+  // real data rather than inferred from the job's own counters.
+  // -------------------------------------------------------------------------
+
+  describe('issue #504 — header-only / blank CSV guard', () => {
+    const GUARD_FILE_NAME = 'worker-guard-file.csv';
+    let otherCensusID: number;
+
+    beforeAll(async () => {
+      const otherCensus = await createAdditionalCensus(connection, testData, {
+        plotCensusNumber: 99,
+        startDate: '2023-01-01',
+        endDate: '2023-12-31'
+      });
+      otherCensusID = otherCensus.censusID;
+    });
+
+    beforeEach(async () => {
+      // Reseeded every test: the outer beforeEach just cleared every
+      // measurement table. This is the data an unguarded empty Clean
+      // Re-Upload would destroy.
+      await insertDirectMeasurements(connection, testData, censusID, [
+        { treeTag: 'GUARD-TARGET', stemTag: '1', speciesCode: 'ACERRU', quadratName: 'Q01', x: 1.1, y: 1.1, dbh: 11.1, hom: 1.3, date: MEASUREMENT_DATE }
+      ]);
+      await insertDirectMeasurements(connection, testData, otherCensusID, [
+        { treeTag: 'GUARD-OTHER', stemTag: '1', speciesCode: 'ACERRU', quadratName: 'Q01', x: 2.2, y: 2.2, dbh: 22.2, hom: 1.3, date: MEASUREMENT_DATE }
+      ]);
+    });
+
+    async function countCensusRows(idToCheck: number): Promise<number> {
+      const [rows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS count FROM coremeasurements WHERE CensusID = ?`, [idToCheck]);
+      return Number(rows[0].count);
+    }
+
+    async function createSingleGuardFileJob(fileName: string, delimiter: string): Promise<number> {
+      const job = await createUploadBackgroundJob(
+        catalogPool,
+        {
+          schema,
+          plotID,
+          censusID,
+          uploadMode: UploadMode.CLEAN_REUPLOAD,
+          sourceFormat: SourceFormat.csv,
+          formType: FormType.measurements,
+          payload: { selectedDelimiters: { [fileName]: delimiter } },
+          files: [{ fileName, blobContainer: BLOB_CONTAINER, blobName: `uploads/${fileName}`, expectedRows: 0 }]
+        },
+        TEST_USER
+      );
+      return job.jobID;
+    }
+
+    function depsForText(fileName: string, text: string): WorkerDeps {
+      return {
+        fetchFileText: async file => {
+          if (file.fileName !== fileName) throw new Error(`[guard test] unexpected fetch for ${file.fileName}`);
+          return text;
+        }
+      };
+    }
+
+    /** Shared assertions for every single-file blank-CSV scenario below. */
+    async function assertJobFailedWithoutDamage(jobID: number, fileName: string): Promise<void> {
+      const job = await getBackgroundJob(catalogPool, jobID);
+      console.log(`[guard] jobID=${jobID} status=${job?.status} lastError=${job?.lastError}`);
+      expect(job!.status).toBe('failed');
+      expect(job!.phase).toBe('failed');
+      expect(job!.lastError).toMatch(/no data rows/i);
+      expect(job!.finishedAt).toBeInstanceOf(Date);
+
+      // Nothing was staged or ingested for the blank file.
+      expect(await countTempRows(fileName)).toBe(0);
+      expect(await fetchIngestedIDs(fileName)).toHaveLength(0);
+
+      // CRITICAL: the census-wide DELETE that CLEAN_REUPLOAD performs on the
+      // first successfully-staged chunk must never have run — both the job's
+      // own target census and a completely unrelated census still hold their
+      // pre-existing rows.
+      expect(await countCensusRows(censusID)).toBe(1);
+      expect(await countCensusRows(otherCensusID)).toBe(1);
+    }
+
+    it('header-only CSV (comma): job fails permanently, no census data is touched', async () => {
+      const jobID = await createSingleGuardFileJob(GUARD_FILE_NAME, ',');
+      await runJobIfClaimable(jobID, depsForText(GUARD_FILE_NAME, `${CSV_HEADER}\n`));
+      await assertJobFailedWithoutDamage(jobID, GUARD_FILE_NAME);
+    }, 120000);
+
+    it('header-only CSV (tab delimiter via selectedDelimiters): job fails permanently, no census data is touched', async () => {
+      const tabHeader = CSV_HEADER.split(',').join('\t');
+      const jobID = await createSingleGuardFileJob(GUARD_FILE_NAME, '\t');
+      await runJobIfClaimable(jobID, depsForText(GUARD_FILE_NAME, `${tabHeader}\n`));
+      await assertJobFailedWithoutDamage(jobID, GUARD_FILE_NAME);
+    }, 120000);
+
+    it('header-only CSV with a UTF-8 BOM and CRLF line endings: job fails permanently, no census data is touched', async () => {
+      const jobID = await createSingleGuardFileJob(GUARD_FILE_NAME, ',');
+      await runJobIfClaimable(jobID, depsForText(GUARD_FILE_NAME, `\uFEFF${CSV_HEADER}\r\n\r\n`));
+      await assertJobFailedWithoutDamage(jobID, GUARD_FILE_NAME);
+    }, 120000);
+
+    it('CSV whose only body lines are delimiter-only/blank cells (kept by skipEmptyLines, not literally empty): job fails permanently, no census data is touched', async () => {
+      // skipEmptyLines only drops lines with zero characters; a line of bare
+      // commas still reaches Papa Parse's row output as a row of empty-string
+      // fields, which is exactly the "structurally blank row" case the guard
+      // (not Papa itself) has to catch.
+      const text = [CSV_HEADER, ',,,,,,,,,', '   ,  , ,,,,,,,'].join('\n') + '\n';
+      const jobID = await createSingleGuardFileJob(GUARD_FILE_NAME, ',');
+      await runJobIfClaimable(jobID, depsForText(GUARD_FILE_NAME, text));
+      await assertJobFailedWithoutDamage(jobID, GUARD_FILE_NAME);
+    }, 120000);
+
+    it('two-file job: a valid first file still ingests, but a header-only second file fails the job instead of completing', async () => {
+      const job = await createUploadBackgroundJob(
+        catalogPool,
+        {
+          schema,
+          plotID,
+          censusID,
+          uploadMode: UploadMode.CLEAN_REUPLOAD,
+          sourceFormat: SourceFormat.csv,
+          formType: FormType.measurements,
+          payload: { selectedDelimiters: { [FILE1_NAME]: ',', [GUARD_FILE_NAME]: ',' } },
+          files: [
+            { fileName: FILE1_NAME, blobContainer: BLOB_CONTAINER, blobName: `uploads/${FILE1_NAME}`, expectedRows: 6 },
+            { fileName: GUARD_FILE_NAME, blobContainer: BLOB_CONTAINER, blobName: `uploads/${GUARD_FILE_NAME}`, expectedRows: 0 }
+          ]
+        },
+        TEST_USER
+      );
+      const jobID = job.jobID;
+      const headerOnlyText = `${CSV_HEADER}\n`;
+
+      await runJobIfClaimable(jobID, {
+        fetchFileText: async file => {
+          if (file.fileName === FILE1_NAME) return FILE1_CSV;
+          if (file.fileName === GUARD_FILE_NAME) return headerOnlyText;
+          throw new Error(`[guard test] unexpected fetch for ${file.fileName}`);
+        }
+      });
+
+      const result = await getBackgroundJob(catalogPool, jobID);
+      console.log(`[guard-two-file] status=${result?.status} lastError=${result?.lastError}`);
+      expect(result!.status).toBe('failed');
+      expect(result!.lastError).toMatch(/no data rows/i);
+
+      // File 1 is a real, nonempty file: its own Clean Re-Upload replacement
+      // of the target census is legitimate (and already covered by the
+      // happy-path test above) — it is expected to have ingested here.
+      expect(await fetchIngestedIDs(FILE1_NAME)).toHaveLength(FILE1_VALID_ROW_COUNT);
+
+      // The decisive assertion: the header-only second file never staged
+      // anything, and file 1's just-ingested rows in the SAME target census
+      // (asserted above) were not wiped by a second CLEAN_REUPLOAD cleanup
+      // pass. The unrelated census' row is checked too as a scope sanity
+      // check, though cleanupPreviousFileUploads' DELETE is scoped by
+      // CensusID and would never reach it regardless.
+      expect(await countTempRows(GUARD_FILE_NAME)).toBe(0);
+      expect(await fetchIngestedIDs(GUARD_FILE_NAME)).toHaveLength(0);
+      expect(await countCensusRows(otherCensusID)).toBe(1);
+    }, 180000);
+
+    /**
+     * Regression guard for the worker-level blank-row filter (issue #504
+     * finding 2): with skipEmptyLines left at its Papa Parse default, a line
+     * that is only delimiters/whitespace still parses into a row of blank
+     * cells. Before the filter, that row rode into the chunk loop verbatim —
+     * and when chunking happens to put it alone in a chunk, that chunk hits
+     * EmptyMeasurementUploadError and fails the job AFTER any earlier chunks
+     * of the same file were already staged (and, for CLEAN_REUPLOAD, after
+     * the first of those earlier chunks already ran the CensusID-wide
+     * DELETE). BACKGROUND_UPLOAD_CHUNK_ROWS=1 forces the leading blank line
+     * below into its own chunk, reproducing exactly that boundary.
+     */
+    it('a leading delimiter-only padding line does not fail a chunk boundary: job completes, both real rows ingest', async () => {
+      const originalChunkRows = process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+      process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = '1';
+      const fileName = 'worker-guard-leading-padding.csv';
+      const text =
+        [
+          CSV_HEADER,
+          ',,,,,,,,,',
+          `W4001,1,ACERRU,Q01,1.5,2.5,10.5,1.3,${MEASUREMENT_DATE},A`,
+          `W4002,1,QUERCO,Q01,3.5,4.5,20.4,1.3,${MEASUREMENT_DATE},A`
+        ].join('\n') + '\n';
+
+      try {
+        const jobID = await createSingleGuardFileJob(fileName, ',');
+        await runJobIfClaimable(jobID, depsForText(fileName, text));
+
+        const job = await getBackgroundJob(catalogPool, jobID);
+        console.log(`[guard-leading-pad] status=${job?.status} lastError=${job?.lastError} processedRows=${job?.processedRows}`);
+        expect(job!.status).toBe('completed');
+        expect(job!.processedRows).toBe(2);
+
+        expect(await fetchIngestedIDs(fileName)).toHaveLength(2);
+        expect(await countTempRows(fileName)).toBe(0);
+        // CLEAN_REUPLOAD replaced the pre-existing GUARD-TARGET row with
+        // exactly this file's 2 real rows.
+        expect(await countCensusRows(censusID)).toBe(2);
+        // Scope sanity: the unrelated census is untouched by this file's
+        // CensusID-wide DELETE.
+        expect(await countCensusRows(otherCensusID)).toBe(1);
+      } finally {
+        if (originalChunkRows === undefined) delete process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+        else process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = originalChunkRows;
+      }
+    }, 120000);
+
+    /**
+     * Same boundary as above, but with the padding AFTER two already-
+     * committed real-row chunks — the scenario the finding actually called
+     * out ("earlier chunks already committed" before the padding chunk is
+     * reached). BACKGROUND_UPLOAD_CHUNK_ROWS=2 with 4 real rows + 2 padding
+     * rows means the final chunk would, pre-fix, be ENTIRELY padding.
+     */
+    it('a trailing delimiter-only padding chunk after committed chunks does not fail the job: all real rows ingest', async () => {
+      const originalChunkRows = process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+      process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = '2';
+      const fileName = 'worker-guard-trailing-padding.csv';
+      const text =
+        [
+          CSV_HEADER,
+          `W3001,1,ACERRU,Q01,1.5,2.5,10.5,1.3,${MEASUREMENT_DATE},A`,
+          `W3002,1,QUERCO,Q01,3.5,4.5,20.4,1.3,${MEASUREMENT_DATE},A`,
+          `W3003,1,PINUST,Q01,5.5,6.5,30.1,1.3,${MEASUREMENT_DATE},A`,
+          `W3004,1,FAGUGR,Q01,7.5,8.5,15.2,1.3,${MEASUREMENT_DATE},A`,
+          ',,,,,,,,,',
+          '   ,  , ,,,,,,,'
+        ].join('\n') + '\n';
+
+      try {
+        const jobID = await createSingleGuardFileJob(fileName, ',');
+        await runJobIfClaimable(jobID, depsForText(fileName, text));
+
+        const job = await getBackgroundJob(catalogPool, jobID);
+        console.log(`[guard-trailing-pad] status=${job?.status} lastError=${job?.lastError} processedRows=${job?.processedRows}`);
+        expect(job!.status).toBe('completed');
+        expect(job!.processedRows).toBe(4);
+
+        expect(await fetchIngestedIDs(fileName)).toHaveLength(4);
+        expect(await countTempRows(fileName)).toBe(0);
+        expect(await countCensusRows(censusID)).toBe(4);
+        expect(await countCensusRows(otherCensusID)).toBe(1);
+      } finally {
+        if (originalChunkRows === undefined) delete process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+        else process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = originalChunkRows;
+      }
+    }, 120000);
+
+    /**
+     * Regression guard for the cleanup-ordering fix (issue #504 finding 3):
+     * cleanupBatchArtifacts must run AFTER the empty-input guard, not before
+     * it. Simulate a batch that already carries staged/unresolved artifacts
+     * from an earlier, non-blank attempt (mirroring the "cancel during a
+     * retry attempt" pattern above), then retry that SAME batch with a
+     * header-only payload. If cleanup ran before the guard, this would have
+     * silently deleted those artifacts before failing; with the fix, the
+     * blank attempt must fail WITHOUT touching them.
+     */
+    it('a blank retry attempt fails without deleting artifacts staged by an earlier attempt on the same batch', async () => {
+      const fileName = 'worker-guard-cleanup-ordering.csv';
+      const FETCH_CRASH_MESSAGE = 'simulated crash after batch assignment, before any staging';
+
+      const jobID = await createSingleGuardFileJob(fileName, ',');
+      await runJobIfClaimable(jobID, {
+        fetchFileText: async () => {
+          throw new Error(FETCH_CRASH_MESSAGE);
+        }
+      });
+      const parked = await getBackgroundJob(catalogPool, jobID);
+      console.log(`[guard-cleanup-order] after attempt 1: status=${parked?.status} retryCount=${parked?.retryCount}`);
+      expect(parked!.status).toBe('waiting_retry');
+
+      const batchID = await batchIDForFile(jobID, fileName);
+
+      // Seed this batch's prior-attempt artifacts directly, as if an earlier
+      // (non-blank) attempt had staged them before this retry cycle began.
+      await insertStagedTempRow(fileName, batchID, 'W5001', 'Q01', 12.5);
+      await insertStagedTempRow(fileName, batchID, 'W5002', 'Q01', 22.4);
+      const priorAttemptReject: FileRow = {
+        tag: 'W5099',
+        stemtag: '1',
+        spcode: 'ACERRU',
+        quadrat: null,
+        lx: '1.0',
+        ly: '1.0',
+        dbh: '9.9',
+        hom: '1.3',
+        date: MEASUREMENT_DATE,
+        codes: 'A',
+        failureReason: 'Missing required field: quadrat'
+      };
+      await recordInvalidRows(ConnectionManager.getInstance(), { schema, plotID, censusID, fileName, batchID, sourceRowIndexOffset: -2 }, [priorAttemptReject]);
+      expect(await countTempRows(fileName)).toBe(2);
+      expect(await fetchRejectIDs(fileName)).toHaveLength(1);
+
+      // Attempt 2 retries the SAME batch with a header-only payload.
+      await setNextAttemptPast(jobID);
+      await runJobIfClaimable(jobID, depsForText(fileName, `${CSV_HEADER}\n`));
+
+      const job = await getBackgroundJob(catalogPool, jobID);
+      console.log(`[guard-cleanup-order] after attempt 2: status=${job?.status} lastError=${job?.lastError}`);
+      expect(job!.status).toBe('failed');
+      expect(job!.lastError).toMatch(/no data rows/i);
+
+      // The decisive assertion: the blank attempt's own guard fired BEFORE
+      // cleanupBatchArtifacts could run for this batch, so the seeded
+      // staged rows and reject survive untouched.
+      expect(await countTempRows(fileName)).toBe(2);
+      expect(await fetchRejectIDs(fileName)).toHaveLength(1);
+
+      // Scope sanity: both censuses' pre-existing rows are also untouched —
+      // the guard fired before CLEAN_REUPLOAD's CensusID-wide DELETE could
+      // ever run for this batch. The target census holds TWO preserved rows:
+      // the beforeEach-seeded GUARD-TARGET row AND the priorAttemptReject row
+      // recordInvalidRows just wrote above (also coremeasurements, StemGUID NULL).
+      expect(await countCensusRows(censusID)).toBe(2);
+      expect(await countCensusRows(otherCensusID)).toBe(1);
+    }, 120000);
+  });
+
+  // -------------------------------------------------------------------------
+  // 9. Batch-family recycle recovery (2026-07-27 Harvard Forest incident)
+  //
+  // The worker stages every row under its final `<batchID>__subNNN` member and
+  // setup ingests those members as staged; nothing owns rows or metrics under
+  // the unsuffixed BatchID. Everything keyed on that bare ID — the uploadmetrics
+  // completion probe and the retry cleanup — would look at an empty ID. These
+  // tests force a multi-member family with a low batch size and prove the worker
+  // reasons about the whole family.
   //
   // Measured scope of each test (verified by reverting buildSubBatchPattern to
-  // bare-ID semantics and re-running):
+  // bare-ID semantics and re-running, when setup still split the family itself):
   //   - 'recycled after every sub-batch completed' FAILS without the
   //     family-scoped completion probe. This is the load-bearing regression:
   //     a fully-ingested split file is otherwise re-staged and re-ingested.
@@ -895,7 +1419,7 @@ describe('runJobIfClaimable — integration', () => {
   //     tests/integration/record-invalid-rows.test.ts.
   // -------------------------------------------------------------------------
 
-  describe('split-batch recycle recovery', () => {
+  describe('batch-family recycle recovery', () => {
     /** Forces FILE1's 5 valid rows into 3 sub-batches (2 + 2 + 1). */
     const SPLIT_THRESHOLD_ROWS = 2;
     const EXPECTED_SUB_BATCH_COUNT = Math.ceil(FILE1_VALID_ROW_COUNT / SPLIT_THRESHOLD_ROWS);
@@ -975,8 +1499,8 @@ describe('runJobIfClaimable — integration', () => {
       const familyMetrics = await fetchFamilyMetrics(batchID);
       console.log(`[split] batchID=${batchID} familyMetrics=${JSON.stringify(familyMetrics)}`);
 
-      // Precondition for the recycle tests below: the split really happened, so
-      // the unsuffixed ID owns no metric of its own.
+      // Precondition for the recycle tests below: the file really ingested as a
+      // multi-member family, so the unsuffixed ID owns no metric of its own.
       expect(Object.keys(familyMetrics)).toHaveLength(EXPECTED_SUB_BATCH_COUNT);
       expect(familyMetrics[batchID]).toBeUndefined();
       expect(Object.values(familyMetrics).every(status => status === UPLOADMETRICS_STATUS_COMPLETED)).toBe(true);
@@ -1261,6 +1785,210 @@ describe('runJobIfClaimable — integration', () => {
         'completed sub-batch failure row must survive cancel cleanup'
       ).toBe(true);
       expect(secondRows, 'abandoned sub-batch residue must be removed').toHaveLength(0);
+      const [deletedAudit] = await connection.query<RowDataPacket[]>(
+        `SELECT ChangedBy, OldRowState FROM unifiedchangelog WHERE TableName = 'coremeasurements' AND Operation = 'DELETE'
+         AND JSON_UNQUOTE(JSON_EXTRACT(OldRowState, '$.RawTreeTag')) IN (?, ?)`,
+        [PRESERVED_TAG, ABANDONED_TAG]
+      );
+      expect(deletedAudit).toHaveLength(1);
+      expect(deletedAudit[0].ChangedBy).toBe(TEST_USER);
+      expect(deletedAudit[0].OldRowState.RawTreeTag).toBe(ABANDONED_TAG);
     }, 180000);
+  });
+
+  // -------------------------------------------------------------------------
+  // 9. Pre-partitioned staging — the worker stages each row under its final
+  //    `__subNNN` member, so setup has nothing left under the original ID to
+  //    split and never issues the BatchID UPDATE.
+  // -------------------------------------------------------------------------
+
+  describe('pre-partitioned staging', () => {
+    const PREPARTITION_SUB_BATCH_ROWS = 4;
+    const PREPARTITION_CHUNK_ROWS = 3;
+    const PREPARTITION_ROW_COUNT = PREPARTITION_SUB_BATCH_ROWS * 2 + 1;
+    const EXPECTED_MEMBER_ROW_COUNTS = [PREPARTITION_SUB_BATCH_ROWS, PREPARTITION_SUB_BATCH_ROWS, 1];
+    const PREPARTITION_FILE_NAME = 'worker-prepartitioned.csv';
+    const PREPARTITION_QUADRATS = ['Q01', 'Q02', 'Q03'];
+    const PREPARTITION_CSV = [
+      CSV_HEADER,
+      ...Array.from({ length: PREPARTITION_ROW_COUNT }, (_, rowIndex) => {
+        const tag = `W9${String(rowIndex + 1).padStart(3, '0')}`;
+        const quadrat = PREPARTITION_QUADRATS[rowIndex % PREPARTITION_QUADRATS.length];
+        return `${tag},1,ACERRU,${quadrat},${rowIndex + 0.5},${rowIndex + 1.5},${10 + rowIndex},1.3,${MEASUREMENT_DATE},A`;
+      })
+    ].join('\n');
+    /** The family-discovery aggregate setup runs before it takes the ingestion lock. */
+    const SETUP_FAMILY_DISCOVERY = /COUNT\(DISTINCT PlotID\) AS plotCount[\s\S]*GROUP BY BatchID/i;
+    const SPLIT_BATCH_ID_UPDATE = /UPDATE[\s\S]*temporarymeasurements[\s\S]*SET BatchID/i;
+
+    let previousSubBatchRows: string | undefined;
+    let previousChunkRows: string | undefined;
+
+    beforeEach(() => {
+      previousSubBatchRows = process.env.INGESTION_SUB_BATCH_ROWS;
+      previousChunkRows = process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+      process.env.INGESTION_SUB_BATCH_ROWS = String(PREPARTITION_SUB_BATCH_ROWS);
+      process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = String(PREPARTITION_CHUNK_ROWS);
+    });
+
+    afterEach(() => {
+      if (previousSubBatchRows === undefined) delete process.env.INGESTION_SUB_BATCH_ROWS;
+      else process.env.INGESTION_SUB_BATCH_ROWS = previousSubBatchRows;
+      if (previousChunkRows === undefined) delete process.env.BACKGROUND_UPLOAD_CHUNK_ROWS;
+      else process.env.BACKGROUND_UPLOAD_CHUNK_ROWS = previousChunkRows;
+    });
+
+    it('stages a 9-row file as three sub-batch members across chunk boundaries and ingests every row without a split UPDATE', async () => {
+      const job = await createUploadBackgroundJob(
+        catalogPool,
+        {
+          schema,
+          plotID,
+          censusID,
+          uploadMode: UploadMode.CLEAN_REUPLOAD,
+          sourceFormat: SourceFormat.csv,
+          formType: FormType.measurements,
+          payload: { selectedDelimiters: { [PREPARTITION_FILE_NAME]: ',' } },
+          files: [
+            {
+              fileName: PREPARTITION_FILE_NAME,
+              blobContainer: BLOB_CONTAINER,
+              blobName: `uploads/${PREPARTITION_FILE_NAME}`,
+              expectedRows: PREPARTITION_ROW_COUNT
+            }
+          ]
+        },
+        TEST_USER
+      );
+      const jobID = job.jobID;
+
+      const splitUpdates: string[] = [];
+      let membersAtSetup: Array<{ batchID: string; rowCount: number }> | null = null;
+      sharedState.onSchemaQuery = async query => {
+        if (SPLIT_BATCH_ID_UPDATE.test(query)) splitUpdates.push(query.replace(/\s+/g, ' ').trim());
+        if (membersAtSetup !== null || !SETUP_FAMILY_DISCOVERY.test(query)) return;
+        const [rows] = await connection.query<RowDataPacket[]>(
+          `SELECT BatchID, COUNT(*) AS rowCount FROM temporarymeasurements WHERE FileID = ? GROUP BY BatchID ORDER BY BatchID`,
+          [PREPARTITION_FILE_NAME]
+        );
+        membersAtSetup = rows.map(row => ({ batchID: String(row.BatchID), rowCount: Number(row.rowCount) }));
+        console.log(`[prepartition] staged members seen at setup discovery: ${JSON.stringify(membersAtSetup)}`);
+      };
+
+      try {
+        await runJobIfClaimable(jobID, { fetchFileText: async () => PREPARTITION_CSV });
+      } finally {
+        sharedState.onSchemaQuery = null;
+      }
+
+      const batchID = await batchIDForFile(jobID, PREPARTITION_FILE_NAME);
+      const finishedJob = await getBackgroundJob(catalogPool, jobID);
+      const ingestedIDs = await fetchIngestedIDs(PREPARTITION_FILE_NAME);
+      const [metricRows] = await connection.query<RowDataPacket[]>(
+        `SELECT batchID, status FROM uploadmetrics WHERE batchID LIKE ? ${LIKE_ESCAPE_CLAUSE} ORDER BY batchID`,
+        [buildSubBatchPattern(batchID)]
+      );
+      console.log(
+        `[prepartition] batchID=${batchID} status=${finishedJob?.status} lastError=${finishedJob?.lastError ?? 'none'} ` +
+          `ingested=${ingestedIDs.length}/${PREPARTITION_ROW_COUNT} tempRowsLeft=${await countTempRows(PREPARTITION_FILE_NAME)} ` +
+          `metrics=${JSON.stringify(metricRows)} splitUpdates=${JSON.stringify(splitUpdates)}`
+      );
+
+      expect(membersAtSetup, 'setup discovery never ran').not.toBeNull();
+      const expectedMembers = EXPECTED_MEMBER_ROW_COUNTS.map((rowCount, memberIndex) => ({
+        batchID: buildSubBatchID(batchID, memberIndex + 1),
+        rowCount
+      }));
+      expect(membersAtSetup, 'every row must already sit under its final sub-batch, none under the original ID').toEqual(expectedMembers);
+      expect(splitUpdates, 'setup must not rewrite BatchID on a pre-partitioned family').toEqual([]);
+      expect(finishedJob!.status, 'staging verification and ingestion must both pass').toBe('completed');
+      expect(ingestedIDs).toHaveLength(PREPARTITION_ROW_COUNT);
+      expect(await countTempRows(PREPARTITION_FILE_NAME)).toBe(0);
+      expect(metricRows.map(row => [String(row.batchID), String(row.status)])).toEqual(
+        expectedMembers.map(member => [member.batchID, UPLOADMETRICS_STATUS_COMPLETED])
+      );
+    }, 180000);
+  });
+
+  describe('issue #524 — TotalRows recorded from the parsed row count', () => {
+    const PARSED_ROW_COUNT = 20;
+    const COUNT_FILE_NAME = 'worker-parsed-count.csv';
+    const COUNT_QUADRATS = ['Q01', 'Q02', 'Q03'];
+    const COUNT_CSV = [
+      CSV_HEADER,
+      ...Array.from({ length: PARSED_ROW_COUNT }, (_, rowIndex) => {
+        const tag = `T524${String(rowIndex + 1).padStart(3, '0')}`;
+        const quadrat = COUNT_QUADRATS[rowIndex % COUNT_QUADRATS.length];
+        return `${tag},1,ACERRU,${quadrat},${rowIndex + 0.5},${rowIndex + 1.5},${10 + rowIndex},1.3,${MEASUREMENT_DATE},A`;
+      })
+    ].join('\n');
+
+    it('records TotalRows = 20 for a 20-row CSV whose job was created with expectedRows null', async () => {
+      const job = await createUploadBackgroundJob(
+        catalogPool,
+        {
+          schema,
+          plotID,
+          censusID,
+          uploadMode: UploadMode.CLEAN_REUPLOAD,
+          sourceFormat: SourceFormat.csv,
+          formType: FormType.measurements,
+          payload: { selectedDelimiters: { [COUNT_FILE_NAME]: ',' } },
+          files: [{ fileName: COUNT_FILE_NAME, blobContainer: BLOB_CONTAINER, blobName: `uploads/${COUNT_FILE_NAME}`, expectedRows: null }]
+        },
+        TEST_USER
+      );
+      const createdJob = await getBackgroundJob(catalogPool, job.jobID);
+
+      await runJobIfClaimable(job.jobID, { fetchFileText: async () => COUNT_CSV });
+
+      const finishedJob = await getBackgroundJobWithDetails(catalogPool, job.jobID);
+      const fileExpectedRows = finishedJob!.files[0].expectedRows;
+      console.log(
+        `[#524 TotalRows] created totalRows=${createdJob?.totalRows} -> status=${finishedJob?.status} lastError=${finishedJob?.lastError ?? 'none'} ` +
+          `totalRows=${finishedJob?.totalRows} processedRows=${finishedJob?.processedRows} file.expectedRows=${fileExpectedRows}`
+      );
+      expect(createdJob!.totalRows, 'precondition: the client sent no row count').toBe(0);
+      expect(finishedJob!.status).toBe('completed');
+      expect(finishedJob!.totalRows).toBe(PARSED_ROW_COUNT);
+      expect(finishedJob!.processedRows).toBe(PARSED_ROW_COUNT);
+      expect(fileExpectedRows).toBe(PARSED_ROW_COUNT);
+    }, 180000);
+
+    it('records ExpectedRows = 0 and TotalRows = 0 for a header-only CSV, which still fails the job under #504', async () => {
+      const HEADER_ONLY_FILE_NAME = 'worker-parsed-count-header-only.csv';
+      const CLIENT_CLAIMED_ROWS = 5;
+      const job = await createUploadBackgroundJob(
+        catalogPool,
+        {
+          schema,
+          plotID,
+          censusID,
+          uploadMode: UploadMode.CLEAN_REUPLOAD,
+          sourceFormat: SourceFormat.csv,
+          formType: FormType.measurements,
+          payload: { selectedDelimiters: { [HEADER_ONLY_FILE_NAME]: ',' } },
+          files: [
+            { fileName: HEADER_ONLY_FILE_NAME, blobContainer: BLOB_CONTAINER, blobName: `uploads/${HEADER_ONLY_FILE_NAME}`, expectedRows: CLIENT_CLAIMED_ROWS }
+          ]
+        },
+        TEST_USER
+      );
+      const createdJob = await getBackgroundJob(catalogPool, job.jobID);
+
+      await runJobIfClaimable(job.jobID, { fetchFileText: async () => `${CSV_HEADER}\n` });
+
+      const finishedJob = await getBackgroundJobWithDetails(catalogPool, job.jobID);
+      const fileExpectedRows = finishedJob!.files[0].expectedRows;
+      console.log(
+        `[#524 header-only] created totalRows=${createdJob?.totalRows} -> status=${finishedJob?.status} lastError=${finishedJob?.lastError ?? 'none'} ` +
+          `totalRows=${finishedJob?.totalRows} file.expectedRows=${fileExpectedRows}`
+      );
+      expect(createdJob!.totalRows, 'precondition: the client claimed a non-zero row count').toBe(CLIENT_CLAIMED_ROWS);
+      expect(finishedJob!.status).toBe('failed');
+      expect(finishedJob!.lastError).toMatch(/no data rows/i);
+      expect(fileExpectedRows).toBe(0);
+      expect(finishedJob!.totalRows).toBe(0);
+    }, 120000);
   });
 });

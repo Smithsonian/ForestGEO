@@ -5,12 +5,26 @@ import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import {
   CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   resetTemporaryMeasurementsSourceFormatColumnCacheForTests,
-  TEMP_MEASUREMENT_INSERT_BATCH_SIZE
+  STALE_BATCH_SCAN_INDEX,
+  TEMP_MEASUREMENT_INSERT_BATCH_SIZE,
+  TEMPORARY_MEASUREMENT_INSERT_COLUMNS
 } from '@/lib/ingestion/temporary-measurements';
 import { REFERENCE_REPLACEMENT_LOCK_TIMEOUT_MS, resetUploadSessionReplacementMarkerCacheForTests } from '@/lib/uploads/upload-session-replacement-marker';
 import { HTTPResponses } from '@/config/macros';
 import { MAX_REFERENCE_UPLOAD_ROWS } from '@/lib/uploads/reference-upload-limits';
 import { SourceFormat } from '@/config/macros/formdetails';
+import {
+  BatchIDContainsSubBatchSeparatorError,
+  buildSubBatchID,
+  buildSubBatchPattern,
+  getIngestionBatchSize,
+  MAX_ORIGINAL_BATCH_ID_LENGTH,
+  MAX_SUB_BATCH_ORDINAL,
+  OriginalBatchIDTooLongError,
+  SUB_BATCH_SEPARATOR,
+  SubBatchOrdinalOverflowError
+} from '@/lib/uploads/batch-family';
+import { InvalidFirstRowOrdinalError } from '@/lib/uploads/stage-measurements';
 import { headerSignature } from '@/lib/column-mapping/mapping';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import ailogger from '@/ailogger';
@@ -19,13 +33,14 @@ import {
   QUADRAT_OVERLAP_ACKNOWLEDGMENT_STATEMENT,
   validateQuadratCollectionDetailed
 } from '@/lib/provisioning/quadrat-collection-validation';
+import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 
 /**
  * Matches the chunk LIMIT only when it terminates the whole statement — i.e. it
  * bounds the DELETE itself rather than an inner subquery.
  */
 function outerLimitPattern(): RegExp {
-  return new RegExp(`LIMIT\\s+${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}\\s*$`);
+  return new RegExp(`LIMIT\\s+${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}\\s*(?:FOR UPDATE)?\\s*$`);
 }
 
 const { getCookieMock, authMock, handleUpsertMock } = vi.hoisted(() => ({
@@ -116,13 +131,17 @@ vi.mock('mysql2/promise', async importOriginal => {
 });
 
 /** Number of columns in the temporarymeasurements INSERT (FileID through PublishedStemID) */
-const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 20;
+const TEMP_MEASUREMENT_COLUMNS_PER_ROW = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.length;
+/** Position of the first staged row's BatchID among the INSERT params. */
+const STAGED_BATCH_ID_PARAM_INDEX = TEMPORARY_MEASUREMENT_INSERT_COLUMNS.indexOf('BatchID');
 
 const TEST_SESSION_ID = 'session-1';
 const TEST_PLOT_ID = 22;
 const TEST_CENSUS_ID = 32;
 const TEST_BATCH_ID = 'batch-1';
 const TEST_FILE_NAME = 'SERC_census1_2025.csv';
+/** The per-chunk scope check: one sampled row of the batch family, never an aggregate over it. */
+const FAMILY_SCOPE_SAMPLE_SQL = /SELECT PlotID AS plotID, CensusID AS censusID\s+FROM\s+\S*temporarymeasurements[\s\S]*LIMIT 1/;
 
 function makeMeasurementRequest(overrides: Partial<Record<string, unknown>> = {}) {
   const body = {
@@ -194,6 +213,39 @@ function makeFixedDataRequest(
 }
 
 /**
+ * formType values outside the attributes/quadrats/personnel/species allowlist
+ * fall through to the generic per-row `insertOrUpdate` loop in route.ts's
+ * fixed-data `else` branch (#507) rather than one of the dedicated
+ * reference-data-writers. Named `coordinates` only as a plausible example —
+ * insertOrUpdate itself is mocked, so this request never reaches real table
+ * logic.
+ */
+function makeGenericFormTypeRequest(fileRowSet: Record<string, unknown>, overrides: Partial<Record<string, unknown>> = {}) {
+  const body = {
+    schema: 'forestgeo_testing',
+    formType: 'coordinates',
+    fileName: 'coordinates.csv',
+    plot: { plotID: TEST_PLOT_ID },
+    census: { dateRanges: [{ censusID: TEST_CENSUS_ID }] },
+    user: 'Test User',
+    fileRowSet,
+    ...overrides
+  };
+
+  const req = new Request('http://localhost/api/sqlpacketload', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-upload-session-id': TEST_SESSION_ID
+    },
+    body: JSON.stringify(body)
+  }) as any;
+  req.json = async () => body;
+  req.nextUrl = new URL('http://localhost/api/sqlpacketload');
+  return req;
+}
+
+/**
  * Primes the measurement-staging query mocks by STATEMENT rather than by call
  * order.
  *
@@ -204,22 +256,19 @@ function makeFixedDataRequest(
  * `undefined` to a downstream call and surfacing as an unrelated 500. Keying on
  * the SQL keeps these tests about the behaviour they name.
  */
-function primeMeasurementQueries(manager: any, options: { stagedRowsAfterInsert?: number } = {}): void {
-  // insertedCount is measured as the staged-row delta across the INSERT(s).
-  // stagedRowsAfterInsert lets a chunk-splitting test declare the post-insert
-  // total without depending on how many INSERT statements it was split into.
-  const stagedRowsAfterInsert = options.stagedRowsAfterInsert ?? 1;
-  let insertSeen = false;
-  manager.executeQuery.mockImplementation(async (sql: string) => {
+function primeMeasurementQueries(manager: any): void {
+  // insertedCount is the INSERT IGNORE affectedRows sum, so a staging INSERT
+  // reports one affected row per VALUES tuple, as MySQL does when nothing is ignored.
+  manager.executeQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
     const text = String(sql);
+    // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
+    if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
     if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
-    if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
-    if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: insertSeen ? stagedRowsAfterInsert : 0 }];
     if (text.includes('COUNT(')) return [{ count: 0 }];
     if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 0 };
     if (text.trimStart().toUpperCase().startsWith('INSERT')) {
-      if (text.includes('temporarymeasurements')) insertSeen = true;
-      return { affectedRows: 1, insertId: 1 };
+      const stagedTupleCount = text.includes('temporarymeasurements') && Array.isArray(params) ? params.length / TEMP_MEASUREMENT_COLUMNS_PER_ROW : 1;
+      return { affectedRows: stagedTupleCount, insertId: 1 };
     }
     return [];
   });
@@ -243,6 +292,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
+    mockConnectionManager.acquireApplicationLock.mockResolvedValue(true);
   });
 
   it('rejects invalid sourceFormat before touching measurement scope data', async () => {
@@ -300,9 +350,7 @@ describe('sqlpacketload measurement scope validation', () => {
   });
 
   it('rejects when an existing batch already has a different census scope', async () => {
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 1, distinctCensusCount: 1, plotID: TEST_PLOT_ID, censusID: 99 }]);
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }]).mockResolvedValueOnce([{ plotID: TEST_PLOT_ID, censusID: 99 }]);
 
     const res = (await POST(makeMeasurementRequest()))!;
 
@@ -310,6 +358,158 @@ describe('sqlpacketload measurement scope validation', () => {
     const body = await res.json();
     expect(body.error).toMatch(/Existing batch scope does not match incoming plot\/census/i);
     expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('samples one row of the batch family for the scope check instead of aggregating the whole batch', async () => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest()))!;
+
+    const executedSql: string[] = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
+    const scopeSampleCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) => FAMILY_SCOPE_SAMPLE_SQL.test(String(call[0])));
+    const aggregateScopeSql = executedSql.filter(sql => /COUNT\(DISTINCT/i.test(sql));
+    console.log(`[scope-sample] status=${res.status} sampleParams=${JSON.stringify(scopeSampleCall?.[1])} aggregateScopeQueries=${aggregateScopeSql.length}`);
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(scopeSampleCall, 'the scope check must issue a LIMIT 1 family sample').toBeDefined();
+    expect(scopeSampleCall[1]).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, buildSubBatchPattern(TEST_BATCH_ID)]);
+    expect(aggregateScopeSql).toEqual([]);
+  });
+
+  it('rejects with CONFLICT when the sampled family row belongs to a different plot', async () => {
+    const OTHER_PLOT_ID = TEST_PLOT_ID + 1;
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
+      .mockResolvedValueOnce([{ plotID: OTHER_PLOT_ID, censusID: TEST_CENSUS_ID }]);
+
+    const res = (await POST(makeMeasurementRequest()))!;
+    const body = await res.json();
+    console.log(`[scope-sample-conflict] status=${res.status} body=${JSON.stringify(body)}`);
+
+    expect(res.status).toBe(HTTPResponses.CONFLICT);
+    expect(body.details).toMatchObject({ batchPlotID: OTHER_PLOT_ID, batchCensusID: TEST_CENSUS_ID, resolvedPlotID: TEST_PLOT_ID });
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a negative ordinal', -1],
+    ['a fractional ordinal', 1.5],
+    ['a numeric string', '3'],
+    ['an ordinal beyond the safe-integer range', 1e300]
+  ])('rejects %s as firstRowOrdinal with INVALID_REQUEST before touching the database', async (_label, firstRowOrdinal) => {
+    const expectedCode = new InvalidFirstRowOrdinalError(firstRowOrdinal).code;
+
+    const res = (await POST(makeMeasurementRequest({ firstRowOrdinal })))!;
+    const body = await res.json();
+    console.log(`[first-row-ordinal] value=${JSON.stringify(firstRowOrdinal)} status=${res.status} body=${JSON.stringify(body)}`);
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body.code).toBe(expectedCode);
+    expect(body.error).toContain('firstRowOrdinal');
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('stages under the original batch ID when firstRowOrdinal is absent (legacy client)', async () => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest()))!;
+    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
+    );
+    console.log(`[first-row-ordinal-absent] status=${res.status} stagedBatchID=${insertCall?.[1]?.[STAGED_BATCH_ID_PARAM_INDEX]}`);
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(insertCall[1][STAGED_BATCH_ID_PARAM_INDEX]).toBe(TEST_BATCH_ID);
+  });
+
+  it('stages each row under its final sub-batch when firstRowOrdinal is sent', async () => {
+    const FIRST_SUB_BATCH_ORDINAL = 1;
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest({ firstRowOrdinal: 0 })))!;
+    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
+    );
+    console.log(`[first-row-ordinal-zero] status=${res.status} stagedBatchID=${insertCall?.[1]?.[STAGED_BATCH_ID_PARAM_INDEX]}`);
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(insertCall[1][STAGED_BATCH_ID_PARAM_INDEX]).toBe(buildSubBatchID(TEST_BATCH_ID, FIRST_SUB_BATCH_ORDINAL));
+  });
+
+  it('rejects a batch ID with no room for the sub-batch suffix with INVALID_REQUEST and stages nothing', async () => {
+    const overLongBatchID = 'b'.repeat(MAX_ORIGINAL_BATCH_ID_LENGTH + 1);
+    const expectedCode = new OriginalBatchIDTooLongError(overLongBatchID).code;
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest({ batchID: overLongBatchID, firstRowOrdinal: 0 })))!;
+    const body = await res.json();
+    const stagingInserts = mockConnectionManager.executeQuery.mock.calls.filter(
+      (call: any[]) => String(call[0]).includes('temporarymeasurements') && String(call[0]).trimStart().startsWith('INSERT')
+    );
+    console.log(
+      `[batch-id-too-long] length=${overLongBatchID.length} status=${res.status} body=${JSON.stringify(body)} stagingInserts=${stagingInserts.length}`
+    );
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body.code).toBe(expectedCode);
+    expect(stagingInserts).toHaveLength(0);
+    expect(mockConnectionManager.executeQuery, 'the batch ID is rejected before any query').not.toHaveBeenCalled();
+    expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+  });
+
+  describe.each([
+    { scenario: 'with firstRowOrdinal', overrides: { firstRowOrdinal: 0 } },
+    { scenario: 'without firstRowOrdinal', overrides: {} }
+  ])('client batch ID containing the sub-batch separator ($scenario)', ({ overrides }) => {
+    it('is rejected with INVALID_REQUEST before any query or transaction', async () => {
+      const separatorBatchID = `batch-1${SUB_BATCH_SEPARATOR}001`;
+      const expectedCode = new BatchIDContainsSubBatchSeparatorError(separatorBatchID).code;
+      primeMeasurementQueries(mockConnectionManager);
+
+      const res = (await POST(makeMeasurementRequest({ batchID: separatorBatchID, ...overrides })))!;
+      const body = await res.json();
+      console.log(`[batch-id-separator] batchID=${separatorBatchID} status=${res.status} body=${JSON.stringify(body)}`);
+
+      expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+      expect(body.code).toBe(expectedCode);
+      expect(mockConnectionManager.executeQuery, 'the batch ID is rejected before any query').not.toHaveBeenCalled();
+      expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  it('still stages a normal client batch ID that has no sub-batch separator', async () => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest({ batchID: 'm9x7k2a-8fh3k9d2x5p', firstRowOrdinal: 0 })))!;
+    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT IGNORE INTO `forestgeo_testing`.temporarymeasurements')
+    );
+    console.log(`[batch-id-normal] status=${res.status} stagedBatchID=${insertCall?.[1]?.[STAGED_BATCH_ID_PARAM_INDEX]}`);
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(insertCall[1][STAGED_BATCH_ID_PARAM_INDEX]).toBe(buildSubBatchID('m9x7k2a-8fh3k9d2x5p', 1));
+  });
+
+  it('rejects a firstRowOrdinal past the last nameable sub-batch with INVALID_REQUEST and stages nothing', async () => {
+    const firstRowOrdinal = getIngestionBatchSize() * MAX_SUB_BATCH_ORDINAL;
+    const expectedCode = new SubBatchOrdinalOverflowError(TEST_BATCH_ID, firstRowOrdinal, MAX_SUB_BATCH_ORDINAL + 1).code;
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest({ firstRowOrdinal })))!;
+    const body = await res.json();
+    const stagingInserts = mockConnectionManager.executeQuery.mock.calls.filter(
+      (call: any[]) => String(call[0]).includes('temporarymeasurements') && String(call[0]).trimStart().startsWith('INSERT')
+    );
+    console.log(
+      `[sub-batch-overflow] firstRowOrdinal=${firstRowOrdinal} status=${res.status} body=${JSON.stringify(body)} stagingInserts=${stagingInserts.length}`
+    );
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(body.code).toBe(expectedCode);
+    expect(stagingInserts).toHaveLength(0);
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
   });
 
   it('accepts valid scope and inserts temporary rows using the resolved plot/census IDs', async () => {
@@ -328,6 +528,116 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
   });
 
+  // ---------------------------------------------------------------------
+  // Issue #507 — the server must resolve ChangedBy from the authenticated
+  // session (authenticatedSessionIdentity), never from the client-supplied
+  // `body.user` field. makeMeasurementRequest() always sends `user: 'Test
+  // User'`; the session mocked in beforeEach resolves to 'user-1'. If the
+  // handler ever reads `body.user` again, this assertion catches it even
+  // though nothing here is a destructive migration.
+  // ---------------------------------------------------------------------
+
+  it('records the authenticated session identity as ChangedBy in the measurement changelog, ignoring forged body.user', async () => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest({ user: 'Test User' })))!;
+
+    expect(res.status).toBe(200);
+
+    const changelogCall = mockConnectionManager.executeQuery.mock.calls.find(
+      (call: any[]) => String(call[0]).includes('unifiedchangelog') && String(call[0]).toUpperCase().includes('INSERT')
+    );
+    expect(changelogCall, 'measurement staging must write a file_upload changelog row').toBeDefined();
+    const [, changelogParams] = changelogCall;
+    // [TableName, RecordID, Operation, NewRowState, ChangedBy, PlotID, CensusID]
+    expect(changelogParams[4]).toBe('user-1');
+    expect(changelogParams).not.toContain('Test User');
+  });
+
+  // ---------------------------------------------------------------------
+  // Issue #507 — chunkSequence must be a positive safe integer with ONE
+  // canonical representation before it is used to build the chunk identity
+  // key; a present-but-invalid value is a rejectable request error.
+  // ---------------------------------------------------------------------
+
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, NaN, '1.5', 'abc', '', '   ', '01', ' 1', '1e0', '+1'])(
+    'rejects an invalid chunkSequence (%p) before any staging write',
+    async invalidChunkSequence => {
+      primeMeasurementQueries(mockConnectionManager);
+      const res = (await POST(makeMeasurementRequest({ chunkSequence: invalidChunkSequence })))!;
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.code).toBe('MEASUREMENT_CHUNK_SEQUENCE_INVALID');
+      expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([1, 7, '3', Number.MAX_SAFE_INTEGER])('accepts a canonical positive chunkSequence (%p) and stages normally', async validChunkSequence => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest({ chunkSequence: validChunkSequence })))!;
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.insertedCount).toBe(1);
+  });
+
+  it('omitting chunkSequence falls back to the content-hash identity rather than being rejected', async () => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest()))!;
+
+    expect(res.status).toBe(200);
+  });
+
+  // ---------------------------------------------------------------------
+  // Issue #504 — a header-only / entirely-blank chunk must never reach the
+  // destructive CLEAN_REUPLOAD census-replacement cleanup or staging INSERT,
+  // and must never surface as a retryable 500.
+  // ---------------------------------------------------------------------
+
+  it('rejects an empty fileRowSet (legacy pre-keyed path) with 422 before any staging write or cleanup', async () => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(makeMeasurementRequest({ fileRowSet: {} })))!;
+
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.code).toBe('EMPTY_MEASUREMENT_UPLOAD');
+    expect(body.error).toMatch(/no data rows/i);
+    expect(body.fileName).toBe(TEST_FILE_NAME);
+    expect(body.batchID).toBe(TEST_BATCH_ID);
+
+    const executedSQL = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
+    expect(executedSQL.some((sql: string) => sql.includes('temporarymeasurements') && sql.trimStart().toUpperCase().startsWith('INSERT'))).toBe(false);
+    expect(executedSQL.some((sql: string) => sql.trimStart().toUpperCase().startsWith('DELETE'))).toBe(false);
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalled();
+  });
+
+  it('rejects an empty rawRows chunk (server-resolution path) with 422 before any staging write or cleanup', async () => {
+    primeMeasurementQueries(mockConnectionManager);
+
+    const res = (await POST(
+      makeMeasurementRequest({
+        rawRows: [],
+        csvHeaders: ['tag', 'stemtag', 'spcode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes'],
+        fileRowSet: {}
+      })
+    ))!;
+
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.code).toBe('EMPTY_MEASUREMENT_UPLOAD');
+
+    const executedSQL = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
+    expect(executedSQL.some((sql: string) => sql.includes('temporarymeasurements') && sql.trimStart().toUpperCase().startsWith('INSERT'))).toBe(false);
+    expect(executedSQL.some((sql: string) => sql.trimStart().toUpperCase().startsWith('DELETE'))).toBe(false);
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalled();
+  });
+
   it('rejects measurement filenames longer than 50 characters before querying or staging', async () => {
     const res = (await POST(makeMeasurementRequest({ fileName: `${'a'.repeat(47)}.csv` })))!;
 
@@ -340,9 +650,7 @@ describe('sqlpacketload measurement scope validation', () => {
   it('rejects measurement uploads when the upload session does not own the scope', async () => {
     requireUploadSessionOwnershipMock.mockRejectedValueOnce(new MockUploadSessionOwnershipError('Upload session expired before measurement chunk upload', 409));
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }]);
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }]).mockResolvedValueOnce([]);
 
     const res = (await POST(makeMeasurementRequest()))!;
 
@@ -374,7 +682,7 @@ describe('sqlpacketload measurement scope validation', () => {
       ])
     );
 
-    primeMeasurementQueries(mockConnectionManager, { stagedRowsAfterInsert: 1001 });
+    primeMeasurementQueries(mockConnectionManager);
 
     const res = (await POST(makeMeasurementRequest({ fileRowSet: largeRowSet })))!;
 
@@ -397,15 +705,53 @@ describe('sqlpacketload measurement scope validation', () => {
 
     expect(res.status).toBe(200);
 
-    const cleanupCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE FROM `forestgeo_testing`.temporarymeasurements')
-    );
+    // Pinned to the (PlotID, CensusID, FileID, BatchID) index: left to itself the planner can
+    // pick an index led by FileID alone, or none, and scan every staged row.
+    const staleBatchDeletePrefix = `DELETE /*+ INDEX(temporarymeasurements ${STALE_BATCH_SCAN_INDEX}) */ FROM \`forestgeo_testing\`.temporarymeasurements`;
+    const temporaryDeletes = mockConnectionManager.executeQuery.mock.calls
+      .map((call: any[]) => String(call[0]).trimStart())
+      .filter((sql: string) => sql.startsWith('DELETE') && sql.includes('temporarymeasurements'));
+    console.log('[stale-batch] temporarymeasurements DELETEs issued:', temporaryDeletes);
+    const cleanupCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) => String(call[0]).trimStart().startsWith(staleBatchDeletePrefix));
     expect(cleanupCall).toBeDefined();
-    expect(cleanupCall[1]).toEqual([TEST_FILE_NAME, TEST_PLOT_ID, TEST_CENSUS_ID, TEST_BATCH_ID]);
+    // The incoming batch is spared as a FAMILY: its own `__subNNN` members are not stale.
+    expect(String(cleanupCall[0])).toContain('NOT (BatchID <=> ?)');
+    expect(String(cleanupCall[0])).not.toContain('BatchID <> ?');
+    expect(cleanupCall[1]).toEqual([TEST_FILE_NAME, TEST_PLOT_ID, TEST_CENSUS_ID, TEST_BATCH_ID, buildSubBatchPattern(TEST_BATCH_ID)]);
   });
 
   it('cleans up previous census upload data by census scope, not by filename or uploadmetrics', async () => {
-    primeMeasurementQueries(mockConnectionManager);
+    // Coremeasurements deletes are audited (#507): the row set is first SELECTed
+    // by CoreMeasurementID so the audit write and the DELETE operate on the exact
+    // same ids, then each id is written to unifiedchangelog, then the DELETE
+    // itself removes that exact id list -- never a broad `WHERE CensusID = ?`
+    // DELETE, which would have no fixed row set to audit against.
+    const priorCoreMeasurementIDs = [501, 502];
+    let insertSeen = false;
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
+      const text = String(sql);
+      // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
+      if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
+      if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
+      if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
+      if (text.includes('SELECT CoreMeasurementID FROM') && text.includes('.coremeasurements')) {
+        return priorCoreMeasurementIDs.map(id => ({ CoreMeasurementID: id }));
+      }
+      if (text.includes('INSERT INTO') && text.includes('unifiedchangelog') && text.includes('.coremeasurements cm')) {
+        return { affectedRows: priorCoreMeasurementIDs.length };
+      }
+      if (text.includes('DELETE FROM') && text.includes('.coremeasurements') && text.includes('CoreMeasurementID IN')) {
+        return { affectedRows: priorCoreMeasurementIDs.length };
+      }
+      if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: insertSeen ? 1 : 0 }];
+      if (text.includes('COUNT(')) return [{ count: 0 }];
+      if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 0 };
+      if (text.trimStart().toUpperCase().startsWith('INSERT')) {
+        if (text.includes('temporarymeasurements')) insertSeen = true;
+        return { affectedRows: 1, insertId: 1 };
+      }
+      return [];
+    });
 
     const res = (await POST(makeMeasurementRequest()))!;
 
@@ -422,23 +768,41 @@ describe('sqlpacketload measurement scope validation', () => {
     // live forestgeo_harvard: 96,227 of 106,227 rows stranded).
     expect(executedSql.some((sql: string) => sql.includes('SELECT batchID FROM `forestgeo_testing`.uploadmetrics'))).toBe(false);
 
-    const deleteCmCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.coremeasurements'));
-    expect(deleteCmCall).toBeDefined();
+    const selectCmIdsCall = executedSql.find((sql: string) => sql.includes('SELECT CoreMeasurementID FROM `forestgeo_testing`.coremeasurements'));
+    expect(selectCmIdsCall).toBeDefined();
     // Scoped to the census, excluding the incoming batch FAMILY.
-    expect(deleteCmCall).toContain('WHERE CensusID = ?');
-    expect(deleteCmCall).toContain('NOT (UploadBatchID <=> ?)');
+    expect(selectCmIdsCall).toContain('WHERE CensusID = ?');
+    expect(selectCmIdsCall).toContain('NOT (UploadBatchID <=> ?)');
     // Both arms NULL-safe: a bare `NOT (col LIKE ?)` yields NULL for the
     // nullable UploadBatchID, which would spare every CTFS-migrated row.
-    expect(deleteCmCall).toContain('(UploadBatchID IS NULL OR UploadBatchID NOT LIKE ?');
-    // Bounded so one statement never runs long enough to be KILLed mid-delete.
+    expect(selectCmIdsCall).toContain('(UploadBatchID IS NULL OR UploadBatchID NOT LIKE ?');
+    // Bounded so one statement never runs long enough to be KILLed mid-select.
     // Pinned to the END of the statement: a bare toContain('LIMIT') also passes
     // when the LIMIT sits inside a subquery, where it bounds the wrong thing and
-    // leaves the outer DELETE unbounded.
-    expect(deleteCmCall).toMatch(outerLimitPattern());
+    // leaves the outer SELECT unbounded.
+    expect(selectCmIdsCall).toMatch(outerLimitPattern());
     // Census replacement, not filename replacement.
-    expect(deleteCmCall).not.toContain('UploadFileID');
+    expect(selectCmIdsCall).not.toContain('UploadFileID');
     // And never a batch id list sourced from metrics.
-    expect(deleteCmCall).not.toContain('UploadBatchID IN');
+    expect(selectCmIdsCall).not.toContain('UploadBatchID IN');
+
+    // The DELETE itself is bounded to exactly the ids the SELECT (and the audit
+    // write below) already fixed -- never a second broad `WHERE CensusID = ?`
+    // that could pick up a different row set than what was audited.
+    const deleteCmCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.coremeasurements'));
+    expect(deleteCmCall).toBeDefined();
+    expect(deleteCmCall).toContain('CoreMeasurementID IN');
+    expect(deleteCmCall).not.toContain('CensusID');
+
+    // Every deleted coremeasurements row gets its own DELETE audit row in
+    // unifiedchangelog, written BEFORE the DELETE in the same transaction (#507).
+    const deleteCmAuditCall = executedSql.find(
+      (sql: string) => sql.includes('INSERT INTO') && sql.includes('unifiedchangelog') && sql.includes('.coremeasurements cm')
+    );
+    expect(deleteCmAuditCall, 'every coremeasurements delete must be audited in unifiedchangelog').toBeDefined();
+    expect(mockConnectionManager.executeQuery.mock.calls.findIndex((call: any[]) => String(call[0]) === deleteCmAuditCall)).toBeLessThan(
+      mockConnectionManager.executeQuery.mock.calls.findIndex((call: any[]) => String(call[0]) === deleteCmCall)
+    );
 
     const deleteValidationErrorsCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.measurement_error_log'));
     expect(deleteValidationErrorsCall).toBeDefined();
@@ -466,12 +830,11 @@ describe('sqlpacketload measurement scope validation', () => {
   it('skips previous-upload cleanup for measurement revisions uploads', async () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce({ affectedRows: 1 })
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(undefined);
 
@@ -488,8 +851,9 @@ describe('sqlpacketload measurement scope validation', () => {
     );
     expect(cleanupCall).toBeUndefined();
 
-    const staleBatchCleanupCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('DELETE FROM `forestgeo_testing`.temporarymeasurements')
+    const staleBatchCleanupCall = mockConnectionManager.executeQuery.mock.calls.find(
+      (call: any[]) =>
+        String(call[0]).includes('DELETE /*+ INDEX(temporarymeasurements') && String(call[0]).includes('FROM `forestgeo_testing`.temporarymeasurements')
     );
     expect(staleBatchCleanupCall).toBeDefined();
   });
@@ -504,8 +868,9 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
       if (text.includes('DELETE FROM') && text.includes('measurement_error_log')) throw missingError;
+      // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
+      if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
-      if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
       if (text.includes('COUNT(') && text.includes('temporarymeasurements')) return [{ count: stagedRowCount }];
       if (text.includes('COUNT(')) return [{ count: 0 }];
       if (text.trimStart().toUpperCase().startsWith('DELETE')) return { affectedRows: 1 };
@@ -563,8 +928,9 @@ describe('sqlpacketload measurement scope validation', () => {
     let insertSeen = false;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
+      // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
+      if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
-      if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
       if (text.includes('dropped_row_candidates') && text.trimStart().toUpperCase().startsWith('SELECT')) {
         return [{ rowOrdinal: 2, existingBatch: null }];
       }
@@ -620,6 +986,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-fixed');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
+    mockConnectionManager.acquireApplicationLock.mockResolvedValue(true);
     mockConnectionManager.acquireApplicationLock.mockResolvedValue(true);
     handleUpsertMock.mockResolvedValue({ id: 1, operation: 'inserted' });
   });
@@ -711,9 +1078,13 @@ describe('sqlpacketload fixed-data upload modes', () => {
   it("writes one file_upload changelog entry per committed request, carrying only that request's counts", async () => {
     // A retry after a client timeout, or a later upload of a file with the same name, is its own
     // write. It must not be folded into (and double-count) an earlier entry for that name.
+    // The existing row returned here matches the submitted row exactly (same Description/Status/
+    // DeletedAt) so upsertAttributeRows' own no-op check skips its per-row attributes audit --
+    // this test is about the file_upload entry, not the per-row one, so the fixture must not
+    // manufacture a second changelog write.
     mockConnectionManager.executeQuery.mockImplementation(async (sql: unknown) => {
       const text = String(sql);
-      if (text.startsWith('SELECT')) return [{ Code: 'EXISTING' }];
+      if (text.startsWith('SELECT')) return [{ Code: 'EXISTING', Description: 'Retried', Status: 'alive', DeletedAt: null }];
       return { affectedRows: 1, insertId: 11 };
     });
 
@@ -744,17 +1115,24 @@ describe('sqlpacketload fixed-data upload modes', () => {
     // the WHOLE transaction back server-side; if it were swallowed like a benign logging
     // failure, the commit would no-op "succeed" and the response would claim 200 while the
     // chunk's data rows were silently lost. It must instead propagate into the retry loop.
-    let changelogInsertAttempts = 0;
+    //
+    // Targets the file_upload changelog entry specifically (its INSERT lists no OldRowState
+    // column -- see route.ts's insertChangelogSQL) rather than the per-row attributes audit
+    // recordMutation write (whose INSERT always lists OldRowState, even for an INSERT
+    // operation, where it serializes to NULL). The row write and its own audit succeed in
+    // every attempt; only the file-level entry that follows the whole row loop deadlocks on
+    // the first attempt, which is what this scenario is about.
+    let fileUploadChangelogAttempts = 0;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: unknown) => {
       const text = String(sql);
-      if (text.includes('unifiedchangelog')) {
-        if (text.includes('INSERT INTO')) {
-          changelogInsertAttempts += 1;
-          if (changelogInsertAttempts === 1) {
+      if (text.includes('unifiedchangelog') && text.includes('INSERT INTO')) {
+        if (!text.includes('OldRowState')) {
+          fileUploadChangelogAttempts += 1;
+          if (fileUploadChangelogAttempts === 1) {
             throw new Error('Deadlock found when trying to get lock; try restarting transaction');
           }
-          return { insertId: 9 };
         }
+        return { insertId: 9 };
       }
       if (text.startsWith('SELECT')) return []; // no existing attribute rows
       return { insertId: 1 };
@@ -765,7 +1143,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     );
 
     expect(res?.status).toBe(200);
-    expect(changelogInsertAttempts, 'the chunk must have been retried after the deadlock').toBe(2);
+    expect(fileUploadChangelogAttempts, 'the chunk must have been retried after the deadlock').toBe(2);
     // The deadlocked attempt was rolled back -- never committed as an empty shell.
     expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledTimes(1);
     expect(mockConnectionManager.beginTransaction).toHaveBeenCalledTimes(2);
@@ -806,6 +1184,62 @@ describe('sqlpacketload fixed-data upload modes', () => {
     });
   });
 
+  // ---------------------------------------------------------------------
+  // Issue #507 — formType values outside the attributes/quadrats/personnel/
+  // species allowlist fall through to the generic per-row insertOrUpdate
+  // loop. That loop, and the file_upload changelog entry that follows it,
+  // must receive the SAME active transactionID the handler opened and the
+  // session-resolved identity — never body.user, which a caller can forge.
+  // ---------------------------------------------------------------------
+
+  it('generic path: threads the active transactionID and authenticated identity to insertOrUpdate and the changelog, ignoring forged body.user', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce({ insertId: 1 });
+    const row = { lat: '9.1', lon: '-79.8' };
+
+    const res = await POST(makeGenericFormTypeRequest({ 'row-1': row }, { user: 'Test User' }));
+
+    const body = await res?.json();
+    expect(res?.status, `response body: ${JSON.stringify(body)}`).toBe(HTTPResponses.OK);
+
+    expect(insertOrUpdate).toHaveBeenCalledTimes(1);
+    const [[props]] = vi.mocked(insertOrUpdate).mock.calls;
+    expect(props).toMatchObject({
+      schema: 'forestgeo_testing',
+      formType: 'coordinates',
+      rowData: row,
+      transactionID: 'tx-fixed',
+      fullName: 'user-1'
+    });
+    expect(props.fullName, 'must never fall back to the client-supplied body.user').not.toBe('Test User');
+
+    const changelogCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) => String(call[0]).includes('unifiedchangelog'));
+    expect(changelogCall, 'the generic path must still write a file_upload changelog row').toBeDefined();
+    const [, changelogParams] = changelogCall;
+    // [TableName, RecordID, Operation, NewRowState, ChangedBy, PlotID, CensusID]
+    expect(changelogParams[0]).toBe('file_upload');
+    expect(changelogParams[4]).toBe('user-1');
+    expect(changelogParams).not.toContain('Test User');
+  });
+
+  it('generic path: rolls back the whole transaction and never commits when a row fails insertOrUpdate', async () => {
+    vi.mocked(insertOrUpdate).mockRejectedValueOnce(new Error('simulated row failure'));
+    mockConnectionManager.executeQuery.mockResolvedValue({ insertId: 1 });
+    const row = { lat: '9.1', lon: '-79.8' };
+
+    const res = await POST(makeGenericFormTypeRequest({ 'row-1': row }));
+
+    const body = await res?.json();
+    // insertOrUpdate writes the row AND its changelog audit inside the same transaction.
+    // A failure must roll the whole packet back -- a row-level catch-and-continue would
+    // let the commit below write an unaudited mutation (#507). Non-retryable, so no retry
+    // and the request surfaces the error rather than phantom-succeeding.
+    expect(res?.status, `response body: ${JSON.stringify(body)}`).toBe(HTTPResponses.SERVICE_UNAVAILABLE);
+    expect(body.error).toBe('simulated row failure');
+    expect(body.failingRows).toEqual([]);
+    expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledTimes(1);
+  });
+
   /**
    * A reference-table CLEAN_REUPLOAD first decides whether THIS request owns the
    * destructive reset (#472): it takes
@@ -828,22 +1262,47 @@ describe('sqlpacketload fixed-data upload modes', () => {
     ).toEqual([]);
   }
 
+  /**
+   * Statement-driven, like primeMeasurementQueries: upsertPersonnelRows' CLEAN_REUPLOAD
+   * path reads each row set (`activeCapRows`, `orphanedPersonnelRows`) BEFORE deleting it --
+   * so the recordMutation DELETE audits below carry the row's real prior state (#507) --
+   * then writes the row, its `roles` audit, the censusactivepersonnel link audit, and the
+   * row's own INSERT audit, all as their own `unifiedchangelog` INSERT. Keying every one of
+   * those on the SQL itself (rather than a fixed call-order queue) survives that entire
+   * sequence without hand-counting every audit write it now produces.
+   */
+  function primePersonnelCleanReuploadQueries(
+    manager: any,
+    options: { activeCapRows?: Record<string, unknown>[]; orphanedPersonnelRows?: Record<string, unknown>[] } = {}
+  ) {
+    const activeCapRows = options.activeCapRows ?? [];
+    const orphanedPersonnelRows = options.orphanedPersonnelRows ?? [];
+
+    manager.executeQuery.mockImplementation(async (sql: string) => {
+      const text = String(sql);
+      const upper = text.trimStart().toUpperCase();
+      // The orphaned-personnel SELECT/DELETE also reference `??.censusactivepersonnel` in
+      // their LEFT JOIN, so that check MUST come first or it would swallow these too.
+      if (text.includes('LEFT JOIN') && upper.startsWith('SELECT')) return orphanedPersonnelRows;
+      if (text.includes('LEFT JOIN') && upper.startsWith('DELETE')) return { affectedRows: orphanedPersonnelRows.length };
+      if (text.includes('.censusactivepersonnel') && upper.startsWith('SELECT')) return activeCapRows;
+      if (text.includes('.censusactivepersonnel') && upper.startsWith('DELETE')) return { affectedRows: activeCapRows.length };
+      if (text.includes('`roles`')) return [{ RoleID: 77, RoleName: 'lead tech', RoleDescription: 'Lead technician' }];
+      if (text.includes('unifiedchangelog') && text.includes('INSERT INTO')) return { insertId: 9001 };
+      if (text.includes('INSERT IGNORE INTO') && text.includes('.censusactivepersonnel')) return { affectedRows: 1, insertId: 601 };
+      if (text.includes('INSERT INTO') && text.includes('.personnel (')) return { insertId: 501 };
+      if (upper.startsWith('UPDATE') && text.includes('upload_sessions')) return { affectedRows: 1 };
+      return [];
+    });
+  }
+
   it('deletes existing personnel and inserts fresh in clean re-upload mode', async () => {
     handleUpsertMock.mockResolvedValueOnce({ id: 77, operation: 'inserted' });
     queueUnclaimedReferenceReplacement();
-    mockConnectionManager.executeQuery
-      // DELETE censusactivepersonnel for this census
-      .mockResolvedValueOnce({ affectedRows: 2 })
-      // DELETE orphaned personnel
-      .mockResolvedValueOnce({ affectedRows: 1 })
-      // INSERT new personnel row
-      .mockResolvedValueOnce({ insertId: 501 })
-      // INSERT IGNORE censusactivepersonnel link
-      .mockResolvedValueOnce({ affectedRows: 1 })
-      // marker write: this session's reset is recorded after the rows
-      .mockResolvedValueOnce({ affectedRows: 1 })
-      // changelog: INSERT new entry
-      .mockResolvedValueOnce({ insertId: 3 });
+    primePersonnelCleanReuploadQueries(mockConnectionManager, {
+      activeCapRows: [{ CAPID: 201, CensusID: TEST_CENSUS_ID, PersonnelID: 301 }],
+      orphanedPersonnelRows: [{ PersonnelID: 301, FirstName: 'Old', LastName: 'Hand', RoleID: 5, IsActive: 1, DeletedAt: null }]
+    });
 
     const res = await POST(
       makeFixedDataRequest(
@@ -878,17 +1337,9 @@ describe('sqlpacketload fixed-data upload modes', () => {
   it('normalizes camelCase personnel roles before upserting', async () => {
     handleUpsertMock.mockResolvedValueOnce({ id: 77, operation: 'inserted' });
     queueUnclaimedReferenceReplacement();
-    mockConnectionManager.executeQuery
-      // DELETE censusactivepersonnel, DELETE orphaned personnel
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      // INSERT personnel, INSERT IGNORE censusactivepersonnel link
-      .mockResolvedValueOnce({ insertId: 501 })
-      .mockResolvedValueOnce({ affectedRows: 1 })
-      // marker write
-      .mockResolvedValueOnce({ affectedRows: 1 })
-      // changelog: INSERT new entry
-      .mockResolvedValueOnce({ insertId: 3 });
+    // No pre-existing census-active or orphaned personnel rows: this test is about role
+    // normalization, not the delete-audit path (covered by the test above).
+    primePersonnelCleanReuploadQueries(mockConnectionManager);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -968,18 +1419,38 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('specieslimits'))).toBe(true);
   });
 
+  /**
+   * Statement-driven, like primePersonnelCleanReuploadQueries above: upsertSpeciesRows'
+   * CLEAN_REUPLOAD path reads `activeSpeciesRows` BEFORE deleting them (#507, so the
+   * DELETE recordMutation audits carry the row's real prior state), then audits every
+   * INSERT/DELETE as its own `unifiedchangelog` write. `blockingSpeciesRows` answers the
+   * trees/specieslimits dependency precheck that runs first.
+   */
+  function primeSpeciesCleanReuploadQueries(
+    manager: any,
+    options: { blockingSpeciesRows?: Record<string, unknown>[]; activeSpeciesRows?: Record<string, unknown>[] } = {}
+  ) {
+    const blockingSpeciesRows = options.blockingSpeciesRows ?? [];
+    const activeSpeciesRows = options.activeSpeciesRows ?? [];
+
+    manager.executeQuery.mockImplementation(async (sql: string) => {
+      const text = String(sql);
+      const upper = text.trimStart().toUpperCase();
+      if (text.includes('specieslimits')) return blockingSpeciesRows; // dependency precheck
+      if (text.includes('.species') && upper.startsWith('SELECT')) return activeSpeciesRows;
+      if (text.includes('.species') && upper.startsWith('DELETE')) return { affectedRows: activeSpeciesRows.length };
+      if (text.includes('unifiedchangelog') && text.includes('INSERT INTO')) return { insertId: 9001 };
+      if (text.includes('INSERT INTO') && text.includes('.species')) return { insertId: 701 };
+      if (upper.startsWith('UPDATE') && text.includes('upload_sessions')) return { affectedRows: 1 };
+      return [];
+    });
+  }
+
   it('allows species clean re-upload on a fresh site with no dependent references', async () => {
     // No trees or species limits reference the current active species rows, so the
     // wipe-and-reload remains safe.
     queueUnclaimedReferenceReplacement();
-    mockConnectionManager.executeQuery
-      // 1: dependency precheck returns nothing
-      .mockResolvedValueOnce([])
-      // 2: DELETE FROM species
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      // 3: INSERT new species
-      .mockResolvedValueOnce({ insertId: 1 })
-      .mockResolvedValueOnce({ affectedRows: 1 });
+    primeSpeciesCleanReuploadQueries(mockConnectionManager);
 
     const res = await POST(
       makeFixedDataRequest(
@@ -999,7 +1470,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     const speciesDeleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
       String(call[0]).includes('DELETE FROM `forestgeo_testing`.species')
     );
-    expect(speciesDeleteCalls.length).toBe(1);
+    expect(speciesDeleteCalls).toHaveLength(0);
   });
 
   it('answers 409 without deleting or retrying when another request of the same session still holds the replacement lock', async () => {
@@ -1767,11 +2238,20 @@ describe('sqlpacketload fixed-data upload modes', () => {
   it('keeps species family and genus upserts on the active transaction', async () => {
     handleUpsertMock.mockResolvedValueOnce({ id: 15, operation: 'inserted' }).mockResolvedValueOnce({ id: 27, operation: 'inserted' });
 
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ insertId: 44 })
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ insertId: 5 });
+    // Statement-driven (see primeSpeciesCleanReuploadQueries above): each handleUpsert result
+    // is audited by auditHandleUpsertResult, which re-reads the just-upserted row from its own
+    // table (#507) before writing its unifiedchangelog entry -- a SELECT per side table this
+    // test's handleUpsertMock doesn't otherwise produce.
+    mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
+      const text = String(sql);
+      const upper = text.trimStart().toUpperCase();
+      if (text.includes('`family`')) return [{ FamilyID: 15, Family: 'Fagaceae' }];
+      if (text.includes('`genus`')) return [{ GenusID: 27, Genus: 'Quercus', FamilyID: 15 }];
+      if (text.includes('unifiedchangelog') && text.includes('INSERT INTO')) return { insertId: 9001 };
+      if (text.includes('.species') && upper.startsWith('SELECT')) return []; // no existing species row
+      if (text.includes('INSERT INTO') && text.includes('.species')) return { insertId: 701 };
+      return [];
+    });
 
     const res = await POST(
       makeFixedDataRequest(
@@ -1904,15 +2384,14 @@ describe('sqlpacketload server-side CSV resolution (rawRows path)', () => {
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
+    mockConnectionManager.acquireApplicationLock.mockResolvedValue(true);
   });
 
   it('rejects a malformed mapping at the wire boundary when rawRows are present', async () => {
     const rawRow = { MyX: '12.5', tag: 'T1', spcode: 'abc', quadrat: 'q1', ly: '3.0', date: '2023-05-17' };
 
     // Scope validation runs before the resolution stage; provide the two scope queries so we reach it.
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }]);
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }]).mockResolvedValueOnce([]);
 
     const res = (await POST(makeRawRowsRequest([rawRow], { mapping: { version: 99 } })))!;
 

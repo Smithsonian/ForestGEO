@@ -23,6 +23,7 @@ import {
 import {
   GridActionsCellItem,
   GridColDef,
+  GridColumnVisibilityModel,
   GridEventListener,
   GridPaginationModel,
   GridRenderEditCellParams,
@@ -70,6 +71,16 @@ import ailogger from '@/ailogger';
 // Wide grids column-virtualize off-screen cells out of the DOM, hiding them
 // from Cypress; e2e-only escape hatch, production is unchanged.
 const E2E_DISABLE_VIRTUALIZATION = process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production';
+
+// View Errors is a triage screen: it starts from these defaults on every visit
+// (no persistence), and users can turn the columns on from Manage columns.
+export const ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS: GridColumnVisibilityModel = {
+  stemPlotX: false,
+  stemPlotY: false,
+  priorDBH: false,
+  priorHOM: false,
+  homChanged: false
+};
 
 const DEFAULT_FACETS: ErrorExplorerFacetsResponse = {
   messages: [],
@@ -341,6 +352,7 @@ export default function ErrorsExplorer() {
   const [isExportingCsv, setIsExportingCsv] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
+  const [columnVisibilityModel, setColumnVisibilityModel] = useState<GridColumnVisibilityModel>(ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS);
   const [selectableOpts, setSelectableOpts] = useState<{ codes: string[] }>({ codes: [] });
   const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
   const infiniteRef = useRef<UseInfiniteGridRowsResult<GridRowModel> | null>(null);
@@ -862,10 +874,36 @@ export default function ErrorsExplorer() {
           ]
         : []),
       {
+        field: 'attributes',
+        headerName: 'Codes',
+        minWidth: 160,
+        flex: 0.9,
+        editable: true,
+        headerAlign: 'left',
+        align: 'left',
+        renderCell: params => {
+          const row = params.row as ErrorExplorerRow;
+          const displayedCodes = getUploadedCodesValue(row);
+          const mismatchMessage = getCodesMismatchMessage(row);
+
+          return (
+            <Stack spacing={0.25} sx={{ py: 0.5 }}>
+              {renderCodesChips(displayedCodes)}
+              {mismatchMessage ? (
+                <Typography level="body-xs" color="warning" sx={{ whiteSpace: 'normal', lineHeight: 1.2 }}>
+                  {mismatchMessage}
+                </Typography>
+              ) : null}
+            </Stack>
+          );
+        },
+        renderEditCell: params => <CodesEditCell params={params} options={[...selectableOpts.codes].sort((a, b) => a.localeCompare(b))} />
+      },
+      {
         field: 'hasContradiction',
         headerName: 'Conflict',
-        minWidth: 150,
-        width: 150,
+        minWidth: 120,
+        width: 120,
         sortable: false,
         headerAlign: 'left',
         align: 'left',
@@ -958,7 +996,7 @@ export default function ErrorsExplorer() {
       {
         field: 'stemLocalX',
         headerName: 'X',
-        width: 90,
+        width: 80,
         type: 'number',
         editable: true,
         align: 'right',
@@ -968,7 +1006,7 @@ export default function ErrorsExplorer() {
       {
         field: 'stemLocalY',
         headerName: 'Y',
-        width: 90,
+        width: 80,
         type: 'number',
         editable: true,
         align: 'right',
@@ -998,7 +1036,7 @@ export default function ErrorsExplorer() {
       {
         field: 'measuredDBH',
         headerName: 'DBH',
-        width: 95,
+        width: 100,
         type: 'number',
         editable: true,
         align: 'right',
@@ -1008,7 +1046,7 @@ export default function ErrorsExplorer() {
       {
         field: 'measuredHOM',
         headerName: 'HOM',
-        width: 95,
+        width: 100,
         type: 'number',
         editable: true,
         align: 'right',
@@ -1061,32 +1099,6 @@ export default function ErrorsExplorer() {
         headerAlign: 'left',
         align: 'left',
         renderCell: params => renderPreviewCell(params.value as string | undefined, 2)
-      },
-      {
-        field: 'attributes',
-        headerName: 'Codes',
-        minWidth: 180,
-        flex: 0.9,
-        editable: true,
-        headerAlign: 'left',
-        align: 'left',
-        renderCell: params => {
-          const row = params.row as ErrorExplorerRow;
-          const displayedCodes = getUploadedCodesValue(row);
-          const mismatchMessage = getCodesMismatchMessage(row);
-
-          return (
-            <Stack spacing={0.25} sx={{ py: 0.5 }}>
-              {renderCodesChips(displayedCodes)}
-              {mismatchMessage ? (
-                <Typography level="body-xs" color="warning" sx={{ whiteSpace: 'normal', lineHeight: 1.2 }}>
-                  {mismatchMessage}
-                </Typography>
-              ) : null}
-            </Stack>
-          );
-        },
-        renderEditCell: params => <CodesEditCell params={params} options={[...selectableOpts.codes].sort((a, b) => a.localeCompare(b))} />
       }
     ],
     [canEditRows, canEditSpeciesCode, rowModesModel, selectableOpts]
@@ -1426,6 +1438,8 @@ export default function ErrorsExplorer() {
               onRowClick={params => setSelectedMeasurementID(Number(params.row.coreMeasurementID))}
               slots={explorerGridSlots}
               rowHeight={68}
+              columnVisibilityModel={columnVisibilityModel}
+              onColumnVisibilityModelChange={setColumnVisibilityModel}
               sx={{
                 minHeight: 640,
                 '& .MuiDataGrid-cell': {

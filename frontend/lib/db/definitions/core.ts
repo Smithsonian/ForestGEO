@@ -119,6 +119,12 @@ export const ATTRIBUTE_STATUS_UNSPECIFIED_LABEL = 'Unspecified (blank)';
 export const ATTRIBUTE_STATUS_UNSPECIFIED_HINT =
   'No status is assigned. This code does not provide a status-based validation exemption. Leave it blank if the code applies to multiple stem states.';
 
+// A null option value (not the string 'null') makes the singleSelect editor commit SQL NULL.
+export const AttributeStatusEditorOptions: { value: string | null; label: string }[] = [
+  { value: null, label: ATTRIBUTE_STATUS_UNSPECIFIED_LABEL },
+  ...AttributeStatusOptions.map(status => ({ value: status, label: status }))
+];
+
 export const validateAttributesRow: ValidationFunction = (row: FileRow) => {
   const errors: RowValidationErrors = {};
 

@@ -1,5 +1,5 @@
 // app/api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]/route.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // ---- Import after mocks ----
 import { GET } from './route';
@@ -48,16 +48,6 @@ vi.mock('@/lib/db/connectionmanager', async () => {
   };
 });
 
-// Deterministic moment().format()
-vi.mock('moment', () => {
-  const mockMoment = vi.fn(() => ({
-    format: vi.fn(() => '2025-01-02 03:04:05')
-  }));
-  // default export must be callable
-  (mockMoment as any).default = mockMoment;
-  return { default: mockMoment };
-});
-
 // Logger (not asserted)
 vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
@@ -90,6 +80,13 @@ const dummyReq = new Request('http://localhost/api') as any;
 describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // LastRunAt is written as UTC wall-clock time regardless of the server's TZ.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2025-01-02T03:04:05Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('400 when any param is missing/falsy', async () => {

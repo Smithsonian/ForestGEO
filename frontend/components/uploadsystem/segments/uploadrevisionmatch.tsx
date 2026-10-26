@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Alert, Box, Button, Chip, Sheet, Stack, Tab, TabList, TabPanel, Table, Tabs, Typography } from '@mui/joy';
+import { Alert, Button, Chip, Sheet, Stack, Tab, TabList, TabPanel, Table, Tabs, Typography } from '@mui/joy';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { RevisionInvalidRow, RevisionMatchCounts, RevisionMatchedRow, RevisionNewRowCandidate } from '@/config/revisionuploadtypes';
+import { RevisionCollapsedRow, RevisionInvalidRow, RevisionMatchCounts, RevisionMatchedRow, RevisionNewRowCandidate } from '@/config/revisionuploadtypes';
 import { BulkEditPlan } from '@/config/editplan/types';
 import ImpactSummary from '@/components/editplan/impactsummary';
 
@@ -11,6 +11,8 @@ interface UploadRevisionMatchProps {
   matchedRows: RevisionMatchedRow[];
   newRows: RevisionNewRowCandidate[];
   invalidRows: RevisionInvalidRow[];
+  /** Rows collapsed into an earlier same-key row that differed only beyond stored DECIMAL(12,6) precision. See RevisionCollapsedRow. */
+  collapsedRows?: RevisionCollapsedRow[];
   counts: RevisionMatchCounts;
   bulkPlan?: BulkEditPlan;
   schema: string;
@@ -23,6 +25,13 @@ interface UploadRevisionMatchProps {
   setReviewState: (state: ReviewStates) => void;
   onApply: (confirmNewRows: boolean) => void;
   handleReturnToStart: () => Promise<void>;
+  /**
+   * Re-runs match for the SAME uploaded file (e.g. DB state may have
+   * changed since review started), retaining the current uploadAttemptID
+   * rather than starting a new upload. Optional: omitted entirely when the
+   * caller has nothing to refresh against.
+   */
+  onRefreshMatch?: () => void;
 }
 
 const NEW_ROW_DISPLAY_FIELDS = ['tag', 'stemtag', 'spcode', 'quadrat', 'dbh', 'date'] as const;
@@ -70,13 +79,14 @@ function hasDuplicateCleanup(row: RevisionMatchedRow): boolean {
   return (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0;
 }
 
-export type RevisionTabValue = 'changes' | 'duplicates' | 'new' | 'invalid' | 'unchanged';
+export type RevisionTabValue = 'changes' | 'duplicates' | 'new' | 'invalid' | 'collapsed' | 'unchanged';
 
 export interface RevisionRowCounts {
   changes: number;
   duplicates: number;
   newRows: number;
   invalid: number;
+  collapsed: number;
   unchanged: number;
 }
 
@@ -93,15 +103,25 @@ export function resolveDefaultTabValue(counts: RevisionRowCounts): RevisionTabVa
   if (counts.duplicates > 0) return 'duplicates';
   if (counts.newRows > 0) return 'new';
   if (counts.invalid > 0) return 'invalid';
+  if (counts.collapsed > 0) return 'collapsed';
   if (counts.unchanged > 0) return 'unchanged';
   return 'changes';
 }
 
-export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchProps>) {
-  const { matchedRows, newRows, invalidRows, counts, bulkPlan, preflightWarning, onApply, handleReturnToStart } = props;
+export const REVIEW_AND_APPLY_LABEL = 'Review and apply…';
+export const NEW_ROWS_TAB_EXPLANATION =
+  'These rows did not match an existing measurement in the active census and will be inserted as new measurements if you include them when applying.';
 
-  const [confirmNewRows, setConfirmNewRows] = useState(false);
+export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchProps>) {
+  const { matchedRows, newRows, invalidRows, collapsedRows = [], counts, bulkPlan, preflightWarning, onApply, handleReturnToStart, onRefreshMatch } = props;
+
+  const [includeNewRows, setIncludeNewRows] = useState(false);
   const [impactSummaryOpen, setImpactSummaryOpen] = useState(false);
+
+  const openImpactSummary = () => {
+    setIncludeNewRows(false);
+    setImpactSummaryOpen(true);
+  };
 
   const rowsWithChanges = matchedRows.filter(r => Object.keys(r.changes).length > 0);
   const rowsWithDuplicateCleanupOnly = matchedRows.filter(r => Object.keys(r.changes).length === 0 && hasDuplicateCleanup(r));
@@ -120,12 +140,30 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
   const roleBlockingErrors = blockingErrors.filter(error => error.kind === 'RoleForbiddenField');
   const otherBlockingErrors = blockingErrors.filter(error => error.kind !== 'RoleForbiddenField');
   const planBlocked = bulkPlan?.canApply === false || blockingErrors.length > 0;
-  const canApply = !planBlocked && (actionableMatchedRowCount > 0 || (confirmNewRows && newRows.length > 0));
+  // An invalid-only (or duplicate-only) upload must still be able to Apply:
+  // invalidRows are persisted as StemGUID=NULL failed-measurement rows during
+  // apply (see app/api/revisionupload/apply/route.ts), so a file consisting
+  // entirely of rejected rows needs a path to record that, not a disabled
+  // button that silently drops them. rowsWithDuplicateCleanupOnly already
+  // counts toward actionableMatchedRowCount.
+  const hasRowsToApply = actionableMatchedRowCount > 0 || newRows.length > 0 || invalidRows.length > 0;
+  // Without a plan there is no dialog to opt new rows in, so they are never inserted.
+  const canApplyWithoutPlan = actionableMatchedRowCount > 0 || invalidRows.length > 0;
+  const canApply = !planBlocked && (bulkPlan ? hasRowsToApply : canApplyWithoutPlan);
+  const selectedRowCount = actionableMatchedRowCount + (includeNewRows ? newRows.length : 0) + invalidRows.length;
+  const applyButtonLabel = bulkPlan
+    ? REVIEW_AND_APPLY_LABEL
+    : actionableMatchedRowCount > 0
+      ? `Apply ${actionableMatchedRowCount} Revisions`
+      : invalidRows.length > 0
+        ? `Record ${invalidRows.length} Invalid Row${invalidRows.length === 1 ? '' : 's'}`
+        : 'Apply 0 Revisions';
   const defaultTabValue = resolveDefaultTabValue({
     changes: rowsWithChanges.length,
     duplicates: rowsWithDuplicateCleanupOnly.length,
     newRows: newRows.length,
     invalid: invalidRows.length,
+    collapsed: collapsedRows.length,
     unchanged: rowsNoChanges.length
   });
 
@@ -157,6 +195,11 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
         {counts.invalid > 0 && (
           <Chip color="danger" variant="soft" size="lg">
             {counts.invalid} invalid rows
+          </Chip>
+        )}
+        {collapsedRows.length > 0 && (
+          <Chip color="neutral" variant="soft" size="lg" data-testid="revision-collapsed-chip">
+            {collapsedRows.length} {collapsedRows.length === 1 ? 'row' : 'rows'} collapsed (precision-only duplicate)
           </Chip>
         )}
         {rowsWithIdentityChanges.length > 0 && (
@@ -220,6 +263,7 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
           {rowsWithDuplicateCleanupOnly.length > 0 && <Tab value="duplicates">Duplicate Cleanup ({rowsWithDuplicateCleanupOnly.length})</Tab>}
           {newRows.length > 0 && <Tab value="new">New Rows ({newRows.length})</Tab>}
           {invalidRows.length > 0 && <Tab value="invalid">Invalid ({invalidRows.length})</Tab>}
+          {collapsedRows.length > 0 && <Tab value="collapsed">Collapsed ({collapsedRows.length})</Tab>}
           {rowsNoChanges.length > 0 && <Tab value="unchanged">Unchanged ({rowsNoChanges.length})</Tab>}
         </TabList>
 
@@ -302,19 +346,7 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
         {newRows.length > 0 && (
           <TabPanel value="new">
             <Stack spacing={2}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Typography level="body-md">
-                  These rows did not match an existing measurement in the active census and will be inserted as new measurements if confirmed.
-                </Typography>
-                <Button
-                  size="sm"
-                  variant={confirmNewRows ? 'solid' : 'outlined'}
-                  color={confirmNewRows ? 'success' : 'neutral'}
-                  onClick={() => setConfirmNewRows(prev => !prev)}
-                >
-                  {confirmNewRows ? 'New rows confirmed' : 'Confirm new row insertion'}
-                </Button>
-              </Box>
+              <Typography level="body-md">{NEW_ROWS_TAB_EXPLANATION}</Typography>
               {stemIdNotFoundCount > 0 && (
                 <Alert color="warning" variant="soft">
                   <Stack spacing={0.5}>
@@ -395,6 +427,36 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
           </TabPanel>
         )}
 
+        {collapsedRows.length > 0 && (
+          <TabPanel value="collapsed">
+            <Stack spacing={2}>
+              <Typography level="body-md" color="neutral">
+                These rows match an earlier row in this upload at the stored measurement precision. The earlier row is kept; see which row below.
+              </Typography>
+              <Sheet variant="outlined" sx={{ borderRadius: 'sm', overflow: 'auto', maxHeight: 480 }}>
+                <Table stickyHeader hoverRow size="sm">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 60 }}>Row #</th>
+                      <th style={{ width: 160 }}>Stem Match Key</th>
+                      <th style={{ width: 100 }}>Collapsed Into Row #</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {collapsedRows.map(row => (
+                      <tr key={row.csvIndex}>
+                        <td>{row.csvIndex + 1}</td>
+                        <td>{formatRowIdentifier(row.csvRow)}</td>
+                        <td>{row.collapsedIntoCsvIndex + 1}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </Sheet>
+            </Stack>
+          </TabPanel>
+        )}
+
         {rowsNoChanges.length > 0 && (
           <TabPanel value="unchanged">
             <Typography level="body-md" color="neutral" sx={{ py: 2 }}>
@@ -408,23 +470,32 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
         <Button variant="outlined" color="neutral" onClick={handleReturnToStart}>
           Cancel
         </Button>
+        {onRefreshMatch ? (
+          <Button variant="outlined" color="neutral" onClick={onRefreshMatch} data-testid="revision-match-refresh">
+            Refresh Matches
+          </Button>
+        ) : null}
         <Button
           variant="solid"
           color="primary"
           disabled={!canApply}
-          onClick={() => (bulkPlan ? setImpactSummaryOpen(true) : onApply(confirmNewRows))}
+          onClick={() => (bulkPlan ? openImpactSummary() : onApply(false))}
           data-testid="revision-match-apply"
         >
-          Apply {actionableMatchedRowCount + (confirmNewRows ? newRows.length : 0)} Revisions
+          {applyButtonLabel}
         </Button>
       </Stack>
 
       {bulkPlan && impactSummaryOpen ? (
         <ImpactSummary
           bulkPlan={bulkPlan}
+          selectedRowCount={selectedRowCount}
+          newRowCount={newRows.length}
+          includeNewRows={includeNewRows}
+          onIncludeNewRowsChange={setIncludeNewRows}
           onConfirm={async () => {
             setImpactSummaryOpen(false);
-            onApply(confirmNewRows);
+            onApply(includeNewRows);
           }}
           onCancel={() => setImpactSummaryOpen(false)}
           busy={false}

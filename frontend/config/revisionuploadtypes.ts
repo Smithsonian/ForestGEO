@@ -55,11 +55,29 @@ export interface RevisionInvalidRow {
   reason: string;
 }
 
+/**
+ * A later row that shares a match key (stemid, or tag+stemtag) with an
+ * earlier row in the same upload and differs from it only beyond the stored
+ * precision of coremeasurements' DECIMAL(12,6) measurement/coordinate
+ * columns (frontend/db/sql/tablestructures.sql). Export-tool float rounding
+ * can introduce a difference in, e.g., the 7th decimal of DBH that can never
+ * be represented in storage — collapsing the row into the earlier occurrence
+ * is accounting-only (no DB write at apply time): it is neither a failure
+ * nor a silent drop, it is the same stored measurement counted once.
+ */
+export interface RevisionCollapsedRow {
+  csvRow: FileRow;
+  csvIndex: number;
+  /** csvIndex of the first occurrence this row collapsed into. */
+  collapsedIntoCsvIndex: number;
+}
+
 export interface RevisionMatchCounts {
   matched: number;
   matchedWithChanges: number;
   new: number;
   invalid: number;
+  collapsed: number;
   total: number;
 }
 
@@ -67,6 +85,8 @@ export interface RevisionUploadResponse {
   matchedRows: RevisionMatchedRow[];
   newRows: RevisionNewRowCandidate[];
   invalidRows: RevisionInvalidRow[];
+  /** Rows collapsed into an earlier same-key occurrence; see RevisionCollapsedRow. */
+  collapsedRows: RevisionCollapsedRow[];
   counts: RevisionMatchCounts;
   /**
    * Bulk edit plan for this revision match, surfacing downstream effects
@@ -76,6 +96,19 @@ export interface RevisionUploadResponse {
    * scope (attributes + duplicates only).
    */
   bulkPlan: BulkEditPlan;
+  /**
+   * Per-attempt identity minted by this match call (UUID v4), echoed back
+   * unchanged on /apply. Derives the failed-row batchID and scopes
+   * invalidRowsIntegrityHash — see shared/invalidrowintegrity.ts.
+   */
+  uploadAttemptID: string;
+  /**
+   * Authenticated HMAC (computeInvalidRowsIntegrityHash) over this
+   * response's invalidRows. Apply recomputes it and 409s on mismatch
+   * before persisting anything, so a client can't edit a rejected row's
+   * content after review without invalidating the plan.
+   */
+  invalidRowsIntegrityHash: string;
 }
 
 export interface RevisionApplyMatchedRow {
@@ -109,6 +142,14 @@ export interface RevisionApplyResponse {
   skippedCount: number;
   insertedCount: number;
   deletedDuplicateCount: number;
+  /**
+   * Number of invalid rows persisted as failed measurements (StemGUID=NULL
+   * coremeasurements rows tagged via measurement_errors/measurement_error_log,
+   * e.g. DUPLICATE_ENTRY) during this apply. Every row submitted in the
+   * request's invalidRows is accounted for here or in applyErrors — none are
+   * silently dropped.
+   */
+  failedRowCount: number;
   applyErrors: RevisionApplyError[];
   validationPending: boolean;
   /** Present only when this batch applied #427 tree-wide species corrections. Not revertable. */
@@ -120,5 +161,6 @@ export const EMPTY_REVISION_MATCH_COUNTS: RevisionMatchCounts = {
   matchedWithChanges: 0,
   new: 0,
   invalid: 0,
+  collapsed: 0,
   total: 0
 };

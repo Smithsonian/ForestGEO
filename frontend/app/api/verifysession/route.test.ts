@@ -31,6 +31,8 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
+import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
+import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 import { GET } from './route';
 
 function makeRequest(url: string): any {
@@ -100,9 +102,32 @@ describe('verifysession route', () => {
     });
 
     expect(mockExecuteQuery).toHaveBeenCalledTimes(5);
-    expect(String(mockExecuteQuery.mock.calls[0][0])).toContain("cm.UploadBatchID LIKE CONCAT(?, '__sub%')");
-    expect(String(mockExecuteQuery.mock.calls[2][0])).toContain("tm.BatchID LIKE CONCAT(?, '__sub%')");
+    expect(String(mockExecuteQuery.mock.calls[0][0])).toContain(`cm.UploadBatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}`);
+    expect(String(mockExecuteQuery.mock.calls[2][0])).toContain(`tm.BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}`);
     expect(String(mockExecuteQuery.mock.calls[3][0])).toContain('cm.UploadFileID IS NULL OR cm.UploadBatchID IS NULL');
-    expect(String(mockExecuteQuery.mock.calls[4][0])).toContain('JSON_UNQUOTE(JSON_EXTRACT');
+    const [legacyProcessedSQL, legacyProcessedParams] = mockExecuteQuery.mock.calls[4];
+    console.log('[legacy-batch] SQL=', legacyProcessedSQL, 'params=', legacyProcessedParams);
+    expect(String(legacyProcessedSQL)).toContain(`JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) LIKE ? ${LIKE_ESCAPE_CLAUSE}`);
+    expect(legacyProcessedParams).toEqual(['1', '2', 'file-a.csv', 'batch-1', buildSubBatchPattern('batch-1')]);
+  });
+
+  it('binds an escaped sub-batch pattern so a batchID containing LIKE wildcards cannot match another batch', async () => {
+    const wildcardBatchID = 'batch_1%';
+    mockExecuteQuery.mockResolvedValue([{ count: 0 }]);
+
+    const response = await GET(
+      makeRequest(`http://localhost/api/verifysession?schema=myschema&plotID=1&censusID=2&fileID=file-a.csv&batchID=${encodeURIComponent(wildcardBatchID)}`),
+      { params: Promise.resolve({}) }
+    );
+
+    expect(response.status).toBe(200);
+    const expectedPattern = buildSubBatchPattern(wildcardBatchID);
+    expect(expectedPattern).toBe('batch\\_1\\%\\_\\_sub%');
+    const [processedCall, failedCall, remainingCall] = [0, 1, 2].map(callIndex => mockExecuteQuery.mock.calls[callIndex]);
+    console.log('[wildcard-batch] failed SQL=', failedCall[0], 'params=', failedCall[1]);
+    for (const [sql] of [processedCall, failedCall, remainingCall]) expect(String(sql)).toContain(`LIKE ? ${LIKE_ESCAPE_CLAUSE}`);
+    expect(processedCall[1]).toEqual(['1', '2', 'file-a.csv', wildcardBatchID, expectedPattern]);
+    expect(failedCall[1]).toEqual(['1', '2', 'file-a.csv', wildcardBatchID, expectedPattern, INGESTION_ERROR_SOURCE]);
+    expect(remainingCall[1]).toEqual(['1', '2', 'file-a.csv', wildcardBatchID, expectedPattern]);
   });
 });

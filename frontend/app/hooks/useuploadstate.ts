@@ -6,13 +6,13 @@
  * - Review state progression
  * - Personnel recording
  * - Data unsaved warning
- * - Upload completion tracking
+ * - Upload outcome (reconciled counts) tracking
  *
  * Centralizes upload state management to reduce component complexity
  */
 
 import React, { useCallback, useReducer, Dispatch } from 'react';
-import { ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { ReviewStates, type UploadOutcome } from '@/config/macros/uploadsystemmacros';
 import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 
@@ -23,7 +23,7 @@ export interface UploadStateType {
   reviewState: ReviewStates;
   personnelRecording: string;
   isDataUnsaved: boolean;
-  uploadCompleteMessage: string;
+  uploadOutcome?: UploadOutcome;
   dataViewActive: number;
 }
 
@@ -35,7 +35,7 @@ type UploadStateAction =
   | { type: 'SET_REVIEW_STATE'; payload: ReviewStates }
   | { type: 'SET_PERSONNEL'; payload: string }
   | { type: 'SET_DATA_UNSAVED'; payload: boolean }
-  | { type: 'SET_COMPLETE_MESSAGE'; payload: string }
+  | { type: 'SET_UPLOAD_OUTCOME'; payload: UploadOutcome | undefined }
   | { type: 'SET_DATA_VIEW_ACTIVE'; payload: number }
   | { type: 'RESET_TO_START' }
   | { type: 'INITIALIZE'; payload: { uploadForm?: FormType; uploadMode?: UploadMode; reviewState?: ReviewStates } };
@@ -48,7 +48,7 @@ const initialState: UploadStateType = {
   reviewState: ReviewStates.START,
   personnelRecording: '',
   isDataUnsaved: false,
-  uploadCompleteMessage: '',
+  uploadOutcome: undefined,
   dataViewActive: 1
 };
 
@@ -73,8 +73,8 @@ function uploadStateReducer(state: UploadStateType, action: UploadStateAction): 
     case 'SET_DATA_UNSAVED':
       return { ...state, isDataUnsaved: action.payload };
 
-    case 'SET_COMPLETE_MESSAGE':
-      return { ...state, uploadCompleteMessage: action.payload };
+    case 'SET_UPLOAD_OUTCOME':
+      return { ...state, uploadOutcome: action.payload };
 
     case 'SET_DATA_VIEW_ACTIVE':
       return { ...state, dataViewActive: action.payload };
@@ -112,7 +112,7 @@ export interface UseUploadStateReturn {
   setReviewState: Dispatch<React.SetStateAction<ReviewStates>>;
   setPersonnelRecording: Dispatch<React.SetStateAction<string>>;
   setIsDataUnsaved: Dispatch<React.SetStateAction<boolean>>;
-  setUploadCompleteMessage: Dispatch<React.SetStateAction<string>>;
+  setUploadOutcome: Dispatch<React.SetStateAction<UploadOutcome | undefined>>;
   setDataViewActive: Dispatch<React.SetStateAction<number>>;
 
   // Complex actions
@@ -214,9 +214,9 @@ export function useUploadState(
     dispatch({ type: 'SET_DATA_UNSAVED', payload: unsaved });
   }, []);
 
-  const setUploadCompleteMessage = useCallback((value: React.SetStateAction<string>) => {
-    const message = typeof value === 'function' ? value(stateRef.current.uploadCompleteMessage) : value;
-    dispatch({ type: 'SET_COMPLETE_MESSAGE', payload: message });
+  const setUploadOutcome = useCallback((value: React.SetStateAction<UploadOutcome | undefined>) => {
+    const outcome = typeof value === 'function' ? value(stateRef.current.uploadOutcome) : value;
+    dispatch({ type: 'SET_UPLOAD_OUTCOME', payload: outcome });
   }, []);
 
   const setDataViewActive = useCallback((value: React.SetStateAction<number>) => {
@@ -252,7 +252,7 @@ export function useUploadState(
     setReviewState,
     setPersonnelRecording,
     setIsDataUnsaved,
-    setUploadCompleteMessage,
+    setUploadOutcome,
     setDataViewActive,
 
     // Complex actions

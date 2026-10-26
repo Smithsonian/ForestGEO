@@ -1,14 +1,24 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BatchFamilyScopeError,
   buildSubBatchID,
   buildSubBatchPattern,
   discoverBatchFamily,
+  FAMILY_SCAN_INDEX,
   escapeLikePattern,
+  familyRootOf,
+  getIngestionBatchSize,
   highestSubBatchOrdinal,
   isSubBatchOf,
-  SUB_BATCH_SEPARATOR
+  MAX_ORIGINAL_BATCH_ID_LENGTH,
+  MAX_SUB_BATCH_ORDINAL,
+  OriginalBatchIDTooLongError,
+  selectNewestFamilyPerFile,
+  STAGED_BATCH_ID_MAX_LENGTH,
+  SUB_BATCH_SEPARATOR,
+  SubBatchOrdinalOverflowError,
+  subBatchIDForRowOrdinal
 } from './batch-family';
 
 vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
@@ -16,6 +26,7 @@ vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: v
 const SCHEMA = 'forestgeo_harvard';
 const FILE_ID = 'harvard2014b.TXT';
 const BATCH_ID = 'ms3k5wnm-oc4mjrino5h';
+const DEFAULT_BATCH_SIZE = 10_000;
 const PLOT_ID = 12;
 const CENSUS_ID = 1;
 
@@ -81,6 +92,8 @@ describe('discoverBatchFamily', () => {
     expect(String(sql)).toContain('BatchID = ? OR BatchID LIKE ?');
     expect(String(sql)).toContain("ESCAPE '\\\\'");
     expect(params).toEqual([FILE_ID, BATCH_ID, `${escapeLikePattern(BATCH_ID)}\\_\\_sub%`]);
+    expect(String(sql)).toContain(`/*+ INDEX(tm ${FAMILY_SCAN_INDEX}) */`);
+    expect(String(sql)).toContain('temporarymeasurements tm');
   });
 
   it('returns null only when the family is genuinely empty', async () => {
@@ -136,5 +149,73 @@ describe('discoverBatchFamily', () => {
     const runQuery = vi.fn().mockResolvedValue([familyRow({ BatchID: BATCH_ID, rowCount: 4, plotCount: 2 })]);
 
     await expect(discoverBatchFamily(runQuery, SCHEMA, FILE_ID, BATCH_ID)).rejects.toThrow(BatchFamilyScopeError);
+  });
+});
+
+describe('subBatchIDForRowOrdinal', () => {
+  afterEach(() => delete process.env.INGESTION_SUB_BATCH_ROWS);
+
+  it.each([
+    [0, 'b__sub001'],
+    [DEFAULT_BATCH_SIZE - 1, 'b__sub001'],
+    [DEFAULT_BATCH_SIZE, 'b__sub002'],
+    [DEFAULT_BATCH_SIZE * MAX_SUB_BATCH_ORDINAL - 1, 'b__sub999']
+  ])('maps ordinal %i to %s at the default batch size', (rowOrdinal, expected) => {
+    expect(getIngestionBatchSize()).toBe(DEFAULT_BATCH_SIZE);
+    expect(subBatchIDForRowOrdinal('b', rowOrdinal)).toBe(expected);
+  });
+
+  it('honours INGESTION_SUB_BATCH_ROWS so tests and staging agree with setup', () => {
+    process.env.INGESTION_SUB_BATCH_ROWS = '4';
+    expect([0, 3, 4, 7, 8].map(ordinal => subBatchIDForRowOrdinal('b', ordinal))).toEqual(['b__sub001', 'b__sub001', 'b__sub002', 'b__sub002', 'b__sub003']);
+  });
+
+  it('refuses to number past the three-digit suffix instead of truncating', () => {
+    const firstOverflowingOrdinal = DEFAULT_BATCH_SIZE * MAX_SUB_BATCH_ORDINAL;
+    expect(() => subBatchIDForRowOrdinal('b', firstOverflowingOrdinal)).toThrow(SubBatchOrdinalOverflowError);
+  });
+
+  it('refuses an original BatchID that would overflow varchar(36) once suffixed', () => {
+    const longest = 'b'.repeat(MAX_ORIGINAL_BATCH_ID_LENGTH);
+    expect(subBatchIDForRowOrdinal(longest, 0)).toHaveLength(STAGED_BATCH_ID_MAX_LENGTH);
+    expect(() => subBatchIDForRowOrdinal(`${longest}b`, 0)).toThrow(OriginalBatchIDTooLongError);
+  });
+
+  it.each([-1, 1.5, Number.MAX_SAFE_INTEGER + 1, Number.NaN])('rejects ordinal %s', badOrdinal => {
+    expect(() => subBatchIDForRowOrdinal('b', badOrdinal)).toThrow(RangeError);
+  });
+});
+
+describe('familyRootOf', () => {
+  it.each([
+    ['x__sub007', 'x'],
+    ['x', 'x'],
+    ['x__subabc', 'x__subabc'],
+    ['x__sub0071', 'x__sub0071']
+  ])('%s -> %s', (batchID, root) => expect(familyRootOf(batchID)).toBe(root));
+});
+
+describe('selectNewestFamilyPerFile', () => {
+  it('collapses sub-batches into their family and picks the newest family per file', () => {
+    const rows = [
+      { FileID: 'a.csv', BatchID: 'old', maxRowID: '10' },
+      { FileID: 'a.csv', BatchID: 'new__sub001', maxRowID: '20' },
+      { FileID: 'a.csv', BatchID: 'new__sub002', maxRowID: '30' },
+      { FileID: 'b.csv', BatchID: 'solo', maxRowID: '5' }
+    ];
+    const selection = selectNewestFamilyPerFile(rows);
+    console.log('[selectNewestFamilyPerFile]', JSON.stringify(selection));
+    expect(selection).toEqual([
+      { fileID: 'a.csv', batchID: 'new', familyCount: 2 },
+      { fileID: 'b.csv', batchID: 'solo', familyCount: 1 }
+    ]);
+  });
+
+  it('compares row IDs beyond 2^53 as integers, not floats', () => {
+    const rows = [
+      { FileID: 'a.csv', BatchID: 'lower', maxRowID: '9007199254740993' },
+      { FileID: 'a.csv', BatchID: 'higher', maxRowID: '9007199254740994' }
+    ];
+    expect(selectNewestFamilyPerFile(rows)[0].batchID).toBe('higher');
   });
 });

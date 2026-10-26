@@ -68,7 +68,7 @@ describe('UploadFireSQL — the /api/sqlpacketload request body', () => {
   const setIsDataUnsaved = vi.fn();
   const setUploadError = vi.fn();
   const setErrorComponent = vi.fn();
-  const setUploadCompleteMessage = vi.fn();
+  const setUploadOutcome = vi.fn();
   const setAllRowToCMID = vi.fn();
 
   beforeEach(() => {
@@ -77,7 +77,7 @@ describe('UploadFireSQL — the /api/sqlpacketload request body', () => {
     setIsDataUnsaved.mockReset();
     setUploadError.mockReset();
     setErrorComponent.mockReset();
-    setUploadCompleteMessage.mockReset();
+    setUploadOutcome.mockReset();
     setAllRowToCMID.mockReset();
     startValidation.mockReset();
     fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ transactionCompleted: true, batchID: 'BATCH-TEST' })));
@@ -97,11 +97,10 @@ describe('UploadFireSQL — the /api/sqlpacketload request body', () => {
       personnelRecording: '',
       acceptedFiles: [buildQuadratFile()],
       parsedData: {},
-      uploadCompleteMessage: '',
       selectedDelimiters: { 'quadrats.csv': ',' },
       quadratOverlapAcknowledgment: null,
       onQuadratOverlapAcknowledgmentRequired: vi.fn(),
-      setUploadCompleteMessage,
+      setUploadOutcome,
       setIsDataUnsaved,
       setUploadError,
       setErrorComponent,
@@ -162,11 +161,10 @@ describe('UploadFireSQL — the /api/sqlpacketload request body', () => {
       personnelRecording: '',
       acceptedFiles: [buildQuadratFile()],
       parsedData: {},
-      uploadCompleteMessage: '',
       selectedDelimiters: { 'quadrats.csv': ',' },
       quadratOverlapAcknowledgment: null,
       onQuadratOverlapAcknowledgmentRequired: onAcknowledgmentRequired,
-      setUploadCompleteMessage,
+      setUploadOutcome,
       setIsDataUnsaved,
       setUploadError,
       setErrorComponent,
@@ -191,11 +189,10 @@ describe('UploadFireSQL — the /api/sqlpacketload request body', () => {
       personnelRecording: '',
       acceptedFiles: [buildMultiChunkQuadratFile()],
       parsedData: {},
-      uploadCompleteMessage: '',
       selectedDelimiters: { 'quadrats-multi-chunk.csv': ',' },
       quadratOverlapAcknowledgment: null,
       onQuadratOverlapAcknowledgmentRequired: vi.fn(),
-      setUploadCompleteMessage,
+      setUploadOutcome,
       setIsDataUnsaved,
       setUploadError,
       setErrorComponent,
@@ -213,10 +210,13 @@ describe('UploadFireSQL — the /api/sqlpacketload request body', () => {
       { timeout: 10_000 }
     );
 
-    const requestModes = fetchMock.mock.calls
+    const requestBodies = fetchMock.mock.calls
       .filter(call => String(call[0]).includes('/api/sqlpacketload'))
-      .map(call => JSON.parse(String((call[1] as RequestInit).body)).uploadMode);
-    expect(requestModes).toEqual([UploadMode.CLEAN_REUPLOAD]);
+      .map(call => JSON.parse(String((call[1] as RequestInit).body)));
+    expect(requestBodies.map(body => body.uploadMode)).toEqual([UploadMode.CLEAN_REUPLOAD]);
+    // #507: the fileRowSet (client-resolved) branch must also send chunkSequence,
+    // not only the rawPayload (server-resolved) branch.
+    expect(requestBodies[0].chunkSequence).toBe(1);
   });
 
   it.each([
@@ -242,9 +242,8 @@ describe('UploadFireSQL — the /api/sqlpacketload request body', () => {
         personnelRecording=""
         acceptedFiles={[file]}
         parsedData={{}}
-        uploadCompleteMessage=""
         selectedDelimiters={{ [file.name]: ',' }}
-        setUploadCompleteMessage={setUploadCompleteMessage}
+        setUploadOutcome={setUploadOutcome}
         setIsDataUnsaved={setIsDataUnsaved}
         setUploadError={setUploadError}
         setErrorComponent={setErrorComponent}
@@ -280,11 +279,10 @@ describe('UploadFireSQL — the /api/sqlpacketload request body', () => {
         personnelRecording=""
         acceptedFiles={[file]}
         parsedData={{}}
-        uploadCompleteMessage=""
         selectedDelimiters={{ 'attributes.csv': ',' }}
         quadratOverlapAcknowledgment={null}
         onQuadratOverlapAcknowledgmentRequired={vi.fn()}
-        setUploadCompleteMessage={setUploadCompleteMessage}
+        setUploadOutcome={setUploadOutcome}
         setIsDataUnsaved={setIsDataUnsaved}
         setUploadError={setUploadError}
         setErrorComponent={setErrorComponent}
@@ -305,7 +303,7 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
   const setIsDataUnsaved = vi.fn();
   const setUploadError = vi.fn();
   const setErrorComponent = vi.fn();
-  const setUploadCompleteMessage = vi.fn();
+  const setUploadOutcome = vi.fn();
   const setAllRowToCMID = vi.fn();
 
   beforeEach(() => {
@@ -314,7 +312,7 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
     setIsDataUnsaved.mockReset();
     setUploadError.mockReset();
     setErrorComponent.mockReset();
-    setUploadCompleteMessage.mockReset();
+    setUploadOutcome.mockReset();
     setAllRowToCMID.mockReset();
     startValidation.mockReset();
     fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ transactionCompleted: true, batchID: 'BATCH-TEST', failingRows: [] })));
@@ -340,11 +338,10 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
       personnelRecording: '',
       acceptedFiles: [file],
       parsedData: {},
-      uploadCompleteMessage: '',
       selectedDelimiters: { 'measurements.csv': ',' },
       quadratOverlapAcknowledgment: null,
       onQuadratOverlapAcknowledgmentRequired: vi.fn(),
-      setUploadCompleteMessage,
+      setUploadOutcome,
       setIsDataUnsaved,
       setUploadError,
       setErrorComponent,
@@ -372,6 +369,62 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
       expect(requestBody.rawRows).toBeDefined();
       expect(requestBody.fileRowSet).toBeUndefined();
     }
+
+    // #507: every chunk request must carry its own stable 1-based chunkSequence
+    // (PapaParse's actualChunkCount at parse time), and every chunk of this
+    // upload must occupy a DISTINCT position — proving two different chunks
+    // never collapse onto the same identity even though the queue may upload
+    // them out of parse order.
+    const chunkSequences = requests.map(requestBody => requestBody.chunkSequence);
+    for (const value of chunkSequences) {
+      expect(Number.isInteger(value) && value > 0, `chunkSequence must be a positive integer, got ${JSON.stringify(value)}`).toBe(true);
+    }
+    expect([...chunkSequences].sort((a, b) => a - b)).toEqual(Array.from({ length: requests.length }, (_, index) => index + 1));
+  });
+
+  // Issue #504: skipEmptyLines must be 'greedy' for measurements specifically, so a delimiter-only
+  // padding row is skipped before staging and never trips the staging guard. Other form types
+  // retain their existing (boolean `true`) parsing behavior.
+  it('excludes delimiter-only padding rows from rawRows for a measurements file, sending only the real data rows', async () => {
+    const csvContent = [
+      'tag,spcode,quadrat,lx,ly,date',
+      '1,ABAL,Q0001,1.5,2.5,2020-01-01',
+      ',,,,,', // delimiter-only padding: 5 commas for the 6 header columns
+      '2,ABAL,Q0001,3.5,4.5,2020-01-02'
+    ].join('\n');
+    const raw = new File([csvContent], 'measurements.csv', { type: 'text/csv' });
+    const file = new FileWithStream(raw, false);
+
+    const props: UploadFireProps = {
+      schema: 'forestgeo_testing',
+      uploadForm: FormType.measurements,
+      uploadMode: UploadMode.CLEAN_REUPLOAD,
+      sourceFormat: SourceFormat.csv,
+      personnelRecording: '',
+      acceptedFiles: [file],
+      parsedData: {},
+      selectedDelimiters: { 'measurements.csv': ',' },
+      quadratOverlapAcknowledgment: null,
+      onQuadratOverlapAcknowledgmentRequired: vi.fn(),
+      setUploadOutcome,
+      setIsDataUnsaved,
+      setUploadError,
+      setErrorComponent,
+      setReviewState,
+      setAllRowToCMID
+    };
+
+    render(<UploadFireSQL {...props} />);
+
+    const requestBodies = () =>
+      fetchMock.mock.calls.filter(call => String(call[0]).includes('/api/sqlpacketload')).map(call => JSON.parse(String((call[1] as RequestInit).body)));
+
+    await waitFor(() => expect(requestBodies().flatMap(body => body.rawRows)).toHaveLength(2));
+
+    const sentTags = requestBodies()
+      .flatMap(body => body.rawRows)
+      .map((rawRow: Record<string, unknown>) => rawRow.tag);
+    expect(new Set(sentTags)).toEqual(new Set(['1', '2']));
   });
 
   // A row the server rejects (data.failingRows) is pushed straight to /api/batchedupload so the
@@ -415,11 +468,10 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
       personnelRecording: '',
       acceptedFiles: [file],
       parsedData: {},
-      uploadCompleteMessage: '',
       selectedDelimiters: { 'measurements.csv': ',' },
       quadratOverlapAcknowledgment: null,
       onQuadratOverlapAcknowledgmentRequired: vi.fn(),
-      setUploadCompleteMessage,
+      setUploadOutcome,
       setIsDataUnsaved,
       setUploadError,
       setErrorComponent,
@@ -441,5 +493,186 @@ describe('UploadFireSQL — the rawPayload request branch (measurements/mapping 
     expect(requestBody).toHaveLength(1);
     expect(requestBody[0].plotX).toBe(0);
     expect(requestBody[0].plotY).toBe('267.5');
+  });
+});
+
+// Drives the measurements path end to end through the mocked endpoints the real
+// component calls, so the outcome is checked against what /api/verifysession returns.
+describe('UploadFireSQL — the reconciled upload outcome (#525 item 4)', () => {
+  const fetchMock = vi.fn();
+  const setReviewState = vi.fn();
+  const setIsDataUnsaved = vi.fn();
+  const setUploadError = vi.fn();
+  const setErrorComponent = vi.fn();
+  const setUploadOutcome = vi.fn();
+  const setAllRowToCMID = vi.fn();
+  const UPLOAD_COMPLETION_TIMEOUT_MS = 10_000;
+  const SQL_PACKET_LOAD_PATH = '/api/sqlpacketload';
+  const ARCGIS_FILE_NAME = 'arcgis-import.xlsx';
+  const ARCGIS_STAGED_ROWS = 4;
+  const ARCGIS_COMMITTED_ROWS = 3;
+
+  interface VerifiedCounts {
+    processedCount: number;
+    failedCount: number;
+  }
+
+  function buildMeasurementFile(fileName: string, rowCount: number): FileWithStream {
+    const rows = Array.from({ length: rowCount }, (_, index) => `${index + 1},ABAL,Q0001,1.5,2.5,2020-01-01`);
+    return new FileWithStream(new File([['tag,spcode,quadrat,lx,ly,date', ...rows].join('\n')], fileName, { type: 'text/csv' }), false);
+  }
+
+  function routeMeasurementUpload(
+    stagedRowsByFile: Record<string, number>,
+    verifiedByFile: Record<string, VerifiedCounts>,
+    sqlPacketLoadExtras: Record<string, unknown> = {}
+  ) {
+    return (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === SQL_PACKET_LOAD_PATH) {
+        const body = JSON.parse(String(init?.body));
+        return Promise.resolve(jsonResponse({ transactionCompleted: true, batchID: body.batchID, failingRows: [], ...sqlPacketLoadExtras }));
+      }
+      if (url.pathname === '/api/arcgis/commit') return Promise.resolve(jsonResponse({ rowCount: ARCGIS_COMMITTED_ROWS }));
+      if (url.pathname === '/api/verifyupload') return Promise.resolve(jsonResponse({ count: stagedRowsByFile[url.searchParams.get('fileName') ?? ''] }));
+      if (url.pathname === '/api/verifyprocessing') return Promise.resolve(jsonResponse({ processedCount: 0, failedCount: 0, remainingCount: 0 }));
+      if (url.pathname === '/api/verifysession') return Promise.resolve(jsonResponse(verifiedByFile[url.searchParams.get('fileID') ?? '']));
+      return Promise.resolve(jsonResponse({ message: 'ok' }));
+    };
+  }
+
+  function renderMeasurementUpload(acceptedFiles: FileWithStream[], overrides: Partial<UploadFireProps> = {}) {
+    const props: UploadFireProps = {
+      schema: 'forestgeo_testing',
+      uploadForm: FormType.measurements,
+      uploadMode: UploadMode.CLEAN_REUPLOAD,
+      sourceFormat: SourceFormat.csv,
+      personnelRecording: '',
+      acceptedFiles,
+      parsedData: {},
+      selectedDelimiters: Object.fromEntries(acceptedFiles.map(file => [file.name, ','])),
+      quadratOverlapAcknowledgment: null,
+      onQuadratOverlapAcknowledgmentRequired: vi.fn(),
+      setUploadOutcome,
+      setIsDataUnsaved,
+      setUploadError,
+      setErrorComponent,
+      setReviewState,
+      setAllRowToCMID,
+      ...overrides
+    };
+    return render(<UploadFireSQL {...props} />);
+  }
+
+  function recordedOutcomes() {
+    return setUploadOutcome.mock.calls.map(([outcome]) => outcome).filter(outcome => outcome !== undefined);
+  }
+
+  function logCalls(label: string) {
+    console.log(
+      `[#525 item 4] ${label}: setUploadOutcome=${JSON.stringify(setUploadOutcome.mock.calls)} reviewStates=${JSON.stringify(setReviewState.mock.calls)} uploadError=${String(setUploadError.mock.calls[0]?.[0]?.message ?? '')}`
+    );
+  }
+
+  function callOrderOf(mock: ReturnType<typeof vi.fn>, predicate: (args: unknown[]) => boolean): number {
+    const index = mock.mock.calls.findIndex(predicate);
+    expect(index, 'expected the call to have happened').toBeGreaterThanOrEqual(0);
+    return mock.mock.invocationCallOrder[index];
+  }
+
+  beforeEach(() => {
+    for (const mock of [fetchMock, setReviewState, setIsDataUnsaved, setUploadError, setErrorComponent, setUploadOutcome, setAllRowToCMID, startValidation])
+      mock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('records the verified totals once, before moving to UPLOAD_AZURE', async () => {
+    fetchMock.mockImplementation(routeMeasurementUpload({ 'measurements.csv': 3 }, { 'measurements.csv': { processedCount: 2, failedCount: 1 } }));
+    renderMeasurementUpload([buildMeasurementFile('measurements.csv', 3)]);
+
+    await waitFor(() => expect(setReviewState).toHaveBeenCalledWith(ReviewStates.UPLOAD_AZURE), { timeout: UPLOAD_COMPLETION_TIMEOUT_MS });
+    logCalls('single file');
+    expect(recordedOutcomes()).toEqual([{ kind: 'ingestion', sourceRows: 3, insertedRows: 2, failedRows: 1 }]);
+    expect(callOrderOf(setUploadOutcome, ([outcome]) => outcome !== undefined)).toBeLessThan(
+      callOrderOf(setReviewState, ([state]) => state === ReviewStates.UPLOAD_AZURE)
+    );
+  });
+
+  it('sums the verified totals across files', async () => {
+    fetchMock.mockImplementation(
+      routeMeasurementUpload(
+        { 'first.csv': 3, 'second.csv': 2 },
+        { 'first.csv': { processedCount: 2, failedCount: 1 }, 'second.csv': { processedCount: 2, failedCount: 0 } }
+      )
+    );
+    renderMeasurementUpload([buildMeasurementFile('first.csv', 3), buildMeasurementFile('second.csv', 2)]);
+
+    await waitFor(() => expect(setReviewState).toHaveBeenCalledWith(ReviewStates.UPLOAD_AZURE), { timeout: UPLOAD_COMPLETION_TIMEOUT_MS });
+    logCalls('two files');
+    expect(recordedOutcomes()).toEqual([{ kind: 'ingestion', sourceRows: 5, insertedRows: 4, failedRows: 1 }]);
+  });
+
+  it('ignores a large per-chunk droppedCount and reports only the verified totals', async () => {
+    const replayInflatedDroppedCount = 999;
+    fetchMock.mockImplementation(
+      routeMeasurementUpload(
+        { 'measurements.csv': 3 },
+        { 'measurements.csv': { processedCount: 2, failedCount: 1 } },
+        {
+          dataIntegrityWarning: true,
+          expectedCount: 3,
+          insertedCount: 0,
+          droppedCount: replayInflatedDroppedCount
+        }
+      )
+    );
+    renderMeasurementUpload([buildMeasurementFile('measurements.csv', 3)]);
+
+    await waitFor(() => expect(setReviewState).toHaveBeenCalledWith(ReviewStates.UPLOAD_AZURE), { timeout: UPLOAD_COMPLETION_TIMEOUT_MS });
+    logCalls('large droppedCount');
+    expect(recordedOutcomes()).toEqual([{ kind: 'ingestion', sourceRows: 3, insertedRows: 2, failedRows: 1 }]);
+  });
+
+  it('never records an outcome when reconciliation fails, and goes to ERRORS', async () => {
+    fetchMock.mockImplementation(routeMeasurementUpload({ 'measurements.csv': 3 }, { 'measurements.csv': { processedCount: 1, failedCount: 1 } }));
+    renderMeasurementUpload([buildMeasurementFile('measurements.csv', 3)]);
+
+    await waitFor(() => expect(setReviewState).toHaveBeenCalledWith(ReviewStates.ERRORS), { timeout: UPLOAD_COMPLETION_TIMEOUT_MS });
+    logCalls('mismatch');
+    expect(recordedOutcomes()).toEqual([]);
+    expect(setUploadError.mock.calls[0]?.[0]?.message).toContain('Upload reconciliation failed');
+  });
+
+  it('clears any previous outcome before the first /api/sqlpacketload request of a fresh attempt', async () => {
+    fetchMock.mockImplementation(routeMeasurementUpload({ 'measurements.csv': 3 }, { 'measurements.csv': { processedCount: 2, failedCount: 1 } }));
+    renderMeasurementUpload([buildMeasurementFile('measurements.csv', 3)]);
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes(SQL_PACKET_LOAD_PATH))).toBe(true), {
+      timeout: UPLOAD_COMPLETION_TIMEOUT_MS
+    });
+    logCalls('fresh attempt');
+    expect(callOrderOf(setUploadOutcome, ([outcome]) => outcome === undefined)).toBeLessThan(
+      callOrderOf(fetchMock, ([url]) => String(url).includes(SQL_PACKET_LOAD_PATH))
+    );
+  });
+
+  it('does not count an ArcGIS commit drop twice: failed equals the verified failedCount', async () => {
+    fetchMock.mockImplementation(
+      routeMeasurementUpload({ [ARCGIS_FILE_NAME]: ARCGIS_COMMITTED_ROWS }, { [ARCGIS_FILE_NAME]: { processedCount: 3, failedCount: 1 } })
+    );
+    const arcgisFile = new FileWithStream(new File(['xlsx'], ARCGIS_FILE_NAME), false);
+    renderMeasurementUpload([arcgisFile], {
+      sourceFormat: SourceFormat.arcgis_xlsx,
+      arcgisImportSession: { importSessionId: 'arcgis-session-525', fileName: ARCGIS_FILE_NAME, rowCount: ARCGIS_STAGED_ROWS },
+      selectedDelimiters: {}
+    });
+
+    await waitFor(() => expect(setReviewState).toHaveBeenCalledWith(ReviewStates.UPLOAD_AZURE), { timeout: UPLOAD_COMPLETION_TIMEOUT_MS });
+    logCalls('ArcGIS');
+    expect(recordedOutcomes()).toEqual([{ kind: 'ingestion', sourceRows: ARCGIS_STAGED_ROWS, insertedRows: 3, failedRows: 1 }]);
   });
 });

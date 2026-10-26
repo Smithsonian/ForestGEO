@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   getPoolMonitorInstance: vi.fn(() => ({ getUsablePool: vi.fn(async () => 'catalog-pool') })),
   createUploadBackgroundJob: vi.fn(),
   listBackgroundJobs: vi.fn(),
+  attachFailureContexts: vi.fn(async (_pool: unknown, jobs: unknown[]) => jobs),
   isAsyncUploadEnabledFor: vi.fn(() => true),
   getBlobProperties: vi.fn(),
   loggerWarn: vi.fn(),
@@ -69,7 +70,8 @@ vi.mock('@/lib/db/poolmonitorsingleton', () => ({
 
 vi.mock('@/lib/background-jobs/repository', () => ({
   createUploadBackgroundJob: mocks.createUploadBackgroundJob,
-  listBackgroundJobs: mocks.listBackgroundJobs
+  listBackgroundJobs: mocks.listBackgroundJobs,
+  attachFailureContexts: mocks.attachFailureContexts
 }));
 
 vi.mock('@/lib/background-jobs/errors', () => ({

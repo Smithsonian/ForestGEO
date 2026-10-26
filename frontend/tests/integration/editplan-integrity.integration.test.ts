@@ -32,6 +32,14 @@ import { DEFAULT_TEST_CONFIG, setupTestDatabase, teardownTestDatabase, type Test
 import type { RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import type { BulkEditPlan, EditPlan, TreeStemResolutionPreviewError } from '@/config/editplan/types';
 
+// The real apply route this suite drives signs invalidRowsIntegrityHash with
+// AUTH_SECRET (shared/invalidrowintegrity.ts) and fails closed without it.
+// The unit suite gets this for free from setup.ts -> tests/mocks/auth-mocks.ts,
+// but vitest.integration.config.mts's setupFiles do not set it. The exact
+// value is irrelevant — only that it stays constant across a test's match+apply
+// call pair.
+process.env.AUTH_SECRET ??= 'test_secret';
+
 // ---------------------------------------------------------------------------
 // Named constants — no magic numbers or strings
 // ---------------------------------------------------------------------------
@@ -647,7 +655,11 @@ describe('editplan bulk hash drift — tampered payload (integration)', () => {
         schema: config.database,
         plotID: fixture.plotID,
         censusID: fixture.censusID,
-        bulkPlanHash
+        bulkPlanHash,
+        // Echoed unchanged from match, same as a real client — this test is
+        // about the bulk-plan-hash drift check, not this contract.
+        uploadAttemptID: matchBody.uploadAttemptID,
+        invalidRowsIntegrityHash: matchBody.invalidRowsIntegrityHash
       })
     );
 
@@ -762,7 +774,11 @@ describe('editplan bulk hash drift — tampered payload (integration)', () => {
         schema: config.database,
         plotID: fixture.plotID,
         censusID: fixture.censusID,
-        bulkPlanHash
+        bulkPlanHash,
+        // Echoed unchanged from match, same as a real client — this test is
+        // about the bulk-plan-hash drift check, not this contract.
+        uploadAttemptID: matchBody.uploadAttemptID,
+        invalidRowsIntegrityHash: matchBody.invalidRowsIntegrityHash
       })
     );
 

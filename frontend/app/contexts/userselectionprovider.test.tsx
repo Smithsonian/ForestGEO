@@ -263,7 +263,8 @@ describe('UserSelectionProvider', () => {
             plotCensusNumber: 1,
             censusIDs: [1],
             dateRanges: [{ censusID: 1, startDate: new Date('2024-01-01'), endDate: new Date('2024-12-31') }],
-            description: 'Test Census'
+            description: 'Test Census',
+            isActive: true
           }
         });
       }).not.toThrow();

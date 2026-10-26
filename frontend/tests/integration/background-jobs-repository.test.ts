@@ -25,6 +25,7 @@ import {
   listBackgroundJobs,
   markBackgroundJobWaitingRetryAsWorker,
   setBackgroundJobStatus,
+  updateBackgroundJobFileExpectedRows,
   updateBackgroundJobFileStatus
 } from '@/lib/background-jobs/repository';
 import type { CreateUploadJobInput } from '@/lib/background-jobs/types';
@@ -345,6 +346,28 @@ describe('createUploadBackgroundJob — duplicate idempotency key', () => {
     await expect(createUploadBackgroundJob(pool, renamed, TEST_USER_A)).rejects.toBeInstanceOf(IdempotencyKeyConflictError);
   });
 
+  it('replays an identical create request after the worker has overwritten ExpectedRows with the parsed count', async () => {
+    const idempotencyKey = 'replay-after-parsed-row-count';
+    const PARSED_FILE_ROWS = 42;
+    const original = makeJobInput({ idempotencyKey });
+    const requestWithoutRowCounts = { ...original, files: original.files.map(file => ({ ...file, expectedRows: null })) };
+    const first = await createUploadBackgroundJob(pool, requestWithoutRowCounts, TEST_USER_A);
+    const claimed = await claimBackgroundJobForWorker(pool, first.jobID, WORKER_A);
+    if (!claimed) throw new Error(`[replay-after-parsed] failed to claim jobID=${first.jobID}`);
+    await updateBackgroundJobFileExpectedRows(pool, first.jobID, WORKER_A, claimed.files[0].jobFileID, PARSED_FILE_ROWS);
+
+    const [storedRows] = await pool.query<RowDataPacket[]>(
+      `SELECT JobFileID, ExpectedRows FROM catalog.background_job_files WHERE JobID = ? ORDER BY JobFileID`,
+      [first.jobID]
+    );
+    console.log(`[replay-after-parsed] stored ExpectedRows=${JSON.stringify(storedRows)}`);
+    expect(Number(storedRows[0].ExpectedRows), 'the worker write must have changed the stored count').toBe(PARSED_FILE_ROWS);
+
+    const replayed = await createUploadBackgroundJob(pool, requestWithoutRowCounts, TEST_USER_A);
+    console.log(`[replay-after-parsed] first jobID=${first.jobID} replayed jobID=${replayed.jobID}`);
+    expect(replayed.jobID).toBe(first.jobID);
+  });
+
   it('creates separate jobs for different users sharing the same idempotency key', async () => {
     const idempotencyKey = 'shared-key-different-users';
     const input = makeJobInput({ idempotencyKey });
@@ -493,6 +516,30 @@ describe('cancelBackgroundJob', () => {
 });
 
 describe('markBackgroundJobWaitingRetryAsWorker — fenced retry transitions', () => {
+  it('rolls back the guarded status update when the authoritative event insert fails', async () => {
+    const triggerName = 'test_fail_waiting_retry_event';
+    const { jobID } = await createAndClaimJob(WORKER_A);
+    await pool.query(`DROP TRIGGER IF EXISTS catalog.${triggerName}`);
+    await pool.query(
+      `CREATE TRIGGER catalog.${triggerName} BEFORE INSERT ON catalog.background_job_events
+       FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected event insert failure'`
+    );
+    try {
+      await expect(markBackgroundJobWaitingRetryAsWorker(pool, jobID, WORKER_A, new Error('retry after setup failure'), 30)).rejects.toThrow(
+        'injected event insert failure'
+      );
+
+      const job = await getBackgroundJob(pool, jobID);
+      expect(job?.status).toBe('running');
+      expect(job?.workerID).toBe(WORKER_A);
+      expect(job?.retryCount).toBe(0);
+      const [events] = await pool.query<RowDataPacket[]>(`SELECT EventType FROM catalog.background_job_events WHERE JobID = ? ORDER BY EventID`, [jobID]);
+      expect(events.some(event => event.EventType === 'waiting_retry')).toBe(false);
+    } finally {
+      await pool.query(`DROP TRIGGER IF EXISTS catalog.${triggerName}`);
+    }
+  });
+
   it('transitions directly to failed when retry budget is exhausted (budget arithmetic in SQL)', async () => {
     const job = await createUploadBackgroundJob(pool, makeJobInput(), TEST_USER_A);
 
@@ -793,6 +840,134 @@ describe('lease fencing — updateBackgroundJobFileStatus', () => {
     const file = details!.files.find(f => f.jobFileID === fileID);
     expect(file!.status).toBe('staged');
     expect(file!.processedRows).toBe(3);
+  });
+});
+
+describe('updateBackgroundJobFileExpectedRows — parsed row count (#524 item 7)', () => {
+  const PARSED_FIRST_FILE_ROWS = 20;
+  const PARSED_SECOND_FILE_ROWS = 7;
+  const REPARSED_FIRST_FILE_ROWS = 18;
+
+  function nullExpectedRowsJobInput(): CreateUploadJobInput {
+    const base = makeJobInput();
+    return { ...base, files: base.files.map(file => ({ ...file, expectedRows: null })) };
+  }
+
+  async function createAndClaimNullCountJob(workerID: string): Promise<{ jobID: number; fileIDs: number[] }> {
+    const job = await createUploadBackgroundJob(pool, nullExpectedRowsJobInput(), TEST_USER_A);
+    const claimed = await claimBackgroundJobForWorker(pool, job.jobID, workerID);
+    if (!claimed) throw new Error(`[expected-rows helper] failed to claim jobID=${job.jobID} for ${workerID}`);
+    return { jobID: job.jobID, fileIDs: claimed.files.map(file => file.jobFileID) };
+  }
+
+  async function readCounts(jobID: number): Promise<{ totalRows: number; status: string; expectedRowsByFile: Record<number, number | null> }> {
+    const [jobRows] = await pool.query<RowDataPacket[]>(`SELECT TotalRows, Status FROM catalog.background_jobs WHERE JobID = ?`, [jobID]);
+    const [fileRows] = await pool.query<RowDataPacket[]>(
+      `SELECT JobFileID, ExpectedRows FROM catalog.background_job_files WHERE JobID = ? ORDER BY JobFileID`,
+      [jobID]
+    );
+    return {
+      totalRows: Number(jobRows[0].TotalRows),
+      status: String(jobRows[0].Status),
+      expectedRowsByFile: Object.fromEntries(fileRows.map(row => [Number(row.JobFileID), row.ExpectedRows === null ? null : Number(row.ExpectedRows)]))
+    };
+  }
+
+  it('lease lost: a non-owning worker is rejected before either table changes', async () => {
+    const { jobID, fileIDs } = await createAndClaimJob(WORKER_A);
+    const before = await readCounts(jobID);
+
+    await expect(updateBackgroundJobFileExpectedRows(pool, jobID, WORKER_B, fileIDs[0], PARSED_FIRST_FILE_ROWS)).rejects.toThrow(WorkerLeaseLostError);
+
+    const after = await readCounts(jobID);
+    console.log(`[expected-rows lease-lost] before=${JSON.stringify(before)} after=${JSON.stringify(after)}`);
+    expect(after).toEqual(before);
+  });
+
+  it('multi-file: TotalRows is the sum of every recorded file count, with NULL counting as 0', async () => {
+    const { jobID, fileIDs } = await createAndClaimNullCountJob(WORKER_A);
+    const initial = await readCounts(jobID);
+
+    await updateBackgroundJobFileExpectedRows(pool, jobID, WORKER_A, fileIDs[0], PARSED_FIRST_FILE_ROWS);
+    const afterFirst = await readCounts(jobID);
+    await updateBackgroundJobFileExpectedRows(pool, jobID, WORKER_A, fileIDs[1], PARSED_SECOND_FILE_ROWS);
+    const afterSecond = await readCounts(jobID);
+
+    console.log(
+      `[expected-rows multi-file] initial=${JSON.stringify(initial)} afterFirst=${JSON.stringify(afterFirst)} afterSecond=${JSON.stringify(afterSecond)}`
+    );
+    expect(initial.totalRows).toBe(0);
+    expect(afterFirst.totalRows).toBe(PARSED_FIRST_FILE_ROWS);
+    expect(afterSecond.totalRows).toBe(PARSED_FIRST_FILE_ROWS + PARSED_SECOND_FILE_ROWS);
+    expect(afterSecond.expectedRowsByFile[fileIDs[0]]).toBe(PARSED_FIRST_FILE_ROWS);
+    expect(afterSecond.expectedRowsByFile[fileIDs[1]]).toBe(PARSED_SECOND_FILE_ROWS);
+  });
+
+  it('repeat and retry: the count is set, never added, so a repeat keeps 20 and a re-parse to 18 gives 18', async () => {
+    const { jobID, fileIDs } = await createAndClaimNullCountJob(WORKER_A);
+
+    await updateBackgroundJobFileExpectedRows(pool, jobID, WORKER_A, fileIDs[0], PARSED_FIRST_FILE_ROWS);
+    await updateBackgroundJobFileExpectedRows(pool, jobID, WORKER_A, fileIDs[0], PARSED_FIRST_FILE_ROWS);
+    const afterRepeat = await readCounts(jobID);
+    await updateBackgroundJobFileExpectedRows(pool, jobID, WORKER_A, fileIDs[0], REPARSED_FIRST_FILE_ROWS);
+    const afterReparse = await readCounts(jobID);
+
+    console.log(`[expected-rows repeat] afterRepeat=${JSON.stringify(afterRepeat)} afterReparse=${JSON.stringify(afterReparse)}`);
+    expect(afterRepeat.totalRows).toBe(PARSED_FIRST_FILE_ROWS);
+    expect(afterReparse.totalRows).toBe(REPARSED_FIRST_FILE_ROWS);
+  });
+
+  it('rolls back the file write when the TotalRows write fails', async () => {
+    const triggerName = 'test_fail_total_rows_update';
+    const { jobID, fileIDs } = await createAndClaimNullCountJob(WORKER_A);
+    await pool.query(`DROP TRIGGER IF EXISTS catalog.${triggerName}`);
+    await pool.query(
+      `CREATE TRIGGER catalog.${triggerName} BEFORE UPDATE ON catalog.background_jobs
+       FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected total rows failure'`
+    );
+    try {
+      await expect(updateBackgroundJobFileExpectedRows(pool, jobID, WORKER_A, fileIDs[0], PARSED_FIRST_FILE_ROWS)).rejects.toThrow(
+        'injected total rows failure'
+      );
+    } finally {
+      await pool.query(`DROP TRIGGER IF EXISTS catalog.${triggerName}`);
+    }
+
+    const after = await readCounts(jobID);
+    console.log(`[expected-rows rollback] after=${JSON.stringify(after)}`);
+    expect(after.expectedRowsByFile[fileIDs[0]], 'the file write must roll back with the job write').toBeNull();
+    expect(after.totalRows).toBe(0);
+  });
+
+  it('cancel requested: the owning worker can still record the count, and Status stays cancel_requested', async () => {
+    const { jobID, fileIDs } = await createAndClaimNullCountJob(WORKER_A);
+    await pool.query(`UPDATE catalog.background_jobs SET Status = 'cancel_requested' WHERE JobID = ?`, [jobID]);
+
+    await updateBackgroundJobFileExpectedRows(pool, jobID, WORKER_A, fileIDs[0], PARSED_FIRST_FILE_ROWS);
+
+    const after = await readCounts(jobID);
+    console.log(`[expected-rows cancel] after=${JSON.stringify(after)}`);
+    expect(after.status).toBe('cancel_requested');
+    expect(after.totalRows).toBe(PARSED_FIRST_FILE_ROWS);
+  });
+
+  it("wrong file: another job's file ID throws JobFileNotFoundError and changes nothing", async () => {
+    const owned = await createAndClaimNullCountJob(WORKER_A);
+    const other = await createUploadBackgroundJob(pool, nullExpectedRowsJobInput(), TEST_USER_A);
+    const otherDetails = await getBackgroundJobWithDetails(pool, other.jobID);
+    const foreignFileID = otherDetails!.files[0].jobFileID;
+    const ownedBefore = await readCounts(owned.jobID);
+    const otherBefore = await readCounts(other.jobID);
+
+    await expect(updateBackgroundJobFileExpectedRows(pool, owned.jobID, WORKER_A, foreignFileID, PARSED_FIRST_FILE_ROWS)).rejects.toThrow(JobFileNotFoundError);
+
+    const ownedAfter = await readCounts(owned.jobID);
+    const otherAfter = await readCounts(other.jobID);
+    console.log(
+      `[expected-rows wrong-file] owned ${JSON.stringify(ownedBefore)} -> ${JSON.stringify(ownedAfter)}; other ${JSON.stringify(otherBefore)} -> ${JSON.stringify(otherAfter)}`
+    );
+    expect(ownedAfter).toEqual(ownedBefore);
+    expect(otherAfter).toEqual(otherBefore);
   });
 });
 

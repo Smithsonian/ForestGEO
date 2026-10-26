@@ -15,6 +15,9 @@ import DashboardPage from './page';
 import { useSession } from 'next-auth/react';
 import { useOrgCensusContext, usePlotContext, useSiteContext, useSiteListContext } from '@/app/contexts/compat-hooks';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
+import { useAppStore } from '@/config/store/appstore';
+import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE } from '@/config/censusdeletion';
+import { HTTPResponses } from '@/config/macros';
 
 // Mock dependencies
 vi.mock('next-auth/react');
@@ -761,6 +764,122 @@ describe('Enhanced Dashboard Page', () => {
     });
   });
 
+  describe('Census delete rejections (#525 items 2+3)', () => {
+    const CLEAR_CENSUS_URL = '/api/clearcensus';
+    const CLEAR_CENSUS_CONFLICT_MESSAGE = 'Only the latest census can be cleared. Delete newer censuses first.';
+    const SERVER_INTERNAL_DETAIL = 'ER_LOCK_DEADLOCK in clearcensusmsmts';
+    const DELETABLE_CENSUS = {
+      plotID: 1,
+      plotCensusNumber: 1,
+      censusIDs: [1],
+      dateRanges: [{ censusID: 1, startDate: new Date('2023-01-01'), endDate: new Date('2023-12-31') }],
+      description: 'Only census',
+      isActive: true
+    };
+
+    function routeClearCensusTo(clearCensusResponse: Response) {
+      vi.mocked(global.fetch).mockImplementation((url: any) =>
+        String(url) === CLEAR_CENSUS_URL ? Promise.resolve(clearCensusResponse) : Promise.resolve({ ok: true, json: () => Promise.resolve([]) } as Response)
+      );
+    }
+
+    async function deleteTheOnlyCensus() {
+      const user = userEvent.setup();
+      render(<DashboardPage />);
+      await user.click(await screen.findByRole('button', { name: 'More actions for census 1' }));
+      await user.click(await screen.findByRole('menuitem', { name: /Delete census/ }));
+      await user.click(await screen.findByRole('button', { name: 'Delete Census' }));
+    }
+
+    beforeEach(() => {
+      vi.mocked(useSession).mockReturnValue({
+        data: { ...mockSession, user: { ...mockSession.user, userStatus: 'global' } },
+        status: 'authenticated',
+        update: vi.fn()
+      } as any);
+      vi.mocked(useOrgCensusContext).mockReturnValue(undefined as any);
+      useAppStore.getState().setCensusList([DELETABLE_CENSUS]);
+    });
+
+    afterEach(() => {
+      useAppStore.getState().setCensusList([]);
+    });
+
+    it('shows a 409 body error verbatim', async () => {
+      routeClearCensusTo(new Response(JSON.stringify({ error: CLEAR_CENSUS_CONFLICT_MESSAGE }), { status: HTTPResponses.CONFLICT }));
+      await deleteTheOnlyCensus();
+
+      expect(await screen.findByText(CLEAR_CENSUS_CONFLICT_MESSAGE)).toBeInTheDocument();
+      expect(screen.queryByText(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE)).not.toBeInTheDocument();
+    });
+
+    describe('refreshing the census list after a refusal', () => {
+      const CENSUS_LIST_URL_FRAGMENT = '/api/fetchall/census/';
+
+      function censusListFetchesAfterTheDeleteRequest() {
+        const urls = vi.mocked(global.fetch).mock.calls.map(([url]) => String(url));
+        const deleteRequestIndex = urls.indexOf(CLEAR_CENSUS_URL);
+        return urls.slice(deleteRequestIndex + 1).filter(url => url.includes(CENSUS_LIST_URL_FRAGMENT));
+      }
+
+      it('refreshes the census list once after a 409 and still shows the server text', async () => {
+        routeClearCensusTo(new Response(JSON.stringify({ error: CLEAR_CENSUS_CONFLICT_MESSAGE }), { status: HTTPResponses.CONFLICT }));
+        await deleteTheOnlyCensus();
+
+        expect(await screen.findByText(CLEAR_CENSUS_CONFLICT_MESSAGE)).toBeInTheDocument();
+        const refreshes = censusListFetchesAfterTheDeleteRequest();
+        console.log(`[#525 refused delete] census list fetches after the 409: ${JSON.stringify(refreshes)}`);
+        expect(refreshes).toHaveLength(1);
+      });
+
+      it('refreshes the census list after a 404 refusal', async () => {
+        routeClearCensusTo(new Response(JSON.stringify({ error: 'Census not found' }), { status: HTTPResponses.NOT_FOUND }));
+        await deleteTheOnlyCensus();
+
+        expect(await screen.findByText('Census not found')).toBeInTheDocument();
+        expect(censusListFetchesAfterTheDeleteRequest()).toHaveLength(1);
+      });
+
+      it('does not refresh the census list after a 500', async () => {
+        routeClearCensusTo(new Response(JSON.stringify({ error: SERVER_INTERNAL_DETAIL }), { status: HTTPResponses.INTERNAL_SERVER_ERROR }));
+        await deleteTheOnlyCensus();
+
+        expect(await screen.findByText(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE)).toBeInTheDocument();
+        expect(censusListFetchesAfterTheDeleteRequest()).toHaveLength(0);
+      });
+
+      it('still shows the server text when the refresh itself fails', async () => {
+        vi.mocked(global.fetch).mockImplementation((url: any) =>
+          String(url) === CLEAR_CENSUS_URL
+            ? Promise.resolve(new Response(JSON.stringify({ error: CLEAR_CENSUS_CONFLICT_MESSAGE }), { status: HTTPResponses.CONFLICT }))
+            : String(url).includes(CENSUS_LIST_URL_FRAGMENT)
+              ? Promise.reject(new TypeError('network down'))
+              : Promise.resolve({ ok: true, json: () => Promise.resolve([]) } as Response)
+        );
+        await deleteTheOnlyCensus();
+
+        expect(await screen.findByText(CLEAR_CENSUS_CONFLICT_MESSAGE)).toBeInTheDocument();
+        expect(screen.queryByText(/refreshing the census list failed/)).not.toBeInTheDocument();
+        expect(censusListFetchesAfterTheDeleteRequest()).toHaveLength(1);
+      });
+    });
+
+    it('shows the generic text for a 4xx whose body is not JSON', async () => {
+      routeClearCensusTo(new Response('<html>Not Found</html>', { status: HTTPResponses.NOT_FOUND }));
+      await deleteTheOnlyCensus();
+
+      expect(await screen.findByText(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE)).toBeInTheDocument();
+    });
+
+    it('shows the generic text for a 500 and never leaks its internal detail', async () => {
+      routeClearCensusTo(new Response(JSON.stringify({ error: SERVER_INTERNAL_DETAIL }), { status: HTTPResponses.INTERNAL_SERVER_ERROR }));
+      await deleteTheOnlyCensus();
+
+      expect(await screen.findByText(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE)).toBeInTheDocument();
+      expect(screen.queryByText(SERVER_INTERNAL_DETAIL)).not.toBeInTheDocument();
+    });
+  });
+
   describe('Empty State', () => {
     it('should show no activity message when changelog is empty', async () => {
       vi.mocked(global.fetch).mockImplementation((url: any) => {
@@ -785,6 +904,271 @@ describe('Enhanced Dashboard Page', () => {
         // Updated to match EmptyState component text
         expect(screen.getByText('No Recent Activity')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('scope switching (#517)', () => {
+    const metricsPayload = (trees: number, stems: number, populated = 10) => ({
+      progressTachometer: { TotalQuadrats: 100, PopulatedQuadrats: populated, PopulatedPercent: populated, UnpopulatedQuadrats: '' },
+      activeUsers: { CountActiveUsers: 1 },
+      countTrees: { CountTrees: trees },
+      countStems: { CountStems: stems },
+      stemTypes: { CountOldStems: 0, CountMultiStems: 0, CountNewRecruits: 0 }
+    });
+    const censusWithID = (censusID: number, plotCensusNumber = censusID) =>
+      ({ dateRanges: [{ censusID, startDate: '2024-01-01', endDate: '2024-12-31' }], plotCensusNumber }) as any;
+    const json = (body: unknown, ok = true, status = 200) =>
+      Promise.resolve({ ok, status, statusText: ok ? 'OK' : 'Err', json: () => Promise.resolve(body) } as Response);
+    const metricsCalls = () =>
+      vi
+        .mocked(global.fetch)
+        .mock.calls.map(([url]) => String(url))
+        .filter(url => url.includes('/api/dashboardmetrics/all/'));
+
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      let reject!: (reason: unknown) => void;
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    }
+
+    it('fires the new scope request even while the previous scope request is still in flight', async () => {
+      vi.mocked(global.fetch).mockImplementation((url: any) => (String(url).includes('/api/dashboardmetrics/') ? new Promise(() => undefined) : json([])));
+      const { rerender } = render(<DashboardPage />);
+      await waitFor(() => expect(metricsCalls()).toEqual(['/api/dashboardmetrics/all/testsite/1/1']));
+
+      vi.mocked(useOrgCensusContext).mockReturnValue(censusWithID(2));
+      rerender(<DashboardPage />);
+
+      await waitFor(() => expect(metricsCalls()).toEqual(['/api/dashboardmetrics/all/testsite/1/1', '/api/dashboardmetrics/all/testsite/1/2']));
+    });
+
+    it('requests metrics for the new plot when only the plot changes (never the old plot)', async () => {
+      const { rerender } = render(<DashboardPage />);
+      await screen.findByText('1,234');
+
+      vi.mocked(usePlotContext).mockReturnValue({ plotID: 2, plotName: 'Plot 2' } as any);
+      vi.mocked(useOrgCensusContext).mockReturnValue(censusWithID(5));
+      rerender(<DashboardPage />);
+
+      await waitFor(() => expect(metricsCalls()).toContain('/api/dashboardmetrics/all/testsite/2/5'));
+    });
+
+    it('does not issue any metrics request while a switched site has no plot/census selected yet', async () => {
+      const { rerender } = render(<DashboardPage />);
+      await screen.findByText('1,234');
+      const before = metricsCalls().length;
+
+      // What the store cascade produces on a site switch: new site, plot and census cleared.
+      vi.mocked(useSiteContext).mockReturnValue({ schemaName: 'newsite', siteName: 'New Site' } as any);
+      vi.mocked(usePlotContext).mockReturnValue(undefined as any);
+      vi.mocked(useOrgCensusContext).mockReturnValue(undefined as any);
+      rerender(<DashboardPage />);
+
+      expect(metricsCalls()).toHaveLength(before);
+      expect(metricsCalls().some(url => url.includes('newsite'))).toBe(false);
+      expect(screen.queryByText('1,234')).not.toBeInTheDocument();
+      expect(screen.queryByText('No Census Data Yet')).not.toBeInTheDocument();
+    });
+
+    it('replaces the previous census counts with a loading state instead of keeping or emptying them', async () => {
+      const { rerender } = render(<DashboardPage />);
+      await screen.findByText('1,234');
+
+      vi.mocked(global.fetch).mockImplementation((url: any) => (String(url).includes('/api/dashboardmetrics/') ? new Promise(() => undefined) : json([])));
+      vi.mocked(useOrgCensusContext).mockReturnValue(censusWithID(2));
+      rerender(<DashboardPage />);
+
+      expect(screen.queryByText('1,234')).not.toBeInTheDocument();
+      expect(screen.queryByText('2,468')).not.toBeInTheDocument();
+      expect(screen.queryByText('No Census Data Yet')).not.toBeInTheDocument();
+      expect(screen.getByText('Loading recent activity...')).toBeInTheDocument();
+    });
+
+    it('shows "No Census Data Yet" only after a successful empty current-scope response, never while loading', async () => {
+      const pending = deferred<Response>();
+      vi.mocked(global.fetch).mockImplementation((url: any) => (String(url).includes('/api/dashboardmetrics/') ? pending.promise : json([])));
+
+      render(<DashboardPage />);
+      expect(screen.queryByText('No Census Data Yet')).not.toBeInTheDocument();
+
+      pending.resolve({ ok: true, json: () => Promise.resolve(metricsPayload(0, 0, 0)) } as Response);
+      expect(await screen.findByText('No Census Data Yet')).toBeInTheDocument();
+    });
+
+    it('ignores an older response that resolves after a newer scope response (out of order)', async () => {
+      const older = deferred<Response>();
+      const newer = deferred<Response>();
+      vi.mocked(global.fetch).mockImplementation((url: any) => {
+        const u = String(url);
+        if (u.endsWith('/testsite/1/1')) return older.promise;
+        if (u.endsWith('/testsite/1/2')) return newer.promise;
+        return json([]);
+      });
+      const { rerender } = render(<DashboardPage />);
+      vi.mocked(useOrgCensusContext).mockReturnValue(censusWithID(2));
+      rerender(<DashboardPage />);
+
+      newer.resolve({ ok: true, json: () => Promise.resolve(metricsPayload(222, 444)) } as Response);
+      expect(await screen.findByText('222')).toBeInTheDocument();
+
+      older.resolve({ ok: true, json: () => Promise.resolve(metricsPayload(111, 999)) } as Response);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(screen.getByText('222')).toBeInTheDocument();
+      expect(screen.queryByText('111')).not.toBeInTheDocument();
+      expect(screen.queryByText('999')).not.toBeInTheDocument();
+    });
+
+    it('ignores a stale error from a superseded scope', async () => {
+      const older = deferred<Response>();
+      vi.mocked(global.fetch).mockImplementation((url: any) => {
+        const u = String(url);
+        if (u.endsWith('/testsite/1/1')) return older.promise;
+        if (u.endsWith('/testsite/1/2')) return json(metricsPayload(222, 444));
+        return json([]);
+      });
+      const { rerender } = render(<DashboardPage />);
+      vi.mocked(useOrgCensusContext).mockReturnValue(censusWithID(2));
+      rerender(<DashboardPage />);
+      await screen.findByText('222');
+
+      older.reject(new Error('late failure from the old census'));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(screen.getByText('222')).toBeInTheDocument();
+      expect(screen.queryByText('Could not load census data')).not.toBeInTheDocument();
+      expect(screen.queryByText(/late failure/)).not.toBeInTheDocument();
+    });
+
+    it('aborts the previous scope request on scope change and on unmount', async () => {
+      const signals: Record<string, AbortSignal> = {};
+      vi.mocked(global.fetch).mockImplementation((url: any, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes('/api/dashboardmetrics/')) {
+          signals[u] = init!.signal as AbortSignal;
+          return new Promise(() => undefined);
+        }
+        return json([]);
+      });
+      const { rerender, unmount } = render(<DashboardPage />);
+      await waitFor(() => expect(Object.keys(signals)).toHaveLength(1));
+
+      vi.mocked(useOrgCensusContext).mockReturnValue(censusWithID(2));
+      rerender(<DashboardPage />);
+      await waitFor(() => expect(Object.keys(signals)).toHaveLength(2));
+
+      expect(signals['/api/dashboardmetrics/all/testsite/1/1'].aborted).toBe(true);
+      expect(signals['/api/dashboardmetrics/all/testsite/1/2'].aborted).toBe(false);
+
+      unmount();
+      expect(signals['/api/dashboardmetrics/all/testsite/1/2'].aborted).toBe(true);
+    });
+
+    it('shows an error state with retry (not "No Census Data Yet") when the request fails, and retry reloads the same scope', async () => {
+      let failing = true;
+      vi.mocked(global.fetch).mockImplementation((url: any) => {
+        if (String(url).includes('/api/dashboardmetrics/')) {
+          return failing ? json({}, false, 500) : json(metricsPayload(1234, 2468));
+        }
+        return json([]);
+      });
+
+      render(<DashboardPage />);
+
+      expect(await screen.findByText('Could not load census data')).toBeInTheDocument();
+      expect(screen.getByText(/Failed to load dashboard data: 500/)).toBeInTheDocument();
+      expect(screen.queryByText('No Census Data Yet')).not.toBeInTheDocument();
+
+      failing = false;
+      await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+      expect(await screen.findByText('1,234')).toBeInTheDocument();
+      expect(screen.queryByText('Could not load census data')).not.toBeInTheDocument();
+      expect(metricsCalls()).toEqual(['/api/dashboardmetrics/all/testsite/1/1', '/api/dashboardmetrics/all/testsite/1/1']);
+    });
+
+    it('treats a network failure as an error, not as empty data', async () => {
+      vi.mocked(global.fetch).mockImplementation((url: any) =>
+        String(url).includes('/api/dashboardmetrics/') ? Promise.reject(new Error('Network down')) : json([])
+      );
+
+      render(<DashboardPage />);
+
+      expect(await screen.findByText('Could not load census data')).toBeInTheDocument();
+      expect(screen.getByText('Network down')).toBeInTheDocument();
+      expect(screen.queryByText('No Census Data Yet')).not.toBeInTheDocument();
+    });
+
+    it('A -> B -> A after A succeeded shows loading for the new A request, not the previous A result', async () => {
+      const { rerender } = render(<DashboardPage />);
+      await screen.findByText('1,234');
+
+      const secondA = deferred<Response>();
+      let aCalls = 0;
+      vi.mocked(global.fetch).mockImplementation((url: any) => {
+        const u = String(url);
+        if (u.endsWith('/testsite/1/1')) {
+          aCalls++;
+          return secondA.promise;
+        }
+        if (u.endsWith('/testsite/1/2')) return new Promise(() => undefined);
+        return json([]);
+      });
+      vi.mocked(useOrgCensusContext).mockReturnValue(censusWithID(2));
+      rerender(<DashboardPage />);
+      vi.mocked(useOrgCensusContext).mockReturnValue(censusWithID(1));
+      rerender(<DashboardPage />);
+
+      await waitFor(() => expect(aCalls).toBe(1));
+      expect(screen.queryByText('1,234')).not.toBeInTheDocument();
+      expect(screen.getByText('Loading recent activity...')).toBeInTheDocument();
+
+      secondA.resolve({ ok: true, json: () => Promise.resolve(metricsPayload(777, 1)) } as Response);
+      expect(await screen.findByText('777')).toBeInTheDocument();
+    });
+
+    it('A -> B -> A while the first A request is still pending ignores the first A response', async () => {
+      const firstA = deferred<Response>();
+      const secondA = deferred<Response>();
+      let aCalls = 0;
+      vi.mocked(global.fetch).mockImplementation((url: any) => {
+        const u = String(url);
+        if (u.endsWith('/testsite/1/1')) return ++aCalls === 1 ? firstA.promise : secondA.promise;
+        if (u.endsWith('/testsite/1/2')) return new Promise(() => undefined);
+        return json([]);
+      });
+      const { rerender } = render(<DashboardPage />);
+      vi.mocked(useOrgCensusContext).mockReturnValue(censusWithID(2));
+      rerender(<DashboardPage />);
+      vi.mocked(useOrgCensusContext).mockReturnValue(censusWithID(1));
+      rerender(<DashboardPage />);
+      await waitFor(() => expect(aCalls).toBe(2));
+
+      firstA.resolve({ ok: true, json: () => Promise.resolve(metricsPayload(111, 999)) } as Response);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(screen.queryByText('111')).not.toBeInTheDocument();
+      expect(screen.getByText('Loading recent activity...')).toBeInTheDocument();
+
+      secondA.resolve({ ok: true, json: () => Promise.resolve(metricsPayload(777, 1)) } as Response);
+      expect(await screen.findByText('777')).toBeInTheDocument();
+    });
+
+    it('does not reload when the census object is re-created with the same scope', async () => {
+      const { rerender } = render(<DashboardPage />);
+      await screen.findByText('1,234');
+
+      vi.mocked(useOrgCensusContext).mockReturnValue(censusWithID(1));
+      rerender(<DashboardPage />);
+
+      expect(metricsCalls()).toHaveLength(1);
+      expect(screen.getByText('1,234')).toBeInTheDocument();
     });
   });
 });

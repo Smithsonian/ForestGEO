@@ -2,11 +2,14 @@ import { HEADER_ALIGN } from '@/config/macros';
 import { Autocomplete, Box, Chip, IconButton, Stack, Typography } from '@mui/joy';
 import { GridColDef, GridPreProcessEditCellProps, GridRenderEditCellParams } from '@mui/x-data-grid';
 import React, { Dispatch, SetStateAction, useState } from 'react';
-import { ATTRIBUTE_STATUS_UNSPECIFIED_LABEL, AttributeStatusOptions } from '@/lib/db/definitions/core';
+import { AttributeStatusEditorOptions } from '@/lib/db/definitions/core';
 import { renderAttributeStatusCell } from '@/components/client/attributestatuscell';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { customNumericOperators } from '@/components/datagrids/filtrationsystem';
+import { formatMeasurementForDisplay } from '@/config/measurementdisplay';
 import CloseIcon from '@mui/icons-material/Close';
+import { parseInstant } from '@/config/dateformats';
+import { FIELD_ALIASES_BY_SURFACE, isNegativeForNonNegativeField } from '@/config/editplan/fieldpolicy';
 
 export const formatHeader = (word1: string, word2: string) => (
   <Stack direction={'column'} sx={{ width: '100%', alignItems: 'center', justifyContent: 'center' }}>
@@ -107,12 +110,6 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     editable: true
   }
 ]);
-
-// A null option value (not the string 'null') makes the singleSelect editor commit SQL NULL.
-const AttributeStatusEditorOptions: { value: string | null; label: string }[] = [
-  { value: null, label: ATTRIBUTE_STATUS_UNSPECIFIED_LABEL },
-  ...AttributeStatusOptions.map(status => ({ value: status, label: status }))
-];
 
 export const AttributeGridColumns: GridColDef[] = standardizeGridColumns([
   {
@@ -282,6 +279,9 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'Last Validated',
     flex: 1,
     type: 'dateTime',
+    // An instant: the grid's dateTime type needs a Date, and a zone-less "YYYY-MM-DD HH:mm:ss"
+    // string must be read as UTC (pool timezone) before the grid shows it in local time.
+    valueGetter: (value: unknown) => parseInstant(value as string | Date | null | undefined) ?? null,
     editable: false,
     filterable: false
   }
@@ -566,7 +566,9 @@ export function InputChip({
   );
 }
 
-export function preprocessor(params: GridPreProcessEditCellProps) {
+// MUI does not pass the column field to preProcessEditCellProps, so columns that need
+// field-specific validation (DBH) pass their own field name.
+export function preprocessor(params: GridPreProcessEditCellProps, field?: string) {
   const { props } = params;
   let newValue = props.value;
 
@@ -577,7 +579,15 @@ export function preprocessor(params: GridPreProcessEditCellProps) {
     }
   }
 
-  return { ...props, value: newValue };
+  // Flag a negative DBH as a cell error: MUI keeps the row in edit mode while any cell is errored,
+  // so the invalid value is surfaced instead of being normalized away or persisted.
+  const aliasedField = field ? (FIELD_ALIASES_BY_SURFACE.measurementssummary[field] ?? field) : undefined;
+  const negativeError = aliasedField !== undefined && isNegativeForNonNegativeField(aliasedField, newValue);
+
+  // MUI carries the previous preprocessing result (including `error`) into the next call. For a
+  // field this function validates, the error is recomputed from the current value so a corrected
+  // DBH is not latched as invalid; for other fields the incoming error is left untouched.
+  return { ...props, value: newValue, error: aliasedField !== undefined ? negativeError : props.error };
 }
 
 export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridColumns([
@@ -742,8 +752,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     editable: true,
     type: 'number',
     filterOperators: customNumericOperators,
-    valueFormatter: (value: number | null | undefined) => parseFloat(Number(value ?? 0).toFixed(2)),
-    preProcessEditCellProps: params => preprocessor(params)
+    valueFormatter: (value: number | null | undefined) => formatMeasurementForDisplay(value ?? 0),
+    preProcessEditCellProps: params => preprocessor(params, 'measuredDBH')
   },
   {
     field: 'measuredHOM',

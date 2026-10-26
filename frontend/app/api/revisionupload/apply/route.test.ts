@@ -1,4 +1,12 @@
+import { ChangelogOperation, ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { HTTPResponses } from '@/config/macros';
+import {
+  BULK_INGESTION_CALL_TEMPLATE,
+  CALLER_OWNS_TRANSACTION_SQL,
+  CLEAR_CALLER_TRANSACTION_SQL,
+  FLAG_CLEAR_FAILED_REASON
+} from '@/lib/ingestion/bulk-ingestion-call';
 import { POST } from './route';
 // Real (unmocked) error classes: route.ts imports these directly from
 // tree-species-correction-writer.ts, which this file never mocks. Using the
@@ -6,9 +14,19 @@ import { POST } from './route';
 // branches actually exercised here.
 import { SpeciesCorrectionTransactionMismatchError, SpeciesCorrectionWriteConflictError } from '@/config/editplan/tree-species-correction-writer';
 import { SpeciesCorrectionGroupMemberContextError } from '@/config/editplan/writers/measurementssummary';
+// Deliberately NOT mocked: route.ts imports this same module directly, so
+// using the real computeInvalidRowsIntegrityHash here (instead of a
+// hand-rolled stand-in) is what makes buildValidBody's default hash and
+// the route's recomputed hash provably the same function, not just two
+// implementations that happen to agree today.
+import { computeInvalidRowsIntegrityHash, REVISION_UPLOAD_FILE_ID } from '../shared/invalidrowintegrity';
 
+const REVISION_TRANSACTION_ID = 'tx-1';
 const MATCHED_PLAN_HASH = 'plan-hash-matched';
 const DRIFTED_PLAN_HASH = 'plan-hash-drifted';
+// Valid per the UPLOAD_ATTEMPT_ID_PATTERN in shared/invalidrowintegrity.ts
+// (UUID v4 shape: version nibble 4, variant nibble in [89ab]).
+const VALID_UPLOAD_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
 
 const mocks = vi.hoisted(() => {
   class MockPendingUserEditForbiddenError extends Error {}
@@ -56,6 +74,7 @@ const mocks = vi.hoisted(() => {
     acquireApplicationLock: vi.fn(async () => true),
     executeQuery: vi.fn<(...args: any[]) => Promise<any>>(async () => []),
     closeConnection: vi.fn(async () => undefined),
+    discardTransaction: vi.fn(),
     buildMeasurementScopeLockName: vi.fn((schema: string, plotID: number, censusID: number) => `measurement-scope:${schema}:${plotID}:${censusID}`),
     refreshMeasurementViewsForScope: vi.fn(async () => undefined),
     assertCanEditMeasurementScope: vi.fn(async () => undefined),
@@ -97,7 +116,19 @@ const mocks = vi.hoisted(() => {
     // group's prepare/apply phase returns or throws, without re-implementing
     // prepareTreeSpeciesCorrection's real locked-replan machinery.
     prepareBulkSpeciesCorrections: vi.fn<(...args: any[]) => Promise<any>>(),
-    applyPreparedBulkSpeciesCorrections: vi.fn<(...args: any[]) => Promise<any>>()
+    applyPreparedBulkSpeciesCorrections: vi.fn<(...args: any[]) => Promise<any>>(),
+    // recordAuditedIngestionFailureRows is mocked wholesale (not exercised
+    // through the real SQL it issues) — the real before/after audit diff
+    // behavior is covered by lib/changelog/ingestion-failure-audit.test.ts and
+    // the revision-apply-invalid-persistence integration suite. Default
+    // behavior here treats every row as a fresh INSERT, matching what
+    // insertIngestionFailureRows did before #507 wrapped it in an audit.
+    recordAuditedIngestionFailureRows: vi.fn<(...args: any[]) => Promise<any>>(async ({ rows }: { rows: unknown[] }) => ({
+      measurementIDs: rows.map((_, index) => 9000 + index),
+      insertedCount: rows.length,
+      updatedCount: 0,
+      unchangedCount: 0
+    }))
   };
 });
 
@@ -106,6 +137,7 @@ vi.mock('@/auth', () => ({
 }));
 
 vi.mock('@/lib/db/sqlsecurity', () => ({
+  buildInPlaceholders: (count: number) => Array(count).fill('?').join(', '),
   isValidSchema: mocks.isValidSchema,
   safeFormatQuery: mocks.safeFormatQuery
 }));
@@ -133,7 +165,8 @@ vi.mock('@/lib/db/connectionmanager', () => ({
       withTransaction: mocks.withTransaction,
       acquireApplicationLock: mocks.acquireApplicationLock,
       executeQuery: mocks.executeQuery,
-      closeConnection: mocks.closeConnection
+      closeConnection: mocks.closeConnection,
+      discardTransaction: mocks.discardTransaction
     })
   }
 }));
@@ -197,6 +230,10 @@ vi.mock('@/config/editoperations', () => ({
   ensureEditOperationsTable: mocks.ensureEditOperationsTable
 }));
 
+vi.mock('@/lib/changelog/ingestion-failure-audit', () => ({
+  recordAuditedIngestionFailureRows: mocks.recordAuditedIngestionFailureRows
+}));
+
 vi.mock('@/ailogger', () => ({
   default: {
     info: mocks.loggerInfo,
@@ -212,15 +249,34 @@ function buildRequest(body: Record<string, unknown>) {
   }) as any;
 }
 
+/**
+ * Every test in this suite that reaches past the uploadAttemptID/
+ * invalidRowsIntegrityHash gate (route.ts ~823-835) needs a hash that
+ * actually matches whatever invalidRows it submits — the route recomputes
+ * computeInvalidRowsIntegrityHash from the submitted body and 409s on any
+ * mismatch (route.ts ~868-881), before any mutation. Computing it here with
+ * the REAL function (not a stand-in) against the SAME schema/plotID/
+ * censusID/uploadAttemptID/invalidRows the body ends up carrying keeps the
+ * two provably in sync: a test that overrides invalidRows gets a hash for
+ * that exact array, not the empty-array default.
+ */
 function buildValidBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const schema = (overrides.schema as string | undefined) ?? 'forestgeo_testing';
+  const plotID = (overrides.plotID as number | undefined) ?? 1;
+  const censusID = (overrides.censusID as number | undefined) ?? 2;
+  const uploadAttemptID = (overrides.uploadAttemptID as string | undefined) ?? VALID_UPLOAD_ATTEMPT_ID;
+  const invalidRows = (overrides.invalidRows as Array<{ csvIndex: number; csvRow?: Record<string, unknown>; reason: string }> | undefined) ?? [];
+
   return {
     matchedRows: [],
     newRows: [],
     confirmNewRows: false,
-    schema: 'forestgeo_testing',
-    plotID: 1,
-    censusID: 2,
+    schema,
+    plotID,
+    censusID,
     bulkPlanHash: MATCHED_PLAN_HASH,
+    uploadAttemptID,
+    invalidRowsIntegrityHash: computeInvalidRowsIntegrityHash(schema, plotID, censusID, uploadAttemptID, REVISION_UPLOAD_FILE_ID, invalidRows),
     ...overrides
   };
 }
@@ -380,6 +436,12 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.assertAuthorizationFresh.mockResolvedValue(undefined);
     mocks.assertBulkPlanCanApply.mockReturnValue(undefined);
     mocks.analyzeBulk.mockResolvedValue(buildFreshPlan(MATCHED_PLAN_HASH));
+    mocks.recordAuditedIngestionFailureRows.mockImplementation(async ({ rows }: { rows: unknown[] }) => ({
+      measurementIDs: rows.map((_, index) => 9000 + index),
+      insertedCount: rows.length,
+      updatedCount: 0,
+      unchangedCount: 0
+    }));
     mocks.applyEditInTransaction.mockResolvedValue({
       updatedIDs: { CoreMeasurementID: 0 },
       applyErrors: [],
@@ -421,6 +483,57 @@ describe('POST /api/revisionupload/apply', () => {
     expect(response.status).toBe(400);
     const body = await response.json();
     expect(body.error).toContain('bulkPlanHash');
+  });
+
+  it('rejects requests missing uploadAttemptID', async () => {
+    const validBody = buildValidBody() as Record<string, unknown>;
+    delete validBody.uploadAttemptID;
+
+    const response = await POST(buildRequest(validBody));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('uploadAttemptID');
+    expect(mocks.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed (non-UUID-v4-shaped) uploadAttemptID', async () => {
+    const response = await POST(buildRequest(buildValidBody({ uploadAttemptID: 'not-a-uuid' })));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('uploadAttemptID');
+    expect(mocks.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects requests missing invalidRowsIntegrityHash', async () => {
+    const validBody = buildValidBody() as Record<string, unknown>;
+    delete validBody.invalidRowsIntegrityHash;
+
+    const response = await POST(buildRequest(validBody));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('invalidRowsIntegrityHash');
+    expect(mocks.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 without writing anything when invalidRowsIntegrityHash does not match the recomputed hash of the submitted invalidRows (client tampered with a reviewed rejected row after match)', async () => {
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }],
+          // Deliberately stale: this is the hash of an EMPTY invalidRows array
+          // (buildValidBody's own default), not the array actually submitted above.
+          invalidRowsIntegrityHash: computeInvalidRowsIntegrityHash('forestgeo_testing', 1, 2, VALID_UPLOAD_ATTEMPT_ID, REVISION_UPLOAD_FILE_ID, [])
+        })
+      )
+    );
+
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body.error).toContain('invalidRows no longer match the reviewed plan');
+    expect(mocks.withTransaction, 'a tampered-hash request must be rejected before any transaction opens').not.toHaveBeenCalled();
   });
 
   it('returns 403 before scope checks for pending users', async () => {
@@ -624,6 +737,41 @@ describe('POST /api/revisionupload/apply', () => {
     expect(rowValues[9]).toBe(4.25);
     expect(rowValues[10]).toBe(-2.531244);
     expect(rowValues[11]).toBe(487.125);
+
+    const statements = mocks.executeQuery.mock.calls.map(([sql]) => String(sql));
+    const procedureIndex = statements.findIndex(sql => sql.includes('bulkingestionprocess'));
+    expect(statements.slice(procedureIndex - 1, procedureIndex + 2)).toEqual([
+      CALLER_OWNS_TRANSACTION_SQL,
+      BULK_INGESTION_CALL_TEMPLATE,
+      CLEAR_CALLER_TRANSACTION_SQL
+    ]);
+    for (const [, , transactionID] of mocks.executeQuery.mock.calls.slice(procedureIndex - 1, procedureIndex + 2)) {
+      expect(transactionID, 'the flag and CALL must run on the revision transaction').toBe(REVISION_TRANSACTION_ID);
+    }
+    expect(mocks.discardTransaction).not.toHaveBeenCalled();
+  });
+
+  it('fails the apply instead of reporting inserted rows when the CALL succeeded but the caller flag could not be cleared', async () => {
+    const clearError = new Error('connection lost while clearing the caller flag');
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('INSERT INTO ??.temporarymeasurements')) return { affectedRows: 1, warningStatus: 0 };
+      if (query === CLEAR_CALLER_TRANSACTION_SQL) throw clearError;
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          newRows: [{ csvIndex: 0, csvRow: { tag: 'T9', stemtag: 'S9', spcode: 'AAA', quadrat: 'Q1', dbh: '10', date: '2026-04-01' } }],
+          confirmNewRows: true
+        })
+      )
+    );
+
+    expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    await expect(response.json()).resolves.toEqual({ error: clearError.message });
+    expect(mocks.discardTransaction).toHaveBeenCalledWith(REVISION_TRANSACTION_ID, FLAG_CLEAR_FAILED_REASON);
+    expect(mocks.refreshMeasurementViewsForScope, 'no derived refresh may follow a discarded transaction').not.toHaveBeenCalled();
   });
 
   it('rejects malformed numeric values in new rows before inserting temporary measurements', async () => {
@@ -676,7 +824,7 @@ describe('POST /api/revisionupload/apply', () => {
     await expect(response.json()).resolves.toEqual({
       error: "Revision staging produced 1 SQL warning(s): Warning 1265 Data truncated for column 'PlotX'"
     });
-    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('CALL ??.bulkingestionprocess'), expect.anything(), expect.anything());
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('bulkingestionprocess'), expect.anything(), expect.anything());
 
     // SHOW WARNINGS must go through the text protocol. runQuery routes to
     // connection.execute() whenever a params array is supplied, and MySQL
@@ -709,7 +857,7 @@ describe('POST /api/revisionupload/apply', () => {
 
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({ error: 'Revision staging inserted 0 of 1 expected row(s)' });
-    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('CALL ??.bulkingestionprocess'), expect.anything(), expect.anything());
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(expect.stringContaining('bulkingestionprocess'), expect.anything(), expect.anything());
   });
 
   it('returns 409 with freshPlan when the bulk plan hash drifts between match and apply', async () => {
@@ -734,12 +882,18 @@ describe('POST /api/revisionupload/apply', () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
       error: 'plan hash mismatch',
-      freshPlan
+      freshPlan,
+      // No invalidRows were submitted and nothing was demoted, so the
+      // authoritative replacement set the 409 hands back is empty — but it
+      // must still be present and its hash must be the real function's hash
+      // of that exact (empty) set, not the client's stale hash.
+      freshInvalidRows: [],
+      freshInvalidRowsIntegrityHash: computeInvalidRowsIntegrityHash('forestgeo_testing', 1, 2, VALID_UPLOAD_ATTEMPT_ID, REVISION_UPLOAD_FILE_ID, [])
     });
     expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
   });
 
-  it('moves apply-time invalid matched rows into the hash plan and only writes surviving matched rows', async () => {
+  it('moves apply-time invalid matched rows into the hash plan, only writes surviving matched rows, and persists the demoted row as a failed measurement', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
@@ -783,8 +937,20 @@ describe('POST /api/revisionupload/apply', () => {
     await expect(response.json()).resolves.toMatchObject({
       updatedCount: 1,
       skippedCount: 0,
-      deletedDuplicateCount: 0
+      deletedDuplicateCount: 0,
+      failedRowCount: 1
     });
+    expect(mocks.recordAuditedIngestionFailureRows).toHaveBeenCalledTimes(1);
+    expect(mocks.recordAuditedIngestionFailureRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schema: 'forestgeo_testing',
+        transactionID: 'tx-1',
+        changedBy: 'mason@example.com',
+        plotID: 1,
+        censusID: 2,
+        rows: expect.arrayContaining([expect.objectContaining({ sourceRowIndex: 10, failureReason: 'Quadrat 999 was not found in this plot/census' })])
+      })
+    );
     expect(mocks.analyzeBulk).toHaveBeenCalledTimes(2);
     const secondBulkInput = (mocks.analyzeBulk.mock.calls[1] as unknown as Array<unknown>)[5] as {
       matched: Array<{ targetID: number }>;
@@ -918,7 +1084,8 @@ describe('POST /api/revisionupload/apply', () => {
     await expect(response.json()).resolves.toMatchObject({
       updatedCount: 1,
       skippedCount: 0,
-      deletedDuplicateCount: 0
+      deletedDuplicateCount: 0,
+      failedRowCount: 1
     });
     expect(
       mocks.analyzeBulk,
@@ -1126,7 +1293,7 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
-      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+      if (query.trimStart().startsWith('SELECT') && query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
         return [buildDbRow(101)];
       }
       if (query.includes('SELECT cm.CoreMeasurementID, cm.StemGUID')) {
@@ -1134,6 +1301,14 @@ describe('POST /api/revisionupload/apply', () => {
           { CoreMeasurementID: 55, StemGUID: 777 },
           { CoreMeasurementID: 101, StemGUID: 777 }
         ];
+      }
+      // recordDeletedCoreMeasurementsAudit's own INSERT ... SELECT (OldRowState
+      // identifies it uniquely from the committed-rows INSERT audit, which
+      // selects into NewRowState instead) — must report exactly 1 audited row
+      // to match the 1 row the DELETE below actually removes, or
+      // verifyAndDeleteDuplicate's audited-vs-deleted equality check throws.
+      if (query.includes('OldRowState')) {
+        return { affectedRows: 1 };
       }
       if (query.includes('DELETE FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND CensusID = ? AND IsActive = 1')) {
         return { affectedRows: 1 };
@@ -1156,6 +1331,7 @@ describe('POST /api/revisionupload/apply', () => {
       skippedCount: 1,
       insertedCount: 0,
       deletedDuplicateCount: 1,
+      failedRowCount: 0,
       applyErrors: [],
       validationPending: true
     });
@@ -1164,6 +1340,14 @@ describe('POST /api/revisionupload/apply', () => {
     expect(mocks.executeQuery).toHaveBeenCalledWith('DELETE FROM ??.measurementssummary WHERE CoreMeasurementID = ?', [55], 'tx-1');
     expect(mocks.executeQuery).toHaveBeenCalledWith('DELETE FROM ??.viewfulltable WHERE CoreMeasurementID = ?', [55], 'tx-1');
     expect(mocks.refreshMeasurementViewsForScope).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing', 1, 2, 'tx-1');
+
+    // #507: the duplicate/survivor verify SELECT must lock every row it reads
+    // (cm, the joined stems row, and the joined quadrats row) for the rest of
+    // the transaction, closing the TOCTOU window between this read and the
+    // audit+DELETE that follow it.
+    const verifyCall = mocks.executeQuery.mock.calls.find(([sql]) => typeof sql === 'string' && sql.includes('SELECT cm.CoreMeasurementID, cm.StemGUID\n'));
+    expect(verifyCall, 'the duplicate/survivor verify query must have run').toBeDefined();
+    expect(verifyCall![0]).toContain('FOR UPDATE');
   });
 
   it('refreshes derived measurement views when matched rows are updated', async () => {
@@ -1190,6 +1374,7 @@ describe('POST /api/revisionupload/apply', () => {
       skippedCount: 0,
       insertedCount: 0,
       deletedDuplicateCount: 0,
+      failedRowCount: 0,
       applyErrors: [],
       validationPending: true
     });
@@ -1269,6 +1454,7 @@ describe('POST /api/revisionupload/apply', () => {
       skippedCount: 1,
       insertedCount: 0,
       deletedDuplicateCount: 0,
+      failedRowCount: 0,
       applyErrors: [],
       validationPending: false
     });
@@ -1320,6 +1506,7 @@ describe('POST /api/revisionupload/apply', () => {
       skippedCount: 1,
       insertedCount: 0,
       deletedDuplicateCount: 0,
+      failedRowCount: 0,
       applyErrors: [],
       validationPending: false
     });
@@ -1719,5 +1906,141 @@ describe('POST /api/revisionupload/apply', () => {
     const recordedSpeciesCorrections = beforeStateRow.speciesCorrections as typeof speciesCorrectionsSummary;
     expect(recordedSpeciesCorrections.additionalAffectedCoreMeasurementIDs).toEqual([ADDITIONALLY_AFFECTED_CORE_ID]);
     expect(recordedSpeciesCorrections.allAffectedCoreMeasurementIDs).toEqual([REQUESTER_CORE_ID, ADDITIONALLY_AFFECTED_CORE_ID]);
+  });
+
+  describe('#507 ingestion-failure audit integration', () => {
+    it('returns safe retry guidance when the audit fails without exposing its SQL cause', async () => {
+      const secretDetail = 'INSERT INTO private_schema.unifiedchangelog transaction secret';
+      mocks.recordAuditedIngestionFailureRows.mockRejectedValueOnce(
+        new ChangelogWriteError(ChangelogOperation.INSERT, 'coremeasurements', '123', new Error(secretDetail))
+      );
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+      expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+      expect(await response.json()).toEqual({ error: 'Unable to record revision history. Please retry.' });
+      expect(mocks.writeEditOperation).not.toHaveBeenCalled();
+    });
+
+    it('writes a ledger summary with failedRowCount for an invalid-only batch (previously silent: the write guard only checked updatedCount/deletedDuplicateCount/speciesCorrections)', async () => {
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const body = await response.json();
+      expect(body.failedRowCount).toBe(1);
+      expect(body.updatedCount).toBe(0);
+
+      expect(mocks.writeEditOperation, 'an invalid-only apply must still get a ledger summary').toHaveBeenCalledTimes(1);
+      const summaryArgs = mocks.writeEditOperation.mock.calls[0] as unknown as [unknown, string, Record<string, unknown>, string];
+      const summaryRow = (summaryArgs[2].beforeState as Array<Record<string, unknown>>)[0].row as Record<string, unknown>;
+      expect(summaryRow.failedRowCount).toBe(1);
+      expect(summaryRow.insertedCount).toBe(0);
+    });
+
+    it('writes a ledger summary for an insert-only batch (regression: #507 extends the write guard to insertedCount, previously silent)', async () => {
+      mocks.executeQuery.mockImplementation(async (query: string) => {
+        if (query.includes('INSERT INTO ??.temporarymeasurements')) return { affectedRows: 1, warningStatus: 0 };
+        return [];
+      });
+
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            newRows: [{ csvIndex: 0, csvRow: { tag: 'T9', stemtag: 'S9', spcode: 'AAA', quadrat: 'Q1', dbh: '10', date: '2026-04-01' } }],
+            confirmNewRows: true
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const body = await response.json();
+      expect(body.insertedCount).toBe(1);
+
+      expect(mocks.writeEditOperation, 'an insert-only apply must still get a ledger summary').toHaveBeenCalledTimes(1);
+      const summaryArgs = mocks.writeEditOperation.mock.calls[0] as unknown as [unknown, string, Record<string, unknown>, string];
+      const summaryRow = (summaryArgs[2].beforeState as Array<Record<string, unknown>>)[0].row as Record<string, unknown>;
+      expect(summaryRow.insertedCount).toBe(1);
+      expect(summaryRow.failedRowCount).toBe(0);
+    });
+
+    it('omits the ledger summary entirely when every rejected row is an unchanged same-attempt retry and nothing else mutated', async () => {
+      mocks.recordAuditedIngestionFailureRows.mockImplementation(async ({ rows }: { rows: unknown[] }) => ({
+        measurementIDs: rows.map((_, index) => 9000 + index),
+        insertedCount: 0,
+        updatedCount: 0,
+        unchangedCount: rows.length
+      }));
+
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const body = await response.json();
+      expect(body.failedRowCount, 'the response must still report the retried row as rejected').toBe(1);
+      expect(mocks.writeEditOperation, 'an unchanged-retry apply must not produce a new ledger entry').not.toHaveBeenCalled();
+      expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+    });
+
+    it('rolls back the whole apply when recordAuditedIngestionFailureRows persists fewer rows than were rejected (data/audit disagreement must abort, never silently under-report)', async () => {
+      mocks.recordAuditedIngestionFailureRows.mockResolvedValueOnce({
+        measurementIDs: [],
+        insertedCount: 0,
+        updatedCount: 0,
+        unchangedCount: 0
+      });
+
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.UNPROCESSABLE_ENTITY);
+      const body = await response.json();
+      expect(body.error).toBe('Revision failure-row persistence recorded 0 of 1 expected rejected row(s)');
+      expect(mocks.writeEditOperation, 'a count-mismatch must abort before any ledger write').not.toHaveBeenCalled();
+      expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+    });
+
+    it('passes the trusted server-side actor, the caller transaction, and the correct plot/census scope to recordAuditedIngestionFailureRows, never a client-supplied changedBy', async () => {
+      mocks.auth.mockResolvedValue({ user: { name: 'Jess Researcher', email: 'jess@example.com', userStatus: 'global', sites: [] } });
+
+      const response = await POST(
+        buildRequest(
+          buildValidBody({
+            invalidRows: [{ csvIndex: 3, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+          })
+        )
+      );
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      expect(mocks.recordAuditedIngestionFailureRows).toHaveBeenCalledTimes(1);
+      expect(mocks.recordAuditedIngestionFailureRows).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schema: 'forestgeo_testing',
+          transactionID: 'tx-1',
+          changedBy: 'jess@example.com',
+          plotID: 1,
+          censusID: 2
+        })
+      );
+    });
   });
 });

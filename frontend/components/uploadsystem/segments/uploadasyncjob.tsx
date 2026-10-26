@@ -12,6 +12,7 @@ import type { FileWithStream } from '@/config/macros/uploadsystemmacros';
 import type { ArcgisImportReference } from '@/lib/arcgis/types';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
 import ailogger from '@/ailogger';
+import { registerSubmittedUploadJob } from '@/components/uploadsystemhelpers/uploadjobcompletiontracker';
 import { describeUploadFileNameCollisions, findUploadFileNameCollisions } from '@/lib/uploads/file-names';
 
 export interface BlobUploadResult {
@@ -289,6 +290,10 @@ export default function UploadAsyncJob({
           cleanupAllowed = !jobResponse.ok;
           throw new Error(jobPayload.error || jobPayload.details || `Failed to queue background upload job: HTTP ${jobResponse.status}`);
         }
+
+        // Before the cancelled check: a modal that already closed must still register,
+        // or a job that finishes between two badge polls never refreshes the grids.
+        registerSubmittedUploadJob(jobPayload.job.jobID);
 
         setIsDataUnsaved(false);
         if (cancelled) return;

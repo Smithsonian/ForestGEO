@@ -322,6 +322,81 @@ describe('issue-list masking when a mapping resolves coverage gaps (M6)', () => 
   });
 });
 
+// Issue #504: a header-only CSV was shown as "Valid" and submitted as a Clean Re-Upload, which
+// then wiped the target census's existing measurements. NO_DATA_ROWS is a STRUCTURAL failure
+// (unlike MISSING_REQUIRED_COLUMNS/TOO_FEW_COLUMNS), so applying a column mapping -- even a fully
+// valid one seeded from canonical headers -- must never re-enable Continue. These assertions check
+// the actual side effect (handleInitialSubmit never invoked, Continue absent/disabled) rather than
+// just the rendered copy.
+describe('structural empty-data failure cannot be rescued by column mapping (issue #504)', () => {
+  it('keeps Continue disabled after applying a valid mapping when the blocking issue is NO_DATA_ROWS', () => {
+    fileValidationEvents.clear();
+    fileValidationEvents.set(SURVEY_FILE_NAME, {
+      isValid: false,
+      issues: [{ code: DelimiterIssueCode.NO_DATA_ROWS, message: 'The file appears to be empty: no data rows were found beyond the header.' }],
+      // Canonical headers seed a fully-valid mapping -- if mapping could rescue structural
+      // issues, this file would pass as soon as the mapping validated.
+      headers: CANONICAL_HEADERS
+    });
+
+    const handleInitialSubmit = vi.fn(async () => {});
+    const setColumnMappingForFile = vi.fn();
+
+    act(() => {
+      render(
+        <UploadParseFiles
+          uploadForm={FormType.measurements}
+          uploadMode={UploadMode.CLEAN_REUPLOAD}
+          sourceFormat={SourceFormat.csv}
+          acceptedFiles={[buildFile(SURVEY_FILE_NAME)]}
+          dataViewActive={0}
+          setDataViewActive={() => {}}
+          selectedDelimiters={{}}
+          setSelectedDelimiters={() => {}}
+          columnMappings={{}}
+          setColumnMappingForFile={setColumnMappingForFile}
+          quadratOverlapAcknowledgment={null}
+          setQuadratOverlapAcknowledgment={() => {}}
+          serverQuadratOverlapSummaries={[]}
+          clearServerQuadratOverlapSummaries={() => {}}
+          handleInitialSubmit={handleInitialSubmit}
+          handleAddFile={() => {}}
+          handleRemoveFile={() => {}}
+          handleReplaceFile={() => {}}
+        />
+      );
+    });
+
+    // Before any mapping interaction: Continue must already be disabled/absent, and the
+    // structural message must be visible.
+    expect(screen.queryByRole('button', { name: /continue upload/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /fix validation errors to continue/i })).toBeDisabled();
+    expect(screen.getByText(/no data rows were found/i)).toBeDefined();
+
+    // Apply a mapping that fully validates against this file's (canonical) headers --
+    // mirrors a user successfully completing the mapping dialog.
+    const mapButton = screen.getByRole('button', { name: /map columns|review column mapping/i });
+    act(() => {
+      fireEvent.click(mapButton);
+    });
+    const applyButton = screen.getByRole('button', { name: /apply mapping/i });
+    expect(applyButton).not.toBeDisabled();
+    act(() => {
+      fireEvent.click(applyButton);
+    });
+    expect(setColumnMappingForFile).toHaveBeenCalledOnce();
+
+    // The structural failure must still block Continue even though the mapping is now valid.
+    expect(screen.queryByRole('button', { name: /continue upload/i })).toBeNull();
+    const fixButton = screen.getByRole('button', { name: /fix validation errors to continue/i });
+    expect(fixButton).toBeDisabled();
+
+    // Clicking the (disabled) button must not invoke the upload side effect.
+    fireEvent.click(fixButton);
+    expect(handleInitialSubmit).not.toHaveBeenCalled();
+  });
+});
+
 describe('CSV mapping gating rule', () => {
   it('is invalid when a required field is unmapped', () => {
     const meta = { format: SourceFormat.csv as const, headers: ['X_Coord', 'Y_Coord', 'Sp', 'quadrat', 'date'] }; // no tag
@@ -434,6 +509,25 @@ describe('measurement upload size gate', () => {
     renderMeasurements([fileReportingSize(name, MAX_UPLOAD_FILE_BYTES, type)], sourceFormat);
 
     expect(screen.queryByText(/exceeds the \d+ MB upload limit/)).toBeNull();
+  });
+
+  it('shows the filename and the physical line location in the persistent File Validation Issues alert', () => {
+    const file = new FileWithStream(new File(['x'], 'ragged.csv', { type: 'text/csv' }), false);
+    fileValidationEvents.clear();
+    fileValidationEvents.set(file.name, {
+      isValid: false,
+      issues: [{ code: DelimiterIssueCode.ROW_COLUMN_COUNT_MISMATCH, message: 'Line 3 has 2 columns, expected 3' }],
+      headers: CANONICAL_HEADERS
+    });
+    act(() => {
+      renderUploadParseFiles([file], vi.fn(), FormType.measurements, SourceFormat.csv);
+    });
+
+    const alertText = screen.getByText('File Validation Issues').parentElement?.textContent ?? '';
+    expect(alertText).toContain('ragged.csv:');
+    expect(alertText).toContain('Line 3 has 2 columns, expected 3');
+    expect(alertText).not.toMatch(/data row/i);
+    expect(screen.queryByText(/data row/i)).toBeNull();
   });
 
   it('still rejects two ArcGIS workbooks, so size advice never implies multi-workbook selection', () => {

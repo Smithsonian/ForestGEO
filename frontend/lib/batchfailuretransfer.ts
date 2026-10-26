@@ -1,3 +1,6 @@
+import { snapshotCoreMeasurementsScope, auditCoreMeasurementsScopeDiff } from '@/lib/changelog/ingestion-audit';
+import { transactionExecutorFor } from '@/lib/ingestion/bulk-ingestion-call';
+import { ChangelogOperation, ChangelogWriteError } from '@/lib/changelog/record-mutation';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import {
   ensureMeasurementErrorDefinition,
@@ -7,73 +10,11 @@ import {
   type SystemFailureKind
 } from '@/config/measurementerrors';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
-import { buildSubBatchPattern, LIKE_ESCAPE_CLAUSE } from '@/lib/uploads/batch-family';
 
-/**
- * Moves all remaining sub-batches for a given file
- * to unresolved coremeasurements. Used when the client calls setupbulkfailure
- * with the original batchID but rows have been split into sub-batch IDs.
- */
-export async function moveTemporarySubBatchesToFailedMeasurements(
-  connectionManager: ConnectionManager,
-  schema: string,
-  fileID: string,
-  originalBatchID: string,
-  failureReason: string,
-  failureKind: SystemFailureKind,
-  transactionID?: string
-): Promise<number> {
-  const managesOwnTransaction = !transactionID;
-  let activeTransactionID = transactionID ?? null;
-
-  try {
-    if (managesOwnTransaction) {
-      activeTransactionID = await connectionManager.beginTransaction();
-    }
-
-    const findSubBatchesSQL = safeFormatQuery(
-      schema,
-      `SELECT DISTINCT BatchID
-       FROM ??.temporarymeasurements
-      WHERE FileID = ?
-        AND BatchID LIKE ? ${LIKE_ESCAPE_CLAUSE}`
-    );
-    // Reuse the caller's transaction when provided so multi-batch cleanup can stay atomic.
-    const subBatchRows: any[] = await connectionManager.executeQuery(
-      findSubBatchesSQL,
-      [fileID, buildSubBatchPattern(originalBatchID)],
-      activeTransactionID ?? undefined
-    );
-
-    let totalMoved = 0;
-    for (const row of subBatchRows) {
-      const moved = await moveTemporaryBatchToFailedMeasurements(
-        connectionManager,
-        schema,
-        fileID,
-        row.BatchID,
-        failureReason,
-        failureKind,
-        activeTransactionID ?? undefined
-      );
-      totalMoved += moved;
-    }
-    if (managesOwnTransaction && activeTransactionID) {
-      await connectionManager.commitTransaction(activeTransactionID);
-    }
-    return totalMoved;
-  } catch (error) {
-    if (managesOwnTransaction && activeTransactionID) {
-      try {
-        await connectionManager.rollbackTransaction(activeTransactionID);
-      } catch (rollbackError) {
-        if (error instanceof Error) {
-          (error as Error & { rollbackError?: unknown }).rollbackError = rollbackError;
-        }
-      }
-    }
-    throw error;
-  }
+export interface FailureTransferAuditContext {
+  changedBy: string | null;
+  plotID: number;
+  censusID: number;
 }
 
 export async function moveTemporaryBatchToFailedMeasurements(
@@ -83,7 +24,8 @@ export async function moveTemporaryBatchToFailedMeasurements(
   batchID: string,
   failureReason: string,
   failureKind: SystemFailureKind,
-  transactionID?: string
+  transactionID?: string,
+  auditContext?: FailureTransferAuditContext
 ): Promise<number> {
   const managesOwnTransaction = !transactionID;
   let activeTransactionID = transactionID ?? null;
@@ -92,6 +34,9 @@ export async function moveTemporaryBatchToFailedMeasurements(
     if (managesOwnTransaction) {
       activeTransactionID = await connectionManager.beginTransaction();
     }
+
+    const tx = transactionExecutorFor(connectionManager, activeTransactionID!);
+    const before = auditContext ? await snapshotCoreMeasurementsScope(tx, schema, fileID, batchID) : undefined;
 
     const countTempSQL = safeFormatQuery(schema, 'SELECT COUNT(*) AS rowCount FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?');
     const countRows: any[] = await connectionManager.executeQuery(countTempSQL, [fileID, batchID], activeTransactionID ?? undefined);
@@ -157,6 +102,20 @@ export async function moveTemporaryBatchToFailedMeasurements(
 
     const deleteTempSQL = safeFormatQuery(schema, 'DELETE FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?');
     await connectionManager.executeQuery(deleteTempSQL, [fileID, batchID], activeTransactionID ?? undefined);
+
+    if (auditContext && before) {
+      const diff = await auditCoreMeasurementsScopeDiff({ tx, schema, fileID, batchID, before, ...auditContext });
+      if (diff.insertedCount !== sourceRowCount || diff.updatedCount !== 0 || diff.deletedCount !== 0) {
+        throw new ChangelogWriteError(
+          ChangelogOperation.INSERT,
+          'coremeasurements',
+          batchID,
+          new Error(
+            `Failure transfer moved ${sourceRowCount} rows but audited ${diff.insertedCount} inserts, ${diff.updatedCount} updates and ${diff.deletedCount} deletes`
+          )
+        );
+      }
+    }
 
     if (managesOwnTransaction && activeTransactionID) {
       await connectionManager.commitTransaction(activeTransactionID);

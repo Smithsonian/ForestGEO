@@ -80,6 +80,7 @@ type MeasurementRow = Parameters<typeof insertTestMeasurements>[2][number];
 const ORIGINAL_FILE = 'original.csv';
 const REPLACEMENT_FILE = 'replacement.csv';
 const LATER_CENSUS_FILE = 'later-census.csv';
+const TEST_CHANGED_BY = 'clean-reupload-leftover-stems-test';
 
 const FIRST_CENSUS_DATE = '2024-03-15';
 const SECOND_VISIT_DATE = '2024-06-15';
@@ -145,7 +146,7 @@ describe('CLEAN_REUPLOAD leftover stems and trees (#489) — integration', () =>
   async function cleanReupload(rows: MeasurementRow[], targetCensusID = censusID): Promise<void> {
     const incomingBatchID = `batch-${batchCounter + 1}`;
     const transactionID = await connectionManager.beginTransaction();
-    await cleanupPreviousFileUploads(connectionManager, schema, REPLACEMENT_FILE, incomingBatchID, plotID, targetCensusID, transactionID);
+    await cleanupPreviousFileUploads(connectionManager, schema, REPLACEMENT_FILE, incomingBatchID, plotID, targetCensusID, TEST_CHANGED_BY, transactionID);
     await connectionManager.commitTransaction(transactionID);
     await ingest(REPLACEMENT_FILE, rows, targetCensusID);
   }

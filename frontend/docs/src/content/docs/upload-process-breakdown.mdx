@@ -399,11 +399,11 @@ Export CSV → Edit only the values you want changed → Upload as Revisions →
 Review match screen (tabs) → Apply
 ```
 
-1. **Export** the current measurements from the data grid (the export keeps `StemGUID`, which is how rows are matched on the way back in).
+1. **Export** the current measurements from the data grid (rows are matched on the way back in by the export's **Stem ID** column; if the file has no Stem IDs, by Tree Tag + Stem Tag instead. One strategy is used for the whole file).
 2. **Edit** only the cells you want to change. Blank or unchanged cells mean "don't change" — they will not overwrite the database.
 3. From the upload page, choose **Measurements → Revisions** and upload the edited file.
 4. The app shows a **multi-tab review screen** before any write — see below.
-5. Click **Apply**. All updates, deletions, and inserts run in a single transaction.
+5. Click **Review and apply…**. The dialog lists every effect. Tick **Also insert N new rows** to include the rows from the New Rows tab. For a destructive plan, type `APPLY` followed by the number of rows the apply will write (the dialog shows the exact phrase; the number includes any invalid rows that will be recorded as failed measurements). Click **Apply**: all updates, deletions, and inserts run in a single transaction.
 
 ### The review screen tabs
 
@@ -411,9 +411,9 @@ Review match screen (tabs) → Apply
 |---|---|---|
 | **Changes** | Rows where one or more of the editable fields differs from the DB | Updated in place |
 | **Duplicate Cleanup** | Rows that match multiple measurements for the same stem (typically legacy) | Highest-ID row wins; others deleted |
-| **New Rows** | Rows that don't match anything in the census | Inserted **only if you explicitly confirm** |
+| **New Rows** | Rows that don't match anything in the census | Inserted **only if you tick "Also insert N new rows"** in the review dialog |
 | **Unchanged** | Matched rows with no field differences | Skipped on Apply |
-| **Invalid** | Rows the app can't safely handle (missing match key, stem in a different plot, etc.) | Not touched |
+| **Invalid** | Rows the app can't safely handle (missing match key, stem in a different plot, etc.) | Recorded as failed measurements |
 
 Only **Changes** is always present. The other tabs appear only when they have something in them,
 so a clean revision file will show fewer tabs than this table lists.
