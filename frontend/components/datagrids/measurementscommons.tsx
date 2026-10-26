@@ -90,6 +90,7 @@ import { EditToolbar } from '../client/datagridelements';
 import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
+import { useReloadOnFinishedUploadJob } from '@/components/datagrids/hooks/usereloadonfinisheduploadjob';
 import { useDeleteAfterCancelGuard } from '@/components/datagrids/hooks/usedeleteaftercancelguard';
 import { getSelectableOptionsForField, loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
@@ -538,6 +539,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   });
 
   const isInfiniteOn = enableInfiniteScroll && infinite.mode === 'infinite';
+  useReloadOnFinishedUploadJob(queryScope, isInfiniteOn, infinite.refresh);
   const gridRows = isInfiniteOn ? infinite.rows : rows;
   const gridRowCount = isInfiniteOn ? infinite.rows.length : rowCount;
 

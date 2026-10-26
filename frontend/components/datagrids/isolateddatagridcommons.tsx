@@ -62,6 +62,7 @@ import { LoadingBar, ContentSkeleton } from '@/components/loading';
 import { areGridFilterModelsEqual, hasServerFilter, toServerFilterModel } from '@/lib/datagrid/filterModel';
 import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel';
 import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
+import { useReloadOnFinishedUploadJob } from '@/components/datagrids/hooks/usereloadonfinisheduploadjob';
 import { useDeleteAfterCancelGuard } from '@/components/datagrids/hooks/usedeleteaftercancelguard';
 import CustomGridPagination, { DEFAULT_PAGE_SIZE_OPTIONS, getPersistedGridPageSize } from '@/components/datagrids/customgridpagination';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
@@ -627,6 +628,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   });
 
   const isInfiniteOn = enableInfiniteScroll && infinite.mode === 'infinite';
+  useReloadOnFinishedUploadJob(queryScope, isInfiniteOn, infinite.refresh);
   const gridRows = isInfiniteOn ? infinite.rows : rows;
   const gridRowCount = isInfiniteOn ? infinite.rows.length : rowCount;
 

@@ -7,6 +7,8 @@ import type { GridColDef, GridRowModesModel, GridRowsProp } from '@mui/x-data-gr
 import type { AlertProps } from '@mui/material';
 import MeasurementsCommons from './measurementscommons';
 import { DELETE_AFTER_CANCEL_GUARD_MS } from './hooks/usedeleteaftercancelguard';
+import UploadJobStatusBadge from '@/components/client/uploadjobstatusbadge';
+import { registerSubmittedUploadJob, resetUploadJobCompletionTrackerForTests } from '@/components/uploadsystemhelpers/uploadjobcompletiontracker';
 
 const MEASUREMENT_ROW = {
   id: 1,
@@ -16,12 +18,15 @@ const MEASUREMENT_ROW = {
   measuredDBH: 12.5,
   measurementDate: '2024-06-15'
 };
+const ROW_ADDED_BY_JOB = { ...MEASUREMENT_ROW, id: 2, coreMeasurementID: 502, treeTag: 'ROW_ADDED_BY_UPLOAD_JOB' };
+const FINISHED_JOB_ID = 9001;
 const PAGE_SIZE = 10;
 const GRID_COLUMNS: GridColDef[] = [{ field: 'treeTag', headerName: 'Tree Tag', editable: true }];
 const DELETE_DIALOG_CONFIRM_LABEL = 'Confirm';
 const FILTERED_GRID_URL_PREFIX = '/api/fixeddatafilter/';
 const VALIDATION_ERRORS_URL_PREFIX = '/api/validations/validationerrordisplay';
 const QUERY_URL = '/api/query';
+const UPLOAD_JOBS_URL_PREFIX = '/api/uploadjobs';
 // waitFor re-checks on this interval; the fetch count must hold still across one interval.
 const HARNESS_SETTLE_POLL_MS = 100;
 const HARNESS_SETTLE_TIMEOUT_MS = 3000;
@@ -99,14 +104,24 @@ vi.mock('@mui/x-data-grid', async importOriginal => {
   };
 });
 vi.mock('@/config/styleddatagrid', () => ({
-  StyledDataGrid: (props: { rows?: Array<{ id: number }>; columns?: GridColDef[] }) => {
+  StyledDataGrid: (props: {
+    rows?: Array<{ id: number }>;
+    columns?: GridColDef[];
+    slots?: { pagination?: { infiniteScroll?: { onToggle?: (next: boolean) => void; enabled?: boolean } } };
+  }) => {
     const rows = props.rows ?? [];
+    const infiniteScroll = props.slots?.pagination?.infiniteScroll;
     const actionColumn = (props.columns ?? []).find(column => 'getActions' in column && typeof column.getActions === 'function') as
       | { getActions: (params: { id: number; row: unknown }) => React.ReactNode[] }
       | undefined;
     if (!actionColumn) return <div data-testid="no-actions-column" />;
     return (
       <div>
+        <div data-testid="grid-rows">{JSON.stringify(rows)}</div>
+        <div data-testid="infinite-scroll-enabled">{String(Boolean(infiniteScroll?.enabled))}</div>
+        <button type="button" onClick={() => infiniteScroll?.onToggle?.(true)}>
+          Test Toggle Infinite On
+        </button>
         {rows.map(row => (
           <div key={row.id} data-testid={`actions-row-${row.id}`}>
             {actionColumn.getActions({ id: row.id, row }).map((action, index) => (
@@ -123,16 +138,38 @@ function jsonResponse(body: unknown): Response {
   return { ok: true, json: async () => body } as Response;
 }
 
+let serverMeasurementRows: Array<typeof MEASUREMENT_ROW> = [MEASUREMENT_ROW];
+
 function routeMeasurementsFetch(input: RequestInfo | URL): Promise<Response> {
   const url = String(input);
-  if (url.startsWith(FILTERED_GRID_URL_PREFIX)) return Promise.resolve(jsonResponse({ output: [MEASUREMENT_ROW], totalCount: 1 }));
+  if (url.startsWith(FILTERED_GRID_URL_PREFIX))
+    return Promise.resolve(jsonResponse({ output: serverMeasurementRows, totalCount: serverMeasurementRows.length }));
+  if (url.startsWith(UPLOAD_JOBS_URL_PREFIX)) {
+    return Promise.resolve(
+      jsonResponse({
+        jobs: [
+          {
+            jobID: FINISHED_JOB_ID,
+            status: 'completed',
+            phase: 'completed',
+            percentComplete: 100,
+            totalFiles: 1,
+            processedRows: 1,
+            failedRows: 0,
+            lastError: null,
+            updatedAt: new Date().toISOString()
+          }
+        ]
+      })
+    );
+  }
   if (url.startsWith(VALIDATION_ERRORS_URL_PREFIX)) return Promise.resolve(jsonResponse({ failed: [] }));
   if (url === QUERY_URL) return Promise.resolve(jsonResponse([{}]));
   return Promise.resolve(jsonResponse({}));
 }
 
 // Owns the props the real parent (msvdatagrid.tsx) owns, so MeasurementsCommons runs unmodified.
-function MeasurementsGridHarness() {
+function MeasurementsGridHarness({ enableInfiniteScroll = false }: { enableInfiniteScroll?: boolean }) {
   const [rows, setRows] = useState<GridRowsProp>([MEASUREMENT_ROW]);
   const [rowCount, setRowCount] = useState(1);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
@@ -164,6 +201,7 @@ function MeasurementsGridHarness() {
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={() => undefined}
         dynamicButtons={[]}
+        enableInfiniteScroll={enableInfiniteScroll}
       />
     </SWRConfig>
   );
@@ -262,5 +300,45 @@ describe('MeasurementsCommons row actions: Delete right after Cancel (#525 item 
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
     expect(screen.getByRole('button', { name: DELETE_DIALOG_CONFIRM_LABEL })).toBeInTheDocument();
+  });
+});
+
+describe('MeasurementsCommons refresh after a background upload job finishes (#525 item 6)', () => {
+  beforeEach(() => {
+    serverMeasurementRows = [MEASUREMENT_ROW];
+    resetUploadJobCompletionTrackerForTests();
+    mockFetch.mockImplementation(routeMeasurementsFetch);
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  afterEach(() => {
+    resetUploadJobCompletionTrackerForTests();
+    vi.unstubAllGlobals();
+  });
+
+  it('reloads the rows an infinite-mode grid is showing when a submitted job finishes', async () => {
+    function GridWithOptionalBadge({ showBadge }: { showBadge: boolean }) {
+      return (
+        <>
+          {showBadge && <UploadJobStatusBadge schema={stableHarnessContext.site.schemaName} plotID={stableHarnessContext.plot.plotID} censusID={1} />}
+          <MeasurementsGridHarness enableInfiniteScroll />
+        </>
+      );
+    }
+    const { rerender } = render(<GridWithOptionalBadge showBadge={false} />);
+    await screen.findByRole('button', { name: 'Test Toggle Infinite On' });
+    await waitForHarnessToSettle();
+    fireEvent.click(screen.getByRole('button', { name: 'Test Toggle Infinite On' }));
+    await waitFor(() => expect(screen.getByTestId('infinite-scroll-enabled').textContent).toBe('true'));
+    await waitForHarnessToSettle();
+
+    serverMeasurementRows = [ROW_ADDED_BY_JOB, MEASUREMENT_ROW];
+    registerSubmittedUploadJob(FINISHED_JOB_ID);
+    rerender(<GridWithOptionalBadge showBadge />);
+
+    await waitFor(() => {
+      console.log(`[#525 item 6] measurements infinite grid rows after job ${FINISHED_JOB_ID} finished: ${screen.getByTestId('grid-rows').textContent}`);
+      expect(screen.getByTestId('grid-rows').textContent).toContain(ROW_ADDED_BY_JOB.treeTag);
+    });
   });
 });

@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BACKGROUND_JOB_STATUSES } from '@/lib/background-jobs/types';
 import {
   ACTIVE_JOB_STATUSES,
+  announceFinishedUploadJobs,
+  subscribeToFinishedUploadJobs,
   TERMINAL_JOB_STATUSES,
   registerSubmittedUploadJob,
   resetUploadJobCompletionTrackerForTests,
@@ -98,5 +100,25 @@ describe('uploadjobcompletiontracker (#525 item 6)', () => {
     registerSubmittedUploadJob(REGISTERED_JOB_ID);
     expect(poll([{ jobID: REGISTERED_JOB_ID, status: 'archived' }], 'unknown status')).toEqual([]);
     expect(poll([{ jobID: REGISTERED_JOB_ID, status: 'completed' }], 'then completed')).toEqual([REGISTERED_JOB_ID]);
+  });
+});
+
+describe('finished upload job announcements (#525 item 6)', () => {
+  const FINISHED_JOB_SCOPE = { siteSchema: 'forest', plotID: 1, censusID: 7 };
+
+  it('tells every subscriber which scope finished, and stops telling one that unsubscribed', () => {
+    const stayingSubscriber = vi.fn();
+    const leavingSubscriber = vi.fn();
+    subscribeToFinishedUploadJobs(stayingSubscriber);
+    const unsubscribeLeaving = subscribeToFinishedUploadJobs(leavingSubscriber);
+
+    announceFinishedUploadJobs(FINISHED_JOB_SCOPE);
+    unsubscribeLeaving();
+    announceFinishedUploadJobs(FINISHED_JOB_SCOPE);
+
+    console.log(`[#525 item 6] staying=${stayingSubscriber.mock.calls.length} leaving=${leavingSubscriber.mock.calls.length}`);
+    expect(stayingSubscriber).toHaveBeenCalledTimes(2);
+    expect(stayingSubscriber).toHaveBeenCalledWith(FINISHED_JOB_SCOPE);
+    expect(leavingSubscriber).toHaveBeenCalledTimes(1);
   });
 });

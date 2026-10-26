@@ -6,7 +6,12 @@ import CloudUploadOutlined from '@mui/icons-material/CloudUploadOutlined';
 import ErrorOutline from '@mui/icons-material/ErrorOutline';
 import ailogger from '@/ailogger';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-import { ACTIVE_JOB_STATUSES, TERMINAL_JOB_STATUSES, takeNewlyFinishedUploadJobIDs } from '@/components/uploadsystemhelpers/uploadjobcompletiontracker';
+import {
+  ACTIVE_JOB_STATUSES,
+  TERMINAL_JOB_STATUSES,
+  announceFinishedUploadJobs,
+  takeNewlyFinishedUploadJobIDs
+} from '@/components/uploadsystemhelpers/uploadjobcompletiontracker';
 import { invalidateAfter } from '@/lib/query';
 import { SourceFormat } from '@/config/macros/formdetails';
 import type { UploadJobFailureContext } from '@/lib/background-jobs/types';
@@ -147,6 +152,7 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
       const finishedJobIDs = takeNewlyFinishedUploadJobIDs(polledJobs);
       if (finishedJobIDs.length === 0) return;
       triggerRefresh();
+      announceFinishedUploadJobs({ siteSchema: schemaName, plotID, censusID });
       // Not awaited: a slow refetch must never delay or skip the next poll.
       invalidateAfter('upload-job', { siteSchema: schemaName, plotID, censusID }).catch((error: unknown) => {
         ailogger.error(

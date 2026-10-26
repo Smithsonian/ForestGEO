@@ -16,6 +16,8 @@ import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
 import { DELETE_AFTER_CANCEL_GUARD_MS } from '@/components/datagrids/hooks/usedeleteaftercancelguard';
 import { LOADING_BAR_VISIBLE_DELAY_MS } from '@/components/loading';
 import { HTTPResponses } from '@/config/macros';
+import UploadJobStatusBadge from '@/components/client/uploadjobstatusbadge';
+import { registerSubmittedUploadJob, resetUploadJobCompletionTrackerForTests } from '@/components/uploadsystemhelpers/uploadjobcompletiontracker';
 
 const mockFetch = vi.fn();
 const mockGetRowWithUpdatedValues = vi.fn();
@@ -1967,6 +1969,108 @@ describe('IsolatedDataGridCommons', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
       expect(screen.getByRole('button', { name: DELETE_DIALOG_CONFIRM_LABEL })).toBeInTheDocument();
+    });
+  });
+
+  describe('refresh after a background upload job finishes (#525 item 6)', () => {
+    const JOB_REFRESH_GRID_TYPE = 'failedmeasurements';
+    const JOB_REFRESH_BADGE_PLOT_ID = 1;
+    const JOB_REFRESH_BADGE_CENSUS_ID = 1;
+    const FINISHED_JOB_ID = 9001;
+    const ROW_BEFORE_JOB = { id: 1, failedMeasurementID: 1, spCode: 'ROW_BEFORE_UPLOAD_JOB' };
+    const ROW_ADDED_BY_JOB = { id: 2, failedMeasurementID: 2, spCode: 'ROW_ADDED_BY_UPLOAD_JOB' };
+    const JOB_REFRESH_COLUMNS = [
+      { field: 'id', editable: false },
+      { field: 'spCode', editable: true }
+    ];
+
+    function serveGridRowsAndFinishedJob(serverRows: () => Record<string, unknown>[]) {
+      mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+        if (String(input).includes('/api/uploadjobs')) {
+          return {
+            ok: true,
+            json: async () => ({
+              jobs: [
+                {
+                  jobID: FINISHED_JOB_ID,
+                  status: 'completed',
+                  phase: 'completed',
+                  percentComplete: 100,
+                  totalFiles: 1,
+                  processedRows: 1,
+                  failedRows: 0,
+                  lastError: null,
+                  updatedAt: new Date().toISOString()
+                }
+              ]
+            })
+          } as Response;
+        }
+        const rows = serverRows();
+        return { ok: true, json: async () => ({ output: rows, totalCount: rows.length, finishedQuery: 'SELECT 1' }) } as Response;
+      });
+    }
+
+    function GridWithOptionalBadge({ showBadge }: { showBadge: boolean }) {
+      return (
+        <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+          {showBadge && <UploadJobStatusBadge schema={TEST_SCHEMA} plotID={JOB_REFRESH_BADGE_PLOT_ID} censusID={JOB_REFRESH_BADGE_CENSUS_ID} />}
+          <IsolatedDataGridCommons
+            gridType={JOB_REFRESH_GRID_TYPE}
+            gridColumns={JOB_REFRESH_COLUMNS}
+            refresh={false}
+            setRefresh={vi.fn()}
+            dynamicButtons={[]}
+            initialRow={ROW_BEFORE_JOB}
+            enablePageJump
+            enableInfiniteScroll
+          />
+        </SWRConfig>
+      );
+    }
+
+    beforeEach(() => resetUploadJobCompletionTrackerForTests());
+    afterEach(() => resetUploadJobCompletionTrackerForTests());
+
+    it('reloads the rows an infinite-mode grid is showing when a submitted job finishes', async () => {
+      let serverRows: Record<string, unknown>[] = [ROW_BEFORE_JOB];
+      serveGridRowsAndFinishedJob(() => serverRows);
+      const { rerender } = render(<GridWithOptionalBadge showBadge={false} />);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ROW_BEFORE_JOB.spCode));
+      fireEvent.click(screen.getByRole('button', { name: 'Test Toggle Infinite On' }));
+      await waitFor(() => expect(screen.getByTestId('infinite-scroll-enabled').textContent).toBe('true'));
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ROW_BEFORE_JOB.spCode));
+
+      serverRows = [ROW_ADDED_BY_JOB, ROW_BEFORE_JOB];
+      registerSubmittedUploadJob(FINISHED_JOB_ID);
+      rerender(<GridWithOptionalBadge showBadge />);
+
+      await waitFor(() => {
+        console.log(`[#525 item 6] infinite grid rows after job ${FINISHED_JOB_ID} finished: ${screen.getByTestId('row-state').textContent}`);
+        expect(screen.getByTestId('row-state').textContent).toContain(ROW_ADDED_BY_JOB.spCode);
+      });
+      expect(screen.getByTestId('row-state').textContent).toContain(ROW_BEFORE_JOB.spCode);
+    });
+
+    it('does not reload an infinite-mode grid when no job finished', async () => {
+      const serverRows: Record<string, unknown>[] = [ROW_BEFORE_JOB];
+      serveGridRowsAndFinishedJob(() => serverRows);
+      const { rerender } = render(<GridWithOptionalBadge showBadge={false} />);
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ROW_BEFORE_JOB.spCode));
+      fireEvent.click(screen.getByRole('button', { name: 'Test Toggle Infinite On' }));
+      await waitFor(() => expect(screen.getByTestId('infinite-scroll-enabled').textContent).toBe('true'));
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ROW_BEFORE_JOB.spCode));
+      const gridFetchCountBeforeBadge = mockFetch.mock.calls.filter(([input]) => !String(input).includes('/api/uploadjobs')).length;
+
+      rerender(<GridWithOptionalBadge showBadge />);
+      await waitFor(() => expect(mockFetch.mock.calls.some(([input]) => String(input).includes('/api/uploadjobs'))).toBe(true));
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      });
+
+      const gridFetchCountAfterBadge = mockFetch.mock.calls.filter(([input]) => !String(input).includes('/api/uploadjobs')).length;
+      console.log(`[#525 item 6] grid fetches before/after an unregistered finished job: ${gridFetchCountBeforeBadge}/${gridFetchCountAfterBadge}`);
+      expect(gridFetchCountAfterBadge).toBe(gridFetchCountBeforeBadge);
     });
   });
 });

@@ -1,3 +1,4 @@
+import type { QueryScope } from '@/lib/query/queryKey';
 import { BACKGROUND_JOB_STATUSES, NON_TERMINAL_BACKGROUND_JOB_STATUSES, type BackgroundJobStatus } from '@/lib/background-jobs/types';
 
 /**
@@ -43,6 +44,25 @@ export function takeNewlyFinishedUploadJobIDs(jobs: readonly PolledUploadJob[]):
     newlyFinishedJobIDs.push(jobID);
   }
   return newlyFinishedJobIDs;
+}
+
+type FinishedUploadJobListener = (scope: QueryScope) => void;
+
+const finishedUploadJobListeners = new Set<FinishedUploadJobListener>();
+
+/**
+ * Lets a grid that keeps its own row accumulator (infinite scroll) reload when
+ * a job finishes: SWR invalidation never reaches that accumulator.
+ */
+export function subscribeToFinishedUploadJobs(listener: FinishedUploadJobListener): () => void {
+  finishedUploadJobListeners.add(listener);
+  return () => {
+    finishedUploadJobListeners.delete(listener);
+  };
+}
+
+export function announceFinishedUploadJobs(scope: QueryScope): void {
+  finishedUploadJobListeners.forEach(listener => listener(scope));
 }
 
 /** Test isolation only: production code never forgets a job within a tab. */
