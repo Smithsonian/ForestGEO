@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MultilineAttributesDataGrid from '@/components/datagrids/applications/multiline/multilineattributesdatagrid';
@@ -49,9 +49,10 @@ function describeGridState(): string {
   return `rows=${JSON.stringify(rows)} codeEditorPresent=${getCodeEditorInput() !== null} activeElement=${document.activeElement?.tagName}`;
 }
 
-async function addNewRowAndWaitForEditor(): Promise<HTMLInputElement> {
-  fireEvent.click(screen.getByRole('button', { name: /New Row/ }));
+async function addNewRowAndWaitForEditor(user: ReturnType<typeof userEvent.setup>): Promise<HTMLInputElement> {
+  await user.click(screen.getByRole('button', { name: /New Row/ }));
   await waitFor(() => expect(getCodeEditorInput(), `code editor never opened: ${describeGridState()}`).not.toBeNull());
+  await waitFor(() => expect(document.activeElement, `editor not focused: ${describeGridState()}`).toBe(getCodeEditorInput()));
   return getCodeEditorInput() as HTMLInputElement;
 }
 
@@ -68,10 +69,8 @@ describe('IsolatedMultilineDataGridCommons new-row editing (#529)', () => {
   });
 
   it("opens the new row's first editable cell in edit mode with focus, and Enter commits it back to view mode", async () => {
-    const codeInput = await addNewRowAndWaitForEditor();
-    await waitFor(() => expect(document.activeElement, `editor not focused: ${describeGridState()}`).toBe(codeInput));
-
     const user = userEvent.setup();
+    const codeInput = await addNewRowAndWaitForEditor(user);
     await user.type(codeInput, `${NEW_ATTRIBUTE_CODE}{enter}`);
 
     await waitFor(() => expect(getCodeEditorInput(), `cell stayed in edit mode after Enter: ${describeGridState()}`).toBeNull());
@@ -80,15 +79,47 @@ describe('IsolatedMultilineDataGridCommons new-row editing (#529)', () => {
     expect(consoleErrorSpy.mock.calls.map(call => String(call[0]))).toEqual([]);
   });
 
-  it('discards a new row that is still in edit mode without grid errors, and a later New Row opens a fresh editor', async () => {
-    await addNewRowAndWaitForEditor();
+  it.each(['', NEW_ATTRIBUTE_CODE])('discards a new row with draft code %j using a real click, then opens a fresh editor', async draftCode => {
+    const user = userEvent.setup();
+    const codeInput = await addNewRowAndWaitForEditor(user);
+    if (draftCode) await user.type(codeInput, draftCode);
 
-    fireEvent.click(screen.getByRole('button', { name: /Discard all changes/ }));
+    await user.click(screen.getByRole('button', { name: /Discard all changes/ }));
     await waitFor(() => expect(getDataRows(), `discarded row still rendered: ${describeGridState()}`).toHaveLength(0));
+    expect(screen.getByRole('button', { name: /^Save$/ })).toBeDisabled();
 
-    const secondCodeInput = await addNewRowAndWaitForEditor();
+    const secondCodeInput = await addNewRowAndWaitForEditor(user);
     expect(getDataRows(), describeGridState()).toHaveLength(1);
     expect(secondCodeInput.value, describeGridState()).toBe('');
+    await user.type(secondCodeInput, `${NEW_ATTRIBUTE_CODE}{enter}`);
+    await waitFor(() => expect(getCodeEditorInput()).toBeNull());
+    expect(getDataRows(), describeGridState()).toHaveLength(1);
+    expect(getDataRows()[0].querySelector(`[data-field="${FIRST_EDITABLE_FIELD}"]`)?.textContent).toBe(NEW_ATTRIBUTE_CODE);
+    expect(consoleErrorSpy.mock.calls.map(call => String(call[0]))).toEqual([]);
+  });
+
+  it('restores edits to a saved row while removing an unsaved new row', async () => {
+    const user = userEvent.setup();
+    const codeInput = await addNewRowAndWaitForEditor(user);
+    await user.type(codeInput, `${NEW_ATTRIBUTE_CODE}{enter}`);
+    await waitFor(() => expect(getCodeEditorInput()).toBeNull());
+    await user.click(screen.getByRole('button', { name: /^Save$/ }));
+    expect(screen.getByRole('button', { name: /Finalize Changes/ })).toBeEnabled();
+
+    await user.dblClick(getDataRows()[0].querySelector<HTMLElement>(`[data-field="${FIRST_EDITABLE_FIELD}"]`)!);
+    await waitFor(() => expect(getCodeEditorInput()).not.toBeNull());
+    await user.clear(getCodeEditorInput()!);
+    await user.type(getCodeEditorInput()!, 'CHANGED{enter}');
+    await waitFor(() => expect(getCodeEditorInput()).toBeNull());
+
+    const newCodeInput = await addNewRowAndWaitForEditor(user);
+    await user.type(newCodeInput, 'UNSAVED');
+    await user.click(screen.getByRole('button', { name: /Discard all changes/ }));
+
+    await waitFor(() => expect(getDataRows(), describeGridState()).toHaveLength(1));
+    expect(getDataRows()[0].querySelector(`[data-field="${FIRST_EDITABLE_FIELD}"]`)?.textContent).toBe(NEW_ATTRIBUTE_CODE);
+    expect(screen.getByRole('button', { name: /^Save$/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Finalize Changes/ })).toBeEnabled();
     expect(consoleErrorSpy.mock.calls.map(call => String(call[0]))).toEqual([]);
   });
 });

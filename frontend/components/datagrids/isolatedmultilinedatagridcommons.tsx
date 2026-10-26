@@ -120,7 +120,10 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     return newRow;
   }, []);
 
-  const discardChanges = useCallback(() => {
+  const discardChanges = useCallback(async () => {
+    // MUI applies the blur-triggered processRowUpdate result in a microtask.
+    // Let that commit finish before removing rows so it cannot reinsert them.
+    await Promise.resolve();
     setHasUnsavedRows(false);
     const newRowIds = new Set(
       Object.values(unsavedChangesRef.current.unsavedRows)
@@ -129,7 +132,9 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     );
     setRows(previousRows => previousRows.filter(row => !newRowIds.has(row.id)));
     Object.values(unsavedChangesRef.current.rowsBeforeChange).forEach(row => {
-      apiRef.current?.updateRows([row]);
+      // Blurring a new row records a snapshot too; restoring it would reinsert
+      // the row we just discarded.
+      if (!newRowIds.has(row.id)) apiRef.current?.updateRows([row]);
     });
     unsavedChangesRef.current = {
       unsavedRows: {},
@@ -148,7 +153,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
       const savedRows = filteredRows.map(row => {
         const updatedRow = rowsToSave.find(editedRow => editedRow.id === row.id);
         const nextRow = updatedRow ? { ...row, ...updatedRow } : row;
-        return { ...nextRow, _error: !validateRow(nextRow, gridType) };
+        return { ...nextRow, isNew: false, _error: !validateRow(nextRow, gridType) };
       });
       setRows(savedRows);
 
