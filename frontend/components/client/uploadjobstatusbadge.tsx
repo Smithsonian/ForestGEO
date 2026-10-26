@@ -5,15 +5,21 @@ import { Box, Button, Chip, LinearProgress, Modal, ModalClose, Sheet, Stack, Typ
 import CloudUploadOutlined from '@mui/icons-material/CloudUploadOutlined';
 import ErrorOutline from '@mui/icons-material/ErrorOutline';
 import ailogger from '@/ailogger';
+import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
+import {
+  ACTIVE_JOB_STATUSES,
+  TERMINAL_JOB_STATUSES,
+  announceFinishedUploadJobs,
+  takeNewlyFinishedUploadJobIDs
+} from '@/components/uploadsystemhelpers/uploadjobcompletiontracker';
+import { invalidateAfter } from '@/lib/query';
 import { SourceFormat } from '@/config/macros/formdetails';
 import type { UploadJobFailureContext } from '@/lib/background-jobs/types';
 
-const JOB_POLL_INTERVAL_MS = 10_000;
+export const JOB_POLL_INTERVAL_MS = 10_000;
 const TERMINAL_JOB_VISIBILITY_MS = 24 * 60 * 60 * 1000;
 
 const CANCELLABLE_JOB_STATUSES = new Set(['queued', 'running', 'waiting_retry']);
-const ACTIVE_JOB_STATUSES = new Set(['queued', 'running', 'cancel_requested', 'waiting_retry']);
-const TERMINAL_JOB_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 
 export interface UploadJobSummary {
   jobID: number;
@@ -74,6 +80,7 @@ function describeJobStatus(status: string): string | null {
 }
 
 export default function UploadJobStatusBadge({ schema, plotID, censusID }: { schema?: string; plotID?: number; censusID?: number }) {
+  const { triggerRefresh } = useDataValidityContext();
   const [jobs, setJobs] = useState<UploadJobSummary[]>([]);
   const [detailOpen, setDetailOpen] = useState(false);
   const [cancellingJobIDs, setCancellingJobIDs] = useState<Set<number>>(new Set());
@@ -141,6 +148,20 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
     let requestInFlight = false;
     const schemaName = schema;
 
+    function refreshAfterFinishedUploadJobs(polledJobs: UploadJobSummary[]) {
+      const finishedJobIDs = takeNewlyFinishedUploadJobIDs(polledJobs);
+      if (finishedJobIDs.length === 0) return;
+      triggerRefresh();
+      announceFinishedUploadJobs({ siteSchema: schemaName, plotID, censusID });
+      // Not awaited: a slow refetch must never delay or skip the next poll.
+      invalidateAfter('upload-job', { siteSchema: schemaName, plotID, censusID }).catch((error: unknown) => {
+        ailogger.error(
+          `[UploadJobStatusBadge] Grid refresh after upload job(s) ${finishedJobIDs.join(', ')} finished was rejected`,
+          error instanceof Error ? error : new Error(String(error))
+        );
+      });
+    }
+
     async function fetchJobs() {
       if (requestInFlight) return;
       requestInFlight = true;
@@ -155,9 +176,12 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
         const response = await fetch(`/api/uploadjobs?${params.toString()}`);
         if (!response.ok) return;
         const payload = (await response.json()) as { jobs?: UploadJobSummary[] };
-        if (!cancelled) {
-          setJobs(selectVisibleJobs(payload.jobs ?? []));
-        }
+        // A response for a scope we already left is dropped before the tracker sees
+        // it; its jobs stay pending and are handled when that scope is polled again.
+        if (cancelled) return;
+        const polledJobs = payload.jobs ?? [];
+        setJobs(selectVisibleJobs(polledJobs));
+        refreshAfterFinishedUploadJobs(polledJobs);
       } catch (error) {
         ailogger.warn('[UploadJobStatusBadge] Failed to poll upload jobs:', error instanceof Error ? error : new Error(String(error)));
       } finally {
@@ -175,7 +199,7 @@ export default function UploadJobStatusBadge({ schema, plotID, censusID }: { sch
         pollTimerRef.current = null;
       }
     };
-  }, [schema, plotID, censusID, refetchNonce]);
+  }, [schema, plotID, censusID, refetchNonce, triggerRefresh]);
 
   if (jobs.length === 0) return null;
 

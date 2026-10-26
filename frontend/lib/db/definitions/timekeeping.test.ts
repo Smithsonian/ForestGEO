@@ -3,13 +3,14 @@ import type { OrgCensusRDS } from './timekeeping';
 
 let reconcileCurrentCensusSelection: typeof import('./timekeeping').reconcileCurrentCensusSelection;
 let OrgCensusToCensusResultMapper: typeof import('./timekeeping').OrgCensusToCensusResultMapper;
+let createAndUpdateCensusList: typeof import('./timekeeping').createAndUpdateCensusList;
 
 beforeAll(async () => {
   vi.unmock('@/lib/db/definitions/timekeeping');
   // The shared auth-mocks setup mocks MapperFactory with 'sites'-only support; the real
   // census mapper is a pure factory (no DB), so use it here rather than the throwing stub.
   vi.unmock('@/config/datamapper');
-  ({ reconcileCurrentCensusSelection, OrgCensusToCensusResultMapper } = await import('./timekeeping'));
+  ({ reconcileCurrentCensusSelection, OrgCensusToCensusResultMapper, createAndUpdateCensusList } = await import('./timekeeping'));
 });
 
 describe('reconcileCurrentCensusSelection', () => {
@@ -19,14 +20,16 @@ describe('reconcileCurrentCensusSelection', () => {
       plotCensusNumber: 2,
       censusIDs: [6],
       dateRanges: [{ censusID: 6, startDate: new Date('2020-01-01'), endDate: new Date('2020-12-31') }],
-      description: 'Second census'
+      description: 'Second census',
+      isActive: true
     },
     {
       plotID: 1,
       plotCensusNumber: 1,
       censusIDs: [1],
       dateRanges: [{ censusID: 1, startDate: new Date('2010-06-06'), endDate: new Date('2012-10-17') }],
-      description: 'First census'
+      description: 'First census',
+      isActive: true
     }
   ];
 
@@ -36,7 +39,8 @@ describe('reconcileCurrentCensusSelection', () => {
       plotCensusNumber: 1,
       censusIDs: [1],
       dateRanges: [{ censusID: 1, startDate: new Date('2010-06-06'), endDate: new Date('2012-10-17') }],
-      description: 'Persisted'
+      description: 'Persisted',
+      isActive: true
     };
 
     expect(reconcileCurrentCensusSelection(currentCensus, censusList)).toBe(censusList[1]);
@@ -48,7 +52,8 @@ describe('reconcileCurrentCensusSelection', () => {
       plotCensusNumber: 1,
       censusIDs: [14],
       dateRanges: [{ censusID: 14, startDate: new Date('2010-06-06'), endDate: new Date('2012-10-17') }],
-      description: 'Stale persisted census'
+      description: 'Stale persisted census',
+      isActive: true
     };
 
     expect(reconcileCurrentCensusSelection(staleCurrentCensus, censusList)).toBe(censusList[1]);
@@ -60,7 +65,8 @@ describe('reconcileCurrentCensusSelection', () => {
       plotCensusNumber: 9,
       censusIDs: [99],
       dateRanges: [{ censusID: 99, startDate: new Date('2030-01-01') }],
-      description: 'Missing census'
+      description: 'Missing census',
+      isActive: true
     };
 
     expect(reconcileCurrentCensusSelection(missingCurrentCensus, censusList)).toBeUndefined();
@@ -143,5 +149,33 @@ describe('OrgCensusToCensusResultMapper.startNewCensus', () => {
     await expect(new OrgCensusToCensusResultMapper().startNewCensus(SCHEMA, PLOT_ID, PLOT_CENSUS_NUMBER, { startDate: PICKED_START })).rejects.toThrow(
       /Census creation failed \(HTTP 500\).*Incorrect date value/
     );
+  });
+});
+
+describe('createAndUpdateCensusList carries the census active flag (#525 items 2+3)', () => {
+  const PLOT_ID = 1;
+  const ACTIVE_CENSUS_NUMBER = 2;
+  const INACTIVE_CENSUS_NUMBER = 1;
+  const ACTIVE_FLAG_FROM_MYSQL = 1;
+
+  it('maps isActive 1 to true and a missing isActive (GenericMapper turns 0 into undefined) to false', async () => {
+    const censusList = await createAndUpdateCensusList([
+      { censusID: 11, plotID: PLOT_ID, plotCensusNumber: ACTIVE_CENSUS_NUMBER, description: 'Active census', isActive: ACTIVE_FLAG_FROM_MYSQL },
+      { censusID: 10, plotID: PLOT_ID, plotCensusNumber: INACTIVE_CENSUS_NUMBER, description: 'Inactive census' }
+    ]);
+
+    console.log('[#525 items 2+3] mapped census list:', JSON.stringify(censusList.map(c => ({ n: c.plotCensusNumber, isActive: c.isActive }))));
+    expect(censusList.find(c => c.plotCensusNumber === ACTIVE_CENSUS_NUMBER)?.isActive).toBe(true);
+    expect(censusList.find(c => c.plotCensusNumber === INACTIVE_CENSUS_NUMBER)?.isActive).toBe(false);
+  });
+
+  it('treats a census number as active when any of its rows is active', async () => {
+    const censusList = await createAndUpdateCensusList([
+      { censusID: 20, plotID: PLOT_ID, plotCensusNumber: ACTIVE_CENSUS_NUMBER, description: 'Inactive row' },
+      { censusID: 21, plotID: PLOT_ID, plotCensusNumber: ACTIVE_CENSUS_NUMBER, description: 'Active row', isActive: ACTIVE_FLAG_FROM_MYSQL }
+    ]);
+
+    expect(censusList).toHaveLength(1);
+    expect(censusList[0].isActive).toBe(true);
   });
 });

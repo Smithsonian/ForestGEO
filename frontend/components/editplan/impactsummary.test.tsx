@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import ImpactSummary from './impactsummary';
+import ImpactSummary, { SELECTED_ROW_COUNT_EXPLANATION, formatIncludeNewRowsLabel } from './impactsummary';
 import {
   BulkEditPlan,
   RoleForbiddenFieldPreviewError,
@@ -14,7 +14,8 @@ import {
 const PLAN_HASH = 'c'.repeat(64);
 const PLAN_ROW_COUNT = 3;
 // The literal phrase ImpactSummary requires the user to type for a destructive plan.
-const EXPECTED_CONFIRM_PHRASE = `APPLY ${PLAN_ROW_COUNT}`;
+const SELECTED_ROW_COUNT = PLAN_ROW_COUNT;
+const EXPECTED_CONFIRM_PHRASE = `APPLY ${SELECTED_ROW_COUNT}`;
 
 const ROLE_FORBIDDEN_MESSAGE = 'SpeciesCode can only be edited by global or db admin users.';
 const GROUP_SPECIES_CONFLICT_MESSAGE = 'Two rows in this batch request different destination species for the same tree.';
@@ -160,7 +161,7 @@ describe('ImpactSummary', () => {
   describe('Blocker banners', () => {
     it('renders a TreeStemResolution group_species_conflict error under impact-summary-blocking-errors with its real message, never under the role banner', () => {
       const bulkPlan = buildBulkPlan({ canApply: false, errors: [buildGroupSpeciesConflictError()] });
-      render(<ImpactSummary bulkPlan={bulkPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
       const blockingErrors = screen.getByTestId('impact-summary-blocking-errors');
       expect(blockingErrors).toHaveTextContent(GROUP_SPECIES_CONFLICT_MESSAGE);
@@ -170,7 +171,7 @@ describe('ImpactSummary', () => {
 
     it('renders the role-blocked banner with the exact role copy for a RoleForbiddenField error, without the generic blocking-errors banner', () => {
       const bulkPlan = buildBulkPlan({ canApply: false, errors: [buildRoleForbiddenError()] });
-      render(<ImpactSummary bulkPlan={bulkPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
       expect(screen.getByTestId('impact-summary-blocked')).toHaveTextContent('This revision cannot be applied by your current role.');
       expect(screen.queryByTestId('impact-summary-blocking-errors')).not.toBeInTheDocument();
@@ -181,7 +182,7 @@ describe('ImpactSummary', () => {
         canApply: false,
         errors: [buildRoleForbiddenError(), buildGroupSpeciesConflictError()]
       });
-      render(<ImpactSummary bulkPlan={bulkPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
       expect(screen.getByTestId('impact-summary-blocked')).toBeInTheDocument();
       expect(screen.getByTestId('impact-summary-blocking-errors')).toHaveTextContent(GROUP_SPECIES_CONFLICT_MESSAGE);
@@ -189,21 +190,23 @@ describe('ImpactSummary', () => {
 
     it('disables Apply in every blocked case: role-only, group-conflict-only, and both together', () => {
       const roleOnly = buildBulkPlan({ canApply: false, errors: [buildRoleForbiddenError()] });
-      const { rerender } = render(<ImpactSummary bulkPlan={roleOnly} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      const { rerender } = render(
+        <ImpactSummary bulkPlan={roleOnly} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />
+      );
       expect(screen.getByTestId('impact-summary-apply')).toBeDisabled();
 
       const conflictOnly = buildBulkPlan({ canApply: false, errors: [buildGroupSpeciesConflictError()] });
-      rerender(<ImpactSummary bulkPlan={conflictOnly} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      rerender(<ImpactSummary bulkPlan={conflictOnly} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
       expect(screen.getByTestId('impact-summary-apply')).toBeDisabled();
 
       const both = buildBulkPlan({ canApply: false, errors: [buildRoleForbiddenError(), buildGroupSpeciesConflictError()] });
-      rerender(<ImpactSummary bulkPlan={both} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      rerender(<ImpactSummary bulkPlan={both} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
       expect(screen.getByTestId('impact-summary-apply')).toBeDisabled();
     });
 
     it('shows a generic (non-role) blocked explanation and disables Apply when canApply is false with no errors at all', () => {
       const bulkPlan = buildBulkPlan({ canApply: false, errors: undefined });
-      render(<ImpactSummary bulkPlan={bulkPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
       const blockingErrors = screen.getByTestId('impact-summary-blocking-errors');
       expect(blockingErrors).not.toHaveTextContent(/role/i);
@@ -235,7 +238,7 @@ describe('ImpactSummary', () => {
         affectedCoreMeasurementIDs: [9101]
       });
       const bulkPlan = buildBulkPlan({ speciesCorrectionGroups: [groupOne, groupTwo] });
-      render(<ImpactSummary bulkPlan={bulkPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
       const containerOne = screen.getByTestId(`impact-summary-species-correction-${CORRECTED_TREE_ID}-${CORRECTED_CENSUS_ID}`);
       expect(within(containerOne).getByText(new RegExp(CORRECTED_TREE_TAG))).toBeInTheDocument();
@@ -253,7 +256,7 @@ describe('ImpactSummary', () => {
     it('reports requested-member, sibling-member, and additional-unsubmitted-affected counts separately when all three differ', () => {
       const group = buildSpeciesCorrectionGroup();
       const bulkPlan = buildBulkPlan({ speciesCorrectionGroups: [group] });
-      render(<ImpactSummary bulkPlan={bulkPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
       const container = screen.getByTestId(`impact-summary-species-correction-${CORRECTED_TREE_ID}-${CORRECTED_CENSUS_ID}`);
       // 1 requested, 1 sibling, 2 unsubmitted-but-affected — three distinct numbers.
@@ -265,7 +268,7 @@ describe('ImpactSummary', () => {
     it('reports active and inactive measurement counts separately rather than summed', () => {
       const group = buildSpeciesCorrectionGroup();
       const bulkPlan = buildBulkPlan({ speciesCorrectionGroups: [group] });
-      render(<ImpactSummary bulkPlan={bulkPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
       const container = screen.getByTestId(`impact-summary-species-correction-${CORRECTED_TREE_ID}-${CORRECTED_CENSUS_ID}`);
       const summedText = `Active measurements: ${GROUP_ONE_ACTIVE_MEASUREMENTS + GROUP_ONE_INACTIVE_MEASUREMENTS}`;
@@ -278,7 +281,7 @@ describe('ImpactSummary', () => {
     it('omits the species-corrections section entirely, and keeps stats/effects/apply working, when there are no species correction groups', async () => {
       const user = userEvent.setup();
       const bulkPlan = buildBulkPlan({ speciesCorrectionGroups: undefined });
-      render(<ImpactSummary bulkPlan={bulkPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
       expect(screen.queryByTestId('impact-summary-species-corrections')).not.toBeInTheDocument();
       expect(screen.queryByTestId('impact-summary-species-correction-count')).not.toBeInTheDocument();
@@ -293,7 +296,7 @@ describe('ImpactSummary', () => {
     it('keeps Apply disabled until the exact APPLY {rowCount} phrase is typed, then enables it', async () => {
       const user = userEvent.setup();
       const bulkPlan = buildBulkPlan({ maxSeverity: 'destructive', rowCount: PLAN_ROW_COUNT });
-      render(<ImpactSummary bulkPlan={bulkPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
       const applyButton = screen.getByTestId('impact-summary-apply');
       expect(applyButton).toBeDisabled();
@@ -310,7 +313,7 @@ describe('ImpactSummary', () => {
         canApply: false,
         errors: [buildGroupSpeciesConflictError()]
       });
-      render(<ImpactSummary bulkPlan={bulkPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
       await user.type(screen.getByTestId('impact-summary-typed-confirm-input'), EXPECTED_CONFIRM_PHRASE);
       expect(screen.getByTestId('impact-summary-apply')).toBeDisabled();
@@ -321,7 +324,7 @@ describe('ImpactSummary', () => {
     it('calls onConfirm when Apply is clicked in an enabled (non-destructive, unblocked) state', async () => {
       const user = userEvent.setup();
       const bulkPlan = buildBulkPlan();
-      render(<ImpactSummary bulkPlan={bulkPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
       await user.click(screen.getByTestId('impact-summary-apply'));
       expect(onConfirm).toHaveBeenCalledTimes(1);
@@ -331,11 +334,131 @@ describe('ImpactSummary', () => {
     it('calls onCancel when Cancel is clicked', async () => {
       const user = userEvent.setup();
       const bulkPlan = buildBulkPlan();
-      render(<ImpactSummary bulkPlan={bulkPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={SELECTED_ROW_COUNT} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
       await user.click(screen.getByTestId('impact-summary-cancel'));
       expect(onCancel).toHaveBeenCalledTimes(1);
       expect(onConfirm).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the rows the apply will write (#525 item 9)', () => {
+    const WHOLE_PLAN_ROW_COUNT = 10;
+    const ROWS_TO_WRITE = 3;
+    const NEW_ROW_COUNT = 2;
+
+    it('asks for APPLY with the selected row count, not the whole plan row count', async () => {
+      const user = userEvent.setup();
+      const bulkPlan = buildBulkPlan({ maxSeverity: 'destructive', rowCount: WHOLE_PLAN_ROW_COUNT });
+      render(<ImpactSummary bulkPlan={bulkPlan} selectedRowCount={ROWS_TO_WRITE} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      // The test id is on Joy Input's root DIV; clear() and toHaveValue need the inner <input>.
+      const input = screen.getByRole('textbox', { name: 'Confirm destructive apply' });
+      const applyButton = screen.getByTestId('impact-summary-apply');
+
+      await user.type(input, `APPLY ${WHOLE_PLAN_ROW_COUNT}`);
+      const disabledWithPlanRowCount = (applyButton as HTMLButtonElement).disabled;
+      await user.clear(input);
+      await user.type(input, `APPLY ${ROWS_TO_WRITE}`);
+
+      console.log(
+        `[#525 item 9] APPLY ${WHOLE_PLAN_ROW_COUNT} disabled=${disabledWithPlanRowCount}; APPLY ${ROWS_TO_WRITE} disabled=${(applyButton as HTMLButtonElement).disabled}`
+      );
+      expect(disabledWithPlanRowCount).toBe(true);
+      expect(applyButton).not.toBeDisabled();
+    });
+
+    it('disables Apply when nothing is selected, even for a plan that needs no typed phrase', () => {
+      render(<ImpactSummary bulkPlan={buildBulkPlan()} selectedRowCount={0} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      expect(screen.getByTestId('impact-summary-apply')).toBeDisabled();
+    });
+
+    it('shows the new-rows checkbox only when there are new rows, and reports changes', async () => {
+      const user = userEvent.setup();
+      const onIncludeNewRowsChange = vi.fn();
+      const { rerender } = render(
+        <ImpactSummary bulkPlan={buildBulkPlan()} selectedRowCount={ROWS_TO_WRITE} newRowCount={0} onConfirm={onConfirm} onCancel={onCancel} busy={false} />
+      );
+      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+
+      rerender(
+        <ImpactSummary
+          bulkPlan={buildBulkPlan()}
+          selectedRowCount={ROWS_TO_WRITE}
+          newRowCount={NEW_ROW_COUNT}
+          includeNewRows={false}
+          onIncludeNewRowsChange={onIncludeNewRowsChange}
+          onConfirm={onConfirm}
+          onCancel={onCancel}
+          busy={false}
+        />
+      );
+      await user.click(screen.getByRole('checkbox', { name: `Also insert ${NEW_ROW_COUNT} new rows` }));
+
+      expect(onIncludeNewRowsChange).toHaveBeenCalledWith(true);
+    });
+
+    it('explains what the typed number counts on a destructive plan', () => {
+      render(
+        <ImpactSummary
+          bulkPlan={buildBulkPlan({ maxSeverity: 'destructive' })}
+          selectedRowCount={ROWS_TO_WRITE}
+          onConfirm={onConfirm}
+          onCancel={onCancel}
+          busy={false}
+        />
+      );
+      expect(screen.getByTestId('impact-summary-selected-count-explanation')).toHaveTextContent(SELECTED_ROW_COUNT_EXPLANATION);
+    });
+
+    it.each([
+      { planKind: 'destructive', maxSeverity: 'destructive' as const },
+      { planKind: 'non-destructive', maxSeverity: 'info' as const }
+    ])('always shows how many rows a $planKind apply will write, with what the number counts', ({ planKind, maxSeverity }) => {
+      render(
+        <ImpactSummary bulkPlan={buildBulkPlan({ maxSeverity })} selectedRowCount={ROWS_TO_WRITE} onConfirm={onConfirm} onCancel={onCancel} busy={false} />
+      );
+
+      const countLine = screen.getByTestId('impact-summary-apply-row-count');
+      console.log(`[#525 F2] ${planKind} plan, count line: "${countLine.textContent}"`);
+      expect(countLine).toHaveTextContent(`This apply will write ${ROWS_TO_WRITE} rows.`);
+      expect(countLine).toHaveTextContent(SELECTED_ROW_COUNT_EXPLANATION);
+    });
+
+    it('says "1 row" in the singular when exactly one row will be written', () => {
+      render(<ImpactSummary bulkPlan={buildBulkPlan()} selectedRowCount={1} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      expect(screen.getByTestId('impact-summary-apply-row-count')).toHaveTextContent('This apply will write 1 row.');
+    });
+
+    it('explains why Apply is greyed on a new-rows-only plan until the new rows are ticked', () => {
+      render(
+        <ImpactSummary
+          bulkPlan={buildBulkPlan()}
+          selectedRowCount={0}
+          newRowCount={NEW_ROW_COUNT}
+          includeNewRows={false}
+          onIncludeNewRowsChange={vi.fn()}
+          onConfirm={onConfirm}
+          onCancel={onCancel}
+          busy={false}
+        />
+      );
+
+      const countLine = screen.getByTestId('impact-summary-apply-row-count');
+      console.log(`[#525 F2] new-only plan, nothing ticked, count line: "${countLine.textContent}"`);
+      expect(screen.getByTestId('impact-summary-apply')).toBeDisabled();
+      expect(countLine).toHaveTextContent('This apply will write 0 rows.');
+      expect(countLine).toHaveTextContent('Nothing is selected yet');
+      expect(countLine).toHaveTextContent(formatIncludeNewRowsLabel(NEW_ROW_COUNT));
+    });
+
+    it('does not suggest ticking new rows when the plan has none and nothing is selected', () => {
+      render(<ImpactSummary bulkPlan={buildBulkPlan()} selectedRowCount={0} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      const countLine = screen.getByTestId('impact-summary-apply-row-count');
+      expect(countLine).toHaveTextContent('This apply will write 0 rows.');
+      expect(countLine).toHaveTextContent('Nothing is selected yet');
+      expect(countLine).not.toHaveTextContent('Also insert');
     });
   });
 });

@@ -58,6 +58,7 @@ import DatasetIcon from '@mui/icons-material/Dataset';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/config/store/appstore';
+import { CENSUS_DELETE_GENERIC_FAILURE_MESSAGE, CENSUS_DELETE_STALE_LIST_STATUSES, readCensusDeleteRejectionMessage } from '@/config/censusdeletion';
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
 import CensusCreationModal, { CensusCreationDetails } from '@/components/client/modals/censuscreationmodal';
@@ -381,6 +382,19 @@ export default function DashboardPage() {
           body: JSON.stringify({ schema: currentSite.schemaName, censusID, type: deleteType })
         });
         if (!response.ok) {
+          const rejectionMessage = await readCensusDeleteRejectionMessage(response);
+          if (rejectionMessage) {
+            ailogger.warn(`Census delete refused by the server (HTTP ${response.status}): ${rejectionMessage}`);
+            setError(rejectionMessage);
+            if (CENSUS_DELETE_STALE_LIST_STATUSES.includes(response.status)) {
+              try {
+                await refreshCensusList();
+              } catch (refreshError) {
+                ailogger.warn(`Census list refresh after a refused delete failed: ${refreshError instanceof Error ? refreshError.message : refreshError}`);
+              }
+            }
+            return;
+          }
           throw new Error(`Failed to clear census: ${response.status}`);
         }
 
@@ -405,7 +419,7 @@ export default function DashboardPage() {
       } catch (error: any) {
         console.error('Failed to delete census:', error);
         ailogger.error('Failed to delete census', error);
-        setError('Failed to delete census. Please try again.');
+        setError(CENSUS_DELETE_GENERIC_FAILURE_MESSAGE);
       } finally {
         setLoading(false);
         setIsDeletingCensus(false);
@@ -658,6 +672,7 @@ export default function DashboardPage() {
             plotName={currentPlot.plotName}
             siteName={currentSite.siteName}
             isLoading={false}
+            userRole={userRole}
             onCensusDelete={handleCensusDelete}
             onAddCensus={handleAddCensus}
             onSelectCensus={census => {

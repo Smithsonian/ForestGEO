@@ -1,14 +1,30 @@
 /**
  * Censuses Overview Component
  *
- * Displays a read-only informational grid of censuses for the selected plot.
- * Users must use the sidebar to make selections - these cards are for display only.
+ * Shows the plot's censuses as cards. Clicking a card selects that census.
+ * Each card's More actions menu offers Delete census, enabled only where
+ * the server's admin, active and latest-only rule would allow it.
  */
 
 'use client';
 
 import React from 'react';
-import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, LinearProgress, IconButton } from '@mui/joy';
+import {
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  Chip,
+  Stack,
+  Avatar,
+  LinearProgress,
+  IconButton,
+  Dropdown,
+  ListItemDecorator,
+  Menu,
+  MenuButton,
+  MenuItem
+} from '@mui/joy';
 import { ContentSkeleton } from '@/components/loading';
 import { OrgCensusRDS, CensusDateRange } from '@/lib/db/definitions/timekeeping';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
@@ -20,7 +36,10 @@ import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import DescriptionIcon from '@mui/icons-material/Description';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import DeleteIcon from '@mui/icons-material/Delete';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import AddIcon from '@mui/icons-material/Add';
+import { getCensusDeleteBlockReason } from '@/config/censusdeletion';
+import type { UserAuthRoles } from '@/config/macros';
 import { formatCalendarDate, formatCalendarMonthYear } from '@/config/dateformats';
 import {
   CensusStatus,
@@ -54,6 +73,7 @@ export interface CensusesOverviewProps {
   plotName?: string;
   siteName?: string;
   isLoading?: boolean;
+  userRole?: UserAuthRoles;
   onCensusDelete?: (census: OrgCensusRDS | CensusWithStats) => void;
   onAddCensus?: () => void;
   onSelectCensus?: (census: OrgCensusRDS | CensusWithStats) => void;
@@ -99,14 +119,73 @@ function calculateDuration(dateRanges: CensusDateRange[]): string | null {
   return formatCensusWindowDuration(dateRanges);
 }
 
+// React events bubble through portals, so the portaled Menu would otherwise
+// reach the card's onClick/onKeyDown and select the census.
+function stopCardInteraction(event: React.SyntheticEvent) {
+  event.stopPropagation();
+}
+
+interface CensusActionsMenuProps {
+  census: OrgCensusRDS | CensusWithStats;
+  deleteBlockReason: string | null;
+  onDelete: (census: OrgCensusRDS | CensusWithStats) => void;
+}
+
+function CensusActionsMenu({ census, deleteBlockReason, onDelete }: CensusActionsMenuProps) {
+  return (
+    <Dropdown>
+      <MenuButton
+        slots={{ root: IconButton }}
+        slotProps={{
+          root: {
+            size: 'sm',
+            variant: 'soft',
+            'aria-label': `More actions for census ${census.plotCensusNumber}`,
+            sx: {
+              bgcolor: 'rgba(255,255,255,0.2)',
+              color: 'rgba(255,255,255,1)',
+              backdropFilter: 'blur(4px)',
+              '&:hover': { bgcolor: 'rgba(255,255,255,0.35)' }
+            }
+          }
+        }}
+        onClick={stopCardInteraction}
+        onKeyDown={stopCardInteraction}
+      >
+        <MoreVertIcon sx={{ fontSize: 16 }} />
+      </MenuButton>
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the handlers only stop events bubbling to the card; they add no behaviour */}
+      <Menu placement="bottom-end" onClick={stopCardInteraction} onKeyDown={stopCardInteraction} sx={{ minWidth: 240, zIndex: 9999 }}>
+        <MenuItem color="danger" disabled={deleteBlockReason !== null} onClick={() => onDelete(census)}>
+          <ListItemDecorator>
+            <DeleteIcon />
+          </ListItemDecorator>
+          <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+            <Typography level="body-sm" color="danger">
+              Delete census
+            </Typography>
+            {deleteBlockReason ? (
+              <Typography level="body-xs" color="neutral" sx={{ whiteSpace: 'normal' }}>
+                {deleteBlockReason}
+              </Typography>
+            ) : null}
+          </Box>
+        </MenuItem>
+      </Menu>
+    </Dropdown>
+  );
+}
+
 interface CensusCardProps {
   census: OrgCensusRDS | CensusWithStats;
   index: number;
+  censusList: readonly (OrgCensusRDS | CensusWithStats)[];
+  userRole?: UserAuthRoles;
   onDelete?: (census: OrgCensusRDS | CensusWithStats) => void;
   onSelect?: (census: OrgCensusRDS | CensusWithStats) => void;
 }
 
-function CensusCard({ census, index, onDelete, onSelect }: CensusCardProps) {
+function CensusCard({ census, index, censusList, userRole, onDelete, onSelect }: CensusCardProps) {
   const gradient = CENSUS_GRADIENTS[index % CENSUS_GRADIENTS.length];
   const status = getCensusStatus(census.dateRanges);
   const duration = calculateDuration(census.dateRanges);
@@ -196,28 +275,7 @@ function CensusCard({ census, index, onDelete, onSelect }: CensusCardProps) {
             >
               {statusConfig[status].label}
             </Chip>
-            {onDelete && (
-              <IconButton
-                size="sm"
-                variant="soft"
-                color="danger"
-                onClick={e => {
-                  e.stopPropagation();
-                  onDelete(census);
-                }}
-                aria-label={`Delete census ${census.plotCensusNumber}`}
-                sx={{
-                  bgcolor: 'rgba(239, 68, 68, 0.5)',
-                  color: 'rgba(255, 255, 255, 1)',
-                  backdropFilter: 'blur(4px)',
-                  '&:hover': {
-                    bgcolor: 'rgba(239, 68, 68, 0.7)'
-                  }
-                }}
-              >
-                <DeleteIcon sx={{ fontSize: 16 }} />
-              </IconButton>
-            )}
+            {onDelete && <CensusActionsMenu census={census} deleteBlockReason={getCensusDeleteBlockReason(census, censusList, userRole)} onDelete={onDelete} />}
           </Stack>
         </Box>
 
@@ -450,6 +508,7 @@ export default function CensusesOverview({
   plotName,
   siteName,
   isLoading = false,
+  userRole,
   onCensusDelete,
   onAddCensus,
   onSelectCensus
@@ -540,7 +599,7 @@ export default function CensusesOverview({
       <Box component="ul" sx={gridStyles}>
         {sortedCensuses.map((census, index) => (
           <Box component="li" key={census.plotCensusNumber ?? index}>
-            <CensusCard census={census} index={index} onDelete={onCensusDelete} onSelect={onSelectCensus} />
+            <CensusCard census={census} index={index} censusList={censuses} userRole={userRole} onDelete={onCensusDelete} onSelect={onSelectCensus} />
           </Box>
         ))}
       </Box>

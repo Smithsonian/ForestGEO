@@ -66,7 +66,8 @@ describe('Sidebar selection cascade (R9, #517)', () => {
     plotCensusNumber,
     censusIDs: [plotCensusNumber * 100],
     dateRanges: [{ censusID: plotCensusNumber * 100, startDate: new Date(2024, 0, 1), endDate: new Date(2024, 11, 31) }],
-    description: `Census ${plotCensusNumber}`
+    description: `Census ${plotCensusNumber}`,
+    isActive: true
   });
 
   const renderSidebar = () => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} />);

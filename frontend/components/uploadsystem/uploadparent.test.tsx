@@ -263,12 +263,13 @@ vi.mock('@/components/uploadsystem/segments/uploadarcgispreflight', () => ({
 // because `vi.mock` factories are hoisted above the rest of the module: a plain
 // module-scope `const` referenced inside the factory below would still be in its
 // temporal dead zone when the factory actually runs.
-const { mockUploadFireSqlBehavior } = vi.hoisted(() => ({
+const { mockUploadFireSqlBehavior, mockUploadFireAzureBehavior } = vi.hoisted(() => ({
   mockUploadFireSqlBehavior: {
     mode: 'complete' as 'complete' | 'error',
     errorMessage: 'Upload failed',
     errorComponent: 'UploadFireSQL'
-  }
+  },
+  mockUploadFireAzureBehavior: { advanceToComplete: false }
 }));
 
 vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => {
@@ -309,9 +310,10 @@ vi.mock('@/components/uploadsystem/segments/uploaderror', () => ({
 }));
 
 vi.mock('@/components/uploadsystem/segments/uploadcomplete', () => ({
-  default: ({ handleCloseUploadModal }: any) => (
+  default: ({ handleCloseUploadModal, uploadOutcome }: any) => (
     <div data-testid="upload-complete">
       <div>Upload Complete!</div>
+      <div data-testid="upload-complete-outcome">{JSON.stringify(uploadOutcome ?? null)}</div>
       <button onClick={() => handleCloseUploadModal()}>Close</button>
     </div>
   )
@@ -325,9 +327,15 @@ vi.mock('@/components/uploadsystem/segments/uploadupdatevalidations', () => ({
   default: () => <div data-testid="upload-update-validations">Update Validations</div>
 }));
 
-vi.mock('@/components/uploadsystem/segments/uploadfireazure', () => ({
-  default: () => <div data-testid="upload-fire-azure">Fire Azure</div>
-}));
+vi.mock('@/components/uploadsystem/segments/uploadfireazure', () => {
+  const MockUploadFireAzure = ({ setReviewState }: any) => {
+    React.useEffect(() => {
+      if (mockUploadFireAzureBehavior.advanceToComplete) setReviewState(ReviewStates.COMPLETE);
+    }, [setReviewState]);
+    return <div data-testid="upload-fire-azure">Fire Azure</div>;
+  };
+  return { default: MockUploadFireAzure };
+});
 
 vi.mock('@/components/uploadsystem/segments/uploadreingestion', () => ({
   default: () => <div data-testid="upload-reingestion">Reingestion</div>
@@ -342,6 +350,7 @@ describe('UploadParent - Hook Integration Tests', () => {
     mockUploadFireSqlBehavior.mode = 'complete';
     mockUploadFireSqlBehavior.errorMessage = 'Upload failed';
     mockUploadFireSqlBehavior.errorComponent = 'UploadFireSQL';
+    mockUploadFireAzureBehavior.advanceToComplete = false;
   });
 
   describe('Hook Integration - useUploadState', () => {
@@ -654,6 +663,7 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUploadFireAzureBehavior.advanceToComplete = false;
     originalFetch = global.fetch;
   });
 
@@ -749,7 +759,7 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     return renderResult;
   }
 
-  it('opens on the New Rows tab for a new-only revision upload, and requires explicit confirmation before applying', async () => {
+  it('opens on the New Rows tab for a new-only revision upload, and inserts new rows only when the box in the confirmation dialog is checked', async () => {
     const user = userEvent.setup();
 
     const newRowCsvRow = { tag: 'T001', stemtag: 'S1', quadrat: 'Q1', dbh: '10', date: '2024-01-01', spcode: null };
@@ -757,7 +767,17 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
       matchedRows: [],
       newRows: [{ csvRow: newRowCsvRow, csvIndex: 0, reason: 'no-match-key-in-db' }],
       invalidRows: [],
-      counts: { matched: 0, matchedWithChanges: 0, new: 1, invalid: 0, total: 1 }
+      counts: { matched: 0, matchedWithChanges: 0, new: 1, invalid: 0, total: 1 },
+      bulkPlan: {
+        dataType: 'measurementssummary',
+        rowCount: 1,
+        rowPlans: [{ rowIndex: 0, status: 'new' }],
+        aggregateEffects: [],
+        maxSeverity: 'info',
+        planHash: 'new-only-plan-hash',
+        generatedAt: '2026-10-21T00:00:00Z',
+        duplicateDeletions: []
+      }
     };
     const applyResponse = {
       updatedCount: 0,
@@ -768,13 +788,14 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
       validationPending: false
     };
     const { applyRequestBodies, resolveMatch } = mockRevisionUploadFetch({ matchResponse, applyResponse, deferMatch: true });
+    const NEW_ROWS_TAB_TEXT = /will be inserted as new measurements if you include them when applying/;
 
     await driveToRevisionMatch(user);
 
     // UploadRevisionMatch must not mount until the match response exists -- while the
     // request is in flight, a matching-in-progress state should be visible instead.
     await waitFor(() => expect(screen.getByText(/matching revision rows/i)).toBeInTheDocument());
-    expect(screen.queryByText('Confirm new row insertion')).not.toBeInTheDocument();
+    expect(screen.queryByText(NEW_ROWS_TAB_TEXT)).not.toBeInTheDocument();
 
     resolveMatch();
 
@@ -786,17 +807,20 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     // real newRows-only response lands, the New Rows tab exists in the TabList but its
     // panel is never the selected one, so this text never renders and the wait below
     // times out.
-    await waitFor(() => expect(screen.getByText('Confirm new row insertion')).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByText(NEW_ROWS_TAB_TEXT)).toBeInTheDocument(), { timeout: 3000 });
 
-    const applyButton = screen.getByTestId('revision-match-apply');
-    expect(applyButton).toBeDisabled();
+    const reviewButton = screen.getByTestId('revision-match-apply');
+    expect(reviewButton).toHaveTextContent('Review and apply…');
+    await user.click(reviewButton);
+    const confirmButton = await screen.findByTestId('impact-summary-apply');
+    expect(confirmButton).toBeDisabled();
 
-    await user.click(screen.getByText('Confirm new row insertion'));
-    expect(applyButton).not.toBeDisabled();
-
-    await user.click(applyButton);
+    await user.click(screen.getByRole('checkbox', { name: 'Also insert 1 new row' }));
+    expect(confirmButton).not.toBeDisabled();
+    await user.click(confirmButton);
 
     await waitFor(() => expect(applyRequestBodies).toHaveLength(1));
+    console.log(`[#525 item 9] apply body confirmNewRows=${String(applyRequestBodies[0].confirmNewRows)}`);
     expect(applyRequestBodies[0].confirmNewRows).toBe(true);
     expect(applyRequestBodies[0].newRows).toHaveLength(1);
 
@@ -1058,7 +1082,8 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
     }) as unknown as typeof global.fetch;
 
     await driveToRevisionMatch(user);
-    await waitFor(() => expect(screen.getByText('Confirm new row insertion')).toBeInTheDocument());
+    // UploadRevisionMatch mounts only once the match response exists (uploadparent.tsx REVISION_MATCH case), with or without a toggle.
+    await waitFor(() => expect(screen.getByTestId('revision-match-apply')).toBeInTheDocument());
 
     expect(matchRequestBodies).toHaveLength(1);
     expect(matchRequestBodies[0].previousUploadAttemptID, 'the first match of a new upload must never send a prior attempt identity').toBeUndefined();
@@ -1109,7 +1134,8 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
 
     // Upload #1: establishes attempt A.
     await addFileAndContinueUpload(user);
-    await waitFor(() => expect(screen.getByText('Confirm new row insertion')).toBeInTheDocument());
+    // UploadRevisionMatch mounts only once the match response exists (uploadparent.tsx REVISION_MATCH case), with or without a toggle.
+    await waitFor(() => expect(screen.getByTestId('revision-match-apply')).toBeInTheDocument());
     expect(matchRequestBodies).toHaveLength(1);
     expect(matchRequestBodies[0].previousUploadAttemptID).toBeUndefined();
 
@@ -1133,6 +1159,56 @@ describe('UploadParent - Revision Upload Default Tab Selection', () => {
       matchRequestBodies[1].previousUploadAttemptID,
       "a new upload started via the real reset path must never echo back the previous upload's attempt identity"
     ).toBeUndefined();
+  });
+
+  it('hands the revision apply counts, failedRowCount included, to the completion screen (#525 item 4)', async () => {
+    const REVISION_APPLY_TO_COMPLETE_TIMEOUT_MS = 6000;
+    mockUploadFireAzureBehavior.advanceToComplete = true;
+    const user = userEvent.setup();
+    const changedRow = { tag: 'T525', stemtag: 'S1', quadrat: 'Q1', dbh: '12.5', date: '2024-01-01' };
+    const matchResponse = {
+      matchedRows: [
+        {
+          csvIndex: 0,
+          csvRow: changedRow,
+          coreMeasurementID: 525,
+          changes: { dbh: { from: '10', to: '12.5' } },
+          existingValues: { measuredDBH: 10, measuredHOM: null, measurementDate: '2024-01-01', rawCodes: null, description: null }
+        }
+      ],
+      newRows: [],
+      invalidRows: [{ csvRow: { tag: 'T404', stemtag: 'S1' }, csvIndex: 1, reason: 'No matching identity found in the active census' }],
+      counts: { matched: 1, matchedWithChanges: 1, new: 0, invalid: 1, total: 2 }
+    };
+    const applyResponse = {
+      updatedCount: 1,
+      skippedCount: 0,
+      insertedCount: 0,
+      deletedDuplicateCount: 0,
+      failedRowCount: 1,
+      applyErrors: [],
+      validationPending: false
+    };
+    mockRevisionUploadFetch({ matchResponse, applyResponse });
+
+    await driveToRevisionMatch(user);
+    await waitFor(() => expect(screen.getByText('1 rows to update')).toBeInTheDocument(), { timeout: 3000 });
+    // No bulkPlan in this response, so Apply calls onApply directly (still true after PR C).
+    await user.click(screen.getByTestId('revision-match-apply'));
+
+    const outcomeNode = await screen.findByTestId('upload-complete-outcome', {}, { timeout: REVISION_APPLY_TO_COMPLETE_TIMEOUT_MS });
+    const receivedOutcome = JSON.parse(outcomeNode.textContent ?? 'null');
+    console.log(`[#525 item 4] outcome UploadComplete received: ${JSON.stringify(receivedOutcome)}`);
+    expect(receivedOutcome).toEqual({
+      kind: 'revisions',
+      updatedCount: 1,
+      deletedDuplicateCount: 0,
+      insertedCount: 0,
+      failedRowCount: 1,
+      skippedCount: 0,
+      applyErrorCount: 0,
+      hasDuplicateCleanupOnlyRows: false
+    });
   });
 });
 

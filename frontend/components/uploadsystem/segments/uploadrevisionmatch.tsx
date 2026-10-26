@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Alert, Box, Button, Chip, Sheet, Stack, Tab, TabList, TabPanel, Table, Tabs, Typography } from '@mui/joy';
+import { Alert, Button, Chip, Sheet, Stack, Tab, TabList, TabPanel, Table, Tabs, Typography } from '@mui/joy';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { RevisionCollapsedRow, RevisionInvalidRow, RevisionMatchCounts, RevisionMatchedRow, RevisionNewRowCandidate } from '@/config/revisionuploadtypes';
 import { BulkEditPlan } from '@/config/editplan/types';
@@ -108,11 +108,20 @@ export function resolveDefaultTabValue(counts: RevisionRowCounts): RevisionTabVa
   return 'changes';
 }
 
+export const REVIEW_AND_APPLY_LABEL = 'Review and apply…';
+export const NEW_ROWS_TAB_EXPLANATION =
+  'These rows did not match an existing measurement in the active census and will be inserted as new measurements if you include them when applying.';
+
 export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchProps>) {
   const { matchedRows, newRows, invalidRows, collapsedRows = [], counts, bulkPlan, preflightWarning, onApply, handleReturnToStart, onRefreshMatch } = props;
 
-  const [confirmNewRows, setConfirmNewRows] = useState(false);
+  const [includeNewRows, setIncludeNewRows] = useState(false);
   const [impactSummaryOpen, setImpactSummaryOpen] = useState(false);
+
+  const openImpactSummary = () => {
+    setIncludeNewRows(false);
+    setImpactSummaryOpen(true);
+  };
 
   const rowsWithChanges = matchedRows.filter(r => Object.keys(r.changes).length > 0);
   const rowsWithDuplicateCleanupOnly = matchedRows.filter(r => Object.keys(r.changes).length === 0 && hasDuplicateCleanup(r));
@@ -137,11 +146,15 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
   // entirely of rejected rows needs a path to record that, not a disabled
   // button that silently drops them. rowsWithDuplicateCleanupOnly already
   // counts toward actionableMatchedRowCount.
-  const canApply = !planBlocked && (actionableMatchedRowCount > 0 || (confirmNewRows && newRows.length > 0) || invalidRows.length > 0);
-  const totalActionableCount = actionableMatchedRowCount + (confirmNewRows ? newRows.length : 0);
-  const applyButtonLabel =
-    totalActionableCount > 0
-      ? `Apply ${totalActionableCount} Revisions`
+  const hasRowsToApply = actionableMatchedRowCount > 0 || newRows.length > 0 || invalidRows.length > 0;
+  // Without a plan there is no dialog to opt new rows in, so they are never inserted.
+  const canApplyWithoutPlan = actionableMatchedRowCount > 0 || invalidRows.length > 0;
+  const canApply = !planBlocked && (bulkPlan ? hasRowsToApply : canApplyWithoutPlan);
+  const selectedRowCount = actionableMatchedRowCount + (includeNewRows ? newRows.length : 0) + invalidRows.length;
+  const applyButtonLabel = bulkPlan
+    ? REVIEW_AND_APPLY_LABEL
+    : actionableMatchedRowCount > 0
+      ? `Apply ${actionableMatchedRowCount} Revisions`
       : invalidRows.length > 0
         ? `Record ${invalidRows.length} Invalid Row${invalidRows.length === 1 ? '' : 's'}`
         : 'Apply 0 Revisions';
@@ -333,19 +346,7 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
         {newRows.length > 0 && (
           <TabPanel value="new">
             <Stack spacing={2}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Typography level="body-md">
-                  These rows did not match an existing measurement in the active census and will be inserted as new measurements if confirmed.
-                </Typography>
-                <Button
-                  size="sm"
-                  variant={confirmNewRows ? 'solid' : 'outlined'}
-                  color={confirmNewRows ? 'success' : 'neutral'}
-                  onClick={() => setConfirmNewRows(prev => !prev)}
-                >
-                  {confirmNewRows ? 'New rows confirmed' : 'Confirm new row insertion'}
-                </Button>
-              </Box>
+              <Typography level="body-md">{NEW_ROWS_TAB_EXPLANATION}</Typography>
               {stemIdNotFoundCount > 0 && (
                 <Alert color="warning" variant="soft">
                   <Stack spacing={0.5}>
@@ -478,7 +479,7 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
           variant="solid"
           color="primary"
           disabled={!canApply}
-          onClick={() => (bulkPlan ? setImpactSummaryOpen(true) : onApply(confirmNewRows))}
+          onClick={() => (bulkPlan ? openImpactSummary() : onApply(false))}
           data-testid="revision-match-apply"
         >
           {applyButtonLabel}
@@ -488,9 +489,13 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
       {bulkPlan && impactSummaryOpen ? (
         <ImpactSummary
           bulkPlan={bulkPlan}
+          selectedRowCount={selectedRowCount}
+          newRowCount={newRows.length}
+          includeNewRows={includeNewRows}
+          onIncludeNewRowsChange={setIncludeNewRows}
           onConfirm={async () => {
             setImpactSummaryOpen(false);
-            onApply(confirmNewRows);
+            onApply(includeNewRows);
           }}
           onCancel={() => setImpactSummaryOpen(false)}
           busy={false}
