@@ -95,6 +95,39 @@ export function useQuadratContext(): Quadrat | undefined {
 // Dispatch Context Compatibility
 // ============================================================================
 
+// Cookie writes are async server actions that can complete out of order. Selection state is
+// always updated synchronously FIRST (so the store reflects the latest intent immediately),
+// and cookie writes are serialized per cookie name with latest-intent-wins: a write whose
+// value was superseded before it started is skipped, and writes never overlap, so a slow
+// write for an older selection can neither restore itself nor overwrite a newer cookie.
+const cookieIntent = new Map<string, string>();
+const cookieChain = new Map<string, Promise<void>>();
+
+function writeCookieLatest(name: string, value: string): Promise<void> {
+  cookieIntent.set(name, value);
+  const previous = cookieChain.get(name) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      if (cookieIntent.get(name) !== value) return;
+      await submitCookie(name, value);
+    });
+  cookieChain.set(name, next);
+  return next;
+}
+
+/**
+ * After a store-level selection cascade, clear the cookies of any dependant selection
+ * (plot/census/quadrat) that the cascade dropped so server-side reads cannot see a stale ID.
+ */
+async function syncClearedCookies(before: ReturnType<typeof useAppStore.getState>, after: ReturnType<typeof useAppStore.getState>) {
+  const writes: Promise<void>[] = [];
+  if (before.currentPlot && !after.currentPlot) writes.push(writeCookieLatest('plotID', ''));
+  if (before.currentCensus && !after.currentCensus) writes.push(writeCookieLatest('censusID', ''));
+  if (before.currentQuadrat && !after.currentQuadrat) writes.push(writeCookieLatest('quadratID', ''));
+  await Promise.all(writes);
+}
+
 /**
  * Enhanced dispatch type matching old API
  */
@@ -111,8 +144,10 @@ export function useSiteDispatch(): EnhancedDispatch<Site | undefined> | undefine
 
   return useCallback(
     async (action: { site?: Site }) => {
-      await submitCookie('schema', action.site?.schemaName ?? '');
+      const before = useAppStore.getState();
       setSite(action.site);
+      // The store cascades a site change to plot/census; keep their cookies in step.
+      await Promise.all([writeCookieLatest('schema', action.site?.schemaName ?? ''), syncClearedCookies(before, useAppStore.getState())]);
     },
     [setSite]
   );
@@ -127,8 +162,10 @@ export function usePlotDispatch(): EnhancedDispatch<Plot | undefined> | undefine
 
   return useCallback(
     async (action: { plot?: Plot }) => {
-      await submitCookie('plotID', action.plot?.plotID?.toString() ?? '');
+      const before = useAppStore.getState();
       setPlot(action.plot);
+      // The store cascades a plot change to the census; keep its cookie in step.
+      await Promise.all([writeCookieLatest('plotID', action.plot?.plotID?.toString() ?? ''), syncClearedCookies(before, useAppStore.getState())]);
     },
     [setPlot]
   );
@@ -143,8 +180,8 @@ export function useOrgCensusDispatch(): EnhancedDispatch<OrgCensus | undefined> 
 
   return useCallback(
     async (action: { census?: OrgCensus }) => {
-      await submitCookie('censusID', action.census?.dateRanges?.[0]?.censusID?.toString() ?? '');
       setCensus(action.census);
+      await writeCookieLatest('censusID', action.census?.dateRanges?.[0]?.censusID?.toString() ?? '');
     },
     [setCensus]
   );
@@ -159,8 +196,8 @@ export function useQuadratDispatch(): EnhancedDispatch<Quadrat | undefined> | un
 
   return useCallback(
     async (action: { quadrat?: Quadrat }) => {
-      await submitCookie('quadratID', action.quadrat?.quadratID?.toString() ?? '');
       setQuadrat(action.quadrat);
+      await writeCookieLatest('quadratID', action.quadrat?.quadratID?.toString() ?? '');
     },
     [setQuadrat]
   );

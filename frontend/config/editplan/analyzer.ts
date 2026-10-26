@@ -16,7 +16,7 @@ import { applySpeciesRules } from './rules/species';
 import { applyTreeStemRules } from './rules/treestem';
 import { applyCoordinateRules } from './rules/coordinates';
 import { applyAttributeRules } from './rules/attributes';
-import { canonicalizeEditPayload, rejectDisallowedFields, EditSurface, isFieldEditableByRole } from './fieldpolicy';
+import { assertNonNegativeFields, canonicalizeEditPayload, rejectDisallowedFields, EditSurface, isFieldEditableByRole } from './fieldpolicy';
 import { hashPlan } from './planhash';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { fieldChanged } from './storedfieldcomparison';
@@ -121,6 +121,7 @@ export async function analyzeEdit(
 ): Promise<EditPlan> {
   const surface = SURFACE_BY_DATATYPE[dataType];
   const newRow = canonicalizeEditPayload(surface, rawNewRow);
+  assertNonNegativeFields(newRow);
   const disallowed = rejectDisallowedFields(surface, newRow);
   if (disallowed) throw new DisallowedFieldError(disallowed);
 

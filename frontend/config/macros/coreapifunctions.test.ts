@@ -851,6 +851,88 @@ describe('CoreAPIFunctions', () => {
     });
   });
 
+  describe('reference text trimming (#521)', () => {
+    const sqlStartingWith = (verb: string): string[] =>
+      mockConnectionManager.executeQuery.mock.calls
+        .map((call: any[]) => call[0])
+        .filter((sql: unknown): sql is string => typeof sql === 'string' && sql.trimStart().toUpperCase().startsWith(verb));
+
+    const patchAttribute = (oldRow: Record<string, unknown>, newRow: Record<string, unknown>) =>
+      PATCH(new NextRequest('http://localhost/api/test', { method: 'PATCH', body: JSON.stringify({ oldRow, newRow }) }), {
+        params: Promise.resolve({ dataType: 'attributes', slugs: [TEST_SCHEMA, 'code'] })
+      });
+
+    const postRow = (dataType: string, gridID: string, newRow: Record<string, unknown>) =>
+      POST(new NextRequest('http://localhost/api/test', { method: 'POST', body: JSON.stringify({ newRow }) }), {
+        params: Promise.resolve({ dataType, slugs: [TEST_SCHEMA, gridID, '1', '7'] })
+      });
+
+    it('POST attributes trims outer whitespace from Code and Description and keeps internal spaces', async () => {
+      mockInsertReadback(0, { Code: 'A1', Description: 'Dead  Stem', IsActive: 1 });
+
+      const response = await postRow('attributes', 'code', { Code: '  A1 ', Description: ' Dead  Stem ' });
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const [insert] = sqlStartingWith('INSERT');
+      expect(insert).toContain("`Code` = 'A1'");
+      expect(insert).toContain("`Description` = 'Dead  Stem'");
+      expect(insert).not.toContain("'  A1 '");
+    });
+
+    it('PATCH attributes trims a Code the user edited', async () => {
+      mockPatchSnapshots({ Code: 'A1', Description: 'd', IsActive: 1 }, { Code: 'B2', Description: 'd', IsActive: 1 });
+
+      const response = await patchAttribute({ Code: 'A1', Description: 'd' }, { Code: ' B2 ', Description: 'd' });
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const [update] = sqlStartingWith('UPDATE');
+      expect(update).toContain("`Code` = 'B2'");
+      expect(update).not.toContain("' B2 '");
+    });
+
+    it('PATCH attributes leaves an unchanged legacy Code alone (it is the primary key) while trimming Description', async () => {
+      mockPatchSnapshots({ Code: ' OLD ', Description: 'x', IsActive: 1 }, { Code: ' OLD ', Description: 'padded', IsActive: 1 });
+
+      const response = await patchAttribute({ Code: ' OLD ', Description: 'x' }, { Code: ' OLD ', Description: '  padded  ' });
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const [update] = sqlStartingWith('UPDATE');
+      expect(update).toContain("`Code` = ' OLD '");
+      expect(update).toContain("`Description` = 'padded'");
+    });
+
+    it('POST attributes with a whitespace-only Code is rejected and inserts nothing', async () => {
+      mockInsertReadback(0, { Code: '', IsActive: 1 });
+
+      const response = await postRow('attributes', 'code', { Code: '   ', Description: 'd' });
+
+      expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+      expect(sqlStartingWith('INSERT')).toHaveLength(0);
+      expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+    });
+
+    it('PATCH attributes with a whitespace-only Code is rejected and updates nothing', async () => {
+      mockPatchSnapshots({ Code: 'A1', Description: 'd', IsActive: 1 }, { Code: 'A1', Description: 'd', IsActive: 1 });
+
+      const response = await patchAttribute({ Code: 'A1', Description: 'd' }, { Code: '   ', Description: 'd' });
+
+      expect(response.status).toBe(HTTPResponses.INVALID_REQUEST);
+      expect(sqlStartingWith('UPDATE')).toHaveLength(0);
+      expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+    });
+
+    it('does not trim text for a non-attributes dataType', async () => {
+      mockInsertReadback(5, { SpeciesID: 5, SpeciesCode: ' ACA ', Description: ' padded  text ', IsActive: 1 });
+
+      const response = await postRow('species', 'speciesID', { SpeciesCode: ' ACA ', Description: ' padded  text ' });
+
+      expect(response.status).toBe(HTTPResponses.OK);
+      const [insert] = sqlStartingWith('INSERT');
+      expect(insert).toContain("`SpeciesCode` = ' ACA '");
+      expect(insert).toContain("`Description` = ' padded  text '");
+    });
+  });
+
   describe('POST function', () => {
     it('should throw error when slugs not provided', async () => {
       const mockRequest = new NextRequest('http://localhost/api/test', {

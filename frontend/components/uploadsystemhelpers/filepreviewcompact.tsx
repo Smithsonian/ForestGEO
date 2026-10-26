@@ -167,14 +167,12 @@ export default function FilePreviewCompact({
             <Typography level="body-xs">
               <strong>Detected:</strong> {previewData[0]?.length || 0} columns
             </Typography>
+            {/* `expectedHeaders` is every permitted field while only the required subset is validated, so a
+                detected-vs-expected count comparison is always a false alarm. Genuine structural problems
+                (missing required headers, ragged rows) surface through the validation issues above. */}
             {expectedHeaders && (
               <Typography level="body-xs">
-                <strong>Expected:</strong> {expectedHeaders.length} columns
-              </Typography>
-            )}
-            {previewData[0]?.length !== expectedHeaders?.length && expectedHeaders && (
-              <Typography level="body-xs" color="warning">
-                ⚠ Count mismatch
+                <strong>Accepted fields:</strong> {expectedHeaders.length}
               </Typography>
             )}
           </Stack>

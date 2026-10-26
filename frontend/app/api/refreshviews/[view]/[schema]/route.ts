@@ -2,7 +2,7 @@ import { HTTPResponses } from '@/config/macros';
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
-import moment from 'moment';
+import { toSqlUtcDateTime } from '@/config/dateformats';
 import { isValidSchema, safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { refreshMeasurementsSummaryForScope, refreshViewFullTableForScope } from '@/lib/measurementviewrefresh';
 import { updatePostValidationLastRun } from '@/lib/postvalidationlastrun';
@@ -68,7 +68,8 @@ async function _executePostValidationQueries(
     for (const queryRow of queriesResult) {
       stats.executed++;
       const queryID = queryRow.QueryID;
-      const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
+      // LastRunAt is read back as UTC (pool timezone 'Z'), so write UTC wall-clock time.
+      const currentTime = toSqlUtcDateTime();
 
       try {
         // Replace placeholders in query definition with undefined check

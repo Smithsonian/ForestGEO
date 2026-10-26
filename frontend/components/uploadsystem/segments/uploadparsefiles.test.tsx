@@ -511,6 +511,25 @@ describe('measurement upload size gate', () => {
     expect(screen.queryByText(/exceeds the \d+ MB upload limit/)).toBeNull();
   });
 
+  it('shows the filename and the physical line location in the persistent File Validation Issues alert', () => {
+    const file = new FileWithStream(new File(['x'], 'ragged.csv', { type: 'text/csv' }), false);
+    fileValidationEvents.clear();
+    fileValidationEvents.set(file.name, {
+      isValid: false,
+      issues: [{ code: DelimiterIssueCode.ROW_COLUMN_COUNT_MISMATCH, message: 'Line 3 has 2 columns, expected 3' }],
+      headers: CANONICAL_HEADERS
+    });
+    act(() => {
+      renderUploadParseFiles([file], vi.fn(), FormType.measurements, SourceFormat.csv);
+    });
+
+    const alertText = screen.getByText('File Validation Issues').parentElement?.textContent ?? '';
+    expect(alertText).toContain('ragged.csv:');
+    expect(alertText).toContain('Line 3 has 2 columns, expected 3');
+    expect(alertText).not.toMatch(/data row/i);
+    expect(screen.queryByText(/data row/i)).toBeNull();
+  });
+
   it('still rejects two ArcGIS workbooks, so size advice never implies multi-workbook selection', () => {
     const workbookType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     renderMeasurements([fileReportingSize('a.xlsx', 10, workbookType), fileReportingSize('b.xlsx', 10, workbookType)], SourceFormat.arcgis_xlsx);
