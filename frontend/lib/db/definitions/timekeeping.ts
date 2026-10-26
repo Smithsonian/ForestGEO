@@ -1,5 +1,6 @@
 import { ResultType } from '@/config/utils';
 import MapperFactory, { IDataMapper } from '@/config/datamapper';
+import { bitToBoolean } from '@/config/macros/bitconversion';
 
 // Types and constants
 export type CensusRDS =
@@ -15,6 +16,8 @@ export type CensusRDS =
       firstMeasurementDate?: Date | null;
       lastMeasurementDate?: Date | null;
       description?: string;
+      // mysql2 returns TINYINT(1) as a number; GenericMapper turns 0 into undefined.
+      isActive?: number | boolean;
     }
   | undefined;
 export type CensusResult = ResultType<CensusRDS>;
@@ -38,6 +41,7 @@ export interface OrgCensusRDS {
   censusIDs: number[];
   dateRanges: CensusDateRange[];
   description: string;
+  isActive: boolean;
 }
 
 export type OrgCensus = OrgCensusRDS | undefined;
@@ -57,7 +61,7 @@ export class OrgCensusToCensusResultMapper {
     censusRDSList.forEach(censusRDS => {
       if (!censusRDS) throw new Error('censusRDS is undefined');
 
-      const { plotCensusNumber, censusID, startDate, endDate, description } = censusRDS;
+      const { plotCensusNumber, censusID, startDate, endDate, description, isActive } = censusRDS;
       // Only carry the window/measurement fields when the row actually has them, so a
       // payload from an older list keeps its original shape.
       const extraDates: Partial<CensusDateRange> = {};
@@ -72,13 +76,15 @@ export class OrgCensusToCensusResultMapper {
           plotCensusNumber: plotCensusNumber!,
           censusIDs: [censusID!],
           dateRanges: [{ censusID: censusID!, startDate, endDate, ...extraDates }],
-          description: description || ''
+          description: description || '',
+          isActive: bitToBoolean(isActive)
         };
         uniqueCensusMap.set(plotCensusNumber!, existingCensus);
       } else {
         existingCensus.censusIDs.push(censusID!);
         existingCensus.dateRanges.push({ censusID: censusID!, startDate, endDate, ...extraDates });
         existingCensus.dateRanges.sort((a, b) => b.censusID - a.censusID);
+        existingCensus.isActive = existingCensus.isActive || bitToBoolean(isActive);
       }
     });
 

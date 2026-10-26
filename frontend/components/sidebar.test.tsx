@@ -391,7 +391,8 @@ describe('Sidebar - Functional Tests', () => {
       plotCensusNumber: 1,
       censusIDs: [101],
       dateRanges: [{ censusID: 101, startDate: new Date('2024-01-01'), endDate: new Date('2024-12-31') }],
-      description: 'Test Census'
+      description: 'Test Census',
+      isActive: true
     };
 
     beforeEach(() => {
@@ -556,14 +557,16 @@ describe('Sidebar - Functional Tests', () => {
         plotCensusNumber: 1,
         censusIDs: [101],
         dateRanges: [{ censusID: 101, startDate: new Date('2024-01-01'), endDate: new Date('2024-12-31') }],
-        description: 'Census 1'
+        description: 'Census 1',
+        isActive: true
       },
       {
         plotID: 1,
         plotCensusNumber: 2,
         censusIDs: [102],
         dateRanges: [{ censusID: 102, startDate: new Date('2025-01-01'), endDate: new Date('2025-12-31') }],
-        description: 'Census 2'
+        description: 'Census 2',
+        isActive: true
       }
     ];
 
@@ -620,7 +623,8 @@ describe('Sidebar - Functional Tests', () => {
         plotCensusNumber: 1,
         censusIDs: [101],
         dateRanges: [{ censusID: 101, startDate: firstMeasurement, endDate: lastMeasurement }],
-        description: 'Census 1'
+        description: 'Census 1',
+        isActive: true
       }
     ];
     const OLD_TODATESTRING_PATTERN = /\b\w{3}\s\w{3}\s\d{2}\s\d{4}\b/; // e.g. "Sat Feb 02 2008"

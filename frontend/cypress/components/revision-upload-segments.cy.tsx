@@ -127,6 +127,7 @@ describe('Revision Upload Segments', () => {
         setReviewState={setReviewState}
         setIsDataUnsaved={setIsDataUnsaved}
         onPlanConflict={cy.stub().as('onPlanConflict')}
+        setUploadOutcome={cy.stub().as('setUploadOutcome')}
       />
     );
 
@@ -147,5 +148,6 @@ describe('Revision Upload Segments', () => {
 
     cy.tick(2000);
     cy.get('@setReviewState').should('have.been.calledWith', ReviewStates.UPLOAD_AZURE);
+    cy.get('@setUploadOutcome').should('have.been.calledWithMatch', { kind: 'revisions', updatedCount: 1, failedRowCount: 0 });
   });
 });

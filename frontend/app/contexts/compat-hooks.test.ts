@@ -17,7 +17,7 @@ const siteA = { siteID: 1, siteName: 'A', schemaName: 'a' };
 const siteB = { siteID: 2, siteName: 'B', schemaName: 'b' };
 const plot1 = { plotID: 1, plotName: 'P1' };
 const plot2 = { plotID: 2, plotName: 'P2' };
-const census = { plotID: 1, plotCensusNumber: 1, censusIDs: [1], dateRanges: [], description: '' } as OrgCensus;
+const census = { plotID: 1, plotCensusNumber: 1, censusIDs: [1], dateRanges: [], description: '', isActive: true } as OrgCensus;
 
 describe('selection dispatch hooks', () => {
   beforeEach(() => {
