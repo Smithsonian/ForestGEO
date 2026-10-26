@@ -20,9 +20,10 @@ import {
   Typography
 } from '@mui/joy';
 import { PlotRDS } from '@/lib/db/definitions/zones';
-import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
+import { ChangeEvent, Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { parseEpsgForSave } from '@/components/client/modals/plot-epsg';
+import { PlotFieldErrors, validatePlot } from '@/components/client/modals/plot-validation';
 import Grid from '@mui/joy/Grid';
 import { createPostPatchQuery } from '@/config/datagridhelpers';
 import { useSiteContext } from '@/app/contexts/compat-hooks';
@@ -56,47 +57,62 @@ export default function PlotCardModal(props: {
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [editablePlot, setEditablePlot] = useState<PlotRDS>({ ...emptyPlot, ...plot });
-  const [validationError, setValidationError] = useState('');
-  const [epsgError, setEpsgError] = useState('');
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [saveSucceeded, setSaveSucceeded] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const currentSite = useSiteContext();
+
+  const fieldErrors = useMemo(() => validatePlot(editablePlot), [editablePlot]);
+  const hasErrors = Object.keys(fieldErrors).length > 0;
+  // Live feedback appears once a field has been edited; Save stays disabled while any field is invalid.
+  const errorFor = (field: keyof PlotFieldErrors): string => {
+    if (!touched[field]) return '';
+    return fieldErrors[field] ?? '';
+  };
 
   // Sync editablePlot state when plot prop changes
   useEffect(() => {
     setEditablePlot({ ...emptyPlot, ...plot });
     setIsEditing(!plot?.plotID);
-    setValidationError('');
-    setEpsgError('');
+    setTouched({});
     setSaveSucceeded(false);
+    setSubmitting(false);
     // The defaults are stable primitives; plot identity is the intended reset trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plot, openPlotCardModal]);
 
   const handleEditToggle = () => {
-    setIsEditing(!isEditing);
-    if (!isEditing) {
-      setEditablePlot({ ...emptyPlot, ...plot });
+    setIsEditing(true);
+    setEditablePlot({ ...emptyPlot, ...plot });
+    setTouched({});
+  };
+
+  // Cancel discards every unsaved edit before leaving edit mode, so the read-only view and any later
+  // re-edit start from the stored plot rather than from abandoned input.
+  const handleCancel = () => {
+    setEditablePlot({ ...emptyPlot, ...plot });
+    setTouched({});
+    setSaveSucceeded(false);
+    if (isCreating) {
+      setOpenPlotCardModal(false);
+    } else {
+      setIsEditing(false);
     }
   };
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setEditablePlot({ ...editablePlot, [name]: value });
-    if (name === 'plotName' && value.trim()) setValidationError('');
-    if (name === 'globalCoordinatesEPSG') setEpsgError('');
+    setEditablePlot(prev => ({ ...prev, [name]: value }));
+    setTouched(prev => ({ ...prev, [name]: true }));
   };
 
   const handleSave = async () => {
-    if (!editablePlot.plotName?.trim()) {
-      setValidationError('Plot name is required.');
+    if (hasErrors) {
+      setTouched(Object.fromEntries(Object.keys(fieldErrors).map(field => [field, true])));
       return;
     }
     const epsg = parseEpsgForSave(editablePlot.globalCoordinatesEPSG);
-    if (!epsg.ok) {
-      setEpsgError(epsg.error);
-      return;
-    }
+    if (!epsg.ok) return;
     setSubmitting(true);
     setSaveSucceeded(false);
 
@@ -105,7 +121,7 @@ export default function PlotCardModal(props: {
       // Send an explicit null when cleared: JSON.stringify drops undefined keys, and the
       // PATCH handler only updates the columns present in the payload, so a dropped key
       // would silently leave a stale code in place instead of un-recording it.
-      const filteredPlot = { ...restOfPlot, globalCoordinatesEPSG: epsg.value };
+      const filteredPlot = { ...restOfPlot, plotName: restOfPlot.plotName?.trim(), globalCoordinatesEPSG: epsg.value };
       const fetchProcessQuery = createPostPatchQuery(currentSite?.schemaName ?? '', 'plots', 'plotID');
 
       const response = await fetch(fetchProcessQuery, {
@@ -120,10 +136,12 @@ export default function PlotCardModal(props: {
       } else {
         const responseBody = await response.json().catch(() => null);
         setSnackbarMessage(responseBody?.error ?? `${isCreating ? 'Creation' : 'Update'} failed. Please try again.`);
+        setSubmitting(false);
       }
     } catch (error) {
       console.error('Failed to save plot:', error);
       setSnackbarMessage('Network error. Please check your connection and try again.');
+      setSubmitting(false);
     }
     setOpenSnackbar(true);
     setCountdown(5);
@@ -181,7 +199,7 @@ export default function PlotCardModal(props: {
                     </Typography>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl id={'plot-name-input'} error={Boolean(validationError)} required>
+                    <FormControl id={'plot-name-input'} error={Boolean(errorFor('plotName'))} required>
                       <FormLabel htmlFor={'plot-name-input'}>Name</FormLabel>
                       <Input
                         aria-labelledby={'plot-name-input'}
@@ -191,7 +209,7 @@ export default function PlotCardModal(props: {
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />
-                      {validationError && <FormHelperText>{validationError}</FormHelperText>}
+                      {errorFor('plotName') && <FormHelperText>{errorFor('plotName')}</FormHelperText>}
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
@@ -253,7 +271,7 @@ export default function PlotCardModal(props: {
                     </Typography>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl id={'global-x-coords'}>
+                    <FormControl id={'global-x-coords'} error={Boolean(errorFor('globalX'))}>
                       <FormLabel htmlFor={'global-x-coords'}>Global X-coordinate</FormLabel>
                       <Input
                         aria-labelledby={'global-x-coords'}
@@ -263,10 +281,11 @@ export default function PlotCardModal(props: {
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />
+                      {errorFor('globalX') && <FormHelperText>{errorFor('globalX')}</FormHelperText>}
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl id={'global-y-coords'}>
+                    <FormControl id={'global-y-coords'} error={Boolean(errorFor('globalY'))}>
                       <FormLabel htmlFor={'global-y-coords'}>Global Y-coordinate</FormLabel>
                       <Input
                         aria-labelledby={'global-y-coords'}
@@ -276,10 +295,11 @@ export default function PlotCardModal(props: {
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />
+                      {errorFor('globalY') && <FormHelperText>{errorFor('globalY')}</FormHelperText>}
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl id={'global-z-coords'}>
+                    <FormControl id={'global-z-coords'} error={Boolean(errorFor('globalZ'))}>
                       <FormLabel htmlFor={'global-z-coords'}>Global Z-coordinate</FormLabel>
                       <Input
                         aria-labelledby={'global-z-coords'}
@@ -289,10 +309,11 @@ export default function PlotCardModal(props: {
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />
+                      {errorFor('globalZ') && <FormHelperText>{errorFor('globalZ')}</FormHelperText>}
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl id={'global-coords-epsg'} error={Boolean(epsgError)}>
+                    <FormControl id={'global-coords-epsg'} error={Boolean(errorFor('globalCoordinatesEPSG'))}>
                       <FormLabel htmlFor={'global-coords-epsg'}>Coordinate System (EPSG)</FormLabel>
                       <Input
                         aria-labelledby={'global-coords-epsg'}
@@ -302,7 +323,9 @@ export default function PlotCardModal(props: {
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />
-                      <FormHelperText>{epsgError || 'The EPSG identifier of the coordinate system — e.g. 26916 = NAD83 / UTM zone 16N.'}</FormHelperText>
+                      <FormHelperText>
+                        {errorFor('globalCoordinatesEPSG') || 'The EPSG identifier of the coordinate system — e.g. 26916 = NAD83 / UTM zone 16N.'}
+                      </FormHelperText>
                     </FormControl>
                   </Grid>
                   <Grid xs={12}>
@@ -311,7 +334,7 @@ export default function PlotCardModal(props: {
                     </Typography>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl id={'plot-x-dim'}>
+                    <FormControl id={'plot-x-dim'} error={Boolean(errorFor('dimensionX'))}>
                       <FormLabel htmlFor={'plot-x-dim'}>X Dimension</FormLabel>
                       <Input
                         aria-labelledby={'plot-x-dim'}
@@ -321,10 +344,11 @@ export default function PlotCardModal(props: {
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />
+                      {errorFor('dimensionX') && <FormHelperText>{errorFor('dimensionX')}</FormHelperText>}
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl id={'plot-y-dim'}>
+                    <FormControl id={'plot-y-dim'} error={Boolean(errorFor('dimensionY'))}>
                       <FormLabel htmlFor={'plot-y-dim'}>Y Dimension</FormLabel>
                       <Input
                         aria-labelledby={'plot-y-dim'}
@@ -334,10 +358,11 @@ export default function PlotCardModal(props: {
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />
+                      {errorFor('dimensionY') && <FormHelperText>{errorFor('dimensionY')}</FormHelperText>}
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl id={'plot-area'}>
+                    <FormControl id={'plot-area'} error={Boolean(errorFor('area'))}>
                       <FormLabel htmlFor={'plot-area'}>Plot Area</FormLabel>
                       <Input
                         aria-labelledby={'plot-area'}
@@ -347,6 +372,7 @@ export default function PlotCardModal(props: {
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />
+                      {errorFor('area') && <FormHelperText>{errorFor('area')}</FormHelperText>}
                     </FormControl>
                   </Grid>
                   <Grid xs={12}>
@@ -466,10 +492,10 @@ export default function PlotCardModal(props: {
           <DialogActions>
             {isEditing ? (
               <>
-                <Button onClick={handleSave} loading={submitting} loadingIndicator={<CircularProgress />} loadingPosition={'start'}>
+                <Button onClick={handleSave} disabled={hasErrors} loading={submitting} loadingIndicator={<CircularProgress />} loadingPosition={'start'}>
                   {isCreating ? 'Create Plot' : 'Save Changes'}
                 </Button>
-                <Button onClick={isCreating ? () => setOpenPlotCardModal(false) : handleEditToggle}>Cancel</Button>
+                <Button onClick={handleCancel}>Cancel</Button>
               </>
             ) : (
               <Button onClick={handleEditToggle}>Edit</Button>
@@ -487,12 +513,13 @@ export default function PlotCardModal(props: {
           open={openSnackbar}
           onClose={() => {
             setOpenSnackbar(false);
-            setOpenPlotCardModal(false);
-            if (saveSucceeded) {
-              setManualReset(true); // reset only triggers if the patch command worked && the snackbar is closed
-            }
-            setIsEditing(false);
             setSubmitting(false);
+            // A failed save leaves the modal open in edit mode with the user's input intact so it can be corrected and retried.
+            if (saveSucceeded) {
+              setOpenPlotCardModal(false);
+              setManualReset(true); // reset only triggers if the patch command worked && the snackbar is closed
+              setIsEditing(false);
+            }
           }}
           anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
           sx={theme => ({

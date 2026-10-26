@@ -71,6 +71,13 @@ describe('ValidationActionsMenu — Run Validations gating', () => {
   it('keeps the override action driven by the full overridable count', () => {
     renderMenu({ pendingCount: 0, overridableCount: 5, revalidatableCount: 2 });
 
-    expect(screen.getByText('Force 5 failed or not-yet-validated row(s) to pass')).toBeInTheDocument();
+    expect(screen.getByText('Force 5 eligible failed or not-yet-validated row(s) to pass')).toBeInTheDocument();
+  });
+
+  it('disables override with a clear message when no rows are eligible', () => {
+    renderMenu({ pendingCount: 0, overridableCount: 0, revalidatableCount: 0 });
+
+    expect(screen.getByText('No eligible rows to override')).toBeInTheDocument();
+    expect(screen.getByText('Override Validations').closest('[role="menuitem"]')).toHaveAttribute('aria-disabled', 'true');
   });
 });

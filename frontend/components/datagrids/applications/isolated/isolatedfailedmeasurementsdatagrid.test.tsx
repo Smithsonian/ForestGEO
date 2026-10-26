@@ -2,6 +2,7 @@ import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import IsolatedFailedMeasurementsDataGrid, {
+  dayToPickerMoment,
   formatDetailedFailureDescription,
   hasStoredCurrentIngestionFailures,
   isReadyForReingestion
@@ -10,6 +11,7 @@ import { RowSaveFinalizationError } from '@/components/datagrids/rowsaveerror';
 import type { ApplyResult } from '@/config/editplan/types';
 import type { UndoRevertOutcome } from '@/components/editplan/undotoast';
 import { UNCONFIRMED_OUTCOME_MESSAGE } from '@/lib/editplan/requestrevert';
+import { toCalendarDayString } from '@/config/dateformats';
 
 // Typed capture shared between the mocked UndoToast and the mocked
 // isolateddatagridcommons below via vi.hoisted, so neither needs an untyped
@@ -224,6 +226,30 @@ vi.mock('@/components/editplan/undotoast', () => ({
     </div>
   )
 }));
+
+// Run under TZ=UTC, TZ=America/Los_Angeles and TZ=Pacific/Auckland; assertions are zone independent.
+describe('Fix Failed Rows date display and editor (calendar day, never zone shifted)', () => {
+  it.each([
+    ['2027-02-15T00:00:00.000Z', '2027-02-15'],
+    ['2027-02-15', '2027-02-15'],
+    ['2027-01-01T00:00:00.000Z', '2027-01-01'],
+    ['2027-03-14T00:00:00.000Z', '2027-03-14']
+  ])('displays %s as %s', (stored, expected) => {
+    expect(toCalendarDayString(stored)).toBe(expected);
+  });
+
+  it('opens the editor on the stored calendar day and saves the same day back', () => {
+    const picker = dayToPickerMoment(toCalendarDayString('2027-02-15T00:00:00.000Z'));
+    expect(picker!.format('YYYY-MM-DD')).toBe('2027-02-15');
+    expect([picker!.year(), picker!.month(), picker!.date()]).toEqual([2027, 1, 15]);
+  });
+
+  it('shows an empty editor and an empty cell for null or invalid dates', () => {
+    expect(dayToPickerMoment(toCalendarDayString(null))).toBeNull();
+    expect(dayToPickerMoment(toCalendarDayString('not a date'))).toBeNull();
+    expect(toCalendarDayString(undefined)).toBeNull();
+  });
+});
 
 describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
   beforeEach(() => {
