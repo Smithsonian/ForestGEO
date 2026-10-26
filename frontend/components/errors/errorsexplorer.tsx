@@ -1036,7 +1036,7 @@ export default function ErrorsExplorer() {
       {
         field: 'measuredDBH',
         headerName: 'DBH',
-        width: 85,
+        width: 100,
         type: 'number',
         editable: true,
         align: 'right',
@@ -1046,7 +1046,7 @@ export default function ErrorsExplorer() {
       {
         field: 'measuredHOM',
         headerName: 'HOM',
-        width: 85,
+        width: 100,
         type: 'number',
         editable: true,
         align: 'right',
