@@ -7,7 +7,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { PostValidationQueriesRDS } from '@/lib/db/definitions/validations';
 import { Button, Checkbox, IconButton, Tooltip } from '@mui/joy';
 import { Done } from '@mui/icons-material';
-import moment from 'moment/moment';
+import { formatInstant } from '@/config/dateformats';
 import { darken } from '@mui/system';
 import CodeEditor from '@/components/client/codeeditor';
 
@@ -116,7 +116,7 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
           <TableCell>{postValidation.queryName}</TableCell>
         </Tooltip>
         <TableCell>{postValidation.description || '—'}</TableCell>
-        <TableCell>{postValidation.lastRunAt ? moment(postValidation.lastRunAt).format('MMM D, YYYY, h:mm A') : 'Never run'}</TableCell>
+        <TableCell>{formatInstant(postValidation.lastRunAt) ?? 'Never run'}</TableCell>
         <TableCell
           sx={{
             whiteSpace: 'nowrap',

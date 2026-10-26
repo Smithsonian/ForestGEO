@@ -9,6 +9,7 @@ import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/con
 import type { UpsertOperation } from '@/config/utils';
 import { recordMutation, ChangelogOperation, type ChangelogRowState } from '@/lib/changelog/record-mutation';
 import { CHANGED_BY_MAX_LENGTH } from '@/lib/changelog/identity';
+import { trimReferenceTextFields } from '@/lib/reference-text';
 
 // need to try integrating this into validation system:
 
@@ -82,6 +83,11 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
     const raw = rowData[fileColumn];
     valueByColumn[dbColumns[index]] = typeof raw === 'string' && raw === '' ? null : raw;
   });
+  // Outer whitespace on reference code/description text is not data (#521); a value that was only whitespace is blank, i.e. null.
+  const trimmedValues = trimReferenceTextFields(formType, valueByColumn);
+  for (const column of Object.keys(valueByColumn)) {
+    valueByColumn[column] = trimmedValues[column] === '' ? null : trimmedValues[column];
+  }
 
   const tx = toTxExecutor(connectionManager, transactionID);
   const fixedMatchColumns = Object.keys(identity.fixedMatch ?? {});
