@@ -399,7 +399,7 @@ Export CSV → Edit only the values you want changed → Upload as Revisions →
 Review match screen (tabs) → Apply
 ```
 
-1. **Export** the current measurements from the data grid (the export keeps `StemGUID`, which is how rows are matched on the way back in).
+1. **Export** the current measurements from the data grid (rows are matched on the way back in by the export's **Stem ID** column; if the file has no Stem IDs, by Tree Tag + Stem Tag instead. One strategy is used for the whole file).
 2. **Edit** only the cells you want to change. Blank or unchanged cells mean "don't change" — they will not overwrite the database.
 3. From the upload page, choose **Measurements → Revisions** and upload the edited file.
 4. The app shows a **multi-tab review screen** before any write — see below.

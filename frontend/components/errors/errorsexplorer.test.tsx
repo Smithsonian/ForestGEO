@@ -11,7 +11,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // row set, fixed in StyledDataGridMock.
 configure({ asyncUtilTimeout: 5000 });
 
-import { formatErrorComparison, formatOptionalMeasurement, getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorsexplorer';
+import {
+  ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS,
+  formatErrorComparison,
+  formatOptionalMeasurement,
+  getUploadedCodesValue,
+  hasCodesMismatch,
+  joinCodesArray,
+  parseCodesString
+} from './errorsexplorer';
 import type { ApplyResult, EditPlan } from '@/config/editplan/types';
 import type { UseEditPreviewFlowReturn } from '@/app/hooks/useEditPreviewFlow';
 import type { UndoRevertOutcome } from '@/components/editplan/undotoast';
@@ -217,6 +225,8 @@ interface RenderedGridProps {
   columns: any[];
   processRowUpdate?: (newRow: Record<string, unknown>, oldRow: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
   slots?: any;
+  columnVisibilityModel?: Record<string, boolean>;
+  onColumnVisibilityModelChange?: (model: Record<string, boolean>) => void;
 }
 
 // What the mocked grid most recently committed. Updated from a layout effect so
@@ -378,7 +388,14 @@ vi.mock('@/config/styleddatagrid', async () => {
       // Layout effects run in the same commit as the DOM mutation. Unlike the old
       // passive effect they are visible before waitFor can react to that commit;
       // unlike a render-time assignment they never publish speculative props.
-      const committedProps = { rows, columns, processRowUpdate: props.processRowUpdate, slots: props.slots };
+      const committedProps = {
+        rows,
+        columns,
+        processRowUpdate: props.processRowUpdate,
+        slots: props.slots,
+        columnVisibilityModel: props.columnVisibilityModel,
+        onColumnVisibilityModelChange: props.onColumnVisibilityModelChange
+      };
       latestGridProps = committedProps;
 
       // Expose test hooks for both direct processRowUpdate coverage and the
@@ -413,7 +430,7 @@ vi.mock('@/config/styleddatagrid', async () => {
       return () => {
         if (latestGridProps === committedProps) latestGridProps = null;
       };
-    }, [rows, columns, props.processRowUpdate, props.slots]);
+    }, [rows, columns, props.processRowUpdate, props.slots, props.columnVisibilityModel, props.onColumnVisibilityModelChange]);
 
     return (
       <div data-testid="styled-grid">
@@ -992,6 +1009,77 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
   // response for this file, so driving those responses through the real
   // HTTP-status/body contract (409 + freshPlan, vs. a plain error body)
   // exercises requestEditRevert's actual parsing instead of assuming it.
+  it('puts Codes right after Actions for an editor, and first for a user who cannot edit (#525 item 7)', async () => {
+    mockSessionUserStatus = 'field crew';
+    const editorView = await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    const editorFields = (latestGridProps?.columns ?? []).map((column: { field: string }) => column.field);
+    editorView.unmount();
+
+    mockSessionUserStatus = 'pending';
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    const readOnlyFields = (latestGridProps?.columns ?? []).map((column: { field: string }) => column.field);
+
+    console.log(`[#525 item 7] editor columns: ${editorFields.join(', ')} | read-only columns: ${readOnlyFields.join(', ')}`);
+    expect(editorFields.slice(0, 2)).toEqual(['actions', 'attributes']);
+    expect(readOnlyFields[0]).toBe('attributes');
+    expect(readOnlyFields).not.toContain('actions');
+  });
+
+  it('starts with the plot-coordinate and prior-census columns hidden through the controlled column visibility model (#525 item 7)', async () => {
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    const visibilityModel = latestGridProps?.columnVisibilityModel;
+
+    console.log(`[#525 item 7] controlled columnVisibilityModel: ${JSON.stringify(visibilityModel)}`);
+    expect(visibilityModel).toEqual(ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS);
+  });
+
+  it('keeps a column the user turned on after the list empties and refills while the page stays open (#525 item 7)', async () => {
+    const NO_MATCH_QUICK_SEARCH = 'no-such-measurement';
+    const SHOWN_COLUMN = 'priorDBH';
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/errors/explorer/query')) {
+        const matchesNothing = JSON.parse(String(init?.body)).filters.quickSearch === NO_MATCH_QUICK_SEARCH;
+        return {
+          ok: true,
+          json: async () => ({
+            rows: matchesNothing ? [] : [GRID_ROW],
+            totalRows: matchesNothing ? 0 : 1,
+            summary: {
+              total: matchesNothing ? 0 : 1,
+              validation: matchesNothing ? 0 : 1,
+              ingestion: 0,
+              contradictions: 0,
+              duplicateTagStem: 0,
+              sameBatchConflict: 0
+            }
+          })
+        } as Response;
+      }
+      return { ok: true, json: async () => ({ messages: [], fields: [], sourceCounts: { validation: 1, ingestion: 0 }, contradictionCounts: {} }) } as Response;
+    });
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+
+    act(() => {
+      latestGridProps?.onColumnVisibilityModelChange?.({ ...ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS, [SHOWN_COLUMN]: true });
+    });
+    await waitFor(() => expect(latestGridProps?.columnVisibilityModel?.[SHOWN_COLUMN]).toBe(true));
+
+    fireEvent.change(screen.getByLabelText('Quick Search'), { target: { value: NO_MATCH_QUICK_SEARCH } });
+    await waitFor(() => expect(screen.getByTestId('errors-explorer-empty-success')).toBeInTheDocument());
+    expect(screen.queryByTestId('styled-grid')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Quick Search'), { target: { value: '' } });
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+
+    console.log(`[#525 item 7] columnVisibilityModel after empty and refill: ${JSON.stringify(latestGridProps?.columnVisibilityModel)}`);
+    expect(latestGridProps?.columnVisibilityModel).toEqual({ ...ERRORS_EXPLORER_DEFAULT_HIDDEN_COLUMNS, [SHOWN_COLUMN]: true });
+  });
+
   describe('undo revert outcome handling (#427)', () => {
     async function mountExplorerWithUndoToast() {
       mockBeginEdit.mockResolvedValueOnce({
