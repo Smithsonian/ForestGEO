@@ -1627,11 +1627,11 @@ describe('POST /api/revisionupload', () => {
     expect(bulkInput.matched[0].newRow).toEqual({});
   });
 
-  it('renders MeasurementDate returned as a Date object using local calendar components, not UTC', async () => {
-    // Construct a local Date that lives on 2026-03-14 locally but is 2026-03-15 in UTC
-    // when the local offset is negative (e.g. Americas). The comparison should still
-    // see 2026-03-14 because the CSV author edited a yyyy-mm-dd string.
-    const localDate = new Date(2026, 2, 14, 23, 30, 0); // month is 0-indexed
+  it(`renders a driver-decoded MeasurementDate as its stored calendar day in any process zone (TZ=${process.env.TZ ?? 'unset'})`, async () => {
+    // The pool runs with timezone 'Z', so mysql2 decodes DATE 2026-03-14 to UTC midnight.
+    // West of UTC that instant is still 2026-03-13 locally; the CSV author's yyyy-mm-dd
+    // string must match the stored day, not the local one.
+    const driverDecodedDate = new Date('2026-03-14T00:00:00.000Z');
 
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('cm.StemGUID IN')) {
@@ -1642,7 +1642,7 @@ describe('POST /api/revisionupload', () => {
             IsActive: 1,
             MeasuredDBH: 10.0,
             MeasuredHOM: 1.0,
-            MeasurementDate: localDate,
+            MeasurementDate: driverDecodedDate,
             RawCodes: null,
             Description: null,
             RawTreeTag: 'T',
