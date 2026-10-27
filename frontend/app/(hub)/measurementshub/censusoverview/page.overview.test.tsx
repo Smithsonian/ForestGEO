@@ -51,7 +51,8 @@ const SINGLE_RANGE_CENSUS = {
   plotCensusNumber: 2,
   censusIDs: [102],
   dateRanges: [{ censusID: 102, startDate: new Date('2025-01-01'), endDate: new Date('2025-12-31') }],
-  description: 'Census 2'
+  description: 'Census 2',
+  isActive: true
 };
 const CENSUS_BEING_CREATED = {
   plotID: 1,
@@ -68,7 +69,8 @@ const GROUPED_CENSUS = {
     { censusID: 202, startDate: new Date('2026-01-01'), endDate: new Date('2026-06-30') },
     { censusID: 201, startDate: new Date('2025-07-01'), endDate: new Date('2025-12-31') }
   ],
-  description: 'Census 3'
+  description: 'Census 3',
+  isActive: true
 };
 
 const METRICS_RESPONSE = {
