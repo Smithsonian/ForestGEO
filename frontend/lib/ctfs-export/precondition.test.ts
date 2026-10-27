@@ -15,7 +15,18 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTestDatabase, teardownTestDatabase, loadSchema, DEFAULT_TEST_CONFIG } from '../../tests/setup/local-db-setup';
-import { checkFinishedCensus, MAX_DISPLAY_FAILURES, partitionPreconditionFailures, isBlockingPreconditionKind, type PreconditionFailure } from './precondition';
+import {
+  checkFinishedCensus,
+  countPublishBlockers,
+  exportableShortfallKind,
+  MAX_DISPLAY_FAILURES,
+  MIN_EXPORTABLE_FRACTION,
+  partitionPreconditionFailures,
+  isBlockingPreconditionKind,
+  type BlockingKindClassifier,
+  type BlockingPreconditionKind,
+  type PreconditionFailure
+} from './precondition';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -648,5 +659,190 @@ describe('checkFinishedCensus', () => {
     );
 
     await expect(checkFinishedCensus(conn, { schema: 'bad`name', plotId: PLOT_ID, censusId: CENSUS_ID })).rejects.toThrow('Invalid schema name');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// exportableShortfallKind (#547): the zero / 50% detection, shared by the gate
+// and countPublishBlockers. Pure — no database.
+// ---------------------------------------------------------------------------
+
+describe('exportableShortfallKind', () => {
+  const TOTAL_ACTIVE_ROWS = 100;
+  const HALF_OF_TOTAL = TOTAL_ACTIVE_ROWS * MIN_EXPORTABLE_FRACTION;
+
+  it.each([
+    { label: 'an empty census', count: 0, totalActiveCount: 0, expected: 'zero-exportable-rows' },
+    { label: 'a census with nothing exportable', count: 0, totalActiveCount: TOTAL_ACTIVE_ROWS, expected: 'zero-exportable-rows' },
+    { label: 'one row under half', count: HALF_OF_TOTAL - 1, totalActiveCount: TOTAL_ACTIVE_ROWS, expected: 'insufficient-exportable-rows' },
+    { label: 'exactly half', count: HALF_OF_TOTAL, totalActiveCount: TOTAL_ACTIVE_ROWS, expected: null },
+    { label: 'every row', count: TOTAL_ACTIVE_ROWS, totalActiveCount: TOTAL_ACTIVE_ROWS, expected: null }
+  ])('returns $expected for $label ($count of $totalActiveCount)', ({ count, totalActiveCount, expected }) => {
+    const actual = exportableShortfallKind(count, totalActiveCount);
+    console.log(`[#547 shortfall] ${count} of ${totalActiveCount} exportable -> ${actual}`);
+    expect(actual, `shortfall kind for ${count} of ${totalActiveCount}`).toBe(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// countPublishBlockers (#547): uncapped blocker counts that cannot drift from the gate
+// ---------------------------------------------------------------------------
+
+// CTFS_LIMITS.dbhComments in precondition.ts; a description one longer trips check 7.
+const CTFS_DBH_COMMENTS_LIMIT = 128;
+const BELOW_CAP_ERROR_ID = 9101;
+const BELOW_CAP_FIXTURE = {
+  unknownCodeMeasurementIds: [301, 302, 303],
+  missingSpeciesCodeMeasurementIds: [311, 312],
+  tooLongMeasurementIds: [321, 322],
+  notValidatedMeasurementId: 331,
+  failedMeasurementId: 332,
+  unresolvedErrorMeasurementId: 333,
+  inactiveStemMeasurementId: 334
+} as const;
+const SEED_MEASUREMENT_ROWS = 1;
+const BELOW_CAP_SKIPPED_ROWS = 3; // 331 not validated, 332 failed, 334 inactive stem
+const BELOW_CAP_ACTIVE_ROWS =
+  SEED_MEASUREMENT_ROWS +
+  BELOW_CAP_FIXTURE.unknownCodeMeasurementIds.length +
+  BELOW_CAP_FIXTURE.missingSpeciesCodeMeasurementIds.length +
+  BELOW_CAP_FIXTURE.tooLongMeasurementIds.length +
+  4; // 331, 332, 333, 334
+const BELOW_CAP_EXPORTABLE_ROWS = BELOW_CAP_ACTIVE_ROWS - BELOW_CAP_SKIPPED_ROWS;
+const BLOCKING_ROW_KINDS = ['unknown-attribute-code', 'missing-taxonomy-fields', 'string-too-long'] as const;
+
+async function insertBelowCapFixture(conn: Connection): Promise<void> {
+  const tooLongDescription = 'x'.repeat(CTFS_DBH_COMMENTS_LIMIT + 1);
+  await conn.query(`INSERT INTO species (SpeciesID, GenusID, SpeciesCode, SpeciesName, IDLevel, IsActive) VALUES (2, 1, NULL, 'nocode', 'species', 1)`);
+  await conn.query(`INSERT INTO trees (TreeID, TreeTag, SpeciesID, CensusID, IsActive) VALUES (2, '2', 2, 1, 1)`);
+  await conn.query(
+    `INSERT INTO stems (StemGUID, TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
+     VALUES (2, 2, 1, 1, '2', 3.0, 4.0, 1), (3, 1, 1, 1, '3', 5.0, 6.0, 0)`
+  );
+  await conn.query(
+    `INSERT INTO coremeasurements
+       (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, IsActive)
+     VALUES (301, 1, 1, TRUE, '2024-06-02', 31, 1.3, NULL, 1),
+            (302, 1, 1, TRUE, '2024-06-02', 32, 1.3, NULL, 1),
+            (303, 1, 1, TRUE, '2024-06-02', 33, 1.3, NULL, 1),
+            (311, 1, 2, TRUE, '2024-06-02', 41, 1.3, NULL, 1),
+            (312, 1, 2, TRUE, '2024-06-02', 42, 1.3, NULL, 1),
+            (321, 1, 1, TRUE, '2024-06-02', 51, 1.3, ?, 1),
+            (322, 1, 1, TRUE, '2024-06-02', 52, 1.3, ?, 1),
+            (331, 1, 1, FALSE, '2024-06-02', 61, 1.3, NULL, 1),
+            (332, 1, NULL, FALSE, '2024-06-02', 62, 1.3, NULL, 1),
+            (333, 1, 1, TRUE, '2024-06-02', 63, 1.3, NULL, 1),
+            (334, 1, 3, TRUE, '2024-06-02', 64, 1.3, NULL, 1)`,
+    [tooLongDescription, tooLongDescription]
+  );
+  // 301 carries TWO unknown codes: the uncapped count must still count it once.
+  await conn.query(`INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (301, 'ZZ'), (301, 'ZY'), (302, 'ZZ'), (303, 'ZZ')`);
+  await conn.query(
+    `INSERT INTO measurement_errors (ErrorID, ErrorSource, ErrorCode, ErrorMessage) VALUES (?, 'validation', 'BELOW_CAP_ERR', 'Below-cap fixture error')`,
+    [BELOW_CAP_ERROR_ID]
+  );
+  await conn.query(`INSERT INTO measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, 0)`, [
+    BELOW_CAP_FIXTURE.unresolvedErrorMeasurementId,
+    BELOW_CAP_ERROR_ID
+  ]);
+}
+
+// #545's proposed policy: the 50% rule only warns. Stand-in for the classifier swap.
+const treatsInsufficientRowsAsWarning: BlockingKindClassifier = (kind): kind is BlockingPreconditionKind =>
+  kind !== 'insufficient-exportable-rows' && isBlockingPreconditionKind(kind);
+
+describe('countPublishBlockers', () => {
+  let conn: Connection;
+  const config = { ...DEFAULT_TEST_CONFIG, database: DB_NAME };
+  const publishInput = () => ({ schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+  beforeEach(async () => {
+    conn = await createTestDatabase(config);
+    await loadSchema(conn);
+    await loadSeedFile(conn);
+  });
+
+  afterEach(async () => {
+    await teardownTestDatabase(conn, config);
+  });
+
+  it('counts exactly the rows checkFinishedCensus flags for every blocking kind below the display cap (drift guard)', async () => {
+    await insertBelowCapFixture(conn);
+
+    const gate = await checkFinishedCensus(conn, publishInput());
+    const counted = await countPublishBlockers(conn, publishInput(), isBlockingPreconditionKind);
+    const gateReasons = gate.ok ? [] : gate.reasons;
+    const gateIdsByKind = new Map(gateReasons.map(reason => [reason.kind, reason.coreMeasurementIds]));
+    console.log(
+      '[#547 drift guard] gate IDs per kind:',
+      JSON.stringify(Object.fromEntries(Array.from(gateIdsByKind, ([kind, ids]) => [kind, ids.length]))),
+      'blocker counts:',
+      JSON.stringify(counted.blockers)
+    );
+
+    for (const kind of BLOCKING_ROW_KINDS) {
+      const gateIds = gateIdsByKind.get(kind) ?? [];
+      expect(gateIds.length, `${kind}: the fixture must flag at least one row`).toBeGreaterThan(0);
+      expect(gateIds.length, `${kind}: the fixture must stay below the display cap`).toBeLessThan(MAX_DISPLAY_FAILURES);
+      expect(counted.blockers.find(blocker => blocker.kind === kind)?.count, `${kind}: uncapped count vs the gate's ID list`).toBe(gateIds.length);
+    }
+    expect(counted.blockers.find(blocker => blocker.kind === 'unknown-attribute-code')?.count, 'a measurement with two unknown codes is one measurement').toBe(
+      BELOW_CAP_FIXTURE.unknownCodeMeasurementIds.length
+    );
+    expect(
+      counted.blockers.map(blocker => blocker.kind),
+      'the same blocking kinds, in the gate order'
+    ).toEqual(gateReasons.map(reason => reason.kind).filter(isBlockingPreconditionKind));
+  });
+
+  it('returns count and totalActiveCount identical to checkFinishedCensus', async () => {
+    await insertBelowCapFixture(conn);
+
+    const gate = await checkFinishedCensus(conn, publishInput());
+    const counted = await countPublishBlockers(conn, publishInput(), isBlockingPreconditionKind);
+    console.log(`[#547 check 8] gate ${gate.count}/${gate.totalActiveCount}, counter ${counted.count}/${counted.totalActiveCount}`);
+
+    expect(counted.count, 'exportable count').toBe(gate.count);
+    expect(counted.totalActiveCount, 'active count').toBe(gate.totalActiveCount);
+    expect(counted.count, 'exportable rows worked out from the fixture').toBe(BELOW_CAP_EXPORTABLE_ROWS);
+    expect(counted.totalActiveCount, 'active rows worked out from the fixture').toBe(BELOW_CAP_ACTIVE_ROWS);
+  });
+
+  it('adds the census-level shortfall with count null under the production classifier, and drops only it under a #545-style classifier', async () => {
+    // 1 of 3 active rows exportable (33%), plus one row-level blocker on the seed row.
+    await conn.query("UPDATE cmattributes SET Code = 'UNKNOWN' WHERE CoreMeasurementID = 1");
+    await conn.query(
+      `INSERT INTO coremeasurements
+         (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
+       VALUES (201, 1, 1, FALSE, '2024-07-01', 10.1, 1.3, 1),
+              (202, 1, 1, FALSE, '2024-07-01', 10.2, 1.3, 1)`
+    );
+
+    const production = await countPublishBlockers(conn, publishInput(), isBlockingPreconditionKind);
+    const warnOnly = await countPublishBlockers(conn, publishInput(), treatsInsufficientRowsAsWarning);
+    console.log('[#547 classification] production:', JSON.stringify(production.blockers), 'warn-only:', JSON.stringify(warnOnly.blockers));
+
+    expect(production.blockers).toEqual([
+      { kind: 'unknown-attribute-code', count: 1 },
+      { kind: 'insufficient-exportable-rows', count: null }
+    ]);
+    expect(warnOnly.blockers, 'the stand-in policy drops only the shortfall').toEqual([{ kind: 'unknown-attribute-code', count: 1 }]);
+    expect(warnOnly.count).toBe(production.count);
+    expect(warnOnly.totalActiveCount).toBe(production.totalActiveCount);
+  });
+
+  it('reports zero-exportable-rows with count null when the census has no active measurements', async () => {
+    await conn.query('UPDATE coremeasurements SET IsActive = 0');
+
+    const counted = await countPublishBlockers(conn, publishInput(), isBlockingPreconditionKind);
+    console.log('[#547 empty census]', JSON.stringify(counted));
+
+    expect(counted).toEqual({ blockers: [{ kind: 'zero-exportable-rows', count: null }], count: 0, totalActiveCount: 0 });
+  });
+
+  it('rejects an invalid schema name before running any SQL', async () => {
+    await expect(
+      countPublishBlockers(conn, { schema: 'bad; DROP TABLE coremeasurements; --', plotId: PLOT_ID, censusId: CENSUS_ID }, isBlockingPreconditionKind)
+    ).rejects.toThrow('Invalid schema name');
   });
 });

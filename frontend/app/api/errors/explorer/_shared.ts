@@ -11,6 +11,7 @@ import {
   ErrorExplorerQueryRequest,
   ErrorExplorerQueryResponse,
   ErrorExplorerRow,
+  ErrorFacetOption,
   INGESTION_ERROR_FIELD_MAP
 } from '@/config/errorsexplorer';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
@@ -491,13 +492,26 @@ function buildSummary(rows: GroupedErrorRow[], filters: ErrorExplorerFilters): E
   };
 }
 
-export async function fetchGroupedErrorRows(connectionManager: ExplorerConnection, schema: string, plotID: number, censusIDs: number | number[]) {
+interface GroupedErrorRowsOptions {
+  /** Contradictions annotate rows that are already in the error set; they never add or remove one. */
+  withContradictions: boolean;
+}
+
+const GROUPED_ERROR_ROWS_WITH_CONTRADICTIONS: GroupedErrorRowsOptions = { withContradictions: true };
+
+export async function fetchGroupedErrorRows(
+  connectionManager: ExplorerConnection,
+  schema: string,
+  plotID: number,
+  censusIDs: number | number[],
+  { withContradictions }: GroupedErrorRowsOptions = GROUPED_ERROR_ROWS_WITH_CONTRADICTIONS
+) {
   const uniqueCensusIDs = Array.from(new Set((Array.isArray(censusIDs) ? censusIDs : [censusIDs]).filter(censusID => censusID > 0)));
   const groupedByCensus = await Promise.all(
     uniqueCensusIDs.map(async censusID => {
       const [rawRows, contradictionMap] = await Promise.all([
         connectionManager.executeQuery(buildRawErrorsQuery(schema), [plotID, censusID]) as Promise<RawErrorOccurrenceRow[]>,
-        buildContradictionMap(connectionManager, schema, plotID, censusID)
+        withContradictions ? buildContradictionMap(connectionManager, schema, plotID, censusID) : new Map<number, ContradictionInfo[]>()
       ]);
       return groupErrorRows(rawRows, contradictionMap);
     })
@@ -586,6 +600,40 @@ export function buildErrorExportRows(groupedRows: Map<number, GroupedErrorRow>, 
     );
 }
 
+function countMeasurementsPerMessage(rows: GroupedErrorRow[]): Map<string, number> {
+  const messageCounts = new Map<string, number>();
+  rows.forEach(row => {
+    new Set(row.allErrors.map(error => error.message)).forEach(message => messageCounts.set(message, (messageCounts.get(message) ?? 0) + 1));
+  });
+  return messageCounts;
+}
+
+function sortFacetOptions(entries: Iterable<[string, number]>): ErrorFacetOption[] {
+  return Array.from(entries)
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+export interface ErrorMessageCounts {
+  /** Distinct measurements carrying at least one unresolved error or an invalid flag. */
+  totalMeasurements: number;
+  messages: ErrorFacetOption[];
+}
+
+/**
+ * The message list and measurement total buildErrorExplorerFacets returns under the
+ * default filters, without the duplicate-tag and same-batch queries: contradictions
+ * never change which rows are in the error set or what their messages are.
+ */
+export async function buildErrorMessageCounts(
+  connectionManager: ExplorerConnection,
+  request: { schema: string; plotID: number; censusIDs: number[] }
+): Promise<ErrorMessageCounts> {
+  const groupedRows = await fetchGroupedErrorRows(connectionManager, request.schema, request.plotID, request.censusIDs, { withContradictions: false });
+  const rows = Array.from(groupedRows.values());
+  return { totalMeasurements: rows.length, messages: sortFacetOptions(countMeasurementsPerMessage(rows).entries()) };
+}
+
 export async function buildErrorExplorerFacets(
   connectionManager: ExplorerConnection,
   request: Pick<ErrorExplorerQueryRequest, 'schema' | 'plotID' | 'censusID' | 'censusIDs' | 'filters'>
@@ -609,27 +657,16 @@ export async function buildErrorExplorerFacets(
     return matchesQuickSearch(row.baseRow, row.allErrors, request.filters.quickSearch);
   });
 
-  const messageCounts = new Map<string, number>();
   const fieldCounts = new Map<string, number>();
 
   scopedRows.forEach(row => {
-    const messageSet = new Set<string>();
     const fieldSet = new Set<string>();
-    row.allErrors.forEach(error => {
-      messageSet.add(error.message);
-      error.fields.forEach(field => fieldSet.add(field));
-    });
-    messageSet.forEach(message => messageCounts.set(message, (messageCounts.get(message) ?? 0) + 1));
+    row.allErrors.forEach(error => error.fields.forEach(field => fieldSet.add(field)));
     fieldSet.forEach(field => fieldCounts.set(field, (fieldCounts.get(field) ?? 0) + 1));
   });
 
-  const sortFacetOptions = (entries: Iterable<[string, number]>) =>
-    Array.from(entries)
-      .map(([value, count]) => ({ value, count }))
-      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
-
   return {
-    messages: sortFacetOptions(messageCounts.entries()),
+    messages: sortFacetOptions(countMeasurementsPerMessage(scopedRows).entries()),
     fields: sortFacetOptions(fieldCounts.entries()),
     sourceCounts: {
       validation: scopedRows.filter(row => row.allErrors.some(error => error.source === 'validation')).length,
@@ -638,7 +675,8 @@ export async function buildErrorExplorerFacets(
     contradictionCounts: {
       duplicateTagStem: scopedRows.filter(row => row.baseRow.contradictionTypes.includes('duplicate_tag_stem')).length,
       sameBatchConflict: scopedRows.filter(row => row.baseRow.contradictionTypes.includes('same_batch_conflict')).length
-    }
+    },
+    totalMeasurements: scopedRows.length
   };
 }
 

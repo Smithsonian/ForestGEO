@@ -171,7 +171,8 @@ describe('API response shape contracts', () => {
       contradictionCounts: {
         duplicateTagStem: 2,
         sameBatchConflict: 0
-      }
+      },
+      totalMeasurements: 2
     });
   });
 });
