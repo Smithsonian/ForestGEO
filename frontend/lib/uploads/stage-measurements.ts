@@ -19,18 +19,24 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import ailogger from '@/ailogger';
 import { FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
+import { UploadSessionOwnershipError } from '@/config/uploadsessiontracker';
 import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import { ColumnMapping } from '@/lib/column-mapping/types';
 import { resolveMeasurementChunk } from '@/lib/column-mapping/measurement-rows';
 import {
   buildDroppedMeasurementFailureReason,
   cleanupPreviousFileUploads,
+  CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
   cleanupStaleMeasurementBatchesForFile,
+  deleteCensusReplacementChunk,
+  deleteCensusReplacementLegacyFailuresWindow,
+  deleteCensusReplacementMetricsWindow,
   ensureTemporaryMeasurementsSourceFormatColumn,
   familyHasStagedRows,
   findDroppedMeasurementCandidates,
   insertTemporaryMeasurementsInBatches,
   isUnsignedIntFieldInvalid,
+  nextCensusReplacementCursor,
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
 import { buildFileUploadChangelogRecordID, measurementFileIDValidationError, mergeFileUploadChunkIntoMetadata } from '@/lib/uploads/file-names';
@@ -47,8 +53,10 @@ import {
 import {
   CENSUS_REPLACEMENT_MARKER_COLUMN,
   ensureUploadSessionReplacementMarkerColumn,
+  lockUploadSessionForCensusReplacement,
   markUploadSessionReplacementCompleted,
-  uploadSessionHasCompletedReplacement
+  uploadSessionHasCompletedReplacement,
+  type CensusReplacementSessionScope
 } from '@/lib/uploads/upload-session-replacement-marker';
 
 const CHANGELOG_TABLE_NAME = 'file_upload';
@@ -237,7 +245,19 @@ function buildIngestionFailurePayload(droppedRows: DroppedMeasurementRow[], plot
   }));
 }
 
-export async function stageMeasurementChunk(connectionManager: ConnectionManager, params: StageMeasurementChunkParams): Promise<StageMeasurementChunkResult> {
+export type CensusReplacementParams = Omit<StageMeasurementChunkParams, 'transactionID'>;
+export type { CensusReplacementSessionScope };
+
+export interface PreparedMeasurementChunk {
+  firstRowOrdinal: number | null;
+  chunkRows: FileRow[];
+  chunkRowOffsets: number[];
+  invalidRows: FileRow[];
+  diagnostics: StageMeasurementChunkResult['diagnostics'];
+}
+
+/** Every input check staging makes, with no database access, so a bad file is rejected before anything is deleted (#504). */
+export function prepareMeasurementChunkForStaging(params: CensusReplacementParams): PreparedMeasurementChunk {
   const fileIDError = measurementFileIDValidationError(params.fileName);
   if (fileIDError) {
     throw new Error(fileIDError);
@@ -253,22 +273,7 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     throw new EmptyMeasurementUploadError(params.fileName, params.batchID);
   }
 
-  const {
-    schema,
-    fileName,
-    batchID,
-    plotID,
-    censusID,
-    uploadMode,
-    sourceFormat,
-    rawRows,
-    csvHeaders,
-    delimiter,
-    storedMapping,
-    uploadSessionID,
-    transactionID,
-    changedBy
-  } = params;
+  const { fileName, batchID, rawRows, csvHeaders, delimiter, storedMapping } = params;
 
   const firstRowOrdinal = parseFirstRowOrdinal(params.firstRowOrdinal);
   if (firstRowOrdinal !== null && batchID.length > MAX_ORIGINAL_BATCH_ID_LENGTH) {
@@ -310,7 +315,14 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     }
   }
 
+  return { firstRowOrdinal, chunkRows, chunkRowOffsets, invalidRows, diagnostics };
+}
+
+export async function stageMeasurementChunk(connectionManager: ConnectionManager, params: StageMeasurementChunkParams): Promise<StageMeasurementChunkResult> {
+  const { firstRowOrdinal, chunkRows, chunkRowOffsets, invalidRows, diagnostics } = prepareMeasurementChunkForStaging(params);
   params.onInvalidRows?.(invalidRows);
+
+  const { schema, fileName, batchID, plotID, censusID, uploadMode, sourceFormat, uploadSessionID, transactionID, changedBy } = params;
 
   const rowBatchIDs =
     firstRowOrdinal === null ? chunkRows.map(() => batchID) : chunkRowOffsets.map(offset => subBatchIDForRowOrdinal(batchID, firstRowOrdinal + offset));
@@ -635,6 +647,177 @@ export async function stageMeasurementChunk(connectionManager: ConnectionManager
     stagedRows: chunkRows,
     diagnostics
   };
+}
+
+/** How far below the stale-transaction reaper's threshold every census-replacement callback must finish. */
+export const CENSUS_REPLACEMENT_REAPER_HEADROOM_FACTOR = 4;
+/**
+ * Callback deadline of every census-replacement transaction: ConnectionManager.DEFAULT_STALE_TRANSACTION_THRESHOLD_MS
+ * (240,000) divided by CENSUS_REPLACEMENT_REAPER_HEADROOM_FACTOR. A literal rather than computed when the module loads:
+ * suites that mock ConnectionManager have no static, and NaN would pass through withTransaction's `??` as a 1 ms timer.
+ * stage-measurements.test.ts asserts the ratio against the real class.
+ */
+export const CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS = 60_000;
+
+export const CENSUS_REPLACEMENT_STARTED_EVENT = 'upload.census_replacement.started';
+export const CENSUS_REPLACEMENT_COMPLETED_EVENT = 'upload.census_replacement.completed';
+
+export type CensusReplacementOutcome = 'not_applicable' | 'already_completed' | 'upload_in_progress' | 'completed_by_peer' | 'replaced';
+export interface CensusReplacementResult {
+  outcome: CensusReplacementOutcome;
+  deletedRows: number;
+  windowCount: number;
+}
+interface CensusReplacementProgress {
+  deletedRows: number;
+  windowCount: number;
+  slowestWindowMs: number;
+}
+type CensusReplacementUnitResult<T> = { completedByPeer: true } | { completedByPeer: false; value: T };
+type CensusReplacementLoopEnd = 'done' | 'completed_by_peer';
+
+const NO_REPLACEMENT_WORK = { deletedRows: 0, windowCount: 0 } as const;
+
+async function runCensusReplacementUnit<T>(
+  connectionManager: ConnectionManager,
+  scope: CensusReplacementSessionScope,
+  progress: CensusReplacementProgress | null,
+  work: (transactionID: string) => Promise<T>
+): Promise<CensusReplacementUnitResult<T>> {
+  const startedAt = Date.now();
+  try {
+    return await connectionManager.withTransaction<CensusReplacementUnitResult<T>>(
+      async tx => {
+        const sessionLock = await lockUploadSessionForCensusReplacement(connectionManager, scope, tx.id);
+        if (sessionLock === 'marker_already_set') return { completedByPeer: true };
+        return { completedByPeer: false, value: await work(tx.id) };
+      },
+      { timeoutMs: CENSUS_REPLACEMENT_TRANSACTION_TIMEOUT_MS }
+    );
+  } finally {
+    if (progress) progress.slowestWindowMs = Math.max(progress.slowestWindowMs, Date.now() - startedAt);
+  }
+}
+
+async function deleteMeasurementWindows(
+  connectionManager: ConnectionManager,
+  params: CensusReplacementParams,
+  scope: CensusReplacementSessionScope,
+  progress: CensusReplacementProgress
+): Promise<CensusReplacementLoopEnd> {
+  let cursor: number | null = 0;
+  while (cursor !== null) {
+    const windowCursor: number = cursor;
+    const unit = await runCensusReplacementUnit(connectionManager, scope, progress, transactionID =>
+      deleteCensusReplacementChunk(
+        connectionManager,
+        scope.schema,
+        params.batchID,
+        scope.plotID,
+        scope.censusID,
+        windowCursor,
+        params.changedBy ?? null,
+        transactionID
+      )
+    );
+    if (unit.completedByPeer) return 'completed_by_peer';
+    progress.windowCount += 1;
+    progress.deletedRows += unit.value.deletedRows;
+    cursor = nextCensusReplacementCursor(windowCursor, unit.value);
+  }
+  return 'done';
+}
+
+async function deleteLegacyFailureWindows(
+  connectionManager: ConnectionManager,
+  params: CensusReplacementParams,
+  scope: CensusReplacementSessionScope,
+  progress: CensusReplacementProgress
+): Promise<CensusReplacementLoopEnd> {
+  for (;;) {
+    const unit = await runCensusReplacementUnit(connectionManager, scope, progress, transactionID =>
+      deleteCensusReplacementLegacyFailuresWindow(connectionManager, scope.schema, params.batchID, scope.censusID, transactionID)
+    );
+    if (unit.completedByPeer) return 'completed_by_peer';
+    if (unit.value.legacyTableMissing || unit.value.deletedRows < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return 'done';
+  }
+}
+
+async function deleteMetricsWindows(
+  connectionManager: ConnectionManager,
+  params: CensusReplacementParams,
+  scope: CensusReplacementSessionScope,
+  progress: CensusReplacementProgress
+): Promise<CensusReplacementLoopEnd> {
+  for (;;) {
+    const unit = await runCensusReplacementUnit(connectionManager, scope, progress, transactionID =>
+      deleteCensusReplacementMetricsWindow(connectionManager, scope.schema, params.batchID, scope.plotID, scope.censusID, transactionID)
+    );
+    if (unit.completedByPeer) return 'completed_by_peer';
+    if (unit.value < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return 'done';
+  }
+}
+
+/** Unit D: the marker, in a transaction of its own, so it is set only after every deleting unit committed. */
+export async function completeCensusReplacement(
+  connectionManager: ConnectionManager,
+  scope: CensusReplacementSessionScope
+): Promise<'replaced' | 'completed_by_peer'> {
+  const unit = await runCensusReplacementUnit(connectionManager, scope, null, transactionID =>
+    markUploadSessionReplacementCompleted(connectionManager, scope.schema, scope.uploadSessionID, CENSUS_REPLACEMENT_MARKER_COLUMN, transactionID)
+  );
+  return unit.completedByPeer ? 'completed_by_peer' : 'replaced';
+}
+
+async function runCensusReplacementUnits(
+  connectionManager: ConnectionManager,
+  params: CensusReplacementParams,
+  scope: CensusReplacementSessionScope,
+  progress: CensusReplacementProgress
+): Promise<'replaced' | 'completed_by_peer'> {
+  if ((await deleteMeasurementWindows(connectionManager, params, scope, progress)) === 'completed_by_peer') return 'completed_by_peer';
+  if ((await deleteLegacyFailureWindows(connectionManager, params, scope, progress)) === 'completed_by_peer') return 'completed_by_peer';
+  if ((await deleteMetricsWindows(connectionManager, params, scope, progress)) === 'completed_by_peer') return 'completed_by_peer';
+
+  const completionStartedAt = Date.now();
+  const completion = await completeCensusReplacement(connectionManager, scope);
+  progress.slowestWindowMs = Math.max(progress.slowestWindowMs, Date.now() - completionStartedAt);
+  return completion;
+}
+
+/**
+ * Replaces the census for a CLEAN_REUPLOAD before the caller opens its staging
+ * transaction, as separately committed transactions (units A-D, issue #555).
+ * The marker is set only by the last one, so an interrupted replacement leaves
+ * it unset and the next call resumes with the rows that are left.
+ */
+export async function replaceCensusForCleanReupload(connectionManager: ConnectionManager, params: CensusReplacementParams): Promise<CensusReplacementResult> {
+  if (params.uploadMode !== UploadMode.CLEAN_REUPLOAD || params.suppressCensusReplacementCleanup) return { outcome: 'not_applicable', ...NO_REPLACEMENT_WORK };
+  if (params.uploadSessionID === null) throw new UploadSessionOwnershipError('An upload session is required to replace a census.');
+  const scope: CensusReplacementSessionScope = {
+    schema: params.schema,
+    plotID: params.plotID,
+    censusID: params.censusID,
+    uploadSessionID: params.uploadSessionID
+  };
+
+  await ensureUploadSessionReplacementMarkerColumn(connectionManager, scope.schema, CENSUS_REPLACEMENT_MARKER_COLUMN);
+  if (await uploadSessionHasCompletedReplacement(connectionManager, scope.schema, scope.uploadSessionID, CENSUS_REPLACEMENT_MARKER_COLUMN)) {
+    return { outcome: 'already_completed', ...NO_REPLACEMENT_WORK };
+  }
+  if (await familyHasStagedRows(connectionManager, scope.schema, params.fileName, params.batchID))
+    return { outcome: 'upload_in_progress', ...NO_REPLACEMENT_WORK };
+
+  const prepared = prepareMeasurementChunkForStaging(params);
+  params.onInvalidRows?.(prepared.invalidRows);
+
+  const logKeys = { schema: scope.schema, plotID: scope.plotID, censusID: scope.censusID, uploadSessionID: scope.uploadSessionID, batchID: params.batchID };
+  ailogger.info(CENSUS_REPLACEMENT_STARTED_EVENT, logKeys);
+  const startedAt = Date.now();
+  const progress: CensusReplacementProgress = { deletedRows: 0, windowCount: 0, slowestWindowMs: 0 };
+  const outcome = await runCensusReplacementUnits(connectionManager, params, scope, progress);
+  ailogger.info(CENSUS_REPLACEMENT_COMPLETED_EVENT, { ...logKeys, outcome, ...progress, elapsedMs: Date.now() - startedAt });
+  return { outcome, deletedRows: progress.deletedRows, windowCount: progress.windowCount };
 }
 
 /** Rows staged for the file under `batchID` or any of its `__subNNN` members, in the given plot/census. */

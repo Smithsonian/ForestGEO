@@ -233,7 +233,7 @@ export async function familyHasStagedRows(
   schema: string,
   fileName: string,
   batchID: string,
-  transactionID: string
+  transactionID?: string
 ): Promise<boolean> {
   const existsSQL = safeFormatQuery(
     schema,

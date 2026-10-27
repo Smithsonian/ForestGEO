@@ -23,6 +23,7 @@ import { safeFormatQuery } from '@/lib/db/sqlsecurity';
 import ailogger from '@/ailogger';
 import { isMissingTableError } from '@/lib/errorhelpers';
 import { UploadMode } from '@/config/uploadmodes';
+import { ACTIVE_UPLOAD_SESSION_STATES, UploadSessionOwnershipError } from '@/config/uploadsessiontracker';
 
 /** Column recording that a session's census replacement (measurements) has run. */
 export const CENSUS_REPLACEMENT_MARKER_COLUMN = 'census_replacement_completed_at';
@@ -88,7 +89,7 @@ export async function uploadSessionHasCompletedReplacement(
   schema: string,
   uploadSessionID: string,
   markerColumn: UploadSessionReplacementMarkerColumn,
-  transactionID: string
+  transactionID?: string
 ): Promise<boolean> {
   const probeSQL = safeFormatQuery(schema, `SELECT ${markerColumn} FROM ??.upload_sessions WHERE session_id = ? LIMIT 1`);
   try {
@@ -105,6 +106,70 @@ export async function uploadSessionHasCompletedReplacement(
     ailogger.warn(`No upload_sessions table in ${schema}; ${markerColumn} cannot be tracked per session for ${uploadSessionID}.`);
     return false;
   }
+}
+
+export type CensusReplacementSessionLock = 'proceed' | 'marker_already_set';
+
+/** The one census a session's replacement may touch. Shared by the lock and by stage-measurements.ts's units. */
+export interface CensusReplacementSessionScope {
+  schema: string;
+  plotID: number;
+  censusID: number;
+  uploadSessionID: string;
+}
+
+/** The session-lock row did not carry the marker column, so "marker set" cannot be told from "marker unreadable". */
+export class CensusReplacementMarkerColumnMissingError extends Error {
+  constructor(scope: CensusReplacementSessionScope) {
+    super(
+      `The session-lock row for ${scope.uploadSessionID} in ${scope.schema} has no ${CENSUS_REPLACEMENT_MARKER_COLUMN} column; ` +
+        `refusing to replace census ${scope.censusID} without it. Nothing was deleted.`
+    );
+    this.name = 'CensusReplacementMarkerColumnMissingError';
+  }
+}
+
+/**
+ * Locks this session's row for the rest of the caller's transaction and checks,
+ * under that lock, that the session may still replace `scope`. Every census-
+ * replacement transaction starts here, so two runners of one session take turns
+ * window by window, and no window runs after the marker is set.
+ */
+export async function lockUploadSessionForCensusReplacement(
+  connectionManager: ConnectionManager,
+  scope: CensusReplacementSessionScope,
+  transactionID: string
+): Promise<CensusReplacementSessionLock> {
+  const { schema, uploadSessionID } = scope;
+  const lockSQL = safeFormatQuery(
+    schema,
+    `SELECT state, plot_id, census_id, ${CENSUS_REPLACEMENT_MARKER_COLUMN} FROM ??.upload_sessions WHERE session_id = ? FOR UPDATE`
+  );
+  let rows: unknown;
+  try {
+    rows = await connectionManager.executeQuery(lockSQL, [uploadSessionID], transactionID);
+  } catch (error: unknown) {
+    if (!isMissingTableError(error, UPLOAD_SESSIONS_TABLE)) throw error;
+    throw new UploadSessionOwnershipError(
+      `${schema} has no upload_sessions table, so census ${scope.censusID} cannot be replaced for upload session ${uploadSessionID}. Nothing was deleted.`
+    );
+  }
+  if (!Array.isArray(rows) || rows.length !== 1) {
+    throw new UploadSessionOwnershipError(`Upload session ${uploadSessionID} was not found in ${schema}; census ${scope.censusID} was not replaced.`);
+  }
+  const session = rows[0] as { state: string; plot_id: number; census_id: number } & Record<string, unknown>;
+  if (!(ACTIVE_UPLOAD_SESSION_STATES as readonly string[]).includes(String(session.state))) {
+    throw new UploadSessionOwnershipError(
+      `Upload session ${uploadSessionID} is ${session.state}, no longer active; another session may own census ${scope.censusID} now. Nothing was deleted.`
+    );
+  }
+  if (Number(session.plot_id) !== scope.plotID || Number(session.census_id) !== scope.censusID) {
+    throw new UploadSessionOwnershipError(
+      `Upload session ${uploadSessionID} belongs to plot ${session.plot_id} census ${session.census_id}, not plot ${scope.plotID} census ${scope.censusID}. Nothing was deleted.`
+    );
+  }
+  if (!(CENSUS_REPLACEMENT_MARKER_COLUMN in session)) throw new CensusReplacementMarkerColumnMissingError(scope);
+  return session[CENSUS_REPLACEMENT_MARKER_COLUMN] === null ? 'proceed' : 'marker_already_set';
 }
 
 /** Records that this session's replacement has run. Same transaction as the delete it guards. */
