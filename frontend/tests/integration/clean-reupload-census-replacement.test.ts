@@ -530,14 +530,10 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
   }, 180000);
 
   /**
-   * The coremeasurements delete and the error-link delete are different SQL
-   * shapes: the latter is a single-table DELETE over an IN-subquery, and its
-   * LIMIT bounds the outer delete while the subquery re-evaluates every pass.
-   * Only exercising the coremeasurements arm past one window leaves that shape's
-   * loop — the one that could re-select the same victims forever, or stop early —
-   * entirely unproven.
+   * Each measurement window deletes its error links by the window's own ids, so no statement
+   * scans the census-wide set. A census one window and a remainder long needs exactly two link deletes.
    */
-  it('drives the error-link delete past one window too (the IN-subquery arm)', async () => {
+  it("deletes error links per window, by the window's own ids (no census-wide subquery)", async () => {
     const overOneChunk = CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE + 137;
     await connection.query(`SET SESSION cte_max_recursion_depth = ?`, [overOneChunk + 1]);
     await connection.query(
@@ -566,15 +562,16 @@ describe('CLEAN_REUPLOAD census replacement — integration', () => {
     await runCleanReupload();
 
     const errorLinkDeleteStatements = sharedState.statements.filter(sql => /DELETE\s+FROM\s+`[^`]+`\.measurement_error_log/.test(sql));
-    // 5137 links = one full 5000-row window plus a short 137-row window that
-    // ends the loop. A single statement would mean the loop gave up early and
-    // left 137 links behind; more than two would mean it re-selected victims.
     const expectedWindows = Math.ceil(overOneChunk / CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE);
     console.log(
       `[error-link chunking] seeded=${overOneChunk} chunk=${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE} ` +
-        `statements=${errorLinkDeleteStatements.length} expected=${expectedWindows}`
+        `statements=${errorLinkDeleteStatements.length} expected=${expectedWindows}`,
+      errorLinkDeleteStatements.map(sql => sql.replace(/\s+/g, ' ').slice(0, 120))
     );
-    expect(errorLinkDeleteStatements.length).toBe(expectedWindows);
+    expect(errorLinkDeleteStatements.length, 'one link delete per non-empty window').toBe(expectedWindows);
+    for (const statement of errorLinkDeleteStatements) {
+      expect(statement, 'link delete must not carry a census-wide subquery').not.toMatch(/SELECT/i);
+    }
     expect(await errorLinkCount(targetCensusID)).toBe(0);
     expect(await countRows(targetCensusID, 'all')).toBe(0);
   }, 180000);

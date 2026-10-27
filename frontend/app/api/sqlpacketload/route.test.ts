@@ -4,6 +4,7 @@ import ConnectionManager from '@/lib/db/connectionmanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import {
   CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE,
+  CENSUS_REPLACEMENT_SCAN_INDEX,
   resetTemporaryMeasurementsSourceFormatColumnCacheForTests,
   STALE_BATCH_SCAN_INDEX,
   TEMP_MEASUREMENT_INSERT_BATCH_SIZE,
@@ -39,6 +40,8 @@ import { insertOrUpdate } from '@/components/processors/processorhelperfunctions
  * Matches the chunk LIMIT only when it terminates the whole statement — i.e. it
  * bounds the DELETE itself rather than an inner subquery.
  */
+const CORE_MEASUREMENT_WINDOW_SELECT_PATTERN = /SELECT\s+(\/\*\+[^*]*\*\/\s+)?CoreMeasurementID FROM/;
+
 function outerLimitPattern(): RegExp {
   return new RegExp(`LIMIT\\s+${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}\\s*(?:FOR UPDATE)?\\s*$`);
 }
@@ -727,6 +730,7 @@ describe('sqlpacketload measurement scope validation', () => {
     // itself removes that exact id list -- never a broad `WHERE CensusID = ?`
     // DELETE, which would have no fixed row set to audit against.
     const priorCoreMeasurementIDs = [501, 502];
+    let windowSelectsAnswered = 0;
     let insertSeen = false;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
@@ -734,8 +738,9 @@ describe('sqlpacketload measurement scope validation', () => {
       if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
       if (text.includes('SELECT PlotID')) return [{ PlotID: TEST_PLOT_ID }];
       if (text.includes('distinctPlotCount')) return [{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }];
-      if (text.includes('SELECT CoreMeasurementID FROM') && text.includes('.coremeasurements')) {
-        return priorCoreMeasurementIDs.map(id => ({ CoreMeasurementID: id }));
+      if (CORE_MEASUREMENT_WINDOW_SELECT_PATTERN.test(text) && text.includes('.coremeasurements')) {
+        windowSelectsAnswered += 1;
+        return windowSelectsAnswered === 1 ? priorCoreMeasurementIDs.map(id => ({ CoreMeasurementID: id })) : [];
       }
       if (text.includes('INSERT INTO') && text.includes('unifiedchangelog') && text.includes('.coremeasurements cm')) {
         return { affectedRows: priorCoreMeasurementIDs.length };
@@ -768,8 +773,13 @@ describe('sqlpacketload measurement scope validation', () => {
     // live forestgeo_harvard: 96,227 of 106,227 rows stranded).
     expect(executedSql.some((sql: string) => sql.includes('SELECT batchID FROM `forestgeo_testing`.uploadmetrics'))).toBe(false);
 
-    const selectCmIdsCall = executedSql.find((sql: string) => sql.includes('SELECT CoreMeasurementID FROM `forestgeo_testing`.coremeasurements'));
+    const selectCmIdsCall = executedSql.find(
+      (sql: string) => CORE_MEASUREMENT_WINDOW_SELECT_PATTERN.test(sql) && sql.includes('FROM `forestgeo_testing`.coremeasurements')
+    );
+    console.log('[route-test] window SELECT:', selectCmIdsCall?.replace(/\s+/g, ' ').slice(0, 200), 'window SELECTs answered:', windowSelectsAnswered);
     expect(selectCmIdsCall).toBeDefined();
+    expect(selectCmIdsCall).toContain(`/*+ INDEX(coremeasurements ${CENSUS_REPLACEMENT_SCAN_INDEX}) */`);
+    expect(selectCmIdsCall).toContain('AND CoreMeasurementID > ?');
     // Scoped to the census, excluding the incoming batch FAMILY.
     expect(selectCmIdsCall).toContain('WHERE CensusID = ?');
     expect(selectCmIdsCall).toContain('NOT (UploadBatchID <=> ?)');
@@ -804,18 +814,15 @@ describe('sqlpacketload measurement scope validation', () => {
       mockConnectionManager.executeQuery.mock.calls.findIndex((call: any[]) => String(call[0]) === deleteCmCall)
     );
 
-    const deleteValidationErrorsCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.measurement_error_log'));
-    expect(deleteValidationErrorsCall).toBeDefined();
-    expect(deleteValidationErrorsCall).toContain('WHERE cm.CensusID = ?');
-    expect(deleteValidationErrorsCall).not.toContain('cm.UploadFileID');
-    // Single-table DELETE over a subquery: MySQL rejects LIMIT on a
-    // multi-table DELETE ... JOIN, and this delete must stay bounded too. The
-    // LIMIT has to bound the OUTER delete — inside the IN-subquery it would cap
-    // the victim list instead and the delete itself would stay unbounded.
-    expect(deleteValidationErrorsCall).toMatch(outerLimitPattern());
-    expect(deleteValidationErrorsCall!.indexOf('LIMIT'), 'LIMIT must follow the subquery, not sit inside it').toBeGreaterThan(
-      deleteValidationErrorsCall!.lastIndexOf(')')
+    const deleteValidationErrorsCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('DELETE FROM `forestgeo_testing`.measurement_error_log')
     );
+    expect(deleteValidationErrorsCall).toBeDefined();
+    const deleteValidationErrorsSQL = String(deleteValidationErrorsCall![0]);
+    console.log('[route-test] error-link delete:', deleteValidationErrorsSQL.replace(/\s+/g, ' '), deleteValidationErrorsCall![1]);
+    expect(deleteValidationErrorsSQL).toMatch(/DELETE FROM `forestgeo_testing`\.measurement_error_log WHERE MeasurementID IN \(/);
+    expect(deleteValidationErrorsSQL, 'no census-wide subquery').not.toMatch(/SELECT/i);
+    expect(deleteValidationErrorsCall![1]).toEqual(priorCoreMeasurementIDs);
 
     const deleteMetricsCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.uploadmetrics'));
     expect(deleteMetricsCall).toBeDefined();
@@ -864,9 +871,15 @@ describe('sqlpacketload measurement scope validation', () => {
 
     // Statement-driven: the unified error-log delete fails as missing, and the
     // route must fall back to the legacy cmverrors delete rather than 500.
+    const priorCoreMeasurementID = 701;
+    let windowSelectsAnswered = 0;
     let stagedRowCount = 0;
     mockConnectionManager.executeQuery.mockImplementation(async (sql: string) => {
       const text = String(sql);
+      if (CORE_MEASUREMENT_WINDOW_SELECT_PATTERN.test(text) && text.includes('.coremeasurements')) {
+        windowSelectsAnswered += 1;
+        return windowSelectsAnswered === 1 ? [{ CoreMeasurementID: priorCoreMeasurementID }] : [];
+      }
       if (text.includes('DELETE FROM') && text.includes('measurement_error_log')) throw missingError;
       // Must stay before the broader includes('SELECT PlotID') branch, which would also match it.
       if (FAMILY_SCOPE_SAMPLE_SQL.test(text)) return [];
@@ -885,9 +898,13 @@ describe('sqlpacketload measurement scope validation', () => {
 
     expect(res.status).toBe(200);
     const executedSql = mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => String(call[0]));
-    const legacyCall = executedSql.find((sql: string) => sql.includes('DELETE FROM `forestgeo_testing`.cmverrors'));
+    const legacyCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('DELETE FROM `forestgeo_testing`.cmverrors')
+    );
+    console.log('[route-test] legacy link delete:', legacyCall && String(legacyCall[0]).replace(/\s+/g, ' '), legacyCall?.[1]);
     expect(legacyCall).toBeDefined();
-    expect(legacyCall).toContain('WHERE cm.CensusID = ?');
+    expect(String(legacyCall![0])).toMatch(/DELETE FROM `forestgeo_testing`\.cmverrors WHERE CoreMeasurementID IN \(/);
+    expect(legacyCall![1]).toEqual([priorCoreMeasurementID]);
   });
 
   it('logs dropped-row alert metadata with a bounded uploadId when unresolved-ingestion persistence fails twice', async () => {

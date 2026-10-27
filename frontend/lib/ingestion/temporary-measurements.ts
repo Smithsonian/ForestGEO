@@ -292,21 +292,37 @@ export async function cleanupStaleMeasurementBatchesForFile(
 }
 
 /**
- * Rows removed per statement by the census-replacement deletes.
+ * Rows a census-replacement statement touches per window, and the longest id
+ * list an audited coremeasurements DELETE builds.
  *
- * What chunking DOES bound: per-statement execution time and per-statement
- * rollback size. A single unbounded DELETE over a large census (Harvard: 116,227
- * rows) runs as one statement that can outlive the 660s JS-side KILL in
- * lib/db/primitives.ts, and a KILL mid-statement forces the server to roll back
- * everything that one statement had removed.
+ * The bound is the range optimizer's. With use_index_extensions=on every
+ * secondary index carries the primary key, so a `CoreMeasurementID IN (...)`
+ * list builds a range tree on every index of coremeasurements. Past
+ * range_optimizer_max_mem_size (8 MiB default) MySQL raises warning 3170 and
+ * plans a full table scan. On the canonical 19-index table, 3,315 ids still
+ * plan `range PRIMARY` and 3,316 fall back. The limit tracks indexes x ids of
+ * about 63,000-67,000 (issue #555 spec, finding F-1).
  *
- * What chunking does NOT bound: the lock footprint at commit. Every chunk runs
- * inside the SAME caller-owned transaction, so InnoDB holds every row lock this
- * loop takes until that transaction commits — the total is identical to the
- * unbounded DELETE. Do not treat lock contention against a concurrent writer as
- * mitigated by this constant.
+ * Azure, read 2026-10-27: the 8 MiB default; 19 indexes in ten schemas, 21 in
+ * forestgeo_harvard, forestgeo_mpala and forestgeo_rabi. The limit there is
+ * about 3,000 ids, so 1,000 keeps a 3x margin.
+ * tests/integration/census-replacement-statement-plans.integration.test.ts
+ * asserts no warning 3170 at this size at both index counts.
+ *
+ * replaceCensusForCleanReupload commits every window separately. Callers that
+ * pass their own transaction (the ArcGIS commit via cleanupPreviousFileUploads,
+ * the ingest-batch recoveries, record-invalid-rows) still hold every row lock
+ * they take until that transaction ends.
  */
-export const CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE = 5000;
+export const CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE = 1000;
+
+/**
+ * The census window walks this (CensusID, CoreMeasurementID) index in id
+ * order. Without the hint, the keyset cursor makes the optimizer switch to a
+ * PRIMARY range scan that walks every other census under FOR UPDATE. A hint,
+ * not FORCE INDEX, like STALE_BATCH_SCAN_INDEX.
+ */
+export const CENSUS_REPLACEMENT_SCAN_INDEX = 'idx_censusid';
 
 /**
  * "Belongs to a batch other than the incoming family" — `batch` itself and its
@@ -342,23 +358,46 @@ function requireAffectedRows(result: unknown, statementSQL: string): number {
   return parsed;
 }
 
-/**
- * Runs a `DELETE ... LIMIT n` until it stops filling the limit, returning the
- * total rows removed. The statement is re-issued verbatim: each pass deletes a
- * fresh window because the previous window's rows no longer match.
- */
-async function deleteInBoundedChunks(connectionManager: ConnectionManager, deleteSQL: string, params: unknown[], transactionID: string): Promise<number> {
-  let totalDeleted = 0;
-  for (;;) {
-    const result = await connectionManager.executeQuery(deleteSQL, params, transactionID);
-    const deleted = requireAffectedRows(result, deleteSQL);
-    totalDeleted += deleted;
-    if (deleted < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return totalDeleted;
+async function selectCoreMeasurementWindowIDs(
+  connectionManager: ConnectionManager,
+  selectIdsSQL: string,
+  params: unknown[],
+  transactionID: string
+): Promise<number[]> {
+  const idRows = await connectionManager.executeQuery(selectIdsSQL, params, transactionID);
+  return (Array.isArray(idRows) ? idRows : []).map((row: { CoreMeasurementID: number }) => row.CoreMeasurementID);
+}
+
+/** Audits exactly `ids`, then deletes exactly `ids`; both counts asserted (#507). */
+async function auditAndDeleteCoreMeasurements(
+  connectionManager: ConnectionManager,
+  schema: string,
+  ids: number[],
+  changedBy: string | null,
+  plotID: number,
+  censusID: number,
+  transactionID: string
+): Promise<number> {
+  const tx = transactionExecutorFor(connectionManager, transactionID);
+  const auditedCount = await recordDeletedCoreMeasurementsAudit({ tx, schema, coreMeasurementIDs: ids, changedBy, plotID, censusID });
+  if (auditedCount !== ids.length) {
+    throw new Error(
+      `Audit mismatch: selected ${ids.length} coremeasurements row(s) for deletion but only ` +
+        `audited ${auditedCount}. Refusing to delete — the audit trail and the data would disagree.`
+    );
   }
+  const deleteSQL = safeFormatQuery(schema, `DELETE FROM ??.coremeasurements WHERE CoreMeasurementID IN (${buildInPlaceholders(ids.length)})`);
+  const deletedRows = requireAffectedRows(await connectionManager.executeQuery(deleteSQL, ids, transactionID), deleteSQL);
+  if (deletedRows !== ids.length) {
+    throw new Error(
+      `Audited delete removed ${deletedRows} coremeasurements row(s) but audited ${ids.length} — ` + `the audit trail and the data would disagree.`
+    );
+  }
+  return deletedRows;
 }
 
 /**
- * Same per-statement bound as deleteInBoundedChunks, but for coremeasurements
+ * Bounded like every census-replacement statement, but for coremeasurements
  * only, with a `unifiedchangelog` DELETE-audit row per row removed (#507).
  * Exported so lib/uploads/ingest-batch.ts's stale-failure cleanup can reuse
  * this select-lock-audit-delete sequence instead of duplicating it.
@@ -400,34 +439,133 @@ export async function deleteCoreMeasurementsInBoundedChunksWithAudit(
      LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}
      FOR UPDATE`
   );
-  const tx = transactionExecutorFor(connectionManager, transactionID);
   let totalDeleted = 0;
 
   for (;;) {
-    const idRows = await connectionManager.executeQuery(selectIdsSQL, whereParams, transactionID);
-    const ids = (Array.isArray(idRows) ? idRows : []).map((row: { CoreMeasurementID: number }) => row.CoreMeasurementID);
+    const ids = await selectCoreMeasurementWindowIDs(connectionManager, selectIdsSQL, whereParams, transactionID);
     if (ids.length === 0) return totalDeleted;
-
-    const auditedCount = await recordDeletedCoreMeasurementsAudit({ tx, schema, coreMeasurementIDs: ids, changedBy, plotID, censusID });
-    if (auditedCount !== ids.length) {
-      throw new Error(
-        `Audit mismatch: selected ${ids.length} coremeasurements row(s) for deletion but only ` +
-          `audited ${auditedCount}. Refusing to delete — the audit trail and the data would disagree.`
-      );
-    }
-
-    const deleteSQL = safeFormatQuery(schema, `DELETE FROM ??.coremeasurements WHERE CoreMeasurementID IN (${buildInPlaceholders(ids.length)})`);
-    const deleteResult = await connectionManager.executeQuery(deleteSQL, ids, transactionID);
-    const deletedThisChunk = requireAffectedRows(deleteResult, deleteSQL);
-    if (deletedThisChunk !== ids.length) {
-      throw new Error(
-        `Audited delete removed ${deletedThisChunk} coremeasurements row(s) but audited ${ids.length} — ` + `the audit trail and the data would disagree.`
-      );
-    }
-
-    totalDeleted += deletedThisChunk;
+    totalDeleted += await auditAndDeleteCoreMeasurements(connectionManager, schema, ids, changedBy, plotID, censusID, transactionID);
     if (ids.length < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return totalDeleted;
   }
+}
+
+/** Links first, so the FK cascade has nothing to do and legacy schemas without that FK are cleaned too. */
+async function deleteErrorLinksForMeasurements(connectionManager: ConnectionManager, schema: string, ids: number[], transactionID: string): Promise<void> {
+  const placeholders = buildInPlaceholders(ids.length);
+  try {
+    await connectionManager.executeQuery(
+      safeFormatQuery(schema, `DELETE FROM ??.measurement_error_log WHERE MeasurementID IN (${placeholders})`),
+      ids,
+      transactionID
+    );
+  } catch (error: unknown) {
+    if (!isMissingTableError(error, 'measurement_error_log')) throw error;
+    await connectionManager.executeQuery(safeFormatQuery(schema, `DELETE FROM ??.cmverrors WHERE CoreMeasurementID IN (${placeholders})`), ids, transactionID);
+  }
+}
+
+export interface CensusReplacementChunkResult {
+  deletedRows: number;
+  /** The cursor after this window: its last id, or the incoming cursor when the window was empty. */
+  lastCoreMeasurementID: number;
+}
+
+/**
+ * One measurement window of a census replacement, in the caller's transaction:
+ * lock at most CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE prior ids above
+ * `afterCoreMeasurementID`, delete their error links, audit them, delete them.
+ * Knows nothing about upload sessions.
+ */
+export async function deleteCensusReplacementChunk(
+  connectionManager: ConnectionManager,
+  schema: string,
+  currentBatchID: string,
+  plotID: number,
+  censusID: number,
+  afterCoreMeasurementID: number,
+  changedBy: string | null,
+  transactionID: string
+): Promise<CensusReplacementChunkResult> {
+  const selectIdsSQL = safeFormatQuery(
+    schema,
+    `SELECT /*+ INDEX(coremeasurements ${CENSUS_REPLACEMENT_SCAN_INDEX}) */ CoreMeasurementID FROM ??.coremeasurements
+     WHERE CensusID = ? AND ${buildNotIncomingFamilyPredicate('UploadBatchID')} AND CoreMeasurementID > ?
+     ORDER BY CoreMeasurementID
+     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}
+     FOR UPDATE`
+  );
+  const ids = await selectCoreMeasurementWindowIDs(
+    connectionManager,
+    selectIdsSQL,
+    [censusID, currentBatchID, buildSubBatchPattern(currentBatchID), afterCoreMeasurementID],
+    transactionID
+  );
+  if (ids.length === 0) return { deletedRows: 0, lastCoreMeasurementID: afterCoreMeasurementID };
+  await deleteErrorLinksForMeasurements(connectionManager, schema, ids, transactionID);
+  const deletedRows = await auditAndDeleteCoreMeasurements(connectionManager, schema, ids, changedBy, plotID, censusID, transactionID);
+  return { deletedRows, lastCoreMeasurementID: ids[ids.length - 1] };
+}
+
+/**
+ * Unit A's termination rule. A full window moves the cursor past its last id.
+ * A short window ends unit A only when it covered the whole scope (cursor 0);
+ * otherwise the walk restarts at 0 for one confirming pass, which catches any
+ * row the cursor passed over. Returns null when unit A is done.
+ */
+export function nextCensusReplacementCursor(currentCursor: number, window: CensusReplacementChunkResult): number | null {
+  if (window.deletedRows === CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) return window.lastCoreMeasurementID;
+  return currentCursor === 0 ? null : 0;
+}
+
+export interface CensusReplacementLegacyPassResult {
+  deletedRows: number;
+  /** failedmeasurements does not exist in this schema (every schema built from tablestructures.sql). */
+  legacyTableMissing: boolean;
+}
+
+export async function deleteCensusReplacementLegacyFailuresWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  currentBatchID: string,
+  censusID: number,
+  transactionID: string
+): Promise<CensusReplacementLegacyPassResult> {
+  const deleteFailedSQL = safeFormatQuery(
+    schema,
+    `DELETE FROM ??.failedmeasurements
+     WHERE CensusID = ? AND ${buildNotIncomingFamilyPredicate('BatchID')}
+     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
+  );
+  try {
+    const result = await connectionManager.executeQuery(deleteFailedSQL, [censusID, currentBatchID, buildSubBatchPattern(currentBatchID)], transactionID);
+    return { deletedRows: requireAffectedRows(result, deleteFailedSQL), legacyTableMissing: false };
+  } catch (error: unknown) {
+    if (!isMissingTableError(error, 'failedmeasurements')) throw error;
+    return { deletedRows: 0, legacyTableMissing: true };
+  }
+}
+
+/** Prior metric rows must go, or the stored procedure's idempotency guard would skip re-ingestion. The incoming family keeps its own. */
+export async function deleteCensusReplacementMetricsWindow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  currentBatchID: string,
+  plotID: number,
+  censusID: number,
+  transactionID: string
+): Promise<number> {
+  const deleteMetricsSQL = safeFormatQuery(
+    schema,
+    `DELETE FROM ??.uploadmetrics
+     WHERE plotID = ? AND censusID = ? AND ${buildNotIncomingFamilyPredicate('batchID')}
+     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
+  );
+  const result = await connectionManager.executeQuery(
+    deleteMetricsSQL,
+    [plotID, censusID, currentBatchID, buildSubBatchPattern(currentBatchID)],
+    transactionID
+  );
+  return requireAffectedRows(result, deleteMetricsSQL);
 }
 
 /**
@@ -436,6 +574,10 @@ export async function deleteCoreMeasurementsInBoundedChunksWithAudit(
  * any earlier measurement batches for that census, even if the filename changed.
  *
  * Removes: validation error links, coremeasurements, failedmeasurements (if legacy table exists), uploadmetrics
+ *
+ * Runs every window in the caller's one transaction, so the row locks of all
+ * windows are held until that transaction ends. replaceCensusForCleanReupload
+ * is the bounded, separately committed form of the same windows.
  *
  * `changedBy` attributes the coremeasurements DELETE audit rows this writes
  * to `unifiedchangelog` (#507). `null` records an unattributed cleanup rather
@@ -471,84 +613,36 @@ export async function cleanupPreviousFileUploads(
   // The incoming batch is excluded as a FAMILY (`batch` and `batch__subNNN`),
   // not just by exact id, so a re-entrant call after this upload has already
   // split cannot delete its own in-flight rows.
-  const incomingSubBatchPattern = buildSubBatchPattern(currentBatchID);
-  const notIncomingFamily = buildNotIncomingFamilyPredicate('%COL%');
-  const familyParams = [currentBatchID, incomingSubBatchPattern];
-
-  // Error links first. The FK is ON DELETE CASCADE in current schemas, but
-  // legacy schemas may lack it, and an explicit scoped delete is cheap.
-  // Expressed as a single-table DELETE over a subquery rather than a
-  // multi-table DELETE ... JOIN, because MySQL rejects LIMIT on the latter and
-  // these deletes must stay bounded (see deleteInBoundedChunks).
-  const deleteValidationErrorsSQL = safeFormatQuery(
-    schema,
-    `DELETE FROM ??.measurement_error_log
-     WHERE MeasurementID IN (
-       SELECT cm.CoreMeasurementID FROM ??.coremeasurements cm
-       WHERE cm.CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'cm.UploadBatchID')}
-     )
-     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
-  );
-  try {
-    await deleteInBoundedChunks(connectionManager, deleteValidationErrorsSQL, [censusID, ...familyParams], transactionID);
-  } catch (error: unknown) {
-    if (!isMissingTableError(error, 'measurement_error_log')) {
-      throw error;
-    }
-
-    const deleteLegacyValidationErrorsSQL = safeFormatQuery(
+  let deletedCmRows = 0;
+  let cursor: number | null = 0;
+  while (cursor !== null) {
+    const window: CensusReplacementChunkResult = await deleteCensusReplacementChunk(
+      connectionManager,
       schema,
-      `DELETE FROM ??.cmverrors
-       WHERE CoreMeasurementID IN (
-         SELECT cm.CoreMeasurementID FROM ??.coremeasurements cm
-         WHERE cm.CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'cm.UploadBatchID')}
-       )
-       LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
+      currentBatchID,
+      plotID,
+      censusID,
+      cursor,
+      changedBy,
+      transactionID
     );
-    await deleteInBoundedChunks(connectionManager, deleteLegacyValidationErrorsSQL, [censusID, ...familyParams], transactionID);
+    deletedCmRows += window.deletedRows;
+    cursor = nextCensusReplacementCursor(cursor, window);
   }
 
-  // Every prior measurement in the census — ingested and unresolved alike.
-  // Audited per row (#507): deleteCoreMeasurementsInBoundedChunksWithAudit
-  // writes a DELETE unifiedchangelog row for each one, in this same
-  // transaction, before removing it.
-  const deleteCmWhereSQL = `CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'UploadBatchID')}`;
-  const deletedCmRows = await deleteCoreMeasurementsInBoundedChunksWithAudit(
-    connectionManager,
-    schema,
-    deleteCmWhereSQL,
-    [censusID, ...familyParams],
-    changedBy,
-    plotID,
-    censusID,
-    transactionID
-  );
-
-  const deleteFailedSQL = safeFormatQuery(
-    schema,
-    `DELETE FROM ??.failedmeasurements
-     WHERE CensusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'BatchID')}
-     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
-  );
-  try {
-    await deleteInBoundedChunks(connectionManager, deleteFailedSQL, [censusID, ...familyParams], transactionID);
-  } catch (error: unknown) {
-    if (!isMissingTableError(error, 'failedmeasurements')) {
-      throw error;
+  for (;;) {
+    const pass = await deleteCensusReplacementLegacyFailuresWindow(connectionManager, schema, currentBatchID, censusID, transactionID);
+    if (pass.legacyTableMissing) {
+      ailogger.info(`Skipping failedmeasurements cleanup for ${fileName}: legacy table does not exist in ${schema}`);
+      break;
     }
-    ailogger.info(`Skipping failedmeasurements cleanup for ${fileName}: legacy table does not exist in ${schema}`);
+    if (pass.deletedRows < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) break;
   }
 
-  // Prior metric rows for this scope must go too, or the stored procedure's
-  // idempotency guard would skip re-ingestion. The incoming upload keeps its
-  // own metrics — those belong to the replacement, not the thing replaced.
-  const deleteMetricsSQL = safeFormatQuery(
-    schema,
-    `DELETE FROM ??.uploadmetrics
-     WHERE plotID = ? AND censusID = ? AND ${notIncomingFamily.replace(/%COL%/g, 'batchID')}
-     LIMIT ${CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE}`
-  );
-  await deleteInBoundedChunks(connectionManager, deleteMetricsSQL, [plotID, censusID, ...familyParams], transactionID);
+  for (;;) {
+    const deletedMetricRows = await deleteCensusReplacementMetricsWindow(connectionManager, schema, currentBatchID, plotID, censusID, transactionID);
+    if (deletedMetricRows < CENSUS_REPLACEMENT_DELETE_CHUNK_SIZE) break;
+  }
 
   if (deletedCmRows > 0) {
     ailogger.info(
